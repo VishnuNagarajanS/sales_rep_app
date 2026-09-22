@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FileCheck, Shield } from 'lucide-react';
 import { AuditLog } from '../../../types';
-import { storageService } from '../../../services/storageService';
+import { auditLogStore } from '../../../services/secondaryStores';
 import { DataTable, Column } from '../../../components/common/DataTable';
 import './PlatformAuditPage.css';
 
@@ -9,8 +9,8 @@ export const PlatformAuditPage: React.FC = () => {
   const [logs, setLogs] = useState<AuditLog[]>([]);
 
   useEffect(() => {
-    setLogs(storageService.getAuditLogs());
-    const handleUpdate = () => setLogs(storageService.getAuditLogs());
+    setLogs(auditLogStore.getAuditLogs());
+    const handleUpdate = () => setLogs(auditLogStore.getAuditLogs());
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, []);

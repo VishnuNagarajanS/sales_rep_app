@@ -27,7 +27,7 @@ import {
   User as UserIcon,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { storageService } from '../../services/storageService';
+import { followupsApi } from '../../services/crmApi';
 import { FEATURES } from '../../constants/features';
 import { PERMISSIONS } from '../../constants/permissions';
 import './Sidebar.css';
@@ -55,15 +55,23 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
   const { isSuperAdmin, tenant, enabledFeatures, permissions, user } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [isCollapseHovered, setIsCollapseHovered] = useState(false);
+  const [pendingFollowupsCount, setPendingFollowupsCount] = useState(0);
 
   const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
   const isIrm = user?.role?.code === 'irm';
 
-  const pendingFollowupsCount = isGhlSalesExec
-    ? (storageService.getFollowups(tenant?.id) || []).filter(
-      f => f.status === 'Pending' && (f.assignedAgentId === user?.id || f.assignedAgentName === user?.name)
-    ).length
-    : 0;
+  useEffect(() => {
+    let isMounted = true;
+    if (isGhlSalesExec) {
+      followupsApi.getFollowups({ status: 'Pending' }).then(res => {
+        if (isMounted && res) {
+          const items = res.items || [];
+          setPendingFollowupsCount(items.length);
+        }
+      }).catch(() => {});
+    }
+    return () => { isMounted = false; };
+  }, [isGhlSalesExec]);
 
   const companyId = (user?.companyId as string | undefined) ?? tenant?.id ?? '';
   const [unreadChatCount, setUnreadChatCount] = useState(0);

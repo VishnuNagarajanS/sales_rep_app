@@ -10,7 +10,7 @@ import {
   FileCheck,
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
-import { storageService } from '../../../services/storageService';
+import { auditLogStore, tenantStore, userStore } from '../../../services/secondaryStores';
 import './PlatformDashboardPage.css';
 
 interface PlatformDashboardPageProps {
@@ -19,9 +19,9 @@ interface PlatformDashboardPageProps {
 
 export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ onNavigate }) => {
   const { switchPersona } = useAuth();
-  const auditLogs = storageService.getAuditLogs();
-  const tenants = storageService.getTenants();
-  const users = storageService.getUsers();
+  const auditLogs = auditLogStore.getAuditLogs();
+  const tenants = tenantStore.getTenants();
+  const users = userStore.getUsers();
 
   return (
     <div className="platform-dashboard-page">

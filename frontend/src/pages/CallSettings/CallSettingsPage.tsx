@@ -12,7 +12,9 @@ import {
   Clock,
   Activity,
 } from 'lucide-react';
-import { storageService, PopupPosition } from '../../services/storageService';
+import { preferenceStore, CallPreferences, PopupPosition } from '../../services/secondaryStores';
+export type { PopupPosition, CallPreferences };
+
 import { useCall } from '../../context/CallContext';
 import './CallSettingsPage.css';
 // ── Shared inline toggle component matching this file's visual language ──────
@@ -81,23 +83,23 @@ const playTestBeep = () => {
 };
 
 export const CallSettingsPage: React.FC = () => {
-  const [position, setPosition] = useState<PopupPosition>(() => storageService.getPopupPosition());
+  const [position, setPosition] = useState<PopupPosition>(() => preferenceStore.getPopupPosition());
   const { simulateIncomingCall } = useCall();
 
   // ── Call preferences state ────────────────────────────────────────────────
-  const [prefs, setPrefs] = useState(() => storageService.getCallPreferences());
+  const [prefs, setPrefs] = useState<CallPreferences>(() => preferenceStore.getCallPreferences());
 
   // Keep prefs in sync with other tabs / external writes
   useEffect(() => {
     const handleUpdate = () => {
-      setPosition(storageService.getPopupPosition());
-      setPrefs(storageService.getCallPreferences());
+      setPosition(preferenceStore.getPopupPosition());
+      setPrefs(preferenceStore.getCallPreferences());
     };
-    window.addEventListener('nexus_storage_updated', handleUpdate);
     window.addEventListener('storage', handleUpdate);
+    window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => {
-      window.removeEventListener('nexus_storage_updated', handleUpdate);
       window.removeEventListener('storage', handleUpdate);
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
     };
   }, []);
 
@@ -110,13 +112,13 @@ export const CallSettingsPage: React.FC = () => {
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleSelectPosition = (newPos: PopupPosition) => {
     setPosition(newPos);
-    storageService.setPopupPosition(newPos);
+    preferenceStore.setPopupPosition(newPos);
   };
 
-  const updatePref = <K extends keyof typeof prefs>(key: K, value: typeof prefs[K]) => {
+  const updatePref = <K extends keyof CallPreferences>(key: K, value: CallPreferences[K]) => {
     const next = { ...prefs, [key]: value };
     setPrefs(next);
-    storageService.setCallPreferences({ [key]: value });
+    preferenceStore.setCallPreferences({ [key]: value });
   };
 
   const handleToggleDesktopNotif = async (enabled: boolean) => {

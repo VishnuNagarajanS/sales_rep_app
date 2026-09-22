@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import { leadsApi, callsApi, followupsApi } from '../../services/crmApi';
 import { Drawer } from '../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
 import { StatusChip } from '../../components/common/StatusChip';
@@ -197,10 +197,78 @@ export const ProfilePage: React.FC = () => {
     setShowBannerPicker(false);
   };
 
-  // ── Live data ──────────────────────────────────────────────────────────────
-  const allCalls = useMemo(() => storageService.getCalls(tenant?.id), [tenant?.id]);
-  const allLeads = useMemo(() => storageService.getLeads(tenant?.id), [tenant?.id]);
-  const allFollowups = useMemo(() => storageService.getFollowups(tenant?.id), [tenant?.id]);
+  // ── Live data from API ───────────────────────────────────────────────────
+  const [allCalls, setAllCalls] = useState<CallRecord[]>([]);
+  const [allLeads, setAllLeads] = useState<Lead[]>([]);
+  const [allFollowups, setAllFollowups] = useState<Followup[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const emptyPaged = { items: [], totalCount: 0, page: 1, pageSize: 100, totalPages: 0 };
+    Promise.all([
+      callsApi.getCalls({ pageSize: 100 }).catch(() => emptyPaged),
+      leadsApi.getActiveLeads({ pageSize: 100 }).catch(() => emptyPaged),
+      followupsApi.getFollowups({ pageSize: 100 }).catch(() => emptyPaged),
+    ]).then(([callsRes, leadsRes, fwRes]) => {
+      if (!isMounted) return;
+      if (callsRes?.items) {
+        const raw = callsRes.items;
+        setAllCalls(raw.map((c: any) => ({
+          id: String(c.id),
+          tenantId: String(tenant?.id || ''),
+          companyId: String(tenant?.id || ''),
+          contactName: c.contactName || '',
+          contactPhone: c.contactPhone || '',
+          agentId: String(c.agentId || ''),
+          agentName: c.agentName || '',
+          direction: (c.direction || 'outbound').toLowerCase() as any,
+          duration: Number(c.duration || 0),
+          disposition: c.disposition || 'Interested',
+          timestamp: c.timestamp || new Date().toISOString(),
+          notes: c.notes || '',
+        })));
+      }
+      if (leadsRes?.items) {
+        const raw = leadsRes.items;
+        setAllLeads(raw.map((l: any) => ({
+          id: String(l.id),
+          tenantId: String(tenant?.id || ''),
+          companyId: String(tenant?.id || ''),
+          name: l.name || '',
+          phone: l.phone || '',
+          email: l.email || '',
+          location: l.location || '',
+          status: l.status || 'New',
+          priority: l.priority || 'Medium',
+          source: l.source || 'Direct',
+          assignedAgentId: String(l.assignedAgentId || ''),
+          assignedAgentName: l.assignedAgentName || '',
+          notes: l.notes || '',
+          customFields: l.customFields || {},
+          createdAt: l.createdAt || new Date().toISOString(),
+        })));
+      }
+      if (fwRes?.items) {
+        const raw = fwRes.items;
+        setAllFollowups(raw.map((f: any) => ({
+          id: String(f.id),
+          tenantId: String(tenant?.id || ''),
+          companyId: String(tenant?.id || ''),
+          contactName: f.contactName || '',
+          contactPhone: f.contactPhone || '',
+          contactType: f.contactType || 'lead',
+          contactId: f.contactId ? String(f.contactId) : '',
+          assignedAgentId: String(f.assignedAgentId || ''),
+          assignedAgentName: f.assignedAgentName || '',
+          scheduledAt: f.scheduledAt || '',
+          notes: f.notes || '',
+          priority: f.priority || 'Medium',
+          status: f.status || 'Pending',
+        })));
+      }
+    });
+    return () => { isMounted = false; };
+  }, [tenant?.id]);
 
   const myCalls = useMemo(
     () => allCalls.filter(c => c.agentId === user?.id || c.agentName === user?.name),
@@ -527,7 +595,6 @@ export const ProfilePage: React.FC = () => {
     if (!user) return;
     const updated = { ...user, name: editName, phone: editPhone, designation: editDesignation };
     setUser(updated);
-    storageService.saveUser(updated);
     setPersonalSaved(true);
     setTimeout(() => setPersonalSaved(false), 2200);
   };
@@ -541,7 +608,6 @@ export const ProfilePage: React.FC = () => {
       specializations: editSpecializations.split(',').map(s => s.trim()).filter(Boolean),
     };
     setUser(updated);
-    storageService.saveUser(updated);
     setSkillsSaved(true);
     setTimeout(() => setSkillsSaved(false), 2200);
   };
@@ -554,7 +620,6 @@ export const ProfilePage: React.FC = () => {
       workingHours: { start: editWorkStart, end: editWorkEnd, days: user.workingHours?.days || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] },
     };
     setUser(updated);
-    storageService.saveUser(updated);
     setHoursSaved(true);
     setTimeout(() => setHoursSaved(false), 2200);
   };

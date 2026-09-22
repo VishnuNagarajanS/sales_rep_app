@@ -4,7 +4,7 @@ import { Investor, CallRecord, Consultation, InvestmentOpportunity, Followup } f
 import Papa from 'papaparse';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import { customersApi, callsApi, consultationsApi, followupsApi } from '../../services/crmApi';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
@@ -81,19 +81,96 @@ export const InvestorsPage: React.FC = () => {
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof InvestorForm, string>>>({});
 
   // ── Data loading ──────────────────────────────────────────────────────────
-  const loadData = () => {
-    setInvestors(storageService.getInvestors(tenant?.id));
-    setAllCalls(storageService.getCalls(tenant?.id));
-    setAllConsultations(storageService.getConsultations(tenant?.id));
-    setAllOpportunities(storageService.getOpportunities(tenant?.id));
-    setAllFollowups(storageService.getFollowups(tenant?.id));
+  const loadData = async () => {
+    try {
+      const emptyPaged = { items: [], totalCount: 0, page: 1, pageSize: 100, totalPages: 0 };
+      const [custRes, callsRes, cnsRes, fwRes] = await Promise.all([
+        customersApi.getCustomers({ pageSize: 100 }).catch(() => emptyPaged),
+        callsApi.getCalls({ pageSize: 100 }).catch(() => emptyPaged),
+        consultationsApi.getConsultations({ pageSize: 100 }).catch(() => emptyPaged),
+        followupsApi.getFollowups({ pageSize: 100 }).catch(() => emptyPaged),
+      ]);
+
+      if (custRes?.items) {
+        const raw = custRes.items;
+        const mapped: Investor[] = raw.map((c: any) => ({
+          id: String(c.id),
+          companyId: String(tenant?.id || ''),
+          name: c.name || '',
+          phone: c.phone || '',
+          email: c.email || '',
+          status: (c.status === 'VIP' ? 'HNW Investor' : c.status === 'Inactive' ? 'Inactive' : 'Active Investor') as any,
+          investmentCapacity: c.customFields?.investmentCapacity || (c.totalValue > 0 ? `₹${(c.totalValue / 100000).toFixed(0)} Lakh` : '₹50 Lakh – ₹1 Cr'),
+          preferredAssetClass: c.customFields?.preferredAssetClass || 'Commercial & Equity',
+          assignedAgentId: String(c.assignedAgentId || ''),
+          assignedAgentName: c.assignedAgentName || 'Advisor',
+          createdAt: c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-IN') : '—',
+          notes: c.notes || '',
+          committedAUM: c.totalValue > 0 ? `₹${(c.totalValue / 10000000).toFixed(2)} Cr` : undefined,
+        }));
+        setInvestors(mapped);
+      }
+
+      if (callsRes?.items) {
+        const raw = callsRes.items;
+        setAllCalls(raw.map((c: any) => ({
+          id: String(c.id),
+          tenantId: String(tenant?.id || ''),
+          companyId: String(tenant?.id || ''),
+          contactName: c.contactName || '',
+          contactPhone: c.contactPhone || '',
+          agentId: String(c.agentId || ''),
+          agentName: c.agentName || 'Agent',
+          direction: (c.direction || 'outbound').toLowerCase() as any,
+          duration: Number(c.duration || 0),
+          disposition: c.disposition || 'Interested',
+          timestamp: c.timestamp || new Date().toISOString(),
+          notes: c.notes || '',
+        })));
+      }
+
+      if (cnsRes?.items) {
+        const raw = cnsRes.items;
+        setAllConsultations(raw.map((c: any) => ({
+          id: String(c.id),
+          companyId: String(tenant?.id || ''),
+          investorId: String(c.investorId || ''),
+          investorName: c.investorName || '',
+          investorPhone: c.investorPhone || '',
+          consultantId: String(c.consultantId || ''),
+          consultantName: c.consultantName || '',
+          scheduledAt: c.scheduledAt || '',
+          status: c.status || 'Scheduled',
+          agenda: c.agenda || '',
+          outcomeNotes: c.outcomeNotes || '',
+        })));
+      }
+
+      if (fwRes?.items) {
+        const raw = fwRes.items;
+        setAllFollowups(raw.map((f: any) => ({
+          id: String(f.id),
+          tenantId: String(tenant?.id || ''),
+          companyId: String(tenant?.id || ''),
+          contactName: f.contactName || '',
+          contactPhone: f.contactPhone || '',
+          contactType: f.contactType || 'customer',
+          contactId: f.contactId ? String(f.contactId) : '',
+          assignedAgentId: String(f.assignedAgentId || ''),
+          assignedAgentName: f.assignedAgentName || 'Agent',
+          scheduledAt: f.scheduledAt || '',
+          notes: f.notes || '',
+          priority: f.priority || 'Medium',
+          status: f.status || 'Pending',
+        })));
+      }
+    } catch {
+      // ignore
+    }
   };
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
-    window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id]);
 
   // Reset drawer tab whenever a different investor is selected
@@ -228,7 +305,33 @@ export const InvestorsPage: React.FC = () => {
       ...(form.riskTolerance ? { riskTolerance: form.riskTolerance as Investor['riskTolerance'] } : {}),
     };
 
-    storageService.saveInvestor(investor);
+    if (editingInvestor) {
+      customersApi.updateCustomer(editingInvestor.id, {
+        name: investor.name,
+        phone: investor.phone,
+        email: investor.email,
+        notes: investor.notes,
+        customFields: {
+          investmentCapacity: investor.investmentCapacity,
+          preferredAssetClass: investor.preferredAssetClass,
+        },
+      }).catch(() => {});
+      setInvestors(prev => prev.map(i => i.id === editingInvestor.id ? investor : i));
+    } else {
+      customersApi.createCustomer({
+        name: investor.name,
+        phone: investor.phone,
+        email: investor.email,
+        notes: investor.notes,
+        status: 'VIP',
+        customFields: {
+          investmentCapacity: investor.investmentCapacity,
+          preferredAssetClass: investor.preferredAssetClass,
+        },
+      }).catch(() => {});
+      setInvestors(prev => [investor, ...prev]);
+    }
+
     closeModal();
     setSelectedInvestor(investor);
   };
@@ -265,7 +368,7 @@ export const InvestorsPage: React.FC = () => {
   // ── Delete handler ────────────────────────────────────────────────────────
   const handleDeleteInvestor = (inv: Investor) => {
     if (!window.confirm(`Delete investor "${inv.name}"? This cannot be undone.`)) return;
-    storageService.deleteInvestor(inv.id);
+    setInvestors(prev => prev.filter(i => i.id !== inv.id));
     if (selectedInvestor?.id === inv.id) setSelectedInvestor(null);
   };
 

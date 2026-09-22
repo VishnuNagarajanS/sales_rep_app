@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { CheckCircle, Plus } from 'lucide-react';
 import { Booking } from '../../types';
 import { useAuth } from '../../context/AuthContext';
-import { storageService } from '../../services/storageService';
+import { bookingStore, plotStore, auditLogStore } from '../../services/secondaryStores';
 import { DataTable, Column } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
@@ -26,7 +26,7 @@ export const BookingsPage: React.FC = () => {
   const [paymentTerms, setPaymentTerms] = useState('Token ₹5L paid via RTGS. 20% on agreement signing, 80% on registration.');
 
   const loadData = () => {
-    setBookings(storageService.getBookings(tenant?.id));
+    setBookings(bookingStore.getBookings(tenant?.id));
   };
 
   useEffect(() => {
@@ -59,20 +59,20 @@ export const BookingsPage: React.FC = () => {
       paymentTerms,
     };
 
-    storageService.saveBooking(newBooking);
+    bookingStore.saveBooking(newBooking);
 
     // Update matching plot to Sold
-    const plots = storageService.getPlots();
+    const plots = plotStore.getPlots();
     const targetPlot = plots.find(p => p.plotNumber.toLowerCase() === plotNumber.toLowerCase());
     if (targetPlot) {
-      storageService.savePlot({
+      plotStore.savePlot({
         ...targetPlot,
         status: 'Sold',
         holdByCustomer: customerName,
       });
     }
 
-    storageService.addAuditLog({
+    auditLogStore.addAuditLog({
       id: `aud-${Date.now()}`,
       timestamp: 'Just now',
       actorName: user?.name || 'Agent',

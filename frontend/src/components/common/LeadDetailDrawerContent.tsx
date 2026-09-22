@@ -9,8 +9,8 @@ import {
   Calendar,
   Clock,
 } from 'lucide-react';
-import { CallDisposition, Consultation } from '../../types';
-import { storageService } from '../../services/storageService';
+import { CallDisposition, Consultation, Lead, CallRecord } from '../../types';
+import { leadsApi, callsApi, followupsApi } from '../../services/crmApi';
 import { StatusChip } from './StatusChip';
 
 interface LeadDetailDrawerContentProps {
@@ -41,6 +41,8 @@ interface LeadDetailDrawerContentProps {
   consultationHistory?: Consultation[];
   /** Optional — when true, strips system-generated disposition lines from Notes & Requirements */
   hideAutoNotes?: boolean;
+  /** Optional — lead object if already available from parent component */
+  lead?: Lead | null;
 }
 
 export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = ({
@@ -53,31 +55,105 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   consultationReason,
   consultationHistory,
   hideAutoNotes = false,
+  lead: initialLead,
 }) => {
   const [expandedTranscripts, setExpandedTranscripts] = useState<Record<string, boolean>>({});
   const [callTab, setCallTab] = useState<'agent' | 'irm'>('agent');
   const [isPreviousConsultationsOpen, setIsPreviousConsultationsOpen] = useState(true);
 
+  const [leadRecord, setLeadRecord] = useState<Lead | null>(initialLead || null);
+  const [callsList, setCallsList] = useState<CallRecord[]>([]);
+  const [activeFollowupCount, setActiveFollowupCount] = useState<number>(0);
+
   useEffect(() => {
     setCallTab('agent');
   }, [contactPhone, contactId]);
 
-  // ── Lead record lookup ───────────────────────────────────────────────────────
-  const selectedLead = (() => {
-    const leads = storageService.getLeads(tenantId) || [];
-    return leads.find(l => {
-      if (contactId && contactId !== 'contact-new' && l.id === contactId) return true;
-      const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
-      const fPhone = (contactPhone || '').replace(/\D/g, '').slice(-10);
-      return lPhone && fPhone && lPhone === fPhone;
-    }) || null;
-  })();
+  useEffect(() => {
+    if (initialLead) {
+      setLeadRecord(initialLead);
+    }
+  }, [initialLead]);
 
-  // ── Call history lookup ──────────────────────────────────────────────────────
-  const allCalls = storageService.getCalls(tenantId) || [];
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadData = async () => {
+      // 1. Load lead details if needed
+      if (!initialLead && contactId && contactId !== 'contact-new') {
+        try {
+          const res = await leadsApi.getLeadById(contactId);
+          if (isMounted && res) {
+            setLeadRecord({
+              ...(res as any),
+              id: String(res.id),
+              companyId: tenantId || '',
+              assignedAgentId: String(res.assignedAgentId || ''),
+            });
+          }
+        } catch {
+          // ignore error
+        }
+      }
+
+      // 2. Load call records
+      try {
+        const callsRes = await callsApi.getCalls({
+          leadId: contactId && contactId !== 'contact-new' ? contactId : undefined,
+          search: contactPhone || undefined,
+        });
+        if (isMounted && callsRes) {
+          const items: CallRecord[] = (callsRes.items || []).map((c: any) => ({
+            id: String(c.id),
+            companyId: tenantId || '',
+            tenantId: tenantId || '',
+            contactName: c.contactName || '',
+            contactPhone: c.contactPhone || '',
+            leadId: c.leadId ? String(c.leadId) : undefined,
+            customerId: c.customerId ? String(c.customerId) : undefined,
+            agentId: String(c.agentId || ''),
+            agentName: c.agentName || 'Agent',
+            direction: (c.direction || 'outbound').toLowerCase() as any,
+            duration: Number(c.duration || 0),
+            disposition: c.disposition || 'Interested',
+            timestamp: c.timestamp ? new Date(c.timestamp).toISOString() : new Date().toISOString(),
+            notes: c.notes || '',
+          }));
+          setCallsList(items);
+        }
+      } catch {
+        // ignore error
+      }
+
+      // 3. Load active followups count
+      try {
+        const fwRes = await followupsApi.getFollowups({ status: 'Pending' });
+        if (isMounted && fwRes) {
+          const items = fwRes.items || [];
+          const phoneDigits = (contactPhone || '').replace(/\D/g, '').slice(-10);
+          const count = items.filter((f: any) => {
+            if (contactId && contactId !== 'contact-new' && String(f.contactId || f.leadId || '') === String(contactId)) return true;
+            const fwPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+            return phoneDigits && fwPhone && phoneDigits === fwPhone;
+          }).length;
+          setActiveFollowupCount(count);
+        }
+      } catch {
+        // ignore error
+      }
+    };
+
+    loadData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [contactId, contactPhone, initialLead]);
+
+  const selectedLead = leadRecord;
   const fPhoneDigits = (contactPhone || '').replace(/\D/g, '').slice(-10);
 
-  const selectedCalls = allCalls.filter(c => {
+  const selectedCalls = callsList.filter(c => {
     const isMatch =
       (contactId && contactId !== 'contact-new' &&
         (c.leadId === contactId || (c as any).contactId === contactId || (c as any).investorId === contactId)) ||
@@ -96,15 +172,6 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   const agentCalls = selectedCalls.filter(c => !(c.notes || '').startsWith('Connected to IRM:'));
   const irmCalls = selectedCalls.filter(c => (c.notes || '').startsWith('Connected to IRM:'));
   const tabCalls = callTab === 'agent' ? agentCalls : irmCalls;
-
-  // ── Active follow-up count ───────────────────────────────────────────────────
-  const followups = storageService.getFollowups(tenantId) || [];
-  const activeFollowupCount = followups.filter(f => {
-    if (f.status !== 'Pending') return false;
-    if (contactId && contactId !== 'contact-new' && f.contactId === contactId) return true;
-    const fwPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-    return fwPhone && fPhoneDigits && fwPhone === fPhoneDigits;
-  }).length;
 
   const toggleTranscript = (callId: string) => {
     setExpandedTranscripts(prev => ({ ...prev, [callId]: !prev[callId] }));
@@ -318,20 +385,14 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
 
             {/* Custom Fields */}
             {(() => {
-              const activeDefs = storageService
-                .getCustomFieldDefinitions(tenantId)
-                .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
-                .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
-
-              const rows = activeDefs
-                .map(def => {
-                  const key = def.fieldKey || def.id;
-                  if (key === 'dispositionReason' || key === 'customerNotes') return null;
-                  const val = selectedLead.customFields?.[key];
-                  if (val === undefined || val === null || val === '') return null;
-                  return { id: def.id, label: def.label || key.replace(/([A-Z])/g, ' $1'), value: String(val) };
-                })
-                .filter(Boolean);
+              if (!selectedLead?.customFields) return null;
+              const rows = Object.entries(selectedLead.customFields)
+                .filter(([key, val]) => key !== 'dispositionReason' && key !== 'customerNotes' && val !== undefined && val !== null && val !== '')
+                .map(([key, val]) => ({
+                  id: key,
+                  label: key.replace(/([A-Z])/g, ' $1').toUpperCase(),
+                  value: String(val),
+                }));
 
               if (rows.length === 0) return null;
 
@@ -340,9 +401,9 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                   <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>CUSTOM ATTRIBUTES</span>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
                     {rows.map(item => (
-                      <div key={item!.id} style={{ backgroundColor: 'var(--bg-surface-hover)', padding: '6px 10px', borderRadius: 6 }}>
-                        <span style={{ fontSize: 10, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{item!.label}</span>
-                        <div style={{ fontWeight: 600 }}>{item!.value}</div>
+                      <div key={item.id} style={{ backgroundColor: 'var(--bg-surface-hover)', padding: '6px 10px', borderRadius: 6 }}>
+                        <span style={{ fontSize: 10, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{item.label}</span>
+                        <div style={{ fontWeight: 600 }}>{item.value}</div>
                       </div>
                     ))}
                   </div>

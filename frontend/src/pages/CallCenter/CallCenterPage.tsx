@@ -2,10 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { PhoneCall, Phone, Delete } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
 import { AgentAvailabilityToggle } from '../../components/calling/CallCenterComponents';
 import { EmptyState } from '../../components/common/EmptyState';
-import { Followup } from '../../types';
+import { CallRecordDto, FollowupDto, LeadDto, callsApi, followupsApi, leadsApi } from '../../services/crmApi';
 import './CallCenterPage.css';
 // ── Calendar-day comparison helper (same pattern as elsewhere in the app) ──────
 const isSameCalendarDay = (dateStr: string, ref: Date): boolean => {
@@ -43,19 +42,35 @@ export const CallCenterPage: React.FC = () => {
   const [dialNumber, setDialNumber] = useState('+91 ');
   const [contactName, setContactName] = useState('');
 
-  // ── Real data ────────────────────────────────────────────────────────────────
-  const [calls, setCalls] = useState(storageService.getCalls(tenant?.id));
-  const [followups, setFollowups] = useState(storageService.getFollowups(tenant?.id));
-  const [leads, setLeads] = useState(storageService.getLeads(tenant?.id));
+  // ── Real data from backend APIs ─────────────────────────────────────────────
+  const [calls, setCalls] = useState<CallRecordDto[]>([]);
+  const [followups, setFollowups] = useState<FollowupDto[]>([]);
+  const [leads, setLeads] = useState<LeadDto[]>([]);
 
   useEffect(() => {
-    const handleUpdate = () => {
-      setCalls(storageService.getCalls(tenant?.id));
-      setFollowups(storageService.getFollowups(tenant?.id));
-      setLeads(storageService.getLeads(tenant?.id));
+    let isMounted = true;
+    const loadData = async () => {
+      try {
+        const [fetchedCalls, fetchedFollowups, fetchedLeads] = await Promise.all([
+          callsApi.getCalls().catch(() => ({ items: [] as CallRecordDto[] })),
+          followupsApi.getFollowups().catch(() => ({ items: [] as FollowupDto[] })),
+          leadsApi.getActiveLeads().catch(() => ({ items: [] as LeadDto[] })),
+        ]);
+        if (isMounted) {
+          setCalls(fetchedCalls.items || []);
+          setFollowups(fetchedFollowups.items || []);
+          setLeads(fetchedLeads.items || []);
+        }
+      } catch (err) {
+        console.error('Failed to load call center data:', err);
+      }
     };
-    window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+    loadData();
+    window.addEventListener('nexus_storage_updated', loadData);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('nexus_storage_updated', loadData);
+    };
   }, [tenant?.id]);
 
   // ── Task 1: Today's outbound calls + connect rate ────────────────────────────
@@ -87,7 +102,7 @@ export const CallCenterPage: React.FC = () => {
   // ── Task 5: Priority callback pipeline ────────────────────────────────────────
   // Combine: pending followups due today or overdue + Urgent/High leads with no
   // scheduled followup and not converted.
-  const isOverdueOrToday = (f: Followup): boolean => {
+  const isOverdueOrToday = (f: FollowupDto): boolean => {
     if (!f.scheduledAt) return false;
     const d = new Date(f.scheduledAt);
     if (isNaN(d.getTime())) return false;
@@ -107,7 +122,7 @@ export const CallCenterPage: React.FC = () => {
   const pipelineFromFollowups: PipelineItem[] = followups
     .filter(f => f.status === 'Pending' && isOverdueOrToday(f))
     .map(f => ({
-      id: f.id,
+      id: String(f.id),
       name: f.contactName,
       phone: f.contactPhone,
       meta: f.notes || 'Pending follow-up',
@@ -117,17 +132,17 @@ export const CallCenterPage: React.FC = () => {
 
   // Leads that are Urgent or High priority, not Converted, with no pending followup
   const followupContactIds = new Set(
-    followups.filter(f => f.status === 'Pending').map(f => f.contactId)
+    followups.filter(f => f.status === 'Pending').map(f => String(f.contactId || ''))
   );
   const pipelineFromLeads: PipelineItem[] = leads
     .filter(
       l =>
         (l.priority === 'Urgent' || l.priority === 'High') &&
         l.status !== 'Converted' &&
-        !followupContactIds.has(l.id)
+        !followupContactIds.has(String(l.id))
     )
     .map(l => ({
-      id: l.id,
+      id: String(l.id),
       name: l.name,
       phone: l.phone,
       meta: `${l.priority} priority lead • ${l.location || l.source}`,

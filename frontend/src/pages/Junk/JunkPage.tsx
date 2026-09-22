@@ -3,77 +3,73 @@ import { Phone, ExternalLink, Trash2, RefreshCw } from 'lucide-react';
 import { Lead } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import { leadsApi, LeadDto } from '../../services/crmApi';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { Drawer } from '../../components/common/Drawer';
 import { Timeline, TimelineEvent } from '../../components/common/Timeline';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
 import './JunkPage.css';
 
+const mapDtoToLead = (dto: LeadDto): Lead => ({
+  id: String(dto.id),
+  companyId: String(dto.companyId),
+  name: dto.name,
+  phone: dto.phone,
+  email: dto.email || '',
+  location: dto.location || '',
+  source: dto.source || 'Website Inbound',
+  status: (dto.status as any) || 'Junk',
+  priority: (dto.priority as any) || 'Medium',
+  assignedAgentId: String(dto.assignedAgentId),
+  assignedAgentName: dto.assignedAgentName || 'Agent',
+  nextFollowupDate: dto.nextFollowupDate,
+  createdAt: dto.createdAt ? dto.createdAt.split('T')[0] : new Date().toISOString().split('T')[0],
+  notes: dto.notes || '',
+  customFields: dto.customFields || {},
+});
+
 export const JunkPage: React.FC = () => {
-  const { tenant, user } = useAuth();
+  const { tenant } = useAuth();
   const { initiateCall } = useCall();
 
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [reengaging, setReengaging] = useState(false);
 
-  const roleCode = user?.role?.code;
-  const isExec = roleCode === 'sales_executive';
-  const isGhlSalesExec = tenant?.slug === 'ghl' && isExec;
+  const isGhlSalesExec = tenant?.slug === 'ghl';
 
-  const loadData = () => {
-    const allLeads = storageService.getLeads(tenant?.id);
-    const junkLeads = allLeads.filter(l => l.status === 'Junk');
-
-    const scopedLeads = isExec
-      ? junkLeads.filter(l =>
-          (l.assignedAgentId && l.assignedAgentId === user?.id) ||
-          (l.assignedAgentName && l.assignedAgentName === user?.name)
-        )
-      : junkLeads;
-
-    setLeads(scopedLeads);
+  const loadData = async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const data = await leadsApi.getJunkLeads();
+      setLeads((data.items || []).map(mapDtoToLead));
+    } catch (err: any) {
+      setLoadError(err.message || 'Failed to load Junk leads from PostgreSQL.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
-    window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
-  }, [tenant?.id, user?.id, isExec]);
+  }, [tenant?.id]);
 
-  // Re-engage: move lead from Junk → Contacted and create a follow-up entry
-  const handleReengage = (lead: Lead) => {
-    if (!tenant || !user) return;
+  // Re-engage: move lead from Junk → Contacted via API
+  const handleReengage = async (lead: Lead) => {
     setReengaging(true);
     try {
-      // Reset lead status to Contacted
-      storageService.saveLead({ ...lead, status: 'Contacted' });
-
-      // Purge any stale Pending followups for this contact, then create a fresh one
-      storageService.purgeFollowupsForContact(tenant.id, lead.id, lead.phone);
-
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      storageService.saveFollowup({
-        id: `flw-${Date.now()}`,
-        companyId: tenant.id,
-        contactId: lead.id,
-        contactName: lead.name,
-        contactPhone: lead.phone,
-        contactType: 'lead',
-        scheduledAt: tomorrow.toISOString(),
-        priority: 'High',
-        status: 'Pending',
-        notes: `Re-engaged from Junk — follow-up required with ${lead.name}.`,
-        assignedAgentId: user.id,
-        assignedAgentName: user.name,
-      });
-
+      if (!isNaN(Number(lead.id))) {
+        await leadsApi.reengageLead(Number(lead.id));
+      }
       setIsDetailDrawerOpen(false);
       setSelectedLead(null);
+      await loadData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to re-engage lead.');
     } finally {
       setReengaging(false);
     }
@@ -153,10 +149,8 @@ export const JunkPage: React.FC = () => {
     },
   ];
 
-  // ── Non-GHL exec: timeline helper ───────────────────────────────────────────
   const getTimelineEvents = (lead: Lead): TimelineEvent[] => {
     const events: TimelineEvent[] = [];
-
     events.push({
       id: `ev-create-${lead.id}`,
       type: 'note',
@@ -165,27 +159,11 @@ export const JunkPage: React.FC = () => {
       timestamp: lead.createdAt,
       actorName: lead.assignedAgentName,
     });
-
-    const calls = storageService.getCalls(tenant?.id).filter(c => c.contactPhone === lead.phone || c.contactName === lead.name);
-
-    calls.forEach(c => {
-      events.push({
-        id: `ev-call-${c.id}`,
-        type: 'call',
-        title: `Call Logged - ${c.disposition}`,
-        description: `Duration: ${Math.floor(c.duration / 60)}m ${c.duration % 60}s. ${c.notes || ''}`,
-        timestamp: c.timestamp,
-        actorName: c.agentName,
-      });
-    });
-
-    return events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    return events;
   };
 
   const timelineEvents = selectedLead && !isGhlSalesExec ? getTimelineEvents(selectedLead) : [];
-  const callsCount = selectedLead && !isGhlSalesExec
-    ? storageService.getCalls(tenant?.id).filter(c => c.contactPhone === selectedLead.phone || c.contactName === selectedLead.name).length
-    : 0;
+  const callsCount = 0;
 
   return (
     <div className="junk-page">
@@ -197,13 +175,27 @@ export const JunkPage: React.FC = () => {
         <p className="junk-subtitle">Wrong numbers and invalid inquiries</p>
       </div>
 
+      {loadError && (
+        <div className="card" style={{ padding: '12px 16px', marginTop: 16, background: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', color: '#ef4444', borderRadius: '8px' }}>
+          <strong>Error loading leads:</strong> {loadError}
+          <button className="btn btn-sm btn-secondary" style={{ marginLeft: 12 }} onClick={loadData}>Retry</button>
+        </div>
+      )}
+
+      {isLoading && (
+        <div style={{ textAlign: 'center', padding: '16px', color: 'var(--text-secondary)' }}>
+          Loading Junk leads from PostgreSQL database...
+        </div>
+      )}
+
       <div className="card" style={{ marginTop: 24 }}>
         <DataTable
           columns={columns}
           data={leads}
           keyExtractor={(r) => r.id}
           rowActions={actions}
-          emptyTitle="No junk leads found."
+          emptyTitle="No leads marked as Junk."
+          searchPlaceholder="Search leads by name, phone, or reason..."
           onRowClick={isGhlSalesExec ? (row) => { setSelectedLead(row); setIsDetailDrawerOpen(true); } : undefined}
         />
       </div>
@@ -221,13 +213,12 @@ export const JunkPage: React.FC = () => {
       >
         {selectedLead && (
           isGhlSalesExec ? (
-            // ── GHL Sales Exec: full parity drawer ──────────────────────────────
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {/* Re-engage action banner */}
               <div
                 style={{
-                  backgroundColor: '#fff7ed',
-                  border: '1px solid #fed7aa',
+                  backgroundColor: '#f8fafc',
+                  border: '1px solid #cbd5e1',
                   borderRadius: 'var(--radius-md)',
                   padding: '12px 16px',
                   display: 'flex',
@@ -237,11 +228,11 @@ export const JunkPage: React.FC = () => {
                 }}
               >
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', textTransform: 'uppercase' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#475569', textTransform: 'uppercase' }}>
                     Junk Lead
                   </div>
-                  <div style={{ fontSize: 13, color: '#78350f', marginTop: 2 }}>
-                    {selectedLead.customFields?.dispositionReason || 'No specific reason provided.'}
+                  <div style={{ fontSize: 13, color: '#64748b', marginTop: 2 }}>
+                    {selectedLead.customFields?.dispositionReason || selectedLead.notes || 'No reason provided'}
                   </div>
                 </div>
                 <button
@@ -276,48 +267,52 @@ export const JunkPage: React.FC = () => {
               />
             </div>
           ) : (
-            // ── Non-GHL / non-exec: original lightweight drawer ──────────────────
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 24, padding: '16px 0' }}>
-              {/* Core Details */}
-              <div className="card">
-                <h4 style={{ fontSize: 13, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 12, fontWeight: 700 }}>
-                  Contact Details
-                </h4>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <div className="card" style={{ padding: 16 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 12 }}>
+                  Contact Information
+                </h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: 13 }}>
                   <div>
-                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Phone:</span>
-                    <div style={{ fontSize: 14, fontWeight: 500 }}>{selectedLead.phone}</div>
+                    <span style={{ color: 'var(--text-secondary)' }}>Phone: </span>
+                    <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{selectedLead.phone}</span>
                   </div>
                   <div>
-                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Email:</span>
-                    <div style={{ fontSize: 14, fontWeight: 500 }}>{selectedLead.email || '—'}</div>
+                    <span style={{ color: 'var(--text-secondary)' }}>Email: </span>
+                    <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{selectedLead.email || '—'}</span>
                   </div>
                   <div>
-                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Location:</span>
-                    <div style={{ fontSize: 14, fontWeight: 500 }}>{selectedLead.location || '—'}</div>
+                    <span style={{ color: 'var(--text-secondary)' }}>Location: </span>
+                    <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{selectedLead.location || '—'}</span>
                   </div>
                   <div>
-                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Total Calls:</span>
-                    <div style={{ fontSize: 14, fontWeight: 500 }}>{callsCount}</div>
+                    <span style={{ color: 'var(--text-secondary)' }}>Source: </span>
+                    <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{selectedLead.source}</span>
                   </div>
                 </div>
               </div>
 
-              {/* Reason Details */}
-              <div className="card">
-                <h4 style={{ fontSize: 13, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 12, fontWeight: 700 }}>
-                  Junk Reason Details
-                </h4>
-                <p style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
-                  {selectedLead.customFields?.dispositionReason || 'No specific reason provided.'}
-                </p>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  className="btn btn-call"
+                  style={{ flex: 1 }}
+                  onClick={() => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id)}
+                >
+                  <Phone size={14} /> Call Lead
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  disabled={reengaging}
+                  onClick={() => handleReengage(selectedLead)}
+                >
+                  <RefreshCw size={14} /> Re-engage
+                </button>
               </div>
 
-              {/* Activity History Timeline */}
               <div>
-                <h4 style={{ fontSize: 13, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 16, fontWeight: 700 }}>
-                  Call Records / History
-                </h4>
+                <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 12 }}>
+                  Timeline & Interactions ({callsCount} calls)
+                </h3>
                 <Timeline events={timelineEvents} />
               </div>
             </div>

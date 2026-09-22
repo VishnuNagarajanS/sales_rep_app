@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Bell, Check, Phone, Users, Calendar } from 'lucide-react';
 import { NotificationItem } from '../../types';
-import { storageService } from '../../services/storageService';
+import { notificationStore } from '../../services/secondaryStores';
 import './NotificationsPage.css';
 
 interface NotificationsPageProps {
@@ -12,7 +12,7 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
   const loadData = () => {
-    setNotifications(storageService.getNotifications());
+    setNotifications(notificationStore.getNotifications());
   };
 
   useEffect(() => {
@@ -23,7 +23,7 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
   }, []);
 
   const handleMarkAll = () => {
-    storageService.markAllNotificationsRead();
+    notificationStore.markAllNotificationsRead();
   };
 
   return (
@@ -49,7 +49,7 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
             key={n.id}
             className={`notification-item-row ${!n.read ? 'unread' : ''}`}
             onClick={() => {
-              storageService.markNotificationRead(n.id);
+              notificationStore.markNotificationRead(n.id);
               if (n.link) onNavigate(n.link.replace('/', ''));
             }}
           >

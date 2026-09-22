@@ -11,7 +11,7 @@ import {
 import { Deal } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCan } from '../../components/common/Guards';
-import { storageService } from '../../services/storageService';
+import { dealStore } from '../../services/secondaryStores';
 import { PIPELINE_STAGES } from '../../constants/pipelineStages';
 import { Modal } from '../../components/common/Modal';
 import { FilterBar } from '../../components/common/FilterBar';
@@ -46,7 +46,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     .map(name => ({ value: name, label: name }));
 
   const loadData = () => {
-    setDeals(storageService.getDeals(tenant?.id));
+    setDeals(dealStore.getDeals(tenant?.id));
   };
 
   useEffect(() => {
@@ -77,12 +77,12 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
         stage: stages[newIndex].id,
         stageEnteredAt: new Date().toISOString(),
       };
-      storageService.saveDeal(updatedDeal);
+      dealStore.saveDeal(updatedDeal);
     }
   };
 
   const handleMarkWon = (deal: Deal) => {
-    storageService.saveDeal({
+    dealStore.saveDeal({
       ...deal,
       stage: wonStageId,
       stageEnteredAt: new Date().toISOString(),
@@ -91,7 +91,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
 
   const handleConfirmLost = () => {
     if (selectedDealForLoss) {
-      storageService.saveDeal({
+      dealStore.saveDeal({
         ...selectedDealForLoss,
         stage: 'lost',
         lostReason: lossReason,

@@ -10,10 +10,10 @@ import {
   Edit,
   ExternalLink,
 } from 'lucide-react';
-import { Lead, Customer, Deal } from '../../types';
+import { Lead } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import { leadsApi, LeadDto } from '../../services/crmApi';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { StatusChip } from '../../components/common/StatusChip';
@@ -32,26 +32,37 @@ const CO_AIF_CAPACITY_OPTIONS = [
   '₹10 Lakh to ₹1 Cr',
 ];
 
+const mapDtoToLead = (dto: LeadDto): Lead => ({
+  id: String(dto.id),
+  companyId: String(dto.companyId),
+  name: dto.name,
+  phone: dto.phone,
+  email: dto.email || '',
+  location: dto.location || '',
+  source: dto.source || 'Website Inbound',
+  status: (dto.status as any) || 'New',
+  priority: (dto.priority as any) || 'Medium',
+  assignedAgentId: String(dto.assignedAgentId),
+  assignedAgentName: dto.assignedAgentName || 'Agent',
+  nextFollowupDate: dto.nextFollowupDate,
+  createdAt: dto.createdAt ? dto.createdAt.split('T')[0] : new Date().toISOString().split('T')[0],
+  notes: dto.notes || '',
+  customFields: dto.customFields || {},
+});
+
 export const LeadsPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
 
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isConverting, setIsConverting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
 
   const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk'];
 
-  // Role-based scoping: Sales Executives see only their own leads.
-  // Managers / Admins / Super Admins see the full company lead list (no filter).
-  // Inactive / moved leads (Interested, Follow-up Required, Not Interested, Junk, Converted) are excluded from active Leads.
-  const roleCode = user?.role?.code;
-  const isExec = roleCode === 'sales_executive';
-  const scopedLeads = (isExec
-    ? leads.filter(l =>
-      (l.assignedAgentId && l.assignedAgentId === user?.id) ||
-      (l.assignedAgentName && l.assignedAgentName === user?.name)
-    )
-    : leads
-  ).filter(l => !MOVED_LEAD_STATUSES.includes(l.status));
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
@@ -100,61 +111,45 @@ export const LeadsPage: React.FC = () => {
     }));
   };
 
-  const loadData = () => {
-    const updated = storageService.getLeads(tenant?.id);
-    setLeads(updated);
-    setSelectedLead(prev => {
-      if (!prev) return null;
-      const found = updated.find(l => l.id === prev.id);
-      if (!found || MOVED_LEAD_STATUSES.includes(found.status)) {
-        setIsDetailDrawerOpen(false);
-        setIsEditDrawerOpen(false);
-        return null;
-      }
-      return found;
-    });
+  const loadData = async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const data = await leadsApi.getActiveLeads({
+        status: statusFilter !== 'All' ? statusFilter : undefined,
+      });
+      const mapped = (data.items || []).map(mapDtoToLead);
+      setLeads(mapped);
+      setSelectedLead(prev => {
+        if (!prev) return null;
+        const found = mapped.find(l => l.id === prev.id);
+        if (!found || MOVED_LEAD_STATUSES.includes(found.status)) {
+          setIsDetailDrawerOpen(false);
+          setIsEditDrawerOpen(false);
+          return null;
+        }
+        return found;
+      });
+    } catch (err: any) {
+      setLoadError(err.message || 'Failed to load leads from PostgreSQL.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
-    storageService.cleanupDuplicateLeads(tenant?.id);
     loadData();
-    const handleUpdate = () => loadData();
-    window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
-  }, [tenant?.id]);
+  }, [tenant?.id, statusFilter]);
 
-  const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
-  const ghlPendingFollowups = isGhlSalesExec
-    ? (storageService.getFollowups(tenant?.id) || []).filter(f => f.status === 'Pending')
-    : [];
-
-  const filteredLeads = scopedLeads.filter(lead => {
-    if (isGhlSalesExec && lead.status !== 'Callback') {
-      const leadPhoneDigits = (lead.phone || '').replace(/\D/g, '').slice(-10);
-      const hasPendingFollowup = ghlPendingFollowups.some(f => {
-        if (f.contactId && f.contactId !== 'contact-new' && f.contactId === lead.id) {
-          return true;
-        }
-        const fPhoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-        return fPhoneDigits && leadPhoneDigits && fPhoneDigits === leadPhoneDigits;
-      });
-      if (hasPendingFollowup) return false;
-    }
+  const filteredLeads = leads.filter(lead => {
     if (statusFilter !== 'All' && (lead.status as string) !== statusFilter) return false;
     return true;
   });
 
   const handleOpenCreate = () => {
-    if (!user) {
-      console.warn('[LeadsPage] Cannot create lead: user session is not yet loaded.');
-      return;
-    }
-    const defaultAgentId = user.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec');
-    const defaultAgentName = user.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer');
-
     setFormData({
-      id: `lead-${Date.now()}`,
-      companyId: tenant?.id || 't-ghl-01',
+      id: '',
+      companyId: tenant?.id || '1',
       name: '',
       phone: '+91 ',
       email: '',
@@ -162,8 +157,8 @@ export const LeadsPage: React.FC = () => {
       source: 'Website Inbound',
       status: 'New',
       priority: 'Medium',
-      assignedAgentId: defaultAgentId,
-      assignedAgentName: defaultAgentName,
+      assignedAgentId: user?.id || '1',
+      assignedAgentName: user?.name || 'Agent',
       createdAt: new Date().toISOString().split('T')[0],
       notes: '',
       customFields: tenant?.slug === 'jamin'
@@ -178,82 +173,68 @@ export const LeadsPage: React.FC = () => {
     setIsEditDrawerOpen(true);
   };
 
-  const handleSaveLead = (e: React.FormEvent) => {
+  const handleSaveLead = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.phone) return;
 
-    // Pull real agent ID and name at save-time to prevent stale/fallback placeholder IDs from leaking
-    const resolvedAgentId = (isExec && user?.id)
-      ? user.id
-      : (formData.assignedAgentId && formData.assignedAgentId !== 'usr-exec' ? formData.assignedAgentId : (user?.id || 'usr-exec'));
-    const resolvedAgentName = (isExec && user?.name)
-      ? user.name
-      : (formData.assignedAgentName && formData.assignedAgentName !== 'Agent' ? formData.assignedAgentName : (user?.name || 'Agent'));
+    setIsSaving(true);
+    try {
+      const isExisting = leads.some(l => l.id === formData.id);
+      const isNumericId = formData.id && !isNaN(Number(formData.id)) && Number(formData.id) > 0;
 
-    const isExistingById = leads.some(l => l.id === formData.id);
-    const targetCompanyId = formData.companyId || tenant?.id || 't-ghl-01';
-
-    let leadToSave: Lead;
-    let isUpdated = isExistingById;
-
-    if (!isExistingById) {
-      const existingMatch = storageService.findLeadByPhone(formData.phone, targetCompanyId);
-      if (existingMatch) {
-        isUpdated = true;
-        leadToSave = {
-          ...existingMatch,
-          ...formData,
-          id: existingMatch.id, // Preserve existing ID
-          companyId: existingMatch.companyId || targetCompanyId,
-          status: formData.status || existingMatch.status || 'New',
-          assignedAgentId: resolvedAgentId || existingMatch.assignedAgentId,
-          assignedAgentName: resolvedAgentName || existingMatch.assignedAgentName,
-          customFields: {
-            ...(existingMatch.customFields || {}),
-            ...(formData.customFields || {}),
-          },
-        };
+      if (isExisting && isNumericId) {
+        await leadsApi.updateLead(Number(formData.id), {
+          name: formData.name,
+          phone: formData.phone,
+          email: formData.email,
+          location: formData.location,
+          source: formData.source,
+          status: formData.status,
+          priority: formData.priority,
+          notes: formData.notes,
+          nextFollowupDate: formData.nextFollowupDate,
+          investmentCapacity: formData.customFields?.investmentCapacity,
+          assetClass: formData.customFields?.assetClass,
+          preferredAssetClass: formData.customFields?.preferredAssetClass,
+          horizon: formData.customFields?.horizon,
+          additionalCustomFields: formData.customFields,
+        });
       } else {
-        leadToSave = {
-          ...formData,
-          status: formData.status || 'New',
-          assignedAgentId: resolvedAgentId,
-          assignedAgentName: resolvedAgentName,
-          companyId: targetCompanyId,
-          createdAt: formData.createdAt || new Date().toISOString().split('T')[0],
-        } as Lead;
+        await leadsApi.createLead({
+          name: formData.name,
+          phone: formData.phone,
+          email: formData.email,
+          location: formData.location,
+          source: formData.source || 'Website Inbound',
+          priority: formData.priority || 'Medium',
+          notes: formData.notes,
+          investmentCapacity: formData.customFields?.investmentCapacity,
+          assetClass: formData.customFields?.assetClass,
+          preferredAssetClass: formData.customFields?.preferredAssetClass,
+          horizon: formData.customFields?.horizon,
+          additionalCustomFields: formData.customFields,
+        });
       }
-    } else {
-      leadToSave = {
-        ...formData,
-        status: formData.status || 'New',
-        assignedAgentId: resolvedAgentId,
-        assignedAgentName: resolvedAgentName,
-        companyId: targetCompanyId,
-      } as Lead;
+
+      setIsEditDrawerOpen(false);
+      await loadData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to save lead to database.');
+    } finally {
+      setIsSaving(false);
     }
-
-    storageService.saveLead(leadToSave);
-
-    storageService.addAuditLog({
-      id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
-      actorName: user?.name || resolvedAgentName,
-      actorEmail: user?.email || 'agent@nexus.io',
-      action: isUpdated ? 'LEAD_UPDATED' : 'LEAD_CREATED',
-      entityType: 'Lead',
-      entityId: leadToSave.id,
-      companyId: tenant?.id,
-      companyName: tenant?.name,
-      details: `Lead record ${leadToSave.name} (${leadToSave.phone}) saved.`,
-    });
-
-    setIsEditDrawerOpen(false);
   };
 
-  const handleDeleteLead = (lead: Lead) => {
-    if (confirm(`Delete lead ${lead.name}?`)) {
-      storageService.deleteLead(lead.id);
+  const handleDeleteLead = async (lead: Lead) => {
+    if (confirm(`Mark lead ${lead.name} as Junk?`)) {
+      try {
+        if (!isNaN(Number(lead.id))) {
+          await leadsApi.updateLead(Number(lead.id), { status: 'Junk' });
+          await loadData();
+        }
+      } catch (err: any) {
+        alert(err.message || 'Failed to update lead.');
+      }
     }
   };
 
@@ -267,51 +248,26 @@ export const LeadsPage: React.FC = () => {
     setIsConvertModalOpen(true);
   };
 
-  const handleConfirmConvert = () => {
-    if (!selectedLead || !tenant) return;
+  const handleConfirmConvert = async () => {
+    if (!selectedLead) return;
 
-    // 1. Create Customer
-    const newCustomer: Customer = {
-      id: `cust-${Date.now()}`,
-      companyId: tenant.id,
-      name: selectedLead.name,
-      phone: selectedLead.phone,
-      email: selectedLead.email,
-      status: 'Active',
-      assignedAgentId: selectedLead.assignedAgentId,
-      assignedAgentName: selectedLead.assignedAgentName,
-      location: selectedLead.location,
-      lastContacted: 'Today',
-      openDealsCount: 1,
-      totalValue: convertDealValue,
-      createdAt: new Date().toISOString().split('T')[0],
-      notes: `Converted from lead. Original notes: ${selectedLead.notes}`,
-      customFields: selectedLead.customFields,
-    };
-    storageService.saveCustomer(newCustomer);
-
-    // 2. Create Deal
-    const newDeal: Deal = {
-      id: `deal-${Date.now()}`,
-      companyId: tenant.id,
-      title: convertDealTitle,
-      customerId: newCustomer.id,
-      customerName: newCustomer.name,
-      stage: tenant.slug === 'jamin' ? 'site_visit' : 'consultation',
-      value: convertDealValue,
-      expectedCloseDate: 'Within 30 Days',
-      assignedAgentId: selectedLead.assignedAgentId,
-      assignedAgentName: selectedLead.assignedAgentName,
-      notes: `Deal initiated upon converting lead ${selectedLead.name}.`,
-      createdAt: new Date().toISOString().split('T')[0],
-    };
-    storageService.saveDeal(newDeal);
-
-    // 3. Mark Lead as Converted
-    storageService.saveLead({ ...selectedLead, status: 'Converted' });
-
-    setIsConvertModalOpen(false);
-    setIsDetailDrawerOpen(false);
+    setIsConverting(true);
+    try {
+      if (!isNaN(Number(selectedLead.id))) {
+        await leadsApi.convertLead(Number(selectedLead.id), {
+          dealTitle: convertDealTitle,
+          dealValue: convertDealValue,
+          notes: selectedLead.notes,
+        });
+      }
+      setIsConvertModalOpen(false);
+      setIsDetailDrawerOpen(false);
+      await loadData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to convert lead.');
+    } finally {
+      setIsConverting(false);
+    }
   };
 
   const handleFileSelect = (file: File) => {
@@ -347,83 +303,35 @@ export const LeadsPage: React.FC = () => {
     if (file) handleFileSelect(file);
   };
 
-  const handleImportLeads = () => {
+  const handleImportLeads = async () => {
+    setIsImporting(true);
     let successCount = 0;
     let skipCount = 0;
-    let updatedCount = 0;
-    const companyId = tenant?.id || 't-ghl-01';
 
-    parsedRows.forEach((row, index) => {
+    for (const row of parsedRows) {
       const nameVal = row[columnMap['name']];
       const phoneVal = row[columnMap['phone']];
-
       if (!nameVal || !phoneVal) {
         skipCount++;
-        return;
+        continue;
       }
-
-      const emailVal = row[columnMap['email']] || '';
-      const locationVal = row[columnMap['location']] || '';
-      const sourceVal = row[columnMap['source']] || 'CSV Import';
-      const rawPriority = row[columnMap['priority']];
-      let priorityVal = 'Medium';
-      if (['Low', 'Medium', 'High', 'Urgent'].includes(String(rawPriority))) {
-        priorityVal = rawPriority;
-      }
-
-      // Check for existing lead by phone in this company
-      const existingMatch = storageService.findLeadByPhone(phoneVal, companyId);
-      if (existingMatch) {
-        const updatedLead: Lead = {
-          ...existingMatch,
-          name: nameVal || existingMatch.name,
-          email: emailVal || existingMatch.email,
-          location: locationVal || existingMatch.location,
-          source: sourceVal || existingMatch.source,
-          priority: (priorityVal as any) || existingMatch.priority,
-        };
-        storageService.saveLead(updatedLead);
-        updatedCount++;
+      try {
+        await leadsApi.createLead({
+          name: nameVal.trim(),
+          phone: phoneVal.trim(),
+          email: row[columnMap['email']]?.trim(),
+          location: row[columnMap['location']]?.trim(),
+          source: row[columnMap['source']]?.trim() || 'CSV Import',
+          priority: row[columnMap['priority']] || 'Medium',
+        });
         successCount++;
-        return;
+      } catch {
+        skipCount++;
       }
-
-      const newLead: Lead = {
-        id: `lead-${Date.now()}-${index}`,
-        companyId,
-        name: nameVal,
-        phone: phoneVal,
-        email: emailVal,
-        location: locationVal,
-        source: sourceVal,
-        priority: priorityVal as any,
-        status: 'New',
-        assignedAgentId: user?.id || 'usr-exec',
-        assignedAgentName: user?.name || 'Agent',
-        createdAt: new Date().toISOString().split('T')[0],
-        notes: '',
-        customFields: {}
-      };
-
-      storageService.saveLead(newLead);
-      successCount++;
-    });
-
-    storageService.addAuditLog({
-      id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
-      actorName: user?.name || 'Agent',
-      actorEmail: user?.email || 'agent@nexus.io',
-      action: 'LEADS_BULK_IMPORTED',
-      entityType: 'Lead',
-      entityId: `batch-${Date.now()}`,
-      companyId: tenant?.id,
-      companyName: tenant?.name,
-      details: `Bulk imported ${successCount} leads (${updatedCount} updated, ${successCount - updatedCount} created), skipped ${skipCount}.`,
-    });
-
+    }
+    setIsImporting(false);
     setImportResults({ success: successCount, skipped: skipCount });
-    loadData();
+    await loadData();
   };
 
   const resetImportState = () => {
@@ -574,6 +482,19 @@ export const LeadsPage: React.FC = () => {
         </div>
       </div>
 
+      {loadError && (
+        <div className="card" style={{ padding: '12px 16px', marginBottom: '16px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', color: '#ef4444', borderRadius: '8px' }}>
+          <strong>Error loading leads:</strong> {loadError}
+          <button className="btn btn-sm btn-secondary" style={{ marginLeft: '12px' }} onClick={loadData}>Retry</button>
+        </div>
+      )}
+
+      {isLoading && (
+        <div style={{ textAlign: 'center', padding: '16px', color: 'var(--text-secondary)' }}>
+          Loading leads from PostgreSQL database...
+        </div>
+      )}
+
       {/* Leads Table */}
       <DataTable
         columns={columns}
@@ -678,23 +599,14 @@ export const LeadsPage: React.FC = () => {
 
             {/* Tenant-Specific Dynamic Custom Fields */}
             {(() => {
-              const activeDefs = storageService
-                .getCustomFieldDefinitions(tenant?.id)
-                .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
-                .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
-
-              const rows = activeDefs
-                .map(def => {
-                  const key = def.fieldKey || def.id;
-                  const val = selectedLead.customFields?.[key];
-                  if (val === undefined || val === null || val === '') return null;
-                  return {
-                    id: def.id,
-                    label: def.label || key.replace(/([A-Z])/g, ' $1'),
-                    value: String(val),
-                  };
-                })
-                .filter(Boolean);
+              if (!selectedLead.customFields) return null;
+              const rows = Object.entries(selectedLead.customFields)
+                .filter(([key, val]) => key !== 'dispositionReason' && val !== undefined && val !== null && val !== '')
+                .map(([key, val]) => ({
+                  id: key,
+                  label: key.replace(/([A-Z])/g, ' $1').toUpperCase(),
+                  value: String(val),
+                }));
 
               if (rows.length === 0) return null;
 
@@ -705,11 +617,11 @@ export const LeadsPage: React.FC = () => {
                   </h4>
                   <div className="lead-detail-grid">
                     {rows.map(item => (
-                      <div key={item!.id}>
+                      <div key={item.id}>
                         <span className="lead-custom-label">
-                          {item!.label}:
+                          {item.label}:
                         </span>
-                        <div className="lead-custom-value">{item!.value}</div>
+                        <div className="lead-custom-value">{item.value}</div>
                       </div>
                     ))}
                   </div>

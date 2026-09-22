@@ -3,7 +3,7 @@ import { Calendar, Plus, CheckCircle2, Phone } from 'lucide-react';
 import { SiteVisit } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import { siteVisitStore, auditLogStore } from '../../services/secondaryStores';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
@@ -25,7 +25,7 @@ export const SiteVisitsPage: React.FC = () => {
   const [notes, setNotes] = useState('');
 
   const loadData = () => {
-    setSiteVisits(storageService.getSiteVisits(tenant?.id));
+    setSiteVisits(siteVisitStore.getSiteVisits(tenant?.id));
   };
 
   useEffect(() => {
@@ -55,10 +55,10 @@ export const SiteVisitsPage: React.FC = () => {
       outcomeNotes: notes,
     };
 
-    storageService.saveSiteVisit(newVisit);
+    siteVisitStore.saveSiteVisit(newVisit);
 
     // Also notify
-    storageService.addAuditLog({
+    auditLogStore.addAuditLog({
       id: `aud-${Date.now()}`,
       timestamp: 'Just now',
       actorName: user?.name || 'Agent',
@@ -77,7 +77,7 @@ export const SiteVisitsPage: React.FC = () => {
   };
 
   const handleMarkComplete = (visit: SiteVisit) => {
-    storageService.saveSiteVisit({ ...visit, status: 'Completed' });
+    siteVisitStore.saveSiteVisit({ ...visit, status: 'Completed' });
   };
 
   const columns: Column<SiteVisit>[] = [

@@ -36,6 +36,9 @@ public static class ServiceExtensions
         // 5. Validators
         services.AddValidatorsFromAssemblyContaining<LoginRequestValidator>();
 
+        // 6. Developer 2 CRM Sales Pipeline Services
+        services.AddDev2Services();
+
         return services;
     }
 }

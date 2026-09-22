@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Grid } from 'lucide-react';
 import { Plot, PropertyProject } from '../../types';
 import { useAuth } from '../../context/AuthContext';
-import { storageService } from '../../services/storageService';
+import { plotStore, auditLogStore } from '../../services/secondaryStores';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import './PlotsPage.css';
@@ -20,8 +20,8 @@ export const PlotsPage: React.FC = () => {
   const [holdDays, setHoldDays] = useState('7');
 
   const loadData = () => {
-    setPlots(storageService.getPlots());
-    setProjects(storageService.getProjects());
+    setPlots(plotStore.getPlots());
+    setProjects(plotStore.getProjects());
   };
 
   useEffect(() => {
@@ -56,9 +56,9 @@ export const PlotsPage: React.FC = () => {
         holdExpiry: expiryDate.toISOString().split('T')[0],
       };
 
-      storageService.savePlot(updatedPlot);
+      plotStore.savePlot(updatedPlot);
 
-      storageService.addAuditLog({
+      auditLogStore.addAuditLog({
         id: `aud-${Date.now()}`,
         timestamp: 'Just now',
         actorName: user?.name || 'Agent',
@@ -85,7 +85,7 @@ export const PlotsPage: React.FC = () => {
         holdByAgent: undefined,
         holdExpiry: undefined,
       };
-      storageService.savePlot(updatedPlot);
+      plotStore.savePlot(updatedPlot);
     }
   };
 

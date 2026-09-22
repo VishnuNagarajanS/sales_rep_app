@@ -55,8 +55,9 @@ import { PlatformAuditPage } from './pages/Admin/Audit/PlatformAuditPage';
 
 import { ProtectedRoute } from './components/common/Guards';
 import { Modal } from './components/common/Modal';
-import { storageService } from './services/storageService';
+import { leadsApi, followupsApi, consultationsApi, customersApi } from './services/crmApi';
 import { PERMISSIONS } from './constants/permissions';
+import { Customer } from './types';
 import './App.css';
 
 export const App: React.FC = () => {
@@ -64,20 +65,7 @@ export const App: React.FC = () => {
   const [currentRoute, setCurrentRoute] = useState<string>(() => {
     return sessionStorage.getItem('nexus_current_route') || 'dashboard';
   });
-
-  // Seed initial mock data on clean install / empty session
-  useEffect(() => {
-    if (storageService.getUsers().length === 0) {
-      storageService.loadMockDataFromSeparateFolder();
-    }
-  }, []);
-
-  // Seed initial mock data on clean install / empty session
-  useEffect(() => {
-    if (storageService.getUsers().length === 0) {
-      storageService.loadMockDataFromSeparateFolder();
-    }
-  }, []);
+  const [availableCustomers, setAvailableCustomers] = useState<Customer[]>([]);
 
   // Set default route for IRM user
   useEffect(() => {
@@ -148,142 +136,67 @@ export const App: React.FC = () => {
     setConsAgenda('Commercial REIT yield analysis & pass-through taxation discussion.');
     setConsOutcome('');
     setScheduledDate(new Date(Date.now() + 86400000).toISOString().split('T')[0]);
-    setScheduledTime(storageService.getCallPreferences().defaultFollowupTime);
-    // Reset deal-specific state; pre-select first available customer
+    setScheduledTime('11:00');
     setDealCustomerMode('existing');
     setNewCustomerName('');
-    const existingCustomers = storageService.getCustomers(tenant?.id);
-    setSelectedCustomerId(existingCustomers[0]?.id || '');
+    customersApi.getCustomers().then(res => {
+      if (res?.items) {
+        setAvailableCustomers(res.items.map((c: any) => ({
+          ...c,
+          id: String(c.id),
+          companyId: String(tenant?.id || ''),
+        })));
+      }
+    }).catch(() => {});
   };
 
-  const handleSaveQuickCreate = (e: React.FormEvent) => {
+  const handleSaveQuickCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!quickName) return;
 
-    if (quickCreateType === 'lead') {
-      storageService.saveLead({
-        id: `lead-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
-        name: quickName,
-        phone: quickPhone,
-        email: quickEmail,
-        location: quickLocation,
-        source: quickSource,
-        status: 'New',
-        priority: 'Medium',
-        assignedAgentId: user?.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec'),
-        assignedAgentName: user?.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer'),
-        createdAt: new Date().toISOString().split('T')[0],
-        notes: quickNotes,
-        customFields: {
+    try {
+      if (quickCreateType === 'lead') {
+        await leadsApi.createLead({
+          name: quickName,
+          phone: quickPhone,
+          email: quickEmail || undefined,
+          location: quickLocation || undefined,
+          source: quickSource,
+          notes: quickNotes,
+          investmentCapacity: quickInvestmentCapacity,
           assetClass: quickAssetClass,
           preferredAssetClass: quickAssetClass,
-          investmentCapacity: quickInvestmentCapacity,
-        },
-      });
-
-    } else if (quickCreateType === 'followup') {
-      const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
-      storageService.saveFollowup({
-        id: `flw-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
-        contactId: `contact-${Date.now()}`,
-        contactName: quickName,
-        contactPhone: quickPhone,
-        contactType: 'lead',
-        scheduledAt: combinedDateTime,
-        scheduledDate,
-        scheduledTime,
-        priority: 'High',
-        status: 'Pending',
-        notes: quickNotes,
-        assignedAgentId: user?.id || 'usr-exec',
-        assignedAgentName: user?.name || 'Agent',
-      });
-
-    } else if (quickCreateType === 'consultation') {
-      // Task 1 — Schedule Consultation
-      storageService.saveConsultation({
-        id: `cons-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
-        investorId: consInvestorId || `investor-${Date.now()}`,
-        investorName: consInvestorName,
-        investorPhone: consInvestorPhone,
-        scheduledAt: consSlot.trim(),
-        consultantId: user?.id || 'usr-exec',
-        consultantName: consConsultantName.trim() || user?.name || 'Agent',
-        status: consStatus,
-        agenda: consAgenda.trim(),
-        outcomeNotes: consOutcome.trim() || undefined,
-      });
-
-    } else if (quickCreateType === 'visit') {
-      // Task 2 — Schedule Site Visit
-      const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
-      storageService.saveSiteVisit({
-        id: `visit-${Date.now()}`,
-        companyId: tenant?.id || 't-jamin-02',
-        customerId: `cust-${Date.now()}`,
-        customerName: quickName,
-        customerPhone: quickPhone,
-        projectId: 'proj-01',
-        projectName: 'Greenfield Meadows Phase 2',
-        scheduledAt: combinedDateTime,
-        assignedAgentId: user?.id || 'usr-exec',
-        assignedAgentName: user?.name || 'Agent',
-        status: 'Scheduled',
-        outcomeNotes: quickNotes,
-      });
-
-    } else if (quickCreateType === 'deal') {
-      // Task 4 — Deal linked to real customer
-      let resolvedCustomerId: string;
-      let resolvedCustomerName: string;
-
-      if (dealCustomerMode === 'existing' && selectedCustomerId) {
-        // Link to the chosen existing customer
-        const existing = storageService.getCustomers(tenant?.id)
-          .find(c => c.id === selectedCustomerId);
-        resolvedCustomerId = existing?.id || selectedCustomerId;
-        resolvedCustomerName = existing?.name || 'Customer';
-      } else {
-        // Create a real Customer record first so it shows in Customer 360
-        if (!newCustomerName) return;
-        resolvedCustomerId = `cust-${Date.now()}`;
-        resolvedCustomerName = newCustomerName;
-        storageService.saveCustomer({
-          id: resolvedCustomerId,
-          companyId: tenant?.id || 't-ghl-01',
-          name: resolvedCustomerName,
+        });
+      } else if (quickCreateType === 'followup') {
+        const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
+        await followupsApi.createFollowup({
+          contactName: quickName,
+          contactPhone: quickPhone,
+          contactType: 'lead',
+          scheduledAt: combinedDateTime,
+          priority: 'High',
+          notes: quickNotes,
+        });
+      } else if (quickCreateType === 'consultation') {
+        await consultationsApi.scheduleConsultation({
+          investorId: consInvestorId || '1',
+          investorName: consInvestorName || quickName,
+          investorPhone: consInvestorPhone || quickPhone,
+          scheduledAt: new Date(Date.now() + 86400000 * 2).toISOString(),
+          agenda: consAgenda.trim(),
+        });
+      } else if (quickCreateType === 'deal') {
+        await customersApi.createCustomer({
+          name: quickName,
           phone: quickPhone,
-          email: '',
+          email: quickEmail || undefined,
+          location: quickLocation || undefined,
           status: 'Active',
-          assignedAgentId: user?.id || 'usr-exec',
-          assignedAgentName: user?.name || 'Agent',
-          location: 'Bengaluru',
-          lastContacted: new Date().toISOString().split('T')[0],
-          openDealsCount: 1,
-          totalValue: 5000000,
-          createdAt: new Date().toISOString().split('T')[0],
-          notes: '',
-          customFields: {},
+          notes: quickNotes,
         });
       }
-
-      storageService.saveDeal({
-        id: `deal-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
-        title: quickName,
-        customerId: resolvedCustomerId,
-        customerName: resolvedCustomerName,
-        stage: 'new',
-        value: 5000000,
-        expectedCloseDate: '30 Days',
-        assignedAgentId: user?.id || 'usr-exec',
-        assignedAgentName: user?.name || 'Agent',
-        notes: quickNotes,
-        createdAt: new Date().toISOString().split('T')[0],
-      });
+    } catch (err) {
+      console.error('Failed to create item via API:', err);
     }
 
     setQuickCreateType(null);
@@ -559,7 +472,7 @@ export const App: React.FC = () => {
             <>
               {/* ── CONSULTATION: Full form matching Schedule Consultation ── */}
               {(() => {
-                const investors = storageService.getInvestors(tenant?.id);
+                const investors = availableCustomers;
                 return (
                   <>
                     <div className="form-group">
@@ -677,7 +590,7 @@ export const App: React.FC = () => {
             <>
             {/* ── Deal: existing vs. new customer picker ── */}
             {quickCreateType === 'deal' && (() => {
-            const tenantCustomers = storageService.getCustomers(tenant?.id);
+            const tenantCustomers = availableCustomers;
             const hasCustomers = tenantCustomers.length > 0;
             return (
               <div className="form-group">

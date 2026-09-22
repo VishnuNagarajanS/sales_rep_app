@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Building2, Plus, ArrowRight, Eye } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
-import { storageService } from '../../../services/storageService';
+import { tenantStore, userStore, auditLogStore } from '../../../services/secondaryStores';
 import { Tenant, User } from '../../../types';
 import { StatusChip } from '../../../components/common/StatusChip';
 import { Modal } from '../../../components/common/Modal';
@@ -10,10 +10,10 @@ import './CompaniesPage.css';
 
 export const CompaniesPage: React.FC = () => {
   const { switchPersona } = useAuth();
-  const [companies, setCompanies] = useState<Tenant[]>(() => storageService.getTenants());
+  const [companies, setCompanies] = useState<Tenant[]>(() => tenantStore.getTenants());
 
   useEffect(() => {
-    const handleUpdate = () => setCompanies(storageService.getTenants());
+    const handleUpdate = () => setCompanies(tenantStore.getTenants());
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, []);
@@ -68,7 +68,7 @@ export const CompaniesPage: React.FC = () => {
       createdAt: new Date().toISOString(),
     };
 
-    storageService.saveTenant(newTenant);
+    tenantStore.saveTenant(newTenant);
 
     // Also provision the primary company admin account
     const newAdminUser: User = {
@@ -88,9 +88,9 @@ export const CompaniesPage: React.FC = () => {
       status: 'Active',
       createdAt: new Date().toISOString(),
     };
-    storageService.saveUser(newAdminUser);
+    userStore.saveUser(newAdminUser);
 
-    storageService.addAuditLog({
+    auditLogStore.addAuditLog({
       id: `aud-${Date.now()}`,
       timestamp: 'Just now',
       actorName: 'Super Admin',

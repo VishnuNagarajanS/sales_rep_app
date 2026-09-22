@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
-import { storageService, PopupPosition } from '../../services/storageService';
+
+export type PopupPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 
 import {
   Phone,
@@ -36,6 +37,7 @@ import { Drawer } from '../common/Drawer';
 import { DocumentUploader } from '../common/DocumentUploader';
 import { DocumentList } from '../common/DocumentList';
 import { EmptyState } from '../common/EmptyState';
+import { callsApi, consultationsApi } from '../../services/crmApi';
 import './CallCenterComponents.css';
 
 // --- Agent Availability Toggle ---
@@ -119,11 +121,11 @@ export const AgentAvailabilityToggle: React.FC = () => {
 // --- Global Incoming Call Popup ---
 export const IncomingCallPopup: React.FC = () => {
   const { activeCall, acceptCall, rejectCall } = useCall();
-  const [popupPosition, setPopupPosition] = useState<PopupPosition>(() => storageService.getPopupPosition());
+  const [popupPosition, setPopupPosition] = useState<PopupPosition>(() => (localStorage.getItem('nexus_popup_position') as PopupPosition) || 'bottom-right');
 
   useEffect(() => {
     const handleUpdate = () => {
-      setPopupPosition(storageService.getPopupPosition());
+      setPopupPosition((localStorage.getItem('nexus_popup_position') as PopupPosition) || 'bottom-right');
     };
     window.addEventListener('nexus_storage_updated', handleUpdate);
     window.addEventListener('storage', handleUpdate);
@@ -239,50 +241,25 @@ export const InCallBar: React.FC = () => {
   const handleConnectIrm = (irm: { name: string; status: string } | null, reason: string) => {
     if (!activeCall || !irm || !tenant || !user) return;
 
-    const callId = `call-${Date.now()}`;
-
-    storageService.addCall({
-      id: callId,
-      companyId: tenant.id,
+    callsApi.logCall({
       contactName: activeCall.contactName,
       contactPhone: activeCall.contactPhone,
       direction: activeCall.direction,
       duration: activeCall.duration,
-      agentId: user.id,
-      agentName: user.name,
       disposition: 'Converted',
-      timestamp: new Date().toISOString(),
       notes: `Connected to IRM: ${irm.name}. Reason: ${reason}`,
-      leadId: activeCall.matchedRecord?.id,
-      investorId: activeCall.matchedRecord?.id,
-    });
+      leadId: activeCall.matchedRecord?.type === 'lead' ? activeCall.matchedRecord.id : undefined,
+      customerId: activeCall.matchedRecord?.type === 'customer' ? activeCall.matchedRecord.id : undefined,
+    }).catch(err => console.error('Failed to log call:', err));
 
-    const existingConsultation = storageService
-      .getConsultations(user?.companyId)
-      .find(c =>
-        c.status === 'Scheduled' &&
-        (
-          (activeCall.matchedRecord?.id && c.investorId === activeCall.matchedRecord.id) ||
-          (
-            (c.investorPhone || '').replace(/\D/g, '').slice(-10) ===
-            (activeCall.contactPhone || '').replace(/\D/g, '').slice(-10) &&
-            (activeCall.contactPhone || '').replace(/\D/g, '').slice(-10).length > 0
-          )
-        )
-      );
-
-    storageService.saveConsultation({
-      id: existingConsultation?.id || `cns-${Date.now()}`,
-      companyId: user?.companyId || tenant.id,
-      investorId: activeCall.matchedRecord?.id || '',
+    consultationsApi.scheduleConsultation({
+      investorId: (activeCall.matchedRecord?.type === 'customer' ? activeCall.matchedRecord.id : undefined) || '1',
       investorName: activeCall.contactName,
       investorPhone: activeCall.contactPhone,
       scheduledAt: new Date().toISOString(),
-      consultantId: irm.name,
-      consultantName: irm.name,
-      status: 'Scheduled',
       agenda: reason,
-    });
+      notes: `Connected to IRM: ${irm.name}`,
+    }).catch(err => console.error('Failed to schedule consultation:', err));
 
     endCall(true);
 
@@ -323,7 +300,7 @@ export const InCallBar: React.FC = () => {
 
   // Compute initial pixel position from the configured popup corner
   const getCornerStyles = (): React.CSSProperties => {
-    const pos = storageService.getPopupPosition();
+    const pos = (localStorage.getItem('nexus_popup_position') as PopupPosition) || 'top-right';
     switch (pos) {
       case 'top-left': return { top: 24, left: 24, bottom: 'auto', right: 'auto' };
       case 'bottom-left': return { bottom: 24, left: 24, top: 'auto', right: 'auto' };
@@ -1017,7 +994,7 @@ export const DispositionModal: React.FC = () => {
     setReason('');
     setScheduleFollowup(false);
     setFollowupDate(freshTomorrow);
-    setFollowupTime(storageService.getCallPreferences().defaultFollowupTime);
+    setFollowupTime('11:00');
     setFollowupPriority('High');
   }, [lastCallRecord?.id]);
 

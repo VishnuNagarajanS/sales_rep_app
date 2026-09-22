@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { MapPin, Grid } from 'lucide-react';
 import { PropertyProject } from '../../types';
 import { useAuth } from '../../context/AuthContext';
-import { storageService } from '../../services/storageService';
+import { plotStore } from '../../services/secondaryStores';
 import { StatusChip } from '../../components/common/StatusChip';
 import './ProjectsPage.css';
 
@@ -15,8 +15,8 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
   const [projects, setProjects] = useState<PropertyProject[]>([]);
 
   useEffect(() => {
-    setProjects(storageService.getProjects());
-    const handleUpdate = () => setProjects(storageService.getProjects());
+    setProjects(plotStore.getProjects());
+    const handleUpdate = () => setProjects(plotStore.getProjects());
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, []);

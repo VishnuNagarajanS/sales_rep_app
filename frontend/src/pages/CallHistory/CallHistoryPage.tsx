@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { History, Phone, FileText, Download, AlertCircle, Users } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { History, Phone, FileText, Download, AlertCircle, Users, RefreshCw } from 'lucide-react';
 import Papa from 'papaparse';
-import { CallRecord } from '../../types';
+import { CallRecord, Consultation } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import { callsApi, consultationsApi } from '../../services/crmApi';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
@@ -17,74 +17,121 @@ export const CallHistoryPage: React.FC = () => {
   const { initiateCall } = useCall();
 
   const [calls, setCalls] = useState<CallRecord[]>([]);
+  const [consultations, setConsultations] = useState<Consultation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   const [selectedCall, setSelectedCall] = useState<CallRecord | null>(null);
   const [transcriptCall, setTranscriptCall] = useState<CallRecord | null>(null);
   const [dispositionFilter, setDispositionFilter] = useState('All');
   const [directionFilter, setDirectionFilter] = useState('All');
 
-  const loadData = () => {
-    setCalls(storageService.getCalls(tenant?.id));
-  };
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [callsRes, cnsRes] = await Promise.all([
+        callsApi.getCalls({ pageSize: 100 }),
+        consultationsApi.getConsultations({ pageSize: 100 }).catch(() => ({ items: [] as any[] })),
+      ]);
+
+      if (callsRes) {
+        const rawCalls = callsRes.items || [];
+        const mappedCalls: CallRecord[] = rawCalls.map((c: any) => ({
+          id: String(c.id),
+          companyId: String(tenant?.id || ''),
+          tenantId: String(tenant?.id || ''),
+          contactName: c.contactName || 'Unknown Contact',
+          contactPhone: c.contactPhone || '',
+          leadId: c.leadId ? String(c.leadId) : undefined,
+          customerId: c.customerId ? String(c.customerId) : undefined,
+          agentId: String(c.agentId || ''),
+          agentName: c.agentName || 'Agent',
+          direction: (c.direction || 'outbound').toLowerCase() as any,
+          duration: Number(c.duration || 0),
+          disposition: c.disposition || 'Interested',
+          timestamp: c.timestamp ? new Date(c.timestamp).toISOString() : new Date().toISOString(),
+          notes: c.notes || '',
+        }));
+        setCalls(mappedCalls);
+      }
+
+      if (cnsRes) {
+        const rawCns = cnsRes.items || [];
+        setConsultations(
+          rawCns.map((c: any) => ({
+            id: String(c.id),
+            companyId: String(tenant?.id || ''),
+            investorId: String(c.investorId || ''),
+            investorName: c.investorName || '',
+            investorPhone: c.investorPhone || '',
+            consultantId: String(c.consultantId || ''),
+            consultantName: c.consultantName || '',
+            scheduledAt: c.scheduledAt ? new Date(c.scheduledAt).toISOString() : '',
+            status: c.status || 'Scheduled',
+            agenda: c.agenda || '',
+            outcomeNotes: c.outcomeNotes || '',
+          }))
+        );
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to load call history from backend API');
+    } finally {
+      setLoading(false);
+    }
+  }, [tenant?.id]);
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
-    window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
-  }, [tenant?.id]);
+  }, [loadData]);
 
-  // ── Task 2: Role-scoping (same pattern as DashboardPage.tsx scopedCalls) ──
   const isExec = user?.role?.code === 'sales_executive';
   const scopedCalls = isExec
-    ? calls.filter(c =>
-      (c.agentId && c.agentId === user?.id) ||
-      (c.agentName && c.agentName === user?.name)
-    )
+    ? calls.filter(
+        c =>
+          (c.agentId && c.agentId === user?.id) ||
+          (c.agentName && c.agentName === user?.name)
+      )
     : calls;
 
-  // ── Filters applied on top of role-scoped calls ───────────────────────────
   const filteredCalls = scopedCalls.filter(c => {
     if (dispositionFilter !== 'All' && c.disposition !== dispositionFilter) return false;
     if (directionFilter !== 'All' && c.direction !== directionFilter) return false;
     return true;
   });
 
-  // ── Formatters ────────────────────────────────────────────────────────────
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}m ${secs}s`;
   };
 
-  // Parses an ISO timestamp and returns a readable local string.
-  // Falls back to the raw value for legacy non-ISO strings (e.g. old "Just now" entries).
   const formatTimestamp = (iso: string): string => {
     if (!iso) return '—';
     const d = new Date(iso);
-    if (isNaN(d.getTime())) return iso; // graceful fallback
-    const date = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }); // "16 Sep"
-    const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }); // "10:23 AM"
+    if (isNaN(d.getTime())) return iso;
+    const date = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
     return `${date}, ${time}`;
   };
 
-  // ── Task 3: CSV export ────────────────────────────────────────────────────
   const handleExportCSV = () => {
     const rows = filteredCalls.map(c => ({
       'Date & Time': formatTimestamp(c.timestamp),
       'Contact Name': c.contactName,
-      'Phone': c.contactPhone,
-      'Direction': c.direction,
+      Phone: c.contactPhone,
+      Direction: c.direction,
       'Duration (seconds)': c.duration,
-      'Agent': c.agentName,
-      'Disposition': c.disposition,
-      'Notes': c.notes || '',
+      Agent: c.agentName,
+      Disposition: c.disposition,
+      Notes: c.notes || '',
     }));
     const csv = Papa.unparse(rows);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `call-history-${tenant?.slug}-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `call-history-${tenant?.slug || 'crm'}-${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -92,7 +139,6 @@ export const CallHistoryPage: React.FC = () => {
   const isIrmConnectedCall = (c: CallRecord | null): boolean =>
     !!(c && (c.notes || '').trim().startsWith('Connected to IRM:'));
 
-  // ── Table columns ─────────────────────────────────────────────────────────
   const columns: Column<CallRecord>[] = [
     {
       key: 'timestamp',
@@ -146,14 +192,12 @@ export const CallHistoryPage: React.FC = () => {
     },
   ];
 
-  // ── Row actions ───────────────────────────────────────────────────────────
   const rowActions: RowAction<CallRecord>[] = [
     {
       label: 'View Transcript',
       icon: <FileText size={14} style={{ marginRight: 6 }} />,
       onClick: c => setTranscriptCall(c),
     },
-    // Task 4: Call Back quick action
     {
       label: 'Call Back',
       icon: <Phone size={14} style={{ marginRight: 6 }} />,
@@ -161,10 +205,9 @@ export const CallHistoryPage: React.FC = () => {
     },
   ];
 
-  // ── Related consultation for contact profile drawer ───────────────────────
+  // Related consultation for contact profile drawer
   const matchingConsultations = selectedCall
-    ? storageService
-        .getConsultations(tenant?.id)
+    ? consultations
         .filter(c => {
           const sPhone = (selectedCall.contactPhone || '').replace(/\D/g, '').slice(-10);
           const cPhone = (c.investorPhone || '').replace(/\D/g, '').slice(-10);
@@ -198,16 +241,32 @@ export const CallHistoryPage: React.FC = () => {
           </h1>
           <p className="page-subtitle">
             {isExec
-              ? `Auditable archive of your calls and automated transcripts for ${tenant?.name}.`
-              : `Auditable archive of all agent calls and automated transcripts for ${tenant?.name}.`}
+              ? `Auditable archive of your calls in Neon PostgreSQL for ${tenant?.name || 'organization'}.`
+              : `Auditable archive of all agent calls in Neon PostgreSQL for ${tenant?.name || 'organization'}.`}
           </p>
         </div>
 
-        {/* Task 3: Export CSV button — same style as ReportsPage */}
-        <button className="btn btn-secondary" onClick={handleExportCSV}>
-          <Download size={15} /> Export CSV
-        </button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            className="btn btn-secondary"
+            onClick={loadData}
+            disabled={loading}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh DB Data
+          </button>
+          <button className="btn btn-secondary" onClick={handleExportCSV}>
+            <Download size={15} /> Export CSV
+          </button>
+        </div>
       </div>
+
+      {error && (
+        <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#dc2626', padding: '10px 14px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <AlertCircle size={16} />
+          <span>{error}</span>
+        </div>
+      )}
 
       <DataTable
         columns={columns}
@@ -253,19 +312,19 @@ export const CallHistoryPage: React.FC = () => {
         }
       />
 
-      {/* Contact Profile Drawer (opened on row click) */}
+      {/* Contact Profile Drawer */}
       <Drawer
         isOpen={!!selectedCall}
         onClose={() => setSelectedCall(null)}
         title={selectedCall?.contactName || 'Contact Profile'}
-        subtitle={`Phone: ${selectedCall?.contactPhone || '—'} • ${tenant?.name}`}
+        subtitle={`Phone: ${selectedCall?.contactPhone || '—'} • ${tenant?.name || 'CRM'}`}
         width={600}
       >
         {selectedCall && (
           <LeadDetailDrawerContent
             contactName={selectedCall.contactName}
             contactPhone={selectedCall.contactPhone}
-            contactId={selectedCall.leadId || selectedCall.investorId || selectedCall.customerId}
+            contactId={selectedCall.leadId || selectedCall.customerId}
             tenantId={tenant?.id}
             tenantName={tenant?.name}
             consultationReason={irmConsultationReason}
@@ -275,7 +334,7 @@ export const CallHistoryPage: React.FC = () => {
         )}
       </Drawer>
 
-      {/* Single Call Detail & Transcript Drawer (accessible via row action) */}
+      {/* Single Call Detail Drawer */}
       <Drawer
         isOpen={!!transcriptCall}
         onClose={() => setTranscriptCall(null)}
@@ -308,7 +367,6 @@ export const CallHistoryPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Task 4: Quick Call Back from drawer */}
               <button
                 className="btn btn-primary btn-sm"
                 style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)' }}
@@ -316,27 +374,6 @@ export const CallHistoryPage: React.FC = () => {
               >
                 <Phone size={13} /> Call Back
               </button>
-            </div>
-
-            {/* Task 1: Honest recording state — no fake player */}
-            <div className="card" style={{ padding: 18, border: '1px solid var(--border-base)' }}>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Call Voice Recording</div>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  padding: '12px 14px',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'var(--bg-surface-hover)',
-                  border: '1px dashed var(--border-strong)',
-                }}
-              >
-                <AlertCircle size={18} color="var(--text-muted)" style={{ flexShrink: 0 }} />
-                <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
-                  Recording playback isn't available — this call was simulated, no audio was recorded.
-                </p>
-              </div>
             </div>
 
             {/* Transcription Box */}

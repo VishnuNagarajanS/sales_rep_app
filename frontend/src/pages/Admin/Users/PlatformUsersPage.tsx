@@ -1,16 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Shield } from 'lucide-react';
-import { storageService } from '../../../services/storageService';
+import { userStore } from '../../../services/secondaryStores';
 import { DataTable, Column } from '../../../components/common/DataTable';
 import { StatusChip } from '../../../components/common/StatusChip';
 import { User } from '../../../types';
 import './PlatformUsersPage.css';
 
 export const PlatformUsersPage: React.FC = () => {
-  const [usersList, setUsersList] = useState<User[]>(() => storageService.getUsers());
+  const [usersList, setUsersList] = useState<User[]>(() => userStore.getUsers());
 
   useEffect(() => {
-    const handleUpdate = () => setUsersList(storageService.getUsers());
+    const handleUpdate = () => setUsersList(userStore.getUsers());
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, []);

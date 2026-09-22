@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { CallDisposition, CallRecord, Lead, Customer, Deal } from '../types';
-import { storageService } from '../services/storageService';
+import { CallDisposition, CallRecord } from '../types';
+import { callsApi, followupsApi, customersApi, leadsApi } from '../services/crmApi';
 import { useAuth } from './AuthContext';
 
 export type AgentAvailability = 'Available' | 'Busy' | 'Offline';
@@ -24,13 +24,9 @@ interface ActiveCall {
   isOnHold: boolean;
   quickNotes: string;
   matchedRecord?: MatchedRecord;
-  // view-mode fields
   isExpanded: boolean;
   isVideoMode: boolean;
-  // Google Meet integration
   meetingLink: string | null;
-  // Follow-up task linkage — set when the call is initiated from a scheduled follow-up task.
-  // The disposition modal uses this to restrict available Call Outcome options.
   sourceFollowupId?: string;
 }
 
@@ -91,7 +87,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       contactName: name,
       contactPhone: phone,
       direction: 'outbound',
-      status: 'connected', // instantly connected for dialer simulation
+      status: 'connected',
       duration: 0,
       isMuted: false,
       isOnHold: false,
@@ -99,8 +95,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       matchedRecord: {
         type: recordType,
         id: recordId,
-        name: name,
-        meta: recordType === 'lead' ? 'Active Inbound Lead' : 'Customer Account',
+        name,
+        meta: `${recordType === 'lead' ? 'Lead' : 'Customer'} • ${phone}`,
       },
       isExpanded: true,
       isVideoMode: false,
@@ -108,63 +104,40 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sourceFollowupId,
     };
     setActiveCall(newCall);
-    const prefs = storageService.getCallPreferences();
-    if (prefs.autoBusyEnabled && availability === 'Available') {
-      setAvailability('Busy');
-    }
+    setAvailability('Busy');
   };
 
-  const simulateIncomingCall = (name = 'Kishore Varma', phone = '+91 98860 77112') => {
-    if (availability === 'Offline' || availability === 'Busy') {
-      return;
-    }
-
-    // Check if phone matches any existing lead or customer
-    const leads = storageService.getLeads(tenant?.id);
-    const matchedLead = leads.find(l => l.phone.includes(phone.slice(-5)) || l.name.toLowerCase().includes(name.toLowerCase()));
-
+  const simulateIncomingCall = (name = 'Vikram Malhotra', phone = '+91 98765 43210') => {
     const newCall: ActiveCall = {
       id: `call-${Date.now()}`,
-      contactName: matchedLead ? matchedLead.name : name,
-      contactPhone: matchedLead ? matchedLead.phone : phone,
+      contactName: name,
+      contactPhone: phone,
       direction: 'inbound',
       status: 'ringing',
       duration: 0,
       isMuted: false,
       isOnHold: false,
       quickNotes: '',
-      matchedRecord: matchedLead
-        ? { type: 'lead', id: matchedLead.id, name: matchedLead.name, meta: `Lead • Priority: ${matchedLead.priority}` }
-        : { type: 'unknown', name: 'Unknown Caller', meta: 'Unregistered Number' },
+      matchedRecord: { type: 'unknown', name, meta: 'Incoming Call' },
       isExpanded: true,
       isVideoMode: false,
       meetingLink: null,
     };
     setActiveCall(newCall);
-    const prefs = storageService.getCallPreferences();
-    // Play ringtone via Web Audio API if sound is enabled
-    if (prefs.soundEnabled) {
-      try {
-        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioCtx) {
-          const ctx = new AudioCtx();
-          const osc = ctx.createOscillator();
-          osc.frequency.value = 880;
-          osc.type = 'sine';
-          osc.connect(ctx.destination);
-          osc.start();
-          osc.stop(ctx.currentTime + 0.3);
-        }
-      } catch { /* audio not available */ }
-    }
-    // Desktop notification if enabled and permission granted
-    if (prefs.desktopNotifEnabled && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      try {
-        new Notification('Incoming Call', { body: `${newCall.contactName} — ${newCall.contactPhone}` });
-      } catch { /* notifications not available */ }
-    }
-    if (prefs.autoBusyEnabled) {
-      setAvailability('Busy');
+
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        osc.frequency.value = 880;
+        osc.type = 'sine';
+        osc.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.3);
+      }
+    } catch {
+      // ignore
     }
   };
 
@@ -177,7 +150,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const rejectCall = () => {
     if (activeCall) {
       setActiveCall(null);
-      setAvailability(prev => prev === 'Busy' ? 'Available' : prev);
+      setAvailability(prev => (prev === 'Busy' ? 'Available' : prev));
     }
   };
 
@@ -187,7 +160,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLastCallRecord(finishedCall);
       setActiveCall(null);
       if (skipDisposition === true) {
-        setAvailability(prev => prev === 'Busy' ? 'Available' : prev);
+        setAvailability(prev => (prev === 'Busy' ? 'Available' : prev));
       } else {
         setShowDispositionModal(true);
       }
@@ -236,322 +209,80 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     scheduleFollowup?: { scheduledAt: string; priority: 'Low' | 'Medium' | 'High'; notes: string },
     reason?: string
   ) => {
-    if (lastCallRecord && tenant && user) {
-      const callRecord: CallRecord = {
-        id: lastCallRecord.id,
-        companyId: tenant.id,
+    if (lastCallRecord && user) {
+      const leadIdStr = lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : undefined;
+      const leadIdNum = leadIdStr && !isNaN(Number(leadIdStr)) ? Number(leadIdStr) : undefined;
+      const customerIdStr = lastCallRecord.matchedRecord?.type === 'customer' ? lastCallRecord.matchedRecord.id : undefined;
+      const customerIdNum = customerIdStr && !isNaN(Number(customerIdStr)) ? Number(customerIdStr) : undefined;
+
+      // 1. Log call to Neon database CallRecords table
+      callsApi.logCall({
         contactName: lastCallRecord.contactName,
         contactPhone: lastCallRecord.contactPhone,
         direction: lastCallRecord.direction,
         duration: lastCallRecord.duration,
-        agentId: user.id,
-        agentName: user.name,
         disposition,
-        timestamp: new Date().toISOString(),
-        recordingUrl: 'https://cdn.nexusplatform.io/recordings/sample.mp3',
-        transcription: `Automated Call Transcript: Agent ${user.name} connected with ${lastCallRecord.contactName}. Call disposition marked as ${disposition}.`,
-        notes: notes || lastCallRecord.quickNotes || undefined,
-        reason: reason || undefined,
-      };
+        notes: notes || lastCallRecord.quickNotes || (reason ? `Reason: ${reason}` : ''),
+        leadId: leadIdNum,
+        customerId: customerIdNum,
+      }).catch(() => {});
 
-      storageService.addCall(callRecord);
-
-      storageService.addAuditLog({
-        id: `aud-${Date.now()}`,
-        timestamp: 'Just now',
-        actorName: user.name,
-        actorEmail: user.email,
-        action: 'CALL_DISPOSITION_SAVED',
-        entityType: 'CallRecord',
-        entityId: callRecord.id,
-        companyId: tenant.id,
-        companyName: tenant.name,
-        details: `Saved disposition "${disposition}" for call with ${lastCallRecord.contactName} (${lastCallRecord.duration}s).`,
-      });
-
-      // Locate matched lead if any
-      const leadId = lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : null;
-      const allLeads = storageService.getLeads(tenant.id);
-      const matchedLead = leadId
-        ? allLeads.find(l => l.id === leadId)
-        : allLeads.find(l => l.phone === lastCallRecord.contactPhone || (l.name && l.name.toLowerCase() === lastCallRecord.contactName.toLowerCase()));
-
-      // 1. Interested -> Move to Customer 360, remove from active Leads
-      if (disposition === 'Interested') {
-        const existingCustomers = storageService.getCustomers(tenant.id);
-        let cust = existingCustomers.find(c =>
-          (matchedLead && c.phone === matchedLead.phone) ||
-          c.phone === lastCallRecord.contactPhone ||
-          (matchedLead?.email && c.email === matchedLead.email)
-        );
-
-        if (!cust) {
-          cust = {
-            id: matchedLead ? `cust-${matchedLead.id.replace('lead-', '')}` : `cust-${Date.now()}`,
-            companyId: tenant.id,
-            name: matchedLead?.name || lastCallRecord.contactName || 'Customer',
-            phone: matchedLead?.phone || lastCallRecord.contactPhone,
-            email: matchedLead?.email || '',
-            status: 'Active',
-            assignedAgentId: matchedLead?.assignedAgentId || user.id,
-            assignedAgentName: matchedLead?.assignedAgentName || user.name,
-            location: matchedLead?.location || '',
-            lastContacted: 'Just now',
-            openDealsCount: 0,
-            totalValue: 0,
-            createdAt: matchedLead?.createdAt || new Date().toISOString().split('T')[0],
-            notes: notes
-              ? `${matchedLead?.notes ? matchedLead.notes + '\n\n' : ''}[Call Disposition - Interested]: ${notes}`
-              : (matchedLead?.notes || 'Interested - Transferred to Customer 360'),
-            customFields: {
-              ...(matchedLead?.customFields || {}),
-              movedFromLeadAt: new Date().toISOString(),
-              disposition: 'Interested',
-            },
-          };
-        } else {
-          cust.lastContacted = 'Just now';
-          if (notes) {
-            cust.notes = cust.notes ? `${cust.notes}\n\n[Call Disposition - Interested]: ${notes}` : `[Call Disposition - Interested]: ${notes}`;
-          }
-          if (matchedLead?.customFields) {
-            cust.customFields = { ...cust.customFields, ...matchedLead.customFields };
-          }
-        }
-        storageService.saveCustomer(cust);
-
-        if (matchedLead) {
-          matchedLead.status = 'Converted';
-          matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Interested - Moved to Customer 360${notes ? `: ${notes}` : ''}`;
-          storageService.saveLead(matchedLead);
-        }
-      }
-
-      // 2. Follow-up Required -> Move to Follow-up section, remove from active Leads
-      else if (disposition === 'Follow-up Required') {
-        const followupScheduledAt = scheduleFollowup?.scheduledAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-        const followupPriority = scheduleFollowup?.priority || 'High';
-        const followupNotes = scheduleFollowup?.notes || (notes ? `Follow-up required: ${notes}` : `Follow-up required from call with ${lastCallRecord.contactName}`);
-
-        storageService.saveFollowup({
-          id: `flw-${Date.now()}`,
-          companyId: tenant.id,
-          contactId: matchedLead?.id || lastCallRecord.matchedRecord?.id || `contact-${Date.now()}`,
+      // 2. If follow-up requested, create in database
+      if (scheduleFollowup || disposition === 'Follow-up Required' || disposition === 'Call Back') {
+        const followupTime = scheduleFollowup?.scheduledAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        followupsApi.createFollowup({
+          contactId: leadIdStr || customerIdStr || 'contact',
           contactName: lastCallRecord.contactName,
           contactPhone: lastCallRecord.contactPhone,
-          contactType: 'lead',
-          scheduledAt: followupScheduledAt,
-          priority: followupPriority,
-          status: 'Pending',
-          notes: followupNotes,
-          assignedAgentId: matchedLead?.assignedAgentId || user.id,
-          assignedAgentName: matchedLead?.assignedAgentName || user.name,
-        });
-
-        if (matchedLead) {
-          matchedLead.status = 'Follow-up Required';
-          matchedLead.nextFollowupDate = followupScheduledAt;
-          if (notes) {
-            matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Follow-up Required: ${notes}`;
-          }
-          storageService.saveLead(matchedLead);
-        }
+          contactType: lastCallRecord.matchedRecord?.type || 'lead',
+          scheduledAt: followupTime,
+          priority: scheduleFollowup?.priority || 'Medium',
+          notes: scheduleFollowup?.notes || notes || `Follow-up from call with ${lastCallRecord.contactName}`,
+        }).catch(() => {});
       }
 
-      // 3. Call Back -> Keep in Leads section, update status to Callback
-      else if (disposition === 'Call Back') {
-        if (matchedLead) {
-          matchedLead.status = 'Callback';
-          if (scheduleFollowup?.scheduledAt) {
-            matchedLead.nextFollowupDate = scheduleFollowup.scheduledAt;
-          }
-          if (notes) {
-            matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Call Back: ${notes}`;
-          }
-          storageService.saveLead(matchedLead);
-        } else {
-          const newLead: Lead = {
-            id: `lead-${Date.now()}`,
-            companyId: tenant.id,
-            name: lastCallRecord.contactName || 'Unknown Caller',
-            phone: lastCallRecord.contactPhone,
-            email: '',
-            location: '',
-            source: 'Inbound Call',
-            status: 'Callback',
-            priority: 'Medium',
-            assignedAgentId: user.id,
-            assignedAgentName: user.name,
-            createdAt: new Date().toISOString().split('T')[0],
-            notes: notes || '',
-            customFields: {},
-          };
-          storageService.saveLead(newLead);
-        }
-
-        if (scheduleFollowup) {
-          storageService.saveFollowup({
-            id: `flw-${Date.now()}`,
-            companyId: tenant.id,
-            contactId: matchedLead?.id || lastCallRecord.matchedRecord?.id || 'contact-new',
-            contactName: lastCallRecord.contactName,
-            contactPhone: lastCallRecord.contactPhone,
-            contactType: 'lead',
-            scheduledAt: scheduleFollowup.scheduledAt,
-            priority: scheduleFollowup.priority,
-            status: 'Pending',
-            notes: scheduleFollowup.notes || (notes ? `Callback reminder: ${notes}` : `Callback reminder for ${lastCallRecord.contactName}`),
-            assignedAgentId: user.id,
-            assignedAgentName: user.name,
-          });
-        }
-      }
-
-      // 4. Not Interested -> Remove from Leads, move to Not Interested section
-      else if (disposition === 'Not Interested') {
-        const reasonText = reason || notes || 'Not Interested';
-        if (matchedLead) {
-          matchedLead.status = 'Not Interested';
-          matchedLead.customFields = { ...matchedLead.customFields, dispositionReason: reasonText };
-          storageService.saveLead(matchedLead);
-        } else {
-          const newLead: Lead = {
-            id: `lead-${Date.now()}`,
-            companyId: tenant.id,
-            name: lastCallRecord.contactName || 'Unknown Caller',
-            phone: lastCallRecord.contactPhone,
-            email: '',
-            location: '',
-            source: 'Inbound Call',
+      // 3. Update lead status if matched
+      if (leadIdNum) {
+        if (disposition === 'Interested') {
+          leadsApi.convertLead(leadIdNum, { notes }).catch(() => {});
+        } else if (disposition === 'Not Interested') {
+          leadsApi.updateLead(leadIdNum, {
             status: 'Not Interested',
-            priority: 'Low',
-            assignedAgentId: user.id,
-            assignedAgentName: user.name,
-            createdAt: new Date().toISOString().split('T')[0],
-            notes: '',
-            customFields: { dispositionReason: reasonText },
-          };
-          storageService.saveLead(newLead);
-        }
-      }
-
-      // 5. Wrong Number -> Remove from Leads, move to Junk section
-      else if (disposition === 'Wrong Number') {
-        const reasonText = reason || notes || 'Wrong Number';
-        if (matchedLead) {
-          matchedLead.status = 'Junk';
-          matchedLead.customFields = { ...matchedLead.customFields, dispositionReason: reasonText };
-          storageService.saveLead(matchedLead);
-        } else {
-          const newLead: Lead = {
-            id: `lead-${Date.now()}`,
-            companyId: tenant.id,
-            name: lastCallRecord.contactName || 'Unknown Caller',
-            phone: lastCallRecord.contactPhone,
-            email: '',
-            location: '',
-            source: 'Inbound Call',
+            dispositionReason: reason || notes || 'Not Interested',
+          }).catch(() => {});
+        } else if (disposition === 'Wrong Number') {
+          leadsApi.updateLead(leadIdNum, {
             status: 'Junk',
-            priority: 'Low',
-            assignedAgentId: user.id,
-            assignedAgentName: user.name,
-            createdAt: new Date().toISOString().split('T')[0],
-            notes: '',
-            customFields: { dispositionReason: reasonText },
-          };
-          storageService.saveLead(newLead);
-        }
-      }
-
-      // 6. No Response -> Keep in Leads section, update status to No Response
-      else if (disposition === 'No Response') {
-        if (matchedLead) {
-          matchedLead.status = 'No Response';
-          if (notes) {
-            matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] No Response: ${notes}`;
-          }
-          storageService.saveLead(matchedLead);
-        } else {
-          const newLead: Lead = {
-            id: `lead-${Date.now()}`,
-            companyId: tenant.id,
-            name: lastCallRecord.contactName || 'Unknown Caller',
-            phone: lastCallRecord.contactPhone,
-            email: '',
-            location: '',
-            source: 'Inbound Call',
+            dispositionReason: reason || notes || 'Wrong Number',
+          }).catch(() => {});
+        } else if (disposition === 'No Response') {
+          leadsApi.updateLead(leadIdNum, {
             status: 'No Response',
-            priority: 'Low',
-            assignedAgentId: user.id,
-            assignedAgentName: user.name,
-            createdAt: new Date().toISOString().split('T')[0],
-            notes: notes || '',
-            customFields: {},
-          };
-          storageService.saveLead(newLead);
+            notes: notes ? `[No Response] ${notes}` : undefined,
+          }).catch(() => {});
+        } else if (disposition === 'Follow-up Required' || disposition === 'Call Back') {
+          leadsApi.updateLead(leadIdNum, {
+            status: disposition,
+            notes: notes ? `[${disposition}] ${notes}` : undefined,
+          }).catch(() => {});
         }
       }
 
-      // 7. Converted -> Existing conversion behavior
-      else if (disposition === 'Converted') {
-        if (matchedLead) {
-          const existingCustomers = storageService.getCustomers(tenant.id);
-          let cust = existingCustomers.find(c => c.phone === matchedLead.phone || (matchedLead.email && c.email === matchedLead.email));
-          if (!cust) {
-            cust = {
-              id: `cust-${matchedLead.id.replace('lead-', '')}`,
-              companyId: tenant.id,
-              name: matchedLead.name,
-              phone: matchedLead.phone,
-              email: matchedLead.email || '',
-              status: 'Active',
-              assignedAgentId: matchedLead.assignedAgentId || user.id,
-              assignedAgentName: matchedLead.assignedAgentName || user.name,
-              location: matchedLead.location || '',
-              lastContacted: 'Just now',
-              openDealsCount: 1,
-              totalValue: 5000000,
-              createdAt: new Date().toISOString().split('T')[0],
-              notes: `Converted from lead. Original notes: ${matchedLead.notes || ''}`,
-              customFields: matchedLead.customFields,
-            };
-            storageService.saveCustomer(cust);
-          }
-
-          const newDeal: Deal = {
-            id: `deal-${Date.now()}`,
-            companyId: tenant.id,
-            title: `${cust.name} - Investment Consultation`,
-            customerId: cust.id,
-            customerName: cust.name,
-            stage: tenant.slug === 'jamin' ? 'site_visit' : 'consultation',
-            value: 5000000,
-            expectedCloseDate: 'Within 30 Days',
-            assignedAgentId: matchedLead.assignedAgentId || user.id,
-            assignedAgentName: matchedLead.assignedAgentName || user.name,
-            notes: `Deal initiated upon converting lead ${matchedLead.name}. ${notes ? `Call notes: ${notes}` : ''}`,
-            createdAt: new Date().toISOString().split('T')[0],
-          };
-          storageService.saveDeal(newDeal);
-
-          matchedLead.status = 'Converted';
-          if (notes) {
-            matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Converted: ${notes}`;
-          }
-          storageService.saveLead(matchedLead);
-        }
+      // Complete source follow-up if this call originated from one
+      if (lastCallRecord.sourceFollowupId) {
+        followupsApi.completeFollowup(lastCallRecord.sourceFollowupId).catch(() => {});
       }
     }
 
     setShowDispositionModal(false);
     setLastCallRecord(null);
-    setAvailability(prev => prev === 'Busy' ? 'Available' : prev);
+    setAvailability(prev => (prev === 'Busy' ? 'Available' : prev));
   };
 
   const closeDispositionModal = () => {
     setShowDispositionModal(false);
     setLastCallRecord(null);
-    setAvailability(prev => prev === 'Busy' ? 'Available' : prev);
+    setAvailability(prev => (prev === 'Busy' ? 'Available' : prev));
   };
 
   return (

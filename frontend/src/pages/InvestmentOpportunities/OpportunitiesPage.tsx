@@ -10,7 +10,8 @@ import {
 import { InvestmentOpportunity, Investor } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import { opportunityStore } from '../../services/secondaryStores';
+import { customersApi } from '../../services/crmApi';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { FilterBar } from '../../components/common/FilterBar';
@@ -87,8 +88,24 @@ export const OpportunitiesPage: React.FC = () => {
 
   // ── Data loading ──────────────────────────────────────────────────────────
   const loadData = () => {
-    setOpps(storageService.getOpportunities(tenant?.id));
-    setInvestors(storageService.getInvestors(tenant?.id));
+    setOpps(opportunityStore.getOpportunities(tenant?.id));
+    customersApi.getCustomers().then(custs => {
+      const items = custs?.items || [];
+      setInvestors(items.map((c: any) => ({
+        id: String(c.id),
+        companyId: tenant?.id || '',
+        name: c.name || '',
+        phone: c.phone || '',
+        email: c.email || '',
+        status: 'Active Investor' as const,
+        investmentCapacity: '₹50L - ₹1Cr',
+        preferredAssetClass: 'Plots',
+        assignedAgentId: String(c.assignedAgentId || ''),
+        assignedAgentName: c.assignedAgentName || '',
+        createdAt: c.createdAt || new Date().toISOString(),
+        notes: c.notes || '',
+      })));
+    }).catch(() => {});
   };
 
   useEffect(() => {
@@ -193,14 +210,14 @@ export const OpportunitiesPage: React.FC = () => {
       notes: form.notes.trim(),
     };
 
-    storageService.saveOpportunity(opp);
+    opportunityStore.saveOpportunity(opp);
     closeModal();
   };
 
   // ── Delete handler ────────────────────────────────────────────────────────
   const handleDeleteOpp = (o: InvestmentOpportunity) => {
     if (!window.confirm(`Delete opportunity "${o.title}"? This cannot be undone.`)) return;
-    storageService.deleteOpportunity(o.id);
+    opportunityStore.deleteOpportunity(o.id);
   };
 
   // ── Move Stage handlers ───────────────────────────────────────────────────
@@ -211,7 +228,7 @@ export const OpportunitiesPage: React.FC = () => {
 
   const handleMoveStage = () => {
     if (!stageModalOpp) return;
-    storageService.saveOpportunity({ ...stageModalOpp, stage: newStage });
+    opportunityStore.saveOpportunity({ ...stageModalOpp, stage: newStage });
     setStageModalOpp(null);
   };
 

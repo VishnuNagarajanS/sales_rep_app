@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Upload, CheckCircle2, AlertCircle } from 'lucide-react';
 import { DocumentItem } from '../../types';
-import { storageService } from '../../services/storageService';
+import { documentStore } from '../../services/documentStore';
 import { useAuth } from '../../context/AuthContext';
 import './DocumentUploader.css';
 
@@ -63,7 +63,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({
         entityId,
       };
 
-      storageService.saveDocument(doc);
+      documentStore.saveDocument(doc);
       onUploaded?.(doc);
       showToast('success', `"${file.name}" logged successfully.`);
     } catch {

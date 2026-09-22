@@ -1,16 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Building2,
   Phone,
   Plus,
   Play,
-  ExternalLink,
   Filter,
+  RefreshCw,
+  AlertCircle,
+  Clock,
+  CheckCircle2,
 } from 'lucide-react';
-import { Customer, CallRecord, Followup, Deal, Lead } from '../../types';
+import { Customer, CallRecord, Followup } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import { customersApi, followupsApi } from '../../services/crmApi';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Timeline, TimelineEvent } from '../../components/common/Timeline';
 import { DocumentUploader } from '../../components/common/DocumentUploader';
@@ -23,18 +26,14 @@ export const CustomersPage: React.FC = () => {
   const { initiateCall } = useCall();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Role-based scoping: Sales Executives see only their own customers.
-  // Managers / Admins / Super Admins see the full company customer list (no filter).
-  const roleCode = user?.role?.code;
-  const isExec = roleCode === 'sales_executive';
-  const scopedCustomers = isExec
-    ? customers.filter(c =>
-      (c.assignedAgentId && c.assignedAgentId === user?.id) ||
-      (c.assignedAgentName && c.assignedAgentName === user?.name)
-    )
-    : customers;
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [customer360Loading, setCustomer360Loading] = useState(false);
+  const [customerCalls, setCustomerCalls] = useState<CallRecord[]>([]);
+  const [customerFollowups, setCustomerFollowups] = useState<Followup[]>([]);
+
   const [activeTab, setActiveTab] = useState<'overview' | 'calls' | 'followups' | 'timeline' | 'documents'>('overview');
   const [statusFilter, setStatusFilter] = useState('All');
   const [agentFilter, setAgentFilter] = useState('All');
@@ -48,36 +47,138 @@ export const CustomersPage: React.FC = () => {
   const [newStatus, setNewStatus] = useState<'Active' | 'VIP' | 'Inactive'>('Active');
   const [newCustomFields, setNewCustomFields] = useState<Record<string, any>>({});
   const [addErrors, setAddErrors] = useState<{ name?: string; phone?: string }>({});
+  const [savingCustomer, setSavingCustomer] = useState(false);
 
-  const [calls, setCalls] = useState<CallRecord[]>([]);
-  const [followups, setFollowups] = useState<Followup[]>([]);
-  const [deals, setDeals] = useState<Deal[]>([]);
+  // Role-based scoping
+  const roleCode = user?.role?.code;
+  const isExec = roleCode === 'sales_executive';
 
-  const loadData = () => {
-    const custs = storageService.getCustomers(tenant?.id);
-    setCustomers(custs);
-    // Auto-select from the scoped list so an exec doesn't land on a customer
-    // that is invisible in their own filtered left-panel list.
-    const firstVisible = isExec
-      ? custs.filter(c =>
-        (c.assignedAgentId && c.assignedAgentId === user?.id) ||
-        (c.assignedAgentName && c.assignedAgentName === user?.name)
-      )[0]
-      : custs[0];
-    if (firstVisible && !selectedCustomer) {
-      setSelectedCustomer(firstVisible);
+  const fetchCustomers = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await customersApi.getCustomers({
+        status: statusFilter !== 'All' ? statusFilter : undefined,
+      });
+
+      if (res?.items) {
+        const rawItems = res.items || [];
+        const mapped: Customer[] = rawItems.map((c: any) => ({
+          id: String(c.id),
+          companyId: String(tenant?.id || ''),
+          name: c.name || '',
+          phone: c.phone || '',
+          email: c.email || '',
+          status: (c.status as any) || 'Active',
+          assignedAgentId: String(c.assignedAgentId || ''),
+          assignedAgentName: c.assignedAgentName || 'Unassigned',
+          location: c.location || '',
+          lastContacted: c.lastContacted ? new Date(c.lastContacted).toISOString().split('T')[0] : '—',
+          openDealsCount: c.openDealsCount || 0,
+          totalValue: Number(c.totalValue || 0),
+          createdAt: c.createdAt ? new Date(c.createdAt).toISOString().split('T')[0] : '—',
+          notes: c.notes || '',
+          customFields: c.customFields || {},
+        }));
+
+        setCustomers(mapped);
+
+        if (mapped.length > 0) {
+          setSelectedCustomer(prev => {
+            if (prev) {
+              const stillExists = mapped.find(c => c.id === prev.id);
+              if (stillExists) return stillExists;
+            }
+            return mapped[0];
+          });
+        } else {
+          setSelectedCustomer(null);
+        }
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to load customers from backend API');
+    } finally {
+      setLoading(false);
     }
-    setCalls(storageService.getCalls(tenant?.id));
-    setFollowups(storageService.getFollowups(tenant?.id));
-    setDeals(storageService.getDeals(tenant?.id));
-  };
+  }, [tenant?.id, statusFilter]);
 
   useEffect(() => {
-    loadData();
-    const handleUpdate = () => loadData();
-    window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
-  }, [tenant?.id]);
+    fetchCustomers();
+  }, [fetchCustomers]);
+
+  // Load 360 data when selected customer changes
+  useEffect(() => {
+    if (!selectedCustomer) {
+      setCustomerCalls([]);
+      setCustomerFollowups([]);
+      return;
+    }
+
+    let isMounted = true;
+    const fetch360 = async () => {
+      setCustomer360Loading(true);
+      try {
+        const res = await customersApi.getCustomer360(selectedCustomer.id);
+        if (isMounted && res) {
+          const raw360 = res;
+          // Map calls
+          const mappedCalls: CallRecord[] = (raw360.calls || []).map((c: any) => ({
+            id: String(c.id),
+            companyId: String(tenant?.id || ''),
+            tenantId: String(tenant?.id || ''),
+            contactName: selectedCustomer.name,
+            contactPhone: selectedCustomer.phone,
+            leadId: undefined,
+            contactType: 'customer',
+            agentId: String(user?.id || ''),
+            agentName: selectedCustomer.assignedAgentName || 'Agent',
+            direction: (c.direction || 'outbound').toLowerCase() as any,
+            duration: Number(c.duration || 0),
+            disposition: (c.disposition || 'Interested') as any,
+            timestamp: c.timestamp ? new Date(c.timestamp).toLocaleString('en-IN') : 'Just now',
+            notes: c.notes || '',
+          }));
+          setCustomerCalls(mappedCalls);
+
+          // Map followups
+          const mappedFollowups: Followup[] = (raw360.followups || []).map((f: any) => ({
+            id: String(f.id),
+            companyId: String(tenant?.id || ''),
+            tenantId: String(tenant?.id || ''),
+            contactName: selectedCustomer.name,
+            contactPhone: selectedCustomer.phone,
+            contactType: 'customer',
+            contactId: selectedCustomer.id,
+            assignedAgentId: String(f.assignedAgentId || ''),
+            assignedAgentName: f.assignedAgentName || 'Agent',
+            scheduledAt: f.scheduledAt ? new Date(f.scheduledAt).toLocaleString('en-IN') : '—',
+            notes: f.notes || '',
+            priority: (f.priority || 'Medium') as any,
+            status: (f.status || 'Pending') as any,
+            completedAt: f.completedAt ? new Date(f.completedAt).toLocaleString('en-IN') : undefined,
+          }));
+          setCustomerFollowups(mappedFollowups);
+        }
+      } catch {
+        // Keep existing or empty
+      } finally {
+        if (isMounted) setCustomer360Loading(false);
+      }
+    };
+
+    fetch360();
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedCustomer?.id, tenant?.id, user?.id]);
+
+  const scopedCustomers = isExec
+    ? customers.filter(
+        c =>
+          (c.assignedAgentId && c.assignedAgentId === user?.id) ||
+          (c.assignedAgentName && c.assignedAgentName === user?.name)
+      )
+    : customers;
 
   const agentOptions = Array.from(new Set(scopedCustomers.map(c => c.assignedAgentName)))
     .filter(Boolean)
@@ -89,19 +190,6 @@ export const CustomersPage: React.FC = () => {
     return true;
   });
 
-  // Filter linked records for selected customer
-  const customerCalls = calls.filter(
-    c => selectedCustomer && (c.contactPhone === selectedCustomer.phone || c.contactName === selectedCustomer.name)
-  );
-
-  const customerFollowups = followups.filter(
-    f => selectedCustomer && (f.contactPhone === selectedCustomer.phone || f.contactName === selectedCustomer.name)
-  );
-
-  const customerDeals = deals.filter(
-    d => selectedCustomer && (d.customerId === selectedCustomer.id || d.customerName === selectedCustomer.name)
-  );
-
   const resetAddForm = () => {
     setNewName('');
     setNewPhone('');
@@ -112,7 +200,7 @@ export const CustomersPage: React.FC = () => {
     setAddErrors({});
   };
 
-  const handleAddCustomer = () => {
+  const handleAddCustomer = async () => {
     const errors: { name?: string; phone?: string } = {};
     if (!newName.trim()) errors.name = 'Name is required.';
     if (!newPhone.trim()) errors.phone = 'Phone is required.';
@@ -120,27 +208,65 @@ export const CustomersPage: React.FC = () => {
       setAddErrors(errors);
       return;
     }
-    const newCustomer: import('../../types').Customer = {
-      id: `cust-${Date.now()}`,
-      companyId: tenant?.id || '',
-      name: newName.trim(),
-      phone: newPhone.trim(),
-      email: newEmail.trim(),
-      status: newStatus,
-      assignedAgentId: user?.id || '',
-      assignedAgentName: user?.name || '',
-      location: newLocation.trim(),
-      lastContacted: new Date().toISOString().split('T')[0],
-      openDealsCount: 0,
-      totalValue: 0,
-      createdAt: new Date().toISOString().split('T')[0],
-      notes: '',
-      customFields: newCustomFields,
-    };
-    storageService.saveCustomer(newCustomer);
-    setIsAddModalOpen(false);
-    resetAddForm();
-    setSelectedCustomer(newCustomer);
+
+    setSavingCustomer(true);
+    try {
+      const res = await customersApi.createCustomer({
+        name: newName.trim(),
+        phone: newPhone.trim(),
+        email: newEmail.trim() || undefined,
+        location: newLocation.trim() || undefined,
+        status: newStatus,
+        totalValue: 0,
+        notes: '',
+        customFields: newCustomFields,
+      });
+
+      setIsAddModalOpen(false);
+      resetAddForm();
+      await fetchCustomers();
+
+      if (res?.id) {
+        const createdId = String(res.id);
+        const match = customers.find(c => c.id === createdId);
+        if (match) setSelectedCustomer(match);
+      }
+    } catch (err: any) {
+      alert(`Error creating customer: ${err.message || 'Please try again'}`);
+    } finally {
+      setSavingCustomer(false);
+    }
+  };
+
+  const handleCompleteFollowup = async (followupId: string) => {
+    try {
+      await followupsApi.completeFollowup(followupId);
+      // Refresh 360 data
+      if (selectedCustomer) {
+        const res = await customersApi.getCustomer360(selectedCustomer.id);
+        if (res?.followups) {
+          const mapped: Followup[] = res.followups.map((f: any) => ({
+            id: String(f.id),
+            companyId: String(tenant?.id || ''),
+            tenantId: String(tenant?.id || ''),
+            contactName: selectedCustomer.name,
+            contactPhone: selectedCustomer.phone,
+            contactType: 'customer',
+            contactId: selectedCustomer.id,
+            assignedAgentId: String(f.assignedAgentId || ''),
+            assignedAgentName: f.assignedAgentName || 'Agent',
+            scheduledAt: f.scheduledAt ? new Date(f.scheduledAt).toLocaleString('en-IN') : '—',
+            notes: f.notes || '',
+            priority: (f.priority || 'Medium') as any,
+            status: (f.status || 'Pending') as any,
+            completedAt: f.completedAt ? new Date(f.completedAt).toLocaleString('en-IN') : undefined,
+          }));
+          setCustomerFollowups(mapped);
+        }
+      }
+    } catch (err: any) {
+      alert(`Failed to complete follow-up: ${err.message}`);
+    }
   };
 
   const formatCurrency = (val: number) => {
@@ -149,62 +275,14 @@ export const CustomersPage: React.FC = () => {
     return `₹${val.toLocaleString('en-IN')}`;
   };
 
-  // Build leads lookup map by last 10 digits of phone once per render
-  const leadsByPhone = new Map<string, Lead>();
-  (storageService.getLeads(tenant?.id) || []).forEach(l => {
-    const digits = (l.phone || '').replace(/\D/g, '').slice(-10);
-    if (digits && !leadsByPhone.has(digits)) {
-      leadsByPhone.set(digits, l);
-    }
-  });
-
-  const getInvestmentRange = (c: Customer): string => {
-    const checkVal = (v: unknown): string => {
-      if (typeof v === 'string' && v.trim()) {
-        return v.trim();
-      }
-      return '';
-    };
-
-    // 1. c.customFields?.investmentCapacity
-    const c1 = checkVal(c.customFields?.investmentCapacity);
-    if (c1) return c1;
-
-    // 2. c.customFields?.budgetRange
-    const c2 = checkVal(c.customFields?.budgetRange);
-    if (c2) return c2;
-
-    // 3. matching lead from the map (by the last 10 digits of c.phone)
-    const digits = (c.phone || '').replace(/\D/g, '').slice(-10);
-    const lead = digits ? leadsByPhone.get(digits) : undefined;
-    if (lead) {
-      const l1 = checkVal(lead.customFields?.investmentCapacity);
-      if (l1) return l1;
-      const l2 = checkVal(lead.customFields?.budgetRange);
-      if (l2) return l2;
-    }
-
-    return '';
-  };
-
-  const getCustomerValueDisplay = (c: Customer): string => {
-    const range = getInvestmentRange(c);
-    if (range) return range;
-    if (typeof c.totalValue === 'number' && c.totalValue > 0) {
-      return formatCurrency(c.totalValue);
-    }
-    return '—';
-  };
-
   const rawEvents: TimelineEvent[] = [];
-
   if (selectedCustomer) {
     customerCalls.forEach(c => {
       rawEvents.push({
         id: c.id,
         type: 'call',
         title: `${c.direction === 'outbound' ? 'Outbound' : 'Inbound'} Call — ${c.disposition}`,
-        description: c.transcription || undefined,
+        description: c.notes || undefined,
         timestamp: c.timestamp,
         actorName: c.agentName,
       });
@@ -221,21 +299,10 @@ export const CustomersPage: React.FC = () => {
       });
     });
 
-    customerDeals.forEach(d => {
-      rawEvents.push({
-        id: d.id,
-        type: 'status_change',
-        title: `Deal Created — ${d.title}`,
-        description: `Stage: ${d.stage} • Value: ${formatCurrency(d.value)}`,
-        timestamp: d.createdAt,
-        actorName: d.assignedAgentName,
-      });
-    });
-
     rawEvents.push({
       id: `ev-create-${selectedCustomer.id}`,
       type: 'note',
-      title: 'Customer Account Created',
+      title: 'Customer Account Created in Database',
       timestamp: selectedCustomer.createdAt,
       actorName: selectedCustomer.assignedAgentName,
     });
@@ -258,10 +325,25 @@ export const CustomersPage: React.FC = () => {
             <Building2 size={24} color="var(--primary-600)" /> Customer 360 Profile
           </h1>
           <p className="page-subtitle">
-            Unified contact view across calls, deals, timeline, and documents for {tenant?.name}.
+            Unified contact view across calls, follow-ups, timeline, and documents for {tenant?.name || 'organization'}.
           </p>
         </div>
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={fetchCustomers}
+          disabled={loading}
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh DB Data
+        </button>
       </div>
+
+      {error && (
+        <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#dc2626', padding: '10px 14px', borderRadius: 8, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <AlertCircle size={16} />
+          <span>{error}</span>
+        </div>
+      )}
 
       {/* Customer 360 Split View: List on left, Full 360 on right */}
       <div className="customers-split-layout">
@@ -269,10 +351,13 @@ export const CustomersPage: React.FC = () => {
         <div className="customers-sidebar">
           <div className="card customers-sidebar-card">
             <div className="customers-sidebar-header">
-              <h3 className="customers-sidebar-title">Customer Accounts</h3>
+              <h3 className="customers-sidebar-title">Customer Accounts ({filteredCustomers.length})</h3>
               <button
                 className="btn btn-primary btn-sm customers-btn-new"
-                onClick={() => { resetAddForm(); setIsAddModalOpen(true); }}
+                onClick={() => {
+                  resetAddForm();
+                  setIsAddModalOpen(true);
+                }}
               >
                 <Plus size={13} /> New Customer
               </button>
@@ -287,10 +372,7 @@ export const CustomersPage: React.FC = () => {
 
               {/* Status Filter */}
               <div className="customers-filter-group">
-                <label
-                  htmlFor="filter-customer-status"
-                  className="customers-filter-tag"
-                >
+                <label htmlFor="filter-customer-status" className="customers-filter-tag">
                   Status:
                 </label>
                 <select
@@ -307,65 +389,71 @@ export const CustomersPage: React.FC = () => {
               </div>
 
               {/* Agent Filter */}
-              {!isExec && (
-              <div className="customers-filter-group">
-                <label
-                  htmlFor="filter-customer-agent"
-                  className="customers-filter-tag"
-                >
-                  Agent:
-                </label>
-                <select
-                  id="filter-customer-agent"
-                  className={`form-select customers-filter-select ${agentFilter !== 'All' && agentFilter !== '' ? 'is-filtered' : ''}`}
-                  value={agentFilter}
-                  onChange={e => setAgentFilter(e.target.value)}
-                >
-                  <option value="All">All</option>
-                  {agentOptions.map(opt => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {!isExec && agentOptions.length > 0 && (
+                <div className="customers-filter-group">
+                  <label htmlFor="filter-customer-agent" className="customers-filter-tag">
+                    Agent:
+                  </label>
+                  <select
+                    id="filter-customer-agent"
+                    className={`form-select customers-filter-select ${agentFilter !== 'All' && agentFilter !== '' ? 'is-filtered' : ''}`}
+                    value={agentFilter}
+                    onChange={e => setAgentFilter(e.target.value)}
+                  >
+                    <option value="All">All</option>
+                    {agentOptions.map(opt => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               )}
             </div>
+
             <div className="customers-list">
-              {filteredCustomers.map(c => {
-                const isSelected = selectedCustomer?.id === c.id;
-                return (
-                  <div
-                    key={c.id}
-                    onClick={() => setSelectedCustomer(c)}
-                    className={`customer-list-item ${isSelected ? 'is-selected' : ''}`}
-                  >
-                    <div className="customer-list-item-top">
-                      <div className="customer-list-name">
-                        {c.name}
+              {loading && customers.length === 0 ? (
+                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-secondary)' }}>
+                  Loading database records...
+                </div>
+              ) : filteredCustomers.length === 0 ? (
+                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-secondary)' }}>
+                  No customer records found in database.
+                </div>
+              ) : (
+                filteredCustomers.map(c => {
+                  const isSelected = selectedCustomer?.id === c.id;
+                  return (
+                    <div
+                      key={c.id}
+                      onClick={() => setSelectedCustomer(c)}
+                      className={`customer-list-item ${isSelected ? 'is-selected' : ''}`}
+                    >
+                      <div className="customer-list-item-top">
+                        <div className="customer-list-name">{c.name}</div>
+                        <StatusChip status={c.status} size="sm" />
                       </div>
-                      <StatusChip status={c.status} size="sm" />
+                      <div className="customer-list-sub">
+                        {c.phone} • {c.location || 'Location not set'}
+                      </div>
+                      <div className="customer-list-bottom">
+                        <span className="customer-list-val">
+                          {c.totalValue > 0 ? formatCurrency(c.totalValue) : '—'}
+                        </span>
+                        <button
+                          className="btn btn-call btn-sm btn-icon customer-list-call-btn"
+                          onClick={e => {
+                            e.stopPropagation();
+                            initiateCall(c.name, c.phone, 'customer', c.id);
+                          }}
+                        >
+                          <Phone size={12} />
+                        </button>
+                      </div>
                     </div>
-                    <div className="customer-list-sub">
-                      {c.phone} • {c.location}
-                    </div>
-                    <div className="customer-list-bottom">
-                      <span className="customer-list-val">
-                        {getCustomerValueDisplay(c)}
-                      </span>
-                      <button
-                        className="btn btn-call btn-sm btn-icon customer-list-call-btn"
-                        onClick={e => {
-                          e.stopPropagation();
-                          initiateCall(c.name, c.phone, 'customer', c.id);
-                        }}
-                      >
-                        <Phone size={12} />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </div>
         </div>
@@ -379,11 +467,17 @@ export const CustomersPage: React.FC = () => {
                 <div className="customer-cockpit-name-row">
                   <h2 className="customer-cockpit-name">{selectedCustomer.name}</h2>
                   <StatusChip status={selectedCustomer.status} />
+                  {customer360Loading && (
+                    <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                      <RefreshCw size={11} className="spin" style={{ display: 'inline', marginRight: 4 }} />
+                      Syncing 360...
+                    </span>
+                  )}
                 </div>
                 <div className="customer-cockpit-meta-row">
                   <span>📞 {selectedCustomer.phone}</span>
                   {selectedCustomer.email && <span>✉️ {selectedCustomer.email}</span>}
-                  <span>📍 {selectedCustomer.location}</span>
+                  {selectedCustomer.location && <span>📍 {selectedCustomer.location}</span>}
                 </div>
               </div>
 
@@ -422,18 +516,16 @@ export const CustomersPage: React.FC = () => {
               {activeTab === 'overview' && (
                 <div className="customer-overview-stack">
                   <div className="card customer-profile-card">
-                    <h4 className="customer-section-heading">
-                      Account & Commercial Profile
-                    </h4>
+                    <h4 className="customer-section-heading">Account & Commercial Profile</h4>
                     <div className="customer-profile-grid">
                       <div>
                         <span className="customer-profile-label">Assigned Account Manager:</span>
                         <div className="customer-profile-val">{selectedCustomer.assignedAgentName}</div>
                       </div>
                       <div>
-                        <span className="customer-profile-label">Investment Range:</span>
+                        <span className="customer-profile-label">Portfolio / Deal Value:</span>
                         <div className="customer-profile-val-green">
-                          {getCustomerValueDisplay(selectedCustomer)}
+                          {selectedCustomer.totalValue > 0 ? formatCurrency(selectedCustomer.totalValue) : '—'}
                         </div>
                       </div>
                       <div>
@@ -442,52 +534,26 @@ export const CustomersPage: React.FC = () => {
                       </div>
                       <div>
                         <span className="customer-profile-label">Last Contacted:</span>
-                        <div className="customer-profile-val-primary">
-                          {selectedCustomer.lastContacted}
-                        </div>
+                        <div className="customer-profile-val-primary">{selectedCustomer.lastContacted}</div>
                       </div>
                     </div>
                   </div>
 
-                  {selectedCustomer.customFields && (() => {
-                    const activeDefs = storageService
-                      .getCustomFieldDefinitions(tenant?.id)
-                      .filter(d => d.active !== false && d.module === 'customers')
-                      .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
-
-                    const rows = activeDefs
-                      .map(def => {
-                        const key = def.fieldKey || def.id;
-                        const val = selectedCustomer.customFields?.[key];
-                        if (val === undefined || val === null || val === '') return null;
-                        return {
-                          id: def.id,
-                          label: def.label || key.replace(/([A-Z])/g, ' $1'),
-                          value: String(val),
-                        };
-                      })
-                      .filter(Boolean);
-
-                    if (rows.length === 0) return null;
-
-                    return (
-                      <div className="card customer-custom-card">
-                        <h4 className="customer-custom-heading">
-                          Tenant Specific Relationship Attributes
-                        </h4>
-                        <div className="customer-custom-grid">
-                          {rows.map(item => (
-                            <div key={item!.id}>
-                              <span className="customer-custom-label">
-                                {item!.label}:
-                              </span>
-                              <div className="customer-custom-val">{item!.value}</div>
-                            </div>
-                          ))}
-                        </div>
+                  {selectedCustomer.customFields && Object.keys(selectedCustomer.customFields).length > 0 && (
+                    <div className="card customer-custom-card">
+                      <h4 className="customer-custom-heading">Attributes & Preferences</h4>
+                      <div className="customer-custom-grid">
+                        {Object.entries(selectedCustomer.customFields).map(([key, val]) => (
+                          <div key={key}>
+                            <span className="customer-custom-label">
+                              {key.replace(/([A-Z])/g, ' $1').toUpperCase()}:
+                            </span>
+                            <div className="customer-custom-val">{String(val)}</div>
+                          </div>
+                        ))}
                       </div>
-                    );
-                  })()}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -495,14 +561,11 @@ export const CustomersPage: React.FC = () => {
                 <div className="customer-calls-stack">
                   {customerCalls.length === 0 ? (
                     <div className="customer-empty-text">
-                      No calls logged yet with this customer. Click "Click to Call" to initiate a call.
+                      No calls logged yet with this customer in Neon database. Use "Click to Call" to initiate a call.
                     </div>
                   ) : (
                     customerCalls.map(c => (
-                      <div
-                        key={c.id}
-                        className="card customer-call-card"
-                      >
+                      <div key={c.id} className="card customer-call-card">
                         <div>
                           <div className="customer-call-meta">
                             <StatusChip status={c.direction} size="sm" />
@@ -511,21 +574,8 @@ export const CustomersPage: React.FC = () => {
                               Duration: {Math.floor(c.duration / 60)}m {c.duration % 60}s • {c.timestamp}
                             </span>
                           </div>
-                          {c.transcription && (
-                            <p className="customer-call-transcript">
-                              "{c.transcription}"
-                            </p>
-                          )}
+                          {c.notes && <p className="customer-call-transcript">"{c.notes}"</p>}
                         </div>
-
-                        {c.recordingUrl && (
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => alert(`Simulated Playback: Playing audio for call with ${c.contactName}`)}
-                          >
-                            <Play size={13} color="var(--primary-600)" /> Play Recording
-                          </button>
-                        )}
                       </div>
                     ))
                   )}
@@ -536,38 +586,35 @@ export const CustomersPage: React.FC = () => {
                 <div className="customer-followups-stack">
                   {customerFollowups.length === 0 ? (
                     <div className="customer-empty-text">
-                      No open follow-ups for this customer.
+                      No follow-ups recorded for this customer in database.
                     </div>
                   ) : (
                     customerFollowups.map(f => (
-                      <div
-                        key={f.id}
-                        className="customer-followup-item"
-                      >
+                      <div key={f.id} className="customer-followup-item">
                         <div>
                           <div className="customer-followup-header">
                             <span className="customer-followup-notes">{f.notes}</span>
                             <StatusChip status={f.priority} size="sm" />
+                            <StatusChip status={f.status} size="sm" />
                           </div>
                           <div className="customer-followup-due">
-                            ⏰ Due: {f.scheduledAt} • Assignee: {f.assignedAgentName}
+                            ⏰ Scheduled: {f.scheduledAt} • Assignee: {f.assignedAgentName}
                           </div>
                         </div>
 
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => {
-                            storageService.saveFollowup({ ...f, status: 'Completed' });
-                          }}
-                        >
-                          Mark Done
-                        </button>
+                        {f.status === 'Pending' && (
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => handleCompleteFollowup(f.id)}
+                          >
+                            Mark Done
+                          </button>
+                        )}
                       </div>
                     ))
                   )}
                 </div>
               )}
-
 
               {activeTab === 'timeline' && <Timeline events={timelineEvents} />}
 
@@ -578,11 +625,7 @@ export const CustomersPage: React.FC = () => {
                     entityId={selectedCustomer.id}
                     allowedCategories={['KYC', 'Agreement', 'Payment Receipt', 'Identity Proof', 'Other']}
                   />
-                  <DocumentList
-                    entityType="customer"
-                    entityId={selectedCustomer.id}
-                    canDelete
-                  />
+                  <DocumentList entityType="customer" entityId={selectedCustomer.id} canDelete />
                 </div>
               )}
             </div>
@@ -593,19 +636,34 @@ export const CustomersPage: React.FC = () => {
           </div>
         )}
       </div>
+
       {/* New Customer Modal */}
       <Modal
         isOpen={isAddModalOpen}
-        onClose={() => { setIsAddModalOpen(false); resetAddForm(); }}
+        onClose={() => {
+          setIsAddModalOpen(false);
+          resetAddForm();
+        }}
         title="New Customer"
-        subtitle="Create a fresh customer account and assign it to yourself."
+        subtitle="Create a fresh customer account in PostgreSQL database."
         footer={
           <>
-            <button className="btn btn-secondary" onClick={() => { setIsAddModalOpen(false); resetAddForm(); }}>
+            <button
+              className="btn btn-secondary"
+              onClick={() => {
+                setIsAddModalOpen(false);
+                resetAddForm();
+              }}
+              disabled={savingCustomer}
+            >
               Cancel
             </button>
-            <button className="btn btn-primary" onClick={handleAddCustomer}>
-              Create Customer
+            <button
+              className="btn btn-primary"
+              onClick={handleAddCustomer}
+              disabled={savingCustomer}
+            >
+              {savingCustomer ? 'Creating...' : 'Create Customer'}
             </button>
           </>
         }
@@ -618,7 +676,10 @@ export const CustomersPage: React.FC = () => {
               className={`form-input${addErrors.name ? ' is-invalid' : ''}`}
               placeholder="e.g. Priya Sharma"
               value={newName}
-              onChange={e => { setNewName(e.target.value); if (addErrors.name) setAddErrors(p => ({ ...p, name: undefined })); }}
+              onChange={e => {
+                setNewName(e.target.value);
+                if (addErrors.name) setAddErrors(p => ({ ...p, name: undefined }));
+              }}
             />
             {addErrors.name && <div className="form-error">{addErrors.name}</div>}
           </div>
@@ -629,7 +690,10 @@ export const CustomersPage: React.FC = () => {
               className={`form-input${addErrors.phone ? ' is-invalid' : ''}`}
               placeholder="e.g. +91 98765 43210"
               value={newPhone}
-              onChange={e => { setNewPhone(e.target.value); if (addErrors.phone) setAddErrors(p => ({ ...p, phone: undefined })); }}
+              onChange={e => {
+                setNewPhone(e.target.value);
+                if (addErrors.phone) setAddErrors(p => ({ ...p, phone: undefined }));
+              }}
             />
             {addErrors.phone && <div className="form-error">{addErrors.phone}</div>}
           </div>
@@ -667,54 +731,6 @@ export const CustomersPage: React.FC = () => {
               <option value="Inactive">Inactive</option>
             </select>
           </div>
-          {/* Tenant-Specific Custom Fields */}
-          {(() => {
-            const customerDefs = storageService
-              .getCustomFieldDefinitions(tenant?.id)
-              .filter(d => d.active !== false && d.module === 'customers')
-              .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
-
-            if (customerDefs.length === 0) return null;
-
-            return customerDefs.map(def => {
-              const key = def.fieldKey || def.id;
-              const val = newCustomFields[key] ?? def.defaultValue ?? '';
-              return (
-                <div key={def.id} className="form-group">
-                  <label className="form-label">
-                    {def.label || key}
-                    {def.required ? ' *' : ''}
-                  </label>
-                  {def.fieldType === 'select' && def.options && def.options.length > 0 ? (
-                    <select
-                      className="form-select"
-                      required={def.required}
-                      value={val}
-                      onChange={e => setNewCustomFields(prev => ({ ...prev, [key]: e.target.value }))}
-                    >
-                      {!def.defaultValue && !def.options.includes(val) && (
-                        <option value="">Select {def.label}...</option>
-                      )}
-                      {def.options.map(opt => (
-                        <option key={opt} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type={def.fieldType === 'number' ? 'number' : 'text'}
-                      className="form-input"
-                      required={def.required}
-                      placeholder={`Enter ${def.label}...`}
-                      value={val}
-                      onChange={e => setNewCustomFields(prev => ({ ...prev, [key]: e.target.value }))}
-                    />
-                  )}
-                </div>
-              );
-            });
-          })()}
         </div>
       </Modal>
     </div>

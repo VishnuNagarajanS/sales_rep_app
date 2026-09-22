@@ -1,165 +1,141 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   CalendarCheck,
   Phone,
   AlertTriangle,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2,
 } from 'lucide-react';
 import { Followup } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import { followupsApi } from '../../services/crmApi';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { Drawer } from '../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
 import './FollowupsPage.css';
 
-
 export const FollowupsPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
 
   const [followups, setFollowups] = useState<Followup[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   const [activeTab, setActiveTab] = useState<'all' | 'due' | 'overdue'>('all');
   const [rescheduleItem, setRescheduleItem] = useState<Followup | null>(null);
   const [newDate, setNewDate] = useState('');
+  const [savingReschedule, setSavingReschedule] = useState(false);
 
-  // Profile Drawer state for GHL Sales Exec
+  // Profile Drawer state
   const [drawerFollowup, setDrawerFollowup] = useState<Followup | null>(null);
 
   const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
-  const isGhlSalesExec = tenant?.slug === 'ghl' && isExec;
 
-  const scopedFollowups = isExec
-    ? followups.filter(f =>
-        (f.assignedAgentId && f.assignedAgentId === user?.id) ||
-        (f.assignedAgentName && f.assignedAgentName === user?.name)
-      )
-    : followups;
+  const fetchFollowups = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await followupsApi.getFollowups({
+        status: 'Pending',
+        scope: isExec ? undefined : 'all',
+      });
 
-  const loadData = () => {
-    if (tenant?.slug === 'ghl') {
-      storageService.cleanupGhlPendingFollowups(tenant?.id);
+      if (res?.items) {
+        const rawItems = res.items;
+        const mapped: Followup[] = rawItems.map((f: any) => ({
+          id: String(f.id),
+          tenantId: String(tenant?.id || ''),
+          companyId: String(tenant?.id || ''),
+          contactName: f.contactName || 'Unknown Contact',
+          contactPhone: f.contactPhone || '',
+          contactType: (f.contactType as any) || 'lead',
+          contactId: f.contactId ? String(f.contactId) : '',
+          assignedAgentId: String(f.assignedAgentId || ''),
+          assignedAgentName: f.assignedAgentName || 'Agent',
+          scheduledAt: f.scheduledAt ? new Date(f.scheduledAt).toLocaleString('en-IN') : 'Scheduled',
+          notes: f.notes || '',
+          priority: (f.priority as any) || 'Medium',
+          status: (f.status as any) || 'Pending',
+          completedAt: f.completedAt ? new Date(f.completedAt).toLocaleString('en-IN') : undefined,
+        }));
+        setFollowups(mapped);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to load follow-ups from backend API');
+    } finally {
+      setLoading(false);
     }
-    setFollowups(storageService.getFollowups(tenant?.id) || []);
-  };
+  }, [tenant?.id, isExec]);
 
   useEffect(() => {
-    loadData();
-    const handleUpdate = () => loadData();
-    window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
-  }, [tenant?.id]);
+    fetchFollowups();
+  }, [fetchFollowups]);
 
+  const handleSaveReschedule = async () => {
+    if (!rescheduleItem || !newDate.trim()) return;
 
-  const handleSaveReschedule = () => {
-    if (rescheduleItem && newDate) {
-      storageService.saveFollowup({
-        ...rescheduleItem,
-        scheduledAt: newDate,
+    setSavingReschedule(true);
+    try {
+      // Parse ISO string if user input valid date, or send ISO string
+      const parsedDate = new Date(newDate);
+      const isoDate = isNaN(parsedDate.getTime()) ? new Date().toISOString() : parsedDate.toISOString();
+
+      await followupsApi.updateFollowup(rescheduleItem.id, {
+        scheduledAt: isoDate,
         status: 'Pending',
       });
+
       setRescheduleItem(null);
       setNewDate('');
+      await fetchFollowups();
+    } catch (err: any) {
+      alert(`Failed to reschedule follow-up: ${err.message || 'Please check the date format'}`);
+    } finally {
+      setSavingReschedule(false);
     }
   };
 
-  // Safely deduplicate display rows for GHL Sales Exec (try/catch protected)
-  let processedFollowups = scopedFollowups;
-  if (isGhlSalesExec) {
+  const handleComplete = async (f: Followup) => {
     try {
-      const seen = new Map<string, Followup>();
-      const deduped: Followup[] = [];
-
-      for (const f of scopedFollowups) {
-        if (f.status !== 'Pending') {
-          deduped.push(f);
-          continue;
-        }
-        const phoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-        const key = (f.contactId && f.contactId !== 'contact-new')
-          ? `id:${f.contactId}`
-          : phoneDigits ? `phone:${phoneDigits}` : `raw:${f.id}`;
-
-        if (!seen.has(key)) {
-          seen.set(key, f);
-          deduped.push(f);
-        }
-      }
-      processedFollowups = deduped;
-    } catch (err) {
-      console.error('Error deduping followups list:', err);
-      processedFollowups = scopedFollowups;
+      await followupsApi.completeFollowup(f.id);
+      await fetchFollowups();
+    } catch (err: any) {
+      alert(`Failed to mark follow-up as complete: ${err.message}`);
     }
-  }
-
-  const callsList = storageService.getCalls(tenant?.id) || [];
-
-  const getCallCountForFollowup = (f: Followup): number => {
-    if (!isGhlSalesExec) return 0;
-    const fPhoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-    return callsList.filter(c => {
-      if (f.contactId && f.contactId !== 'contact-new' && (c.leadId === f.contactId || c.contactId === f.contactId)) {
-        return true;
-      }
-      const cPhoneDigits = (c.contactPhone || '').replace(/\D/g, '').slice(-10);
-      return cPhoneDigits && fPhoneDigits && cPhoneDigits === fPhoneDigits;
-    }).length;
   };
 
-  // ── GHL Sales Exec: cross-reference safety filter ────────────────────────
-  // Strips any followup whose matched lead is currently in Not Interested or
-  // Junk — guaranteeing mutual exclusivity at the display layer even if a
-  // Pending record somehow survived a routing transition.
-  if (isGhlSalesExec) {
-    try {
-      const allLeads = storageService.getLeads(tenant?.id) || [];
-      const niJunkLeadIds = new Set<string>(
-        allLeads
-          .filter(l => l.status === 'Not Interested' || l.status === 'Junk')
-          .map(l => l.id)
-      );
-      const niJunkPhones = new Set<string>(
-        allLeads
-          .filter(l => l.status === 'Not Interested' || l.status === 'Junk')
-          .map(l => (l.phone || '').replace(/\D/g, '').slice(-10))
-          .filter(Boolean)
-      );
+  // Determine overdue & due today based on date timestamps
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const endOfToday = startOfToday + 24 * 60 * 60 * 1000;
 
-      processedFollowups = processedFollowups.filter(f => {
-        // Non-pending items are not subject to this mutual-exclusivity rule
-        if (f.status !== 'Pending') return true;
-        // Exclude if lead is now NI/Junk (by id)
-        if (f.contactId && f.contactId !== 'contact-new' && niJunkLeadIds.has(f.contactId)) return false;
-        // Exclude if lead is now NI/Junk (by phone)
-        const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-        if (fPhone && niJunkPhones.has(fPhone)) return false;
-        return true;
-      });
-    } catch (err) {
-      console.error('Error in GHL NI/Junk cross-reference filter:', err);
-    }
-  }
+  const isDueToday = (scheduledAt: string) => {
+    const time = Date.parse(scheduledAt);
+    return !isNaN(time) && time >= startOfToday && time < endOfToday;
+  };
 
-  // Count badges — for GHL exec, 'All Tasks' means active (Pending) tasks only
-  const activePendingFollowups = isGhlSalesExec
-    ? processedFollowups.filter(f => f.status === 'Pending')
-    : processedFollowups;
+  const isOverdue = (scheduledAt: string) => {
+    const time = Date.parse(scheduledAt);
+    return !isNaN(time) && time < startOfToday;
+  };
 
-  const filteredFollowups = processedFollowups.filter(f => {
+  const dueTodayCount = followups.filter(f => isDueToday(f.scheduledAt)).length;
+  const overdueCount = followups.filter(f => isOverdue(f.scheduledAt)).length;
+
+  const filteredFollowups = followups.filter(f => {
     if (activeTab === 'due') {
-      return f.status === 'Pending' && (f.scheduledAt || '').toLowerCase().includes('today');
+      return isDueToday(f.scheduledAt);
     }
     if (activeTab === 'overdue') {
-      return f.status === 'Pending' && (f.scheduledAt || '').toLowerCase().includes('yesterday');
+      return isOverdue(f.scheduledAt);
     }
-    // 'all' tab: for GHL exec show only Pending tasks
-    if (isGhlSalesExec) return f.status === 'Pending';
-    return f.status === 'Pending';
+    return true;
   });
-
-
 
   return (
     <div className="followups-page-container">
@@ -170,17 +146,32 @@ export const FollowupsPage: React.FC = () => {
             <CalendarCheck size={24} color="var(--primary-600)" /> Follow-ups & Reminders
           </h1>
           <p className="page-subtitle">
-            Keep commitments, maintain pipeline velocity, and log outcomes seamlessly.
+            Keep commitments, maintain pipeline velocity, and log outcomes seamlessly via Neon database.
           </p>
         </div>
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={fetchFollowups}
+          disabled={loading}
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh DB Data
+        </button>
       </div>
+
+      {error && (
+        <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#dc2626', padding: '10px 14px', borderRadius: 8, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <AlertCircle size={16} />
+          <span>{error}</span>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="followups-tabs-container">
         {[
-          { id: 'all', label: `All Tasks (${activePendingFollowups.length})` },
-          { id: 'due', label: `Due Today (${activePendingFollowups.filter(f => (f.scheduledAt || '').toLowerCase().includes('today')).length})` },
-          { id: 'overdue', label: `Overdue (${activePendingFollowups.filter(f => (f.scheduledAt || '').toLowerCase().includes('yesterday')).length})`, danger: true },
+          { id: 'all', label: `All Tasks (${followups.length})` },
+          { id: 'due', label: `Due Today (${dueTodayCount})` },
+          { id: 'overdue', label: `Overdue (${overdueCount})`, danger: overdueCount > 0 },
         ].map(tab => (
           <button
             key={tab.id}
@@ -195,62 +186,48 @@ export const FollowupsPage: React.FC = () => {
 
       {/* Follow-ups List Cards */}
       <div className="followups-list">
-        {filteredFollowups.length === 0 ? (
+        {loading && followups.length === 0 ? (
+          <div className="card text-center followups-empty-card">
+            Loading follow-ups from PostgreSQL database...
+          </div>
+        ) : filteredFollowups.length === 0 ? (
           <div className="card text-center followups-empty-card">
             No tasks in this category. You're all caught up!
           </div>
         ) : (
           filteredFollowups.map(f => {
-            const isOverdue = f.status === 'Pending' && (f.scheduledAt || '').toLowerCase().includes('yesterday');
-            const callCount = getCallCountForFollowup(f);
+            const overdue = isOverdue(f.scheduledAt);
 
             return (
               <div
                 key={f.id}
-                className={`card card-hover followup-item-card ${isOverdue ? 'overdue' : ''}`}
-                onClick={isGhlSalesExec ? () => setDrawerFollowup(f) : undefined}
-                style={isGhlSalesExec ? { cursor: 'pointer' } : undefined}
+                className={`card card-hover followup-item-card ${overdue ? 'overdue' : ''}`}
+                onClick={() => setDrawerFollowup(f)}
+                style={{ cursor: 'pointer' }}
               >
                 <div className="followup-item-left">
-
                   <div>
                     <div className="followup-contact-header" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <span
                         className="followup-contact-name"
-                        style={isGhlSalesExec ? { color: 'var(--primary-600)', fontWeight: 700 } : undefined}
+                        style={{ color: 'var(--primary-600)', fontWeight: 700 }}
                       >
                         {f.contactName}
                       </span>
 
                       <StatusChip status={f.priority} size="sm" />
 
-                      {isGhlSalesExec && (
-                        <span
-                          style={{
-                            backgroundColor: '#f1f5f9',
-                            color: '#475569',
-                            fontSize: 11,
-                            fontWeight: 600,
-                            padding: '2px 8px',
-                            borderRadius: 12,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 4,
-                          }}
-                        >
-                          📞 {callCount} {callCount === 1 ? 'call' : 'calls'}
-                        </span>
-                      )}
-
                       <span className="followup-contact-phone">
                         Phone: {f.contactPhone}
                       </span>
                     </div>
-                    <p className="followup-notes">
-                      {f.notes}
-                    </p>
+                    {f.notes && (
+                      <p className="followup-notes">
+                        {f.notes}
+                      </p>
+                    )}
                     <div className="followup-meta-row">
-                      <span className={`followup-schedule-time ${isOverdue ? 'overdue' : ''}`}>
+                      <span className={`followup-schedule-time ${overdue ? 'overdue' : ''}`}>
                         ⏰ {f.scheduledAt}
                       </span>
                       <span className="followup-assignee">• Assignee: {f.assignedAgentName}</span>
@@ -259,6 +236,16 @@ export const FollowupsPage: React.FC = () => {
                 </div>
 
                 <div className="followup-actions-right">
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleComplete(f);
+                    }}
+                    title="Mark Done"
+                  >
+                    <CheckCircle2 size={15} color="#16a34a" /> Done
+                  </button>
                   <button
                     className="btn btn-secondary btn-sm"
                     onClick={(e) => {
@@ -292,11 +279,11 @@ export const FollowupsPage: React.FC = () => {
         subtitle={`Adjust scheduled reminder date for ${rescheduleItem?.contactName}`}
         footer={
           <>
-            <button className="btn btn-secondary" onClick={() => setRescheduleItem(null)}>
+            <button className="btn btn-secondary" onClick={() => setRescheduleItem(null)} disabled={savingReschedule}>
               Cancel
             </button>
-            <button className="btn btn-primary" onClick={handleSaveReschedule}>
-              Save New Slot
+            <button className="btn btn-primary" onClick={handleSaveReschedule} disabled={savingReschedule}>
+              {savingReschedule ? 'Saving...' : 'Save New Slot'}
             </button>
           </>
         }
@@ -304,46 +291,43 @@ export const FollowupsPage: React.FC = () => {
         <div className="form-group">
           <label className="form-label">New Date & Time</label>
           <input
-            type="text"
+            type="datetime-local"
             className="form-input"
             value={newDate}
             onChange={e => setNewDate(e.target.value)}
-            placeholder="e.g. Next Monday, 10:00 AM"
           />
         </div>
       </Modal>
 
-      {/* Contact Profile Drawer (GHL Sales Exec only) */}
-      {isGhlSalesExec && (
-        <Drawer
-          isOpen={!!drawerFollowup}
-          onClose={() => setDrawerFollowup(null)}
-          title={drawerFollowup?.contactName || 'Contact Profile'}
-          subtitle={`Phone: ${drawerFollowup?.contactPhone || '—'} • ${tenant?.name}`}
-          width={600}
-        >
-          {drawerFollowup && (
-            <LeadDetailDrawerContent
-              contactName={drawerFollowup.contactName}
-              contactPhone={drawerFollowup.contactPhone}
-              contactId={drawerFollowup.contactId}
-              contactType={drawerFollowup.contactType}
-              tenantId={tenant?.id}
-              tenantName={tenant?.name}
-              onCall={() =>
-                initiateCall(
-                  drawerFollowup.contactName,
-                  drawerFollowup.contactPhone,
-                  drawerFollowup.contactType as any,
-                  drawerFollowup.contactId,
-                  drawerFollowup.id
-                )
-              }
-              callDispositionFilter={['Follow-up Required', 'Call Back']}
-            />
-          )}
-        </Drawer>
-      )}
+      {/* Contact Profile Drawer */}
+      <Drawer
+        isOpen={!!drawerFollowup}
+        onClose={() => setDrawerFollowup(null)}
+        title={drawerFollowup?.contactName || 'Contact Profile'}
+        subtitle={`Phone: ${drawerFollowup?.contactPhone || '—'} • ${tenant?.name || 'CRM'}`}
+        width={600}
+      >
+        {drawerFollowup && (
+          <LeadDetailDrawerContent
+            contactName={drawerFollowup.contactName}
+            contactPhone={drawerFollowup.contactPhone}
+            contactId={drawerFollowup.contactId}
+            contactType={drawerFollowup.contactType}
+            tenantId={tenant?.id}
+            tenantName={tenant?.name}
+            onCall={() =>
+              initiateCall(
+                drawerFollowup.contactName,
+                drawerFollowup.contactPhone,
+                drawerFollowup.contactType as any,
+                drawerFollowup.contactId,
+                drawerFollowup.id
+              )
+            }
+            callDispositionFilter={['Follow-up Required', 'Call Back']}
+          />
+        )}
+      </Drawer>
     </div>
   );
 };

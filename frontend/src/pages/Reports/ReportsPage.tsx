@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BarChart3, Download, TrendingUp, PhoneCall, Users, Award, MapPin, Building } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { storageService } from '../../services/storageService';
+import { leadsApi, customersApi, callsApi, consultationsApi, followupsApi } from '../../services/crmApi';
 import { PIPELINE_STAGES } from '../../constants/pipelineStages';
 import { FEATURES } from '../../constants/features';
 import { EmptyState } from '../../components/common/EmptyState';
@@ -22,23 +22,119 @@ export const ReportsPage: React.FC = () => {
   const [followups, setFollowups] = useState<Followup[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
 
-  const loadData = () => {
-    setLeads(storageService.getLeads(tenant?.id) || []);
-    setDeals(storageService.getDeals(tenant?.id) || []);
-    setCalls(storageService.getCalls(tenant?.id) || []);
-    setSiteVisits(storageService.getSiteVisits(tenant?.id) || []);
-    setBookings(storageService.getBookings(tenant?.id) || []);
-    setConsultations(storageService.getConsultations(tenant?.id) || []);
-    setOpportunities(storageService.getOpportunities(tenant?.id) || []);
-    setFollowups(storageService.getFollowups(tenant?.id) || []);
-    setCustomers(storageService.getCustomers(tenant?.id) || []);
+  const loadData = async () => {
+    try {
+      const emptyPaged = { items: [], totalCount: 0, page: 1, pageSize: 100, totalPages: 0 };
+      const [leadsRes, custsRes, callsRes, cnsRes, fwRes] = await Promise.all([
+        leadsApi.getActiveLeads({ pageSize: 100 }).catch(() => emptyPaged),
+        customersApi.getCustomers({ pageSize: 100 }).catch(() => emptyPaged),
+        callsApi.getCalls({ pageSize: 100 }).catch(() => emptyPaged),
+        consultationsApi.getConsultations({ pageSize: 100 }).catch(() => emptyPaged),
+        followupsApi.getFollowups({ pageSize: 100 }).catch(() => emptyPaged),
+      ]);
+
+      if (leadsRes?.items) {
+        const raw = leadsRes.items;
+        setLeads(raw.map((l: any) => ({
+          id: String(l.id),
+          tenantId: String(tenant?.id || ''),
+          companyId: String(tenant?.id || ''),
+          name: l.name || '',
+          phone: l.phone || '',
+          email: l.email || '',
+          location: l.location || '',
+          status: l.status || 'New',
+          priority: l.priority || 'Medium',
+          source: l.source || 'Direct',
+          assignedAgentId: String(l.assignedAgentId || ''),
+          assignedAgentName: l.assignedAgentName || 'Agent',
+          notes: l.notes || '',
+          customFields: l.customFields || {},
+          createdAt: l.createdAt || new Date().toISOString(),
+        })));
+      }
+
+      if (custsRes?.items) {
+        const raw = custsRes.items;
+        setCustomers(raw.map((c: any) => ({
+          id: String(c.id),
+          companyId: String(tenant?.id || ''),
+          name: c.name || '',
+          phone: c.phone || '',
+          email: c.email || '',
+          status: c.status || 'Active',
+          assignedAgentId: String(c.assignedAgentId || ''),
+          assignedAgentName: c.assignedAgentName || 'Agent',
+          location: c.location || '',
+          lastContacted: c.lastContacted || '',
+          openDealsCount: c.openDealsCount || 0,
+          totalValue: Number(c.totalValue || 0),
+          customFields: c.customFields || {},
+          createdAt: c.createdAt || new Date().toISOString(),
+          notes: c.notes || '',
+        })));
+      }
+
+      if (callsRes?.items) {
+        const raw = callsRes.items;
+        setCalls(raw.map((c: any) => ({
+          id: String(c.id),
+          tenantId: String(tenant?.id || ''),
+          companyId: String(tenant?.id || ''),
+          contactName: c.contactName || '',
+          contactPhone: c.contactPhone || '',
+          agentId: String(c.agentId || ''),
+          agentName: c.agentName || 'Agent',
+          direction: (c.direction || 'outbound').toLowerCase() as any,
+          duration: Number(c.duration || 0),
+          disposition: c.disposition || 'Interested',
+          timestamp: c.timestamp || new Date().toISOString(),
+          notes: c.notes || '',
+        })));
+      }
+
+      if (cnsRes?.items) {
+        const raw = cnsRes.items;
+        setConsultations(raw.map((c: any) => ({
+          id: String(c.id),
+          companyId: String(tenant?.id || ''),
+          investorId: String(c.investorId || ''),
+          investorName: c.investorName || '',
+          investorPhone: c.investorPhone || '',
+          consultantId: String(c.consultantId || ''),
+          consultantName: c.consultantName || '',
+          scheduledAt: c.scheduledAt || '',
+          status: c.status || 'Scheduled',
+          agenda: c.agenda || '',
+          outcomeNotes: c.outcomeNotes || '',
+        })));
+      }
+
+      if (fwRes?.items) {
+        const raw = fwRes.items;
+        setFollowups(raw.map((f: any) => ({
+          id: String(f.id),
+          tenantId: String(tenant?.id || ''),
+          companyId: String(tenant?.id || ''),
+          contactName: f.contactName || '',
+          contactPhone: f.contactPhone || '',
+          contactType: f.contactType || 'lead',
+          contactId: f.contactId ? String(f.contactId) : '',
+          assignedAgentId: String(f.assignedAgentId || ''),
+          assignedAgentName: f.assignedAgentName || 'Agent',
+          scheduledAt: f.scheduledAt || '',
+          notes: f.notes || '',
+          priority: f.priority || 'Medium',
+          status: f.status || 'Pending',
+        })));
+      }
+    } catch {
+      // ignore
+    }
   };
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
-    window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id]);
 
   // Currency Formatter
@@ -246,7 +342,7 @@ export const ReportsPage: React.FC = () => {
   const agentMap = new Map<string, AgentPerformance>();
 
   // Include tenant users so configured staff are visible
-  const tenantUsers = storageService.getUsers(tenant?.slug);
+  const tenantUsers = user ? [user] : [];
   tenantUsers.forEach(u => {
     agentMap.set(u.id, {
       id: u.id,

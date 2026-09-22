@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, FileImage, FileSpreadsheet, Trash2, File } from 'lucide-react';
 import { DocumentItem } from '../../types';
-import { storageService } from '../../services/storageService';
+import { documentStore } from '../../services/documentStore';
 import { EmptyState } from './EmptyState';
 import './DocumentList.css';
 
@@ -9,7 +9,7 @@ import './DocumentList.css';
 
 interface DocumentListProps {
   entityType: DocumentItem['entityType'];
-  entityId: string;
+  entityId?: string;
   /** If true, a delete button is rendered per row. Default: false. */
   canDelete?: boolean;
 }
@@ -43,18 +43,18 @@ export const DocumentList: React.FC<DocumentListProps> = ({
   const [docs, setDocs] = useState<DocumentItem[]>([]);
 
   const loadDocs = () => {
-    setDocs(storageService.getDocuments(entityType, entityId));
+    setDocs(documentStore.getDocuments(entityType, entityId || ''));
   };
 
   useEffect(() => {
     loadDocs();
-    window.addEventListener('nexus_storage_updated', loadDocs);
-    return () => window.removeEventListener('nexus_storage_updated', loadDocs);
+    window.addEventListener('nexus_docs_updated', loadDocs);
+    return () => window.removeEventListener('nexus_docs_updated', loadDocs);
   }, [entityType, entityId]);
 
   const handleDelete = (id: string) => {
     if (confirm('Remove this document record?')) {
-      storageService.deleteDocument(id);
+      documentStore.deleteDocument(id);
     }
   };
 

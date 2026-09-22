@@ -3,111 +3,88 @@ import { Phone, ExternalLink, XCircle, RefreshCw } from 'lucide-react';
 import { Lead } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import { leadsApi, LeadDto } from '../../services/crmApi';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { Drawer } from '../../components/common/Drawer';
 import { Timeline, TimelineEvent } from '../../components/common/Timeline';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
 import './NotInterestedPage.css';
 
+const mapDtoToLead = (dto: LeadDto): Lead => ({
+  id: String(dto.id),
+  companyId: String(dto.companyId),
+  name: dto.name,
+  phone: dto.phone,
+  email: dto.email || '',
+  location: dto.location || '',
+  source: dto.source || 'Website Inbound',
+  status: (dto.status as any) || 'Not Interested',
+  priority: (dto.priority as any) || 'Medium',
+  assignedAgentId: String(dto.assignedAgentId),
+  assignedAgentName: dto.assignedAgentName || 'Agent',
+  nextFollowupDate: dto.nextFollowupDate,
+  createdAt: dto.createdAt ? dto.createdAt.split('T')[0] : new Date().toISOString().split('T')[0],
+  notes: dto.notes || '',
+  customFields: dto.customFields || {},
+});
+
 export const NotInterestedPage: React.FC = () => {
-  const { tenant, user } = useAuth();
+  const { tenant } = useAuth();
   const { initiateCall } = useCall();
 
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [reengaging, setReengaging] = useState(false);
 
-  const roleCode = user?.role?.code;
-  const isExec = roleCode === 'sales_executive';
-  const isGhlSalesExec = tenant?.slug === 'ghl' && isExec;
+  const isGhlSalesExec = tenant?.slug === 'ghl';
 
-  const loadData = () => {
-    const allLeads = storageService.getLeads(tenant?.id);
-    const niLeads = allLeads.filter(l => l.status === 'Not Interested');
-
-    const scopedLeads = isExec
-      ? niLeads.filter(l =>
-          (l.assignedAgentId && l.assignedAgentId === user?.id) ||
-          (l.assignedAgentName && l.assignedAgentName === user?.name)
-        )
-      : niLeads;
-
-    setLeads(scopedLeads);
+  const loadData = async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const data = await leadsApi.getNotInterestedLeads();
+      setLeads((data.items || []).map(mapDtoToLead));
+    } catch (err: any) {
+      setLoadError(err.message || 'Failed to load Not-Interested leads from PostgreSQL.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
-    window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
-  }, [tenant?.id, user?.id, isExec]);
+  }, [tenant?.id]);
 
-  // Re-engage: move lead from Not Interested → Contacted and create a follow-up entry
-  const handleReengage = (lead: Lead) => {
-    if (!tenant || !user) return;
+  // Re-engage: move lead from Not Interested → Contacted via API
+  const handleReengage = async (lead: Lead) => {
     setReengaging(true);
     try {
-      // Reset lead status to Contacted
-      storageService.saveLead({ ...lead, status: 'Contacted' });
-
-      // Purge any stale Pending followups for this contact, then create a fresh one
-      storageService.purgeFollowupsForContact(tenant.id, lead.id, lead.phone);
-
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      storageService.saveFollowup({
-        id: `flw-${Date.now()}`,
-        companyId: tenant.id,
-        contactId: lead.id,
-        contactName: lead.name,
-        contactPhone: lead.phone,
-        contactType: 'lead',
-        scheduledAt: tomorrow.toISOString(),
-        priority: 'High',
-        status: 'Pending',
-        notes: `Re-engaged from Not Interested — follow-up required with ${lead.name}.`,
-        assignedAgentId: user.id,
-        assignedAgentName: user.name,
-      });
-
+      if (!isNaN(Number(lead.id))) {
+        await leadsApi.reengageLead(Number(lead.id));
+      }
       setIsDetailDrawerOpen(false);
       setSelectedLead(null);
+      await loadData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to re-engage lead.');
     } finally {
       setReengaging(false);
     }
   };
 
   const getNotInterestedReason = (lead: Lead): string => {
-    // 1. Check customFields (saved during call disposition wrap-up)
     if (lead.customFields?.dispositionReason?.trim()) {
       return lead.customFields.dispositionReason.trim();
     }
-
-    // 2. Parse from lead notes if present
     if (lead.notes) {
       const match = lead.notes.match(/Not Interested Reason:\s*([^\n]+)/i);
       if (match && match[1]?.trim()) {
         return match[1].trim();
       }
     }
-
-    // 3. Fallback to latest call log with disposition 'Not Interested'
-    const calls = storageService
-      .getCalls(tenant?.id)
-      .filter(c => (c.contactPhone === lead.phone || c.contactName === lead.name) && c.disposition === 'Not Interested');
-    if (calls.length > 0) {
-      const latestCall = calls.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
-      if (latestCall.notes) {
-        const reasonMatch = latestCall.notes.match(/Reason:\s*([^\n]+)/i);
-        if (reasonMatch && reasonMatch[1]?.trim()) {
-          return reasonMatch[1].trim();
-        }
-        return latestCall.notes.trim();
-      }
-    }
-
     return 'No specific reason provided';
   };
 
@@ -206,26 +183,11 @@ export const NotInterestedPage: React.FC = () => {
       actorName: lead.assignedAgentName,
     });
 
-    const calls = storageService.getCalls(tenant?.id).filter(c => c.contactPhone === lead.phone || c.contactName === lead.name);
-
-    calls.forEach(c => {
-      events.push({
-        id: `ev-call-${c.id}`,
-        type: 'call',
-        title: `Call Logged - ${c.disposition}`,
-        description: `Duration: ${Math.floor(c.duration / 60)}m ${c.duration % 60}s. ${c.notes || ''}`,
-        timestamp: c.timestamp,
-        actorName: c.agentName,
-      });
-    });
-
-    return events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    return events;
   };
 
   const timelineEvents = selectedLead && !isGhlSalesExec ? getTimelineEvents(selectedLead) : [];
-  const callsCount = selectedLead && !isGhlSalesExec
-    ? storageService.getCalls(tenant?.id).filter(c => c.contactPhone === selectedLead.phone || c.contactName === selectedLead.name).length
-    : 0;
+  const callsCount = 0;
 
   return (
     <div className="not-interested-page">

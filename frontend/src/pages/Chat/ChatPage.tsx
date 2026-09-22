@@ -3,7 +3,7 @@ import { MessageSquare, Phone, Video, ArrowLeft } from 'lucide-react';
 import { ChatConversation, ChatMember } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import { userStore } from '../../services/secondaryStores';
 import * as cs from '../../services/chatStorage';
 import { ConversationList } from './ConversationList';
 import { MessageThread } from './MessageThread';
@@ -64,8 +64,8 @@ export const ChatPage: React.FC<{ onNavigate?: (route: string) => void }> = ({ o
     const convs = cs.getConversations(companyId);
     setConversations(convs);
 
-    // Build directory from storageService users, filtered strictly to this company
-    const allUsers = storageService.getUsers(tenant?.slug);
+    // Build directory from userStore users, filtered strictly to this company
+    const allUsers = userStore.getUsers(tenant?.slug);
     setDirectory(cs.buildDirectory(allUsers as any, companyId, tenant?.slug));
   }, [companyId, tenant?.slug]);
 

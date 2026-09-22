@@ -1,14 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Calendar,
   Plus,
   Phone,
   Clock,
+  RefreshCw,
+  AlertCircle,
 } from 'lucide-react';
-import { Consultation, Investor } from '../../types';
+import { Consultation } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import { consultationsApi, customersApi } from '../../services/crmApi';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { Modal } from '../../components/common/Modal';
@@ -16,7 +18,7 @@ import { Drawer } from '../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
 import './ConsultationsPage.css';
 
-// ─── Status Options (kept for the create/reschedule form only) ───────────────
+// ─── Status Options ─────────────────────────────────────────────────────────
 const STATUS_OPTIONS: { value: Consultation['status']; label: string }[] = [
   { value: 'Scheduled', label: 'Scheduled' },
   { value: 'Completed', label: 'Completed' },
@@ -50,17 +52,21 @@ const BLANK_FORM: ConsultationForm = {
   outcomeNotes: '',
 };
 
-// ─── Component ───────────────────────────────────────────────────────────────
+interface InvestorOption {
+  id: string;
+  name: string;
+  phone: string;
+}
+
 export const ConsultationsPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
 
-  // ── Role scoping ──────────────────────────────────────────────────────────
-  const roleCode = user?.role?.code;
-  const isExec = roleCode === 'sales_executive';
-
   const [consultations, setConsultations] = useState<Consultation[]>([]);
-  const [investors, setInvestors] = useState<Investor[]>([]);
+  const [investorOptions, setInvestorOptions] = useState<InvestorOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   const [drawerConsultation, setDrawerConsultation] = useState<Consultation | null>(null);
 
   // ── Filters ───────────────────────────────────────────────────────────────
@@ -72,96 +78,65 @@ export const ConsultationsPage: React.FC = () => {
   const [isRescheduleMode, setIsRescheduleMode] = useState(false);
   const [form, setForm] = useState<ConsultationForm>(BLANK_FORM);
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof ConsultationForm, string>>>({});
+  const [isSaving, setIsSaving] = useState(false);
 
   // ── Data loading ──────────────────────────────────────────────────────────
-  const loadData = () => {
-    setConsultations(storageService.getConsultations(tenant?.id));
-    setInvestors(storageService.getInvestors(tenant?.id));
-  };
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [cnsRes, custRes] = await Promise.all([
+        consultationsApi.getConsultations(),
+        customersApi.getCustomers({ pageSize: 100 }),
+      ]);
+
+      if (cnsRes?.items) {
+        const raw = cnsRes.items;
+        const mapped: Consultation[] = raw.map((c: any) => ({
+          id: String(c.id),
+          companyId: String(tenant?.id || ''),
+          investorId: String(c.investorId || ''),
+          investorName: c.investorName || 'Investor',
+          investorPhone: c.investorPhone || '',
+          consultantId: String(c.consultantId || ''),
+          consultantName: c.consultantName || 'Consultant',
+          scheduledAt: c.scheduledAt ? new Date(c.scheduledAt).toLocaleString('en-IN') : 'Scheduled',
+          status: (c.status as any) || 'Scheduled',
+          agenda: c.agenda || '',
+          outcomeNotes: c.outcomeNotes || '',
+        }));
+        setConsultations(mapped);
+      }
+
+      if (custRes?.items) {
+        const rawCusts = custRes.items;
+        setInvestorOptions(
+          rawCusts.map((c: any) => ({
+            id: String(c.id),
+            name: c.name || 'Client',
+            phone: c.phone || '',
+          }))
+        );
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to load consultations from backend API');
+    } finally {
+      setLoading(false);
+    }
+  }, [tenant?.id]);
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
-    window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
-  }, [tenant?.id]);
+  }, [loadData]);
 
-  // ── Helper to parse timestamp for newest-first sorting / deduplication ────
-  const getConsultationTimestamp = (c: Consultation): number => {
-    // 1. Highest timestamp parsed from the cns-<timestamp> id
-    const match = (c.id || '').match(/^cns-(\d+)$/);
-    if (match) {
-      const ts = parseInt(match[1], 10);
-      if (!isNaN(ts) && ts > 10000000000) return ts;
-    }
-    // 2. Fall back to parsing scheduledAt
-    if (c.scheduledAt) {
-      const parsed = Date.parse(c.scheduledAt);
-      if (!isNaN(parsed)) return parsed;
-    }
-    // 3. Fall back to any numeric value from id (e.g. seed data cns-01 -> 1)
-    if (match) {
-      const ts = parseInt(match[1], 10);
-      if (!isNaN(ts)) return ts;
-    }
-    return 0;
-  };
-
-  // ── Role-based scoping ────────────────────────────────────────────────────
-  const scopedConsultations = consultations;
-
-  // ── Group by investor & derive latestByInvestor (at most ONE row per investor) ──
-  const latestByInvestor = (() => {
-    // Pre-pass: map normalized phone digits to investorId if any consultation for that phone has one
-    const phoneToInvestorId = new Map<string, string>();
-    for (const c of scopedConsultations) {
-      if (c.investorId && c.investorId.trim()) {
-        const phone = (c.investorPhone || '').replace(/\D/g, '').slice(-10);
-        if (phone) phoneToInvestorId.set(phone, c.investorId.trim());
-      }
-    }
-
-    const getInvestorKey = (c: Consultation): string => {
-      if (c.investorId && c.investorId.trim()) {
-        return `id:${c.investorId.trim()}`;
-      }
-      const phone = (c.investorPhone || '').replace(/\D/g, '').slice(-10);
-      if (phone && phoneToInvestorId.has(phone)) {
-        return `id:${phoneToInvestorId.get(phone)}`;
-      }
-      if (phone) {
-        return `phone:${phone}`;
-      }
-      return `cns:${c.id}`;
-    };
-
-    const map = new Map<string, Consultation>();
-    for (const c of scopedConsultations) {
-      const key = getInvestorKey(c);
-      const existing = map.get(key);
-      if (!existing) {
-        map.set(key, c);
-      } else {
-        if (getConsultationTimestamp(c) > getConsultationTimestamp(existing)) {
-          map.set(key, c);
-        }
-      }
-    }
-
-    return Array.from(map.values()).sort(
-      (a, b) => getConsultationTimestamp(b) - getConsultationTimestamp(a)
-    );
-  })();
-
-  // ── Filter options (operates on deduplicated latestByInvestor) ────────────
+  // ── Consultant Filter options ─────────────────────────────────────────────
   const consultantOptions = Array.from(
-    new Set(latestByInvestor.map(c => c.consultantName)),
+    new Set(consultations.map(c => c.consultantName))
   )
     .filter(Boolean)
     .map(name => ({ value: name, label: name }));
 
-  // ── Filtered list (operates on deduplicated latestByInvestor) ─────────────
-  const filteredConsultations = latestByInvestor.filter(c => {
+  const filteredConsultations = consultations.filter(c => {
     if (consultantFilter !== 'All' && c.consultantName !== consultantFilter) return false;
     return true;
   });
@@ -172,10 +147,10 @@ export const ConsultationsPage: React.FC = () => {
     setIsRescheduleMode(false);
     setForm({
       ...BLANK_FORM,
-      scheduledAt: 'This Friday, 03:00 PM',
-      agenda: 'Commercial REIT yield analysis & pass-through taxation discussion.',
-      consultantId: user?.id ?? '',
-      consultantName: user?.name ?? 'Advisor',
+      scheduledAt: new Date(Date.now() + 86400000 * 2).toISOString().slice(0, 16),
+      agenda: 'Commercial asset class yield analysis & investment mandate review.',
+      consultantId: String(user?.id || ''),
+      consultantName: user?.name || 'Advisor',
     });
     setFormErrors({});
     setIsModalOpen(true);
@@ -188,7 +163,7 @@ export const ConsultationsPage: React.FC = () => {
       investorId: c.investorId,
       investorName: c.investorName,
       investorPhone: c.investorPhone,
-      scheduledAt: c.scheduledAt,
+      scheduledAt: '',
       consultantId: c.consultantId,
       consultantName: c.consultantName,
       status: 'Rescheduled',
@@ -212,7 +187,7 @@ export const ConsultationsPage: React.FC = () => {
     if (formErrors[key]) setFormErrors(prev => ({ ...prev, [key]: undefined }));
   };
 
-  const handleSaveConsultation = (e?: React.FormEvent) => {
+  const handleSaveConsultation = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
     const errors: Partial<Record<keyof ConsultationForm, string>> = {};
@@ -223,45 +198,35 @@ export const ConsultationsPage: React.FC = () => {
       return;
     }
 
-    const isEdit = !!editingConsultation;
-    const cons: Consultation = {
-      id: editingConsultation ? editingConsultation.id : `cns-${Date.now()}`,
-      companyId: tenant?.id || 't-ghl-01',
-      investorId: form.investorId,
-      investorName: form.investorName,
-      investorPhone: form.investorPhone,
-      scheduledAt: form.scheduledAt.trim(),
-      consultantId: form.consultantId.trim() || (user?.id ?? 'usr-admin'),
-      consultantName: form.consultantName.trim() || (user?.name ?? 'Advisor'),
-      status: form.status,
-      agenda: form.agenda.trim(),
-      outcomeNotes: form.outcomeNotes.trim() || undefined,
-    };
+    setIsSaving(true);
+    try {
+      const parsedDate = new Date(form.scheduledAt);
+      const isoDate = isNaN(parsedDate.getTime()) ? new Date().toISOString() : parsedDate.toISOString();
 
-    storageService.saveConsultation(cons);
+      if (editingConsultation) {
+        await consultationsApi.updateConsultation(editingConsultation.id, {
+          scheduledAt: isoDate,
+          status: form.status,
+          agenda: form.agenda.trim(),
+          outcomeNotes: form.outcomeNotes.trim() || undefined,
+        });
+      } else {
+        await consultationsApi.scheduleConsultation({
+          investorId: form.investorId,
+          investorName: form.investorName,
+          investorPhone: form.investorPhone,
+          scheduledAt: isoDate,
+          agenda: form.agenda.trim(),
+        });
+      }
 
-    storageService.addAuditLog({
-      id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
-      actorName: user?.name || 'Advisor',
-      actorEmail: user?.email || 'advisor@ghl.com',
-      action: isEdit
-        ? isRescheduleMode
-          ? 'CONSULTATION_RESCHEDULED'
-          : 'CONSULTATION_UPDATED'
-        : 'CONSULTATION_SCHEDULED',
-      entityType: 'Consultation',
-      entityId: cons.id,
-      companyId: tenant?.id,
-      companyName: tenant?.name,
-      details: isEdit
-        ? isRescheduleMode
-          ? `Rescheduled consultation with ${cons.investorName} to ${cons.scheduledAt}.`
-          : `Updated consultation with ${cons.investorName} (Status: ${cons.status}).`
-        : `Scheduled wealth advisory consultation with ${cons.investorName}.`,
-    });
-
-    closeModal();
+      closeModal();
+      await loadData();
+    } catch (err: any) {
+      alert(`Failed to save consultation: ${err.message || 'Please check inputs'}`);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // ── Table columns ─────────────────────────────────────────────────────────
@@ -270,11 +235,11 @@ export const ConsultationsPage: React.FC = () => {
       key: 'scheduledAt',
       header: 'Session Slot',
       sortable: true,
-      width: '18%',
+      width: '20%',
       render: c => (
         <div>
           <div className="consultation-slot-title">{c.scheduledAt}</div>
-          <div className="consultation-slot-id">ID: {c.id}</div>
+          <div className="consultation-slot-id">ID: #{c.id}</div>
         </div>
       ),
     },
@@ -282,7 +247,7 @@ export const ConsultationsPage: React.FC = () => {
       key: 'investorName',
       header: 'Investor Profile',
       sortable: true,
-      width: '18%',
+      width: '20%',
       render: c => (
         <div>
           <div className="consultation-client-name">{c.investorName}</div>
@@ -293,7 +258,7 @@ export const ConsultationsPage: React.FC = () => {
     {
       key: 'agenda',
       header: 'Reason for Consultation',
-      width: '38%',
+      width: '35%',
       render: c => (
         <div>
           <span className="consultation-agenda-text">{c.agenda}</span>
@@ -314,8 +279,8 @@ export const ConsultationsPage: React.FC = () => {
     },
     {
       key: 'consultantName',
-      header: 'IRM Profile',
-      width: '16%',
+      header: 'Consultant / Advisor',
+      width: '15%',
       render: c => <span className="consultation-advisor-name">{c.consultantName}</span>,
     },
   ];
@@ -335,7 +300,6 @@ export const ConsultationsPage: React.FC = () => {
     },
   ];
 
-  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="consultations-page-container">
       <div className="page-header">
@@ -344,22 +308,38 @@ export const ConsultationsPage: React.FC = () => {
             <Calendar size={24} color="#0284c7" /> Wealth Advisory Consultations
           </h1>
           <p className="page-subtitle">
-            1-on-1 private advisory sessions, term sheet reviews, and mandate agreements for{' '}
-            {tenant?.name}.
+            1-on-1 private advisory sessions, term sheet reviews, and mandate agreements in Neon database.
           </p>
         </div>
 
-        <button
-          id="consultations-schedule-btn"
-          className="btn btn-primary"
-          style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
-          onClick={openCreateModal}
-        >
-          <Plus size={15} /> Schedule Consultation
-        </button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            className="btn btn-secondary"
+            onClick={loadData}
+            disabled={loading}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+          >
+            <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh DB Data
+          </button>
+          <button
+            id="consultations-schedule-btn"
+            className="btn btn-primary"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+            onClick={openCreateModal}
+          >
+            <Plus size={15} /> Schedule Consultation
+          </button>
+        </div>
       </div>
 
-      {/* ── Data table ───────────────────────────────────────────────────── */}
+      {error && (
+        <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#dc2626', padding: '10px 14px', borderRadius: 8, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <AlertCircle size={16} />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* Data table */}
       <DataTable
         columns={columns}
         data={filteredConsultations}
@@ -385,7 +365,7 @@ export const ConsultationsPage: React.FC = () => {
         }
       />
 
-      {/* ── Schedule / Edit / Reschedule Consultation Modal ──────────────── */}
+      {/* Schedule / Edit / Reschedule Consultation Modal */}
       <Modal
         isOpen={isModalOpen}
         onClose={closeModal}
@@ -402,15 +382,18 @@ export const ConsultationsPage: React.FC = () => {
         maxWidth={620}
         footer={
           <>
-            <button type="button" className="btn btn-secondary" onClick={closeModal}>
+            <button type="button" className="btn btn-secondary" onClick={closeModal} disabled={isSaving}>
               Cancel
             </button>
             <button
               type="button"
               className="btn btn-primary"
               onClick={() => handleSaveConsultation()}
+              disabled={isSaving}
             >
-              {isRescheduleMode
+              {isSaving
+                ? 'Saving...'
+                : isRescheduleMode
                 ? 'Save Reschedule'
                 : 'Confirm Advisory Slot'}
             </button>
@@ -426,19 +409,20 @@ export const ConsultationsPage: React.FC = () => {
               className={`form-select${formErrors.investorId ? ' is-invalid' : ''}`}
               value={form.investorId}
               onChange={e => {
-                const inv = investors.find(i => i.id === e.target.value);
+                const inv = investorOptions.find(i => i.id === e.target.value);
                 setField('investorId', e.target.value);
                 setField('investorName', inv?.name ?? '');
                 setField('investorPhone', inv?.phone ?? '');
               }}
+              disabled={isRescheduleMode}
             >
               <option value="">— Select Investor —</option>
-              {form.investorId && !investors.some(i => i.id === form.investorId) && (
+              {form.investorId && !investorOptions.some(i => i.id === form.investorId) && (
                 <option value={form.investorId}>
                   {form.investorName || form.investorId} (Current)
                 </option>
               )}
-              {investors.map(inv => (
+              {investorOptions.map(inv => (
                 <option key={inv.id} value={inv.id}>
                   {inv.name} {inv.phone ? `(${inv.phone})` : ''}
                 </option>
@@ -449,182 +433,93 @@ export const ConsultationsPage: React.FC = () => {
             )}
           </div>
 
-          <div className="consultation-form-grid-2">
-            <div className="form-group">
-              <label className="form-label">Investor Phone</label>
-              <input
-                id="consultation-form-phone"
-                type="text"
-                className="form-input"
-                placeholder="+91 98800 00000"
-                value={form.investorPhone}
-                onChange={e => setField('investorPhone', e.target.value)}
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Consultation Slot *</label>
-              <input
-                id="consultation-form-slot"
-                type="text"
-                className={`form-input${formErrors.scheduledAt ? ' is-invalid' : ''}`}
-                placeholder="e.g. Thursday, 04:00 PM"
-                value={form.scheduledAt}
-                onChange={e => setField('scheduledAt', e.target.value)}
-              />
-              {formErrors.scheduledAt && (
-                <div className="form-error">{formErrors.scheduledAt}</div>
-              )}
-            </div>
+          {/* Scheduled At */}
+          <div className="form-group">
+            <label className="form-label">Date & Time *</label>
+            <input
+              type="datetime-local"
+              className={`form-input${formErrors.scheduledAt ? ' is-invalid' : ''}`}
+              value={form.scheduledAt}
+              onChange={e => setField('scheduledAt', e.target.value)}
+            />
+            {formErrors.scheduledAt && (
+              <div className="form-error">{formErrors.scheduledAt}</div>
+            )}
           </div>
 
-          {/* Row: Advisor / Consultant & Status */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div className="form-group">
-              <label className="form-label">
-                Private Wealth Advisor
-                {isExec && (
-                  <span
-                    style={{
-                      marginLeft: 6,
-                      fontSize: 11,
-                      color: 'var(--text-muted)',
-                      fontWeight: 400,
-                    }}
-                  >
-                    (auto-assigned to you)
-                  </span>
-                )}
-              </label>
-              {isExec ? (
-                <input
-                  className="form-input"
-                  value={form.consultantName}
-                  readOnly
-                  style={{
-                    backgroundColor: 'var(--bg-surface-hover)',
-                    cursor: 'not-allowed',
-                    color: 'var(--text-secondary)',
-                  }}
-                />
-              ) : (
-                <input
-                  id="consultation-form-consultant"
-                  className="form-input"
-                  placeholder="e.g. Vikram Malhotra"
-                  value={form.consultantName}
-                  onChange={e => {
-                    setField('consultantName', e.target.value);
-                    setField('consultantId', '');
-                  }}
-                />
-              )}
-            </div>
+          {/* Agenda */}
+          <div className="form-group">
+            <label className="form-label">Reason / Agenda for Consultation</label>
+            <textarea
+              className="form-input"
+              rows={3}
+              value={form.agenda}
+              onChange={e => setField('agenda', e.target.value)}
+              placeholder="e.g. Discuss yield targets and commercial tax strategy"
+            />
+          </div>
 
+          {/* Status if editing */}
+          {editingConsultation && (
             <div className="form-group">
               <label className="form-label">Status</label>
               <select
-                id="consultation-form-status"
                 className="form-select"
                 value={form.status}
-                onChange={e =>
-                  setField('status', e.target.value as Consultation['status'])
-                }
+                onChange={e => setField('status', e.target.value as Consultation['status'])}
               >
-                {STATUS_OPTIONS.map(s => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
+                {STATUS_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
                   </option>
                 ))}
               </select>
             </div>
-          </div>
+          )}
 
-          {/* Discussion Agenda */}
-          <div className="form-group">
-            <label className="form-label">Discussion Agenda & Objectives</label>
-            <textarea
-              id="consultation-form-agenda"
-              className="form-textarea"
-              rows={3}
-              placeholder="e.g. Commercial REIT yield analysis & pass-through taxation discussion."
-              value={form.agenda}
-              onChange={e => setField('agenda', e.target.value)}
-              style={{ resize: 'vertical' }}
-            />
-          </div>
-
-          {/* Outcome Notes */}
-          <div className="form-group">
-            <label className="form-label">
-              Outcome Notes & Recommendations
-              <span
-                style={{
-                  marginLeft: 6,
-                  fontSize: 11,
-                  color: 'var(--text-muted)',
-                  fontWeight: 400,
-                }}
-              >
-                (advisory notes, mandate agreements, next steps)
-              </span>
-            </label>
-            <textarea
-              id="consultation-form-outcome"
-              className="form-textarea"
-              rows={3}
-              placeholder="Record key takeaways, investor interest level, follow-up requirements..."
-              value={form.outcomeNotes}
-              onChange={e => setField('outcomeNotes', e.target.value)}
-              style={{ resize: 'vertical' }}
-            />
-          </div>
+          {/* Outcome Notes if editing */}
+          {editingConsultation && (
+            <div className="form-group">
+              <label className="form-label">Outcome Notes</label>
+              <textarea
+                className="form-input"
+                rows={2}
+                value={form.outcomeNotes}
+                onChange={e => setField('outcomeNotes', e.target.value)}
+                placeholder="Key decisions or commitments reached during this session"
+              />
+            </div>
+          )}
         </form>
       </Modal>
 
+      {/* Drawer */}
       <Drawer
         isOpen={!!drawerConsultation}
         onClose={() => setDrawerConsultation(null)}
         title={drawerConsultation?.investorName || 'Investor Profile'}
-        subtitle={`Phone: ${drawerConsultation?.investorPhone || '—'} • ${tenant?.name}`}
+        subtitle={`Session: ${drawerConsultation?.scheduledAt || '—'} • ${tenant?.name || 'CRM'}`}
         width={600}
       >
-        {drawerConsultation && (() => {
-          const dPhone = (drawerConsultation.investorPhone || '').replace(/\D/g, '').slice(-10);
-          const matchingConsultations = consultations.filter(c => {
-            if (drawerConsultation.investorId && c.investorId === drawerConsultation.investorId) {
-              return true;
+        {drawerConsultation && (
+          <LeadDetailDrawerContent
+            contactName={drawerConsultation.investorName}
+            contactPhone={drawerConsultation.investorPhone}
+            contactId={drawerConsultation.investorId}
+            contactType="customer"
+            tenantId={tenant?.id}
+            tenantName={tenant?.name}
+            onCall={() =>
+              initiateCall(
+                drawerConsultation.investorName,
+                drawerConsultation.investorPhone,
+                'customer',
+                drawerConsultation.investorId
+              )
             }
-            const cPhone = (c.investorPhone || '').replace(/\D/g, '').slice(-10);
-            return !!(dPhone && cPhone && dPhone === cPhone);
-          });
-
-          const sortedConsultations = [...matchingConsultations].sort(
-            (a, b) => getConsultationTimestamp(b) - getConsultationTimestamp(a)
-          );
-
-          const consultationHistory = sortedConsultations.filter(c => c.id !== drawerConsultation.id);
-
-          return (
-            <LeadDetailDrawerContent
-              contactName={drawerConsultation.investorName}
-              contactPhone={drawerConsultation.investorPhone}
-              contactId={drawerConsultation.investorId}
-              tenantId={tenant?.id}
-              tenantName={tenant?.name}
-              consultationReason={drawerConsultation.agenda}
-              consultationHistory={consultationHistory}
-              onCall={() =>
-                initiateCall(
-                  drawerConsultation.investorName,
-                  drawerConsultation.investorPhone,
-                  'customer',
-                  drawerConsultation.investorId
-                )
-              }
-            />
-          );
-        })()}
+            consultationReason={drawerConsultation.agenda}
+          />
+        )}
       </Drawer>
     </div>
   );

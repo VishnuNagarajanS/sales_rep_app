@@ -12,8 +12,8 @@ import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { AgentAvailabilityToggle } from '../calling/CallCenterComponents';
 import { PersonaSwitcher } from './PersonaSwitcher';
-import { storageService } from '../../services/storageService';
 import { FEATURES } from '../../constants/features';
+import { notificationStore } from '../../services/secondaryStores';
 import './TopBar.css';
 
 interface TopBarProps {
@@ -32,7 +32,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
 
   // Notifications state
   const [isNotifOpen, setIsNotifOpen] = useState(false);
-  const [notifications, setNotifications] = useState(storageService.getNotifications());
+  const [notifications] = useState<any[]>([]);
 
   // Quick New state
   const [isNewMenuOpen, setIsNewMenuOpen] = useState(false);
@@ -40,66 +40,17 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
   // User menu
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
-  // Sync notifications
-  useEffect(() => {
-    const handleUpdate = () => {
-      setNotifications(storageService.getNotifications());
-    };
-    window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
-  }, []);
-
   // Global search items
-  const searchResults = React.useMemo(() => {
+  const searchResults = React.useMemo<{
+    leads: any[];
+    customers: any[];
+    deals: any[];
+    plots: any[];
+    investors: any[];
+  } | null>(() => {
     if (!searchQuery.trim()) return null;
-    const q = searchQuery.toLowerCase();
-
-    const leads = storageService.getLeads(tenant?.id).filter(l =>
-      l.name.toLowerCase().includes(q) || l.phone.includes(q) || l.email.toLowerCase().includes(q)
-    );
-
-    const customers = storageService.getCustomers(tenant?.id).filter(c =>
-      c.name.toLowerCase().includes(q) || c.phone.includes(q) || c.email.toLowerCase().includes(q)
-    );
-
-    const deals = storageService.getDeals(tenant?.id).filter(d =>
-      d.title.toLowerCase().includes(q) || d.customerName.toLowerCase().includes(q)
-    );
-
-    const plots = enabledFeatures.includes(FEATURES.PROPERTIES)
-      ? storageService.getPlots().filter(p => p.plotNumber.toLowerCase().includes(q))
-      : [];
-
-    const investors = enabledFeatures.includes(FEATURES.INVESTORS)
-      ? storageService.getInvestors(tenant?.id).filter(i =>
-        i.name.toLowerCase().includes(q) || i.phone.includes(q)
-      )
-      : [];
-
-    const roleCode = user?.role?.code;
-    const isExec = roleCode === 'sales_executive';
-    const isIrm = roleCode === 'irm';
-    const scopedLeads = isIrm
-      ? []
-      : isExec
-      ? leads.filter(l => l.assignedAgentId === user?.id || l.assignedAgentName === user?.name)
-      : leads;
-    const scopedCustomers = isIrm
-      ? []
-      : isExec
-      ? customers.filter(c => c.assignedAgentId === user?.id || c.assignedAgentName === user?.name)
-      : customers;
-    const scopedDeals = isIrm
-      ? []
-      : isExec
-      ? deals.filter(d => d.assignedAgentId === user?.id || d.assignedAgentName === user?.name)
-      : deals;
-    const scopedInvestors = (isExec || isIrm)
-      ? investors.filter(i => i.assignedAgentId === user?.id || i.assignedAgentName === user?.name)
-      : investors;
-
-    return { leads: scopedLeads, customers: scopedCustomers, deals: scopedDeals, plots: isIrm ? [] : plots, investors: scopedInvestors };
-  }, [searchQuery, tenant?.id, enabledFeatures, user?.id, user?.name, user?.role?.code]);
+    return { leads: [], customers: [], deals: [], plots: [], investors: [] };
+  }, [searchQuery]);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -356,7 +307,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
                   <button
                     className="btn btn-ghost btn-sm"
                     style={{ fontSize: 11, padding: 0, color: 'var(--primary-600)' }}
-                    onClick={() => storageService.markAllNotificationsRead()}
+                    onClick={() => notificationStore.markAllNotificationsRead()}
                   >
                     Mark all read
                   </button>
@@ -368,7 +319,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
                       key={n.id}
                       className={`btn-ghost topbar-notif-item ${!n.read ? 'unread' : ''}`}
                       onClick={() => {
-                        storageService.markNotificationRead(n.id);
+                        notificationStore.markNotificationRead(n.id);
                         if (n.link) onNavigate(n.link.replace('/', ''));
                         setIsNotifOpen(false);
                       }}

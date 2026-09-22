@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FileCheck, Download, Filter, Shield } from 'lucide-react';
 import { AuditLog } from '../../types';
 import { useAuth } from '../../context/AuthContext';
-import { storageService } from '../../services/storageService';
+import { auditLogStore } from '../../services/secondaryStores';
 import { DataTable, Column } from '../../components/common/DataTable';
 import './CompanyAuditPage.css';
 
@@ -11,8 +11,8 @@ export const CompanyAuditPage: React.FC = () => {
   const [logs, setLogs] = useState<AuditLog[]>([]);
 
   useEffect(() => {
-    setLogs(storageService.getAuditLogs(tenant?.id));
-    const handleUpdate = () => setLogs(storageService.getAuditLogs(tenant?.id));
+    setLogs(auditLogStore.getAuditLogs(tenant?.id));
+    const handleUpdate = () => setLogs(auditLogStore.getAuditLogs(tenant?.id));
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id]);
