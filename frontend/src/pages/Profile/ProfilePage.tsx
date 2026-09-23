@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { leadsApi, callsApi, followupsApi } from '../../services/crmApi';
+import { leadsApi, callsApi, followupsApi, profileApi } from '../../services/crmApi';
 import { Drawer } from '../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
 import { StatusChip } from '../../components/common/StatusChip';
@@ -589,39 +589,66 @@ export const ProfilePage: React.FC = () => {
       setEditWorkEnd(user.workingHours?.end || '18:00');
       setEditMaxLeads(String(user.maxActiveLeads || 50));
     }
+
+    profileApi.getProfile().then(p => {
+      if (!p) return;
+      if (p.name) setEditName(p.name);
+      if (p.phone) setEditPhone(p.phone);
+      if (p.designation) setEditDesignation(p.designation);
+      if (p.skills?.length) setEditSkills(p.skills.join(', '));
+      if (p.languages?.length) setEditLanguages(p.languages.join(', '));
+      if (p.specializations?.length) setEditSpecializations(p.specializations.join(', '));
+      if (p.maxActiveLeads) setEditMaxLeads(String(p.maxActiveLeads));
+    }).catch(() => { });
   }, [user?.id]);
 
-  const savePersonal = () => {
+  const savePersonal = async () => {
     if (!user) return;
     const updated = { ...user, name: editName, phone: editPhone, designation: editDesignation };
     setUser(updated);
     setPersonalSaved(true);
     setTimeout(() => setPersonalSaved(false), 2200);
+    try {
+      await profileApi.updateProfile({ name: editName, phone: editPhone, designation: editDesignation });
+    } catch { }
   };
 
-  const saveSkills = () => {
+  const saveSkills = async () => {
     if (!user) return;
+    const sArr = editSkills.split(',').map(s => s.trim()).filter(Boolean);
+    const lArr = editLanguages.split(',').map(s => s.trim()).filter(Boolean);
+    const spArr = editSpecializations.split(',').map(s => s.trim()).filter(Boolean);
     const updated = {
       ...user,
-      skills: editSkills.split(',').map(s => s.trim()).filter(Boolean),
-      languages: editLanguages.split(',').map(s => s.trim()).filter(Boolean),
-      specializations: editSpecializations.split(',').map(s => s.trim()).filter(Boolean),
+      skills: sArr,
+      languages: lArr,
+      specializations: spArr,
     };
     setUser(updated);
     setSkillsSaved(true);
     setTimeout(() => setSkillsSaved(false), 2200);
+    try {
+      await profileApi.updateProfile({ skills: sArr, languages: lArr, specializations: spArr });
+    } catch { }
   };
 
-  const saveHours = () => {
+  const saveHours = async () => {
     if (!user) return;
+    const maxVal = parseInt(editMaxLeads) || 50;
     const updated = {
       ...user,
-      maxActiveLeads: parseInt(editMaxLeads) || 50,
+      maxActiveLeads: maxVal,
       workingHours: { start: editWorkStart, end: editWorkEnd, days: user.workingHours?.days || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] },
     };
     setUser(updated);
     setHoursSaved(true);
     setTimeout(() => setHoursSaved(false), 2200);
+    try {
+      await profileApi.updateProfile({
+        workingHours: `${editWorkStart} - ${editWorkEnd}`,
+        maxActiveLeads: maxVal,
+      });
+    } catch { }
   };
 
   // ── Static enrichment data ────────────────────────────────────────────────

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Bell, Check, Phone, Users, Calendar } from 'lucide-react';
 import { NotificationItem } from '../../types';
 import { notificationStore } from '../../services/secondaryStores';
+import { notificationsApi } from '../../services/crmApi';
 import './NotificationsPage.css';
 
 interface NotificationsPageProps {
@@ -11,7 +12,25 @@ interface NotificationsPageProps {
 export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate }) => {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
-  const loadData = () => {
+  const loadData = async () => {
+    try {
+      const apiItems = await notificationsApi.getNotifications();
+      if (apiItems && apiItems.length > 0) {
+        setNotifications(
+          apiItems.map(item => ({
+            id: String(item.id),
+            title: item.title,
+            message: item.message,
+            type: (item.type as any) || 'system',
+            timestamp: new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            read: item.isRead,
+          }))
+        );
+        return;
+      }
+    } catch {
+      // fallback to local store if offline or no backend notifications yet
+    }
     setNotifications(notificationStore.getNotifications());
   };
 
@@ -22,8 +41,24 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, []);
 
-  const handleMarkAll = () => {
+  const handleMarkAll = async () => {
+    try {
+      await notificationsApi.markAllAsRead();
+    } catch { }
     notificationStore.markAllNotificationsRead();
+    loadData();
+  };
+
+  const handleItemClick = async (n: NotificationItem) => {
+    try {
+      const numId = Number(n.id);
+      if (!isNaN(numId)) {
+        await notificationsApi.markAsRead(numId);
+      }
+    } catch { }
+    notificationStore.markNotificationRead(n.id);
+    loadData();
+    if (n.link) onNavigate(n.link.replace('/', ''));
   };
 
   return (
@@ -48,10 +83,7 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
           <div
             key={n.id}
             className={`notification-item-row ${!n.read ? 'unread' : ''}`}
-            onClick={() => {
-              notificationStore.markNotificationRead(n.id);
-              if (n.link) onNavigate(n.link.replace('/', ''));
-            }}
+            onClick={() => handleItemClick(n)}
           >
             <div className="notification-item-left">
               <div className={`notification-icon-circle ${!n.read ? 'unread' : ''}`}>
