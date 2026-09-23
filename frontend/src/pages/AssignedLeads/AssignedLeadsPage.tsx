@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   UserCheck,
   Phone,
@@ -22,6 +22,7 @@ export const AssignedLeadsPage: React.FC = () => {
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
   const [formData, setFormData] = useState<Partial<Lead>>({});
+  const [agentFilter, setAgentFilter] = useState<string>('');
 
   const roleCode = user?.role?.code;
   const isGhlAdmin =
@@ -172,6 +173,20 @@ export const AssignedLeadsPage: React.FC = () => {
     },
   ];
 
+  // Unique agent names for the filter dropdown
+  const uniqueAgents = useMemo(() => {
+    const names = leads
+      .map(l => l.assignedAgentName)
+      .filter((n): n is string => Boolean(n));
+    return Array.from(new Set(names)).sort();
+  }, [leads]);
+
+  // Apply agent filter on top of the full leads list
+  const filteredLeads = useMemo(() => {
+    if (!agentFilter) return leads;
+    return leads.filter(l => l.assignedAgentName === agentFilter);
+  }, [leads, agentFilter]);
+
   if (!isGhlAdmin) {
     return (
       <div className="assigned-leads-unauthorized">
@@ -198,7 +213,7 @@ export const AssignedLeadsPage: React.FC = () => {
       {/* Assigned Leads Table */}
       <DataTable
         columns={columns}
-        data={leads}
+        data={filteredLeads}
         keyExtractor={l => l.id}
         rowActions={rowActions}
         onRowClick={l => {
@@ -214,6 +229,21 @@ export const AssignedLeadsPage: React.FC = () => {
         }
         emptyTitle="No assigned leads found"
         emptyDescription="Leads assigned to agents will appear here."
+        filtersNode={
+          uniqueAgents.length > 0 ? (
+            <select
+              className="form-select"
+              style={{ height: 38, fontSize: 13, minWidth: 180 }}
+              value={agentFilter}
+              onChange={e => setAgentFilter(e.target.value)}
+            >
+              <option value="">All Agents</option>
+              {uniqueAgents.map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          ) : undefined
+        }
       />
 
       {/* 360 Detail Drawer */}
