@@ -25,6 +25,7 @@ import {
   Trash2,
   MessageSquare,
   User as UserIcon,
+  UserCheck,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
@@ -56,6 +57,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
   const [collapsed, setCollapsed] = useState(false);
   const [isCollapseHovered, setIsCollapseHovered] = useState(false);
 
+  const roleCode = user?.role?.code;
+  const isGhlAdmin =
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
+    (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
   const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
   const isIrm = user?.role?.code === 'irm';
 
@@ -116,6 +121,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
       header: 'Sales',
       items: [
         { id: 'leads', label: 'Leads', icon: <Users size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
+        ...(isGhlAdmin ? [{ id: 'assigned-leads', label: 'Assigned Leads', icon: <UserCheck size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW }] : []),
         { id: 'customers', label: 'Customers 360', icon: <Building2 size={18} />, feature: FEATURES.CUSTOMERS, permission: PERMISSIONS.CUSTOMERS_VIEW },
         { id: 'pipeline', label: 'Pipeline', icon: <Kanban size={18} />, feature: FEATURES.DEALS, permission: PERMISSIONS.DEALS_VIEW },
         { id: 'deals', label: 'Deals', icon: <Briefcase size={18} />, feature: FEATURES.DEALS, permission: PERMISSIONS.DEALS_VIEW },
@@ -180,6 +186,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
       header: 'Sales',
       items: [
         { id: 'leads', label: 'Leads', icon: <Users size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
+        ...(isGhlAdmin ? [{ id: 'assigned-leads', label: 'Assigned Leads', icon: <UserCheck size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW }] : []),
         { id: 'followups', label: 'Follow-ups', icon: <CalendarCheck size={18} />, feature: FEATURES.FOLLOWUPS, permission: PERMISSIONS.FOLLOWUPS_VIEW },
         { id: 'consultations', label: 'Consultations', icon: <Calendar size={18} />, feature: FEATURES.CONSULTATIONS, permission: PERMISSIONS.CONSULTATIONS_VIEW },
         { id: 'customers', label: 'Customers 360', icon: <Building2 size={18} />, feature: FEATURES.CUSTOMERS, permission: PERMISSIONS.CUSTOMERS_VIEW },

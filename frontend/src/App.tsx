@@ -38,6 +38,7 @@ import { BookingsPage } from './pages/Bookings/BookingsPage';
 import { InvestorsPage } from './pages/Investors/InvestorsPage';
 import { ConsultationsPage } from './pages/Consultations/ConsultationsPage';
 import { OpportunitiesPage } from './pages/InvestmentOpportunities/OpportunitiesPage';
+import { AssignedLeadsPage } from './pages/AssignedLeads/AssignedLeadsPage';
 
 // Company Admin
 import { CompanyUsersPage } from './pages/Company/CompanyUsersPage';
@@ -64,6 +65,11 @@ export const App: React.FC = () => {
   const [currentRoute, setCurrentRoute] = useState<string>(() => {
     return sessionStorage.getItem('nexus_current_route') || 'dashboard';
   });
+
+  const roleCode = user?.role?.code;
+  const isGhlAdmin =
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
+    (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
 
   // Seed initial mock data on clean install / empty session
   useEffect(() => {
@@ -331,6 +337,14 @@ export const App: React.FC = () => {
       ) : currentRoute === 'leads' ? (
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
           <LeadsPage />
+        </ProtectedRoute>
+      ) : currentRoute === 'assigned-leads' ? (
+        <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
+          {isGhlAdmin ? (
+            <AssignedLeadsPage />
+          ) : (
+            <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+          )}
         </ProtectedRoute>
       ) : currentRoute === 'customers' ? (
         <ProtectedRoute permission={PERMISSIONS.CUSTOMERS_VIEW}>

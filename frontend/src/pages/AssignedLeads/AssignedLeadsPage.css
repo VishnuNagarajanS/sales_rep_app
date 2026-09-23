@@ -1,0 +1,34 @@
+@import '../Leads/LeadsPage.css';
+
+/* ── Assigned Leads Page Specific Styles ───────────────────────── */
+.assigned-leads-page .lead-assigned-agent-val {
+  font-weight: 600;
+  color: var(--primary-600, #dc2626);
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.assigned-leads-unauthorized {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 50vh;
+  padding: 80px 20px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.assigned-leads-unauthorized h3 {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.assigned-leads-unauthorized p {
+  font-size: 14px;
+  color: var(--text-muted);
+}

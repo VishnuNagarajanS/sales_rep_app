@@ -594,18 +594,21 @@
   gap: 8px;
   margin-left: auto;
 }
+
 .assign-toggle-label {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
   white-space: nowrap;
 }
+
 .assign-toggle-group {
   display: flex;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-base);
   overflow: hidden;
 }
+
 .assign-toggle-btn {
   padding: 5px 14px;
   font-size: 12px;
@@ -616,10 +619,12 @@
   cursor: pointer;
   transition: all 0.15s;
 }
+
 .assign-toggle-btn.active {
   background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
   color: #fff;
 }
+
 .assign-toggle-btn:hover:not(.active) {
   background: var(--bg-surface-hover);
   color: var(--text-primary);
@@ -646,10 +651,11 @@
   border: 1px solid var(--border-base);
   border-radius: 14px;
   padding: 12px 20px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
   z-index: 200;
   animation: assign-slideUp 0.2s ease-out;
 }
+
 .assign-action-bar-text {
   font-size: 13px;
   font-weight: 600;
@@ -672,13 +678,14 @@
   border-radius: var(--radius-md, 8px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   white-space: nowrap;
-  animation: assign-slideUp 0.2s ease-out;
 }
+
 .assign-auto-label {
   font-size: 13px;
   font-weight: 700;
   color: var(--text-secondary);
 }
+
 .coming-soon-badge {
   position: absolute;
   top: -8px;
@@ -714,10 +721,11 @@
   border-radius: 16px;
   width: 420px;
   max-width: calc(100vw - 32px);
-  box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
   overflow: hidden;
   animation: assign-slideUp 0.2s ease-out;
 }
+
 .assign-modal-header {
   display: flex;
   align-items: flex-start;
@@ -725,18 +733,21 @@
   padding: 20px 20px 16px;
   border-bottom: 1px solid var(--border-base);
 }
+
 .assign-modal-title {
   font-size: 16px;
   font-weight: 700;
   color: var(--text-primary);
   margin: 0;
 }
+
 .assign-modal-sub {
   font-size: 12px;
   color: var(--text-secondary);
   margin: 6px 20px 0;
   padding: 0 0 12px;
 }
+
 .assign-modal-close {
   background: none;
   border: none;
@@ -748,10 +759,12 @@
   line-height: 1;
   flex-shrink: 0;
 }
+
 .assign-modal-close:hover {
   background: var(--bg-surface-hover);
   color: var(--text-primary);
 }
+
 .assign-agent-list {
   max-height: 320px;
   overflow-y: auto;
@@ -760,6 +773,7 @@
   flex-direction: column;
   gap: 4px;
 }
+
 .assign-agent-row {
   display: flex;
   align-items: center;
@@ -770,19 +784,23 @@
   border: 1px solid transparent;
   transition: all 0.15s;
 }
+
 .assign-agent-row:hover {
   background: var(--bg-surface-hover);
 }
+
 .assign-agent-row.selected {
   background: rgba(220, 38, 38, 0.08);
   border-color: rgba(220, 38, 38, 0.3);
 }
+
 .assign-agent-row input[type="radio"] {
   accent-color: #dc2626;
   width: 15px;
   height: 15px;
   cursor: pointer;
 }
+
 .assign-agent-avatar {
   width: 32px;
   height: 32px;
@@ -796,11 +814,13 @@
   justify-content: center;
   flex-shrink: 0;
 }
+
 .assign-agent-name {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
 }
+
 .assign-modal-footer {
   display: flex;
   justify-content: flex-end;
@@ -818,6 +838,7 @@
   border-radius: 12px;
   text-align: center;
 }
+
 .assign-confirm-label {
   font-size: 12px;
   color: var(--text-secondary);
@@ -826,6 +847,7 @@
   letter-spacing: 0.05em;
   margin-bottom: 10px;
 }
+
 .assign-confirm-agent {
   font-size: 22px;
   font-weight: 800;
@@ -833,6 +855,7 @@
   margin-bottom: 10px;
   letter-spacing: 0.02em;
 }
+
 .assign-confirm-detail {
   font-size: 12px;
   color: var(--text-secondary);
@@ -847,10 +870,11 @@
   max-height: 85vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
   overflow: hidden;
   animation: assign-slideUp 0.2s ease-out;
 }
+
 .ai-dist-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
@@ -860,6 +884,7 @@
   flex: 1;
   min-height: 0;
 }
+
 .ai-dist-col {
   display: flex;
   flex-direction: column;
@@ -868,6 +893,7 @@
   border-radius: 10px;
   overflow: hidden;
 }
+
 .ai-dist-col-header {
   display: flex;
   align-items: center;
@@ -876,6 +902,7 @@
   background: var(--bg-surface-hover);
   border-bottom: 1px solid var(--border-base);
 }
+
 .ai-dist-avatar {
   width: 24px;
   height: 24px;
@@ -889,6 +916,7 @@
   justify-content: center;
   flex-shrink: 0;
 }
+
 .ai-dist-agent-name {
   font-size: 12px;
   font-weight: 700;
@@ -898,6 +926,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .ai-dist-count {
   font-size: 11px;
   font-weight: 700;
@@ -908,6 +937,7 @@
   min-width: 18px;
   text-align: center;
 }
+
 .ai-dist-col-body {
   padding: 8px;
   display: flex;
@@ -915,18 +945,21 @@
   gap: 6px;
   min-height: 60px;
 }
+
 .ai-dist-empty {
   font-size: 11px;
   color: var(--text-secondary);
   text-align: center;
   padding: 12px 0;
 }
+
 .ai-dist-lead-card {
   background: var(--bg-card);
   border: 1px solid var(--border-base);
   border-radius: 6px;
   padding: 6px 8px;
 }
+
 .ai-dist-lead-name {
   font-size: 11px;
   font-weight: 600;
@@ -935,15 +968,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
 .ai-dist-lead-phone {
   font-size: 10px;
   color: var(--text-secondary);
 }
+
 .ai-dist-move-btns {
   display: flex;
   gap: 4px;
   margin-top: 4px;
 }
+
 .ai-move-btn {
   flex: 1;
   padding: 2px 0;
@@ -955,11 +991,13 @@
   color: var(--text-secondary);
   transition: all 0.1s;
 }
+
 .ai-move-btn:hover:not(:disabled) {
   background: rgba(220, 38, 38, 0.1);
   color: #dc2626;
   border-color: rgba(220, 38, 38, 0.3);
 }
+
 .ai-move-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
@@ -977,20 +1015,30 @@
   padding: 13px 20px;
   font-size: 13px;
   font-weight: 600;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   z-index: 600;
   animation: assign-slideUp 0.2s ease-out;
 }
 
 /* ── Keyframes ───────────────────────────────────────────── */
 @keyframes assign-slideUp {
-  from { transform: translateY(12px); opacity: 0; }
-  to   { transform: translateY(0);    opacity: 1; }
+  from {
+    transform: translateX(-50%) translateY(12px);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+  }
 }
+
 @keyframes assign-fadeIn {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
-
-
-
