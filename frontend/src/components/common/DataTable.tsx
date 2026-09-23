@@ -340,7 +340,6 @@ export function DataTable<T>({
                       position: 'sticky',
                       right: 0,
                       background: 'var(--bg-surface-hover)',
-                      borderLeft: '1px solid var(--border-base)',
                       zIndex: 2,
                     }}
                   >
@@ -409,7 +408,6 @@ export function DataTable<T>({
                           position: 'sticky',
                           right: 0,
                           background: isSelected ? 'rgba(59, 130, 246, 0.04)' : 'var(--bg-surface)',
-                          borderLeft: '1px solid var(--border-base)',
                           zIndex: 1,
                         }}
                         onClick={e => e.stopPropagation()}
