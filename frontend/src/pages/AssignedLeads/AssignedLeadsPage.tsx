@@ -36,7 +36,7 @@ export const AssignedLeadsPage: React.FC = () => {
     try {
       const raw = sessionStorage.getItem('ghl_mock_agent_assignments');
       if (raw) sessionAssignments = JSON.parse(raw);
-    } catch {}
+    } catch { }
 
     const assigned = allLeads
       .map(lead => {
