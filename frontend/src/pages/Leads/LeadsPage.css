@@ -540,6 +540,8 @@
 }
 
 .leads-page .filterbar-select {
+  width: auto;
+  flex-shrink: 0;
   height: 38px;
   min-width: 150px;
   font-size: 13px;

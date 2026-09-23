@@ -10,6 +10,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
+import { FilterBar } from '../../components/common/FilterBar';
 import { Drawer } from '../../components/common/Drawer';
 import './AssignedLeadsPage.css';
 
@@ -22,7 +23,7 @@ export const AssignedLeadsPage: React.FC = () => {
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
   const [formData, setFormData] = useState<Partial<Lead>>({});
-  const [agentFilter, setAgentFilter] = useState<string>('');
+  const [agentFilter, setAgentFilter] = useState<string>('All');
 
   const roleCode = user?.role?.code;
   const isGhlAdmin =
@@ -183,7 +184,7 @@ export const AssignedLeadsPage: React.FC = () => {
 
   // Apply agent filter on top of the full leads list
   const filteredLeads = useMemo(() => {
-    if (!agentFilter) return leads;
+    if (!agentFilter || agentFilter === 'All') return leads;
     return leads.filter(l => l.assignedAgentName === agentFilter);
   }, [leads, agentFilter]);
 
@@ -230,19 +231,19 @@ export const AssignedLeadsPage: React.FC = () => {
         emptyTitle="No assigned leads found"
         emptyDescription="Leads assigned to agents will appear here."
         filtersNode={
-          uniqueAgents.length > 0 ? (
-            <select
-              className="form-select"
-              style={{ height: 38, fontSize: 13, width: 'auto', flexShrink: 0 }}
-              value={agentFilter}
-              onChange={e => setAgentFilter(e.target.value)}
-            >
-              <option value="">All Agents</option>
-              {uniqueAgents.map(name => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-            </select>
-          ) : undefined
+          <FilterBar
+            filters={[
+              {
+                key: 'assignedAgent',
+                label: 'Assigned Agent',
+                value: agentFilter,
+                onChange: setAgentFilter,
+                placeholder: 'Select an agent',
+                options: uniqueAgents.map(name => ({ value: name, label: name })),
+              },
+            ]}
+            onClearAll={() => setAgentFilter('All')}
+          />
         }
       />
 

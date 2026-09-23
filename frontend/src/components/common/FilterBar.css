@@ -34,6 +34,8 @@
 }
 
 .filterbar-select {
+  width: auto;
+  flex-shrink: 0;
   height: 32px;
   font-size: 12px;
   padding-top: 0;
