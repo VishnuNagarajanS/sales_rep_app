@@ -984,8 +984,8 @@
 
 /* ── Keyframes ───────────────────────────────────────────── */
 @keyframes assign-slideUp {
-  from { transform: translateY(12px); opacity: 0; }
-  to   { transform: translateY(0);    opacity: 1; }
+  from { transform: translateX(-50%) translateY(12px); opacity: 0; }
+  to   { transform: translateX(-50%) translateY(0);    opacity: 1; }
 }
 @keyframes assign-fadeIn {
   from { opacity: 0; }
