@@ -209,7 +209,11 @@ export function DataTable<T>({
               }}
             />
           </div>
-          {filtersNode}
+          {filtersNode && (
+            <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+              {filtersNode}
+            </span>
+          )}
         </div>
 
         {/* Bulk Action Bar */}

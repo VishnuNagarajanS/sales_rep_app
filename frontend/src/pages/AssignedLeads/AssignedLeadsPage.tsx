@@ -233,7 +233,7 @@ export const AssignedLeadsPage: React.FC = () => {
           uniqueAgents.length > 0 ? (
             <select
               className="form-select"
-              style={{ height: 38, fontSize: 13, minWidth: 180 }}
+              style={{ height: 38, fontSize: 13, width: 'auto', flexShrink: 0 }}
               value={agentFilter}
               onChange={e => setAgentFilter(e.target.value)}
             >
