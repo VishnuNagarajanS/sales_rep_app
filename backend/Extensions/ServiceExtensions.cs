@@ -33,6 +33,8 @@ public static class ServiceExtensions
         services.AddScoped<IJwtService, JwtService>();
         services.AddScoped<IAuthService, AuthService>();
 
+        services.AddDev1Services();
+
         // 5. Validators
         services.AddValidatorsFromAssemblyContaining<LoginRequestValidator>();
 

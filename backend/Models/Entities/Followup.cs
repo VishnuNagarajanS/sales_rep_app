@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace backend.Models.Entities;
 
 public class Followup
@@ -9,6 +11,15 @@ public class Followup
 
     public int AssignedAgentId { get; set; }
     public User? AssignedAgent { get; set; }
+
+    [NotMapped]
+    public int UserId
+    {
+        get => AssignedAgentId;
+        set => AssignedAgentId = value;
+    }
+
+    public int? LeadId { get; set; }
 
     public string ContactId { get; set; } = string.Empty;
     public string ContactType { get; set; } = "lead"; // "lead" | "customer"

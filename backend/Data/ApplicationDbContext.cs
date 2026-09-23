@@ -19,6 +19,9 @@ public class ApplicationDbContext : DbContext
     public DbSet<Followup> Followups => Set<Followup>();
     public DbSet<Consultation> Consultations => Set<Consultation>();
     public DbSet<CallRecord> CallRecords => Set<CallRecord>();
+    public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+    public DbSet<ExecutiveProfile> ExecutiveProfiles => Set<ExecutiveProfile>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
