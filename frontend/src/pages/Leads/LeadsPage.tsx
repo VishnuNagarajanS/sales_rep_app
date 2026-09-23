@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Papa from 'papaparse';
 import {
   Users,
@@ -30,15 +30,8 @@ const CAPACITY_OPTIONS = [
   'Not sure yet — help me decide'
 ];
 
-const MOCK_AGENTS = [
-  { id: 1, name: 'Ram' },
-  { id: 2, name: 'Sam' },
-  { id: 3, name: 'Kishore' },
-  { id: 4, name: 'Ray' },
-  { id: 5, name: 'Kumar' },
-  { id: 6, name: 'Suresh' },
-  { id: 7, name: 'Vishnu' },
-];
+import { MOCK_AGENTS } from '../../mock_data/mockData';
+export { MOCK_AGENTS };
 
 export const LeadsPage: React.FC = () => {
   const { tenant, user } = useAuth();
@@ -48,12 +41,14 @@ export const LeadsPage: React.FC = () => {
 
   const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk'];
 
-  // Role-based scoping: Sales Executives see only their own leads.
+  // Role-based scoping: Sales Executives and IRMs see only their own leads.
   // Managers / Admins / Super Admins see the full company lead list (no filter).
   // Inactive / moved leads (Interested, Follow-up Required, Not Interested, Junk, Converted) are excluded from active Leads.
   const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
-  const scopedLeads = (isExec
+  const isLeadScopedUser = roleCode === 'sales_executive' || roleCode === 'irm';
+  const isIrm = roleCode === 'irm';
+  const scopedLeads = (isLeadScopedUser
     ? leads.filter(l =>
       (l.assignedAgentId && l.assignedAgentId === user?.id) ||
       (l.assignedAgentName && l.assignedAgentName === user?.name)
@@ -78,6 +73,15 @@ export const LeadsPage: React.FC = () => {
   // Filter states
   const [statusFilter, setStatusFilter] = useState('All');
   const [capacityFilter, setCapacityFilter] = useState('All');
+  const [agentFilter, setAgentFilter] = useState('All');
+
+  const agentOptions = useMemo(() => {
+    return Array.from(
+      new Set(scopedLeads.map(l => l.assignedAgentName).filter((n): n is string => !!n))
+    )
+      .sort()
+      .map(name => ({ value: name, label: name }));
+  }, [scopedLeads]);
 
   // GHL Admin assign-mode state
   const isGhlAdmin =
@@ -231,6 +235,7 @@ export const LeadsPage: React.FC = () => {
       if (hasPendingFollowup) return false;
     }
     if (!isGhlAdmin && statusFilter !== 'All' && (lead.status as string) !== statusFilter) return false;
+    if (agentFilter !== 'All' && lead.assignedAgentName !== agentFilter) return false;
     if (capacityFilter !== 'All') {
       if (!matchCapacity(lead, capacityFilter)) return false;
     }
@@ -371,10 +376,10 @@ export const LeadsPage: React.FC = () => {
     if (!formData.name || !formData.phone) return;
 
     // Pull real agent ID and name at save-time to prevent stale/fallback placeholder IDs from leaking
-    const resolvedAgentId = (isExec && user?.id)
+    const resolvedAgentId = (isLeadScopedUser && user?.id)
       ? user.id
       : (formData.assignedAgentId && formData.assignedAgentId !== 'usr-exec' ? formData.assignedAgentId : (user?.id || 'usr-exec'));
-    const resolvedAgentName = (isExec && user?.name)
+    const resolvedAgentName = (isLeadScopedUser && user?.name)
       ? user.name
       : (formData.assignedAgentName && formData.assignedAgentName !== 'Agent' ? formData.assignedAgentName : (user?.name || 'Agent'));
 
@@ -624,6 +629,52 @@ export const LeadsPage: React.FC = () => {
   };
 
   // Columns for DataTable
+  const statusColumn: Column<Lead> = {
+    key: 'status',
+    header: 'Status',
+    sortable: true,
+    render: l => {
+      if ((l.status as string) === 'Callback') {
+        return (
+          <span
+            className="status-chip status-chip-callback"
+            style={{
+              backgroundColor: 'rgba(59, 130, 246, 0.12)',
+              color: '#2563eb',
+              borderColor: 'rgba(59, 130, 246, 0.3)',
+              fontSize: '11px',
+              padding: '2px 8px',
+            }}
+          >
+            <span className="status-dot" style={{ backgroundColor: '#2563eb' }} />
+            Callback
+          </span>
+        );
+      }
+      return <StatusChip status={l.status} size="sm" />;
+    },
+  };
+
+  const sourceColumn: Column<Lead> = {
+    key: 'source',
+    header: 'Source',
+    sortable: true,
+    render: l => <span className="lead-text-muted">{l.source}</span>,
+  };
+
+  const assignedAgentColumn: Column<Lead> = {
+    key: 'assignedAgentName',
+    header: 'Assigned Agent',
+    sortable: true,
+    width: '18%',
+    render: l => {
+      const agentName = (l.assignedAgentName && l.assignedAgentName !== 'Agent')
+        ? l.assignedAgentName
+        : (l.assignedAgentId === user?.id && user?.name ? user.name : (l.assignedAgentName || '—'));
+      return <span className="lead-text-muted">{agentName}</span>;
+    },
+  };
+
   const columns: Column<Lead>[] = [
     ...(isGhlAdmin && assignMode === 'manual' ? [{
       key: 'select',
@@ -692,37 +743,7 @@ export const LeadsPage: React.FC = () => {
         return <span className="lead-investment-val">{amount}</span>;
       },
     },
-    {
-      key: 'status',
-      header: 'Status',
-      sortable: true,
-      render: l => {
-        if ((l.status as string) === 'Callback') {
-          return (
-            <span
-              className="status-chip status-chip-callback"
-              style={{
-                backgroundColor: 'rgba(59, 130, 246, 0.12)',
-                color: '#2563eb',
-                borderColor: 'rgba(59, 130, 246, 0.3)',
-                fontSize: '11px',
-                padding: '2px 8px',
-              }}
-            >
-              <span className="status-dot" style={{ backgroundColor: '#2563eb' }} />
-              Callback
-            </span>
-          );
-        }
-        return <StatusChip status={l.status} size="sm" />;
-      },
-    },
-    {
-      key: 'source',
-      header: 'Source',
-      sortable: true,
-      render: l => <span className="lead-text-muted">{l.source}</span>,
-    },
+    ...(isIrm ? [assignedAgentColumn] : [statusColumn, sourceColumn]),
     {
       key: 'quickCall',
       header: 'Quick Call',
@@ -823,6 +844,13 @@ export const LeadsPage: React.FC = () => {
                     { value: 'No Response', label: 'No Response' },
                   ],
                 }]),
+                ...(!isExec ? [{
+                  key: 'agent',
+                  label: 'Agent',
+                  value: agentFilter,
+                  onChange: setAgentFilter,
+                  options: agentOptions,
+                }] : []),
                 ...(isGhlAdmin ? [{
                   key: 'investmentCapacity',
                   label: 'Investment Capacity Range',
@@ -834,6 +862,7 @@ export const LeadsPage: React.FC = () => {
               ]}
               onClearAll={() => {
                 setStatusFilter('All');
+                setAgentFilter('All');
                 setCapacityFilter('All');
               }}
             />

@@ -2,6 +2,7 @@ import {
   Lead,
   Customer,
   Deal,
+  DealActivity,
   CallRecord,
   Followup,
   PropertyProject,
@@ -32,6 +33,7 @@ import {
   INITIAL_INVESTORS,
   INITIAL_CONSULTATIONS,
   INITIAL_OPPORTUNITIES,
+  INITIAL_DEAL_ACTIVITIES,
 } from '../mock_data/mockData';
 
 export type PopupPosition = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
@@ -254,6 +256,19 @@ class StorageService {
       deals.unshift(deal);
     }
     this.set('deals', deals);
+  }
+
+  // Deal Activities
+  getDealActivities(dealId: string, companyId?: string): DealActivity[] {
+    const activities = this.get<DealActivity[]>('deal_activities', INITIAL_DEAL_ACTIVITIES);
+    return activities.filter(a => a.dealId === dealId && (!companyId || a.companyId === companyId));
+  }
+
+  addDealActivity(activity: DealActivity): void {
+    const activities = this.get<DealActivity[]>('deal_activities', INITIAL_DEAL_ACTIVITIES);
+    activities.unshift(activity);
+    this.set('deal_activities', activities);
+    window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 
   // Calls (Defaults to empty [] - real-time data only)
@@ -798,6 +813,7 @@ class StorageService {
     this.set('users', mock.USERS);
     this.set('tenants', Object.values(mock.TENANTS));
     this.set('custom_field_definitions', mock.INITIAL_CUSTOM_FIELD_DEFINITIONS);
+    this.set('deal_activities', mock.INITIAL_DEAL_ACTIVITIES);
     window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 

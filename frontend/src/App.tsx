@@ -39,6 +39,7 @@ import { InvestorsPage } from './pages/Investors/InvestorsPage';
 import { ConsultationsPage } from './pages/Consultations/ConsultationsPage';
 import { OpportunitiesPage } from './pages/InvestmentOpportunities/OpportunitiesPage';
 import { AssignedLeadsPage } from './pages/AssignedLeads/AssignedLeadsPage';
+import { KYCPage } from './pages/KYC/KYCPage';
 
 // Company Admin
 import { CompanyUsersPage } from './pages/Company/CompanyUsersPage';
@@ -387,6 +388,10 @@ export const App: React.FC = () => {
       ) : currentRoute === 'bookings' ? (
         <ProtectedRoute permission={PERMISSIONS.BOOKINGS_VIEW}>
           <BookingsPage />
+        </ProtectedRoute>
+      ) : currentRoute === 'kyc' ? (
+        <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
+          <KYCPage />
         </ProtectedRoute>
       ) : currentRoute === 'investors' ? (
         <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>

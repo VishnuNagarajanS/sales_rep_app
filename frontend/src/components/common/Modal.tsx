@@ -10,6 +10,7 @@ interface ModalProps {
   children: React.ReactNode;
   maxWidth?: string | number;
   footer?: React.ReactNode;
+  className?: string;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -20,6 +21,7 @@ export const Modal: React.FC<ModalProps> = ({
   children,
   maxWidth = 560,
   footer,
+  className = '',
 }) => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -36,7 +38,7 @@ export const Modal: React.FC<ModalProps> = ({
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
-        className="card animate-slide-down modal-card"
+        className={`card animate-slide-down modal-card ${className}`.trim()}
         style={{
           maxWidth: typeof maxWidth === 'number' ? `${maxWidth}px` : maxWidth,
         }}

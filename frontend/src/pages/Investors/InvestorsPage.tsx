@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { TrendingUp, Phone, ExternalLink, Edit2, Trash2, Download, Plus } from 'lucide-react';
-import { Investor, CallRecord, Consultation, InvestmentOpportunity, Followup } from '../../types';
+import { Investor, CallRecord, Consultation, InvestmentOpportunity, Followup, Deal } from '../../types';
 import Papa from 'papaparse';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
@@ -55,9 +55,12 @@ export const InvestorsPage: React.FC = () => {
   // ── Role scoping ───────────────────────────────────────────────────────────
   const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
+  const isIrm = roleCode === 'irm';
+  const isGhlIrm = isIrm && tenant?.slug === 'ghl';
 
   // ── Core data ─────────────────────────────────────────────────────────────
   const [investors, setInvestors] = useState<Investor[]>([]);
+  const [deals, setDeals] = useState<Deal[]>([]);
   const [allCalls, setAllCalls] = useState<CallRecord[]>([]);
   const [allConsultations, setAllConsultations] = useState<Consultation[]>([]);
   const [allOpportunities, setAllOpportunities] = useState<InvestmentOpportunity[]>([]);
@@ -83,6 +86,7 @@ export const InvestorsPage: React.FC = () => {
   // ── Data loading ──────────────────────────────────────────────────────────
   const loadData = () => {
     setInvestors(storageService.getInvestors(tenant?.id));
+    setDeals(storageService.getDeals(tenant?.id));
     setAllCalls(storageService.getCalls(tenant?.id));
     setAllConsultations(storageService.getConsultations(tenant?.id));
     setAllOpportunities(storageService.getOpportunities(tenant?.id));
@@ -102,14 +106,46 @@ export const InvestorsPage: React.FC = () => {
   }, [selectedInvestor?.id]);
 
   // ── Role-based scoping ────────────────────────────────────────────────────
+  // For IRM on GHL: show ONLY investors who completed the full pipeline with a deal at stage === 'converted'
   // sales_executive sees only their own investors; managers/admins see all
-  const scopedInvestors = isExec
-    ? investors.filter(
-      inv =>
-        (inv.assignedAgentId && inv.assignedAgentId === user?.id) ||
-        (inv.assignedAgentName && inv.assignedAgentName === user?.name),
-    )
-    : investors;
+  const convertedDeals = deals.filter(d => d.stage === 'converted');
+  const convertedCustomerIds = new Set(convertedDeals.map(d => d.customerId));
+  const convertedCustomerNames = new Set(convertedDeals.map(d => d.customerName.toLowerCase()));
+
+  const scopedInvestors = isGhlIrm
+    ? [
+        ...investors.filter(inv =>
+          convertedCustomerIds.has(inv.id) ||
+          convertedCustomerNames.has(inv.name.toLowerCase())
+        ),
+        ...convertedDeals
+          .filter(d => !investors.some(inv => inv.id === d.customerId || inv.name.toLowerCase() === d.customerName.toLowerCase()))
+          .map((d): Investor => ({
+            id: d.customerId || `inv-${d.id}`,
+            companyId: d.companyId,
+            name: d.customerName,
+            phone: d.phone || '',
+            email: d.email || '',
+            status: 'Active Investor',
+            investmentCapacity: d.investmentRange || (d.value >= 10000000 ? `₹${(d.value / 10000000).toFixed(2)} Cr` : `₹${d.value}`),
+            preferredAssetClass: d.preferredAssetClass || 'Commercial Pre-Leased',
+            assignedAgentId: d.assignedAgentId,
+            assignedAgentName: d.assignedAgentName,
+            referralSource: 'Pipeline Mandate Converted',
+            createdAt: d.createdAt,
+            committedAUM: d.investmentRange || (d.value >= 10000000 ? `₹${(d.value / 10000000).toFixed(2)} Cr` : `₹${d.value}`),
+            notes: d.notes,
+            investmentMandate: '',
+            riskTolerance: undefined,
+          }))
+      ]
+    : isExec
+      ? investors.filter(
+        inv =>
+          (inv.assignedAgentId && inv.assignedAgentId === user?.id) ||
+          (inv.assignedAgentName && inv.assignedAgentName === user?.name),
+      )
+      : investors;
 
   // ── Filter options ────────────────────────────────────────────────────────
   const assetClassOptions = Array.from(new Set(scopedInvestors.map(inv => inv.preferredAssetClass)))
@@ -298,6 +334,19 @@ export const InvestorsPage: React.FC = () => {
       sortable: true,
       render: (inv: Investor) => <span style={{ fontSize: 12 }}>{inv.preferredAssetClass}</span>,
     } as Column<Investor>]),
+    ...(isGhlIrm ? [{
+      key: 'investorType' as any,
+      header: 'Structure',
+      render: (inv: Investor) => {
+        const matchingDeal = convertedDeals.find(d => d.customerId === inv.id || d.customerName.toLowerCase() === inv.name.toLowerCase());
+        const type = matchingDeal?.investorType || 'AIF';
+        return (
+          <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 4, background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+            {type}
+          </span>
+        );
+      },
+    } as Column<Investor>] : []),
     {
       key: 'status',
       header: 'KYC / Investor Status',
@@ -355,11 +404,13 @@ export const InvestorsPage: React.FC = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">
-            <TrendingUp size={24} color="#0284c7" /> High Net-Worth Investors 360
+            <TrendingUp size={24} color={isGhlIrm ? '#10b981' : '#0284c7'} />{' '}
+            {isGhlIrm ? 'Converted Investors 360' : 'High Net-Worth Investors 360'}
           </h1>
           <p className="page-subtitle">
-            Private wealth client directory, institutional capital allocation, and mandate
-            tracking for {tenant?.name}.
+            {isGhlIrm
+              ? 'HNIs, family offices, and institutional partners who have completed the full pipeline and committed capital.'
+              : `Private wealth client directory, institutional capital allocation, and mandate tracking for ${tenant?.name}.`}
           </p>
         </div>
 
@@ -473,6 +524,20 @@ export const InvestorsPage: React.FC = () => {
                     {selectedInvestor.investmentCapacity}
                   </div>
                 </div>
+                {(() => {
+                  const matchingDeal = convertedDeals.find(d => d.customerId === selectedInvestor.id || d.customerName.toLowerCase() === selectedInvestor.name.toLowerCase());
+                  if (matchingDeal?.investorType) {
+                    return (
+                      <div>
+                        <span style={{ color: 'var(--text-secondary)' }}>Investor Structure:</span>
+                        <div style={{ fontWeight: 800, color: 'var(--primary-600)', marginTop: 4 }}>
+                          {matchingDeal.investorType}
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
             </div>
 

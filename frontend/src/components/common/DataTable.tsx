@@ -309,8 +309,8 @@ export function DataTable<T>({
                           col.align === 'right'
                             ? 'flex-end'
                             : col.align === 'center'
-                            ? 'center'
-                            : 'flex-start',
+                              ? 'center'
+                              : 'flex-start',
                       }}
                     >
                       {col.header}
@@ -331,7 +331,18 @@ export function DataTable<T>({
                   </th>
                 ))}
                 {rowActions && rowActions.length > 0 && (
-                  <th style={{ width: 64, padding: '12px 16px', textAlign: 'right' }}>
+                  <th
+                    style={{
+                      width: 80,
+                      minWidth: 80,
+                      padding: '12px 16px',
+                      textAlign: 'right',
+                      position: 'sticky',
+                      right: 0,
+                      background: 'var(--bg-surface-hover)',
+                      zIndex: 2,
+                    }}
+                  >
                     Actions
                   </th>
                 )}
@@ -394,9 +405,18 @@ export function DataTable<T>({
                         style={{
                           padding: '14px 16px',
                           textAlign: 'right',
-                          position: 'relative',
+                          position: 'sticky',
+                          right: 0,
+                          background: isSelected ? 'rgba(59, 130, 246, 0.04)' : 'var(--bg-surface)',
+                          zIndex: 1,
                         }}
                         onClick={e => e.stopPropagation()}
+                        onMouseEnter={e => {
+                          if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'var(--bg-surface-hover)';
+                        }}
+                        onMouseLeave={e => {
+                          if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'var(--bg-surface)';
+                        }}
                       >
                         <button
                           ref={el => { triggerRefs.current[rowKey] = el; }}

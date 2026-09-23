@@ -31,7 +31,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(() => {
     const saved = sessionStorage.getItem('nexus_current_user');
     if (saved) {
-      try { return JSON.parse(saved); } catch { }
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed?.role?.code && SYSTEM_ROLES[parsed.role.code]) {
+          parsed.role.permissions = Array.from(
+            new Set([...(parsed.role.permissions || []), ...SYSTEM_ROLES[parsed.role.code].permissions])
+          );
+        }
+        return parsed;
+      } catch { }
     }
     return null;
   });
@@ -72,8 +80,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     ? Object.values(FEATURES)
     : tenant?.enabledFeatures || [];
 
-  // Derive permissions from live user role
-  const permissions = user?.role.permissions || [];
+  // Derive permissions from live user role merged with SYSTEM_ROLES definition
+  const roleCode = user?.role?.code as RoleCode | undefined;
+  const systemRolePerms = roleCode ? SYSTEM_ROLES[roleCode]?.permissions || [] : [];
+  const permissions = Array.from(new Set([...(user?.role?.permissions || []), ...systemRolePerms]));
 
   const switchPersona = (roleCode: RoleCode, tenantSlug?: TenantSlug) => {
     if (roleCode === 'super_admin') {
@@ -103,6 +113,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const tenantUsers = storageService.getUsers(targetTenant.slug);
     const existingUser = tenantUsers.find(u => u.role.code === roleCode);
     if (existingUser) {
+      if (SYSTEM_ROLES[roleCode]) {
+        existingUser.role.permissions = Array.from(
+          new Set([...(existingUser.role.permissions || []), ...SYSTEM_ROLES[roleCode].permissions])
+        );
+      }
       setUser(existingUser);
       return;
     }
