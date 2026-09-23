@@ -219,6 +219,7 @@ export interface Followup {
   notes: string;
   assignedAgentId: string;
   assignedAgentName: string;
+  assignedRole?: string;
   followupType?: 'call' | 'meeting' | 'email' | 'whatsapp';
   scheduledDate?: string;
   scheduledTime?: string;
@@ -361,12 +362,21 @@ export interface AuditLog {
 
 export interface NotificationItem {
   id: string;
-  type: 'lead' | 'call' | 'followup' | 'visit' | 'booking' | 'system';
+  type: 'lead' | 'call' | 'followup' | 'visit' | 'booking' | 'system' | 'alert' | 'broadcast';
   title: string;
   message: string;
   timestamp: string;
   read: boolean;
   link?: string;
+  companyId?: string;
+  companySlug?: string;
+  targetUserId?: string; // 'all' or specific user ID
+  targetUserName?: string;
+  targetRole?: string; // 'all' | 'sales_executive' | 'irm' | etc.
+  createdById?: string;
+  createdByName?: string;
+  priority?: 'normal' | 'important' | 'urgent';
+  createdAt?: string;
 }
 
 export interface DocumentItem {

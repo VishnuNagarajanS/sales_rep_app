@@ -32,7 +32,9 @@ import {
   INITIAL_INVESTORS,
   INITIAL_CONSULTATIONS,
   INITIAL_OPPORTUNITIES,
+  INITIAL_NOTIFICATIONS,
 } from '../mock_data/mockData';
+import { ensureInitialAdminFollowups } from '../mock_data/adminFollowupsData';
 
 export type PopupPosition = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
 
@@ -270,8 +272,16 @@ class StorageService {
 
   // Follow-ups (Defaults to empty [] - real-time data only)
   getFollowups(companyId?: string): Followup[] {
-    const followups = this.get<Followup[]>('followups', []) || [];
-    return companyId ? followups.filter(f => f.companyId === companyId) : followups;
+    const raw = this.get<Followup[]>('followups', []) || [];
+    const { list, modified } = ensureInitialAdminFollowups(raw);
+    if (modified) {
+      try {
+        localStorage.setItem('nexus_followups', JSON.stringify(list));
+      } catch (e) {
+        console.error('Failed to seed admin followups', e);
+      }
+    }
+    return companyId ? list.filter(f => f.companyId === companyId) : list;
   }
 
   cleanupGhlPendingFollowups(companyId?: string): void {
@@ -569,23 +579,130 @@ class StorageService {
     this.set('audit_logs', logs);
   }
 
-  // Notifications (Defaults to empty [] - real-time data only)
-  getNotifications(): NotificationItem[] {
-    return this.get<NotificationItem[]>('notifications', []);
+  // Notifications (Multi-tenant scoped with strict cross-tenant isolation)
+  getNotifications(companyId?: string, userId?: string, userRoleCode?: string): NotificationItem[] {
+    let raw = this.get<NotificationItem[]>('notifications', []);
+
+    // Seed defaults if empty
+    if (raw.length === 0) {
+      raw = INITIAL_NOTIFICATIONS;
+      try {
+        localStorage.setItem('nexus_notifications', JSON.stringify(raw));
+      } catch (e) {
+        console.error('Failed to seed initial notifications', e);
+      }
+    }
+
+    // Auto-migrate any legacy items lacking tenant information (default to GHL)
+    let migrated = false;
+    const cleanList = raw.map(n => {
+      if (!n.companyId && !n.companySlug) {
+        migrated = true;
+        return {
+          ...n,
+          companyId: 't-ghl-01',
+          companySlug: 'ghl',
+          targetUserId: n.targetUserId || 'all',
+          priority: n.priority || 'normal',
+        };
+      }
+      return n;
+    });
+
+    if (migrated) {
+      try {
+        localStorage.setItem('nexus_notifications', JSON.stringify(cleanList));
+      } catch (e) {
+        console.error('Failed to update migrated notifications', e);
+      }
+    }
+
+    // 1. Strict Tenant Filtering
+    if (!companyId) return cleanList;
+
+    const targetCompanyId = companyId.toLowerCase();
+    const isGhlTarget = targetCompanyId === 't-ghl-01' || targetCompanyId === 'ghl';
+    const isJaminTarget = targetCompanyId === 't-jamin-02' || targetCompanyId === 'jamin';
+
+    const tenantScoped = cleanList.filter(n => {
+      const nCompId = (n.companyId || '').toLowerCase();
+      const nSlug = (n.companySlug || '').toLowerCase();
+
+      if (isGhlTarget) {
+        return nCompId === 't-ghl-01' || nSlug === 'ghl';
+      }
+      if (isJaminTarget) {
+        return nCompId === 't-jamin-02' || nSlug === 'jamin';
+      }
+      return nCompId === targetCompanyId || nSlug === targetCompanyId;
+    });
+
+    // 2. User / Role Targeting within the Tenant
+    if (!userId) return tenantScoped;
+
+    return tenantScoped.filter(n => {
+      // Broadcast to all users in tenant
+      if (!n.targetUserId || n.targetUserId === 'all') {
+        // If targeted to a specific role, verify role match or admin
+        if (n.targetRole && n.targetRole !== 'all') {
+          return (
+            userRoleCode === n.targetRole ||
+            userRoleCode === 'company_admin' ||
+            (userRoleCode as string) === 'admin' ||
+            userRoleCode === 'super_admin'
+          );
+        }
+        return true;
+      }
+      // Targeted directly to this user
+      if (n.targetUserId === userId) return true;
+      // Sender admin can view what they sent
+      if (n.createdById === userId) return true;
+
+      return false;
+    });
+  }
+
+  createNotification(notification: NotificationItem): void {
+    const raw = this.get<NotificationItem[]>('notifications', []);
+    const updated = [notification, ...raw];
+    this.set('notifications', updated);
   }
 
   markNotificationRead(id: string): void {
-    const notifs = this.getNotifications();
-    const found = notifs.find(n => n.id === id);
+    const raw = this.get<NotificationItem[]>('notifications', []);
+    const found = raw.find(n => n.id === id);
     if (found) {
       found.read = true;
-      this.set('notifications', notifs);
+      this.set('notifications', raw);
     }
   }
 
-  markAllNotificationsRead(): void {
-    const notifs = this.getNotifications().map(n => ({ ...n, read: true }));
-    this.set('notifications', notifs);
+  markAllNotificationsRead(companyId?: string, userId?: string): void {
+    const raw = this.get<NotificationItem[]>('notifications', []);
+    const targetCompanyId = (companyId || '').toLowerCase();
+    const isGhlTarget = targetCompanyId === 't-ghl-01' || targetCompanyId === 'ghl';
+    const isJaminTarget = targetCompanyId === 't-jamin-02' || targetCompanyId === 'jamin';
+
+    const updated = raw.map(n => {
+      if (companyId) {
+        const nCompId = (n.companyId || '').toLowerCase();
+        const nSlug = (n.companySlug || '').toLowerCase();
+        let companyMatches = false;
+        if (isGhlTarget) companyMatches = nCompId === 't-ghl-01' || nSlug === 'ghl';
+        else if (isJaminTarget) companyMatches = nCompId === 't-jamin-02' || nSlug === 'jamin';
+        else companyMatches = nCompId === targetCompanyId || nSlug === targetCompanyId;
+
+        if (!companyMatches) return n;
+      }
+
+      if (userId && n.targetUserId && n.targetUserId !== 'all' && n.targetUserId !== userId) {
+        return n;
+      }
+
+      return { ...n, read: true };
+    });
+    this.set('notifications', updated);
   }
 
   // Documents — metadata-only (no file bytes stored)
