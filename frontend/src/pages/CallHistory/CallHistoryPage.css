@@ -1,0 +1,223 @@
+/* CallHistoryPage styles */
+
+.call-history-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.call-history-page .page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.call-history-page .page-title {
+  font-size: 24px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.call-history-page .page-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.call-history-page .card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--shadow-card);
+  transition: border-color var(--transition-fast);
+}
+
+.call-history-page .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.call-history-page .btn-primary {
+  background: var(--gradient-primary);
+  color: #ffffff;
+  box-shadow: 0 2px 4px rgba(220, 38, 38, 0.2);
+}
+
+.call-history-page .btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.call-history-page .btn-sm {
+  padding: 5px 10px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+}
+
+.call-history-page .btn-icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: var(--radius-md);
+}
+
+/* Table cells */
+.call-cell-timestamp {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.call-contact-primary {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.call-contact-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.call-cell-text {
+  font-size: 12px;
+}
+
+.call-listen-btn {
+  color: var(--primary-600);
+}
+
+.call-action-icon {
+  margin-right: 6px;
+}
+
+/* Drawer styles */
+.call-drawer-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.call-drawer-overview-banner {
+  padding: 16px;
+  border-radius: var(--radius-lg);
+  background-color: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.call-drawer-chips-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.call-drawer-meta-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.call-drawer-player-card {
+  padding: 18px;
+  border: 1px solid var(--border-strong);
+}
+
+.call-drawer-player-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.call-drawer-player-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.call-drawer-player-quality {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.call-drawer-player-box {
+  background-color: var(--bg-surface-hover);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.call-player-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+}
+
+.call-player-track {
+  flex: 1;
+}
+
+.call-player-bar {
+  height: 4px;
+  background-color: var(--border-strong);
+  border-radius: 2px;
+  position: relative;
+}
+
+.call-player-progress {
+  height: 100%;
+  background-color: var(--primary-600);
+  border-radius: 2px;
+  transition: width 2s ease;
+}
+
+.call-player-times {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.call-drawer-card {
+  padding: 18px;
+}
+
+.call-drawer-heading {
+  font-size: 13px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+.call-drawer-transcript {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  font-style: italic;
+}
+
+.call-drawer-notes {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}

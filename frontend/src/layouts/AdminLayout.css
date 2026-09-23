@@ -1,0 +1,23 @@
+/* ==========================================================================
+   Admin Layout Styles
+   ========================================================================== */
+
+.admin-layout-main {
+  background-color: #090d16;
+}
+
+.admin-platform-banner {
+  background-color: rgba(139, 92, 246, 0.1);
+  border-bottom: 1px solid rgba(139, 92, 246, 0.25);
+  padding: 6px 24px;
+  font-size: 11px;
+  color: #c084fc;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.admin-platform-status {
+  color: #94a3b8;
+}

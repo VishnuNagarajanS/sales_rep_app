@@ -1,0 +1,89 @@
+/* ==========================================================================
+   FilterBar Component Styles
+   ========================================================================== */
+
+.filterbar-container {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.filterbar-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.filterbar-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.filterbar-item-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.filterbar-select {
+  height: 32px;
+  font-size: 12px;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 10px;
+  padding-right: 28px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  min-width: 110px;
+}
+
+.filterbar-select.active {
+  background-color: var(--primary-50);
+}
+
+.filterbar-date-group {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.filterbar-date-input {
+  height: 32px;
+  font-size: 12px;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 10px;
+  padding-right: 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+  background-color: var(--bg-surface);
+  min-width: 130px;
+}
+
+.filterbar-date-input.active {
+  background-color: var(--primary-50);
+}
+
+.filterbar-clear-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 4px 8px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+  white-space: nowrap;
+}

@@ -1,0 +1,61 @@
+/* CompanyAuditPage styles */
+
+.company-audit-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.company-audit-page .page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.company-audit-page .page-title {
+  font-size: 24px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.company-audit-page .page-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.company-audit-cell-timestamp {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.company-audit-actor-name {
+  font-weight: 700;
+}
+
+.company-audit-actor-email {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.company-audit-action-tag {
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  background-color: var(--bg-surface-hover);
+  border-radius: 4px;
+}
+
+.company-audit-entity-text {
+  font-size: 12px;
+}
+
+.company-audit-details-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+}

@@ -1,0 +1,85 @@
+/* CompanyUsersPage styles */
+
+.company-users-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.company-users-page .page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.company-users-page .page-title {
+  font-size: 24px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.company-users-page .page-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+
+
+
+.company-users-page .form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.company-users-page .form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.company-users-page .form-input,
+.company-users-page .form-select {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  outline: none;
+  transition: all var(--transition-fast);
+  width: 100%;
+}
+
+.company-user-name {
+  font-weight: 700;
+}
+
+.company-user-email {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.company-user-role {
+  font-weight: 600;
+  color: var(--primary-600);
+}
+
+.company-user-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.company-user-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}

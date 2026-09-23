@@ -1,0 +1,127 @@
+/* ==========================================================================
+   FollowupsPage Styles
+   ========================================================================== */
+
+.followups-page-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.followups-tabs-container {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.followups-tab-danger-active {
+  background-color: #dc2626 !important;
+}
+
+.followups-tab-danger-inactive {
+  border-color: rgba(239, 68, 68, 0.4) !important;
+}
+
+.followups-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.followups-empty-card {
+  padding: 48px;
+  color: var(--text-secondary);
+}
+
+.followup-item-card {
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-left: 1px solid var(--border-base);
+  background-color: var(--bg-surface);
+  opacity: 1;
+}
+
+.followup-item-card.overdue {
+  border-left: 4px solid #dc2626;
+}
+
+.followup-item-card.completed {
+  background-color: var(--bg-surface-hover);
+  opacity: 0.75;
+}
+
+.followup-item-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.followup-check-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  margin-top: 2px;
+}
+
+.followup-check-empty {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.followup-contact-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.followup-contact-name {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.followup-contact-name.completed {
+  text-decoration: line-through;
+}
+
+.followup-contact-phone {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.followup-notes {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.followup-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.followup-schedule-time {
+  font-weight: 600;
+  color: var(--primary-600);
+}
+
+.followup-schedule-time.overdue {
+  color: #dc2626;
+}
+
+.followup-assignee {
+  color: var(--text-muted);
+}
+
+.followup-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

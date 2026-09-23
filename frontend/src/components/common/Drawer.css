@@ -1,0 +1,12 @@
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-right {
+  animation: slideInRight var(--transition-smooth) ease-out forwards;
+}

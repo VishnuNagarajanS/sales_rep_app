@@ -1,0 +1,61 @@
+/* ==========================================================================
+   SiteVisitsPage Styles
+   ========================================================================== */
+
+.sitevisits-page-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.sitevisit-slot-title {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.sitevisit-slot-id {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sitevisit-client-name {
+  font-weight: 600;
+}
+
+.sitevisit-client-phone {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.sitevisit-project-name {
+  font-weight: 600;
+}
+
+.sitevisit-plot-target {
+  font-size: 11px;
+  color: #059669;
+  font-weight: 600;
+}
+
+.sitevisit-agent-name {
+  font-size: 12px;
+}
+
+.sitevisit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sitevisit-form-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.sitevisit-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}

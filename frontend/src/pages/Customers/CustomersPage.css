@@ -1,0 +1,548 @@
+/* CustomersPage styles */
+
+.customers-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.customers-page .page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.customers-page .page-title {
+  font-size: 24px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.customers-page .page-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.customers-split-layout {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.customers-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.customers-sidebar-card {
+  padding: 14px;
+}
+
+.customers-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.customers-sidebar-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.customers-btn-new {
+  font-size: 12px;
+  padding: 5px 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.customers-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  flex-wrap: nowrap;
+  box-sizing: border-box;
+  margin-top: 4px;
+  margin-bottom: 14px;
+}
+
+.customers-filter-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.customers-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1 1 0;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.customers-filter-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.customers-filter-select {
+  height: 30px;
+  font-size: 12px;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 8px;
+  padding-right: 22px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+  color: var(--text-primary);
+  cursor: pointer;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.customers-filter-select.is-filtered {
+  background-color: var(--primary-50);
+}
+
+.customers-filter-select:not(.is-filtered) {
+  background-color: var(--bg-surface);
+}
+
+.customers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.customer-list-item {
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  background-color: var(--bg-surface-hover);
+}
+
+.customer-list-item.is-selected {
+  background-color: var(--primary-50);
+  border-color: var(--primary-500);
+}
+
+.customer-list-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.customer-list-name {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.customer-list-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.customer-list-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.customer-list-val {
+  font-size: 11px;
+  font-weight: 700;
+  color: #059669;
+}
+
+.customer-list-call-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+}
+
+/* 360 Right Cockpit */
+.customer-cockpit-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.customer-cockpit-header {
+  padding: 24px 28px;
+  border-bottom: 1px solid var(--border-base);
+  background: linear-gradient(to right, var(--bg-surface), var(--bg-surface-hover));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.customer-cockpit-name-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.customer-cockpit-name {
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.customer-cockpit-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.customer-cockpit-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.customer-call-btn {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+}
+
+.customer-tabs-bar {
+  display: flex;
+  border-bottom: 1px solid var(--border-base);
+  background-color: var(--bg-surface);
+  padding: 0 20px;
+}
+
+.customer-tab-btn {
+  border-radius: 0;
+  padding: 12px 16px;
+  font-size: 13px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font-weight: 500;
+  transition: all var(--transition-fast);
+}
+
+.customer-tab-btn.is-active {
+  border-bottom-color: var(--primary-600);
+  color: var(--primary-600);
+  font-weight: 700;
+}
+
+.customer-tab-content {
+  padding: 24px;
+}
+
+/* Overview Tab */
+.customer-overview-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.customer-profile-card {
+  padding: 18px;
+}
+
+.customer-section-heading {
+  font-size: 13px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.customer-profile-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  font-size: 13px;
+}
+
+.customer-profile-label {
+  color: var(--text-secondary);
+}
+
+.customer-profile-val {
+  font-weight: 600;
+}
+
+.customer-profile-val-green {
+  font-weight: 700;
+  color: #059669;
+  font-size: 15px;
+}
+
+.customer-profile-val-primary {
+  font-weight: 600;
+  color: var(--primary-600);
+}
+
+.customer-custom-card {
+  padding: 18px;
+  background: var(--primary-50);
+  border: 1px solid var(--primary-100);
+}
+
+.customer-custom-heading {
+  font-size: 13px;
+  text-transform: uppercase;
+  color: var(--primary-700);
+  margin-bottom: 12px;
+}
+
+.customer-custom-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.customer-custom-label {
+  color: var(--text-secondary);
+  text-transform: capitalize;
+}
+
+.customer-custom-val {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* Calls Tab */
+.customer-calls-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.customer-empty-text {
+  text-align: center;
+  padding: 32px 0;
+  color: var(--text-secondary);
+}
+
+.customer-call-card {
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--border-base);
+}
+
+.customer-call-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.customer-call-duration {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.customer-call-transcript {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 6px;
+  font-style: italic;
+}
+
+/* Followups Tab */
+.customer-followups-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.customer-followup-item {
+  padding: 14px;
+  border-radius: var(--radius-md);
+  background-color: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.customer-followup-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.customer-followup-notes {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.customer-followup-due {
+  font-size: 12px;
+  color: var(--primary-600);
+  margin-top: 4px;
+}
+
+/* Deals Tab */
+.customer-deals-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.customer-deal-card {
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.customer-deal-title {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.customer-deal-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.customer-deal-val {
+  font-size: 16px;
+  font-weight: 800;
+  color: #059669;
+}
+
+.customer-docs-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.customer-empty-placeholder {
+  padding: 40px;
+  text-align: center;
+}
+
+.customer-modal-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.form-error {
+  font-size: 11px;
+  color: var(--danger);
+  margin-top: 4px;
+}
+
+.customer-cell-primary {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.customer-cell-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.customer-deals-count {
+  font-weight: 600;
+  color: var(--primary-600);
+}
+
+.customer-total-val {
+  font-weight: 700;
+  color: #059669;
+}
+
+.customer-agent-text {
+  font-size: 12px;
+}
+
+.customer-action-icon {
+  margin-right: 6px;
+}
+
+@media (max-width: 900px) {
+  .customers-split-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-cockpit-meta-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .customer-cockpit-header {
+    padding: 18px;
+  }
+
+  .customer-tab-content {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 600px) {
+  .customers-filter-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .customers-filter-group {
+    flex: 1 1 100%;
+  }
+
+  .customer-profile-grid,
+  .customer-custom-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-cockpit-actions {
+    width: 100%;
+  }
+
+  .customer-call-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .customer-tabs-bar {
+    overflow-x: auto;
+    padding: 0 8px;
+  }
+
+  .customer-tab-btn {
+    white-space: nowrap;
+  }
+}

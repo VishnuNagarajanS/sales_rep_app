@@ -1,0 +1,54 @@
+/* PlatformUsersPage styles */
+
+.platform-users-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.platform-users-page .page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.platform-users-page .page-title {
+  font-size: 24px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #ffffff;
+}
+
+.platform-users-page .page-subtitle {
+  font-size: 13px;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+
+.platform-users-name {
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.platform-users-email {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.platform-users-tenant {
+  font-weight: 600;
+  color: #38bdf8;
+}
+
+.platform-users-role {
+  color: #c084fc;
+  font-weight: 600;
+}
+
+.platform-users-table-container {
+  color: #cbd5e1;
+}

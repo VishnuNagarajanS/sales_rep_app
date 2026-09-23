@@ -1,0 +1,346 @@
+/* ==========================================================================
+   DashboardPage.css
+   Dedicated stylesheet for DashboardPage (1:1 extraction of original styles)
+   ========================================================================== */
+
+/* Main Page Container */
+.dashboard-page-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* Header Banner */
+.dashboard-banner {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%) !important;
+  color: #ffffff;
+  padding: 24px 28px;
+  border: none !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  border-radius: var(--radius-lg);
+}
+
+.dashboard-banner-tag {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.dashboard-banner-title {
+  font-size: 24px;
+  font-weight: 800;
+  color: #ffffff;
+  margin-top: 4px;
+}
+
+.dashboard-banner-subtitle {
+  font-size: 13px;
+  color: #cbd5e1;
+  margin-top: 4px;
+}
+
+.dashboard-banner-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.dashboard-banner-btn-secondary {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+}
+
+.dashboard-banner-btn-secondary:hover {
+  background-color: rgba(255, 255, 255, 0.18) !important;
+}
+
+/* KPI Cards Row */
+.dashboard-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.dashboard-kpi-card {
+  cursor: pointer;
+}
+
+.dashboard-kpi-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dashboard-kpi-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.dashboard-kpi-icon-box {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dashboard-kpi-icon-box.leads {
+  background: rgba(59, 130, 246, 0.1);
+  color: #2563eb;
+}
+
+.dashboard-kpi-icon-box.followups {
+  background: rgba(245, 158, 11, 0.1);
+  color: #d97706;
+}
+
+.dashboard-kpi-icon-box.calls {
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+
+.dashboard-kpi-icon-box.deals {
+  background: rgba(139, 92, 246, 0.1);
+  color: #7c3aed;
+}
+
+.dashboard-kpi-icon-box.plots {
+  background: rgba(5, 150, 105, 0.1);
+  color: #059669;
+}
+
+.dashboard-kpi-icon-box.consultations {
+  background: rgba(2, 132, 199, 0.1);
+  color: #0284c7;
+}
+
+.dashboard-kpi-value {
+  font-size: 28px;
+  font-weight: 800;
+  margin-top: 12px;
+  color: var(--text-primary);
+}
+
+.dashboard-kpi-delta-positive {
+  font-size: 12px;
+  color: #059669;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+.dashboard-kpi-followup-status {
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+.dashboard-kpi-followup-status.overdue {
+  color: #dc2626;
+}
+
+.dashboard-kpi-followup-status.on-time {
+  color: #64748b;
+}
+
+.dashboard-kpi-subtext {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.dashboard-kpi-deals-stat {
+  font-size: 12px;
+  color: #2563eb;
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+.dashboard-kpi-plots-total {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.dashboard-kpi-plots-stat {
+  font-size: 12px;
+  color: #d97706;
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+.dashboard-kpi-consultations-stat {
+  font-size: 12px;
+  color: #059669;
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+.dashboard-kpi-exec-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+.dashboard-missed-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 6px;
+  padding: 2px 7px;
+}
+
+.dashboard-missed-pill.has-missed {
+  color: #dc2626;
+  background-color: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.2);
+}
+
+.dashboard-missed-pill.none {
+  color: #64748b;
+  background-color: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+}
+
+/* Main Split Row: Recent Inquiries & Actionable Followups */
+.dashboard-split-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 20px;
+}
+
+.dashboard-split-card {
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.dashboard-split-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-base);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dashboard-split-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.dashboard-split-subtitle {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.dashboard-table-container {
+  overflow-x: auto;
+}
+
+.dashboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.dashboard-table-thead-tr {
+  background: var(--bg-surface-hover);
+  border-bottom: 1px solid var(--border-base);
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.dashboard-table-th {
+  padding: 10px 16px;
+  text-align: left;
+}
+
+.dashboard-table-th.right {
+  text-align: right;
+}
+
+.dashboard-table-tbody-tr {
+  border-bottom: 1px solid var(--border-base);
+}
+
+.dashboard-table-td {
+  padding: 12px 16px;
+}
+
+.dashboard-table-td.right {
+  text-align: right;
+}
+
+.dashboard-contact-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.dashboard-contact-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.dashboard-call-btn {
+  width: 30px !important;
+  height: 30px !important;
+  border-radius: 8px !important;
+}
+
+/* Due Follow-ups & Reminders */
+.dashboard-followups-list {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dashboard-followup-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background-color: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+}
+
+.dashboard-followup-contact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dashboard-followup-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.dashboard-followup-notes {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.dashboard-followup-schedule {
+  font-size: 11px;
+  color: #d97706;
+  margin-top: 4px;
+  font-weight: 600;
+}

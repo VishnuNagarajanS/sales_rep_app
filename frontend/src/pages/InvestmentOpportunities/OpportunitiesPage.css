@@ -1,0 +1,53 @@
+/* OpportunitiesPage styles */
+
+.opportunities-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.opportunities-page .page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.opportunities-page .page-title {
+  font-size: 24px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.opportunities-page .page-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.opp-title-primary {
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.opp-notes-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.opp-investor-text {
+  font-weight: 600;
+  color: var(--primary-600);
+}
+
+.opp-target-text {
+  font-weight: 700;
+}
+
+.opp-committed-text {
+  font-weight: 800;
+  color: #059669;
+}

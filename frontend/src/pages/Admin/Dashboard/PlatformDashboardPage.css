@@ -1,0 +1,296 @@
+/* PlatformDashboardPage styles */
+
+.platform-dashboard-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.platform-dashboard-page .page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.platform-dashboard-page .page-title {
+  font-size: 24px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #ffffff;
+}
+
+.platform-dashboard-page .page-subtitle {
+  font-size: 13px;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+
+.platform-dashboard-page .card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--shadow-card);
+  transition: border-color var(--transition-fast);
+}
+
+.platform-dashboard-page .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.platform-dashboard-page .btn-secondary {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-color: var(--border-base);
+}
+
+.platform-dashboard-page .btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.platform-dashboard-page .btn-sm {
+  padding: 5px 10px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+}
+
+/* Telemetry Grid */
+.platform-telemetry-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.platform-telemetry-card {
+  background-color: #0f172a;
+  border-color: #334155;
+}
+
+.platform-telemetry-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.platform-telemetry-val {
+  font-size: 28px;
+  font-weight: 800;
+  color: #ffffff;
+  margin-top: 8px;
+}
+
+.platform-telemetry-val-purple {
+  color: #c084fc;
+}
+
+.platform-telemetry-val-green {
+  color: #34d399;
+}
+
+.platform-telemetry-sub-sky {
+  font-size: 12px;
+  color: #38bdf8;
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+.platform-telemetry-sub-green {
+  font-size: 12px;
+  color: #34d399;
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+.platform-telemetry-sub-muted {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+
+/* Performance Matrix Card & Table */
+.platform-matrix-card {
+  padding: 0;
+  background-color: #0f172a;
+  border-color: #334155;
+  overflow: hidden;
+}
+
+.platform-matrix-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #334155;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.platform-matrix-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.platform-matrix-manage-btn {
+  color: #c084fc;
+}
+
+.platform-matrix-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  color: #cbd5e1;
+}
+
+.platform-matrix-thead-tr {
+  background: #1e293b;
+  border-bottom: 1px solid #334155;
+  color: #94a3b8;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.platform-matrix-th-name {
+  padding: 12px 20px;
+  text-align: left;
+}
+
+.platform-matrix-th-tagline {
+  padding: 12px 16px;
+  text-align: left;
+}
+
+.platform-matrix-th-center {
+  padding: 12px 16px;
+  text-align: center;
+}
+
+.platform-matrix-th-action {
+  padding: 12px 20px;
+  text-align: right;
+}
+
+.platform-matrix-tbody-tr {
+  border-bottom: 1px solid #334155;
+}
+
+.platform-matrix-td-name {
+  padding: 14px 20px;
+}
+
+.platform-matrix-tenant-name {
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.platform-matrix-tenant-id {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.platform-matrix-td-tagline {
+  padding: 14px 16px;
+}
+
+.platform-matrix-td-center {
+  padding: 14px 16px;
+  text-align: center;
+}
+
+.platform-matrix-badge-purple {
+  padding: 3px 8px;
+  border-radius: 10px;
+  background: rgba(139, 92, 246, 0.2);
+  color: #c084fc;
+  font-weight: 600;
+}
+
+.platform-matrix-did {
+  font-family: monospace;
+}
+
+.platform-matrix-td-action {
+  padding: 14px 20px;
+  text-align: right;
+}
+
+.platform-matrix-drill-btn {
+  background-color: #1e293b;
+  color: #ffffff;
+  border-color: #475569;
+}
+
+/* Security Audit Feed */
+.platform-audit-card {
+  padding: 20px;
+  background-color: #0f172a;
+  border-color: #334155;
+}
+
+.platform-audit-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+  margin-bottom: 14px;
+}
+
+.platform-audit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.platform-audit-item {
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.platform-audit-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.platform-audit-company-badge {
+  color: #38bdf8;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.platform-audit-action {
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.platform-audit-details {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+.platform-audit-time {
+  font-size: 11px;
+  color: #64748b;
+}

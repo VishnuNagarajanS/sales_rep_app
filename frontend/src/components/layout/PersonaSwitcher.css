@@ -1,0 +1,153 @@
+/* ==========================================================================
+   Persona Switcher Styles
+   ========================================================================== */
+
+.persona-switcher-container {
+  position: relative;
+}
+
+.persona-trigger-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #ffffff;
+  padding: 5px 12px;
+}
+
+.persona-trigger-btn.super-admin {
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid #8b5cf6;
+}
+
+.persona-trigger-btn.tenant-admin {
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid var(--primary-500);
+}
+
+.persona-role-prefix {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.persona-role-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.persona-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+
+.persona-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  z-index: 1050;
+  width: 320px;
+  padding: 8px;
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+}
+
+.persona-dropdown-header {
+  padding: 8px 12px 10px;
+  border-bottom: 1px solid var(--border-base);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.persona-reset-btn {
+  font-size: 10px;
+  padding: 2px 6px;
+  color: var(--text-muted);
+}
+
+.persona-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.persona-item-btn {
+  display: flex;
+  align-items: flex-start;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background-color: transparent;
+  border: 1px solid transparent;
+}
+
+.persona-item-btn.active {
+  background-color: var(--primary-50);
+  border: 1px solid var(--primary-100);
+}
+
+.persona-item-icon {
+  margin-top: 2px;
+  margin-right: 10px;
+}
+
+.persona-item-content {
+  flex: 1;
+}
+
+.persona-item-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  white-space: normal;
+}
+
+.persona-item-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.persona-item-label.active {
+  color: #0f172a;
+}
+
+.persona-item-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--bg-surface-hover);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.persona-item-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  white-space: normal;
+}
+
+.persona-item-desc.active {
+  color: #475569;
+}
+
+.persona-custom-header {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  padding: 8px 10px 4px;
+  border-top: 1px solid var(--border-subtle);
+}

@@ -1,0 +1,189 @@
+/* ==========================================================================
+   PlotsPage Styles
+   ========================================================================== */
+
+.plots-page-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.plots-project-selector {
+  width: 260px;
+}
+
+.plots-legend-bar {
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  background-color: var(--bg-surface);
+}
+
+.plots-legend-group {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.plots-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.plots-legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.plots-legend-dot.avail { background-color: #10b981; }
+.plots-legend-dot.hold { background-color: #f59e0b; }
+.plots-legend-dot.sold { background-color: #ef4444; }
+
+.plots-legend-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.plots-legend-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.plots-grid-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.plot-item-card {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.plot-item-card.available {
+  background-color: rgba(16, 185, 129, 0.05);
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.plot-item-card.hold {
+  background-color: rgba(245, 158, 11, 0.05);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.plot-item-card.sold {
+  background-color: rgba(239, 68, 68, 0.05);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.plot-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.plot-number-title {
+  font-weight: 800;
+  font-size: 16px;
+  color: var(--text-primary);
+}
+
+.plot-dimensions {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.plot-facing {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.plot-pricing-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--border-base);
+  padding-top: 10px;
+  margin-top: 4px;
+}
+
+.plot-price-highlight {
+  font-weight: 800;
+  font-size: 15px;
+  color: #059669;
+}
+
+.plot-sqft-rate {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.plot-hold-badge {
+  background-color: rgba(245, 158, 11, 0.12);
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: #b45309;
+  margin-top: 4px;
+}
+
+.plot-sold-badge {
+  background-color: rgba(239, 68, 68, 0.12);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: #b91c1c;
+  margin-top: 4px;
+}
+
+.plot-hold-btn-gold {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+}
+
+.plot-release-btn {
+  color: #dc2626;
+}
+
+.plot-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.plot-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.plot-detail-val {
+  font-weight: 700;
+}
+
+.plot-detail-price {
+  font-weight: 800;
+  color: #059669;
+  font-size: 16px;
+}
+
+.plot-hold-detail-box {
+  background-color: rgba(245, 158, 11, 0.1);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  font-size: 12px;
+}
+
+.plot-hold-detail-title {
+  font-weight: 700;
+  color: #b45309;
+  margin-bottom: 4px;
+}
