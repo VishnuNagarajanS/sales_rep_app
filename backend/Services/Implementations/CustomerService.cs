@@ -132,7 +132,7 @@ public class CustomerService : ICustomerService
                 Direction = cr.Direction,
                 Duration = cr.Duration,
                 Disposition = cr.Disposition,
-                Notes = cr.Notes,
+                Notes = cr.Notes ?? string.Empty,
                 Timestamp = cr.Timestamp
             })
             .ToListAsync(ct);

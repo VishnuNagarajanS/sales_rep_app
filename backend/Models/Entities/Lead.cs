@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace backend.Models.Entities;
 
 public class Lead
@@ -9,6 +11,13 @@ public class Lead
 
     public int AssignedAgentId { get; set; }
     public User? AssignedAgent { get; set; }
+
+    [NotMapped]
+    public int? AssignedToUserId
+    {
+        get => AssignedAgentId;
+        set => AssignedAgentId = value ?? 0;
+    }
 
     public string Name { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;

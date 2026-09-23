@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace backend.Controllers.SalesExecutive;
 
-[ApiController, Authorize(Roles = "sales_executive"), Route("api/sales-executive/notifications")]
+[ApiController, Authorize(Roles = "sales_executive,company_admin,sales_manager,super_admin,irm"), Route("api/sales-executive/notifications")]
 public sealed class SalesExecutiveNotificationsController(INotificationService service) : ControllerBase
 {
     [HttpGet] public async Task<IActionResult> Get(CancellationToken cancellationToken) => Ok(ApiResponse<IReadOnlyList<NotificationDto>>.SuccessResult(await service.GetAsync(cancellationToken)));

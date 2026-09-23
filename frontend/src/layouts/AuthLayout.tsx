@@ -137,7 +137,7 @@ export const AuthLayout: React.FC = () => {
             className="btn btn-primary auth-submit-btn"
             disabled={isLoading}
           >
-            {isLoading ? 'Authenticating with Backend...' : 'Sign In with PostgreSQL Account'} <ArrowRight size={16} />
+            {isLoading ? 'Signing in...' : 'Sign in'} <ArrowRight size={16} />
           </button>
         </form>
       </div>

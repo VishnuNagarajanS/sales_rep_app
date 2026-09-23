@@ -366,4 +366,109 @@ export const callsApi = {
     const res = await apiClient.post<ApiResponse<CallRecordDto>>('/sales-executive/calls', formatted);
     return res.data;
   },
+
+  async processDisposition(payload: {
+    callId?: number;
+    contactName: string;
+    contactPhone: string;
+    direction?: string;
+    duration?: number;
+    disposition: string;
+    notes?: string;
+    followupAt?: string;
+    leadId?: number;
+    customerId?: number;
+  }): Promise<CallRecordDto> {
+    const res = await apiClient.post<ApiResponse<CallRecordDto>>('/sales-executive/calls/disposition', payload);
+    return res.data;
+  },
 };
+
+export interface ExecutiveDashboardData {
+  activeLeads: { label: string; value: number; weeklyDelta: number };
+  pendingFollowups: { label: string; value: number; weeklyDelta: number };
+  overdueFollowups: number;
+  callsLoggedToday: number;
+  connectedCallsToday: number;
+  averageTalkTimeSeconds: number;
+  recentLeads: Array<{ id: number; name: string; phone: string; status: string; createdAt: string }>;
+  upcomingFollowups: Array<{ id: number; leadId?: number; scheduledAt: string; notes?: string }>;
+}
+
+export interface NotificationItem {
+  id: number;
+  title: string;
+  message: string;
+  type: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface ExecutiveProfileData {
+  userId: number;
+  name: string;
+  email: string;
+  phone?: string;
+  employeeId?: string;
+  designation?: string;
+  workingHours?: string;
+  maxActiveLeads: number;
+  skills: string[];
+  languages: string[];
+  specializations: string[];
+  autoAnswerCalls: boolean;
+  callRecordingEnabled: boolean;
+}
+
+export interface ExecutiveReportData {
+  totalCalls: number;
+  inboundCalls: number;
+  outboundCalls: number;
+  totalDurationSeconds: number;
+  averageDurationSeconds: number;
+  connectRatePercent: number;
+  dispositions: Array<{ disposition: string; count: number; percentage: number }>;
+  followupsCompletedOnTime: number;
+  followupsOverdue: number;
+  followupAdherencePercent: number;
+}
+
+export const dashboardApi = {
+  async getDashboard(): Promise<ExecutiveDashboardData> {
+    const res = await apiClient.get<ApiResponse<ExecutiveDashboardData>>('/sales-executive/dashboard');
+    return res.data;
+  },
+};
+
+export const notificationsApi = {
+  async getNotifications(): Promise<NotificationItem[]> {
+    const res = await apiClient.get<ApiResponse<NotificationItem[]>>('/sales-executive/notifications');
+    return res.data;
+  },
+  async markAsRead(id: number): Promise<void> {
+    await apiClient.patch(`/sales-executive/notifications/${id}/read`);
+  },
+  async markAllAsRead(): Promise<number> {
+    const res = await apiClient.post<ApiResponse<number>>('/sales-executive/notifications/read-all');
+    return res.data;
+  },
+};
+
+export const profileApi = {
+  async getProfile(): Promise<ExecutiveProfileData> {
+    const res = await apiClient.get<ApiResponse<ExecutiveProfileData>>('/sales-executive/profile');
+    return res.data;
+  },
+  async updateProfile(payload: Partial<ExecutiveProfileData>): Promise<ExecutiveProfileData> {
+    const res = await apiClient.patch<ApiResponse<ExecutiveProfileData>>('/sales-executive/profile', payload);
+    return res.data;
+  },
+};
+
+export const reportsApi = {
+  async getReports(params?: { from?: string; to?: string }): Promise<ExecutiveReportData> {
+    const res = await apiClient.get<ApiResponse<ExecutiveReportData>>('/sales-executive/reports', params);
+    return res.data;
+  },
+};
+
