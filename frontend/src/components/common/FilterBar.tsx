@@ -14,8 +14,11 @@ export interface FilterDef {
   key: string;
   /** Human-readable label shown beside the select */
   label: string;
-  /** Available choices — "All" is added automatically as the first option */
+  /** Available choices — "All" (or custom placeholder) is added automatically as the first option */
   options: FilterOption[];
+  /** Optional custom text for the default unselected option (defaults to "All") */
+  placeholder?: string;
+  allLabel?: string;
   /** Controlled value (use 'All' for the default / unset state) */
   value: string;
   onChange: (value: string) => void;
@@ -74,7 +77,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             value={filter.value}
             onChange={e => filter.onChange(e.target.value)}
           >
-            <option value="All">All</option>
+            <option value="All">{filter.placeholder || filter.allLabel || 'All'}</option>
             {filter.options.map(opt => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}

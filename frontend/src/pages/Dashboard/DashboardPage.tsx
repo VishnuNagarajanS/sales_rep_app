@@ -491,7 +491,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                     <tr key={inv.id} className="dashboard-table-tbody-tr">
                       <td className="dashboard-table-td">
                         <div className="dashboard-contact-name">{inv.name}</div>
-                        <div className="dashboard-contact-meta">{inv.phone} • {inv.preferredAssetClass || 'Equity & Commercial'}</div>
+                        <div className="dashboard-contact-meta">{inv.phone}{isExec ? '' : ` • ${inv.preferredAssetClass || 'Equity & Commercial'}`}</div>
                       </td>
                       <td className="dashboard-table-td">
                         <StatusChip status={inv.status} size="sm" />

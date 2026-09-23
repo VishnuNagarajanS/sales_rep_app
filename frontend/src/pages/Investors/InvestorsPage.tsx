@@ -292,12 +292,12 @@ export const InvestorsPage: React.FC = () => {
         <span className="investor-capacity-badge">{inv.investmentCapacity}</span>
       ),
     },
-    {
+    ...(isExec ? [] : [{
       key: 'preferredAssetClass',
       header: 'Preferred Asset Class',
       sortable: true,
-      render: inv => <span style={{ fontSize: 12 }}>{inv.preferredAssetClass}</span>,
-    },
+      render: (inv: Investor) => <span style={{ fontSize: 12 }}>{inv.preferredAssetClass}</span>,
+    } as Column<Investor>]),
     {
       key: 'status',
       header: 'KYC / Investor Status',
@@ -412,13 +412,13 @@ export const InvestorsPage: React.FC = () => {
                   { value: 'Inactive', label: 'Inactive' },
                 ],
               },
-              {
+              ...(isExec ? [] : [{
                 key: 'assetClass',
                 label: 'Asset Class',
                 value: assetClassFilter,
                 onChange: setAssetClassFilter,
                 options: assetClassOptions,
-              },
+              }]),
               {
                 key: 'consultant',
                 label: 'Consultant',
@@ -441,7 +441,7 @@ export const InvestorsPage: React.FC = () => {
         isOpen={!!selectedInvestor}
         onClose={() => setSelectedInvestor(null)}
         title={selectedInvestor?.name || 'Investor Overview'}
-        subtitle={`Mandate: ${selectedInvestor?.preferredAssetClass ?? ''}`}
+        subtitle={isExec ? undefined : `Mandate: ${selectedInvestor?.preferredAssetClass ?? ''}`}
         width={720}
       >
         {selectedInvestor && (
@@ -605,16 +605,18 @@ export const InvestorsPage: React.FC = () => {
                 onChange={e => setField('investmentCapacity', e.target.value)}
               />
             </div>
-            <div className="form-group">
-              <label className="form-label">Preferred Asset Class</label>
-              <input
-                id="inv-form-asset-class"
-                className="form-input"
-                placeholder="e.g. Residential, Commercial"
-                value={form.preferredAssetClass}
-                onChange={e => setField('preferredAssetClass', e.target.value)}
-              />
-            </div>
+            {!isExec && (
+              <div className="form-group">
+                <label className="form-label">Preferred Asset Class</label>
+                <input
+                  id="inv-form-asset-class"
+                  className="form-input"
+                  placeholder="e.g. Residential, Commercial"
+                  value={form.preferredAssetClass}
+                  onChange={e => setField('preferredAssetClass', e.target.value)}
+                />
+              </div>
+            )}
           </div>
 
           {/* Row: Committed AUM + Risk Tolerance */}

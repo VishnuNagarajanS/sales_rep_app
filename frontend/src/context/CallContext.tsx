@@ -272,9 +272,14 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Locate matched lead if any
       const leadId = lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : null;
       const allLeads = storageService.getLeads(tenant.id);
+      const normalize = (p: string) => (p || '').replace(/\D/g, '').slice(-10);
+      const callPhoneDigits = normalize(lastCallRecord.contactPhone);
       const matchedLead = leadId
         ? allLeads.find(l => l.id === leadId)
-        : allLeads.find(l => l.phone === lastCallRecord.contactPhone || (l.name && l.name.toLowerCase() === lastCallRecord.contactName.toLowerCase()));
+        : allLeads.find(l =>
+            (callPhoneDigits && normalize(l.phone) === callPhoneDigits) ||
+            (l.name && l.name.toLowerCase() === lastCallRecord.contactName.toLowerCase())
+          );
 
       // 1. Interested -> Move to Customer 360, remove from active Leads
       if (disposition === 'Interested') {

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { CallDisposition, Consultation } from '../../types';
 import { storageService } from '../../services/storageService';
+import { useAuth } from '../../context/AuthContext';
 import { StatusChip } from './StatusChip';
 
 interface LeadDetailDrawerContentProps {
@@ -54,6 +55,9 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   consultationHistory,
   hideAutoNotes = false,
 }) => {
+  const { user } = useAuth();
+  const isSalesExecutive = user?.role?.code === 'sales_executive';
+
   const [expandedTranscripts, setExpandedTranscripts] = useState<Record<string, boolean>>({});
   const [callTab, setCallTab] = useState<'agent' | 'irm'>('agent');
   const [isPreviousConsultationsOpen, setIsPreviousConsultationsOpen] = useState(true);
@@ -327,6 +331,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                 .map(def => {
                   const key = def.fieldKey || def.id;
                   if (key === 'dispositionReason' || key === 'customerNotes') return null;
+                  if (isSalesExecutive && key === 'preferredAssetClass') return null;
                   const val = selectedLead.customFields?.[key];
                   if (val === undefined || val === null || val === '') return null;
                   return { id: def.id, label: def.label || key.replace(/([A-Z])/g, ' $1'), value: String(val) };

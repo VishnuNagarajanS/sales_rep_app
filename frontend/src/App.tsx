@@ -101,7 +101,7 @@ export const App: React.FC = () => {
   const [quickLocation, setQuickLocation] = useState('');
   const [quickSource, setQuickSource] = useState('Website Inbound');
   const [quickAssetClass, setQuickAssetClass] = useState('AIF');
-  const [quickInvestmentCapacity, setQuickInvestmentCapacity] = useState('₹1 Cr – ₹5 Cr');
+  const [quickInvestmentCapacity, setQuickInvestmentCapacity] = useState('');
   const [quickNotes, setQuickNotes] = useState('');
 
   // Consultation-specific state
@@ -510,21 +510,19 @@ export const App: React.FC = () => {
               <div className="lead-custom-schema-box">
                 <div className="lead-custom-schema-title">GHL India Ventures Asset Terms</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div className="form-group">
-                    <label className="form-label">Asset Class</label>
-                    <select
-                      className="form-select"
-                      value={quickAssetClass}
-                      onChange={e => {
-                        const ac = e.target.value;
-                        setQuickAssetClass(ac);
-                        setQuickInvestmentCapacity(ac === 'CO-AIF' ? '₹10 Lakh to ₹1 Cr' : '₹1 Cr – ₹5 Cr');
-                      }}
-                    >
-                      <option value="AIF">AIF</option>
-                      <option value="CO-AIF">CO-AIF</option>
-                    </select>
-                  </div>
+                  {user?.role?.code !== 'sales_executive' && (
+                    <div className="form-group">
+                      <label className="form-label">Asset Class</label>
+                      <select
+                        className="form-select"
+                        value={quickAssetClass}
+                        onChange={e => setQuickAssetClass(e.target.value)}
+                      >
+                        <option value="AIF">AIF</option>
+                        <option value="CO-AIF">CO-AIF</option>
+                      </select>
+                    </div>
+                  )}
                   <div className="form-group">
                     <label className="form-label">Investment Capacity</label>
                     <select
@@ -532,12 +530,17 @@ export const App: React.FC = () => {
                       value={quickInvestmentCapacity}
                       onChange={e => setQuickInvestmentCapacity(e.target.value)}
                     >
-                      {quickAssetClass === 'CO-AIF'
-                        ? [<option key="co" value="₹10 Lakh to ₹1 Cr">₹10 Lakh to ₹1 Cr</option>]
-                        : ['₹1 Cr – ₹5 Cr', '₹5 Cr – ₹10 Cr', '₹10 Cr – ₹25 Cr', '₹25 Cr+'].map(o => (
-                            <option key={o} value={o}>{o}</option>
-                          ))
-                      }
+                      <option value="" disabled>Select a range</option>
+                      {[
+                        'Contact for Co-Invest Details',
+                        '₹1 Cr – ₹5 Cr',
+                        '₹5 Cr – ₹10 Cr',
+                        '₹10 Cr – ₹25 Cr',
+                        '₹25 Cr+',
+                        'Not sure yet — help me decide'
+                      ].map(o => (
+                        <option key={o} value={o}>{o}</option>
+                      ))}
                     </select>
                   </div>
                 </div>

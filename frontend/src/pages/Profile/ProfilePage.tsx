@@ -36,7 +36,7 @@ import { storageService } from '../../services/storageService';
 import { Drawer } from '../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
 import { StatusChip } from '../../components/common/StatusChip';
-import { CallRecord, Lead, Followup } from '../../types';
+import { CallRecord, Lead, Followup, Consultation } from '../../types';
 import './ProfilePage.css';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -127,6 +127,9 @@ const BANNER_KEY = 'nexus_profile_banner';
 
 // Statuses counted as "Active" leads
 const ACTIVE_LEAD_STATUSES = ['Follow-up Required', 'Contacted'];
+const OPEN_CONSULTATION_STATUSES = ['Scheduled', 'Rescheduled'];
+// Statuses that are permanently closed — never count as Active
+const CLOSED_LEAD_STATUSES = ['Converted', 'Lost', 'Not Interested', 'Junk'];
 
 type Tab = 'overview' | 'performance' | 'edit';
 
@@ -197,10 +200,25 @@ export const ProfilePage: React.FC = () => {
     setShowBannerPicker(false);
   };
 
-  // ── Live data ──────────────────────────────────────────────────────────────
-  const allCalls = useMemo(() => storageService.getCalls(tenant?.id), [tenant?.id]);
-  const allLeads = useMemo(() => storageService.getLeads(tenant?.id), [tenant?.id]);
-  const allFollowups = useMemo(() => storageService.getFollowups(tenant?.id), [tenant?.id]);
+  // ── Live data — re-fetches on every nexus_storage_updated event ──────────
+  const [allCalls, setAllCalls] = useState<CallRecord[]>([]);
+  const [allLeads, setAllLeads] = useState<Lead[]>([]);
+  const [allFollowups, setAllFollowups] = useState<Followup[]>([]);
+  const [allConsultations, setAllConsultations] = useState<Consultation[]>([]);
+
+  useEffect(() => {
+    const loadLiveData = () => {
+      // Merge any leftover duplicates first so KPIs reflect clean data
+      storageService.cleanupDuplicateLeads(tenant?.id);
+      setAllCalls(storageService.getCalls(tenant?.id) || []);
+      setAllLeads(storageService.getLeads(tenant?.id) || []);
+      setAllFollowups(storageService.getFollowups(tenant?.id) || []);
+      setAllConsultations(storageService.getConsultations(tenant?.id) || []);
+    };
+    loadLiveData();
+    window.addEventListener('nexus_storage_updated', loadLiveData);
+    return () => window.removeEventListener('nexus_storage_updated', loadLiveData);
+  }, [tenant?.id]);
 
   const myCalls = useMemo(
     () => allCalls.filter(c => c.agentId === user?.id || c.agentName === user?.name),
@@ -214,6 +232,25 @@ export const ProfilePage: React.FC = () => {
     () => allFollowups.filter(f => f.assignedAgentId === user?.id || f.assignedAgentName === user?.name),
     [allFollowups, user]
   );
+
+  // Phones of open consultations (full 10-digit only — rejects placeholder numbers)
+  const inConsultationKeys = useMemo(() => {
+    const keys = new Set<string>();
+    allConsultations
+      .filter(c => OPEN_CONSULTATION_STATUSES.includes(c.status))
+      .forEach(c => {
+        const digits = (c.investorPhone || '').replace(/\D/g, '').slice(-10);
+        if (digits.length === 10) keys.add(digits);
+      });
+    return keys;
+  }, [allConsultations]);
+
+  const isActiveLead = (l: Lead): boolean => {
+    if (CLOSED_LEAD_STATUSES.includes(l.status)) return false;
+    if (ACTIVE_LEAD_STATUSES.includes(l.status)) return true;
+    const digits = (l.phone || '').replace(/\D/g, '').slice(-10);
+    return Boolean(digits.length === 10 && inConsultationKeys.has(digits));
+  };
 
   // ── KPI Metrics ───────────────────────────────────────────────────────────
   const totalCalls = myCalls.length;
@@ -255,9 +292,11 @@ export const ProfilePage: React.FC = () => {
   const convertedCalls = interestedContactKeys.size;
   const interestedCalls = myCalls.filter(c => c.disposition === 'Interested').length;
   const conversionRate = totalCalls ? Math.round((convertedCalls / totalCalls) * 100) : 0;
-  const activeLeads = dedupedLeads.filter(l => ACTIVE_LEAD_STATUSES.includes(l.status)).length;
+  const activeLeads = dedupedLeads.filter(isActiveLead).length;
   const convertedLeads = myLeads.filter(l => l.status === 'Converted').length;
-  const pendingFollowups = myFollowups.filter(f => f.status === 'Pending').length;
+  const pendingFollowups = dedupedLeads.filter(l =>
+    ['New', 'Callback', 'No Response'].includes(l.status)
+  ).length;
   const completedFollowups = myFollowups.filter(f => f.status === 'Completed').length;
   const followupCompletionRate = myFollowups.length
     ? Math.round((completedFollowups / myFollowups.length) * 100)
@@ -338,7 +377,7 @@ export const ProfilePage: React.FC = () => {
 
     if (statView === 'total-leads' || statView === 'active-leads') {
       const sourceLeads = statView === 'active-leads'
-        ? dedupedLeads.filter(l => ACTIVE_LEAD_STATUSES.includes(l.status))
+        ? dedupedLeads.filter(isActiveLead)
         : dedupedLeads;
 
       const total = sourceLeads.length;
@@ -366,55 +405,35 @@ export const ProfilePage: React.FC = () => {
     }
 
     if (statView === 'pending-followups') {
-      const sourceFollowups = myFollowups.filter(f => f.status === 'Pending');
-      const total = sourceFollowups.length;
-      const groups = new Map<string, Followup[]>();
+      const sourceLeads = dedupedLeads.filter(l =>
+        ['New', 'Callback', 'No Response'].includes(l.status)
+      );
+      const total = sourceLeads.length;
 
-      sourceFollowups.forEach(f => {
-        const digits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-        const key = digits || (f.contactName || '').trim().toLowerCase() || f.id;
-        if (!groups.has(key)) {
-          groups.set(key, []);
-        }
-        groups.get(key)!.push(f);
-      });
-
-      const personList: StatPerson[] = [];
-
-      groups.forEach((fups, key) => {
-        const sortedFups = [...fups].sort((a, b) => {
-          const ta = Date.parse(a.scheduledAt || '') || Number.MAX_SAFE_INTEGER;
-          const tb = Date.parse(b.scheduledAt || '') || Number.MAX_SAFE_INTEGER;
-          return ta - tb;
-        });
-
-        const earliestFup = sortedFups[0];
-        const name = sortedFups.find(f => (f.contactName || '').trim())?.contactName || earliestFup.contactName || '—';
-        const phone = sortedFups.find(f => (f.contactPhone || '').trim())?.contactPhone || earliestFup.contactPhone || '—';
-        const rawContactId = sortedFups.find(f => f.contactId && f.contactId !== 'contact-new')?.contactId;
-        const contactId = rawContactId || undefined;
-
-        personList.push({
-          key,
-          name,
-          phone,
+      const personList: StatPerson[] = sourceLeads.map((l: Lead, idx: number) => {
+        const contactId = (l.id && l.id !== 'contact-new') ? l.id : undefined;
+        return {
+          key: l.id || `lead-${idx}`,
+          name: (l.name || '').trim() || '—',
+          phone: (l.phone || '').trim() || '—',
           contactId,
-          pendingCount: sortedFups.length,
-          earliestScheduledAt: earliestFup.scheduledAt,
-        });
+          location: l.location,
+          leadStatus: l.status,
+          createdAt: l.createdAt,
+        };
       });
 
       personList.sort((a, b) => {
-        const ta = Date.parse(a.earliestScheduledAt || '') || Number.MAX_SAFE_INTEGER;
-        const tb = Date.parse(b.earliestScheduledAt || '') || Number.MAX_SAFE_INTEGER;
-        return ta - tb;
+        const ta = Date.parse(a.createdAt || '') || 0;
+        const tb = Date.parse(b.createdAt || '') || 0;
+        return tb - ta;
       });
 
       return { people: personList, rawCount: total };
     }
 
     return { people: [] as StatPerson[], rawCount: 0 };
-  }, [statView, myCalls, myLeads, myFollowups]);
+  }, [statView, myCalls, myLeads, myFollowups, dedupedLeads, inConsultationKeys]);
 
   const filteredPeople = useMemo(() => {
     const q = statSearch.trim().toLowerCase();
@@ -504,8 +523,12 @@ export const ProfilePage: React.FC = () => {
   const [editSpecializations, setEditSpecializations] = useState((user?.specializations || []).join(', '));
   const [skillsSaved, setSkillsSaved] = useState(false);
 
-  const [editWorkStart, setEditWorkStart] = useState(user?.workingHours?.start || '09:00');
-  const [editWorkEnd, setEditWorkEnd] = useState(user?.workingHours?.end || '18:00');
+  const [editWorkStart, setEditWorkStart] = useState(
+    user?.workingHours?.start && user.workingHours.start !== '09:00' ? user.workingHours.start : '10:00'
+  );
+  const [editWorkEnd, setEditWorkEnd] = useState(
+    user?.workingHours?.end && user.workingHours.end !== '18:00' ? user.workingHours.end : '19:00'
+  );
   const [editMaxLeads, setEditMaxLeads] = useState(String(user?.maxActiveLeads || 50));
   const [hoursSaved, setHoursSaved] = useState(false);
 
@@ -517,8 +540,8 @@ export const ProfilePage: React.FC = () => {
       setEditSkills((user.skills || []).join(', '));
       setEditLanguages((user.languages || []).join(', '));
       setEditSpecializations((user.specializations || []).join(', '));
-      setEditWorkStart(user.workingHours?.start || '09:00');
-      setEditWorkEnd(user.workingHours?.end || '18:00');
+      setEditWorkStart(user.workingHours?.start && user.workingHours.start !== '09:00' ? user.workingHours.start : '10:00');
+      setEditWorkEnd(user.workingHours?.end && user.workingHours.end !== '18:00' ? user.workingHours.end : '19:00');
       setEditMaxLeads(String(user.maxActiveLeads || 50));
     }
   }, [user?.id]);
@@ -551,7 +574,11 @@ export const ProfilePage: React.FC = () => {
     const updated = {
       ...user,
       maxActiveLeads: parseInt(editMaxLeads) || 50,
-      workingHours: { start: editWorkStart, end: editWorkEnd, days: user.workingHours?.days || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] },
+      workingHours: {
+        start: editWorkStart,
+        end: editWorkEnd,
+        days: user.workingHours?.days?.includes('Sat') ? user.workingHours.days : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+      },
     };
     setUser(updated);
     storageService.saveUser(updated);
@@ -563,8 +590,12 @@ export const ProfilePage: React.FC = () => {
   const skills = user?.skills?.length ? user.skills : ['Lead Qualification', 'CRM Management', 'Cold Calling', 'Objection Handling', 'Deal Closing'];
   const languages = user?.languages?.length ? user.languages : ['English', 'Hindi', 'Kannada'];
   const specializations = user?.specializations?.length ? user.specializations : ['Residential Real Estate', 'High-Value Investors', 'NRI Clients'];
-  const workDays = user?.workingHours?.days || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-  const allDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const workStart = user?.workingHours?.start && user.workingHours.start !== '09:00' ? user.workingHours.start : '10:00';
+  const workEnd = user?.workingHours?.end && user.workingHours.end !== '18:00' ? user.workingHours.end : '19:00';
+  const workDays = user?.workingHours?.days && user.workingHours.days.includes('Sat')
+    ? user.workingHours.days
+    : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const allDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const designation = user?.designation || (user?.role?.code === 'sales_executive' ? 'Sales Executive' : user?.role?.name || 'Agent');
   const employeeCode = user?.employeeCode || `EMP-${user?.id?.slice(-4).toUpperCase() || '0001'}`;
   const joinedAt = user?.joinedAt || user?.createdAt || '2024-01-15';
@@ -755,7 +786,7 @@ export const ProfilePage: React.FC = () => {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <Clock size={14} color="var(--primary-600)" />
                   <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
-                    {user?.workingHours?.start || '09:00'} – {user?.workingHours?.end || '18:00'}
+                    {workStart} – {workEnd}
                   </span>
                   <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>IST</span>
                 </div>
