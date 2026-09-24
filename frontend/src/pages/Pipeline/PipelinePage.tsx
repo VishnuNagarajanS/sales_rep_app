@@ -342,6 +342,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                                   {deal.investorType}
                                 </span>
                               )}
+
                             </div>
                           </div>
 
@@ -372,13 +373,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                             </span>
                           </div>
 
-                          {/* Last Activity */}
-                          <div className="irm-last-activity-box">
-                            <div className="irm-last-activity-label">LAST ACTIVITY</div>
-                            <div className="irm-last-activity-text">
-                              {lastActivity ? lastActivity.text : 'No activity logged yet.'}
-                            </div>
-                          </div>
+                          {/* Last Activity Removed */}
 
                           {/* Footer: Investment range + pagination */}
                           <div className="irm-card-footer">
@@ -604,6 +599,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                     {irmDetailDeal.title}
                   </div>
                 </div>
+
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: 'var(--text-secondary)' }}>
@@ -679,7 +675,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
               </div>
             </div>
 
-
+            {/* Log New Activity / Note Removed */}
 
             {/* Activity History & Stage Transitions */}
             <div className="irm-activity-card">
