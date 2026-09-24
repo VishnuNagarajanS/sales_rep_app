@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { History, Phone, FileText, Download, AlertCircle, Users } from 'lucide-react';
 import Papa from 'papaparse';
-import { CallRecord } from '../../types';
+import { CallRecord, User } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
@@ -17,13 +17,19 @@ export const CallHistoryPage: React.FC = () => {
   const { initiateCall } = useCall();
 
   const [calls, setCalls] = useState<CallRecord[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [selectedCall, setSelectedCall] = useState<CallRecord | null>(null);
   const [transcriptCall, setTranscriptCall] = useState<CallRecord | null>(null);
-  const [dispositionFilter, setDispositionFilter] = useState('All');
-  const [directionFilter, setDirectionFilter] = useState('All');
+  
+  const [roleFilter, setRoleFilter] = useState('All');
+  const [agentFilter, setAgentFilter] = useState('All');
+  const [datePreset, setDatePreset] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
 
   const loadData = () => {
     setCalls(storageService.getCalls(tenant?.id));
+    setUsers(storageService.getUsers(tenant?.slug));
   };
 
   useEffect(() => {
@@ -33,7 +39,72 @@ export const CallHistoryPage: React.FC = () => {
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id]);
 
-  // ── Task 2: Role-scoping (same pattern as DashboardPage.tsx scopedCalls) ──
+  // ── Date formatting helpers ────────────────────────────────────────────────
+  const formatDateYMD = (d: Date): string => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const getPresetDates = (preset: string): { from: string; to: string } => {
+    const now = new Date();
+    const todayStr = formatDateYMD(now);
+    switch (preset) {
+      case 'today': return { from: todayStr, to: todayStr };
+      case 'yesterday': {
+        const yest = new Date(now);
+        yest.setDate(yest.getDate() - 1);
+        return { from: formatDateYMD(yest), to: formatDateYMD(yest) };
+      }
+      case 'this_week': {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 6);
+        return { from: formatDateYMD(d), to: todayStr };
+      }
+      case 'this_month': {
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        return { from: formatDateYMD(startOfMonth), to: formatDateYMD(endOfMonth) };
+      }
+      case 'last_30_days': {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 29);
+        return { from: formatDateYMD(d), to: todayStr };
+      }
+      default: return { from: '', to: '' };
+    }
+  };
+
+  const handleDatePresetChange = (preset: string) => {
+    if (preset === 'all') {
+      setDatePreset('all');
+      setDateFrom('');
+      setDateTo('');
+    } else if (preset === 'custom') {
+      setDatePreset('custom');
+    } else {
+      const { from, to } = getPresetDates(preset);
+      setDatePreset(preset);
+      setDateFrom(from);
+      setDateTo(to);
+    }
+  };
+
+  const parseDateFromTimestamp = (ts: string): string => {
+    if (!ts) return '';
+    if (ts.startsWith('Today')) return formatDateYMD(new Date());
+    if (ts.startsWith('Yesterday')) {
+      const d = new Date();
+      d.setDate(d.getDate() - 1);
+      return formatDateYMD(d);
+    }
+    const d = new Date(ts);
+    if (!isNaN(d.getTime())) return formatDateYMD(d);
+    return '';
+  };
+
+  // ── Task 2: Role-scoping ───────────────────────────────────────────────────
   const isExec = user?.role?.code === 'sales_executive';
   const scopedCalls = isExec
     ? calls.filter(c =>
@@ -42,10 +113,39 @@ export const CallHistoryPage: React.FC = () => {
     )
     : calls;
 
+  const agentRoleMap = React.useMemo(() => {
+    const map = new Map<string, string>();
+    users.forEach(u => map.set(u.id, u.role?.name || 'Unknown'));
+    return map;
+  }, [users]);
+
+  const roleOptions = React.useMemo(() => {
+    const roles = new Set<string>();
+    scopedCalls.forEach(c => {
+      roles.add(agentRoleMap.get(c.agentId) || 'Unknown');
+    });
+    return Array.from(roles).filter(Boolean).map(r => ({ value: r, label: r }));
+  }, [scopedCalls, agentRoleMap]);
+
+  const agentOptions = React.useMemo(() => {
+    const agents = new Set<string>();
+    scopedCalls.forEach(c => {
+      if (c.agentName) agents.add(c.agentName);
+    });
+    return Array.from(agents).filter(Boolean).map(a => ({ value: a, label: a }));
+  }, [scopedCalls]);
+
   // ── Filters applied on top of role-scoped calls ───────────────────────────
   const filteredCalls = scopedCalls.filter(c => {
-    if (dispositionFilter !== 'All' && c.disposition !== dispositionFilter) return false;
-    if (directionFilter !== 'All' && c.direction !== directionFilter) return false;
+    if (agentFilter !== 'All' && c.agentName !== agentFilter) return false;
+    if (roleFilter !== 'All' && (agentRoleMap.get(c.agentId) || 'Unknown') !== roleFilter) return false;
+    
+    if (datePreset !== 'all' && dateFrom && dateTo) {
+      const callDate = parseDateFromTimestamp(c.timestamp);
+      if (callDate) {
+        if (callDate < dateFrom || callDate > dateTo) return false;
+      }
+    }
     return true;
   });
 
@@ -220,38 +320,63 @@ export const CallHistoryPage: React.FC = () => {
           <FilterBar
             filters={[
               {
-                key: 'disposition',
-                label: 'Disposition',
-                value: dispositionFilter,
-                onChange: setDispositionFilter,
-                options: [
-                  { value: 'Interested', label: 'Interested' },
-                  { value: 'Not Interested', label: 'Not Interested' },
-                  { value: 'Follow-up Required', label: 'Follow-up Required' },
-                  { value: 'Call Back', label: 'Call Back' },
-                  { value: 'Wrong Number', label: 'Wrong Number' },
-                  { value: 'Converted', label: 'Converted' },
-                  { value: 'No Response', label: 'No Response' },
-                ],
+                key: 'role',
+                label: 'Role',
+                value: roleFilter,
+                onChange: setRoleFilter,
+                options: roleOptions,
               },
               {
-                key: 'direction',
-                label: 'Direction',
-                value: directionFilter,
-                onChange: setDirectionFilter,
+                key: 'agent',
+                label: 'Agent',
+                value: agentFilter,
+                onChange: setAgentFilter,
+                options: agentOptions,
+              },
+              {
+                key: 'dateRange',
+                label: 'Date Range',
+                value: datePreset,
+                onChange: handleDatePresetChange,
                 options: [
-                  { value: 'inbound', label: 'Inbound' },
-                  { value: 'outbound', label: 'Outbound' },
+                  { value: 'all', label: 'All Time' },
+                  { value: 'today', label: 'Today' },
+                  { value: 'yesterday', label: 'Yesterday' },
+                  { value: 'this_week', label: 'This Week' },
+                  { value: 'this_month', label: 'This Month' },
+                  { value: 'last_30_days', label: 'Last 30 Days' },
+                  { value: 'custom', label: 'Custom Range' },
                 ],
               },
             ]}
             onClearAll={() => {
-              setDispositionFilter('All');
-              setDirectionFilter('All');
+              setRoleFilter('All');
+              setAgentFilter('All');
+              setDatePreset('all');
+              setDateFrom('');
+              setDateTo('');
             }}
           />
         }
       />
+
+      {datePreset === 'custom' && (
+        <div style={{ padding: '0 24px', display: 'flex', gap: 12, alignItems: 'center', marginTop: '-12px', marginBottom: 12 }}>
+          <input
+            type="date"
+            className="form-input"
+            value={dateFrom}
+            onChange={e => setDateFrom(e.target.value)}
+          />
+          <span style={{ color: 'var(--text-muted)' }}>to</span>
+          <input
+            type="date"
+            className="form-input"
+            value={dateTo}
+            onChange={e => setDateTo(e.target.value)}
+          />
+        </div>
+      )}
 
       {/* Contact Profile Drawer (opened on row click) */}
       <Drawer
