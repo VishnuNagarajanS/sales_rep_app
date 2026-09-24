@@ -8,6 +8,13 @@ interface BackendLead {
   name: string;
   email: string;
   phone: string;
+  location?: string;
+  source?: string;
+  notes?: string;
+  investmentCapacity?: string;
+  assetClass?: string;
+  preferredAssetClass?: string;
+  horizon?: string;
   status: Lead['status'];
   createdAt: string;
   updatedAt?: string;
@@ -23,6 +30,14 @@ interface BackendFollowup {
   notes?: string;
   completedAt?: string;
   createdAt: string;
+}
+
+interface BackendPage<T> {
+  items: T[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
 }
 
 const unwrap = <T>(response: ApiResponse<T>): T => {
@@ -44,15 +59,20 @@ const mapLead = (item: BackendLead): Lead => ({
   name: item.name,
   email: item.email,
   phone: item.phone,
-  location: '',
-  source: 'Database',
+  location: item.location || '',
+  source: item.source || 'Database',
   status: item.status,
   priority: 'Medium',
   assignedAgentId: item.assignedToUserId ? String(item.assignedToUserId) : '',
   assignedAgentName: '',
   createdAt: item.createdAt,
-  notes: '',
-  customFields: {},
+  notes: item.notes || '',
+  customFields: {
+    ...(item.investmentCapacity ? { investmentCapacity: item.investmentCapacity } : {}),
+    ...(item.assetClass ? { assetClass: item.assetClass } : {}),
+    ...(item.preferredAssetClass ? { preferredAssetClass: item.preferredAssetClass } : {}),
+    ...(item.horizon ? { horizon: item.horizon } : {}),
+  },
 });
 
 const mapFollowup = (item: BackendFollowup): Followup => ({
@@ -77,6 +97,13 @@ const leadPayload = (lead: Lead) => ({
   name: lead.name,
   email: lead.email,
   phone: lead.phone,
+  location: lead.location,
+  source: lead.source,
+  notes: lead.notes,
+  investmentCapacity: lead.customFields?.investmentCapacity,
+  assetClass: lead.customFields?.assetClass,
+  preferredAssetClass: lead.customFields?.preferredAssetClass,
+  horizon: lead.customFields?.horizon,
   status: lead.status,
   assignedToUserId: toInt(lead.assignedAgentId),
 });
@@ -90,7 +117,8 @@ const followupPayload = (followup: Followup) => ({
 
 export const salesApi = {
   async getLeads(): Promise<Lead[]> {
-    return (unwrap(await apiClient.get<ApiResponse<BackendLead[]>>('/sales-executive/leads'))).map(mapLead);
+    const result = unwrap(await apiClient.get<ApiResponse<BackendPage<BackendLead>>>('/sales-executive/leads'));
+    return result.items.map(mapLead);
   },
   async saveLead(lead: Lead): Promise<Lead> {
     const id = toInt(lead.id);
@@ -103,7 +131,8 @@ export const salesApi = {
     unwrap(await apiClient.delete<ApiResponse<object>>(`/sales-executive/leads/${toInt(id)}`));
   },
   async getFollowups(): Promise<Followup[]> {
-    return (unwrap(await apiClient.get<ApiResponse<BackendFollowup[]>>('/sales-executive/followups'))).map(mapFollowup);
+    const result = unwrap(await apiClient.get<ApiResponse<BackendPage<BackendFollowup>>>('/sales-executive/followups'));
+    return result.items.map(mapFollowup);
   },
   async saveFollowup(followup: Followup): Promise<Followup> {
     const id = toInt(followup.id);

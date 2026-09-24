@@ -94,4 +94,16 @@ public class SalesExecutiveConsultationsController : ControllerBase
 
         return Ok(result);
     }
+
+    [HttpDelete("{id:int}")]
+    public async Task<ActionResult<ApiResponse<bool>>> DeleteConsultation(
+        [FromRoute] int id,
+        CancellationToken ct)
+    {
+        var result = await _consultationService.DeleteConsultationAsync(id, ct);
+        if (!result.Success)
+            return NotFound(result);
+
+        return Ok(result);
+    }
 }

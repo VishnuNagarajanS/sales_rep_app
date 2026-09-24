@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from './context/AuthContext';
+import { Followup, Lead } from './types';
 import { AuthLayout } from './layouts/AuthLayout';
 import { SalesLayout } from './layouts/SalesLayout';
 import { AdminLayout } from './layouts/AdminLayout';
@@ -56,6 +57,7 @@ import { PlatformAuditPage } from './pages/Admin/Audit/PlatformAuditPage';
 import { ProtectedRoute } from './components/common/Guards';
 import { Modal } from './components/common/Modal';
 import { storageService } from './services/storageService';
+import { salesApi } from './services/salesApi';
 import { PERMISSIONS } from './constants/permissions';
 import { IS_MOCK_ENV } from './config/runtime';
 import './App.css';
@@ -125,12 +127,12 @@ export const App: React.FC = () => {
     setSelectedCustomerId(existingCustomers[0]?.id || '');
   };
 
-  const handleSaveQuickCreate = (e: React.FormEvent) => {
+  const handleSaveQuickCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!quickName) return;
 
     if (quickCreateType === 'lead') {
-      storageService.saveLead({
+      const lead: Lead = {
         id: `lead-${Date.now()}`,
         companyId: tenant?.id || 't-ghl-01',
         name: quickName,
@@ -145,11 +147,16 @@ export const App: React.FC = () => {
         createdAt: new Date().toISOString().split('T')[0],
         notes: quickNotes,
         customFields: {},
-      });
+      };
+      if (IS_MOCK_ENV) {
+        storageService.saveLead(lead);
+      } else {
+        await salesApi.saveLead(lead);
+      }
 
     } else if (quickCreateType === 'followup') {
       const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
-      storageService.saveFollowup({
+      const followup: Followup = {
         id: `flw-${Date.now()}`,
         companyId: tenant?.id || 't-ghl-01',
         contactId: `contact-${Date.now()}`,
@@ -164,9 +171,18 @@ export const App: React.FC = () => {
         notes: quickNotes,
         assignedAgentId: user?.id || 'usr-exec',
         assignedAgentName: user?.name || 'Agent',
-      });
+      };
+      if (IS_MOCK_ENV) {
+        storageService.saveFollowup(followup);
+      } else {
+        await salesApi.saveFollowup(followup);
+      }
 
     } else if (quickCreateType === 'consultation') {
+      if (!IS_MOCK_ENV) {
+        window.alert('Consultations are not available until the database API is implemented.');
+        return;
+      }
       // Task 1 — Schedule Consultation
       const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
       storageService.saveConsultation({
@@ -183,6 +199,10 @@ export const App: React.FC = () => {
       });
 
     } else if (quickCreateType === 'visit') {
+      if (!IS_MOCK_ENV) {
+        window.alert('Site visits are not available until the database API is implemented.');
+        return;
+      }
       // Task 2 — Schedule Site Visit
       const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
       storageService.saveSiteVisit({
@@ -201,6 +221,10 @@ export const App: React.FC = () => {
       });
 
     } else if (quickCreateType === 'deal') {
+      if (!IS_MOCK_ENV) {
+        window.alert('Deals are not available until the database API is implemented.');
+        return;
+      }
       // Task 4 — Deal linked to real customer
       let resolvedCustomerId: string;
       let resolvedCustomerName: string;

@@ -33,10 +33,40 @@ import {
   INITIAL_CONSULTATIONS,
   INITIAL_OPPORTUNITIES,
 } from '../mock_data';
+import { IS_MOCK_ENV } from '../config/runtime';
 
 export type PopupPosition = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
 
 class StorageService {
+  private readonly mockCollectionKeys = new Set([
+    'tenants',
+    'users',
+    'leads',
+    'customers',
+    'deals',
+    'calls',
+    'followups',
+    'projects',
+    'plots',
+    'site_visits',
+    'bookings',
+    'investors',
+    'consultations',
+    'opportunities',
+    'audit_logs',
+    'notifications',
+    'documents',
+    'departments',
+    'teams',
+    'queues',
+    'routing_rules',
+    'lead_assignments',
+    'agent_presence',
+    'routing_attempts',
+    'custom_field_definitions',
+    'products_services',
+  ]);
+
   ensureEnvironment(): boolean {
     const environment = import.meta.env.VITE_APP_ENV || 'development';
     const key = 'nexus_storage_environment';
@@ -46,6 +76,10 @@ class StorageService {
   }
 
   private get<T>(key: string, fallback: T): T {
+    if (!IS_MOCK_ENV && this.mockCollectionKeys.has(key)) {
+      return (Array.isArray(fallback) ? [] : fallback) as T;
+    }
+
     try {
       const data = localStorage.getItem(`nexus_${key}`);
       return data ? JSON.parse(data) : fallback;
@@ -55,6 +89,10 @@ class StorageService {
   }
 
   private set<T>(key: string, value: T): void {
+    if (!IS_MOCK_ENV && this.mockCollectionKeys.has(key)) {
+      return;
+    }
+
     try {
       localStorage.setItem(`nexus_${key}`, JSON.stringify(value));
       window.dispatchEvent(new Event('nexus_storage_updated'));

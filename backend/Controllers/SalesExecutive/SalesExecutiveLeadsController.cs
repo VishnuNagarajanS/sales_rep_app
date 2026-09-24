@@ -165,4 +165,16 @@ public class SalesExecutiveLeadsController : ControllerBase
 
         return Ok(result);
     }
+
+    [HttpDelete("{id:int}")]
+    public async Task<ActionResult<ApiResponse<bool>>> DeleteLead(
+        [FromRoute] int id,
+        CancellationToken ct)
+    {
+        var deleted = await _leadService.DeleteAsync(id, ct);
+        if (!deleted)
+            return NotFound(ApiResponse<bool>.FailureResult("Lead not found."));
+
+        return Ok(ApiResponse<bool>.SuccessResult(true, "Lead deleted successfully."));
+    }
 }

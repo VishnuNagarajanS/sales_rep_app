@@ -14,6 +14,8 @@ import { Consultation, Investor } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
+import { consultationApi } from '../../services/consultationApi';
+import { IS_MOCK_ENV } from '../../config/runtime';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { FilterBar } from '../../components/common/FilterBar';
@@ -81,14 +83,20 @@ export const ConsultationsPage: React.FC = () => {
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof ConsultationForm, string>>>({});
 
   // ── Data loading ──────────────────────────────────────────────────────────
-  const loadData = () => {
-    setConsultations(storageService.getConsultations(tenant?.id));
-    setInvestors(storageService.getInvestors(tenant?.id));
+  const loadData = async () => {
+    if (IS_MOCK_ENV) {
+      setConsultations(storageService.getConsultations(tenant?.id));
+      setInvestors(storageService.getInvestors(tenant?.id));
+      return;
+    }
+
+    setConsultations(await consultationApi.getAll());
+    setInvestors([]);
   };
 
   useEffect(() => {
-    loadData();
-    const handleUpdate = () => loadData();
+    void loadData().catch(error => console.error('Failed to load consultations', error));
+    const handleUpdate = () => void loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id]);
@@ -180,11 +188,11 @@ export const ConsultationsPage: React.FC = () => {
     if (formErrors[key]) setFormErrors(prev => ({ ...prev, [key]: undefined }));
   };
 
-  const handleSaveConsultation = (e?: React.FormEvent) => {
+  const handleSaveConsultation = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
     const errors: Partial<Record<keyof ConsultationForm, string>> = {};
-    if (!form.investorId) errors.investorId = 'Please select an investor.';
+    if (!form.investorId && !form.investorName.trim()) errors.investorId = 'Please select or enter an investor.';
     if (!form.scheduledAt.trim()) errors.scheduledAt = 'Consultation slot is required.';
     if (Object.keys(errors).length > 0) {
       setFormErrors(errors);
@@ -195,8 +203,8 @@ export const ConsultationsPage: React.FC = () => {
     const cons: Consultation = {
       id: editingConsultation ? editingConsultation.id : `cns-${Date.now()}`,
       companyId: tenant?.id || 't-ghl-01',
-      investorId: form.investorId,
-      investorName: form.investorName,
+      investorId: form.investorId || form.investorName.trim(),
+      investorName: form.investorName.trim(),
       investorPhone: form.investorPhone,
       scheduledAt: form.scheduledAt.trim(),
       consultantId: form.consultantId.trim() || (user?.id ?? 'usr-admin'),
@@ -206,7 +214,11 @@ export const ConsultationsPage: React.FC = () => {
       outcomeNotes: form.outcomeNotes.trim() || undefined,
     };
 
-    storageService.saveConsultation(cons);
+    if (IS_MOCK_ENV) {
+      storageService.saveConsultation(cons);
+    } else {
+      await consultationApi.save(cons);
+    }
 
     storageService.addAuditLog({
       id: `aud-${Date.now()}`,
@@ -230,6 +242,7 @@ export const ConsultationsPage: React.FC = () => {
     });
 
     closeModal();
+    await loadData();
   };
 
   // ── Table columns ─────────────────────────────────────────────────────────
@@ -312,8 +325,10 @@ export const ConsultationsPage: React.FC = () => {
       label: 'Mark Completed',
       icon: <CheckCircle size={14} color="#2563eb" style={{ marginRight: 6 }} />,
       hidden: c => c.status === 'Completed' || c.status === 'Cancelled',
-      onClick: c => {
-        storageService.saveConsultation({ ...c, status: 'Completed' });
+      onClick: async c => {
+        const updated = { ...c, status: 'Completed' as const };
+        if (IS_MOCK_ENV) storageService.saveConsultation(updated);
+        else await consultationApi.save(updated);
         storageService.addAuditLog({
           id: `aud-${Date.now()}`,
           timestamp: 'Just now',
@@ -333,8 +348,10 @@ export const ConsultationsPage: React.FC = () => {
       icon: <UserX size={14} color="#ea580c" style={{ marginRight: 6 }} />,
       hidden: c =>
         c.status === 'Completed' || c.status === 'Cancelled' || c.status === 'No-show',
-      onClick: c => {
-        storageService.saveConsultation({ ...c, status: 'No-show' });
+      onClick: async c => {
+        const updated = { ...c, status: 'No-show' as const };
+        if (IS_MOCK_ENV) storageService.saveConsultation(updated);
+        else await consultationApi.save(updated);
         storageService.addAuditLog({
           id: `aud-${Date.now()}`,
           timestamp: 'Just now',
@@ -353,9 +370,11 @@ export const ConsultationsPage: React.FC = () => {
       label: 'Cancel',
       icon: <XCircle size={14} color="#dc2626" style={{ marginRight: 6 }} />,
       hidden: c => c.status === 'Completed' || c.status === 'Cancelled',
-      onClick: c => {
+      onClick: async c => {
         if (window.confirm(`Cancel consultation with ${c.investorName}?`)) {
-          storageService.saveConsultation({ ...c, status: 'Cancelled' });
+          const updated = { ...c, status: 'Cancelled' as const };
+          if (IS_MOCK_ENV) storageService.saveConsultation(updated);
+          else await consultationApi.save(updated);
           storageService.addAuditLog({
             id: `aud-${Date.now()}`,
             timestamp: 'Just now',
@@ -374,13 +393,14 @@ export const ConsultationsPage: React.FC = () => {
     {
       label: 'Delete',
       icon: <Trash2 size={14} color="#dc2626" style={{ marginRight: 6 }} />,
-      onClick: c => {
+      onClick: async c => {
         if (
           window.confirm(
             `Delete consultation with ${c.investorName}? This cannot be undone.`,
           )
         ) {
-          storageService.deleteConsultation(c.id);
+          if (IS_MOCK_ENV) storageService.deleteConsultation(c.id);
+          else await consultationApi.delete(c.id);
           storageService.addAuditLog({
             id: `aud-${Date.now()}`,
             timestamp: 'Just now',
@@ -524,6 +544,17 @@ export const ConsultationsPage: React.FC = () => {
             {formErrors.investorId && (
               <div className="form-error">{formErrors.investorId}</div>
             )}
+            <input
+              id="consultation-form-investor-name"
+              className="form-input"
+              placeholder="Investor name (or select an existing investor)"
+              value={form.investorName}
+              onChange={e => {
+                setField('investorName', e.target.value);
+                if (!form.investorId) setField('investorId', e.target.value);
+              }}
+              style={{ marginTop: 8 }}
+            />
           </div>
 
           <div className="consultation-form-grid-2">
