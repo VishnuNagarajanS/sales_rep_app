@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace backend.Controllers.SalesExecutive;
 
-[ApiController, Authorize(Roles = "sales_executive"), Route("api/sales-executive/profile")]
+[ApiController, Authorize(Roles = "sales_executive,company_admin,sales_manager,super_admin,irm"), Route("api/sales-executive/profile")]
 public sealed class SalesExecutiveProfileController(IExecutiveProfileService service, IValidator<UpdateProfileDto> validator) : ControllerBase
 {
     [HttpGet] public async Task<IActionResult> Get(CancellationToken cancellationToken) { var result = await service.GetAsync(cancellationToken); return result == null ? NotFound() : Ok(ApiResponse<ExecutiveProfileDto>.SuccessResult(result)); }
