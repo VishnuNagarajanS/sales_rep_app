@@ -370,11 +370,6 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({ onOpenQuickC
                         {/* Card Header */}
                         <div className="admin-card-header">
                           <span className="admin-card-name">{card.title}</span>
-                          <span
-                            className={`admin-card-priority-badge priority-${card.priority.toLowerCase()}`}
-                          >
-                            {card.priority}
-                          </span>
                         </div>
 
                         {/* Contact Row */}

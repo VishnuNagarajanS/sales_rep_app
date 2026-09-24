@@ -141,11 +141,6 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
                 )}
               </div>
             </div>
-            <span
-              className={`activity-priority-badge priority-${card.priority.toLowerCase()}`}
-            >
-              {card.priority} Priority
-            </span>
           </div>
 
           <div className="activity-summary-grid">
@@ -172,14 +167,7 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
               </div>
             )}
 
-            {card.preferredAssetClass && (
-              <div className="activity-summary-stat">
-                <span className="stat-label">Preferred Asset Class</span>
-                <span className="stat-val">
-                  <Shield size={13} /> {card.preferredAssetClass}
-                </span>
-              </div>
-            )}
+
           </div>
 
           {/* Quick Stage Switcher */}
@@ -212,63 +200,7 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
           </div>
         </div>
 
-        {/* Add Note / Activity Form */}
-        <div className="card activity-add-note-card">
-          <h4 className="activity-section-heading">Log New Activity / Note</h4>
-          <form onSubmit={handleAddActivity}>
-            <div className="activity-type-selector">
-              <button
-                type="button"
-                className={`type-btn ${actionType === 'note' ? 'active' : ''}`}
-                onClick={() => setActionType('note')}
-              >
-                <FileText size={13} /> Note
-              </button>
-              <button
-                type="button"
-                className={`type-btn ${actionType === 'call' ? 'active' : ''}`}
-                onClick={() => setActionType('call')}
-              >
-                <Phone size={13} /> Call
-              </button>
-              <button
-                type="button"
-                className={`type-btn ${actionType === 'whatsapp' ? 'active' : ''}`}
-                onClick={() => setActionType('whatsapp')}
-              >
-                <MessageSquare size={13} /> WhatsApp
-              </button>
-              <button
-                type="button"
-                className={`type-btn ${actionType === 'meeting' ? 'active' : ''}`}
-                onClick={() => setActionType('meeting')}
-              >
-                <Calendar size={13} /> Meeting
-              </button>
-            </div>
 
-            <textarea
-              className="form-textarea activity-textarea"
-              rows={2}
-              placeholder={`Enter ${actionType} details, outcome, or notes...`}
-              value={newNote}
-              onChange={(e) => setNewNote(e.target.value)}
-            />
-
-            <div className="activity-form-footer">
-              <span className="activity-form-hint">
-                Logged as <strong>{user?.name || 'Admin'}</strong>
-              </span>
-              <button
-                type="submit"
-                disabled={!newNote.trim()}
-                className="btn btn-primary btn-sm"
-              >
-                <Send size={13} /> Log Activity
-              </button>
-            </div>
-          </form>
-        </div>
 
         {/* Chronological Timeline */}
         <div className="activity-timeline-section">
