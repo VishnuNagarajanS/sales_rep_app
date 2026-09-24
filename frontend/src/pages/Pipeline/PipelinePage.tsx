@@ -24,6 +24,7 @@ import { storageService } from '../../services/storageService';
 import { PIPELINE_STAGES } from '../../constants/pipelineStages';
 import { Modal } from '../../components/common/Modal';
 import { FilterBar } from '../../components/common/FilterBar';
+import { AdminKanbanBoard } from '../../components/admin/AdminKanbanBoard';
 import './PipelinePage.css';
 
 const IRM_STAGE_SUBTITLES: Record<string, string> = {
@@ -40,6 +41,16 @@ interface PipelinePageProps {
 
 export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate }) => {
   const { tenant, user } = useAuth();
+  
+  const roleCode = user?.role?.code;
+  const isGhlAdmin =
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
+    (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
+
+  if (isGhlAdmin) {
+    return <AdminKanbanBoard onOpenQuickCreate={onOpenQuickCreate} />;
+  }
+
   const canUpdateDeals = useCan('deals.update');
   const [deals, setDeals] = useState<Deal[]>([]);
   const [selectedDealForLoss, setSelectedDealForLoss] = useState<Deal | null>(null);
@@ -54,7 +65,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
 
   // Role-based scoping: Sales Executives see only their own deals.
   // Managers / Admins / Super Admins see every deal in the company (no filter).
-  const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
   const scopedDeals = isExec
     ? deals.filter(d =>

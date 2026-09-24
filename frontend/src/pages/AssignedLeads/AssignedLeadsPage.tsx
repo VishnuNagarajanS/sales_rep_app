@@ -10,6 +10,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
+import { FilterBar } from '../../components/common/FilterBar';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
 import { MOCK_AGENTS } from '../../mock_data/mockData';
@@ -24,6 +25,7 @@ export const AssignedLeadsPage: React.FC = () => {
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
   const [formData, setFormData] = useState<Partial<Lead>>({});
+  const [agentFilter, setAgentFilter] = useState<string>('All');
 
   // Agent reassignment confirmation state for Edit panel
   const [pendingAgent, setPendingAgent] = useState<{ id: string | number; name: string } | null>(null);
@@ -42,7 +44,7 @@ export const AssignedLeadsPage: React.FC = () => {
     try {
       const raw = sessionStorage.getItem('ghl_mock_agent_assignments');
       if (raw) sessionAssignments = JSON.parse(raw);
-    } catch {}
+    } catch { }
 
     const assigned = allLeads
       .map(lead => {
@@ -239,6 +241,20 @@ export const AssignedLeadsPage: React.FC = () => {
     },
   ];
 
+  // Unique agent names for the filter dropdown
+  const uniqueAgents = useMemo(() => {
+    const names = leads
+      .map(l => l.assignedAgentName)
+      .filter((n): n is string => Boolean(n));
+    return Array.from(new Set(names)).sort();
+  }, [leads]);
+
+  // Apply agent filter on top of the full leads list
+  const filteredLeads = useMemo(() => {
+    if (!agentFilter || agentFilter === 'All') return leads;
+    return leads.filter(l => l.assignedAgentName === agentFilter);
+  }, [leads, agentFilter]);
+
   if (!isGhlAdmin) {
     return (
       <div className="assigned-leads-unauthorized">
@@ -265,7 +281,7 @@ export const AssignedLeadsPage: React.FC = () => {
       {/* Assigned Leads Table */}
       <DataTable
         columns={columns}
-        data={leads}
+        data={filteredLeads}
         keyExtractor={l => l.id}
         rowActions={rowActions}
         onRowClick={l => {
@@ -281,6 +297,21 @@ export const AssignedLeadsPage: React.FC = () => {
         }
         emptyTitle="No assigned leads found"
         emptyDescription="Leads assigned to agents will appear here."
+        filtersNode={
+          <FilterBar
+            filters={[
+              {
+                key: 'assignedAgent',
+                label: 'Assigned Agent',
+                value: agentFilter,
+                onChange: setAgentFilter,
+                placeholder: 'Select an agent',
+                options: uniqueAgents.map(name => ({ value: name, label: name })),
+              },
+            ]}
+            onClearAll={() => setAgentFilter('All')}
+          />
+        }
       />
 
       {/* 360 Detail Drawer */}

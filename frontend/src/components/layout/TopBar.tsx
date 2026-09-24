@@ -32,7 +32,9 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
 
   // Notifications state
   const [isNotifOpen, setIsNotifOpen] = useState(false);
-  const [notifications, setNotifications] = useState(storageService.getNotifications());
+  const [notifications, setNotifications] = useState(() =>
+    storageService.getNotifications(tenant?.id, user?.id, user?.role?.code)
+  );
 
   // Quick New state
   const [isNewMenuOpen, setIsNewMenuOpen] = useState(false);
@@ -40,14 +42,15 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
   // User menu
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
-  // Sync notifications
+  // Sync notifications with tenant and user scoping
   useEffect(() => {
     const handleUpdate = () => {
-      setNotifications(storageService.getNotifications());
+      setNotifications(storageService.getNotifications(tenant?.id, user?.id, user?.role?.code));
     };
+    handleUpdate();
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
-  }, []);
+  }, [tenant?.id, tenant?.slug, user?.id, user?.role?.code]);
 
   // Global search items
   const searchResults = React.useMemo(() => {
@@ -352,36 +355,92 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
               />
               <div className="card animate-slide-down topbar-notif-dropdown">
                 <div className="topbar-notif-header">
-                  <span style={{ fontWeight: 700, fontSize: 13 }}>Notifications</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13 }}>Notifications</span>
+                    <span style={{ fontSize: 10, background: 'var(--bg-surface-hover)', padding: '1px 6px', borderRadius: 10, color: 'var(--text-muted)' }}>
+                      {tenant?.name}
+                    </span>
+                  </div>
                   <button
                     className="btn btn-ghost btn-sm"
                     style={{ fontSize: 11, padding: 0, color: 'var(--primary-600)' }}
-                    onClick={() => storageService.markAllNotificationsRead()}
+                    onClick={() => storageService.markAllNotificationsRead(tenant?.id, user?.id)}
                   >
                     Mark all read
                   </button>
                 </div>
 
                 <div className="topbar-notif-list">
-                  {notifications.map(n => (
-                    <div
-                      key={n.id}
-                      className={`btn-ghost topbar-notif-item ${!n.read ? 'unread' : ''}`}
+                  {notifications.length === 0 ? (
+                    <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+                      No notifications for {tenant?.name}. You're all caught up!
+                    </div>
+                  ) : (
+                    notifications.map(n => (
+                      <div
+                        key={n.id}
+                        className={`btn-ghost topbar-notif-item ${!n.read ? 'unread' : ''}`}
+                        onClick={() => {
+                          storageService.markNotificationRead(n.id);
+                          if (n.link) onNavigate(n.link.replace('/', ''));
+                          setIsNotifOpen(false);
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
+                            {n.priority === 'urgent' && (
+                              <span style={{ fontSize: 9, fontWeight: 700, background: '#dc2626', color: '#fff', padding: '1px 5px', borderRadius: 4, textTransform: 'uppercase' }}>
+                                Urgent
+                              </span>
+                            )}
+                            {n.type === 'broadcast' && (
+                              <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', padding: '1px 5px', borderRadius: 4 }}>
+                                Alert
+                              </span>
+                            )}
+                            <span style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {n.title}
+                            </span>
+                          </div>
+                          <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>{n.timestamp}</span>
+                        </div>
+                        <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 3, lineHeight: 1.4 }}>
+                          {n.message}
+                        </p>
+                        {n.createdByName && (
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
+                            📢 By {n.createdByName}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderTop: '1px solid var(--border-base)', background: 'var(--bg-surface-hover)' }}>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ fontSize: 11, padding: '2px 6px', color: 'var(--text-secondary)' }}
+                    onClick={() => {
+                      setIsNotifOpen(false);
+                      onNavigate('notifications');
+                    }}
+                  >
+                    View All Center →
+                  </button>
+                  {((user?.role?.code as string) === 'company_admin' || (user?.role?.code as string) === 'admin' || user?.role?.code === 'super_admin') && (
+                    <button
+                      className="btn btn-primary btn-sm"
+                      style={{ fontSize: 11, padding: '3px 8px', gap: 4 }}
                       onClick={() => {
-                        storageService.markNotificationRead(n.id);
-                        if (n.link) onNavigate(n.link.replace('/', ''));
+                        sessionStorage.setItem('nexus_open_alert_modal', 'true');
                         setIsNotifOpen(false);
+                        onNavigate('notifications');
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span style={{ fontWeight: 600, fontSize: 12 }}>{n.title}</span>
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{n.timestamp}</span>
-                      </div>
-                      <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 3 }}>
-                        {n.message}
-                      </p>
-                    </div>
-                  ))}
+                      <Plus size={12} /> Send Alert
+                    </button>
+                  )}
                 </div>
               </div>
             </>

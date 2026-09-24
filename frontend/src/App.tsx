@@ -697,121 +697,121 @@ export const App: React.FC = () => {
             </>
           ) : (
             <>
-            {/* ── Deal: existing vs. new customer picker ── */}
-            {quickCreateType === 'deal' && (() => {
-            const tenantCustomers = storageService.getCustomers(tenant?.id);
-            const hasCustomers = tenantCustomers.length > 0;
-            return (
-              <div className="form-group">
-                <label className="form-label">Link to Customer</label>
+              {/* ── Deal: existing vs. new customer picker ── */}
+              {quickCreateType === 'deal' && (() => {
+                const tenantCustomers = storageService.getCustomers(tenant?.id);
+                const hasCustomers = tenantCustomers.length > 0;
+                return (
+                  <div className="form-group">
+                    <label className="form-label">Link to Customer</label>
 
-                {/* Segmented toggle — same style as Reports page period toggle */}
-                <div className="app-segmented-toggle">
-                  {(['existing', 'new'] as const).map(mode => (
-                    <button
-                      key={mode}
-                      type="button"
-                      className={`btn btn-sm app-segmented-btn ${dealCustomerMode === mode ? 'btn-primary' : 'btn-ghost'} ${mode === 'existing' && !hasCustomers ? 'disabled' : ''}`}
-                      disabled={mode === 'existing' && !hasCustomers}
-                      onClick={() => setDealCustomerMode(mode)}
-                    >
-                      {mode === 'existing' ? 'Existing customer' : 'New customer'}
-                    </button>
-                  ))}
+                    {/* Segmented toggle — same style as Reports page period toggle */}
+                    <div className="app-segmented-toggle">
+                      {(['existing', 'new'] as const).map(mode => (
+                        <button
+                          key={mode}
+                          type="button"
+                          className={`btn btn-sm app-segmented-btn ${dealCustomerMode === mode ? 'btn-primary' : 'btn-ghost'} ${mode === 'existing' && !hasCustomers ? 'disabled' : ''}`}
+                          disabled={mode === 'existing' && !hasCustomers}
+                          onClick={() => setDealCustomerMode(mode)}
+                        >
+                          {mode === 'existing' ? 'Existing customer' : 'New customer'}
+                        </button>
+                      ))}
+                    </div>
+
+                    {!hasCustomers && (
+                      <p className="app-no-customers-msg">
+                        No customers in this workspace yet — deal will create a new customer record.
+                      </p>
+                    )}
+
+                    {dealCustomerMode === 'existing' && hasCustomers ? (
+                      <select
+                        className="form-select"
+                        value={selectedCustomerId}
+                        onChange={e => setSelectedCustomerId(e.target.value)}
+                        required
+                      >
+                        {tenantCustomers.map(c => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}{c.phone ? ` · ${c.phone}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div>
+                        <label className="form-label app-new-customer-label">
+                          New Customer Name * — a new Customer record will be created
+                        </label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          required
+                          placeholder="Customer full name"
+                          value={newCustomerName}
+                          onChange={e => setNewCustomerName(e.target.value)}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* ── Phone (non-lead, non-deal-existing) ── */}
+              {!(quickCreateType === 'deal' && dealCustomerMode === 'existing') && (
+                <div className="form-group">
+                  <label className="form-label">Phone Number</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={quickPhone}
+                    onChange={e => setQuickPhone(e.target.value)}
+                  />
                 </div>
+              )}
 
-                {!hasCustomers && (
-                  <p className="app-no-customers-msg">
-                    No customers in this workspace yet — deal will create a new customer record.
-                  </p>
-                )}
-
-                {dealCustomerMode === 'existing' && hasCustomers ? (
-                  <select
-                    className="form-select"
-                    value={selectedCustomerId}
-                    onChange={e => setSelectedCustomerId(e.target.value)}
-                    required
-                  >
-                    {tenantCustomers.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}{c.phone ? ` · ${c.phone}` : ''}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div>
-                    <label className="form-label app-new-customer-label">
-                      New Customer Name * — a new Customer record will be created
-                    </label>
+              {/* ── Scheduled Date + Time (followup, visit) ── */}
+              {(quickCreateType === 'followup' || quickCreateType === 'visit') && (
+                <div className="app-schedule-grid">
+                  <div className="form-group">
+                    <label className="form-label">Scheduled Date *</label>
                     <input
-                      type="text"
+                      type="date"
                       className="form-input"
                       required
-                      placeholder="Customer full name"
-                      value={newCustomerName}
-                      onChange={e => setNewCustomerName(e.target.value)}
+                      value={scheduledDate}
+                      onChange={e => setScheduledDate(e.target.value)}
                     />
                   </div>
-                )}
-              </div>
-            );
-          })()}
+                  <div className="form-group">
+                    <label className="form-label">Scheduled Time *</label>
+                    <input
+                      type="time"
+                      className="form-input"
+                      required
+                      value={scheduledTime}
+                      onChange={e => setScheduledTime(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
 
-          {/* ── Phone (non-lead, non-deal-existing) ── */}
-          {!(quickCreateType === 'deal' && dealCustomerMode === 'existing') && (
-            <div className="form-group">
-              <label className="form-label">Phone Number</label>
-              <input
-                type="text"
-                className="form-input"
-                value={quickPhone}
-                onChange={e => setQuickPhone(e.target.value)}
-              />
-            </div>
-          )}
-
-          {/* ── Scheduled Date + Time (followup, visit) ── */}
-          {(quickCreateType === 'followup' || quickCreateType === 'visit') && (
-            <div className="app-schedule-grid">
+              {/* ── Notes/Agenda (non-lead types) ── */}
               <div className="form-group">
-                <label className="form-label">Scheduled Date *</label>
-                <input
-                  type="date"
-                  className="form-input"
-                  required
-                  value={scheduledDate}
-                  onChange={e => setScheduledDate(e.target.value)}
+                <label className="form-label">Quick Notes</label>
+                <textarea
+                  className="form-textarea"
+                  rows={2}
+                  value={quickNotes}
+                  onChange={e => setQuickNotes(e.target.value)}
+                  placeholder={
+                    quickCreateType === 'visit'
+                      ? 'Special requirements, preferred plots...'
+                      : 'Brief requirement summary...'
+                  }
                 />
               </div>
-              <div className="form-group">
-                <label className="form-label">Scheduled Time *</label>
-                <input
-                  type="time"
-                  className="form-input"
-                  required
-                  value={scheduledTime}
-                  onChange={e => setScheduledTime(e.target.value)}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* ── Notes/Agenda (non-lead types) ── */}
-          <div className="form-group">
-            <label className="form-label">Quick Notes</label>
-            <textarea
-              className="form-textarea"
-              rows={2}
-              value={quickNotes}
-              onChange={e => setQuickNotes(e.target.value)}
-              placeholder={
-                quickCreateType === 'visit'
-                    ? 'Special requirements, preferred plots...'
-                    : 'Brief requirement summary...'
-              }
-            />
-          </div>
             </>
           )}
 
