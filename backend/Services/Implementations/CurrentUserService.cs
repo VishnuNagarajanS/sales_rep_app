@@ -7,6 +7,7 @@ public sealed class CurrentUserService(IHttpContextAccessor httpContextAccessor)
 {
     public int UserId => ParseClaim(ClaimTypes.NameIdentifier, "userId");
     public int CompanyId => ParseClaim("company_id", "companyId");
+    public string RoleCode => httpContextAccessor.HttpContext?.User.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
     public bool IsAuthenticated => UserId > 0 && CompanyId > 0;
 
     private int ParseClaim(params string[] claimTypes)

@@ -57,27 +57,24 @@ import { ProtectedRoute } from './components/common/Guards';
 import { Modal } from './components/common/Modal';
 import { storageService } from './services/storageService';
 import { PERMISSIONS } from './constants/permissions';
+import { IS_MOCK_ENV } from './config/runtime';
 import './App.css';
 
 export const App: React.FC = () => {
-  const { isAuthenticated, isSuperAdmin, tenant, user } = useAuth();
+  const { isAuthenticated, isSuperAdmin, tenant, user, setUser, setTenant } = useAuth();
   const [currentRoute, setCurrentRoute] = useState<string>(() => {
     return sessionStorage.getItem('nexus_current_route') || 'dashboard';
   });
 
-  // Seed initial mock data on clean install / empty session
   useEffect(() => {
-    if (storageService.getUsers().length === 0) {
+    if (storageService.ensureEnvironment()) {
+      setUser(null);
+      setTenant(null);
+    }
+    if (IS_MOCK_ENV && storageService.getUsers().length === 0) {
       storageService.loadMockDataFromSeparateFolder();
     }
-  }, []);
-
-  // Seed initial mock data on clean install / empty session
-  useEffect(() => {
-    if (storageService.getUsers().length === 0) {
-      storageService.loadMockDataFromSeparateFolder();
-    }
-  }, []);
+  }, [setTenant, setUser]);
 
   // Set default route for IRM user
   useEffect(() => {

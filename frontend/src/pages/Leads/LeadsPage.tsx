@@ -14,6 +14,8 @@ import { Lead, Customer, Deal } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
+import { salesApi } from '../../services/salesApi';
+import { IS_MOCK_ENV } from '../../config/runtime';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { StatusChip } from '../../components/common/StatusChip';
@@ -100,8 +102,8 @@ export const LeadsPage: React.FC = () => {
     }));
   };
 
-  const loadData = () => {
-    const updated = storageService.getLeads(tenant?.id);
+  const loadData = async () => {
+    const updated = IS_MOCK_ENV ? storageService.getLeads(tenant?.id) : await salesApi.getLeads();
     setLeads(updated);
     setSelectedLead(prev => {
       if (!prev) return null;
@@ -116,8 +118,8 @@ export const LeadsPage: React.FC = () => {
   };
 
   useEffect(() => {
-    loadData();
-    const handleUpdate = () => loadData();
+    void loadData().catch(error => console.error('Failed to load leads', error));
+    const handleUpdate = () => void loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id]);
@@ -170,7 +172,7 @@ export const LeadsPage: React.FC = () => {
     setIsEditDrawerOpen(true);
   };
 
-  const handleSaveLead = (e: React.FormEvent) => {
+  const handleSaveLead = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.phone) return;
 
@@ -178,7 +180,9 @@ export const LeadsPage: React.FC = () => {
       ...formData,
       status: formData.status || 'New',
     } as Lead;
-    storageService.saveLead(leadToSave);
+    const savedLead = IS_MOCK_ENV ? leadToSave : await salesApi.saveLead(leadToSave);
+
+    if (IS_MOCK_ENV) storageService.saveLead(savedLead);
 
     storageService.addAuditLog({
       id: `aud-${Date.now()}`,
@@ -187,18 +191,21 @@ export const LeadsPage: React.FC = () => {
       actorEmail: user?.email || 'agent@nexus.io',
       action: leads.some(l => l.id === leadToSave.id) ? 'LEAD_UPDATED' : 'LEAD_CREATED',
       entityType: 'Lead',
-      entityId: leadToSave.id,
+      entityId: savedLead.id,
       companyId: tenant?.id,
       companyName: tenant?.name,
       details: `Lead record ${leadToSave.name} (${leadToSave.phone}) saved.`,
     });
 
     setIsEditDrawerOpen(false);
+    await loadData();
   };
 
-  const handleDeleteLead = (lead: Lead) => {
+  const handleDeleteLead = async (lead: Lead) => {
     if (confirm(`Delete lead ${lead.name}?`)) {
-      storageService.deleteLead(lead.id);
+      if (IS_MOCK_ENV) storageService.deleteLead(lead.id);
+      else await salesApi.deleteLead(lead.id);
+      await loadData();
     }
   };
 
@@ -292,11 +299,11 @@ export const LeadsPage: React.FC = () => {
     if (file) handleFileSelect(file);
   };
 
-  const handleImportLeads = () => {
+  const handleImportLeads = async () => {
     let successCount = 0;
     let skipCount = 0;
 
-    parsedRows.forEach((row, index) => {
+    for (const [index, row] of parsedRows.entries()) {
       const nameVal = row[columnMap['name']];
       const phoneVal = row[columnMap['phone']];
 
@@ -331,9 +338,10 @@ export const LeadsPage: React.FC = () => {
         customFields: {}
       };
 
-      storageService.saveLead(newLead);
+      if (IS_MOCK_ENV) storageService.saveLead(newLead);
+      else await salesApi.saveLead(newLead);
       successCount++;
-    });
+    }
 
     storageService.addAuditLog({
       id: `aud-${Date.now()}`,
@@ -349,7 +357,7 @@ export const LeadsPage: React.FC = () => {
     });
 
     setImportResults({ success: successCount, skipped: skipCount });
-    loadData();
+    await loadData();
   };
 
   const resetImportState = () => {

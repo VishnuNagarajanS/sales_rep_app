@@ -9,6 +9,8 @@ import { Followup } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
+import { salesApi } from '../../services/salesApi';
+import { IS_MOCK_ENV } from '../../config/runtime';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { Drawer } from '../../components/common/Drawer';
@@ -39,36 +41,42 @@ export const FollowupsPage: React.FC = () => {
       )
     : followups;
 
-  const loadData = () => {
-    if (tenant?.slug === 'ghl') {
+  const loadData = async () => {
+    if (IS_MOCK_ENV && tenant?.slug === 'ghl') {
       storageService.cleanupGhlPendingFollowups(tenant?.id);
     }
-    setFollowups(storageService.getFollowups(tenant?.id) || []);
+    setFollowups(IS_MOCK_ENV ? storageService.getFollowups(tenant?.id) || [] : await salesApi.getFollowups());
   };
 
   useEffect(() => {
-    loadData();
-    const handleUpdate = () => loadData();
+    void loadData().catch(error => console.error('Failed to load follow-ups', error));
+    const handleUpdate = () => void loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id]);
 
-  const handleComplete = (f: Followup) => {
-    storageService.saveFollowup({
+  const handleComplete = async (f: Followup) => {
+    const updated = {
       ...f,
       status: f.status === 'Completed' ? 'Pending' : 'Completed',
-    });
+    } as Followup;
+    if (IS_MOCK_ENV) storageService.saveFollowup(updated);
+    else await salesApi.saveFollowup(updated);
+    await loadData();
   };
 
-  const handleSaveReschedule = () => {
+  const handleSaveReschedule = async () => {
     if (rescheduleItem && newDate) {
-      storageService.saveFollowup({
+      const updated = {
         ...rescheduleItem,
         scheduledAt: newDate,
         status: 'Pending',
-      });
+      } as Followup;
+      if (IS_MOCK_ENV) storageService.saveFollowup(updated);
+      else await salesApi.saveFollowup(updated);
       setRescheduleItem(null);
       setNewDate('');
+      await loadData();
     }
   };
 

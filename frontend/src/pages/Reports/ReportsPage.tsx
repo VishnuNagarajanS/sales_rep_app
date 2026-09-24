@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { BarChart3, Download, TrendingUp, PhoneCall, Users, Award, MapPin, Calendar, Clock, DollarSign, Building } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
+import { executiveApi } from '../../services/executiveApi';
+import { IS_MOCK_ENV } from '../../config/runtime';
 import { PIPELINE_STAGES } from '../../constants/pipelineStages';
 import { FEATURES } from '../../constants/features';
 import { EmptyState } from '../../components/common/EmptyState';
@@ -19,6 +21,7 @@ export const ReportsPage: React.FC = () => {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [consultations, setConsultations] = useState<Consultation[]>([]);
   const [opportunities, setOpportunities] = useState<InvestmentOpportunity[]>([]);
+  const [executiveReport, setExecutiveReport] = useState<Awaited<ReturnType<typeof executiveApi.getReport>> | null>(null);
 
   const loadData = () => {
     setLeads(storageService.getLeads(tenant?.id));
@@ -36,6 +39,14 @@ export const ReportsPage: React.FC = () => {
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id]);
+
+  useEffect(() => {
+    if (IS_MOCK_ENV || user?.role?.code !== 'sales_executive') {
+      setExecutiveReport(null);
+      return;
+    }
+    executiveApi.getReport().then(setExecutiveReport).catch(() => setExecutiveReport(null));
+  }, [user?.id, period]);
 
   // Currency Formatter
   const formatCurrency = (val: number) => {
@@ -102,13 +113,17 @@ export const ReportsPage: React.FC = () => {
     : null;
 
   // Telephone connect rate
-  const totalCalls = scopedCalls.length;
+  const totalCalls = executiveReport?.totalCalls ?? scopedCalls.length;
   const connectedCalls = scopedCalls.filter(c => c.duration > 0);
-  const connectRate = totalCalls > 0
+  const connectRate = executiveReport
+    ? executiveReport.connectRatePercent.toFixed(1)
+    : totalCalls > 0
     ? ((connectedCalls.length / totalCalls) * 100).toFixed(1)
     : null;
   const totalConnectedDuration = connectedCalls.reduce((sum, c) => sum + (c.duration || 0), 0);
-  const avgDuration = connectedCalls.length > 0
+  const avgDuration = executiveReport
+    ? formatDuration(Math.round(executiveReport.averageDurationSeconds))
+    : connectedCalls.length > 0
     ? formatDuration(Math.round(totalConnectedDuration / connectedCalls.length))
     : '0s';
 

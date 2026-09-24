@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { IS_MOCK_ENV } from '../config/runtime';
 import { Shield, Building2, UserCheck, ArrowRight, Lock, Mail, AlertCircle, TrendingUp } from 'lucide-react';
 import './AuthLayout.css';
 
 export const AuthLayout: React.FC = () => {
   const { login, switchPersona, loginError } = useAuth();
-  const [email, setEmail] = useState('vikram@ghlindiatrust.com');
-  const [password, setPassword] = useState('Password@123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -30,8 +31,7 @@ export const AuthLayout: React.FC = () => {
           </p>
         </div>
 
-        {/* Demo Fast Login Presets */}
-        <div className="auth-presets-container">
+        {IS_MOCK_ENV && <div className="auth-presets-container">
           <div className="auth-presets-label">
             Quick One-Click Demo Sign-in
           </div>
@@ -96,13 +96,13 @@ export const AuthLayout: React.FC = () => {
               </div>
             </button>
           </div>
-        </div>
+        </div>}
 
-        <div className="auth-divider">
+        {IS_MOCK_ENV && <div className="auth-divider">
           <div className="auth-divider-line" />
           <span>or sign in with credentials</span>
           <div className="auth-divider-line" />
-        </div>
+        </div>}
 
         {/* Standard Form */}
         <form onSubmit={handleSubmit} className="auth-form">
@@ -115,6 +115,7 @@ export const AuthLayout: React.FC = () => {
                 className="form-input auth-input-field"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
+                autoComplete="username"
                 required
               />
             </div>
@@ -134,6 +135,7 @@ export const AuthLayout: React.FC = () => {
                 className="form-input auth-input-field"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
+                autoComplete="current-password"
                 required
               />
             </div>

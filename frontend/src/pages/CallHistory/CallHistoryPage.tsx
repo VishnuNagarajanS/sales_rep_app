@@ -5,6 +5,8 @@ import { CallRecord } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
+import { executiveApi } from '../../services/executiveApi';
+import { IS_MOCK_ENV } from '../../config/runtime';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
@@ -19,17 +21,27 @@ export const CallHistoryPage: React.FC = () => {
   const [selectedCall, setSelectedCall] = useState<CallRecord | null>(null);
   const [dispositionFilter, setDispositionFilter] = useState('All');
   const [directionFilter, setDirectionFilter] = useState('All');
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const loadData = () => {
-    setCalls(storageService.getCalls(tenant?.id));
+  const loadData = async () => {
+    try {
+      setLoadError(null);
+      if (!IS_MOCK_ENV && user?.role.code === 'sales_executive' && user) {
+        setCalls(await executiveApi.getCalls(user, tenant));
+      } else {
+        setCalls(storageService.getCalls(tenant?.id));
+      }
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Unable to load call history.');
+    }
   };
 
   useEffect(() => {
-    loadData();
+    void loadData();
     const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
-  }, [tenant?.id]);
+  }, [tenant?.id, user?.id]);
 
   // ── Task 2: Role-scoping (same pattern as DashboardPage.tsx scopedCalls) ──
   const isExec = user?.role?.code === 'sales_executive';
@@ -211,6 +223,12 @@ export const CallHistoryPage: React.FC = () => {
           />
         }
       />
+      {loadError && (
+        <div className="auth-error-alert">
+          <AlertCircle size={16} />
+          <span>{loadError}</span>
+        </div>
+      )}
 
       {/* Call Detail Drawer */}
       <Drawer

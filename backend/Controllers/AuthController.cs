@@ -74,6 +74,6 @@ public class AuthController : ControllerBase
     }
 
     [HttpGet("me")]
-    [Authorize(Roles = "sales_executive")]
+    [Authorize]
     public async Task<IActionResult> Me(CancellationToken cancellationToken) => Ok(await _authService.GetCurrentUserAsync(cancellationToken));
 }

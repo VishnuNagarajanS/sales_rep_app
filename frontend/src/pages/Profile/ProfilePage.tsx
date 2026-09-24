@@ -31,6 +31,8 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
+import { executiveApi } from '../../services/executiveApi';
+import { IS_MOCK_ENV } from '../../config/runtime';
 import './ProfilePage.css';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -205,16 +207,24 @@ export const ProfilePage: React.FC = () => {
     }
   }, [user?.id]);
 
-  const savePersonal = () => {
+  const savePersonal = async () => {
     if (!user) return;
     const updated = { ...user, name: editName, phone: editPhone, designation: editDesignation };
+    if (!IS_MOCK_ENV && user.role.code === 'sales_executive') {
+      try {
+        await executiveApi.updateProfile({ name: editName, phone: editPhone, designation: editDesignation });
+      } catch {
+        return;
+      }
+    } else {
+      storageService.saveUser(updated);
+    }
     setUser(updated);
-    storageService.saveUser(updated);
     setPersonalSaved(true);
     setTimeout(() => setPersonalSaved(false), 2200);
   };
 
-  const saveSkills = () => {
+  const saveSkills = async () => {
     if (!user) return;
     const updated = {
       ...user,
@@ -222,21 +232,44 @@ export const ProfilePage: React.FC = () => {
       languages: editLanguages.split(',').map(s => s.trim()).filter(Boolean),
       specializations: editSpecializations.split(',').map(s => s.trim()).filter(Boolean),
     };
+    if (!IS_MOCK_ENV && user.role.code === 'sales_executive') {
+      try {
+        await executiveApi.updateProfile({
+          skills: updated.skills,
+          languages: updated.languages,
+          specializations: updated.specializations,
+        });
+      } catch {
+        return;
+      }
+    } else {
+      storageService.saveUser(updated);
+    }
     setUser(updated);
-    storageService.saveUser(updated);
     setSkillsSaved(true);
     setTimeout(() => setSkillsSaved(false), 2200);
   };
 
-  const saveHours = () => {
+  const saveHours = async () => {
     if (!user) return;
     const updated = {
       ...user,
       maxActiveLeads: parseInt(editMaxLeads) || 50,
       workingHours: { start: editWorkStart, end: editWorkEnd, days: user.workingHours?.days || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] },
     };
+    if (!IS_MOCK_ENV && user.role.code === 'sales_executive') {
+      try {
+        await executiveApi.updateProfile({
+          maxActiveLeads: updated.maxActiveLeads,
+          workingHours: `${editWorkStart}-${editWorkEnd}`,
+        });
+      } catch {
+        return;
+      }
+    } else {
+      storageService.saveUser(updated);
+    }
     setUser(updated);
-    storageService.saveUser(updated);
     setHoursSaved(true);
     setTimeout(() => setHoursSaved(false), 2200);
   };

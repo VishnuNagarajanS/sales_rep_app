@@ -5,7 +5,8 @@ import { SYSTEM_ROLES } from '../constants/roles';
 import { FEATURES } from '../constants/features';
 import { storageService } from '../services/storageService';
 
-import { apiClient } from '../services/apiClient';
+import { apiClient, ApiResponse, LoginResponse } from '../services/apiClient';
+import { IS_MOCK_ENV } from '../config/runtime';
 
 interface AuthContextType {
   user: User | null;
@@ -64,6 +65,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.removeItem('nexus_current_tenant');
     }
   }, [tenant]);
+
+  useEffect(() => {
+    const token = sessionStorage.getItem('nexus_auth_token');
+    if (!token || IS_MOCK_ENV) return;
+
+    apiClient.get<ApiResponse<LoginResponse>>('/auth/me')
+      .then(response => {
+        if (response.success && response.data) {
+          setUser(response.data.user);
+          setTenant(response.data.tenant || null);
+        }
+      })
+      .catch(() => {
+        setUser(null);
+        setTenant(null);
+      });
+  }, []);
+
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      setUser(null);
+      setTenant(null);
+    };
+    window.addEventListener('nexus_auth_unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('nexus_auth_unauthorized', handleUnauthorized);
+  }, []);
 
   const isSuperAdmin = user?.role.code === 'super_admin';
 
@@ -145,17 +172,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   ): Promise<boolean> => {
     setLoginError(null);
 
-    // If password provided, call real ASP.NET Core backend
-    if (password) {
+    if (!IS_MOCK_ENV && password) {
       try {
-        const response: any = await apiClient.post('/auth/login', { email, password });
+        const response = await apiClient.post<ApiResponse<LoginResponse>>('/auth/login', { email, password });
 
         if (response && response.success && response.data) {
           const { token, user: userData, tenant: tenantData } = response.data;
 
           if (token) {
             sessionStorage.setItem('nexus_auth_token', token);
-            localStorage.setItem('nexus_auth_token', token);
           }
 
           if (userData) {
@@ -175,6 +200,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setLoginError(error.message || 'Unable to connect to server.');
         return false;
       }
+    }
+
+    if (!IS_MOCK_ENV) {
+      setLoginError('Enter your email and password to continue.');
+      return false;
     }
 
     // Fallback: fast-login demo mode without password

@@ -40,7 +40,7 @@ public class AuthService : IAuthService
         var user = await _userRepository.GetByEmailAsync(request.Email, cancellationToken);
 
         // Security practice: use constant-time dummy verification or generic failure message to prevent email enumeration
-        if (user == null || user.CompanyId != 1 || user.Role.Code != "sales_executive" || !PasswordHasher.VerifyPassword(request.Password, user.PasswordHash))
+        if (user == null || !PasswordHasher.VerifyPassword(request.Password, user.PasswordHash))
         {
             _logger.LogWarning("Failed login attempt for email: {Email}", request.Email);
             return ApiResponse<LoginResponseDto>.FailureResult("Invalid email or password.");
@@ -78,7 +78,7 @@ public class AuthService : IAuthService
 
     public async Task<ApiResponse<string>> ForgotPasswordAsync(ForgotPasswordDto request, CancellationToken cancellationToken = default)
     {
-        var user = await _context.Users.Include(x => x.Role).Include(x => x.Company).FirstOrDefaultAsync(x => x.Email.ToLower() == request.Email.Trim().ToLower() && x.CompanyId == 1 && x.Role.Code == "sales_executive", cancellationToken);
+        var user = await _context.Users.Include(x => x.Role).Include(x => x.Company).FirstOrDefaultAsync(x => x.Email.ToLower() == request.Email.Trim().ToLower(), cancellationToken);
         if (user == null) return ApiResponse<string>.SuccessResult(string.Empty, "If the account exists, reset instructions have been generated.");
         var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
         _context.Set<PasswordResetToken>().Add(new PasswordResetToken { UserId = user.Id, TokenHash = Hash(rawToken), ExpiresAt = DateTime.UtcNow.AddHours(1) });
@@ -90,7 +90,7 @@ public class AuthService : IAuthService
     {
         var reset = await _context.Set<PasswordResetToken>().FirstOrDefaultAsync(x => x.TokenHash == Hash(request.Token) && x.UsedAt == null && x.ExpiresAt > DateTime.UtcNow, cancellationToken);
         if (reset == null) return ApiResponse<object>.FailureResult("Invalid or expired reset token.");
-        var user = await _context.Users.FirstOrDefaultAsync(x => x.Id == reset.UserId && x.CompanyId == 1, cancellationToken);
+        var user = await _context.Users.FirstOrDefaultAsync(x => x.Id == reset.UserId, cancellationToken);
         if (user == null) return ApiResponse<object>.FailureResult("Invalid reset request.");
         user.PasswordHash = PasswordHasher.HashPassword(request.NewPassword); reset.UsedAt = DateTime.UtcNow; await _context.SaveChangesAsync(cancellationToken);
         return ApiResponse<object>.SuccessResult(new { }, "Password reset successful.");
@@ -98,8 +98,11 @@ public class AuthService : IAuthService
 
     public async Task<ApiResponse<LoginResponseDto>> GetCurrentUserAsync(CancellationToken cancellationToken = default)
     {
-        var user = await _context.Users.Include(x => x.Role).Include(x => x.Company).FirstOrDefaultAsync(x => x.Id == _currentUser.UserId && x.CompanyId == _currentUser.CompanyId && x.Role.Code == "sales_executive", cancellationToken);
-        if (user == null) return ApiResponse<LoginResponseDto>.FailureResult("Sales executive profile not found.");
+        var user = await _context.Users
+            .Include(x => x.Role)
+            .Include(x => x.Company)
+            .FirstOrDefaultAsync(x => x.Id == _currentUser.UserId, cancellationToken);
+        if (user == null) return ApiResponse<LoginResponseDto>.FailureResult("Authenticated user was not found.");
         return ApiResponse<LoginResponseDto>.SuccessResult(new LoginResponseDto { User = MapToUserDto(user), Tenant = user.Company == null ? null : MapToTenantDto(user.Company) }, "Current user loaded");
     }
 

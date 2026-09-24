@@ -32,11 +32,19 @@ import {
   INITIAL_INVESTORS,
   INITIAL_CONSULTATIONS,
   INITIAL_OPPORTUNITIES,
-} from '../mock_data/mockData';
+} from '../mock_data';
 
 export type PopupPosition = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
 
 class StorageService {
+  ensureEnvironment(): boolean {
+    const environment = import.meta.env.VITE_APP_ENV || 'development';
+    const key = 'nexus_storage_environment';
+    const previous = localStorage.getItem(key);
+    localStorage.setItem(key, environment);
+    return previous !== null && previous !== environment;
+  }
+
   private get<T>(key: string, fallback: T): T {
     try {
       const data = localStorage.getItem(`nexus_${key}`);
@@ -673,7 +681,7 @@ class StorageService {
 
   // Optional: Explicitly populate demo mock data from separate mock_data folder
   async loadMockDataFromSeparateFolder(): Promise<void> {
-    const mock = await import('../mock_data/mockData');
+    const mock = await import('../mock_data');
     this.set('leads', mock.INITIAL_LEADS);
     this.set('customers', mock.INITIAL_CUSTOMERS);
     this.set('deals', mock.INITIAL_DEALS);

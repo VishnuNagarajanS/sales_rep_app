@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { CallDisposition, CallRecord, Lead, Customer, Deal } from '../types';
 import { storageService } from '../services/storageService';
+import { executiveApi } from '../services/executiveApi';
+import { IS_MOCK_ENV } from '../config/runtime';
 import { useAuth } from './AuthContext';
 
 export type AgentAvailability = 'Available' | 'Busy' | 'Offline';
@@ -248,6 +250,17 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         transcription: `Automated Call Transcript: Agent ${user.name} connected with ${lastCallRecord.contactName}. Call disposition marked as ${disposition}.`,
         notes: reason ? `${notes}\n\nReason: ${reason}` : (notes || lastCallRecord.quickNotes),
       };
+
+      if (!IS_MOCK_ENV && user.role.code === 'sales_executive') {
+        void executiveApi.processDisposition({
+          contactName: callRecord.contactName,
+          contactPhone: callRecord.contactPhone,
+          direction: callRecord.direction,
+          duration: callRecord.duration,
+          disposition,
+          notes: callRecord.notes,
+        }).catch(error => console.error('Failed to persist call disposition', error));
+      }
 
       storageService.addCall(callRecord);
 

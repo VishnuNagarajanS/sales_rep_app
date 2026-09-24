@@ -16,6 +16,8 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
+import { executiveApi } from '../../services/executiveApi';
+import { IS_MOCK_ENV } from '../../config/runtime';
 import { StatusChip } from '../../components/common/StatusChip';
 import { FEATURES } from '../../constants/features';
 import './DashboardPage.css';
@@ -37,6 +39,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
   const [consultations, setConsultations] = useState(storageService.getConsultations(tenant?.id));
   const [investors, setInvestors] = useState(storageService.getInvestors(tenant?.id));
   const [opportunities, setOpportunities] = useState(storageService.getOpportunities(tenant?.id));
+  const [executiveDashboard, setExecutiveDashboard] = useState<Awaited<ReturnType<typeof executiveApi.getDashboard>> | null>(null);
 
   // Sync with storage updates
   useEffect(() => {
@@ -53,6 +56,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id]);
+
+  useEffect(() => {
+    if (IS_MOCK_ENV || user?.role?.code !== 'sales_executive') {
+      setExecutiveDashboard(null);
+      return;
+    }
+    executiveApi.getDashboard().then(setExecutiveDashboard).catch(() => setExecutiveDashboard(null));
+  }, [user?.id]);
 
   // ── Role-based scoping (Task 2 & IRM) ────────────────────────────────────
   const roleCode = user?.role?.code;
@@ -117,6 +128,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
     f => f.status === 'Pending' && f.scheduledAt.toLowerCase().includes('yesterday')
   );
   const pendingFollowups = scopedFollowups.filter(f => f.status === 'Pending');
+  const activeLeadCount = executiveDashboard?.activeLeads.value ?? scopedLeads.length;
+  const pendingFollowupCount = executiveDashboard?.pendingFollowups.value ?? pendingFollowups.length;
+  const overdueFollowupCount = executiveDashboard?.overdueFollowups ?? overdueFollowups.length;
 
   // Task 1a — real "+N this week" delta from scopedLeads.createdAt
   const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -180,6 +194,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
     connectedCalls.length > 0
       ? formatDuration(Math.round(totalConnectedDuration / connectedCalls.length))
       : '0s';
+  const dashboardAvgDuration = executiveDashboard
+    ? formatDuration(Math.round(executiveDashboard.averageTalkTimeSeconds))
+    : avgDuration;
 
   // Task 4 — missed calls: duration === 0 or disposition === 'No Response'
   const missedCalls = scopedCalls.filter(
@@ -346,7 +363,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                 </div>
               </div>
               <div className="dashboard-kpi-value">
-                {scopedLeads.length}
+                {activeLeadCount}
               </div>
               <div className="dashboard-kpi-delta-positive">
                 <ArrowUpRight size={14} /> +{leadsThisWeek} this week
@@ -362,12 +379,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                 </div>
               </div>
               <div className="dashboard-kpi-value">
-                {pendingFollowups.length}
+                {pendingFollowupCount}
               </div>
-              <div className={`dashboard-kpi-followup-status ${overdueFollowups.length > 0 ? 'overdue' : 'on-time'}`}>
-                {overdueFollowups.length > 0 ? (
+              <div className={`dashboard-kpi-followup-status ${overdueFollowupCount > 0 ? 'overdue' : 'on-time'}`}>
+                {overdueFollowupCount > 0 ? (
                   <>
-                    <AlertCircle size={14} /> {overdueFollowups.length} overdue item!
+                    <AlertCircle size={14} /> {overdueFollowupCount} overdue item!
                   </>
                 ) : (
                   'All scheduled on time'
@@ -384,13 +401,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                 </div>
               </div>
               <div className="dashboard-kpi-value">
-                {scopedCalls.length}
+                {executiveDashboard?.callsLoggedToday ?? scopedCalls.length}
               </div>
               {/* Task 4 — Missed Calls inline stat for Sales Executive */}
               {isExec ? (
                 <div className="dashboard-kpi-exec-row">
                   <span className="dashboard-kpi-subtext">
-                    Avg duration: {avgDuration}
+                    Avg duration: {dashboardAvgDuration}
                   </span>
                   <span className={`dashboard-missed-pill ${missedCalls > 0 ? 'has-missed' : 'none'}`}>
                     <PhoneMissed size={11} />
@@ -399,7 +416,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                 </div>
               ) : (
                 <div className="dashboard-kpi-subtext">
-                  Avg duration: {avgDuration}
+                  Avg duration: {dashboardAvgDuration}
                 </div>
               )}
             </div>

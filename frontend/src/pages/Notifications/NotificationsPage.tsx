@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Bell, Check, Phone, Users, Calendar } from 'lucide-react';
 import { NotificationItem } from '../../types';
+import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
+import { executiveApi } from '../../services/executiveApi';
+import { IS_MOCK_ENV } from '../../config/runtime';
 import './NotificationsPage.css';
 
 interface NotificationsPageProps {
@@ -9,20 +12,30 @@ interface NotificationsPageProps {
 }
 
 export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate }) => {
+  const { user } = useAuth();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
-  const loadData = () => {
+  const loadData = async () => {
+    if (!IS_MOCK_ENV && user?.role.code === 'sales_executive') {
+      setNotifications(await executiveApi.getNotifications());
+      return;
+    }
     setNotifications(storageService.getNotifications());
   };
 
   useEffect(() => {
-    loadData();
+    void loadData();
     const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
-  }, []);
+  }, [user?.id]);
 
-  const handleMarkAll = () => {
+  const handleMarkAll = async () => {
+    if (!IS_MOCK_ENV && user?.role.code === 'sales_executive') {
+      await executiveApi.markAllNotificationsRead();
+      void loadData();
+      return;
+    }
     storageService.markAllNotificationsRead();
   };
 
@@ -49,7 +62,11 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
             key={n.id}
             className={`notification-item-row ${!n.read ? 'unread' : ''}`}
             onClick={() => {
-              storageService.markNotificationRead(n.id);
+              if (!IS_MOCK_ENV && user?.role.code === 'sales_executive') {
+                void executiveApi.markNotificationRead(n.id).then(() => loadData());
+              } else {
+                storageService.markNotificationRead(n.id);
+              }
               if (n.link) onNavigate(n.link.replace('/', ''));
             }}
           >
