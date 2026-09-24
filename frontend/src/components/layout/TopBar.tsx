@@ -7,6 +7,7 @@ import {
   LogOut,
   Sun,
   Moon,
+  Download,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -24,6 +25,11 @@ interface TopBarProps {
 export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate }) => {
   const { user, tenant, isSuperAdmin, logout, enabledFeatures } = useAuth();
   const { theme, toggleTheme } = useTheme();
+
+  const roleCode = user?.role?.code;
+  const isGhlAdmin =
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
+    (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -260,6 +266,19 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
 
       {/* Right Controls */}
       <div className="topbar-right-controls">
+        {isGhlAdmin && (
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => {
+              alert("Downloading comprehensive report for all users...");
+            }}
+            title="Export Report"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <Download size={14} /> Export Report
+          </button>
+        )}
+
         {/* Theme Toggle (Available for all roles except Super Admin) */}
         {!isSuperAdmin && (
           <button
