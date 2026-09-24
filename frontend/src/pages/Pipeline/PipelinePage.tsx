@@ -342,9 +342,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                                   {deal.investorType}
                                 </span>
                               )}
-                              <span className={`irm-priority-badge ${(deal.priority || 'medium').toLowerCase()}`}>
-                                {(deal.priority || 'Medium').toUpperCase()}
-                              </span>
                             </div>
                           </div>
 
@@ -607,9 +604,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                     {irmDetailDeal.title}
                   </div>
                 </div>
-                <span className={`irm-priority-badge ${(irmDetailDeal.priority || 'medium').toLowerCase()}`}>
-                  {(irmDetailDeal.priority || 'Medium').toUpperCase()} PRIORITY
-                </span>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: 'var(--text-secondary)' }}>
@@ -658,31 +652,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                     {irmDetailDeal.investmentRange || formatCurrency(irmDetailDeal.value)}
                   </span>
                 </div>
-                <div className="irm-detail-grid-item">
-                  <span className="irm-detail-grid-label">
-                    <Building2 size={12} /> Preferred Asset Class
-                  </span>
-                  <span className="irm-detail-grid-value">
-                    {irmDetailDeal.preferredAssetClass || 'Commercial Pre-Leased'}
-                    {irmDetailDeal.investorType && (
-                      <span
-                        style={{
-                          marginLeft: 8,
-                          fontSize: 10,
-                          fontWeight: 800,
-                          padding: '2px 6px',
-                          borderRadius: 4,
-                          background: 'rgba(59, 130, 246, 0.15)',
-                          color: '#3b82f6',
-                          border: '1px solid rgba(59, 130, 246, 0.3)',
-                          verticalAlign: 'middle',
-                        }}
-                      >
-                        {irmDetailDeal.investorType}
-                      </span>
-                    )}
-                  </span>
-                </div>
+
               </div>
             </div>
 
@@ -709,63 +679,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
               </div>
             </div>
 
-            {/* Log New Activity / Note */}
-            <div className="irm-activity-card">
-              <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 700 }}>
-                Log New Activity / Note
-              </h4>
-              <div className="irm-activity-tabs">
-                <button
-                  type="button"
-                  className={`irm-activity-tab-btn ${activityType === 'note' ? 'active' : ''}`}
-                  onClick={() => setActivityType('note')}
-                >
-                  <FileText size={13} /> Note
-                </button>
-                <button
-                  type="button"
-                  className={`irm-activity-tab-btn ${activityType === 'call' ? 'active' : ''}`}
-                  onClick={() => setActivityType('call')}
-                >
-                  <Phone size={13} /> Call
-                </button>
-                <button
-                  type="button"
-                  className={`irm-activity-tab-btn ${activityType === 'whatsapp' ? 'active' : ''}`}
-                  onClick={() => setActivityType('whatsapp')}
-                >
-                  <MessageCircle size={13} /> WhatsApp
-                </button>
-                <button
-                  type="button"
-                  className={`irm-activity-tab-btn ${activityType === 'meeting' ? 'active' : ''}`}
-                  onClick={() => setActivityType('meeting')}
-                >
-                  <Calendar size={13} /> Meeting
-                </button>
-              </div>
-              <textarea
-                className="form-control"
-                rows={3}
-                placeholder="Enter note details, outcome, or notes..."
-                value={activityText}
-                onChange={e => setActivityText(e.target.value)}
-                style={{ width: '100%', resize: 'vertical', fontSize: '13px', padding: '10px 12px' }}
-              />
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '10px' }}>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  Logged as <strong style={{ color: 'var(--text-secondary)' }}>{user?.name || 'IRM'}</strong>
-                </span>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  disabled={!activityText.trim()}
-                  onClick={handleLogActivity}
-                >
-                  Log Activity
-                </button>
-              </div>
-            </div>
+
 
             {/* Activity History & Stage Transitions */}
             <div className="irm-activity-card">
