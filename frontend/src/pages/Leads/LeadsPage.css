@@ -874,7 +874,6 @@
   flex-direction: column;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
   overflow: hidden;
-  animation: assign-slideUp 0.2s ease-out;
 }
 
 .ai-dist-grid {
@@ -1019,7 +1018,6 @@
   font-weight: 600;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   z-index: 600;
-  animation: assign-slideUp 0.2s ease-out;
 }
 
 /* ── Keyframes ───────────────────────────────────────────── */

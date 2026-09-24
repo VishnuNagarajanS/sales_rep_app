@@ -6,8 +6,12 @@ import {
   Edit2,
   Trash2,
   ArrowRight,
+  Mail,
+  MapPin,
+  Clock,
+  CheckCircle,
 } from 'lucide-react';
-import { InvestmentOpportunity, Investor } from '../../types';
+import { InvestmentOpportunity, Investor, Deal, DealActivity } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
@@ -66,10 +70,19 @@ export const OpportunitiesPage: React.FC = () => {
   // ── Role scoping ──────────────────────────────────────────────────────────
   const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
+  const isIrm = roleCode === 'irm';
+  const isGhlIrm = isIrm && tenant?.slug === 'ghl';
 
   // ── Core data ─────────────────────────────────────────────────────────────
   const [opps, setOpps] = useState<InvestmentOpportunity[]>([]);
   const [investors, setInvestors] = useState<Investor[]>([]);
+  const [deals, setDeals] = useState<Deal[]>([]);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
 
   // ── Filters ───────────────────────────────────────────────────────────────
   const [stageFilter, setStageFilter] = useState('All');
@@ -89,6 +102,7 @@ export const OpportunitiesPage: React.FC = () => {
   const loadData = () => {
     setOpps(storageService.getOpportunities(tenant?.id));
     setInvestors(storageService.getInvestors(tenant?.id));
+    setDeals(storageService.getDeals(tenant?.id));
   };
 
   useEffect(() => {
@@ -291,63 +305,292 @@ export const OpportunitiesPage: React.FC = () => {
     },
   ];
 
+  // ── IRM Stage & Investor Type Handlers ─────────────────────────────────────
+  const irmDeals = deals.filter(d => d.stage === 'investment_opportunity');
+
+  const handleSetInvestorType = (deal: Deal, type: 'AIF' | 'Co-AIF') => {
+    const updatedDeal: Deal = {
+      ...deal,
+      investorType: type,
+    };
+    storageService.saveDeal(updatedDeal);
+
+    const activity: DealActivity = {
+      id: `act-${Date.now()}`,
+      dealId: deal.id,
+      companyId: tenant?.id || '',
+      type: 'note',
+      text: `Investor structure set to: ${type}`,
+      loggedByName: user?.name || 'IRM User',
+      loggedByRole: 'IRM',
+      timestamp: new Date().toISOString(),
+    };
+    storageService.addDealActivity(activity);
+
+    loadData();
+    showToast(`Investor structure for "${deal.customerName}" set to ${type}`);
+  };
+
+  const handleAdvanceToConverted = (deal: Deal) => {
+    const updatedDeal: Deal = {
+      ...deal,
+      stage: 'converted',
+      stageEnteredAt: new Date().toISOString(),
+    };
+    storageService.saveDeal(updatedDeal);
+
+    const activity: DealActivity = {
+      id: `act-${Date.now()}`,
+      dealId: deal.id,
+      companyId: tenant?.id || '',
+      type: 'stage_change',
+      fromStage: 'investment_opportunity',
+      toStage: 'converted',
+      text: 'Investment Opportunity → Converted (Mandate Signed & Capital Transferred)',
+      loggedByName: user?.name || 'IRM User',
+      loggedByRole: 'IRM',
+      timestamp: new Date().toISOString(),
+    };
+    storageService.addDealActivity(activity);
+
+    loadData();
+    showToast(`Deal "${deal.customerName}" converted successfully!`);
+  };
+
+  const getDealDaysInStage = (deal: Deal) => {
+    const timestamp = deal.stageEnteredAt || deal.createdAt;
+    if (!timestamp) return 0;
+    const time = new Date(timestamp).getTime();
+    if (isNaN(time)) return 0;
+    const diffMs = new Date().getTime() - time;
+    const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    return Math.max(0, days);
+  };
+
+  const irmColumns: Column<Deal>[] = [
+    {
+      key: 'customerName',
+      header: 'Investor & Opportunity',
+      sortable: true,
+      render: deal => (
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+            {deal.customerName}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+            {deal.title}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'contact',
+      header: 'Contact Details',
+      render: deal => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 12, color: 'var(--text-secondary)' }}>
+          {deal.phone && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Phone size={12} color="var(--text-muted)" />
+              <span>{deal.phone}</span>
+            </div>
+          )}
+          {deal.email && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Mail size={12} color="var(--text-muted)" />
+              <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {deal.email}
+              </span>
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'investmentRange',
+      header: 'Target Capital / Size',
+      sortable: true,
+      render: deal => (
+        <span style={{ color: '#10b981', fontWeight: 800, fontSize: 13 }}>
+          {deal.investmentRange || formatCurrency(deal.value)}
+        </span>
+      ),
+    },
+    {
+      key: 'preferredAssetClass',
+      header: 'Preferred Asset Class',
+      render: deal => (
+        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+          {deal.preferredAssetClass || 'Commercial Pre-Leased'}
+        </span>
+      ),
+    },
+    {
+      key: 'investorType',
+      header: 'Investor Structure (AIF / Co-AIF)',
+      render: deal => {
+        const currentType = deal.investorType || 'AIF';
+        return (
+          <div className="irm-investor-type-toggle" onClick={e => e.stopPropagation()}>
+            <button
+              type="button"
+              className={`irm-type-btn ${currentType === 'AIF' ? 'active' : ''}`}
+              title="Classify as Direct AIF Investor"
+              onClick={() => handleSetInvestorType(deal, 'AIF')}
+            >
+              AIF
+            </button>
+            <button
+              type="button"
+              className={`irm-type-btn ${currentType === 'Co-AIF' ? 'active' : ''}`}
+              title="Classify as Co-Investment AIF Investor"
+              onClick={() => handleSetInvestorType(deal, 'Co-AIF')}
+            >
+              Co-AIF
+            </button>
+          </div>
+        );
+      },
+    },
+    {
+      key: 'assignedAgentName',
+      header: 'Assigned IRM',
+      render: deal => (
+        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+          {deal.assignedAgentName || 'Ananya Iyer'}
+        </span>
+      ),
+    },
+    {
+      key: 'stageEnteredAt',
+      header: 'Stage Duration',
+      render: deal => (
+        <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 7px', borderRadius: 10, background: 'var(--bg-surface-hover)', border: '1px solid var(--border-base)', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <Clock size={11} /> {getDealDaysInStage(deal)}d
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: 'Action',
+      render: deal => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost btn-icon"
+            title={`Call ${deal.customerName}`}
+            onClick={() => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.id)}
+          >
+            <Phone size={14} color="#059669" />
+          </button>
+          <button
+            type="button"
+            className="irm-convert-btn"
+            title="Convert deal (Mandate executed & funds committed)"
+            onClick={() => handleAdvanceToConverted(deal)}
+          >
+            <CheckCircle size={13} /> Convert
+          </button>
+        </div>
+      ),
+    },
+  ];
+
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="opportunities-page">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 24,
+            right: 24,
+            backgroundColor: '#059669',
+            color: '#fff',
+            padding: '12px 20px',
+            borderRadius: 8,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 14,
+            fontWeight: 600,
+          }}
+        >
+          <CheckCircle size={18} /> {toastMessage}
+        </div>
+      )}
+
       <div className="page-header">
         <div>
           <h1 className="page-title">
-            <Briefcase size={24} color="#0284c7" /> Investment Opportunities Syndicate
+            <Briefcase size={24} color={isGhlIrm ? '#ec4899' : '#0284c7'} />{' '}
+            {isGhlIrm ? 'Investment Opportunities & Term Sheets' : 'Investment Opportunities Syndicate'}
           </h1>
           <p className="page-subtitle">
-            Commercial real-estate fractional tranches, warehousing yields, and capital
-            commitments for {tenant?.name}.
+            {isGhlIrm
+              ? 'Pitch deck shared, term sheet under review, legal team active. Classify investor structure (AIF vs Co-AIF).'
+              : `Commercial real-estate fractional tranches, warehousing yields, and capital commitments for ${tenant?.name}.`}
           </p>
         </div>
 
-        <button
-          id="opps-new-opportunity"
-          className="btn btn-primary"
-          style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
-          onClick={openNewModal}
-        >
-          <Plus size={15} /> New Opportunity
-        </button>
+        {!isGhlIrm && (
+          <button
+            id="opps-new-opportunity"
+            className="btn btn-primary"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+            onClick={openNewModal}
+          >
+            <Plus size={15} /> New Opportunity
+          </button>
+        )}
       </div>
 
       {/* ── Data table ───────────────────────────────────────────────────── */}
-      <DataTable
-        columns={columns}
-        data={filteredOpps}
-        keyExtractor={o => o.id}
-        rowActions={rowActions}
-        onRowClick={o => openEditModal(o)}
-        searchPlaceholder="Search opportunities by asset title or investor..."
-        filtersNode={
-          <FilterBar
-            filters={[
-              {
-                key: 'stage',
-                label: 'Stage',
-                value: stageFilter,
-                onChange: setStageFilter,
-                options: stageOptions,
-              },
-              {
-                key: 'agent',
-                label: 'Agent',
-                value: agentFilter,
-                onChange: setAgentFilter,
-                options: agentOptions,
-              },
-            ]}
-            onClearAll={() => {
-              setStageFilter('All');
-              setAgentFilter('All');
-            }}
-          />
-        }
-      />
+      {isGhlIrm ? (
+        <DataTable
+          columns={irmColumns}
+          data={irmDeals}
+          keyExtractor={d => d.id}
+          searchPlaceholder="Search opportunities by investor, deal, or asset class..."
+          emptyTitle="No Investment Opportunities"
+          emptyDescription="No deals currently in the Investment Opportunity stage."
+        />
+      ) : (
+        <DataTable
+          columns={columns}
+          data={filteredOpps}
+          keyExtractor={o => o.id}
+          rowActions={rowActions}
+          onRowClick={o => openEditModal(o)}
+          searchPlaceholder="Search opportunities by asset title or investor..."
+          filtersNode={
+            <FilterBar
+              filters={[
+                {
+                  key: 'stage',
+                  label: 'Stage',
+                  value: stageFilter,
+                  onChange: setStageFilter,
+                  options: stageOptions,
+                },
+                {
+                  key: 'agent',
+                  label: 'Agent',
+                  value: agentFilter,
+                  onChange: setAgentFilter,
+                  options: agentOptions,
+                },
+              ]}
+              onClearAll={() => {
+                setStageFilter('All');
+                setAgentFilter('All');
+              }}
+            />
+          }
+        />
+      )}
 
       {/* ── Create / Edit Opportunity Modal ──────────────────────────────── */}
       <Modal

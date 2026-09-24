@@ -340,8 +340,8 @@ export function DataTable<T>({
                           col.align === 'right'
                             ? 'flex-end'
                             : col.align === 'center'
-                            ? 'center'
-                            : 'flex-start',
+                              ? 'center'
+                              : 'flex-start',
                       }}
                     >
                       {col.header}

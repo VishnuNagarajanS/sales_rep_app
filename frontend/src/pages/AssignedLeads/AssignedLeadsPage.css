@@ -53,6 +53,10 @@
   white-space: nowrap;
 }
 
+.assigned-leads-page .modal-backdrop {
+  z-index: 1100;
+}
+
 .assigned-leads-unauthorized {
   display: flex;
   flex-direction: column;

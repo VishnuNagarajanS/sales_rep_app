@@ -12,6 +12,8 @@ import { storageService } from '../../services/storageService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { Drawer } from '../../components/common/Drawer';
+import { Modal } from '../../components/common/Modal';
+import { MOCK_AGENTS } from '../../mock_data/mockData';
 import './AssignedLeadsPage.css';
 
 export const AssignedLeadsPage: React.FC = () => {
@@ -27,6 +29,10 @@ export const AssignedLeadsPage: React.FC = () => {
   const [datePreset, setDatePreset] = useState<string>('all');
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
+
+  // Agent reassignment confirmation state for Edit panel
+  const [pendingAgent, setPendingAgent] = useState<{ id: string | number; name: string } | null>(null);
+  const [isReassignConfirmOpen, setIsReassignConfirmOpen] = useState(false);
 
   const roleCode = user?.role?.code;
   const isGhlAdmin =
@@ -148,7 +154,50 @@ export const AssignedLeadsPage: React.FC = () => {
 
   const handleOpenEdit = (lead: Lead) => {
     setFormData({ ...lead });
+    setPendingAgent(null);
+    setIsReassignConfirmOpen(false);
     setIsEditDrawerOpen(true);
+  };
+
+  // Populate agent options from MOCK_AGENTS, ensuring the current assigned agent is included
+  const agentOptions = useMemo<Array<{ id: string | number; name: string }>>(() => {
+    const list: Array<{ id: string | number; name: string }> = [...MOCK_AGENTS];
+    if (formData.assignedAgentName && !list.some(a => a.name.toLowerCase() === formData.assignedAgentName?.toLowerCase())) {
+      list.unshift({ id: 'current', name: formData.assignedAgentName });
+    }
+    return list;
+  }, [formData.assignedAgentName]);
+
+  const handleAgentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newName = e.target.value;
+    const currentName = formData.assignedAgentName || '';
+
+    // If unchanged, do nothing
+    if (!newName || newName === currentName) return;
+
+    const chosenAgent = agentOptions.find(a => a.name === newName);
+    if (!chosenAgent) return;
+
+    // Trigger confirmation modal; do not change form state immediately
+    setPendingAgent(chosenAgent);
+    setIsReassignConfirmOpen(true);
+  };
+
+  const handleConfirmReassign = () => {
+    if (pendingAgent) {
+      setFormData(prev => ({
+        ...prev,
+        assignedAgentId: String(pendingAgent.id),
+        assignedAgentName: pendingAgent.name,
+      }));
+    }
+    setIsReassignConfirmOpen(false);
+    setPendingAgent(null);
+  };
+
+  const handleCancelReassign = () => {
+    setIsReassignConfirmOpen(false);
+    setPendingAgent(null);
   };
 
   const handleSaveLead = (e: React.FormEvent) => {
@@ -164,6 +213,24 @@ export const AssignedLeadsPage: React.FC = () => {
     };
 
     storageService.saveLead(leadToSave);
+
+    // Keep session mock assignments in sync if tracked
+    try {
+      const raw = sessionStorage.getItem('ghl_mock_agent_assignments');
+      if (raw) {
+        const assignments: Array<{ leadId: string; agentId: number | string; agentName: string }> = JSON.parse(raw);
+        const idx = assignments.findIndex(a => a.leadId === leadToSave.id);
+        if (idx >= 0) {
+          assignments[idx] = {
+            ...assignments[idx],
+            agentId: leadToSave.assignedAgentId || '',
+            agentName: leadToSave.assignedAgentName || '',
+          };
+          sessionStorage.setItem('ghl_mock_agent_assignments', JSON.stringify(assignments));
+        }
+      }
+    } catch {}
+
     setIsEditDrawerOpen(false);
     loadData();
   };
@@ -588,13 +655,18 @@ export const AssignedLeadsPage: React.FC = () => {
 
           <div className="form-group">
             <label className="form-label">Assigned Agent</label>
-            <input
-              type="text"
-              className="form-input"
+            <select
+              className="form-select"
               value={formData.assignedAgentName || ''}
-              onChange={e => setFormData({ ...formData, assignedAgentName: e.target.value })}
-              placeholder="Agent Name"
-            />
+              onChange={handleAgentChange}
+            >
+              {!formData.assignedAgentName && <option value="">Select Agent</option>}
+              {agentOptions.map(agent => (
+                <option key={agent.id} value={agent.name}>
+                  {agent.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="form-group">
@@ -609,6 +681,38 @@ export const AssignedLeadsPage: React.FC = () => {
           </div>
         </form>
       </Drawer>
+
+      {/* Reassign Confirmation Modal */}
+      <Modal
+        isOpen={isReassignConfirmOpen}
+        onClose={handleCancelReassign}
+        title="Confirm Lead Reassignment"
+        maxWidth={460}
+        footer={
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', width: '100%' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleCancelReassign}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleConfirmReassign}
+            >
+              Confirm
+            </button>
+          </div>
+        }
+      >
+        <p style={{ margin: '16px 0', fontSize: '14px', lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+          Reassign this lead to <strong>{pendingAgent?.name}</strong>? This will change the assigned agent from{' '}
+          <strong>{formData.assignedAgentName || 'Unassigned'}</strong> to{' '}
+          <strong>{pendingAgent?.name}</strong>.
+        </p>
+      </Modal>
     </div>
   );
 };

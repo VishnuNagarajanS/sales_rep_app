@@ -141,6 +141,21 @@ export interface Customer {
   lastContactedAt?: string;
   createdBy?: string;
   updatedBy?: string;
+  assignedIrmId?: string;
+  assignedIrmName?: string;
+  assignedIrmAt?: string;
+}
+
+export interface IrmProfile {
+  id: string;
+  name: string;
+  experience: string;
+  experienceYears: number;
+  experienceLevel: 'Experienced' | 'Mid-Level' | 'Fresher';
+  performance: number;
+  status: 'Available' | 'Busy';
+  email: string;
+  phone: string;
 }
 
 export interface Deal {
@@ -158,6 +173,26 @@ export interface Deal {
   lostReason?: string;
   createdAt: string;
   stageEnteredAt?: string;
+  phone?: string;
+  email?: string;
+  priority?: 'High' | 'Medium' | 'Low';
+  location?: string;
+  preferredAssetClass?: string;
+  investmentRange?: string; // e.g. "₹15 Cr – ₹25 Cr", display string shown in green
+  investorType?: 'AIF' | 'Co-AIF';
+}
+
+export interface DealActivity {
+  id: string;
+  dealId: string;
+  companyId: string;
+  type: 'note' | 'call' | 'whatsapp' | 'meeting' | 'stage_change';
+  text: string;
+  fromStage?: string; // for stage_change entries
+  toStage?: string;   // for stage_change entries
+  loggedByName: string;
+  loggedByRole: string; // e.g. "IRM"
+  timestamp: string;
 }
 
 export type CallDisposition =

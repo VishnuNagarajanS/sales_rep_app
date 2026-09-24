@@ -42,6 +42,8 @@ interface LeadDetailDrawerContentProps {
   consultationHistory?: Consultation[];
   /** Optional — when true, strips system-generated disposition lines from Notes & Requirements */
   hideAutoNotes?: boolean;
+  /** Optional — when provided, renders only the specified sections */
+  sectionsOnly?: ('callRecordings' | 'summary' | 'details' | 'consultations')[];
 }
 
 export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = ({
@@ -54,6 +56,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   consultationReason,
   consultationHistory,
   hideAutoNotes = false,
+  sectionsOnly,
 }) => {
   const { user } = useAuth();
   const isSalesExecutive = user?.role?.code === 'sales_executive';
@@ -161,33 +164,36 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
       {/* ── Activity Summary Badge ───────────────────────────────────────────── */}
-      <div
-        style={{
-          backgroundColor: 'var(--bg-surface-hover)',
-          border: '1px solid var(--border-base)',
-          borderRadius: 'var(--radius-lg)',
-          padding: '14px 18px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        <div>
-          <div style={{ fontSize: 12, color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700 }}>
-            Total Activity Summary
+      {(!sectionsOnly || sectionsOnly.includes('summary')) && (
+        <div
+          style={{
+            backgroundColor: 'var(--bg-surface-hover)',
+            border: '1px solid var(--border-base)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '14px 18px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700 }}>
+              Total Activity Summary
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 800, marginTop: 2, color: 'var(--primary-600)' }}>
+              {selectedCalls.length} {selectedCalls.length === 1 ? 'Call Recorded' : 'Calls Recorded'}
+              {activeFollowupCount > 0 && ` • ${activeFollowupCount} Active Follow-up${activeFollowupCount > 1 ? 's' : ''}`}
+            </div>
           </div>
-          <div style={{ fontSize: 16, fontWeight: 800, marginTop: 2, color: 'var(--primary-600)' }}>
-            {selectedCalls.length} {selectedCalls.length === 1 ? 'Call Recorded' : 'Calls Recorded'}
-            {activeFollowupCount > 0 && ` • ${activeFollowupCount} Active Follow-up${activeFollowupCount > 1 ? 's' : ''}`}
-          </div>
+          <button className="btn btn-call btn-sm" onClick={onCall}>
+            <Phone size={13} /> Call Now
+          </button>
         </div>
-        <button className="btn btn-call btn-sm" onClick={onCall}>
-          <Phone size={13} /> Call Now
-        </button>
-      </div>
+      )}
 
       {/* ── Lead / Investor Details ──────────────────────────────────────────── */}
-      <div className="card">
+      {(!sectionsOnly || sectionsOnly.includes('details')) && (
+        <div className="card">
         <h4 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
           <Building2 size={16} color="var(--primary-600)" /> Lead / Investor Details
         </h4>
@@ -371,9 +377,10 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
           </div>
         )}
       </div>
+      )}
 
       {/* ── Previous Consultations ─────────────────────────────────────── */}
-      {consultationHistory && consultationHistory.length > 0 && (
+      {(!sectionsOnly || sectionsOnly.includes('consultations')) && consultationHistory && consultationHistory.length > 0 && (
         <div className="card">
           <div
             style={{
@@ -474,7 +481,8 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
       )}
 
       {/* ── Call Recordings ────────────────────────────────────────────── */}
-      <div className="card">
+      {(!sectionsOnly || sectionsOnly.includes('callRecordings')) && (
+        <div className="card">
         <h4 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
           <Phone size={16} color="var(--primary-600)" /> Call Recordings
         </h4>
@@ -598,6 +606,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
           </div>
         )}
       </div>
+      )}
     </div>
   );
 };

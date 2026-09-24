@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { storageService, PopupPosition } from '../../services/storageService';
+import { MOCK_AGENTS, MOCK_IRMS } from '../../mock_data/mockData';
 
 import {
   Phone,
@@ -220,20 +221,32 @@ export const InCallBar: React.FC = () => {
   const [irmButtonRect, setIrmButtonRect] = useState<DOMRect | null>(null);
   const [irmSearchQuery, setIrmSearchQuery] = useState('');
   const [connectingIrm, setConnectingIrm] = useState<string | null>(null);
-  const [pendingIrm, setPendingIrm] = useState<{ name: string; status: string } | null>(null);
+  const [pendingIrm, setPendingIrm] = useState<{ name: string; status: string; isPrevious?: boolean } | null>(null);
   const [consultationReason, setConsultationReason] = useState('');
 
   const irmPortalRef = useRef<HTMLDivElement>(null);
   const irmButtonRef = useRef<HTMLButtonElement>(null);
 
-  const MOCK_IRMS = [
-    { name: 'Ananya Iyer', status: 'Available' },
-    { name: 'Rohan Mehta', status: 'Busy' },
-    { name: 'Priya Nair', status: 'Available' },
-  ];
+  const isIrm = user?.role?.code === 'irm';
 
-  const filteredIrms = MOCK_IRMS.filter(irm =>
-    irm.name.toLowerCase().includes(irmSearchQuery.toLowerCase())
+  // Look up the full lead record to find who previously handled this contact
+  const matchedLead = activeCall?.matchedRecord?.type === 'lead'
+    ? storageService.getLeads(tenant?.id).find(l => l.id === activeCall.matchedRecord?.id)
+    : (activeCall?.contactPhone ? storageService.findLeadByPhone(activeCall.contactPhone, tenant?.id) : undefined);
+  const previousAgentName = matchedLead?.assignedAgentName;
+
+  const connectOptions = isIrm
+    ? (() => {
+        const base = MOCK_AGENTS.map(a => ({ name: a.name, status: 'Available' as const }));
+        if (!previousAgentName) return base;
+        // Move the previously-assigned agent to the top of the list as the default
+        const rest = base.filter(a => a.name !== previousAgentName);
+        return [{ name: previousAgentName, status: 'Available' as const, isPrevious: true }, ...rest];
+      })()
+    : MOCK_IRMS;
+
+  const filteredConnectOptions = connectOptions.filter(o =>
+    o.name.toLowerCase().includes(irmSearchQuery.toLowerCase())
   );
 
   const handleConnectIrm = (irm: { name: string; status: string } | null, reason: string) => {
@@ -252,7 +265,9 @@ export const InCallBar: React.FC = () => {
       agentName: user.name,
       disposition: 'Converted',
       timestamp: new Date().toISOString(),
-      notes: `Connected to IRM: ${irm.name}. Reason: ${reason}`,
+      notes: isIrm
+        ? `Connected to Agent: ${irm.name}. Reason: ${reason}`
+        : `Connected to IRM: ${irm.name}. Reason: ${reason}`,
       leadId: activeCall.matchedRecord?.id,
       investorId: activeCall.matchedRecord?.id,
     });
@@ -281,7 +296,7 @@ export const InCallBar: React.FC = () => {
       consultantId: irm.name,
       consultantName: irm.name,
       status: 'Scheduled',
-      agenda: reason,
+      agenda: isIrm ? `Connected to Agent: ${reason}` : reason,
     });
 
     endCall(true);
@@ -603,10 +618,12 @@ export const InCallBar: React.FC = () => {
             </div>
           )}
 
-          {/* ── IRM connect toast ── */}
+          {/* ── IRM / Agent connect toast ── */}
           {connectingIrm && (
             <div style={{ fontSize: 12, color: '#38bdf8', padding: '4px 8px' }}>
-              Call ended. Connected to {connectingIrm} — moved to Consultations.
+              {isIrm
+                ? `Call ended. Connected to ${connectingIrm} — reconnected with Agent.`
+                : `Call ended. Connected to ${connectingIrm} — moved to Consultations.`}
             </div>
           )}
 
@@ -652,11 +669,11 @@ export const InCallBar: React.FC = () => {
               <ExternalLink size={13} /> Meet
             </button>
 
-            {/* Connect IRM */}
+            {/* Connect IRM / Connect Agent */}
             <button
               ref={irmButtonRef}
               className="btn btn-sm incall-btn-action incall-btn-irm"
-              title="Connect to an IRM"
+              title={isIrm ? 'Connect to an Agent' : 'Connect to an IRM'}
               onClick={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 setIrmButtonRect(rect);
@@ -664,7 +681,7 @@ export const InCallBar: React.FC = () => {
                 setIrmSearchQuery('');
               }}
             >
-              <Users size={13} /> Connect IRM
+              <Users size={13} /> {isIrm ? 'Connect Agent' : 'Connect IRM'}
             </button>
 
             {irmMenuOpen && irmButtonRect && ReactDOM.createPortal(
@@ -687,7 +704,7 @@ export const InCallBar: React.FC = () => {
                 <input
                   type="text"
                   autoFocus
-                  placeholder="Search IRM by name..."
+                  placeholder={isIrm ? 'Search agent by name...' : 'Search IRM by name...'}
                   value={irmSearchQuery}
                   onChange={e => setIrmSearchQuery(e.target.value)}
                   style={{
@@ -704,17 +721,17 @@ export const InCallBar: React.FC = () => {
                   }}
                 />
 
-                {filteredIrms.length === 0 && (
+                {filteredConnectOptions.length === 0 && (
                   <div style={{ padding: '8px', fontSize: 12, color: '#64748b', textAlign: 'center' }}>
-                    No IRM found
+                    {isIrm ? 'No agent found' : 'No IRM found'}
                   </div>
                 )}
 
-                {filteredIrms.map(irm => (
+                {filteredConnectOptions.map(o => (
                   <div
-                    key={irm.name}
+                    key={o.name}
                     onClick={() => {
-                      setPendingIrm(irm);
+                      setPendingIrm(o);
                       setIrmMenuOpen(false);
                       setIrmSearchQuery('');
                     }}
@@ -736,11 +753,26 @@ export const InCallBar: React.FC = () => {
                         width: 8,
                         height: 8,
                         borderRadius: '50%',
-                        background: irm.status === 'Available' ? '#22c55e' : '#d97706',
+                        background: o.status === 'Available' ? '#22c55e' : '#d97706',
                       }}
                     />
-                    {irm.name}
-                    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94a3b8' }}>{irm.status}</span>
+                    {o.name}
+                    {isIrm && (o as any).isPrevious && (
+                      <span
+                        style={{
+                          marginLeft: 6,
+                          fontSize: 10,
+                          color: 'var(--primary-600, #38bdf8)',
+                          background: 'rgba(56, 189, 248, 0.12)',
+                          padding: '1px 5px',
+                          borderRadius: 4,
+                          fontWeight: 500,
+                        }}
+                      >
+                        Previously handled
+                      </span>
+                    )}
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94a3b8' }}>{o.status}</span>
                   </div>
                 ))}
               </div>,
@@ -785,12 +817,12 @@ export const InCallBar: React.FC = () => {
                     Connect {pendingIrm.name} to this call
                   </div>
                   <label style={{ display: 'block', fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>
-                    Reason for Consultation *
+                    {isIrm ? 'Reason for Connecting Agent *' : 'Reason for Consultation *'}
                   </label>
                   <textarea
                     autoFocus
                     rows={3}
-                    placeholder="Enter reason for consultation..."
+                    placeholder={isIrm ? 'Enter reason for connecting agent...' : 'Enter reason for consultation...'}
                     value={consultationReason}
                     onChange={e => setConsultationReason(e.target.value)}
                     style={{

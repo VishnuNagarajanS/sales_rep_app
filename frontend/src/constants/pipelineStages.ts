@@ -16,6 +16,13 @@ export const PIPELINE_STAGES = {
     { id: 'converted', name: 'Converted', color: '#10b981' },
     { id: 'lost', name: 'Lost', color: '#ef4444' },
   ],
+  ghl_irm: [
+    { id: 'leads', name: 'Leads', color: '#3b82f6' },
+    { id: 'followup', name: 'Follow-up', color: '#8b5cf6' },
+    { id: 'qualified_investor', name: 'Qualified Investor', color: '#06b6d4' },
+    { id: 'investment_opportunity', name: 'Investment Opportunity', color: '#ec4899' },
+    { id: 'converted', name: 'Converted', color: '#10b981' },
+  ],
   jamin: [
     { id: 'enquiry', name: 'Enquiry', color: '#3b82f6' },
     { id: 'contacted', name: 'Contacted', color: '#8b5cf6' },
