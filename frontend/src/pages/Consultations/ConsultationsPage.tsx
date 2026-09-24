@@ -293,7 +293,7 @@ export const ConsultationsPage: React.FC = () => {
     },
     {
       key: 'investorName',
-      header: 'Investor Profile',
+      header: 'Customer Profile',
       sortable: true,
       width: '18%',
       render: c => (
