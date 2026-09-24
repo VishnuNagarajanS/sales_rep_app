@@ -1007,6 +1007,7 @@ export const INITIAL_CONSULTATIONS: Consultation[] = [
     status: 'Scheduled',
     agenda: 'Review lease deed covenants and tax pass-through structure for Pre-Leased IT Park Suite.',
     outcomeNotes: 'Financial models and tenant credit rating sheets prepared.',
+    referredByAgentName: 'Suresh Kumar',
   },
   {
     id: 'cns-02',
@@ -1020,6 +1021,7 @@ export const INITIAL_CONSULTATIONS: Consultation[] = [
     status: 'Completed',
     agenda: 'Introductory advisory on fractional commercial real estate yields vs residential rental yields.',
     outcomeNotes: 'Client expressed clear interest in Grade-A commercial asset. Next step: Term sheet.',
+    referredByAgentName: 'Ananya Iyer',
   },
   {
     id: 'cns-03',
@@ -1033,6 +1035,7 @@ export const INITIAL_CONSULTATIONS: Consultation[] = [
     status: 'Scheduled',
     agenda: 'Whitefield Grade-A IT Park tranche allocation and yields discussion.',
     outcomeNotes: 'Term sheet shared; awaiting confirmation on ₹15 Cr ticket.',
+    referredByAgentName: 'Priya Rajan',
   },
   {
     id: 'cns-04',
@@ -1046,6 +1049,7 @@ export const INITIAL_CONSULTATIONS: Consultation[] = [
     status: 'Scheduled',
     agenda: 'Review lease deed covenants and tax structure for Pre-Leased Logistics Hub.',
     outcomeNotes: 'Preparing comparison matrix for 9% gross yield.',
+    referredByAgentName: 'Suresh Kumar',
   },
 ];
 
