@@ -24,11 +24,89 @@ export const AssignedLeadsPage: React.FC = () => {
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
   const [formData, setFormData] = useState<Partial<Lead>>({});
   const [agentFilter, setAgentFilter] = useState<string>('All');
+  const [datePreset, setDatePreset] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
 
   const roleCode = user?.role?.code;
   const isGhlAdmin =
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
+
+  // Date range helpers
+  const formatDateYMD = (d: Date): string => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const getPresetDates = (preset: string): { from: string; to: string } => {
+    const now = new Date();
+    const todayStr = formatDateYMD(now);
+
+    switch (preset) {
+      case 'today':
+        return { from: todayStr, to: todayStr };
+      case 'yesterday': {
+        const yest = new Date(now);
+        yest.setDate(yest.getDate() - 1);
+        const yestStr = formatDateYMD(yest);
+        return { from: yestStr, to: yestStr };
+      }
+      case 'this_week': {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 6);
+        return { from: formatDateYMD(d), to: todayStr };
+      }
+      case 'this_month': {
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        return { from: formatDateYMD(startOfMonth), to: formatDateYMD(endOfMonth) };
+      }
+      case 'last_30_days': {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 29);
+        return { from: formatDateYMD(d), to: todayStr };
+      }
+      default:
+        return { from: '', to: '' };
+    }
+  };
+
+  const getLeadDateStr = (lead: Lead): string => {
+    const raw = lead.assignedAt || lead.createdAt;
+    if (!raw) return '';
+    if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
+      return raw.substring(0, 10);
+    }
+    const d = new Date(raw);
+    if (!isNaN(d.getTime())) {
+      return formatDateYMD(d);
+    }
+    return '';
+  };
+
+  const handleDatePresetChange = (preset: string) => {
+    if (preset === 'all') {
+      setDatePreset('all');
+      setDateFrom('');
+      setDateTo('');
+    } else if (preset === 'custom') {
+      setDatePreset('custom');
+    } else {
+      const { from, to } = getPresetDates(preset);
+      setDatePreset(preset);
+      setDateFrom(from);
+      setDateTo(to);
+    }
+  };
+
+  const handleCustomDateChange = (from: string, to: string) => {
+    setDatePreset('custom');
+    setDateFrom(from);
+    setDateTo(to);
+  };
 
   const loadData = () => {
     const allLeads = storageService.getLeads(tenant?.id);
@@ -131,6 +209,27 @@ export const AssignedLeadsPage: React.FC = () => {
       ),
     },
     {
+      key: 'assignedAt',
+      header: 'Assigned Date',
+      sortable: true,
+      render: l => {
+        const raw = l.assignedAt || l.createdAt;
+        if (!raw) return <span className="lead-text-muted">—</span>;
+        const d = new Date(raw);
+        const formatted = isNaN(d.getTime())
+          ? raw
+          : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        return (
+          <div className="lead-date-cell">
+            <span className="lead-date-primary">{formatted}</span>
+            {l.assignedAt && l.createdAt && l.assignedAt.slice(0, 10) !== l.createdAt.slice(0, 10) && (
+              <span className="lead-date-sub">Created {l.createdAt.slice(0, 10)}</span>
+            )}
+          </div>
+        );
+      },
+    },
+    {
       key: 'source',
       header: 'Source',
       sortable: true,
@@ -182,11 +281,34 @@ export const AssignedLeadsPage: React.FC = () => {
     return Array.from(new Set(names)).sort();
   }, [leads]);
 
-  // Apply agent filter on top of the full leads list
+  // Apply agent and date range filter on top of the full leads list
   const filteredLeads = useMemo(() => {
-    if (!agentFilter || agentFilter === 'All') return leads;
-    return leads.filter(l => l.assignedAgentName === agentFilter);
-  }, [leads, agentFilter]);
+    return leads.filter(l => {
+      // 1. Agent filter
+      if (agentFilter && agentFilter !== 'All' && l.assignedAgentName !== agentFilter) {
+        return false;
+      }
+
+      // 2. Date range filter
+      if (datePreset === 'all' && !dateFrom && !dateTo) {
+        return true;
+      }
+
+      const leadDateStr = getLeadDateStr(l);
+      if (!leadDateStr) {
+        return datePreset === 'all';
+      }
+
+      if (dateFrom && leadDateStr < dateFrom) {
+        return false;
+      }
+      if (dateTo && leadDateStr > dateTo) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [leads, agentFilter, datePreset, dateFrom, dateTo]);
 
   if (!isGhlAdmin) {
     return (
@@ -242,7 +364,19 @@ export const AssignedLeadsPage: React.FC = () => {
                 options: uniqueAgents.map(name => ({ value: name, label: name })),
               },
             ]}
-            onClearAll={() => setAgentFilter('All')}
+            dateRange={{
+              preset: datePreset,
+              onPresetChange: handleDatePresetChange,
+              from: dateFrom,
+              to: dateTo,
+              onChange: handleCustomDateChange,
+            }}
+            onClearAll={() => {
+              setAgentFilter('All');
+              setDatePreset('all');
+              setDateFrom('');
+              setDateTo('');
+            }}
           />
         }
       />

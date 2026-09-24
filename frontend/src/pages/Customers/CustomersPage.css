@@ -115,19 +115,40 @@
   padding-right: 22px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-base);
+  background-color: var(--bg-surface);
   color: var(--text-primary);
+  color-scheme: dark;
   cursor: pointer;
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
 }
 
+.customers-filter-select:focus {
+  outline: none;
+  border-color: var(--primary-500);
+}
+
 .customers-filter-select.is-filtered {
-  background-color: var(--primary-50);
+  background-color: var(--bg-surface-active);
+  border-color: var(--primary-600, #dc2626);
+  color: var(--text-primary);
 }
 
 .customers-filter-select:not(.is-filtered) {
   background-color: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.customers-filter-select option {
+  background-color: var(--bg-surface, #0f172a);
+  color: var(--text-primary, #f8fafc);
+}
+
+.customers-filter-select option:checked,
+.customers-filter-select option:hover {
+  background-color: var(--primary-600, #dc2626);
+  color: #ffffff;
 }
 
 .customers-list {
