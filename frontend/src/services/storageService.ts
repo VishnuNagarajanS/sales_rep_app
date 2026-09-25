@@ -35,6 +35,7 @@ import {
   INITIAL_OPPORTUNITIES,
   INITIAL_NOTIFICATIONS,
   INITIAL_DEAL_ACTIVITIES,
+  INITIAL_CALLS,
 } from '../mock_data/mockData';
 import { ensureInitialAdminFollowups } from '../mock_data/adminFollowupsData';
 
@@ -273,10 +274,13 @@ class StorageService {
     window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 
-  // Calls (Defaults to empty [] - real-time data only)
+  // Calls (Seeds from INITIAL_CALLS; real calls are prepended via addCall)
   getCalls(companyId?: string): CallRecord[] {
-    const calls = this.get<CallRecord[]>('calls', []);
-    return companyId ? calls.filter(c => c.companyId === companyId) : calls;
+    const stored = this.get<CallRecord[]>('calls', []);
+    // Merge: keep stored calls first, then append any INITIAL_CALLS not already present
+    const storedIds = new Set(stored.map(c => c.id));
+    const merged = [...stored, ...INITIAL_CALLS.filter(c => !storedIds.has(c.id))];
+    return companyId ? merged.filter(c => c.companyId === companyId) : merged;
   }
 
   addCall(call: CallRecord): void {

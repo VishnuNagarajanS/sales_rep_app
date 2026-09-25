@@ -21,8 +21,14 @@ import {
   CreditCard,
   Layers,
   Users,
+  Edit2,
+  Send,
 } from 'lucide-react';
-import { Deal, DealActivity, DocumentItem } from '../../types';
+import { SendKycLinkModal } from './components/SendKycLinkModal';
+import { KycStatusBadge, getMockCustomerKycStatus } from './components/KycStatusBadge';
+import { KycRowActionsMenu } from './components/KycRowActionsMenu';
+import { KycReviewDrawer } from './components/KycReviewDrawer';
+import { Deal, DealActivity, DocumentItem, Lead, Customer } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
@@ -50,6 +56,7 @@ interface KYCFormData {
   gender: string;
   investorType: string;
   residentType: string;
+  occupation?: string;
 
   // Step 2: Identity Details
   panNumber: string;
@@ -79,6 +86,9 @@ interface KYCFormData {
   // Step 4: Demat Account
   hasNoDemat: boolean;
   dematAccountNumber: string;
+  dematDepository?: string;
+  dematDpId?: string;
+  dematClientId?: string;
   dematDoc: { name: string; size: string; type: string } | null;
 
   // Step 5: Nominee Details
@@ -102,6 +112,7 @@ const BLANK_KYC_FORM: KYCFormData = {
   gender: 'Male',
   investorType: 'Individual / Retail HNW',
   residentType: 'Resident Indian (RI)',
+  occupation: '',
 
   panNumber: '',
   nameAsPerPan: '',
@@ -128,6 +139,9 @@ const BLANK_KYC_FORM: KYCFormData = {
 
   hasNoDemat: false,
   dematAccountNumber: '',
+  dematDepository: '',
+  dematDpId: '',
+  dematClientId: '',
   dematDoc: null,
 
   nominees: [INITIAL_NOMINEE],
@@ -240,13 +254,25 @@ const GhlIrmKycView: React.FC = () => {
   const { initiateCall } = useCall();
 
   const [deals, setDeals] = useState<Deal[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // View state: 'table' or 'flow'
-  const [viewMode, setViewMode] = useState<'table' | 'flow'>('table');
+  // KYC Link Feature State
+  const [sendLinkDeal, setSendLinkDeal] = useState<Deal | null>(null);
+  const [reviewDeal, setReviewDeal] = useState<Deal | null>(null);
+
+  // View state: 'table' | 'flow' | 'profile'
+  const [viewMode, setViewMode] = useState<'table' | 'flow' | 'profile'>('table');
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
+  const [selectedCustomerDeal, setSelectedCustomerDeal] = useState<Deal | null>(null);
+  const [profileKycData, setProfileKycData] = useState<Partial<KYCFormData> | null>(null);
+
+  // Quick Section Edit State (Personal Details / Address & Identity)
+  const [editingSection, setEditingSection] = useState<'personal' | 'address' | null>(null);
+  const [sectionFormData, setSectionFormData] = useState<Record<string, any>>({});
 
   // Dossier modal for table preview
   const [selectedDealForDetail, setSelectedDealForDetail] = useState<Deal | null>(null);
@@ -257,8 +283,128 @@ const GhlIrmKycView: React.FC = () => {
   const [sameAsPermanent, setSameAsPermanent] = useState(false);
 
   const loadData = () => {
-    const allDeals = storageService.getDeals(tenant?.id);
+    const allDeals = storageService.getDeals(tenant?.id) || [];
     setDeals(allDeals.filter(d => d.stage === 'qualified_investor'));
+    setLeads(storageService.getLeads(tenant?.id) || []);
+    setCustomers(storageService.getCustomers(tenant?.id) || []);
+  };
+
+  const getResolvedLocation = (deal: Deal) => {
+    if (deal.location && deal.location !== '—') return deal.location;
+    const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+    const matchingLead = leads.find(l => {
+      if (deal.customerId && l.id === deal.customerId) return true;
+      const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+      return Boolean(lDigits && fDigits && lDigits === fDigits);
+    });
+    const matchingCustomer = customers.find(c => {
+      if (deal.customerId && c.id === deal.customerId) return true;
+      const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
+      return Boolean(cDigits && fDigits && cDigits === fDigits);
+    });
+    return matchingLead?.location || matchingCustomer?.location || '—';
+  };
+
+  const getCustomerFilledCapacity = (deal: Deal) => {
+    const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+    const matchingLead = leads.find(l => {
+      if (deal.customerId && l.id === deal.customerId) return true;
+      const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+      return Boolean(lDigits && fDigits && lDigits === fDigits);
+    });
+    const matchingCustomer = customers.find(c => {
+      if (deal.customerId && c.id === deal.customerId) return true;
+      const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
+      return Boolean(cDigits && fDigits && cDigits === fDigits);
+    });
+
+    return (
+      matchingLead?.customFields?.investmentCapacity ||
+      matchingLead?.customFields?.capacityRange ||
+      matchingLead?.customFields?.investmentRange ||
+      (matchingLead as any)?.investmentRange ||
+      matchingCustomer?.customFields?.investmentCapacity ||
+      deal.investmentRange ||
+      (deal.value ? formatCurrency(deal.value) : '—')
+    );
+  };
+
+  const getIrmPreferredAssetClass = (deal: Deal) => {
+    const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+    let savedLocal: any = null;
+    try {
+      const raw =
+        (deal.customerId ? localStorage.getItem(`nexus_irm_pref_${deal.customerId}`) : null) ||
+        (fDigits ? localStorage.getItem(`nexus_irm_pref_${fDigits}`) : null) ||
+        localStorage.getItem(`nexus_irm_pref_${deal.id}`);
+      if (raw) savedLocal = JSON.parse(raw);
+    } catch { }
+
+    const matchingLead = leads.find(l => {
+      if (deal.customerId && l.id === deal.customerId) return true;
+      const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+      return Boolean(lDigits && fDigits && lDigits === fDigits);
+    });
+    const matchingCustomer = customers.find(c => {
+      if (deal.customerId && c.id === deal.customerId) return true;
+      const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
+      return Boolean(cDigits && fDigits && cDigits === fDigits);
+    });
+
+    const isConfirmed =
+      savedLocal?.confirmed === true ||
+      matchingLead?.customFields?.irmPreferencesConfirmed === true ||
+      matchingCustomer?.customFields?.irmPreferencesConfirmed === true;
+
+    if (savedLocal?.preferredAssetClass) return savedLocal.preferredAssetClass;
+    if (matchingLead?.customFields?.preferredAssetClass && isConfirmed) return matchingLead.customFields.preferredAssetClass;
+    if (matchingCustomer?.customFields?.preferredAssetClass && isConfirmed) return matchingCustomer.customFields.preferredAssetClass;
+    if (deal.preferredAssetClass && (deal.preferredAssetClass === 'CO-AIF' || deal.preferredAssetClass === 'AIF' || isConfirmed)) {
+      return deal.preferredAssetClass;
+    }
+
+    return '—';
+  };
+
+  const getDynamicKycStatus = (deal: Deal): 'completed' | 'continue' | 'pending' => {
+    const status = localStorage.getItem(`nexus_kyc_status_${deal.id}`);
+    if (status === 'Completed' || status === 'Submitted for Review' || status === 'SEBI KYC Validated') {
+      return 'completed';
+    }
+    if (status === 'Partially Completed') {
+      return 'continue';
+    }
+
+    const savedDataStr = localStorage.getItem(`nexus_kyc_data_${deal.id}`);
+    if (savedDataStr) {
+      try {
+        const data = JSON.parse(savedDataStr);
+        const isAllFilled =
+          Boolean(data.investorName?.trim()) &&
+          Boolean(data.panNumber?.trim()) &&
+          Boolean(data.bankAccountNumber?.trim()) &&
+          Boolean(data.bankIfsc?.trim()) &&
+          (Boolean(data.dematDoc) || data.hasNoDemat) &&
+          Boolean(data.nominees && data.nominees.length > 0 && data.nominees[0]?.name?.trim());
+
+        if (isAllFilled) return 'completed';
+
+        const isPartiallyFilled =
+          Boolean(data.panNumber?.trim()) ||
+          Boolean(data.aadhaarNumber?.trim()) ||
+          Boolean(data.bankAccountNumber?.trim()) ||
+          Boolean(data.aadhaarDoc) ||
+          Boolean(data.panDoc);
+
+        if (isPartiallyFilled) return 'continue';
+      } catch { }
+    }
+
+    if ((deal as any).kycValidated === true) {
+      return 'completed';
+    }
+
+    return 'pending';
   };
 
   useEffect(() => {
@@ -289,10 +435,87 @@ const GhlIrmKycView: React.FC = () => {
     return `₹${val.toLocaleString('en-IN')}`;
   };
 
+  const getGhlId = (deal: Deal) => {
+    const digits = (deal.id || '').replace(/\D/g, '');
+    if (digits.length >= 6) return `GHL${digits.slice(-6)}`;
+    let hash = 0;
+    for (let i = 0; i < deal.id.length; i++) {
+      hash = (hash << 5) - hash + deal.id.charCodeAt(i);
+      hash |= 0;
+    }
+    const clean = Math.abs(hash).toString().padEnd(6, '7').slice(0, 6);
+    return `GHL${clean}`;
+  };
+
+  const getJoinedDate = (deal: Deal) => {
+    const d = deal.createdAt ? new Date(deal.createdAt) : new Date();
+    return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  };
+
+  const calculateProfileCompletion = (data: Partial<KYCFormData> | null, deal: Deal) => {
+    if (!data) return 25;
+    const fields = [
+      data.investorName || deal.customerName,
+      data.phone || deal.phone,
+      data.email || deal.email,
+      data.panNumber,
+      data.dob,
+      data.city || deal.location,
+      data.occupation,
+      data.aadhaarNumber,
+      data.address,
+      data.courierAddress,
+      data.bankName,
+      data.accountNumber,
+      data.ifscCode,
+      data.nominees?.[0]?.name,
+      data.nominees?.[0]?.relationship,
+      data.hasNoDemat || data.dematAccountNumber || data.dematDpId,
+    ];
+    const filled = fields.filter(f => Boolean(f && String(f).trim() && f !== 'Not provided')).length;
+    const pct = Math.round((filled / fields.length) * 100);
+    return Math.max(25, Math.min(100, pct));
+  };
+
+  const handleOpenCustomerProfile = (deal: Deal) => {
+    setSelectedCustomerDeal(deal);
+    const savedKycKey = `nexus_kyc_data_${deal.id}`;
+    let saved: Partial<KYCFormData> | null = null;
+    try {
+      const raw = localStorage.getItem(savedKycKey);
+      if (raw) saved = JSON.parse(raw);
+    } catch { }
+
+    const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+    const matchingLead = leads.find(l => {
+      if (deal.customerId && l.id === deal.customerId) return true;
+      const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+      return Boolean(lDigits && fDigits && lDigits === fDigits);
+    });
+    const matchingCustomer = customers.find(c => {
+      if (deal.customerId && c.id === deal.customerId) return true;
+      const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
+      return Boolean(cDigits && fDigits && cDigits === fDigits);
+    });
+
+    const merged: Partial<KYCFormData> = {
+      investorName: saved?.investorName || deal.customerName || matchingLead?.name || matchingCustomer?.name || '',
+      phone: saved?.phone || deal.phone || matchingLead?.phone || matchingCustomer?.phone || '',
+      email: saved?.email || deal.email || matchingLead?.email || matchingCustomer?.email || '',
+      city: saved?.city || deal.location || matchingLead?.location || matchingCustomer?.location || '',
+      panNumber: saved?.panNumber || (deal as any).pan || matchingLead?.customFields?.pan || matchingCustomer?.customFields?.pan || '',
+      ...saved,
+    };
+
+    setProfileKycData(merged);
+    setViewMode('profile');
+  };
+
   // Helper to open the 5-step wizard prefilled with deal info
-  const startKycFlow = (deal?: Deal) => {
-    const targetDeal = deal || null;
+  const startKycFlow = (deal?: Deal, targetStep?: 1 | 2 | 3 | 4 | 5) => {
+    const targetDeal = deal || selectedCustomerDeal || null;
     setSelectedDeal(targetDeal);
+    if (targetDeal) setSelectedCustomerDeal(targetDeal);
 
     // Check if there is existing saved KYC data for this deal
     const savedKycKey = targetDeal ? `nexus_kyc_data_${targetDeal.id}` : null;
@@ -323,8 +546,111 @@ const GhlIrmKycView: React.FC = () => {
 
     setFormData(initialForm);
     setFormErrors({});
-    setCurrentStep(1);
+    setCurrentStep(targetStep || 1);
     setViewMode('flow');
+  };
+
+  const handleOpenSectionEdit = (section: 'personal' | 'address') => {
+    setEditingSection(section);
+    const deal = selectedCustomerDeal;
+    const current = profileKycData || {};
+
+    if (section === 'personal') {
+      setSectionFormData({
+        investorName: current.investorName || deal?.customerName || '',
+        email: current.email || deal?.email || '',
+        phone: current.phone || deal?.phone || '',
+        panNumber: current.panNumber || '',
+        city: current.city || (deal ? getResolvedLocation(deal) : '') || '',
+        dob: current.dob || '',
+        occupation: current.occupation || '',
+        gender: current.gender || 'Male',
+        investorType: current.investorType || 'Individual / Retail HNW',
+        residentType: current.residentType || 'Resident Indian (RI)',
+        preferredAssetClass: deal ? getIrmPreferredAssetClass(deal) : 'CO-AIF',
+      });
+    } else {
+      setSectionFormData({
+        nameAsPerPan: current.nameAsPerPan || current.investorName || deal?.customerName || '',
+        fatherName: current.fatherName || '',
+        aadhaarNumber: current.aadhaarNumber || '',
+        address: current.address || '',
+        courierAddress: current.courierAddress || current.address || '',
+        city: current.city || (deal ? getResolvedLocation(deal) : '') || '',
+        state: current.state || '',
+        pincode: current.pincode || '',
+        country: current.country || 'India',
+      });
+    }
+  };
+
+  const handleSaveSectionEdit = () => {
+    if (!selectedCustomerDeal) return;
+    const deal = selectedCustomerDeal;
+    const dealId = deal.id;
+    const savedKey = `nexus_kyc_data_${dealId}`;
+
+    let currentSaved: any = {};
+    try {
+      const raw = localStorage.getItem(savedKey);
+      if (raw) currentSaved = JSON.parse(raw);
+    } catch { }
+
+    const updatedData: Partial<KYCFormData> = {
+      ...currentSaved,
+      ...(profileKycData || {}),
+      ...sectionFormData,
+    };
+
+    localStorage.setItem(savedKey, JSON.stringify(updatedData));
+    setProfileKycData(updatedData);
+
+    // Update Deal in storageService if primary contact fields changed
+    let dealChanged = false;
+    const updatedDeal: Deal = { ...deal };
+    if (sectionFormData.investorName && sectionFormData.investorName !== deal.customerName) {
+      updatedDeal.customerName = sectionFormData.investorName;
+      dealChanged = true;
+    }
+    if (sectionFormData.phone && sectionFormData.phone !== deal.phone) {
+      updatedDeal.phone = sectionFormData.phone;
+      dealChanged = true;
+    }
+    if (sectionFormData.email && sectionFormData.email !== deal.email) {
+      updatedDeal.email = sectionFormData.email;
+      dealChanged = true;
+    }
+    if (sectionFormData.city && sectionFormData.city !== deal.location) {
+      updatedDeal.location = sectionFormData.city;
+      dealChanged = true;
+    }
+
+    if (dealChanged) {
+      storageService.saveDeal(updatedDeal);
+      setSelectedCustomerDeal(updatedDeal);
+      loadData();
+    }
+
+    // Save preferred asset class if changed
+    if (editingSection === 'personal' && sectionFormData.preferredAssetClass) {
+      const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+      const prefObj = {
+        preferredAssetClass: sectionFormData.preferredAssetClass,
+        confirmed: true,
+      };
+      if (deal.customerId) localStorage.setItem(`nexus_irm_pref_${deal.customerId}`, JSON.stringify(prefObj));
+      if (fDigits) localStorage.setItem(`nexus_irm_pref_${fDigits}`, JSON.stringify(prefObj));
+      localStorage.setItem(`nexus_irm_pref_${deal.id}`, JSON.stringify(prefObj));
+    }
+
+    const currentStatus = localStorage.getItem(`nexus_kyc_status_${dealId}`);
+    if (currentStatus !== 'Completed' && currentStatus !== 'Submitted for Review') {
+      localStorage.setItem(`nexus_kyc_status_${dealId}`, 'Partially Completed');
+    }
+
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+    setEditingSection(null);
+    showToast(`${editingSection === 'personal' ? 'Personal Details' : 'Address & Identity'} updated successfully!`);
   };
 
   // Advance deal to opportunity
@@ -559,6 +885,14 @@ const GhlIrmKycView: React.FC = () => {
   const handleContinue = () => {
     if (validateStep(currentStep)) {
       setFormErrors({});
+      if (selectedDeal) {
+        localStorage.setItem(`nexus_kyc_data_${selectedDeal.id}`, JSON.stringify(formData));
+        const currentStatus = localStorage.getItem(`nexus_kyc_status_${selectedDeal.id}`);
+        if (currentStatus !== 'Completed' && currentStatus !== 'Submitted for Review') {
+          localStorage.setItem(`nexus_kyc_status_${selectedDeal.id}`, 'Partially Completed');
+        }
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+      }
       if (currentStep < 5) {
         setCurrentStep((prev) => (prev + 1) as 1 | 2 | 3 | 4 | 5);
       }
@@ -567,6 +901,14 @@ const GhlIrmKycView: React.FC = () => {
 
   const handleBack = () => {
     setFormErrors({});
+    if (selectedDeal) {
+      localStorage.setItem(`nexus_kyc_data_${selectedDeal.id}`, JSON.stringify(formData));
+      const currentStatus = localStorage.getItem(`nexus_kyc_status_${selectedDeal.id}`);
+      if (currentStatus !== 'Completed' && currentStatus !== 'Submitted for Review') {
+        localStorage.setItem(`nexus_kyc_status_${selectedDeal.id}`, 'Partially Completed');
+      }
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+    }
     if (currentStep > 1) {
       setCurrentStep((prev) => (prev - 1) as 1 | 2 | 3 | 4 | 5);
     } else {
@@ -583,7 +925,8 @@ const GhlIrmKycView: React.FC = () => {
 
     // 1. Persist full KYC form data in localStorage
     localStorage.setItem(`nexus_kyc_data_${dealId}`, JSON.stringify(formData));
-    localStorage.setItem(`nexus_kyc_status_${dealId}`, 'Submitted for Review');
+    localStorage.setItem(`nexus_kyc_status_${dealId}`, 'Completed');
+    window.dispatchEvent(new Event('nexus_storage_updated'));
 
     // 2. Persist Document metadata in storageService
     const nowStr = new Date().toLocaleDateString('en-IN', {
@@ -684,17 +1027,24 @@ const GhlIrmKycView: React.FC = () => {
   const filteredDeals = deals;
 
   const getDealKycStatus = (deal: Deal) => {
-    const status = localStorage.getItem(`nexus_kyc_status_${deal.id}`);
-    if (status === 'Submitted for Review') {
+    const status = getDynamicKycStatus(deal);
+    if (status === 'completed') {
+      return (
+        <span className="kyc-badge-verified">
+          <CheckCircle size={12} /> Completed
+        </span>
+      );
+    }
+    if (status === 'continue') {
       return (
         <span className="kyc-badge-review">
-          <Clock size={12} /> Under Review
+          <Clock size={12} /> Partially Completed
         </span>
       );
     }
     return (
-      <span className="kyc-badge-verified">
-        <CheckCircle size={12} /> SEBI KYC Validated
+      <span className="kyc-badge-review" style={{ background: 'rgba(148,163,184,0.15)', color: '#94a3b8' }}>
+        <AlertCircle size={12} /> Pending
       </span>
     );
   };
@@ -702,147 +1052,217 @@ const GhlIrmKycView: React.FC = () => {
   const columns: Column<Deal>[] = [
     {
       key: 'customerName',
-      header: 'Investor & Deal',
+      header: 'Name & Contact',
+      width: '210px',
       sortable: true,
       render: deal => (
         <div>
-          <div className="kyc-customer-name">{deal.customerName}</div>
-          <div className="kyc-deal-subtitle">{deal.title}</div>
-        </div>
-      ),
-    },
-    {
-      key: 'contact',
-      header: 'Contact Details',
-      render: deal => (
-        <div className="kyc-contact-info">
-          {deal.phone && (
-            <div className="kyc-contact-row">
-              <Phone size={12} color="var(--text-muted)" />
-              <span>{deal.phone}</span>
-            </div>
-          )}
-          {deal.email && (
-            <div className="kyc-contact-row">
-              <Mail size={12} color="var(--text-muted)" />
-              <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {deal.email}
-              </span>
-            </div>
-          )}
+          <div
+            className="kyc-customer-name"
+            style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)', cursor: 'pointer' }}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleOpenCustomerProfile(deal);
+            }}
+            title="Click to view KYC profile"
+          >
+            {deal.customerName}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
+            {deal.phone && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)' }}>
+                <Phone size={11} color="var(--text-muted)" />
+                <span>{deal.phone}</span>
+              </div>
+            )}
+            {deal.email && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)' }}>
+                <Mail size={11} color="var(--text-muted)" />
+                <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {deal.email}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
       ),
     },
     {
       key: 'location',
       header: 'Location',
-      render: deal => (
-        <div className="kyc-contact-row" style={{ fontSize: 12 }}>
-          <MapPin size={12} color="var(--text-muted)" />
-          <span>{deal.location || '—'}</span>
-        </div>
-      ),
+      width: '120px',
+      render: deal => {
+        const loc = getResolvedLocation(deal);
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--text-secondary)' }}>
+            <MapPin size={12} color="var(--text-muted)" />
+            <span>{loc}</span>
+          </div>
+        );
+      },
     },
     {
       key: 'investmentRange',
       header: 'Investment Capacity',
+      width: '150px',
       sortable: true,
-      render: deal => (
-        <span style={{ color: '#10b981', fontWeight: 800, fontSize: 13 }}>
-          {deal.investmentRange || formatCurrency(deal.value)}
-        </span>
-      ),
-    },
-    {
-      key: 'preferredAssetClass',
-      header: 'Preferred Asset Class',
-      render: deal => (
-        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-          {deal.preferredAssetClass || 'Commercial Pre-Leased'}
-        </span>
-      ),
-    },
-    {
-      key: 'kycStatus',
-      header: 'KYC Document Status',
-      render: deal => getDealKycStatus(deal),
-    },
-    {
-      key: 'assignedAgentName',
-      header: 'Assigned IRM',
-      render: deal => (
-        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-          {deal.assignedAgentName || 'Ananya Iyer'}
-        </span>
-      ),
-    },
-    {
-      key: 'stageEnteredAt',
-      header: 'Stage Duration',
       render: deal => {
-        const days = getDaysInStage(deal);
+        const capacity = getCustomerFilledCapacity(deal);
         return (
-          <span className="kyc-days-pill">
-            <Clock size={11} /> {days}d
+          <span style={{ color: '#10b981', fontWeight: 800, fontSize: 13 }}>
+            {capacity}
           </span>
         );
       },
     },
     {
-      key: 'actions',
-      header: 'Stage Action',
-      render: deal => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <button
-            type="button"
-            className="btn btn-sm btn-ghost btn-icon"
-            title={`Call ${deal.customerName}`}
-            onClick={() => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.id)}
+      key: 'preferredAssetClass',
+      header: 'Preferred Asset Class',
+      width: '150px',
+      render: deal => {
+        const pref = getIrmPreferredAssetClass(deal);
+        return (
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: pref !== '—' ? 'var(--text-primary)' : 'var(--text-muted)',
+            }}
           >
-            <Phone size={14} color="#059669" />
-          </button>
+            {pref}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'kycStatus',
+      header: 'KYC Status',
+      width: '140px',
+      render: deal => {
+        const status = getDynamicKycStatus(deal);
+        if (status === 'completed') {
+          return (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 10px',
+                borderRadius: 12,
+                fontSize: 11,
+                fontWeight: 700,
+                background: 'rgba(16, 185, 129, 0.15)',
+                color: '#10b981',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+              }}
+            >
+              <CheckCircle size={12} /> Completed
+            </span>
+          );
+        }
+        if (status === 'continue') {
+          return (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 10px',
+                borderRadius: 12,
+                fontSize: 11,
+                fontWeight: 700,
+                background: 'rgba(245, 158, 11, 0.15)',
+                color: '#f59e0b',
+                border: '1px solid rgba(245, 158, 11, 0.3)',
+              }}
+            >
+              <Clock size={12} /> Partially Completed
+            </span>
+          );
+        }
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '4px 10px',
+              borderRadius: 12,
+              fontSize: 11,
+              fontWeight: 700,
+              background: 'rgba(148, 163, 184, 0.12)',
+              color: '#94a3b8',
+              border: '1px solid rgba(148, 163, 184, 0.25)',
+            }}
+          >
+            <AlertCircle size={12} /> Pending
+          </span>
+        );
+      },
+    },
+    {
+      key: 'customerKycStatus',
+      header: 'Customer KYC',
+      width: '140px',
+      render: deal => {
+        // TODO(logic): Connect to live backend customer KYC link status
+        const custStatus = getMockCustomerKycStatus(deal.id, getDynamicKycStatus(deal));
+        return <KycStatusBadge status={custStatus} />;
+      },
+    },
+    {
+      key: 'stageAction',
+      header: 'Stage Action',
+      width: '160px',
+      render: deal => (
+        <div style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+          {/* Send KYC Link Button */}
           <button
             type="button"
             className="btn btn-sm btn-secondary"
-            title="Complete 5-step KYC & Documents flow"
-            style={{ fontSize: 11, padding: '4px 8px', fontWeight: 600 }}
-            onClick={() => startKycFlow(deal)}
+            title="Send Customer KYC Link"
+            style={{
+              fontSize: 11,
+              padding: '5px 10px',
+              fontWeight: 600,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              borderRadius: 6,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+              borderColor: 'var(--primary-500, #3b82f6)',
+              color: 'var(--primary-600, #2563eb)',
+              background: 'rgba(37, 99, 235, 0.06)',
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setSendLinkDeal(deal);
+            }}
           >
-            <FileCheck size={13} style={{ marginRight: 4 }} /> KYC Flow
-          </button>
-          <button
-            type="button"
-            className="kyc-advance-btn"
-            title="Advance stage to Investment Opportunity"
-            onClick={() => handleAdvanceStage(deal)}
-          >
-            Advance <ArrowRight size={13} />
+            <Send size={12} />
+            Send KYC Link
           </button>
         </div>
       ),
     },
-  ];
-
-  const rowActions: RowAction<Deal>[] = [
     {
-      label: 'Complete / Edit KYC Flow',
-      icon: <FileCheck size={14} style={{ marginRight: 6 }} color="#06b6d4" />,
-      onClick: deal => startKycFlow(deal),
-    },
-    {
-      label: 'View KYC Dossier',
-      icon: <Eye size={14} style={{ marginRight: 6 }} />,
-      onClick: deal => setSelectedDealForDetail(deal),
-    },
-    {
-      label: 'Call Investor',
-      icon: <Phone size={14} color="#059669" style={{ marginRight: 6 }} />,
-      onClick: deal => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.id),
-    },
-    {
-      label: 'Advance to Opportunity',
-      icon: <ArrowRight size={14} color="var(--primary-600)" style={{ marginRight: 6 }} />,
-      onClick: deal => handleAdvanceStage(deal),
+      key: 'actions',
+      header: 'Actions',
+      width: '65px',
+      align: 'center',
+      render: deal => (
+        <KycRowActionsMenu
+          deal={deal}
+          onOpenReview={d => setReviewDeal(d)}
+          onShowToast={msg => showToast(msg)}
+          onViewProfile={d => handleOpenCustomerProfile(d)}
+          onEditKyc={d => startKycFlow(d)}
+          onCallInvestor={d => initiateCall(d.customerName, d.phone || '', 'customer', d.id)}
+          onAdvanceStage={d => handleAdvanceStage(d)}
+        />
+      ),
     },
   ];
 
@@ -880,7 +1300,240 @@ const GhlIrmKycView: React.FC = () => {
         </div>
       )}
 
-      {viewMode === 'table' ? (
+      {viewMode === 'profile' && selectedCustomerDeal ? (() => {
+        const deal = selectedCustomerDeal;
+        const data = profileKycData || {};
+        const completionPct = calculateProfileCompletion(profileKycData, deal);
+        const status = getDynamicKycStatus(deal);
+        const isCompleted = status === 'completed';
+        const isContinue = status === 'continue';
+        const initial = (deal.customerName || 'U').trim().charAt(0).toUpperCase();
+
+        const renderField = (label: string, value?: string | number | null) => (
+          <div className="kyc-profile-field">
+            <span className="kyc-profile-label">{label}</span>
+            {value && String(value).trim() && String(value).trim() !== 'Not provided' ? (
+              <span className="kyc-profile-value">{String(value)}</span>
+            ) : (
+              <span className="kyc-profile-value not-provided">Not provided</span>
+            )}
+          </div>
+        );
+
+        return (
+          <div className="kyc-profile-container">
+            {/* Header: Back Button + Your Profile + Edit Profile button */}
+            <div>
+              <button
+                type="button"
+                className="kyc-flow-back-btn"
+                style={{ marginBottom: 12, display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+                onClick={() => setViewMode('table')}
+              >
+                <ArrowLeft size={16} /> Back to Qualified Investors
+              </button>
+              <div className="kyc-profile-header-row">
+                <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
+                  Your Profile
+                </h1>
+                <button
+                  type="button"
+                  className="btn-edit-profile"
+                  onClick={() => startKycFlow(deal)}
+                >
+                  <FileText size={14} /> Edit Profile
+                </button>
+              </div>
+            </div>
+
+            {/* Profile Completion Progress Card */}
+            <div className="kyc-completion-card">
+              <div className="kyc-completion-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#dc2626', display: 'inline-block' }}></span>
+                  <span>Profile Completion</span>
+                </div>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#dc2626' }}>
+                  {completionPct}%
+                </span>
+              </div>
+              <div className="kyc-progress-track">
+                <div className="kyc-progress-fill" style={{ width: `${completionPct}%` }}></div>
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8 }}>
+                Complete your profile to unlock all platform features and faster KYC approval.
+              </div>
+            </div>
+
+            {/* Main Layout: Left Sidebar + Right Stacked Cards */}
+            <div className="kyc-profile-layout">
+              {/* Left Sidebar Card */}
+              <div className="kyc-profile-sidebar">
+                <div className="kyc-profile-avatar">
+                  {initial}
+                  <span className="kyc-profile-avatar-badge">CE</span>
+                </div>
+                <div className="kyc-profile-sidebar-name">{deal.customerName}</div>
+                <div className="kyc-profile-sidebar-email">{data.email || deal.email || '—'}</div>
+
+                {/* Status Pill */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 12 }}>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '4px 14px',
+                      borderRadius: 16,
+                      fontSize: 11.5,
+                      fontWeight: 700,
+                      background: isCompleted ? 'rgba(16, 185, 129, 0.15)' : '#FEF3C7',
+                      color: isCompleted ? '#10b981' : '#B45309',
+                      border: isCompleted ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid #FDE68A',
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => startKycFlow(deal)}
+                  >
+                    <span style={{ fontSize: 9 }}>●</span>
+                    {isCompleted ? 'KYC completed' : isContinue ? 'KYC in progress' : 'KYC pending'}
+                  </span>
+                  <span
+                    style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 5, cursor: 'pointer' }}
+                    onClick={() => startKycFlow(deal)}
+                  >
+                    Tap to complete your KYC
+                  </span>
+                </div>
+
+                {/* Meta Details Table */}
+                <div className="kyc-profile-meta-table">
+                  <div className="kyc-profile-meta-row">
+                    <span className="kyc-profile-meta-key">GHL ID</span>
+                    <span className="kyc-profile-meta-val">{getGhlId(deal)}</span>
+                  </div>
+                  <div className="kyc-profile-meta-row">
+                    <span className="kyc-profile-meta-key">PAN</span>
+                    <span className="kyc-profile-meta-val">{data.panNumber || 'Not provided'}</span>
+                  </div>
+                  <div className="kyc-profile-meta-row">
+                    <span className="kyc-profile-meta-key">Mobile</span>
+                    <span className="kyc-profile-meta-val">{data.phone || deal.phone || 'Not provided'}</span>
+                  </div>
+                  <div className="kyc-profile-meta-row">
+                    <span className="kyc-profile-meta-key">Joined</span>
+                    <span className="kyc-profile-meta-val">{getJoinedDate(deal)}</span>
+                  </div>
+                </div>
+
+                {/* Complete KYC Action Button */}
+                <button
+                  type="button"
+                  className="btn-complete-kyc"
+                  onClick={() => startKycFlow(deal)}
+                >
+                  <FileText size={14} /> {isCompleted ? 'Edit KYC' : isContinue ? 'Continue KYC' : 'Complete KYC'}
+                </button>
+              </div>
+
+              {/* Right Stacked Cards */}
+              <div className="kyc-profile-main-cards">
+                {/* 1. Personal Details */}
+                <div className="kyc-profile-card">
+                  <h3 className="kyc-profile-card-title">Personal Details</h3>
+                  <div className="kyc-profile-fields-grid">
+                    {renderField('Full Name', data.investorName || deal.customerName)}
+                    {renderField('Email', data.email || deal.email)}
+                    {renderField('Phone', data.phone || deal.phone)}
+                    {renderField('Pan Number', data.panNumber)}
+                    {renderField('City', data.city || getResolvedLocation(deal))}
+                    {renderField('Date of Birth', data.dob)}
+                    {renderField('Occupation', data.occupation)}
+                    {renderField('Gender', data.gender)}
+                    {renderField('Investor Type', data.investorType)}
+                    {renderField('Resident Type', data.residentType)}
+                    {renderField('Investment Capacity', getCustomerFilledCapacity(deal))}
+                    {renderField('Preferred Asset Class', getIrmPreferredAssetClass(deal))}
+                  </div>
+                  <div className="kyc-card-footer-action">
+                    <button
+                      type="button"
+                      className="btn-card-edit"
+                      onClick={() => handleOpenSectionEdit('personal')}
+                    >
+                      <Edit2 size={13} /> Edit
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Address & Identity */}
+                <div className="kyc-profile-card">
+                  <h3 className="kyc-profile-card-title">Address &amp; Identity</h3>
+                  <div className="kyc-profile-fields-grid">
+                    {renderField('Name on Document', data.nameAsPerPan || data.investorName || deal.customerName)}
+                    {renderField("Father's Name", data.fatherName)}
+                    {renderField('Aadhaar Number', data.aadhaarNumber)}
+                    {renderField('Permanent Address', data.address)}
+                    {renderField('Courier Address', data.courierAddress || data.address)}
+                    {renderField('City', data.city || getResolvedLocation(deal))}
+                    {renderField('State', data.state)}
+                    {renderField('Pincode', data.pincode)}
+                    {renderField('Country', data.country || 'India')}
+                    {renderField('Aadhaar Document', data.aadhaarDoc?.name)}
+                    {renderField('PAN Document', data.panDoc?.name)}
+                  </div>
+                  <div className="kyc-card-footer-action">
+                    <button
+                      type="button"
+                      className="btn-card-edit"
+                      onClick={() => handleOpenSectionEdit('address')}
+                    >
+                      <Edit2 size={13} /> Edit
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3. Nominee Details */}
+                <div className="kyc-profile-card">
+                  <h3 className="kyc-profile-card-title">Nominee Details</h3>
+                  <div className="kyc-profile-fields-grid">
+                    {renderField('Nominee Name', data.nominees?.[0]?.name)}
+                    {renderField('Relationship', data.nominees?.[0]?.relationship)}
+                    {renderField('ID Proof', data.nominees?.[0]?.guardianName ? `Guardian: ${data.nominees[0].guardianName}` : (data.nominees?.[0] ? 'Provided' : null))}
+                    {renderField('Share', data.nominees?.[0]?.allocationPercentage ? `${data.nominees[0].allocationPercentage}%` : null)}
+                    {renderField('Date of Birth / Age', data.nominees?.[0]?.dob)}
+                    {renderField('Nominee Address', data.nominees?.[0]?.address)}
+                  </div>
+                </div>
+
+                {/* 4. Bank Details */}
+                <div className="kyc-profile-card">
+                  <h3 className="kyc-profile-card-title">Bank Details</h3>
+                  <div className="kyc-profile-fields-grid">
+                    {renderField('Bank Name', data.bankName)}
+                    {renderField('Account No', data.accountNumber)}
+                    {renderField('IFSC', data.ifscCode)}
+                    {renderField('Account Type', data.accountType)}
+                    {renderField('Bank Proof Document', data.bankProofDoc?.name)}
+                  </div>
+                </div>
+
+                {/* 5. Demat Details */}
+                <div className="kyc-profile-card">
+                  <h3 className="kyc-profile-card-title">Demat Details</h3>
+                  <div className="kyc-profile-fields-grid">
+                    {renderField('Demat Account', data.hasNoDemat ? 'No Demat Account' : (data.dematAccountNumber || data.dematDepository || data.dematDpId ? 'Active Demat' : null))}
+                    {renderField('Demat Account Number', data.dematAccountNumber)}
+                    {renderField('Depository', data.dematDepository)}
+                    {renderField('DP ID', data.dematDpId)}
+                    {renderField('Client ID', data.dematClientId)}
+                    {renderField('Demat Statement Proof', data.dematDoc?.name)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })() : viewMode === 'table' ? (
         <>
           {/* Header */}
           <div className="page-header" style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -906,7 +1559,7 @@ const GhlIrmKycView: React.FC = () => {
           <DataTable
             data={filteredDeals}
             columns={columns}
-            rowActions={rowActions}
+            onRowClick={deal => handleOpenCustomerProfile(deal)}
             keyExtractor={d => d.id}
             searchPlaceholder="Search by investor, phone, city..."
             searchFilter={(deal, q) => {
@@ -918,7 +1571,6 @@ const GhlIrmKycView: React.FC = () => {
             }}
             emptyTitle="No Qualified Investors"
             emptyDescription="No investors currently in the Qualified Investor / KYC stage."
-
           />
         </>
       ) : (
@@ -930,9 +1582,9 @@ const GhlIrmKycView: React.FC = () => {
               <button
                 type="button"
                 className="kyc-flow-back-btn"
-                onClick={() => setViewMode('table')}
+                onClick={() => setViewMode(selectedCustomerDeal ? 'profile' : 'table')}
               >
-                <ArrowLeft size={16} /> Back to Qualified Investors
+                <ArrowLeft size={16} /> Back to {selectedCustomerDeal ? 'Profile' : 'Qualified Investors'}
               </button>
             </div>
             <div style={{ textAlign: 'right' }}>
@@ -1845,6 +2497,279 @@ const GhlIrmKycView: React.FC = () => {
           </div>
         </Modal>
       )}
+
+      {/* Quick Section Edit Modal (Personal Details / Address & Identity) */}
+      {editingSection && selectedCustomerDeal && (
+        <Modal
+          isOpen={!!editingSection}
+          onClose={() => setEditingSection(null)}
+          title={editingSection === 'personal' ? 'Edit Personal Details' : 'Edit Address & Identity'}
+          subtitle={`Investor: ${selectedCustomerDeal.customerName} • GHL ID: ${getGhlId(selectedCustomerDeal)}`}
+          maxWidth={680}
+          footer={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setEditingSection(null)}
+              >
+                Cancel
+              </button>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}
+                  onClick={() => {
+                    const targetStep = editingSection === 'personal' ? 1 : 2;
+                    setEditingSection(null);
+                    startKycFlow(selectedCustomerDeal, targetStep);
+                  }}
+                >
+                  <FileText size={13} /> Open Full KYC Step ({editingSection === 'personal' ? '1' : '2'})
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleSaveSectionEdit}
+                >
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          }
+        >
+          {editingSection === 'personal' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Full Name *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={sectionFormData.investorName || ''}
+                    onChange={e => setSectionFormData({ ...sectionFormData, investorName: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Email</label>
+                  <input
+                    type="email"
+                    className="form-input"
+                    value={sectionFormData.email || ''}
+                    onChange={e => setSectionFormData({ ...sectionFormData, email: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Phone</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={sectionFormData.phone || ''}
+                    onChange={e => setSectionFormData({ ...sectionFormData, phone: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">PAN Number</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    maxLength={10}
+                    placeholder="e.g. ABCDE1234F"
+                    value={sectionFormData.panNumber || ''}
+                    onChange={e => setSectionFormData({ ...sectionFormData, panNumber: e.target.value.toUpperCase() })}
+                  />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">City</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={sectionFormData.city || ''}
+                    onChange={e => setSectionFormData({ ...sectionFormData, city: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Date of Birth</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={sectionFormData.dob || ''}
+                    onChange={e => setSectionFormData({ ...sectionFormData, dob: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Occupation</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Business Owner / Executive"
+                    value={sectionFormData.occupation || ''}
+                    onChange={e => setSectionFormData({ ...sectionFormData, occupation: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Gender</label>
+                  <select
+                    className="form-select"
+                    value={sectionFormData.gender || 'Male'}
+                    onChange={e => setSectionFormData({ ...sectionFormData, gender: e.target.value })}
+                  >
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Investor Type</label>
+                  <select
+                    className="form-select"
+                    value={sectionFormData.investorType || 'Individual / Retail HNW'}
+                    onChange={e => setSectionFormData({ ...sectionFormData, investorType: e.target.value })}
+                  >
+                    <option value="Individual / Retail HNW">Individual / Retail HNW</option>
+                    <option value="HUF (Hindu Undivided Family)">HUF (Hindu Undivided Family)</option>
+                    <option value="Corporate / Private Ltd">Corporate / Private Ltd</option>
+                    <option value="Partnership / LLP">Partnership / LLP</option>
+                    <option value="Family Office / AIF">Family Office / AIF</option>
+                    <option value="Trust / Society">Trust / Society</option>
+                  </select>
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Resident Type</label>
+                  <select
+                    className="form-select"
+                    value={sectionFormData.residentType || 'Resident Indian (RI)'}
+                    onChange={e => setSectionFormData({ ...sectionFormData, residentType: e.target.value })}
+                  >
+                    <option value="Resident Indian (RI)">Resident Indian (RI)</option>
+                    <option value="Non-Resident Indian (NRI)">Non-Resident Indian (NRI)</option>
+                    <option value="Overseas Citizen of India (OCI)">Overseas Citizen of India (OCI)</option>
+                    <option value="Person of Indian Origin (PIO)">Person of Indian Origin (PIO)</option>
+                    <option value="Foreign National">Foreign National</option>
+                  </select>
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Preferred Asset Class</label>
+                  <select
+                    className="form-select"
+                    value={sectionFormData.preferredAssetClass || 'CO-AIF'}
+                    onChange={e => setSectionFormData({ ...sectionFormData, preferredAssetClass: e.target.value })}
+                  >
+                    <option value="CO-AIF">CO-AIF</option>
+                    <option value="AIF">AIF</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Name on Document</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={sectionFormData.nameAsPerPan || ''}
+                    onChange={e => setSectionFormData({ ...sectionFormData, nameAsPerPan: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Father's Name</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={sectionFormData.fatherName || ''}
+                    onChange={e => setSectionFormData({ ...sectionFormData, fatherName: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Aadhaar Number</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    maxLength={14}
+                    placeholder="12-digit Aadhaar"
+                    value={sectionFormData.aadhaarNumber || ''}
+                    onChange={e => setSectionFormData({ ...sectionFormData, aadhaarNumber: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">City</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={sectionFormData.city || ''}
+                    onChange={e => setSectionFormData({ ...sectionFormData, city: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">State</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={sectionFormData.state || ''}
+                    onChange={e => setSectionFormData({ ...sectionFormData, state: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Pincode</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    maxLength={6}
+                    value={sectionFormData.pincode || ''}
+                    onChange={e => setSectionFormData({ ...sectionFormData, pincode: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Country</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={sectionFormData.country || 'India'}
+                    onChange={e => setSectionFormData({ ...sectionFormData, country: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Permanent Address</label>
+                <textarea
+                  className="form-textarea"
+                  rows={2}
+                  value={sectionFormData.address || ''}
+                  onChange={e => setSectionFormData({ ...sectionFormData, address: e.target.value })}
+                />
+              </div>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Courier Address</label>
+                <textarea
+                  className="form-textarea"
+                  rows={2}
+                  value={sectionFormData.courierAddress || ''}
+                  onChange={e => setSectionFormData({ ...sectionFormData, courierAddress: e.target.value })}
+                />
+              </div>
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {/* Send Customer KYC Link Modal */}
+      <SendKycLinkModal
+        isOpen={!!sendLinkDeal}
+        onClose={() => setSendLinkDeal(null)}
+        deal={sendLinkDeal}
+        onShowToast={showToast}
+      />
+
+      {/* Review Customer KYC Drawer */}
+      <KycReviewDrawer
+        isOpen={!!reviewDeal}
+        onClose={() => setReviewDeal(null)}
+        deal={reviewDeal}
+        onShowToast={showToast}
+      />
     </div>
   );
 };

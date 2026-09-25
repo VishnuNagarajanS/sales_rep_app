@@ -370,48 +370,49 @@ export const OpportunitiesPage: React.FC = () => {
   const irmColumns: Column<Deal>[] = [
     {
       key: 'customerName',
-      header: 'Investor & Opportunity',
+      header: 'Name & Contact',
       sortable: true,
       render: deal => (
         <div>
           <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
             {deal.customerName}
           </div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-            {deal.title}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 4, fontSize: 12, color: 'var(--text-secondary)' }}>
+            {deal.phone && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Phone size={12} color="var(--text-muted)" />
+                <span>{deal.phone}</span>
+              </div>
+            )}
+            {deal.email && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Mail size={12} color="var(--text-muted)" />
+                <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {deal.email}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       ),
     },
     {
-      key: 'contact',
-      header: 'Contact Details',
-      render: deal => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 12, color: 'var(--text-secondary)' }}>
-          {deal.phone && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Phone size={12} color="var(--text-muted)" />
-              <span>{deal.phone}</span>
-            </div>
-          )}
-          {deal.email && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Mail size={12} color="var(--text-muted)" />
-              <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {deal.email}
-              </span>
-            </div>
-          )}
-        </div>
-      ),
-    },
-    {
       key: 'investmentRange',
-      header: 'Target Capital / Size',
+      header: 'Investment Capacity',
       sortable: true,
       render: deal => (
         <span style={{ color: '#10b981', fontWeight: 800, fontSize: 13 }}>
-          {deal.investmentRange || formatCurrency(deal.value)}
+          {deal.investmentRange || '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'value',
+      header: 'Investment Amount',
+      sortable: true,
+      render: deal => (
+        <span style={{ color: '#10b981', fontWeight: 800, fontSize: 13 }}>
+          {formatCurrency(deal.value)}
         </span>
       ),
     },
@@ -425,33 +426,6 @@ export const OpportunitiesPage: React.FC = () => {
       ),
     },
     {
-      key: 'investorType',
-      header: 'Investor Structure (AIF / Co-AIF)',
-      render: deal => {
-        const currentType = deal.investorType || 'AIF';
-        return (
-          <div className="irm-investor-type-toggle" onClick={e => e.stopPropagation()}>
-            <button
-              type="button"
-              className={`irm-type-btn ${currentType === 'AIF' ? 'active' : ''}`}
-              title="Classify as Direct AIF Investor"
-              onClick={() => handleSetInvestorType(deal, 'AIF')}
-            >
-              AIF
-            </button>
-            <button
-              type="button"
-              className={`irm-type-btn ${currentType === 'Co-AIF' ? 'active' : ''}`}
-              title="Classify as Co-Investment AIF Investor"
-              onClick={() => handleSetInvestorType(deal, 'Co-AIF')}
-            >
-              Co-AIF
-            </button>
-          </div>
-        );
-      },
-    },
-    {
       key: 'assignedAgentName',
       header: 'Assigned IRM',
       render: deal => (
@@ -461,36 +435,17 @@ export const OpportunitiesPage: React.FC = () => {
       ),
     },
     {
-      key: 'stageEnteredAt',
-      header: 'Stage Duration',
-      render: deal => (
-        <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 7px', borderRadius: 10, background: 'var(--bg-surface-hover)', border: '1px solid var(--border-base)', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-          <Clock size={11} /> {getDealDaysInStage(deal)}d
-        </span>
-      ),
-    },
-    {
       key: 'actions',
       header: 'Action',
       render: deal => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <button
-            type="button"
-            className="btn btn-sm btn-ghost btn-icon"
-            title={`Call ${deal.customerName}`}
-            onClick={() => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.id)}
-          >
-            <Phone size={14} color="#059669" />
-          </button>
-          <button
-            type="button"
-            className="irm-convert-btn"
-            title="Convert deal (Mandate executed & funds committed)"
-            onClick={() => handleAdvanceToConverted(deal)}
-          >
-            <CheckCircle size={13} /> Convert
-          </button>
-        </div>
+        <button
+          type="button"
+          className="irm-convert-btn"
+          title="Convert deal (Mandate executed & funds committed)"
+          onClick={() => handleAdvanceToConverted(deal)}
+        >
+          <CheckCircle size={13} /> Convert
+        </button>
       ),
     },
   ];
