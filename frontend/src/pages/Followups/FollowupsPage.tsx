@@ -7,8 +7,11 @@ import {
   User,
   Calendar,
   Sparkles,
+  ShieldCheck,
+  CheckCircle,
+  Pencil,
 } from 'lucide-react';
-import { Followup } from '../../types';
+import { Followup, Deal, Lead, Customer } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
@@ -23,6 +26,7 @@ import {
 } from '../../mock_data/adminFollowupsData';
 import { DateRangePreset } from '../../mock_data/adminKanbanData';
 import './FollowupsPage.css';
+import '../Leads/LeadsPage.css';
 
 export const FollowupsPage: React.FC = () => {
   const { tenant, user } = useAuth();
@@ -36,6 +40,23 @@ export const FollowupsPage: React.FC = () => {
   // Profile Drawer state for GHL Sales Exec & Admin
   const [drawerFollowup, setDrawerFollowup] = useState<Followup | null>(null);
 
+  // IRM Custom Preferences state
+  const [isEditingPref, setIsEditingPref] = useState<boolean>(false);
+  const [prefAssetClass, setPrefAssetClass] = useState<string>('CO-AIF');
+  const [prefHorizon, setPrefHorizon] = useState<string>('3-5 Years');
+  const [isPrefConfirmed, setIsPrefConfirmed] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // IRM Investment Capacity state
+  const [isEditingCapacity, setIsEditingCapacity] = useState<boolean>(false);
+  const [capacityValue, setCapacityValue] = useState<string>('');
+  const INVESTMENT_CAPACITY_OPTIONS = ['₹1 Cr – ₹5 Cr', '₹5 Cr – ₹10 Cr', '₹10 Cr – ₹25 Cr', '₹25 Cr+'];
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
   const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
   const isGhlAdmin =
@@ -47,7 +68,8 @@ export const FollowupsPage: React.FC = () => {
     (roleCode as string) === 'admin' ||
     roleCode === 'super_admin';
   const isGhlSalesExec = tenant?.slug === 'ghl' && isExec;
-  const canOpenDrawer = isGhlSalesExec || isAdmin;
+  const isIrm = roleCode === 'irm';
+  const canOpenDrawer = isGhlSalesExec || isAdmin || isIrm;
 
   // ── Admin Filter States ──────────────────────────────────────────────────
   const [selectedRole, setSelectedRole] = useState<FollowupRoleFilter>('sales_executive');
@@ -84,6 +106,311 @@ export const FollowupsPage: React.FC = () => {
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id]);
+
+  // Sync IRM preference state when drawer opens for a contact
+  useEffect(() => {
+    if (!drawerFollowup) return;
+    const leads = storageService.getLeads(tenant?.id) || [];
+    const customers = storageService.getCustomers(tenant?.id) || [];
+    const fDigits = (drawerFollowup.contactPhone || '').replace(/\D/g, '').slice(-10);
+
+    const l = leads.find(item => {
+      if (drawerFollowup.contactId && drawerFollowup.contactId !== 'contact-new' && item.id === drawerFollowup.contactId) return true;
+      const lDigits = (item.phone || '').replace(/\D/g, '').slice(-10);
+      return lDigits && fDigits && lDigits === fDigits;
+    });
+    const c = customers.find(item => {
+      if (drawerFollowup.contactId && item.id === drawerFollowup.contactId) return true;
+      const cDigits = (item.phone || '').replace(/\D/g, '').slice(-10);
+      return cDigits && fDigits && cDigits === fDigits;
+    });
+
+    const contactKey = drawerFollowup.contactId || fDigits;
+    let savedLocal: any = null;
+    if (contactKey) {
+      try {
+        const raw = localStorage.getItem(`nexus_irm_pref_${contactKey}`);
+        if (raw) savedLocal = JSON.parse(raw);
+      } catch {}
+    }
+
+    const rawAssetClass =
+      savedLocal?.preferredAssetClass ||
+      (l?.customFields?.irmPreferencesConfirmed ? l?.customFields?.preferredAssetClass : null) ||
+      (c?.customFields?.irmPreferencesConfirmed ? c?.customFields?.preferredAssetClass : null) ||
+      l?.customFields?.preferredAssetClass ||
+      c?.customFields?.preferredAssetClass;
+
+    const existingAssetClass =
+      rawAssetClass === 'AIF' || rawAssetClass === 'CO-AIF'
+        ? rawAssetClass
+        : 'CO-AIF';
+
+    const existingHorizon =
+      savedLocal?.horizon ||
+      (l?.customFields?.irmPreferencesConfirmed ? (l?.customFields?.horizon || l?.customFields?.investmentHorizon) : null) ||
+      (c?.customFields?.irmPreferencesConfirmed ? (c?.customFields?.horizon || c?.customFields?.investmentHorizon) : null) ||
+      l?.customFields?.horizon ||
+      l?.customFields?.investmentHorizon ||
+      c?.customFields?.horizon ||
+      c?.customFields?.investmentHorizon ||
+      '3-5 Years';
+
+    const isConfirmed =
+      savedLocal?.confirmed === true ||
+      l?.customFields?.irmPreferencesConfirmed === true ||
+      c?.customFields?.irmPreferencesConfirmed === true ||
+      false;
+
+    setPrefAssetClass(existingAssetClass);
+    setPrefHorizon(existingHorizon);
+    setIsPrefConfirmed(isConfirmed);
+    setIsEditingPref(false);
+
+    const existingCapacity =
+      l?.customFields?.investmentCapacity ||
+      l?.customFields?.capacityRange ||
+      l?.customFields?.investmentRange ||
+      (l as any)?.investmentRange ||
+      c?.customFields?.investmentCapacity ||
+      c?.customFields?.totalAUMCommitted ||
+      (drawerFollowup as any)?.investmentCapacity ||
+      '';
+    setCapacityValue(existingCapacity);
+    setIsEditingCapacity(false);
+  }, [drawerFollowup?.id, drawerFollowup?.contactPhone, drawerFollowup?.contactId, tenant?.id]);
+
+  const handleTogglePrefCheckbox = (checked: boolean, matchingLead: Lead | null, matchingCustomer: Customer | null) => {
+    if (checked) {
+      setIsEditingPref(true);
+    } else {
+      setIsEditingPref(false);
+      setIsPrefConfirmed(false);
+
+      if (!drawerFollowup) return;
+      const fDigits = (drawerFollowup.contactPhone || '').replace(/\D/g, '').slice(-10);
+      const contactKey = drawerFollowup.contactId || fDigits;
+
+      if (matchingLead) {
+        storageService.saveLead({
+          ...matchingLead,
+          customFields: {
+            ...(matchingLead.customFields || {}),
+            irmPreferencesConfirmed: false,
+          },
+        });
+      }
+
+      if (matchingCustomer) {
+        storageService.saveCustomer({
+          ...matchingCustomer,
+          customFields: {
+            ...(matchingCustomer.customFields || {}),
+            irmPreferencesConfirmed: false,
+          },
+        });
+      }
+
+      if (contactKey) {
+        localStorage.setItem(
+          `nexus_irm_pref_${contactKey}`,
+          JSON.stringify({
+            preferredAssetClass: prefAssetClass,
+            horizon: prefHorizon,
+            confirmed: false,
+          })
+        );
+      }
+
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+      showToast('Preferences unconfirmed — Hidden from other modules');
+    }
+  };
+
+  const handleSaveCapacity = (matchingLead: Lead | null, matchingCustomer: Customer | null) => {
+    if (!drawerFollowup) return;
+    if (matchingLead) {
+      storageService.saveLead({
+        ...matchingLead,
+        customFields: {
+          ...(matchingLead.customFields || {}),
+          investmentCapacity: capacityValue,
+        },
+      });
+    }
+    if (matchingCustomer) {
+      storageService.saveCustomer({
+        ...matchingCustomer,
+        customFields: {
+          ...(matchingCustomer.customFields || {}),
+          investmentCapacity: capacityValue,
+        },
+      });
+    }
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+    showToast('Investment Capacity updated');
+    setIsEditingCapacity(false);
+  };
+
+  const handleSavePreferences = (matchingLead: Lead | null, matchingCustomer: Customer | null) => {
+    if (!drawerFollowup) return;
+    const fDigits = (drawerFollowup.contactPhone || '').replace(/\D/g, '').slice(-10);
+    const contactKey = drawerFollowup.contactId || fDigits;
+
+    if (matchingLead) {
+      const updatedLead: Lead = {
+        ...matchingLead,
+        customFields: {
+          ...(matchingLead.customFields || {}),
+          preferredAssetClass: prefAssetClass,
+          horizon: prefHorizon,
+          investmentHorizon: prefHorizon,
+          irmPreferencesConfirmed: true,
+        },
+      };
+      storageService.saveLead(updatedLead);
+    }
+
+    if (matchingCustomer) {
+      const updatedCustomer: Customer = {
+        ...matchingCustomer,
+        customFields: {
+          ...(matchingCustomer.customFields || {}),
+          preferredAssetClass: prefAssetClass,
+          horizon: prefHorizon,
+          investmentHorizon: prefHorizon,
+          irmPreferencesConfirmed: true,
+        },
+      };
+      storageService.saveCustomer(updatedCustomer);
+    }
+
+    if (contactKey) {
+      localStorage.setItem(
+        `nexus_irm_pref_${contactKey}`,
+        JSON.stringify({
+          preferredAssetClass: prefAssetClass,
+          horizon: prefHorizon,
+          confirmed: true,
+        })
+      );
+    }
+
+    setIsPrefConfirmed(true);
+    setIsEditingPref(false);
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+    showToast('✓ Preferences confirmed by IRM and updated across modules!');
+  };
+
+  const handleMoveToKyc = () => {
+    if (!drawerFollowup) return;
+
+    const leads = storageService.getLeads(tenant?.id) || [];
+    const customers = storageService.getCustomers(tenant?.id) || [];
+    const fDigits = (drawerFollowup.contactPhone || '').replace(/\D/g, '').slice(-10);
+
+    const matchingLead = leads.find(l => {
+      if (drawerFollowup.contactId && drawerFollowup.contactId !== 'contact-new' && l.id === drawerFollowup.contactId) return true;
+      const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+      if (lDigits && fDigits && lDigits === fDigits) return true;
+      if (l.name && drawerFollowup.contactName && l.name.trim().toLowerCase() === drawerFollowup.contactName.trim().toLowerCase()) return true;
+      return false;
+    }) || null;
+
+    const matchingCustomer = customers.find(c => {
+      if (drawerFollowup.contactId && c.id === drawerFollowup.contactId) return true;
+      const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
+      if (cDigits && fDigits && cDigits === fDigits) return true;
+      if (c.name && drawerFollowup.contactName && c.name.trim().toLowerCase() === drawerFollowup.contactName.trim().toLowerCase()) return true;
+      return false;
+    }) || null;
+
+    const resolvedContactId = drawerFollowup.contactId || matchingLead?.id || matchingCustomer?.id || `contact-${Date.now()}`;
+    const contactEmail = matchingLead?.email || matchingCustomer?.email || (drawerFollowup as any).email || '';
+    const contactLocation = matchingLead?.location || matchingCustomer?.location || (drawerFollowup as any).location || '';
+
+    const investmentCapacity =
+      matchingLead?.customFields?.investmentCapacity ||
+      matchingLead?.customFields?.capacityRange ||
+      matchingLead?.customFields?.investmentRange ||
+      (matchingLead as any)?.investmentRange ||
+      matchingCustomer?.customFields?.investmentCapacity ||
+      matchingCustomer?.customFields?.totalAUMCommitted ||
+      (drawerFollowup as any)?.investmentCapacity ||
+      '₹10 Lakh to ₹1 Cr';
+
+    // 1. Create or update deal in stage 'qualified_investor'
+    const allDeals = storageService.getDeals(tenant?.id) || [];
+    const existingDeal = allDeals.find(d =>
+      (d.customerId && d.customerId === resolvedContactId) ||
+      (d.phone && fDigits && (d.phone || '').replace(/\D/g, '').slice(-10) === fDigits)
+    );
+
+    const kycDeal: Deal = {
+      id: existingDeal?.id || `deal-kyc-${Date.now()}`,
+      companyId: tenant?.id || 't-ghl-01',
+      title: `${drawerFollowup.contactName} - KYC Verification`,
+      customerId: resolvedContactId,
+      customerName: drawerFollowup.contactName,
+      phone: drawerFollowup.contactPhone,
+      email: contactEmail && contactEmail !== '—' ? contactEmail : undefined,
+      location: contactLocation && contactLocation !== '—' ? contactLocation : undefined,
+      stage: 'qualified_investor',
+      stageEnteredAt: new Date().toISOString(),
+      value: 20000000,
+      expectedCloseDate: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+      assignedAgentId: user?.id || drawerFollowup.assignedAgentId || 'usr-ghl-irm',
+      assignedAgentName: user?.name || drawerFollowup.assignedAgentName || 'Rohan Varma',
+      notes: `Ready for KYC. Moved from Follow-ups by IRM (${user?.name || 'Rohan Varma'}).`,
+      createdAt: new Date().toISOString().slice(0, 10),
+      priority: drawerFollowup.priority || 'High',
+      preferredAssetClass: prefAssetClass || 'CO-AIF',
+      investmentRange: investmentCapacity,
+    };
+    storageService.saveDeal(kycDeal);
+
+    // 2. Mark the follow-up task as completed so it does not show in the followup page
+    storageService.saveFollowup({
+      ...drawerFollowup,
+      status: 'Completed',
+      notes: `${drawerFollowup.notes ? drawerFollowup.notes + ' | ' : ''}Ready for KYC: Moved to KYC Module by IRM`,
+    });
+
+    // 3. If matching lead exists, update lead status to Qualified
+    if (matchingLead) {
+      storageService.saveLead({
+        ...matchingLead,
+        status: 'Qualified',
+        customFields: {
+          ...(matchingLead.customFields || {}),
+          preferredAssetClass: prefAssetClass,
+          horizon: prefHorizon,
+          investmentHorizon: prefHorizon,
+          irmPreferencesConfirmed: true,
+        },
+      });
+    }
+
+    // 4. Audit Log
+    storageService.addAuditLog({
+      id: `aud-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      actorName: user?.name || 'IRM',
+      actorEmail: user?.email || 'irm@ghl.com',
+      action: 'DEAL_CREATED_KYC',
+      entityType: 'Deal',
+      entityId: kycDeal.id,
+      companyId: tenant?.id || 't-ghl-01',
+      companyName: tenant?.name || 'GHL India Ventures',
+      details: `Moved ${drawerFollowup.contactName} to KYC verification module`,
+    });
+
+    // 5. Update local state & close drawer
+    setDrawerFollowup(null);
+    loadData();
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+    showToast(`✓ ${drawerFollowup.contactName} moved to KYC module!`);
+  };
 
   const handleSaveReschedule = () => {
     if (rescheduleItem && newDate) {
@@ -609,97 +936,508 @@ export const FollowupsPage: React.FC = () => {
         </div>
       </Modal>
 
-      {/* Contact Profile & Detailed Attribution Drawer (GHL Sales Exec & Admin) */}
+      {/* Contact Profile & Detailed Attribution Drawer */}
       {canOpenDrawer && (
         <Drawer
           isOpen={!!drawerFollowup}
           onClose={() => setDrawerFollowup(null)}
           title={drawerFollowup?.contactName || 'Contact Profile'}
           subtitle={
-            isAdmin
-              ? `Phone: ${drawerFollowup?.contactPhone || '—'} • Assigned to: ${
-                  drawerFollowup?.assignedAgentName || 'Unassigned'
-                } (${drawerFollowupRole})`
-              : `Phone: ${drawerFollowup?.contactPhone || '—'} • ${tenant?.name}`
+            drawerFollowup?.contactPhone
+              ? `Phone: ${drawerFollowup.contactPhone} • ${tenant?.name || 'GHL India'}`
+              : (tenant?.name || '')
           }
-          width={600}
+          width={720}
+          footer={
+            drawerFollowup && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 10 }}>
+                {/* Red marked area on the left: Ready for KYC button */}
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{
+                    backgroundColor: '#7c3aed',
+                    borderColor: '#7c3aed',
+                    color: '#ffffff',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontWeight: 600,
+                    padding: '8px 16px',
+                  }}
+                  onClick={handleMoveToKyc}
+                  title="Move customer to KYC module and mark follow-up completed"
+                >
+                  <ShieldCheck size={16} /> Ready for KYC
+                </button>
+
+                {/* Right side buttons */}
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      setRescheduleItem(drawerFollowup);
+                      setDrawerFollowup(null);
+                    }}
+                  >
+                    Reschedule
+                  </button>
+                  <button
+                    className="btn btn-call"
+                    onClick={() => {
+                      initiateCall(
+                        drawerFollowup.contactName,
+                        drawerFollowup.contactPhone,
+                        (drawerFollowup.contactType as any) || 'lead',
+                        drawerFollowup.contactId,
+                        drawerFollowup.id
+                      );
+                    }}
+                  >
+                    <Phone size={14} /> Call Contact
+                  </button>
+                </div>
+              </div>
+            )
+          }
         >
-          {drawerFollowup && (
-            <div className="followup-drawer-body">
-              {/* Prominent Admin Representative Attribution Card */}
-              {isAdmin && (
-                <div className="admin-detail-owner-banner">
-                  <div className="admin-owner-header-row">
-                    <div className="admin-owner-avatar-icon">
-                      <User size={18} color="var(--primary-600)" />
+          {drawerFollowup && (() => {
+            const leads = storageService.getLeads(tenant?.id) || [];
+            const customers = storageService.getCustomers(tenant?.id) || [];
+            const fDigits = (drawerFollowup.contactPhone || '').replace(/\D/g, '').slice(-10);
+
+            const matchingLead = leads.find(l => {
+              if (drawerFollowup.contactId && drawerFollowup.contactId !== 'contact-new' && l.id === drawerFollowup.contactId) return true;
+              const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+              if (lDigits && fDigits && lDigits === fDigits) return true;
+              if (l.name && drawerFollowup.contactName && l.name.trim().toLowerCase() === drawerFollowup.contactName.trim().toLowerCase()) return true;
+              return false;
+            }) || null;
+
+            const matchingCustomer = customers.find(c => {
+              if (drawerFollowup.contactId && c.id === drawerFollowup.contactId) return true;
+              const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
+              if (cDigits && fDigits && cDigits === fDigits) return true;
+              if (c.name && drawerFollowup.contactName && c.name.trim().toLowerCase() === drawerFollowup.contactName.trim().toLowerCase()) return true;
+              return false;
+            }) || null;
+
+            const assignedAgent =
+              drawerFollowup.assignedAgentName ||
+              matchingLead?.assignedAgentName ||
+              matchingCustomer?.assignedAgentName ||
+              'Unassigned';
+
+            const contactEmail = matchingLead?.email || matchingCustomer?.email || (drawerFollowup as any).email || '—';
+            const contactLocation = matchingLead?.location || matchingCustomer?.location || (drawerFollowup as any).location || '—';
+            const contactSource = matchingLead?.source || (drawerFollowup as any).source || 'Follow-up Task';
+
+            const investmentCapacity =
+              matchingLead?.customFields?.investmentCapacity ||
+              matchingLead?.customFields?.capacityRange ||
+              matchingLead?.customFields?.investmentRange ||
+              (matchingLead as any)?.investmentRange ||
+              matchingCustomer?.customFields?.investmentCapacity ||
+              matchingCustomer?.customFields?.totalAUMCommitted ||
+              (drawerFollowup as any)?.investmentCapacity ||
+              null;
+
+            const userMessage =
+              (matchingLead as any)?.message ||
+              (matchingLead as any)?.userMessage ||
+              matchingLead?.customFields?.message ||
+              matchingLead?.customFields?.userMessage ||
+              (matchingCustomer as any)?.message ||
+              (matchingCustomer as any)?.userMessage ||
+              matchingLead?.notes ||
+              matchingCustomer?.notes ||
+              drawerFollowup.notes ||
+              null;
+
+            const isExcludedCustomField = (key: string, label?: string) => {
+              const k = (key || '').toLowerCase().replace(/[^a-z]/g, '');
+              const l = (label || '').toLowerCase().replace(/[^a-z]/g, '');
+              return (
+                k.includes('assetclass') || l.includes('assetclass') ||
+                k.includes('horizon') || l.includes('horizon') ||
+                k.includes('capacity') || l.includes('capacity') ||
+                k.includes('investmentrange') || l.includes('investmentrange') ||
+                k.includes('irmpreference') || l.includes('irmpreference')
+              );
+            };
+
+            const activeDefs = storageService
+              .getCustomFieldDefinitions(tenant?.id)
+              .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
+              .filter(d => !isExcludedCustomField(d.fieldKey || d.id, d.label))
+              .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+            const customFieldsObj = matchingLead?.customFields || matchingCustomer?.customFields || {};
+            const customFieldRows = activeDefs
+              .map(def => {
+                const key = def.fieldKey || def.id;
+                if (isExcludedCustomField(key, def.label)) return null;
+                const val = customFieldsObj[key];
+                if (val === undefined || val === null || val === '') return null;
+                return { id: def.id, label: def.label || key.replace(/([A-Z])/g, ' $1'), value: String(val) };
+              })
+              .filter(Boolean);
+
+            const resolvedContactId = drawerFollowup.contactId || matchingLead?.id || matchingCustomer?.id;
+            const resolvedContactType = drawerFollowup.contactType || (matchingCustomer ? 'customer' : 'lead');
+
+            return (
+              <div className="followup-drawer-body">
+                {/* Prominent Admin Representative Attribution Card */}
+                {isAdmin && (
+                  <div className="admin-detail-owner-banner">
+                    <div className="admin-owner-header-row">
+                      <div className="admin-owner-avatar-icon">
+                        <User size={18} color="var(--primary-600)" />
+                      </div>
+                      <div className="admin-owner-title-block">
+                        <span className="admin-owner-label">Assigned Representative Data</span>
+                        <div className="admin-owner-name-row">
+                          <strong className="admin-owner-person-name">
+                            {assignedAgent}
+                          </strong>
+                          <span
+                            className={`admin-owner-role-tag ${
+                              drawerFollowupRole === 'IRM' ? 'tag-irm' : 'tag-sales-exec'
+                            }`}
+                          >
+                            <Briefcase size={12} />
+                            {drawerFollowupRole === 'IRM'
+                              ? 'IRM (Investor Relations)'
+                              : 'Sales Executive'}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="admin-owner-title-block">
-                      <span className="admin-owner-label">Assigned Representative Data</span>
-                      <div className="admin-owner-name-row">
-                        <strong className="admin-owner-person-name">
-                          {drawerFollowup.assignedAgentName || 'Unassigned'}
-                        </strong>
-                        <span
-                          className={`admin-owner-role-tag ${
-                            drawerFollowupRole === 'IRM' ? 'tag-irm' : 'tag-sales-exec'
-                          }`}
-                        >
-                          <Briefcase size={12} />
-                          {drawerFollowupRole === 'IRM'
-                            ? 'IRM (Investor Relations)'
-                            : 'Sales Executive'}
+
+                    <div className="admin-owner-meta-grid">
+                      <div className="admin-owner-meta-cell">
+                        <span className="cell-lbl">Scheduled Slot</span>
+                        <span className="cell-val">⏰ {drawerFollowup.scheduledAt}</span>
+                      </div>
+                      <div className="admin-owner-meta-cell">
+                        <span className="cell-lbl">Priority Level</span>
+                        <span className="cell-val">{drawerFollowup.priority}</span>
+                      </div>
+                      <div className="admin-owner-meta-cell">
+                        <span className="cell-lbl">Record Type</span>
+                        <span className="cell-val">
+                          {(drawerFollowup.contactType || 'LEAD').toUpperCase()}
                         </span>
+                      </div>
+                      <div className="admin-owner-meta-cell">
+                        <span className="cell-lbl">Task Status</span>
+                        <span className="cell-val">{drawerFollowup.status}</span>
                       </div>
                     </div>
                   </div>
+                )}
 
-                  <div className="admin-owner-meta-grid">
-                    <div className="admin-owner-meta-cell">
-                      <span className="cell-lbl">Scheduled Slot</span>
-                      <span className="cell-val">⏰ {drawerFollowup.scheduledAt}</span>
+                {/* ── Quick Info Banner (Assigned Agent) ── */}
+                {!isAdmin && (
+                  <div className="lead-quick-banner">
+                    <div className="lead-assigned-note" style={{ fontSize: 13, marginTop: 0 }}>
+                      Assigned to <strong>{assignedAgent}</strong>
+                      {drawerFollowupRole && (
+                        <span
+                          style={{
+                            marginLeft: 8,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            padding: '2px 7px',
+                            borderRadius: 4,
+                            background: drawerFollowupRole === 'IRM' ? 'rgba(124,58,237,0.1)' : 'rgba(14,165,233,0.1)',
+                            color: drawerFollowupRole === 'IRM' ? '#7c3aed' : '#0284c7',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.04em',
+                          }}
+                        >
+                          {drawerFollowupRole}
+                        </span>
+                      )}
                     </div>
-                    <div className="admin-owner-meta-cell">
-                      <span className="cell-lbl">Priority Level</span>
-                      <span className="cell-val">{drawerFollowup.priority}</span>
+                  </div>
+                )}
+
+                {/* ── Contact & Profile Details ── */}
+                <div className="card lead-detail-card">
+                  <h4 className="lead-detail-title">Contact &amp; Profile Details</h4>
+                  <div className="lead-detail-grid">
+                    <div>
+                      <span className="lead-detail-label">Email:</span>
+                      <div className="lead-detail-value">{contactEmail}</div>
                     </div>
-                    <div className="admin-owner-meta-cell">
-                      <span className="cell-lbl">Record Type</span>
-                      <span className="cell-val">
-                        {drawerFollowup.contactType
-                          ? drawerFollowup.contactType.toUpperCase()
-                          : 'LEAD'}
-                      </span>
+                    <div>
+                      <span className="lead-detail-label">Location:</span>
+                      <div className="lead-detail-value">{contactLocation}</div>
                     </div>
-                    <div className="admin-owner-meta-cell">
-                      <span className="cell-lbl">Task Status</span>
-                      <span className="cell-val">{drawerFollowup.status}</span>
+                    <div>
+                      <span className="lead-detail-label">Lead Source:</span>
+                      <div className="lead-detail-value">{contactSource}</div>
+                    </div>
+                    <div>
+                      <span className="lead-detail-label">Follow-up:</span>
+                      <div className="lead-detail-value lead-followup-text has-date">
+                        {drawerFollowup.scheduledAt || matchingLead?.nextFollowupDate || 'Not scheduled'}
+                      </div>
                     </div>
                   </div>
                 </div>
-              )}
 
-              {/* Standard Lead / Investor Detail Content */}
-              <LeadDetailDrawerContent
-                contactName={drawerFollowup.contactName}
-                contactPhone={drawerFollowup.contactPhone}
-                contactId={drawerFollowup.contactId}
-                contactType={drawerFollowup.contactType}
-                tenantId={tenant?.id}
-                tenantName={tenant?.name}
-                onCall={() =>
-                  initiateCall(
-                    drawerFollowup.contactName,
-                    drawerFollowup.contactPhone,
-                    drawerFollowup.contactType as any,
-                    drawerFollowup.contactId,
-                    drawerFollowup.id
-                  )
-                }
-                callDispositionFilter={['Follow-up Required', 'Call Back']}
-              />
-            </div>
-          )}
+                {/* ── Investment Capacity ── */}
+                <div className="card lead-custom-card">
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <h4 className="lead-custom-title" style={{ margin: 0 }}>Investment Details</h4>
+                    {isIrm && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm btn-icon"
+                        title={isEditingCapacity ? 'Cancel edit' : 'Edit Investment Capacity'}
+                        style={{ width: 28, height: 28 }}
+                        onClick={() => setIsEditingCapacity(prev => !prev)}
+                      >
+                        <Pencil size={13} />
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div>
+                      <span className="lead-detail-label">Investment Capacity:</span>
+                      {isEditingCapacity ? (
+                        <div style={{ marginTop: 6 }}>
+                          <select
+                            className="form-select"
+                            value={capacityValue}
+                            onChange={e => setCapacityValue(e.target.value)}
+                            style={{ width: '100%', fontSize: 13, height: 36 }}
+                          >
+                            <option value="">— Select —</option>
+                            {capacityValue && !INVESTMENT_CAPACITY_OPTIONS.includes(capacityValue) && (
+                              <option value={capacityValue}>{capacityValue}</option>
+                            )}
+                            {INVESTMENT_CAPACITY_OPTIONS.map(opt => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                          <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => setIsEditingCapacity(false)}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                              onClick={() => handleSaveCapacity(matchingLead, matchingCustomer)}
+                            >
+                              <CheckCircle size={14} /> Save
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          className="lead-detail-value"
+                          style={{
+                            marginTop: 4,
+                            fontSize: 16,
+                            fontWeight: 700,
+                            color: '#10b981',
+                            letterSpacing: '0.01em',
+                          }}
+                        >
+                          {capacityValue || investmentCapacity || '—'}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── GHL India Ventures Custom Attributes (with Set by IRM Checkbox) ── */}
+                <div className="card lead-custom-card">
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <h4 className="lead-custom-title" style={{ margin: 0 }}>
+                      {tenant?.name || 'GHL India Ventures'} Custom Attributes
+                    </h4>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', fontWeight: 600, color: 'var(--text-primary)' }}>
+                      <input
+                        type="checkbox"
+                        checked={isPrefConfirmed || isEditingPref}
+                        onChange={e => handleTogglePrefCheckbox(e.target.checked, matchingLead, matchingCustomer)}
+                        style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--primary-600)' }}
+                      />
+                      <span>Set by IRM</span>
+                    </label>
+                  </div>
+
+                  {isEditingPref ? (
+                    <div>
+                      <div className="lead-detail-grid" style={{ gap: 14 }}>
+                        <div>
+                          <label className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                            Preferred Asset Class:
+                          </label>
+                          <select
+                            className="form-select"
+                            value={prefAssetClass}
+                            onChange={e => setPrefAssetClass(e.target.value)}
+                            style={{ width: '100%', fontSize: 13, height: 36 }}
+                          >
+                            <option value="CO-AIF">CO-AIF</option>
+                            <option value="AIF">AIF</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                            Investment Horizon:
+                          </label>
+                          <select
+                            className="form-select"
+                            value={prefHorizon}
+                            onChange={e => setPrefHorizon(e.target.value)}
+                            style={{ width: '100%', fontSize: 13, height: 36 }}
+                          >
+                            <option value="1-2 Years">1-2 Years</option>
+                            <option value="3-5 Years">3-5 Years</option>
+                            <option value="5-7 Years">5-7 Years</option>
+                            <option value="7-10 Years">7-10 Years</option>
+                            <option value="10+ Years">10+ Years</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                        {isPrefConfirmed && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => setIsEditingPref(false)}
+                          >
+                            Cancel
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                          onClick={() => handleSavePreferences(matchingLead, matchingCustomer)}
+                        >
+                          <CheckCircle size={14} /> Confirm Preferences
+                        </button>
+                      </div>
+                    </div>
+                  ) : isPrefConfirmed ? (
+                    <div>
+                      <div className="lead-detail-grid">
+                        <div>
+                          <span className="lead-custom-label">Preferred Asset Class:</span>
+                          <div className="lead-custom-value">{prefAssetClass}</div>
+                        </div>
+                        <div>
+                          <span className="lead-custom-label">Investment Horizon:</span>
+                          <div className="lead-custom-value">{prefHorizon}</div>
+                        </div>
+                      </div>
+                      <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <CheckCircle size={13} /> Confirmed by IRM — Visible in other modules
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ fontSize: 11, padding: '3px 8px', height: 'auto' }}
+                          onClick={() => setIsEditingPref(true)}
+                        >
+                          Edit
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ padding: '12px 14px', background: 'var(--bg-surface)', borderRadius: 6, fontSize: 12, color: 'var(--text-muted)' }}>
+                      Preferred Asset Class and Investment Horizon have not been set by IRM yet. Check <strong>"Set by IRM"</strong> above to configure and confirm them.
+                    </div>
+                  )}
+
+                  {/* Any other custom attributes from intake */}
+                  {customFieldRows.length > 0 && (
+                    <div className="lead-detail-grid" style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-base)' }}>
+                      {customFieldRows.map(item => (
+                        <div key={item!.id}>
+                          <span className="lead-custom-label">{item!.label}:</span>
+                          <div className="lead-custom-value">{item!.value}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Message from User ── */}
+                <div className="card lead-custom-card">
+                  <h4 className="lead-custom-title">Message from User</h4>
+                  <div className="lead-user-message-box">
+                    {userMessage ? (
+                      <div className="lead-user-message-text">{userMessage}</div>
+                    ) : (
+                      <div className="lead-user-message-empty">No message available</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* ── Call Recordings, Logged Calls & Transcripts (Agent + IRM) ── */}
+                <LeadDetailDrawerContent
+                  contactName={drawerFollowup.contactName}
+                  contactPhone={drawerFollowup.contactPhone}
+                  contactId={resolvedContactId}
+                  contactType={resolvedContactType}
+                  tenantId={tenant?.id}
+                  tenantName={tenant?.name}
+                  onCall={() =>
+                    initiateCall(
+                      drawerFollowup.contactName,
+                      drawerFollowup.contactPhone,
+                      resolvedContactType as any,
+                      resolvedContactId,
+                      drawerFollowup.id
+                    )
+                  }
+                  sectionsOnly={['callRecordings']}
+                />
+              </div>
+            );
+          })()}
         </Drawer>
+      )}
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 24,
+            right: 24,
+            backgroundColor: '#059669',
+            color: '#ffffff',
+            padding: '12px 20px',
+            borderRadius: 8,
+            boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 13,
+            fontWeight: 600,
+            zIndex: 99999,
+          }}
+        >
+          <CheckCircle size={17} /> {toastMessage}
+        </div>
       )}
     </div>
   );

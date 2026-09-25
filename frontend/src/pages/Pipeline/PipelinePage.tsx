@@ -17,7 +17,7 @@ import {
   FileText,
   MessageCircle,
 } from 'lucide-react';
-import { Deal, DealActivity } from '../../types';
+import { Deal, DealActivity, Lead, Followup } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCan } from '../../components/common/Guards';
 import { storageService } from '../../services/storageService';
@@ -52,7 +52,12 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   }
 
   const canUpdateDeals = useCan('deals.update');
+  const isIrm = roleCode === 'irm';
+  const isGhlIrm = isIrm && tenant?.slug === 'ghl';
+
   const [deals, setDeals] = useState<Deal[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [followups, setFollowups] = useState<Followup[]>([]);
   const [selectedDealForLoss, setSelectedDealForLoss] = useState<Deal | null>(null);
   const [lossReason, setLossReason] = useState('Competitor Pricing');
   const [agentFilter, setAgentFilter] = useState('All');
@@ -60,8 +65,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   // IRM-specific state
   const [cardIndex, setCardIndex] = useState<Record<string, number>>({});
   const [irmDetailDeal, setIrmDetailDeal] = useState<Deal | null>(null);
-  const [activityType, setActivityType] = useState<'note' | 'call' | 'whatsapp' | 'meeting'>('note');
-  const [activityText, setActivityText] = useState('');
 
   // Role-based scoping: Sales Executives see only their own deals.
   // Managers / Admins / Super Admins see every deal in the company (no filter).
@@ -73,14 +76,88 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     )
     : deals;
 
+  const scopedLeads = isGhlIrm
+    ? leads.filter(
+        l =>
+          (l.assignedAgentId && l.assignedAgentId === user?.id) ||
+          (l.assignedAgentName && l.assignedAgentName === user?.name)
+      )
+    : [];
+
+  const scopedFollowups = isGhlIrm
+    ? followups.filter(
+        f =>
+          (f.assignedAgentId && f.assignedAgentId === user?.id) ||
+          (f.assignedAgentName && f.assignedAgentName === user?.name)
+      )
+    : [];
+
+  const leadToPipelineCard = (lead: Lead): Deal => ({
+    id: lead.id,
+    companyId: lead.companyId || tenant?.id || '',
+    title: lead.name,
+    customerId: lead.id,
+    customerName: lead.name,
+    phone: lead.phone,
+    email: lead.email,
+    assignedAgentId: lead.assignedAgentId,
+    assignedAgentName: lead.assignedAgentName,
+    stage: 'leads',
+    stageEnteredAt: lead.createdAt,
+    createdAt: lead.createdAt,
+    expectedCloseDate: '',
+    notes: lead.notes || '',
+    value: 0,
+    priority: lead.priority === 'Urgent' ? 'High' : (lead.priority as 'High' | 'Medium' | 'Low'),
+    location: lead.location,
+    investmentRange:
+      lead.customFields?.investmentCapacity ||
+      lead.customFields?.capacityRange ||
+      lead.customFields?.investmentRange ||
+      (lead as any).investmentRange ||
+      undefined,
+    investorType: lead.customFields?.investorType || undefined,
+  });
+
+  const followupToPipelineCard = (followup: Followup): Deal => ({
+    id: followup.id,
+    companyId: followup.companyId || tenant?.id || '',
+    title: followup.contactName,
+    customerId: followup.contactId,
+    customerName: followup.contactName,
+    phone: followup.contactPhone,
+    email: (followup as any).email || undefined,
+    assignedAgentId: followup.assignedAgentId,
+    assignedAgentName: followup.assignedAgentName,
+    stage: 'followup',
+    stageEnteredAt: followup.scheduledAt,
+    createdAt: followup.scheduledAt || (followup as any).createdAt || '',
+    expectedCloseDate: '',
+    notes: followup.notes || '',
+    value: 0,
+    priority: (followup.priority as 'High' | 'Medium' | 'Low') || 'Medium',
+    investmentRange:
+      (followup as any).investmentCapacity ||
+      (followup as any).investmentRange ||
+      undefined,
+  });
+
   // Agent filter options — derived from the already-scoped pool so execs never see this.
-  const agentOptions = Array.from(new Set(scopedDeals.map(d => d.assignedAgentName)))
+  const agentOptions = Array.from(
+    new Set([
+      ...scopedDeals.map(d => d.assignedAgentName),
+      ...scopedLeads.map(l => l.assignedAgentName),
+      ...scopedFollowups.map(f => f.assignedAgentName),
+    ])
+  )
     .filter(Boolean)
     .map(name => ({ value: name, label: name }));
 
   const loadData = () => {
     const latestDeals = storageService.getDeals(tenant?.id);
     setDeals(latestDeals);
+    setLeads(storageService.getLeads(tenant?.id) || []);
+    setFollowups(storageService.getFollowups(tenant?.id) || []);
     setIrmDetailDeal(prev => {
       if (!prev) return null;
       return latestDeals.find(d => d.id === prev.id) || prev;
@@ -95,7 +172,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   }, [tenant?.id]);
 
   // Stages derived dynamically from current tenant slug!
-  const isIrm = roleCode === 'irm';
 
   const stages = tenant?.slug === 'jamin'
     ? PIPELINE_STAGES.jamin
@@ -150,25 +226,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     storageService.addDealActivity(newActivity);
 
     setIrmDetailDeal(updatedDeal);
-    loadData();
-  };
-
-  const handleLogActivity = () => {
-    if (!irmDetailDeal || !activityText.trim()) return;
-
-    const newActivity: DealActivity = {
-      id: `act-${Date.now()}`,
-      dealId: irmDetailDeal.id,
-      companyId: tenant?.id || '',
-      type: activityType,
-      text: activityText.trim(),
-      loggedByName: user?.name || 'IRM User',
-      loggedByRole: 'IRM',
-      timestamp: new Date().toISOString(),
-    };
-
-    storageService.addDealActivity(newActivity);
-    setActivityText('');
     loadData();
   };
 
@@ -266,10 +323,21 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       {/* Kanban Board Horizontal Scrolling Container */}
       <div className="pipeline-board-container">
         {stages.map((stage, sIdx) => {
-          const stageDeals = scopedDeals.filter(d =>
-            d.stage === stage.id &&
-            (agentFilter === 'All' || d.assignedAgentName === agentFilter)
-          );
+          let stageDeals: Deal[];
+          if (isIrm && tenant?.slug === 'ghl' && stage.id === 'leads') {
+            stageDeals = scopedLeads
+              .filter(l => agentFilter === 'All' || l.assignedAgentName === agentFilter)
+              .map(leadToPipelineCard);
+          } else if (isIrm && tenant?.slug === 'ghl' && stage.id === 'followup') {
+            stageDeals = scopedFollowups
+              .filter(f => agentFilter === 'All' || f.assignedAgentName === agentFilter)
+              .map(followupToPipelineCard);
+          } else {
+            stageDeals = scopedDeals.filter(d =>
+              d.stage === stage.id &&
+              (agentFilter === 'All' || d.assignedAgentName === agentFilter)
+            );
+          }
           const stageTotal = stageDeals.reduce((sum, d) => sum + d.value, 0);
 
           return (
@@ -312,8 +380,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                       const currIdx = Math.min(cardIndex[stage.id] || 0, Math.max(0, stageDeals.length - 1));
                       const deal = stageDeals[currIdx];
                       const daysInStage = getDaysInStage(deal);
-                      const activities = storageService.getDealActivities(deal.id, tenant?.id);
-                      const lastActivity = activities.length > 0 ? activities[0] : null;
 
                       return (
                         <div
@@ -375,13 +441,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                             </span>
                           </div>
 
-                          {/* Last Activity */}
-                          <div className="irm-last-activity-box">
-                            <div className="irm-last-activity-label">LAST ACTIVITY</div>
-                            <div className="irm-last-activity-text">
-                              {lastActivity ? lastActivity.text : 'No activity logged yet.'}
-                            </div>
-                          </div>
+
 
                           {/* Footer: Investment range + pagination */}
                           <div className="irm-card-footer">
@@ -709,63 +769,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
               </div>
             </div>
 
-            {/* Log New Activity / Note */}
-            <div className="irm-activity-card">
-              <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 700 }}>
-                Log New Activity / Note
-              </h4>
-              <div className="irm-activity-tabs">
-                <button
-                  type="button"
-                  className={`irm-activity-tab-btn ${activityType === 'note' ? 'active' : ''}`}
-                  onClick={() => setActivityType('note')}
-                >
-                  <FileText size={13} /> Note
-                </button>
-                <button
-                  type="button"
-                  className={`irm-activity-tab-btn ${activityType === 'call' ? 'active' : ''}`}
-                  onClick={() => setActivityType('call')}
-                >
-                  <Phone size={13} /> Call
-                </button>
-                <button
-                  type="button"
-                  className={`irm-activity-tab-btn ${activityType === 'whatsapp' ? 'active' : ''}`}
-                  onClick={() => setActivityType('whatsapp')}
-                >
-                  <MessageCircle size={13} /> WhatsApp
-                </button>
-                <button
-                  type="button"
-                  className={`irm-activity-tab-btn ${activityType === 'meeting' ? 'active' : ''}`}
-                  onClick={() => setActivityType('meeting')}
-                >
-                  <Calendar size={13} /> Meeting
-                </button>
-              </div>
-              <textarea
-                className="form-control"
-                rows={3}
-                placeholder="Enter note details, outcome, or notes..."
-                value={activityText}
-                onChange={e => setActivityText(e.target.value)}
-                style={{ width: '100%', resize: 'vertical', fontSize: '13px', padding: '10px 12px' }}
-              />
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '10px' }}>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  Logged as <strong style={{ color: 'var(--text-secondary)' }}>{user?.name || 'IRM'}</strong>
-                </span>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  disabled={!activityText.trim()}
-                  onClick={handleLogActivity}
-                >
-                  Log Activity
-                </button>
-              </div>
-            </div>
 
             {/* Activity History & Stage Transitions */}
             <div className="irm-activity-card">

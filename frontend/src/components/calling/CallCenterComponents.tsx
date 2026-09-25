@@ -1044,20 +1044,25 @@ export const DispositionModal: React.FC = () => {
     const d = new Date();
     d.setDate(d.getDate() + 1);
     const freshTomorrow = d.toISOString().slice(0, 10);
-    setDisposition('Interested');
+    const isFollowup = !!lastCallRecord.sourceFollowupId;
+    const isIrmLead = user?.role?.code === 'irm' && lastCallRecord.matchedRecord?.type === 'lead';
+    const defaultDispo: CallDisposition = isIrmLead && !isFollowup ? 'Follow-up Required' : 'Interested';
+    setDisposition(defaultDispo);
     setNotes('');
     setReason('');
-    setScheduleFollowup(false);
+    setScheduleFollowup(defaultDispo === 'Follow-up Required');
     setFollowupDate(freshTomorrow);
     setFollowupTime(storageService.getCallPreferences().defaultFollowupTime);
     setFollowupPriority('High');
-  }, [lastCallRecord?.id]);
+  }, [lastCallRecord?.id, lastCallRecord?.matchedRecord?.type, lastCallRecord?.sourceFollowupId, user?.role?.code]);
 
   if (!showDispositionModal || !lastCallRecord) return null;
 
   const isGhlSalesExec = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') && user?.role?.code === 'sales_executive';
   // This call was launched from the Follow-ups page (a previously scheduled follow-up task).
   const isFollowupCall = !!lastCallRecord.sourceFollowupId;
+  const isIrm = user?.role?.code === 'irm';
+  const isIrmLeadCall = isIrm && lastCallRecord.matchedRecord?.type === 'lead';
 
   const allDispositions: CallDisposition[] = [
     'Interested',
@@ -1074,11 +1079,19 @@ export const DispositionModal: React.FC = () => {
   // is expected to have reached the contact.
   const FOLLOWUP_CALL_OUTCOMES: CallDisposition[] = ['Interested', 'Follow-up Required', 'Not Interested'];
 
+  // For IRM follow-up calls, outcomes are restricted to Interested and Follow-up Required only.
+  const IRM_FOLLOWUP_CALL_OUTCOMES: CallDisposition[] = ['Interested', 'Follow-up Required'];
+
+  // For IRM calls against Lead records, restrict to Follow-up Required and Converted
+  const IRM_LEAD_OUTCOMES: CallDisposition[] = ['Follow-up Required', 'Converted'];
+
   const dispositions: CallDisposition[] = isFollowupCall
-    ? FOLLOWUP_CALL_OUTCOMES
-    : isGhlSalesExec
-      ? allDispositions.filter(d => d !== 'Converted')
-      : allDispositions;
+    ? (isIrm ? IRM_FOLLOWUP_CALL_OUTCOMES : FOLLOWUP_CALL_OUTCOMES)
+    : isIrmLeadCall
+      ? IRM_LEAD_OUTCOMES
+      : isGhlSalesExec
+        ? allDispositions.filter(d => d !== 'Converted')
+        : allDispositions;
 
   const handleSave = () => {
     // Combine date + time into a proper ISO string so scheduledAt is parseable
