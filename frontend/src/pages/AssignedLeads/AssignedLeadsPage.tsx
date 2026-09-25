@@ -13,8 +13,9 @@ import { DataTable, Column, RowAction } from '../../components/common/DataTable'
 import { FilterBar } from '../../components/common/FilterBar';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
-import { MOCK_AGENTS } from '../../mock_data/mockData';
 import './AssignedLeadsPage.css';
+
+const MOCK_AGENTS = storageService.getMockAgents();
 
 export const AssignedLeadsPage: React.FC = () => {
   const { tenant, user } = useAuth();

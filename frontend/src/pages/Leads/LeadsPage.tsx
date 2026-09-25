@@ -31,7 +31,7 @@ const CAPACITY_OPTIONS = [
   'Not sure yet — help me decide'
 ];
 
-import { MOCK_AGENTS } from '../../mock_data/mockData';
+const MOCK_AGENTS = storageService.getMockAgents();
 export { MOCK_AGENTS };
 
 export const LeadsPage: React.FC = () => {

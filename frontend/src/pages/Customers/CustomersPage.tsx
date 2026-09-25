@@ -23,8 +23,10 @@ import { Timeline, TimelineEvent } from '../../components/common/Timeline';
 import { DocumentUploader } from '../../components/common/DocumentUploader';
 import { DocumentList } from '../../components/common/DocumentList';
 import { Modal } from '../../components/common/Modal';
-import { MOCK_IRMS, INITIAL_CUSTOMERS } from '../../mock_data/mockData';
 import './CustomersPage.css';
+
+const MOCK_IRMS = storageService.getMockIrms();
+const INITIAL_CUSTOMERS = storageService.getInitialCustomers();
 
 interface AutoRecommendation {
   customerId: string;

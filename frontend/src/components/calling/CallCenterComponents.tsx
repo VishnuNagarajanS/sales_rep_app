@@ -2,7 +2,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { storageService, PopupPosition } from '../../services/storageService';
-import { MOCK_AGENTS, MOCK_IRMS } from '../../mock_data/mockData';
+
+const MOCK_AGENTS = storageService.getMockAgents();
+const MOCK_IRMS = storageService.getMockIrms();
 
 import {
   Phone,

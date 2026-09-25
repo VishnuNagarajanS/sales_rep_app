@@ -36,6 +36,9 @@ import {
   INITIAL_NOTIFICATIONS,
   INITIAL_DEAL_ACTIVITIES,
   INITIAL_CALLS,
+  INITIAL_CUSTOMERS,
+  MOCK_AGENTS,
+  MOCK_IRMS,
 } from '../mock_data/mockData';
 import { ensureInitialAdminFollowups } from '../mock_data/adminFollowupsData';
 
@@ -936,6 +939,19 @@ class StorageService {
     this.set('custom_field_definitions', mock.INITIAL_CUSTOM_FIELD_DEFINITIONS);
     this.set('deal_activities', mock.INITIAL_DEAL_ACTIVITIES);
     window.dispatchEvent(new Event('nexus_storage_updated'));
+  }
+
+  // Proxy methods for remaining mock data usage
+  getMockAgents() {
+    return MOCK_AGENTS;
+  }
+
+  getMockIrms() {
+    return MOCK_IRMS;
+  }
+
+  getInitialCustomers() {
+    return INITIAL_CUSTOMERS;
   }
 
   // Incoming Call Popup Position
