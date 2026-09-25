@@ -42,7 +42,7 @@ export const BookingsPage: React.FC = () => {
 
     const newBooking: Booking = {
       id: `bkg-${Date.now()}`,
-      companyId: tenant?.id || 't-jamin-02',
+      companyId: tenant?.id || '',
       customerId: `cust-${Date.now()}`,
       customerName,
       customerPhone,

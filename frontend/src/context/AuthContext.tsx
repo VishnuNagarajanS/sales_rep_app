@@ -1,12 +1,10 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, Tenant, TenantSlug, RoleCode } from '../types';
-import { DEFAULT_TENANTS } from '../constants/defaultTenants';
-import { SYSTEM_ROLES } from '../constants/roles';
 import { FEATURES } from '../constants/features';
 import { storageService } from '../services/storageService';
-
-import { apiClient, ApiResponse, LoginResponse } from '../services/apiClient';
-import { IS_MOCK_ENV } from '../config/runtime';
+import { apiClient } from '../services/apiClient';
+import { isMockMode } from '../mock/runtime/mockConfig';
+import { getMockTenant, getMockPersonaUser, createMockLoginUser } from '../mock';
 
 interface AuthContextType {
   user: User | null;
@@ -27,8 +25,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [loginError, setLoginError] = useState<string | null>(null);
-  // Use sessionStorage: preserves session during page reload/refresh,
-  // but defaults to Login on new app launches / new tabs.
+
   const [user, setUser] = useState<User | null>(() => {
     const saved = sessionStorage.getItem('nexus_current_user');
     if (saved) {
@@ -42,7 +39,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (saved) {
       try { return JSON.parse(saved); } catch { }
     }
-    return DEFAULT_TENANTS.ghl;
+    if (isMockMode()) {
+      return getMockTenant('ghl');
+    }
+    return null;
   });
 
   useEffect(() => {
@@ -51,7 +51,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } else {
       sessionStorage.removeItem('nexus_current_user');
       sessionStorage.removeItem('nexus_auth_token');
-      // Also ensure legacy localStorage items don't linger
       localStorage.removeItem('nexus_current_user');
       localStorage.removeItem('nexus_auth_token');
     }
@@ -66,32 +65,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [tenant]);
 
-  useEffect(() => {
-    const token = sessionStorage.getItem('nexus_auth_token');
-    if (!token || IS_MOCK_ENV) return;
-
-    apiClient.get<ApiResponse<LoginResponse>>('/auth/me')
-      .then(response => {
-        if (response.success && response.data) {
-          setUser(response.data.user);
-          setTenant(response.data.tenant || null);
-        }
-      })
-      .catch(() => {
-        setUser(null);
-        setTenant(null);
-      });
-  }, []);
-
-  useEffect(() => {
-    const handleUnauthorized = () => {
-      setUser(null);
-      setTenant(null);
-    };
-    window.addEventListener('nexus_auth_unauthorized', handleUnauthorized);
-    return () => window.removeEventListener('nexus_auth_unauthorized', handleUnauthorized);
-  }, []);
-
   const isSuperAdmin = user?.role.code === 'super_admin';
 
   // Derive enabled features from live tenant object
@@ -103,16 +76,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const permissions = user?.role.permissions || [];
 
   const switchPersona = (roleCode: RoleCode, tenantSlug?: TenantSlug) => {
+    if (!isMockMode()) {
+      console.warn('[DEV MODE] Persona switching is disabled in dev/API mode.');
+      return;
+    }
+
     if (roleCode === 'super_admin') {
-      const superUser: User = {
-        id: 'usr-super-01',
-        name: 'Alex Rivera (Super Admin)',
-        email: 'alex@nexusplatform.io',
-        phone: '+91 98800 11000',
-        role: SYSTEM_ROLES.super_admin,
-        status: 'Active',
-        lastLogin: 'Just now',
-      };
+      const superUser = getMockPersonaUser('super_admin');
       setUser(superUser);
       setTenant(null);
       return;
@@ -122,11 +92,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const allTenants = storageService.getTenants();
     const targetTenant =
       allTenants.find(t => t.slug === slug || t.id === slug) ||
-      DEFAULT_TENANTS[slug] ||
-      DEFAULT_TENANTS.ghl;
+      getMockTenant(slug);
     setTenant(targetTenant);
 
-    // Check if a real user exists for this tenant and role in storage
+    // Check if a user exists for this tenant and role in mock storage
     const tenantUsers = storageService.getUsers(targetTenant.slug);
     const existingUser = tenantUsers.find(u => u.role.code === roleCode);
     if (existingUser) {
@@ -134,32 +103,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    const targetUser: User = {
-      id: `usr-${slug}-${roleCode}`,
-      name:
-        roleCode === 'company_admin'
-          ? slug === 'ghl'
-            ? 'Vikram Malhotra'
-            : slug === 'jamin'
-              ? 'Kavita Rao'
-              : `${targetTenant.name} Admin`
-          : roleCode === 'irm'
-            ? 'Rohan Varma'
-            : slug === 'ghl'
-              ? 'Ananya Iyer'
-              : slug === 'jamin'
-                ? 'Pooja Hegde'
-                : `${targetTenant.name} Agent`,
-      email: `${roleCode}@${slug}.com`,
-      phone: '+91 98450 00000',
-      role: SYSTEM_ROLES[roleCode] || SYSTEM_ROLES.company_admin,
-      companyId: targetTenant.id,
-      companySlug: slug,
-      companyName: targetTenant.name,
-      status: 'Active',
-      lastLogin: 'Just now',
-    };
-
+    const targetUser = getMockPersonaUser(roleCode, slug, targetTenant);
     storageService.saveUser(targetUser);
     setUser(targetUser);
   };
@@ -172,15 +116,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   ): Promise<boolean> => {
     setLoginError(null);
 
-    if (!IS_MOCK_ENV && password) {
+    // In dev mode: strictly use backend API authentication
+    if (!isMockMode()) {
+      if (!password || !password.trim()) {
+        setLoginError('Password is required in dev/API mode.');
+        return false;
+      }
       try {
-        const response = await apiClient.post<ApiResponse<LoginResponse>>('/auth/login', { email, password });
+        const response: any = await apiClient.post('/auth/login', { email, password });
 
         if (response && response.success && response.data) {
           const { token, user: userData, tenant: tenantData } = response.data;
 
           if (token) {
             sessionStorage.setItem('nexus_auth_token', token);
+            localStorage.setItem('nexus_auth_token', token);
           }
 
           if (userData) {
@@ -197,37 +147,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return false;
         }
       } catch (error: any) {
-        setLoginError(error.message || 'Unable to connect to server.');
+        setLoginError(error.message || 'Unable to connect to backend server.');
         return false;
       }
     }
 
-    if (!IS_MOCK_ENV) {
-      setLoginError('Enter your email and password to continue.');
-      return false;
+    // In mock mode:
+    if (password) {
+      try {
+        const response: any = await apiClient.post('/auth/login', { email, password });
+        if (response && response.success && response.data) {
+          const { token, user: userData, tenant: tenantData } = response.data;
+          if (token) {
+            sessionStorage.setItem('nexus_auth_token', token);
+            localStorage.setItem('nexus_auth_token', token);
+          }
+          if (userData) setUser(userData);
+          if (tenantData) setTenant(tenantData);
+          return true;
+        }
+      } catch {
+        // In mock mode, if backend is not running, continue with demo auth
+      }
     }
 
-    // Fallback: fast-login demo mode without password
+    // Mock mode demo login
     const allTenants = storageService.getTenants();
     const targetTenant =
       allTenants.find(t => t.slug === tenantSlug || t.id === tenantSlug) ||
-      DEFAULT_TENANTS[tenantSlug] ||
-      DEFAULT_TENANTS.ghl;
+      getMockTenant(tenantSlug);
     setTenant(targetTenant);
 
-    const authenticatedUser: User = {
-      id: `usr-${Date.now()}`,
-      name: email.split('@')[0].replace('.', ' '),
-      email,
-      phone: '+91 98000 00000',
-      role: SYSTEM_ROLES[roleCode] || SYSTEM_ROLES.company_admin,
-      companyId: targetTenant.id,
-      companySlug: tenantSlug,
-      companyName: targetTenant.name,
-      status: 'Active',
-      lastLogin: 'Just now',
-    };
-
+    const authenticatedUser = createMockLoginUser(email, roleCode, tenantSlug, targetTenant);
     storageService.saveUser(authenticatedUser);
     setUser(authenticatedUser);
     return true;

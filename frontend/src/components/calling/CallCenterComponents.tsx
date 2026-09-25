@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
+import ReactDOM from 'react-dom';
 import { storageService, PopupPosition } from '../../services/storageService';
 
 import {
@@ -13,6 +14,7 @@ import {
   FileText,
   Clock,
   User,
+  Users,
   CheckCircle2,
   Calendar,
   AlertCircle,
@@ -208,12 +210,101 @@ export const InCallBar: React.FC = () => {
     setQuickNotes,
     setMeetingLink,
   } = useCall();
-  const { tenant } = useAuth();
+  const { tenant, user } = useAuth();
 
   const [docsOpen, setDocsOpen] = useState(false);
   const [docsTab, setDocsTab] = useState<'customer' | 'company'>('customer');
   const [meetLaunched, setMeetLaunched] = useState(false);
   const [meetInput, setMeetInput] = useState('');
+  const [irmMenuOpen, setIrmMenuOpen] = useState(false);
+  const [irmButtonRect, setIrmButtonRect] = useState<DOMRect | null>(null);
+  const [irmSearchQuery, setIrmSearchQuery] = useState('');
+  const [connectingIrm, setConnectingIrm] = useState<string | null>(null);
+  const [pendingIrm, setPendingIrm] = useState<{ name: string; status: string } | null>(null);
+  const [consultationReason, setConsultationReason] = useState('');
+
+  const irmPortalRef = useRef<HTMLDivElement>(null);
+  const irmButtonRef = useRef<HTMLButtonElement>(null);
+
+  const availableIrms = storageService.getAvailableIrms();
+
+  const filteredIrms = availableIrms.filter(irm =>
+    irm.name.toLowerCase().includes(irmSearchQuery.toLowerCase())
+  );
+
+  const handleConnectIrm = (irm: { name: string; status: string } | null, reason: string) => {
+    if (!activeCall || !irm || !tenant || !user) return;
+
+    const callId = `call-${Date.now()}`;
+
+    storageService.addCall({
+      id: callId,
+      companyId: tenant.id,
+      contactName: activeCall.contactName,
+      contactPhone: activeCall.contactPhone,
+      direction: activeCall.direction,
+      duration: activeCall.duration,
+      agentId: user.id,
+      agentName: user.name,
+      disposition: 'Converted',
+      timestamp: new Date().toISOString(),
+      notes: `Connected to IRM: ${irm.name}. Reason: ${reason}`,
+      leadId: activeCall.matchedRecord?.id,
+      investorId: activeCall.matchedRecord?.id,
+    });
+
+    const existingConsultation = storageService
+      .getConsultations(user?.companyId)
+      .find(c =>
+        c.status === 'Scheduled' &&
+        (
+          (activeCall.matchedRecord?.id && c.investorId === activeCall.matchedRecord.id) ||
+          (
+            (c.investorPhone || '').replace(/\D/g, '').slice(-10) ===
+            (activeCall.contactPhone || '').replace(/\D/g, '').slice(-10) &&
+            (activeCall.contactPhone || '').replace(/\D/g, '').slice(-10).length > 0
+          )
+        )
+      );
+
+    storageService.saveConsultation({
+      id: existingConsultation?.id || `cns-${Date.now()}`,
+      companyId: user?.companyId || tenant.id,
+      investorId: activeCall.matchedRecord?.id || '',
+      investorName: activeCall.contactName,
+      investorPhone: activeCall.contactPhone,
+      scheduledAt: new Date().toISOString(),
+      consultantId: irm.name,
+      consultantName: irm.name,
+      status: 'Scheduled',
+      agenda: reason,
+    });
+
+    endCall(true);
+
+    setConnectingIrm(irm.name);
+    setPendingIrm(null);
+    setConsultationReason('');
+    setTimeout(() => setConnectingIrm(null), 3000);
+  };
+
+  useEffect(() => {
+    if (!irmMenuOpen) return;
+
+    const handleOutsideClick = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (irmButtonRef.current && irmButtonRef.current.contains(target)) return;
+      if (irmPortalRef.current && irmPortalRef.current.contains(target)) return;
+      setIrmMenuOpen(false);
+      setIrmSearchQuery('');
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, [irmMenuOpen]);
 
   // Camera preview state
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -230,11 +321,11 @@ export const InCallBar: React.FC = () => {
   const getCornerStyles = (): React.CSSProperties => {
     const pos = storageService.getPopupPosition();
     switch (pos) {
-      case 'top-left':    return { top: 24, left: 24, bottom: 'auto', right: 'auto' };
+      case 'top-left': return { top: 24, left: 24, bottom: 'auto', right: 'auto' };
       case 'bottom-left': return { bottom: 24, left: 24, top: 'auto', right: 'auto' };
       case 'bottom-right': return { bottom: 24, right: 24, top: 'auto', left: 'auto' };
       case 'top-right':
-      default:            return { top: 24, right: 24, bottom: 'auto', left: 'auto' };
+      default: return { top: 24, right: 24, bottom: 'auto', left: 'auto' };
     }
   };
 
@@ -257,6 +348,8 @@ export const InCallBar: React.FC = () => {
   // Drag handlers
   const handleDragMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
+    setIrmMenuOpen(false);
+    setIrmSearchQuery('');
     const el = panelRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
@@ -328,6 +421,10 @@ export const InCallBar: React.FC = () => {
       setDocsTab('customer');
       setMeetLaunched(false);
       setMeetInput('');
+      setIrmMenuOpen(false);
+      setIrmSearchQuery('');
+      setPendingIrm(null);
+      setConsultationReason('');
     }
   }, [activeCall]);
 
@@ -396,7 +493,7 @@ export const InCallBar: React.FC = () => {
           <button
             className="btn btn-danger btn-icon btn-sm incall-minimized-btn-end"
             title="End Call"
-            onClick={endCall}
+            onClick={() => endCall()}
             onMouseDown={e => e.stopPropagation()}
           >
             <PhoneOff size={14} />
@@ -502,6 +599,13 @@ export const InCallBar: React.FC = () => {
             </div>
           )}
 
+          {/* ── IRM connect toast ── */}
+          {connectingIrm && (
+            <div style={{ fontSize: 12, color: '#38bdf8', padding: '4px 8px' }}>
+              Call ended. Connected to {connectingIrm} — moved to Consultations.
+            </div>
+          )}
+
           {/* ── Quick notes ── */}
           <div className="incall-notes-container">
             <input
@@ -544,6 +648,197 @@ export const InCallBar: React.FC = () => {
               <ExternalLink size={13} /> Meet
             </button>
 
+            {/* Connect IRM */}
+            <button
+              ref={irmButtonRef}
+              className="btn btn-sm incall-btn-action incall-btn-irm"
+              title="Connect to an IRM"
+              onClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                setIrmButtonRect(rect);
+                setIrmMenuOpen(prev => !prev);
+                setIrmSearchQuery('');
+              }}
+            >
+              <Users size={13} /> Connect IRM
+            </button>
+
+            {irmMenuOpen && irmButtonRect && ReactDOM.createPortal(
+              <div
+                ref={irmPortalRef}
+                style={{
+                  position: 'fixed',
+                  top: irmButtonRect.bottom + 6,
+                  left: irmButtonRect.left,
+                  background: '#1e293b',
+                  border: '1px solid #334155',
+                  borderRadius: 8,
+                  padding: 6,
+                  minWidth: 200,
+                  zIndex: 9999,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="Search IRM by name..."
+                  value={irmSearchQuery}
+                  onChange={e => setIrmSearchQuery(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '6px 8px',
+                    marginBottom: 6,
+                    fontSize: 13,
+                    background: '#0f172a',
+                    border: '1px solid #334155',
+                    borderRadius: 6,
+                    color: '#e2e8f0',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+
+                {filteredIrms.length === 0 && (
+                  <div style={{ padding: '8px', fontSize: 12, color: '#64748b', textAlign: 'center' }}>
+                    No IRM found
+                  </div>
+                )}
+
+                {filteredIrms.map(irm => (
+                  <div
+                    key={irm.name}
+                    onClick={() => {
+                      setPendingIrm(irm);
+                      setIrmMenuOpen(false);
+                      setIrmSearchQuery('');
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '6px 8px',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      fontSize: 13,
+                      color: '#e2e8f0',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background = '#334155')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <span
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        background: irm.status === 'Available' ? '#22c55e' : '#d97706',
+                      }}
+                    />
+                    {irm.name}
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94a3b8' }}>{irm.status}</span>
+                  </div>
+                ))}
+              </div>,
+              document.body
+            )}
+
+            {/* ── Reason for Consultation Modal ── */}
+            {pendingIrm && ReactDOM.createPortal(
+              <div
+                style={{
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 10000,
+                  backdropFilter: 'blur(2px)',
+                }}
+                onClick={() => {
+                  setPendingIrm(null);
+                  setConsultationReason('');
+                }}
+              >
+                <div
+                  style={{
+                    background: '#1e293b',
+                    border: '1px solid #334155',
+                    borderRadius: 10,
+                    padding: '18px 20px',
+                    width: '90%',
+                    maxWidth: 380,
+                    boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)',
+                    color: '#e2e8f0',
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div style={{ fontSize: 15, fontWeight: 600, color: '#f8fafc', marginBottom: 12 }}>
+                    Connect {pendingIrm.name} to this call
+                  </div>
+                  <label style={{ display: 'block', fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>
+                    Reason for Consultation *
+                  </label>
+                  <textarea
+                    autoFocus
+                    rows={3}
+                    placeholder="Enter reason for consultation..."
+                    value={consultationReason}
+                    onChange={e => setConsultationReason(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '8px 10px',
+                      fontSize: 13,
+                      background: '#0f172a',
+                      border: '1px solid #334155',
+                      borderRadius: 6,
+                      color: '#e2e8f0',
+                      outline: 'none',
+                      boxSizing: 'border-box',
+                      resize: 'none',
+                      marginBottom: 16,
+                    }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => {
+                        setPendingIrm(null);
+                        setConsultationReason('');
+                      }}
+                      style={{ padding: '6px 12px', fontSize: 12 }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={!consultationReason.trim() || !pendingIrm}
+                      onClick={() => {
+                        if (pendingIrm) {
+                          handleConnectIrm(pendingIrm, consultationReason.trim());
+                        }
+                      }}
+                      style={{
+                        padding: '6px 14px',
+                        fontSize: 12,
+                        opacity: consultationReason.trim() && pendingIrm ? 1 : 0.5,
+                        cursor: consultationReason.trim() && pendingIrm ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      Confirm & Connect
+                    </button>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )}
+
             {/* Spacer */}
             <div style={{ flex: 1 }} />
 
@@ -574,7 +869,7 @@ export const InCallBar: React.FC = () => {
             {/* End Call */}
             <button
               className="btn btn-danger btn-sm incall-btn-end"
-              onClick={endCall}
+              onClick={() => endCall()}
             >
               <PhoneOff size={14} /> End
             </button>
@@ -724,7 +1019,7 @@ export const DispositionModal: React.FC = () => {
 
   if (!showDispositionModal || !lastCallRecord) return null;
 
-  const isGhlSalesExec = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') && user?.role?.code === 'sales_executive';
+  const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
   // This call was launched from the Follow-ups page (a previously scheduled follow-up task).
   const isFollowupCall = !!lastCallRecord.sourceFollowupId;
 
@@ -765,10 +1060,10 @@ export const DispositionModal: React.FC = () => {
       notes,
       combinedDateTime
         ? {
-            scheduledAt: combinedDateTime,
-            priority: followupPriority,
-            notes: notes ? `Follow-up required from call with ${lastCallRecord.contactName}: ${notes}` : `Follow-up required from call with ${lastCallRecord.contactName}`,
-          }
+          scheduledAt: combinedDateTime,
+          priority: followupPriority,
+          notes: notes ? `Follow-up required from call with ${lastCallRecord.contactName}: ${notes}` : `Follow-up required from call with ${lastCallRecord.contactName}`,
+        }
         : undefined,
       (disposition === 'Not Interested' || disposition === 'Wrong Number') ? reason : undefined
     );

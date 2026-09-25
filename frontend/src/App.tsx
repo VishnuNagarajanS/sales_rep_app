@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from './context/AuthContext';
-import { Followup, Lead } from './types';
 import { AuthLayout } from './layouts/AuthLayout';
 import { SalesLayout } from './layouts/SalesLayout';
 import { AdminLayout } from './layouts/AdminLayout';
@@ -57,26 +56,23 @@ import { PlatformAuditPage } from './pages/Admin/Audit/PlatformAuditPage';
 import { ProtectedRoute } from './components/common/Guards';
 import { Modal } from './components/common/Modal';
 import { storageService } from './services/storageService';
-import { salesApi } from './services/salesApi';
 import { PERMISSIONS } from './constants/permissions';
-import { IS_MOCK_ENV } from './config/runtime';
+import { isMockMode } from './mock/runtime/mockConfig';
+import { mockBootstrap } from './mock/runtime/mockBootstrap';
 import './App.css';
 
 export const App: React.FC = () => {
-  const { isAuthenticated, isSuperAdmin, tenant, user, setUser, setTenant } = useAuth();
+  const { isAuthenticated, isSuperAdmin, tenant, user } = useAuth();
   const [currentRoute, setCurrentRoute] = useState<string>(() => {
     return sessionStorage.getItem('nexus_current_route') || 'dashboard';
   });
 
+  // Initialize mock data strictly in mock mode
   useEffect(() => {
-    if (storageService.ensureEnvironment()) {
-      setUser(null);
-      setTenant(null);
+    if (isMockMode()) {
+      mockBootstrap();
     }
-    if (IS_MOCK_ENV && storageService.getUsers().length === 0) {
-      storageService.loadMockDataFromSeparateFolder();
-    }
-  }, [setTenant, setUser]);
+  }, []);
 
   // Set default route for IRM user
   useEffect(() => {
@@ -96,7 +92,22 @@ export const App: React.FC = () => {
 
   const [quickName, setQuickName] = useState('');
   const [quickPhone, setQuickPhone] = useState('+91 ');
+  const [quickEmail, setQuickEmail] = useState('');
+  const [quickLocation, setQuickLocation] = useState('');
+  const [quickSource, setQuickSource] = useState('Website Inbound');
+  const [quickAssetClass, setQuickAssetClass] = useState('AIF');
+  const [quickInvestmentCapacity, setQuickInvestmentCapacity] = useState('₹1 Cr – ₹5 Cr');
   const [quickNotes, setQuickNotes] = useState('');
+
+  // Consultation-specific state
+  const [consInvestorId, setConsInvestorId] = useState('');
+  const [consInvestorName, setConsInvestorName] = useState('');
+  const [consInvestorPhone, setConsInvestorPhone] = useState('');
+  const [consSlot, setConsSlot] = useState('');
+  const [consConsultantName, setConsConsultantName] = useState('');
+  const [consStatus, setConsStatus] = useState<'Scheduled' | 'Completed' | 'Cancelled' | 'No-show'>('Scheduled');
+  const [consAgenda, setConsAgenda] = useState('');
+  const [consOutcome, setConsOutcome] = useState('');
   const [scheduledDate, setScheduledDate] = useState(
     new Date(Date.now() + 86400000).toISOString().split('T')[0]
   );
@@ -117,7 +128,20 @@ export const App: React.FC = () => {
     setQuickCreateType(type);
     setQuickName('');
     setQuickPhone('+91 ');
+    setQuickEmail('');
+    setQuickLocation('');
+    setQuickSource('Website Inbound');
+    setQuickAssetClass('AIF');
+    setQuickInvestmentCapacity('₹1 Cr – ₹5 Cr');
     setQuickNotes('');
+    setConsInvestorId('');
+    setConsInvestorName('');
+    setConsInvestorPhone('');
+    setConsSlot('This Friday, 03:00 PM');
+    setConsConsultantName(user?.name ?? 'Advisor');
+    setConsStatus('Scheduled');
+    setConsAgenda('Commercial REIT yield analysis & pass-through taxation discussion.');
+    setConsOutcome('');
     setScheduledDate(new Date(Date.now() + 86400000).toISOString().split('T')[0]);
     setScheduledTime(storageService.getCallPreferences().defaultFollowupTime);
     // Reset deal-specific state; pre-select first available customer
@@ -127,38 +151,37 @@ export const App: React.FC = () => {
     setSelectedCustomerId(existingCustomers[0]?.id || '');
   };
 
-  const handleSaveQuickCreate = async (e: React.FormEvent) => {
+  const handleSaveQuickCreate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!quickName) return;
 
     if (quickCreateType === 'lead') {
-      const lead: Lead = {
+      storageService.saveLead({
         id: `lead-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
+        companyId: tenant?.id || '',
         name: quickName,
         phone: quickPhone,
-        email: '',
-        location: 'Bengaluru',
-        source: 'Quick Create',
+        email: quickEmail,
+        location: quickLocation,
+        source: quickSource,
         status: 'New',
         priority: 'Medium',
-        assignedAgentId: user?.id || 'usr-exec',
-        assignedAgentName: user?.name || 'Agent',
+        assignedAgentId: user?.id || '',
+        assignedAgentName: user?.name || '',
         createdAt: new Date().toISOString().split('T')[0],
         notes: quickNotes,
-        customFields: {},
-      };
-      if (IS_MOCK_ENV) {
-        storageService.saveLead(lead);
-      } else {
-        await salesApi.saveLead(lead);
-      }
+        customFields: {
+          assetClass: quickAssetClass,
+          preferredAssetClass: quickAssetClass,
+          investmentCapacity: quickInvestmentCapacity,
+        },
+      });
 
     } else if (quickCreateType === 'followup') {
       const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
-      const followup: Followup = {
+      storageService.saveFollowup({
         id: `flw-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
+        companyId: tenant?.id || '',
         contactId: `contact-${Date.now()}`,
         contactName: quickName,
         contactPhone: quickPhone,
@@ -169,62 +192,45 @@ export const App: React.FC = () => {
         priority: 'High',
         status: 'Pending',
         notes: quickNotes,
-        assignedAgentId: user?.id || 'usr-exec',
-        assignedAgentName: user?.name || 'Agent',
-      };
-      if (IS_MOCK_ENV) {
-        storageService.saveFollowup(followup);
-      } else {
-        await salesApi.saveFollowup(followup);
-      }
+        assignedAgentId: user?.id || '',
+        assignedAgentName: user?.name || '',
+      });
 
     } else if (quickCreateType === 'consultation') {
-      if (!IS_MOCK_ENV) {
-        window.alert('Consultations are not available until the database API is implemented.');
-        return;
-      }
       // Task 1 — Schedule Consultation
-      const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
       storageService.saveConsultation({
         id: `cons-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
-        investorId: `investor-${Date.now()}`,
-        investorName: quickName,
-        investorPhone: quickPhone,
-        scheduledAt: combinedDateTime,
-        consultantId: user?.id || 'usr-exec',
-        consultantName: user?.name || 'Agent',
-        status: 'Scheduled',
-        agenda: quickNotes || 'Initial consultation',
+        companyId: tenant?.id || '',
+        investorId: consInvestorId || `investor-${Date.now()}`,
+        investorName: consInvestorName,
+        investorPhone: consInvestorPhone,
+        scheduledAt: consSlot.trim(),
+        consultantId: user?.id || '',
+        consultantName: consConsultantName.trim() || user?.name || '',
+        status: consStatus,
+        agenda: consAgenda.trim(),
+        outcomeNotes: consOutcome.trim() || undefined,
       });
 
     } else if (quickCreateType === 'visit') {
-      if (!IS_MOCK_ENV) {
-        window.alert('Site visits are not available until the database API is implemented.');
-        return;
-      }
       // Task 2 — Schedule Site Visit
       const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
       storageService.saveSiteVisit({
         id: `visit-${Date.now()}`,
-        companyId: tenant?.id || 't-jamin-02',
+        companyId: tenant?.id || '',
         customerId: `cust-${Date.now()}`,
         customerName: quickName,
         customerPhone: quickPhone,
-        projectId: 'proj-01',
-        projectName: 'Greenfield Meadows Phase 2',
+        projectId: '',
+        projectName: '',
         scheduledAt: combinedDateTime,
-        assignedAgentId: user?.id || 'usr-exec',
-        assignedAgentName: user?.name || 'Agent',
+        assignedAgentId: user?.id || '',
+        assignedAgentName: user?.name || '',
         status: 'Scheduled',
         outcomeNotes: quickNotes,
       });
 
     } else if (quickCreateType === 'deal') {
-      if (!IS_MOCK_ENV) {
-        window.alert('Deals are not available until the database API is implemented.');
-        return;
-      }
       // Task 4 — Deal linked to real customer
       let resolvedCustomerId: string;
       let resolvedCustomerName: string;
@@ -242,13 +248,13 @@ export const App: React.FC = () => {
         resolvedCustomerName = newCustomerName;
         storageService.saveCustomer({
           id: resolvedCustomerId,
-          companyId: tenant?.id || 't-ghl-01',
+          companyId: tenant?.id || '',
           name: resolvedCustomerName,
           phone: quickPhone,
           email: '',
           status: 'Active',
-          assignedAgentId: user?.id || 'usr-exec',
-          assignedAgentName: user?.name || 'Agent',
+          assignedAgentId: user?.id || '',
+          assignedAgentName: user?.name || '',
           location: 'Bengaluru',
           lastContacted: new Date().toISOString().split('T')[0],
           openDealsCount: 1,
@@ -261,15 +267,15 @@ export const App: React.FC = () => {
 
       storageService.saveDeal({
         id: `deal-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
+        companyId: tenant?.id || '',
         title: quickName,
         customerId: resolvedCustomerId,
         customerName: resolvedCustomerName,
         stage: 'new',
         value: 5000000,
         expectedCloseDate: '30 Days',
-        assignedAgentId: user?.id || 'usr-exec',
-        assignedAgentName: user?.name || 'Agent',
+        assignedAgentId: user?.id || '',
+        assignedAgentName: user?.name || '',
         notes: quickNotes,
         createdAt: new Date().toISOString().split('T')[0],
       });
@@ -424,23 +430,248 @@ export const App: React.FC = () => {
       >
         <form onSubmit={handleSaveQuickCreate} className="app-quickcreate-form">
 
-          {/* ── Deal Title (deals only) or Contact Name (everything else) ── */}
-          <div className="form-group">
-            <label className="form-label">
-              {quickCreateType === 'deal' ? 'Deal Title *' : 'Contact Name *'}
-            </label>
-            <input
-              type="text"
-              className="form-input"
-              required
-              value={quickName}
-              onChange={e => setQuickName(e.target.value)}
-              placeholder={quickCreateType === 'deal' ? 'e.g. Commercial Plot Purchase' : 'e.g. Ramesh Chandra'}
-            />
-          </div>
+          {/* ── LEAD: Full form matching Add New Prospect Lead ── */}
+          {quickCreateType === 'lead' ? (
+            <>
+              {/* Full Name */}
+              <div className="form-group">
+                <label className="form-label">Full Name *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  required
+                  value={quickName}
+                  onChange={e => setQuickName(e.target.value)}
+                  placeholder="e.g. Ramesh Chandra"
+                />
+              </div>
 
-          {/* ── Deal: existing vs. new customer picker (Task 4) ── */}
-          {quickCreateType === 'deal' && (() => {
+              {/* Phone + Email */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Phone Number *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    required
+                    value={quickPhone}
+                    onChange={e => setQuickPhone(e.target.value)}
+                    placeholder="+91 98800 00000"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Email Address</label>
+                  <input
+                    type="email"
+                    className="form-input"
+                    value={quickEmail}
+                    onChange={e => setQuickEmail(e.target.value)}
+                    placeholder="ramesh@example.com"
+                  />
+                </div>
+              </div>
+
+              {/* Location + Source */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Location / City</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={quickLocation}
+                    onChange={e => setQuickLocation(e.target.value)}
+                    placeholder="e.g. Bengaluru, Indiranagar"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Source</label>
+                  <select
+                    className="form-select"
+                    value={quickSource}
+                    onChange={e => setQuickSource(e.target.value)}
+                  >
+                    <option value="Website Inbound">Website Inbound</option>
+                    <option value="Google Search">Google Search</option>
+                    <option value="Facebook / Instagram">Facebook / Instagram</option>
+                    <option value="Referral - HNW">Referral - HNW</option>
+                    <option value="Walk-in Site Office">Walk-in Site Office</option>
+                    <option value="LinkedIn Executive Campaign">LinkedIn Executive Campaign</option>
+                    <option value="Inbound Call">Inbound Call</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* GHL India Ventures Asset Terms */}
+              <div className="lead-custom-schema-box">
+                <div className="lead-custom-schema-title">GHL India Ventures Asset Terms</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div className="form-group">
+                    <label className="form-label">Asset Class</label>
+                    <select
+                      className="form-select"
+                      value={quickAssetClass}
+                      onChange={e => {
+                        const ac = e.target.value;
+                        setQuickAssetClass(ac);
+                        setQuickInvestmentCapacity(ac === 'CO-AIF' ? '₹10 Lakh to ₹1 Cr' : '₹1 Cr – ₹5 Cr');
+                      }}
+                    >
+                      <option value="AIF">AIF</option>
+                      <option value="CO-AIF">CO-AIF</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Investment Capacity</label>
+                    <select
+                      className="form-select"
+                      value={quickInvestmentCapacity}
+                      onChange={e => setQuickInvestmentCapacity(e.target.value)}
+                    >
+                      {quickAssetClass === 'CO-AIF'
+                        ? [<option key="co" value="₹10 Lakh to ₹1 Cr">₹10 Lakh to ₹1 Cr</option>]
+                        : ['₹1 Cr – ₹5 Cr', '₹5 Cr – ₹10 Cr', '₹10 Cr – ₹25 Cr', '₹25 Cr+'].map(o => (
+                            <option key={o} value={o}>{o}</option>
+                          ))
+                      }
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Notes & Requirements */}
+              <div className="form-group">
+                <label className="form-label">Notes & Requirements</label>
+                <textarea
+                  className="form-textarea"
+                  rows={3}
+                  value={quickNotes}
+                  onChange={e => setQuickNotes(e.target.value)}
+                  placeholder="Client background, key objections, time horizon..."
+                />
+              </div>
+            </>
+          ) : quickCreateType === 'consultation' ? (
+            <>
+              {/* ── CONSULTATION: Full form matching Schedule Consultation ── */}
+              {(() => {
+                const investors = storageService.getInvestors(tenant?.id);
+                return (
+                  <>
+                    <div className="form-group">
+                      <label className="form-label">Investor *</label>
+                      <select
+                        className="form-select"
+                        value={consInvestorId}
+                        required
+                        onChange={e => {
+                          const inv = investors.find(i => i.id === e.target.value);
+                          setConsInvestorId(e.target.value);
+                          setConsInvestorName(inv?.name ?? '');
+                          setConsInvestorPhone(inv?.phone ?? '');
+                        }}
+                      >
+                        <option value="">— Select Investor —</option>
+                        {investors.map(inv => (
+                          <option key={inv.id} value={inv.id}>
+                            {inv.name} {inv.phone ? `(${inv.phone})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <div className="form-group">
+                        <label className="form-label">Investor Phone</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="+91 98800 00000"
+                          value={consInvestorPhone}
+                          onChange={e => setConsInvestorPhone(e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Consultation Slot *</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          required
+                          placeholder="e.g. Thursday, 04:00 PM"
+                          value={consSlot}
+                          onChange={e => setConsSlot(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <div className="form-group">
+                        <label className="form-label">
+                          Private Wealth Advisor
+                          {user?.role?.code === 'sales_executive' && (
+                            <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--text-muted)' }}>
+                              (auto-assigned to you)
+                            </span>
+                          )}
+                        </label>
+                        {user?.role?.code === 'sales_executive' ? (
+                          <input
+                            className="form-input"
+                            value={consConsultantName}
+                            readOnly
+                            style={{ backgroundColor: 'var(--bg-surface-hover)', cursor: 'not-allowed', color: 'var(--text-secondary)' }}
+                          />
+                        ) : (
+                          <input
+                            className="form-input"
+                            placeholder="e.g. Vikram Malhotra"
+                            value={consConsultantName}
+                            onChange={e => setConsConsultantName(e.target.value)}
+                          />
+                        )}
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Status</label>
+                        <select
+                          className="form-select"
+                          value={consStatus}
+                          onChange={e => setConsStatus(e.target.value as any)}
+                        >
+                          {['Scheduled', 'Completed', 'Cancelled', 'No-show'].map(s => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Discussion Agenda & Objectives</label>
+                      <textarea
+                        className="form-textarea"
+                        rows={3}
+                        placeholder="e.g. Commercial REIT yield analysis & pass-through taxation discussion."
+                        value={consAgenda}
+                        onChange={e => setConsAgenda(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Outcome Notes & Recommendations</label>
+                      <textarea
+                        className="form-textarea"
+                        rows={3}
+                        placeholder="Record key takeaways, investor interest level, follow-up requirements..."
+                        value={consOutcome}
+                        onChange={e => setConsOutcome(e.target.value)}
+                      />
+                    </div>
+                  </>
+                );
+              })()}
+            </>
+          ) : (
+            <>
+            {/* ── Deal: existing vs. new customer picker ── */}
+            {quickCreateType === 'deal' && (() => {
             const tenantCustomers = storageService.getCustomers(tenant?.id);
             const hasCustomers = tenantCustomers.length > 0;
             return (
@@ -500,7 +731,7 @@ export const App: React.FC = () => {
             );
           })()}
 
-          {/* ── Phone (all types except deal-existing-customer) ── */}
+          {/* ── Phone (non-lead, non-deal-existing) ── */}
           {!(quickCreateType === 'deal' && dealCustomerMode === 'existing') && (
             <div className="form-group">
               <label className="form-label">Phone Number</label>
@@ -513,8 +744,8 @@ export const App: React.FC = () => {
             </div>
           )}
 
-          {/* ── Scheduled Date + Time (followup, consultation, visit) ── */}
-          {(quickCreateType === 'followup' || quickCreateType === 'consultation' || quickCreateType === 'visit') && (
+          {/* ── Scheduled Date + Time (followup, visit) ── */}
+          {(quickCreateType === 'followup' || quickCreateType === 'visit') && (
             <div className="app-schedule-grid">
               <div className="form-group">
                 <label className="form-label">Scheduled Date *</label>
@@ -539,24 +770,23 @@ export const App: React.FC = () => {
             </div>
           )}
 
+          {/* ── Notes/Agenda (non-lead types) ── */}
           <div className="form-group">
-            <label className="form-label">
-              {quickCreateType === 'consultation' ? 'Consultation Agenda' : 'Quick Notes'}
-            </label>
+            <label className="form-label">Quick Notes</label>
             <textarea
               className="form-textarea"
               rows={2}
               value={quickNotes}
               onChange={e => setQuickNotes(e.target.value)}
               placeholder={
-                quickCreateType === 'consultation'
-                  ? 'Topics to discuss, investor interest area...'
-                  : quickCreateType === 'visit'
+                quickCreateType === 'visit'
                     ? 'Special requirements, preferred plots...'
                     : 'Brief requirement summary...'
               }
             />
           </div>
+            </>
+          )}
 
           <div className="app-modal-actions">
             <button type="button" className="btn btn-secondary" onClick={() => setQuickCreateType(null)}>

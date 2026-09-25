@@ -2,11 +2,13 @@ import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Shield, Building2, UserCheck, RefreshCw, ChevronDown, TrendingUp } from 'lucide-react';
 import { storageService } from '../../services/storageService';
+import { isMockMode } from '../../mock/runtime/mockConfig';
 import './PersonaSwitcher.css';
 
 export const PersonaSwitcher: React.FC = () => {
   const { user, tenant, isSuperAdmin, switchPersona } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
+  const mockMode = isMockMode();
 
   const personas = [
     {
@@ -58,29 +60,42 @@ export const PersonaSwitcher: React.FC = () => {
     },
   ];
 
-  const customTenants = storageService.getTenants().filter(t => t.slug !== 'ghl' && t.slug !== 'jamin');
+  const customTenants = mockMode
+    ? storageService.getTenants().filter(t => t.slug !== 'ghl' && t.slug !== 'jamin')
+    : [];
 
   const handleResetData = () => {
+    if (!mockMode) return;
     if (confirm('Reset demo data to initial defaults?')) {
       storageService.resetData();
       window.location.reload();
     }
   };
 
+  const roleDisplayName = isSuperAdmin
+    ? 'Super Admin'
+    : `${tenant?.name || 'Organization'} (${user?.role?.name || user?.role?.code || 'User'})`;
+
   return (
     <div className="persona-switcher-container">
       <button
         className={`btn btn-secondary btn-sm persona-trigger-btn ${isSuperAdmin ? 'super-admin' : 'tenant-admin'}`}
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => {
+          if (mockMode) {
+            setIsOpen(!isOpen);
+          }
+        }}
+        style={!mockMode ? { cursor: 'default' } : undefined}
+        title={mockMode ? 'Switch Tenant Persona' : 'Authenticated User Session'}
       >
         <span className="persona-role-prefix">ROLE:</span>
         <span className="persona-role-name">
-          {isSuperAdmin ? 'Super Admin' : `${tenant?.name} (${user?.role.name})`}
+          {roleDisplayName}
         </span>
-        <ChevronDown size={14} color="#ffffff" />
+        {mockMode && <ChevronDown size={14} color="#ffffff" />}
       </button>
 
-      {isOpen && (
+      {mockMode && isOpen && (
         <>
           <div
             className="persona-backdrop"

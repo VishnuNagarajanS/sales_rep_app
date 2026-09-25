@@ -1,16 +1,10 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
-export interface ApiResponse<T> {
+export interface ApiResponse<T = any> {
   success: boolean;
   message?: string;
-  errors?: string[];
   data?: T;
-}
-
-export interface LoginResponse {
-  token: string;
-  user: import('../types').User;
-  tenant?: import('../types').Tenant | null;
+  errors?: string[];
 }
 
 class ApiClient {
@@ -35,14 +29,9 @@ class ApiClient {
       }
       throw new Error(err.message || 'Invalid email or password.');
     }
-    if (res.status === 403) {
-      const err = await res.json().catch(() => ({ message: 'You are not authorized to perform this action.' }));
-      throw new Error(err.message || 'You are not authorized to perform this action.');
-    }
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: res.statusText }));
-      const details = Array.isArray(err.errors) ? ` ${err.errors.join(' ')}` : '';
-      throw new Error(`${err.message || `HTTP Error ${res.status}`}${details}`);
+      throw new Error(err.message || `HTTP Error ${res.status}`);
     }
     return res.json();
   }
@@ -69,15 +58,6 @@ class ApiClient {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify(body),
-    });
-    return this.handleResponse<T>(res);
-  }
-
-  async patch<T>(endpoint: string, body?: unknown): Promise<T> {
-    const res = await fetch(`${API_BASE_URL}${endpoint}`, {
-      method: 'PATCH',
-      headers: this.getHeaders(),
-      body: body === undefined ? undefined : JSON.stringify(body),
     });
     return this.handleResponse<T>(res);
   }

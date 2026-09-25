@@ -3,26 +3,20 @@ import {
   Calendar,
   Plus,
   Phone,
-  Edit2,
-  Trash2,
-  CheckCircle,
   Clock,
-  UserX,
-  XCircle,
 } from 'lucide-react';
 import { Consultation, Investor } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
-import { consultationApi } from '../../services/consultationApi';
-import { IS_MOCK_ENV } from '../../config/runtime';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
-import { StatusChip } from '../../components/common/StatusChip';
 import { FilterBar } from '../../components/common/FilterBar';
 import { Modal } from '../../components/common/Modal';
+import { Drawer } from '../../components/common/Drawer';
+import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
 import './ConsultationsPage.css';
 
-// ─── Status Options ─────────────────────────────────────────────────────────
+// ─── Status Options (kept for the create/reschedule form only) ───────────────
 const STATUS_OPTIONS: { value: Consultation['status']; label: string }[] = [
   { value: 'Scheduled', label: 'Scheduled' },
   { value: 'Completed', label: 'Completed' },
@@ -30,8 +24,6 @@ const STATUS_OPTIONS: { value: Consultation['status']; label: string }[] = [
   { value: 'Cancelled', label: 'Cancelled' },
   { value: 'No-show', label: 'No-show' },
 ];
-
-const filterStatusOptions = STATUS_OPTIONS.map(s => ({ value: s.value, label: s.label }));
 
 // ─── Form State Shape ───────────────────────────────────────────────────────
 interface ConsultationForm {
@@ -67,12 +59,11 @@ export const ConsultationsPage: React.FC = () => {
   const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
 
-  // ── Core data ─────────────────────────────────────────────────────────────
   const [consultations, setConsultations] = useState<Consultation[]>([]);
   const [investors, setInvestors] = useState<Investor[]>([]);
+  const [drawerConsultation, setDrawerConsultation] = useState<Consultation | null>(null);
 
   // ── Filters ───────────────────────────────────────────────────────────────
-  const [statusFilter, setStatusFilter] = useState('All');
   const [consultantFilter, setConsultantFilter] = useState('All');
 
   // ── Create / Edit / Reschedule Modal ──────────────────────────────────────
@@ -83,43 +74,94 @@ export const ConsultationsPage: React.FC = () => {
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof ConsultationForm, string>>>({});
 
   // ── Data loading ──────────────────────────────────────────────────────────
-  const loadData = async () => {
-    if (IS_MOCK_ENV) {
-      setConsultations(storageService.getConsultations(tenant?.id));
-      setInvestors(storageService.getInvestors(tenant?.id));
-      return;
-    }
-
-    setConsultations(await consultationApi.getAll());
-    setInvestors([]);
+  const loadData = () => {
+    setConsultations(storageService.getConsultations(tenant?.id));
+    setInvestors(storageService.getInvestors(tenant?.id));
   };
 
   useEffect(() => {
-    void loadData().catch(error => console.error('Failed to load consultations', error));
-    const handleUpdate = () => void loadData();
+    loadData();
+    const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id]);
 
-  // ── Role-based scoping ────────────────────────────────────────────────────
-  const scopedConsultations = isExec
-    ? consultations.filter(
-      c =>
-        (c.consultantId && c.consultantId === user?.id) ||
-        (c.consultantName && c.consultantName === user?.name),
-    )
-    : consultations;
+  // ── Helper to parse timestamp for newest-first sorting / deduplication ────
+  const getConsultationTimestamp = (c: Consultation): number => {
+    // 1. Highest timestamp parsed from the cns-<timestamp> id
+    const match = (c.id || '').match(/^cns-(\d+)$/);
+    if (match) {
+      const ts = parseInt(match[1], 10);
+      if (!isNaN(ts) && ts > 10000000000) return ts;
+    }
+    // 2. Fall back to parsing scheduledAt
+    if (c.scheduledAt) {
+      const parsed = Date.parse(c.scheduledAt);
+      if (!isNaN(parsed)) return parsed;
+    }
+    // 3. Fall back to any numeric value from id (e.g. seed data cns-01 -> 1)
+    if (match) {
+      const ts = parseInt(match[1], 10);
+      if (!isNaN(ts)) return ts;
+    }
+    return 0;
+  };
 
-  // ── Filter options ────────────────────────────────────────────────────────
+  // ── Role-based scoping ────────────────────────────────────────────────────
+  const scopedConsultations = consultations;
+
+  // ── Group by investor & derive latestByInvestor (at most ONE row per investor) ──
+  const latestByInvestor = (() => {
+    // Pre-pass: map normalized phone digits to investorId if any consultation for that phone has one
+    const phoneToInvestorId = new Map<string, string>();
+    for (const c of scopedConsultations) {
+      if (c.investorId && c.investorId.trim()) {
+        const phone = (c.investorPhone || '').replace(/\D/g, '').slice(-10);
+        if (phone) phoneToInvestorId.set(phone, c.investorId.trim());
+      }
+    }
+
+    const getInvestorKey = (c: Consultation): string => {
+      if (c.investorId && c.investorId.trim()) {
+        return `id:${c.investorId.trim()}`;
+      }
+      const phone = (c.investorPhone || '').replace(/\D/g, '').slice(-10);
+      if (phone && phoneToInvestorId.has(phone)) {
+        return `id:${phoneToInvestorId.get(phone)}`;
+      }
+      if (phone) {
+        return `phone:${phone}`;
+      }
+      return `cns:${c.id}`;
+    };
+
+    const map = new Map<string, Consultation>();
+    for (const c of scopedConsultations) {
+      const key = getInvestorKey(c);
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, c);
+      } else {
+        if (getConsultationTimestamp(c) > getConsultationTimestamp(existing)) {
+          map.set(key, c);
+        }
+      }
+    }
+
+    return Array.from(map.values()).sort(
+      (a, b) => getConsultationTimestamp(b) - getConsultationTimestamp(a)
+    );
+  })();
+
+  // ── Filter options (operates on deduplicated latestByInvestor) ────────────
   const consultantOptions = Array.from(
-    new Set(scopedConsultations.map(c => c.consultantName)),
+    new Set(latestByInvestor.map(c => c.consultantName)),
   )
     .filter(Boolean)
     .map(name => ({ value: name, label: name }));
 
-  // ── Filtered list ─────────────────────────────────────────────────────────
-  const filteredConsultations = scopedConsultations.filter(c => {
-    if (statusFilter !== 'All' && c.status !== statusFilter) return false;
+  // ── Filtered list (operates on deduplicated latestByInvestor) ─────────────
+  const filteredConsultations = latestByInvestor.filter(c => {
     if (consultantFilter !== 'All' && c.consultantName !== consultantFilter) return false;
     return true;
   });
@@ -134,24 +176,6 @@ export const ConsultationsPage: React.FC = () => {
       agenda: 'Commercial REIT yield analysis & pass-through taxation discussion.',
       consultantId: user?.id ?? '',
       consultantName: user?.name ?? 'Advisor',
-    });
-    setFormErrors({});
-    setIsModalOpen(true);
-  };
-
-  const openEditModal = (c: Consultation) => {
-    setEditingConsultation(c);
-    setIsRescheduleMode(false);
-    setForm({
-      investorId: c.investorId,
-      investorName: c.investorName,
-      investorPhone: c.investorPhone,
-      scheduledAt: c.scheduledAt,
-      consultantId: c.consultantId,
-      consultantName: c.consultantName,
-      status: c.status,
-      agenda: c.agenda || '',
-      outcomeNotes: c.outcomeNotes || '',
     });
     setFormErrors({});
     setIsModalOpen(true);
@@ -188,11 +212,11 @@ export const ConsultationsPage: React.FC = () => {
     if (formErrors[key]) setFormErrors(prev => ({ ...prev, [key]: undefined }));
   };
 
-  const handleSaveConsultation = async (e?: React.FormEvent) => {
+  const handleSaveConsultation = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
     const errors: Partial<Record<keyof ConsultationForm, string>> = {};
-    if (!form.investorId && !form.investorName.trim()) errors.investorId = 'Please select or enter an investor.';
+    if (!form.investorId) errors.investorId = 'Please select an investor.';
     if (!form.scheduledAt.trim()) errors.scheduledAt = 'Consultation slot is required.';
     if (Object.keys(errors).length > 0) {
       setFormErrors(errors);
@@ -202,23 +226,19 @@ export const ConsultationsPage: React.FC = () => {
     const isEdit = !!editingConsultation;
     const cons: Consultation = {
       id: editingConsultation ? editingConsultation.id : `cns-${Date.now()}`,
-      companyId: tenant?.id || 't-ghl-01',
-      investorId: form.investorId || form.investorName.trim(),
-      investorName: form.investorName.trim(),
+      companyId: tenant?.id || '',
+      investorId: form.investorId,
+      investorName: form.investorName,
       investorPhone: form.investorPhone,
       scheduledAt: form.scheduledAt.trim(),
-      consultantId: form.consultantId.trim() || (user?.id ?? 'usr-admin'),
+      consultantId: form.consultantId.trim() || (user?.id ?? ''),
       consultantName: form.consultantName.trim() || (user?.name ?? 'Advisor'),
       status: form.status,
       agenda: form.agenda.trim(),
       outcomeNotes: form.outcomeNotes.trim() || undefined,
     };
 
-    if (IS_MOCK_ENV) {
-      storageService.saveConsultation(cons);
-    } else {
-      await consultationApi.save(cons);
-    }
+    storageService.saveConsultation(cons);
 
     storageService.addAuditLog({
       id: `aud-${Date.now()}`,
@@ -242,7 +262,6 @@ export const ConsultationsPage: React.FC = () => {
     });
 
     closeModal();
-    await loadData();
   };
 
   // ── Table columns ─────────────────────────────────────────────────────────
@@ -251,6 +270,7 @@ export const ConsultationsPage: React.FC = () => {
       key: 'scheduledAt',
       header: 'Session Slot',
       sortable: true,
+      width: '18%',
       render: c => (
         <div>
           <div className="consultation-slot-title">{c.scheduledAt}</div>
@@ -262,6 +282,7 @@ export const ConsultationsPage: React.FC = () => {
       key: 'investorName',
       header: 'Investor Profile',
       sortable: true,
+      width: '18%',
       render: c => (
         <div>
           <div className="consultation-client-name">{c.investorName}</div>
@@ -271,7 +292,8 @@ export const ConsultationsPage: React.FC = () => {
     },
     {
       key: 'agenda',
-      header: 'Advisory Agenda & Scope',
+      header: 'Reason for Consultation',
+      width: '38%',
       render: c => (
         <div>
           <span className="consultation-agenda-text">{c.agenda}</span>
@@ -292,14 +314,9 @@ export const ConsultationsPage: React.FC = () => {
     },
     {
       key: 'consultantName',
-      header: 'Private Wealth Advisor',
+      header: 'IRM Profile',
+      width: '16%',
       render: c => <span className="consultation-advisor-name">{c.consultantName}</span>,
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      sortable: true,
-      render: c => <StatusChip status={c.status} size="sm" />,
     },
   ];
 
@@ -311,110 +328,10 @@ export const ConsultationsPage: React.FC = () => {
       onClick: c => initiateCall(c.investorName, c.investorPhone, 'customer', c.investorId),
     },
     {
-      label: 'Edit',
-      icon: <Edit2 size={14} color="var(--primary-600)" style={{ marginRight: 6 }} />,
-      onClick: c => openEditModal(c),
-    },
-    {
       label: 'Reschedule',
       icon: <Clock size={14} color="#d97706" style={{ marginRight: 6 }} />,
       hidden: c => c.status === 'Completed' || c.status === 'Cancelled',
       onClick: c => openRescheduleModal(c),
-    },
-    {
-      label: 'Mark Completed',
-      icon: <CheckCircle size={14} color="#2563eb" style={{ marginRight: 6 }} />,
-      hidden: c => c.status === 'Completed' || c.status === 'Cancelled',
-      onClick: async c => {
-        const updated = { ...c, status: 'Completed' as const };
-        if (IS_MOCK_ENV) storageService.saveConsultation(updated);
-        else await consultationApi.save(updated);
-        storageService.addAuditLog({
-          id: `aud-${Date.now()}`,
-          timestamp: 'Just now',
-          actorName: user?.name || 'Advisor',
-          actorEmail: user?.email || 'advisor@ghl.com',
-          action: 'CONSULTATION_COMPLETED',
-          entityType: 'Consultation',
-          entityId: c.id,
-          companyId: tenant?.id,
-          companyName: tenant?.name,
-          details: `Marked consultation with ${c.investorName} as Completed.`,
-        });
-      },
-    },
-    {
-      label: 'Mark No-show',
-      icon: <UserX size={14} color="#ea580c" style={{ marginRight: 6 }} />,
-      hidden: c =>
-        c.status === 'Completed' || c.status === 'Cancelled' || c.status === 'No-show',
-      onClick: async c => {
-        const updated = { ...c, status: 'No-show' as const };
-        if (IS_MOCK_ENV) storageService.saveConsultation(updated);
-        else await consultationApi.save(updated);
-        storageService.addAuditLog({
-          id: `aud-${Date.now()}`,
-          timestamp: 'Just now',
-          actorName: user?.name || 'Advisor',
-          actorEmail: user?.email || 'advisor@ghl.com',
-          action: 'CONSULTATION_NO_SHOW',
-          entityType: 'Consultation',
-          entityId: c.id,
-          companyId: tenant?.id,
-          companyName: tenant?.name,
-          details: `Marked consultation with ${c.investorName} as No-show.`,
-        });
-      },
-    },
-    {
-      label: 'Cancel',
-      icon: <XCircle size={14} color="#dc2626" style={{ marginRight: 6 }} />,
-      hidden: c => c.status === 'Completed' || c.status === 'Cancelled',
-      onClick: async c => {
-        if (window.confirm(`Cancel consultation with ${c.investorName}?`)) {
-          const updated = { ...c, status: 'Cancelled' as const };
-          if (IS_MOCK_ENV) storageService.saveConsultation(updated);
-          else await consultationApi.save(updated);
-          storageService.addAuditLog({
-            id: `aud-${Date.now()}`,
-            timestamp: 'Just now',
-            actorName: user?.name || 'Advisor',
-            actorEmail: user?.email || 'advisor@ghl.com',
-            action: 'CONSULTATION_CANCELLED',
-            entityType: 'Consultation',
-            entityId: c.id,
-            companyId: tenant?.id,
-            companyName: tenant?.name,
-            details: `Cancelled consultation with ${c.investorName}.`,
-          });
-        }
-      },
-    },
-    {
-      label: 'Delete',
-      icon: <Trash2 size={14} color="#dc2626" style={{ marginRight: 6 }} />,
-      onClick: async c => {
-        if (
-          window.confirm(
-            `Delete consultation with ${c.investorName}? This cannot be undone.`,
-          )
-        ) {
-          if (IS_MOCK_ENV) storageService.deleteConsultation(c.id);
-          else await consultationApi.delete(c.id);
-          storageService.addAuditLog({
-            id: `aud-${Date.now()}`,
-            timestamp: 'Just now',
-            actorName: user?.name || 'Advisor',
-            actorEmail: user?.email || 'advisor@ghl.com',
-            action: 'CONSULTATION_DELETED',
-            entityType: 'Consultation',
-            entityId: c.id,
-            companyId: tenant?.id,
-            companyName: tenant?.name,
-            details: `Deleted consultation record with ${c.investorName}.`,
-          });
-        }
-      },
     },
   ];
 
@@ -448,18 +365,11 @@ export const ConsultationsPage: React.FC = () => {
         data={filteredConsultations}
         keyExtractor={c => c.id}
         rowActions={rowActions}
-        onRowClick={c => openEditModal(c)}
+        onRowClick={c => setDrawerConsultation(c)}
         searchPlaceholder="Search consultations by investor or agenda..."
         filtersNode={
           <FilterBar
             filters={[
-              {
-                key: 'status',
-                label: 'Status',
-                value: statusFilter,
-                onChange: setStatusFilter,
-                options: filterStatusOptions,
-              },
               {
                 key: 'consultant',
                 label: 'Consultant',
@@ -469,7 +379,6 @@ export const ConsultationsPage: React.FC = () => {
               },
             ]}
             onClearAll={() => {
-              setStatusFilter('All');
               setConsultantFilter('All');
             }}
           />
@@ -483,16 +392,12 @@ export const ConsultationsPage: React.FC = () => {
         title={
           isRescheduleMode
             ? 'Reschedule Consultation'
-            : editingConsultation
-              ? 'Edit Consultation'
-              : 'Schedule Private Wealth Advisory Consultation'
+            : 'Schedule Private Wealth Advisory Consultation'
         }
         subtitle={
           isRescheduleMode
             ? `Reschedule advisory slot for ${form.investorName || 'client'}`
-            : editingConsultation
-              ? `Update advisory session details for ${form.investorName || 'client'}`
-              : 'Book an advisory slot with a high-net-worth client'
+            : 'Book an advisory slot with a high-net-worth client'
         }
         maxWidth={620}
         footer={
@@ -507,9 +412,7 @@ export const ConsultationsPage: React.FC = () => {
             >
               {isRescheduleMode
                 ? 'Save Reschedule'
-                : editingConsultation
-                  ? 'Update Consultation'
-                  : 'Confirm Advisory Slot'}
+                : 'Confirm Advisory Slot'}
             </button>
           </>
         }
@@ -544,17 +447,6 @@ export const ConsultationsPage: React.FC = () => {
             {formErrors.investorId && (
               <div className="form-error">{formErrors.investorId}</div>
             )}
-            <input
-              id="consultation-form-investor-name"
-              className="form-input"
-              placeholder="Investor name (or select an existing investor)"
-              value={form.investorName}
-              onChange={e => {
-                setField('investorName', e.target.value);
-                if (!form.investorId) setField('investorId', e.target.value);
-              }}
-              style={{ marginTop: 8 }}
-            />
           </div>
 
           <div className="consultation-form-grid-2">
@@ -689,6 +581,51 @@ export const ConsultationsPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+
+      <Drawer
+        isOpen={!!drawerConsultation}
+        onClose={() => setDrawerConsultation(null)}
+        title={drawerConsultation?.investorName || 'Investor Profile'}
+        subtitle={`Phone: ${drawerConsultation?.investorPhone || '—'} • ${tenant?.name}`}
+        width={600}
+      >
+        {drawerConsultation && (() => {
+          const dPhone = (drawerConsultation.investorPhone || '').replace(/\D/g, '').slice(-10);
+          const matchingConsultations = consultations.filter(c => {
+            if (drawerConsultation.investorId && c.investorId === drawerConsultation.investorId) {
+              return true;
+            }
+            const cPhone = (c.investorPhone || '').replace(/\D/g, '').slice(-10);
+            return !!(dPhone && cPhone && dPhone === cPhone);
+          });
+
+          const sortedConsultations = [...matchingConsultations].sort(
+            (a, b) => getConsultationTimestamp(b) - getConsultationTimestamp(a)
+          );
+
+          const consultationHistory = sortedConsultations.filter(c => c.id !== drawerConsultation.id);
+
+          return (
+            <LeadDetailDrawerContent
+              contactName={drawerConsultation.investorName}
+              contactPhone={drawerConsultation.investorPhone}
+              contactId={drawerConsultation.investorId}
+              tenantId={tenant?.id}
+              tenantName={tenant?.name}
+              consultationReason={drawerConsultation.agenda}
+              consultationHistory={consultationHistory}
+              onCall={() =>
+                initiateCall(
+                  drawerConsultation.investorName,
+                  drawerConsultation.investorPhone,
+                  'customer',
+                  drawerConsultation.investorId
+                )
+              }
+            />
+          );
+        })()}
+      </Drawer>
     </div>
   );
 };

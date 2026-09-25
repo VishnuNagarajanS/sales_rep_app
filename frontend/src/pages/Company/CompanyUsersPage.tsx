@@ -11,7 +11,6 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { SYSTEM_ROLES } from '../../constants/roles';
 import { storageService } from '../../services/storageService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
@@ -41,7 +40,8 @@ export const CompanyUsersPage: React.FC = () => {
   };
 
   // ── Assignable Tenant Roles ──────────────────────────────────────────────
-  const assignableRoles = Object.values(SYSTEM_ROLES).filter(
+  const systemRoles = storageService.getRoles();
+  const assignableRoles = Object.values(systemRoles).filter(
     r => r.code !== 'super_admin' && r.code !== 'company_admin'
   );
 
@@ -82,7 +82,7 @@ export const CompanyUsersPage: React.FC = () => {
       return;
     }
 
-    const assignedRole = SYSTEM_ROLES[inviteRole] || SYSTEM_ROLES.sales_executive;
+    const assignedRole = systemRoles[inviteRole] || systemRoles.sales_executive;
     const newUser: User = {
       id: `usr-${Date.now()}`,
       name: trimmedName,
@@ -207,7 +207,7 @@ export const CompanyUsersPage: React.FC = () => {
   const handleSaveRole = () => {
     if (!editingRoleUser) return;
 
-    const newRole = SYSTEM_ROLES[newRoleCode] || SYSTEM_ROLES.sales_executive;
+    const newRole = systemRoles[newRoleCode] || systemRoles.sales_executive;
     const oldRole = editingRoleUser.role;
 
     storageService.saveUser({ ...editingRoleUser, role: newRole });
