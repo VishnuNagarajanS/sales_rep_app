@@ -370,11 +370,6 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({ onOpenQuickC
                         {/* Card Header */}
                         <div className="admin-card-header">
                           <span className="admin-card-name">{card.title}</span>
-                          <span
-                            className={`admin-card-priority-badge priority-${card.priority.toLowerCase()}`}
-                          >
-                            {card.priority}
-                          </span>
                         </div>
 
                         {/* Contact Row */}
@@ -399,13 +394,7 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({ onOpenQuickC
                           </span>
                         </div>
 
-                        {/* Last Action Snippet */}
-                        {card.lastActionSnippet && (
-                          <div className="admin-card-snippet-box">
-                            <span className="admin-card-snippet-title">Last Activity</span>
-                            <span>{card.lastActionSnippet}</span>
-                          </div>
-                        )}
+                        {/* Last Action Snippet Removed */}
 
                         {/* Footer & Stage Transition Controls */}
                         <div className="admin-card-footer">

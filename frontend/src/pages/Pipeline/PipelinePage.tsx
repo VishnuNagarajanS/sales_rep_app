@@ -408,9 +408,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                                   {deal.investorType}
                                 </span>
                               )}
-                              <span className={`irm-priority-badge ${(deal.priority || 'medium').toLowerCase()}`}>
-                                {(deal.priority || 'Medium').toUpperCase()}
-                              </span>
+
                             </div>
                           </div>
 
@@ -440,7 +438,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                               {daysInStage}d in stage
                             </span>
                           </div>
-
 
 
                           {/* Footer: Investment range + pagination */}
@@ -667,9 +664,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                     {irmDetailDeal.title}
                   </div>
                 </div>
-                <span className={`irm-priority-badge ${(irmDetailDeal.priority || 'medium').toLowerCase()}`}>
-                  {(irmDetailDeal.priority || 'Medium').toUpperCase()} PRIORITY
-                </span>
+
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: 'var(--text-secondary)' }}>
@@ -718,31 +713,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                     {irmDetailDeal.investmentRange || formatCurrency(irmDetailDeal.value)}
                   </span>
                 </div>
-                <div className="irm-detail-grid-item">
-                  <span className="irm-detail-grid-label">
-                    <Building2 size={12} /> Preferred Asset Class
-                  </span>
-                  <span className="irm-detail-grid-value">
-                    {irmDetailDeal.preferredAssetClass || 'Commercial Pre-Leased'}
-                    {irmDetailDeal.investorType && (
-                      <span
-                        style={{
-                          marginLeft: 8,
-                          fontSize: 10,
-                          fontWeight: 800,
-                          padding: '2px 6px',
-                          borderRadius: 4,
-                          background: 'rgba(59, 130, 246, 0.15)',
-                          color: '#3b82f6',
-                          border: '1px solid rgba(59, 130, 246, 0.3)',
-                          verticalAlign: 'middle',
-                        }}
-                      >
-                        {irmDetailDeal.investorType}
-                      </span>
-                    )}
-                  </span>
-                </div>
+
               </div>
             </div>
 

@@ -75,6 +75,9 @@ export const LeadsPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('All');
   const [capacityFilter, setCapacityFilter] = useState('All');
   const [agentFilter, setAgentFilter] = useState('All');
+  const [datePreset, setDatePreset] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
 
   const agentOptions = useMemo(() => {
     return Array.from(
@@ -83,6 +86,67 @@ export const LeadsPage: React.FC = () => {
       .sort()
       .map(name => ({ value: name, label: name }));
   }, [scopedLeads]);
+
+  const formatDateYMD = (d: Date): string => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const getPresetDates = (preset: string): { from: string; to: string } => {
+    const now = new Date();
+    const todayStr = formatDateYMD(now);
+
+    switch (preset) {
+      case 'today':
+        return { from: todayStr, to: todayStr };
+      case 'yesterday': {
+        const yest = new Date(now);
+        yest.setDate(yest.getDate() - 1);
+        const yestStr = formatDateYMD(yest);
+        return { from: yestStr, to: yestStr };
+      }
+      case 'this_week': {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 6);
+        return { from: formatDateYMD(d), to: todayStr };
+      }
+      case 'this_month': {
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        return { from: formatDateYMD(startOfMonth), to: formatDateYMD(endOfMonth) };
+      }
+      case 'last_30_days': {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 29);
+        return { from: formatDateYMD(d), to: todayStr };
+      }
+      default:
+        return { from: '', to: '' };
+    }
+  };
+
+  const handleDatePresetChange = (preset: string) => {
+    if (preset === 'all') {
+      setDatePreset('all');
+      setDateFrom('');
+      setDateTo('');
+    } else if (preset === 'custom') {
+      setDatePreset('custom');
+    } else {
+      const { from, to } = getPresetDates(preset);
+      setDatePreset(preset);
+      setDateFrom(from);
+      setDateTo(to);
+    }
+  };
+
+  const handleCustomDateChange = (from: string, to: string) => {
+    setDatePreset('custom');
+    setDateFrom(from);
+    setDateTo(to);
+  };
 
   // GHL Admin assign-mode state
   const isGhlAdmin =
@@ -240,6 +304,18 @@ export const LeadsPage: React.FC = () => {
     if (capacityFilter !== 'All') {
       if (!matchCapacity(lead, capacityFilter)) return false;
     }
+
+    // Date range filter
+    if (datePreset !== 'all' || dateFrom || dateTo) {
+      const rawDate = lead.createdAt;
+      if (!rawDate) return datePreset === 'all';
+      const dateStr = /^\d{4}-\d{2}-\d{2}/.test(rawDate)
+        ? rawDate.substring(0, 10)
+        : formatDateYMD(new Date(rawDate));
+      if (dateFrom && dateStr < dateFrom) return false;
+      if (dateTo && dateStr > dateTo) return false;
+    }
+
     return true;
   });
 
@@ -861,10 +937,20 @@ export const LeadsPage: React.FC = () => {
                   options: CAPACITY_OPTIONS.map(o => ({ value: o, label: o })),
                 }] : []),
               ]}
+              dateRange={{
+                preset: datePreset,
+                onPresetChange: handleDatePresetChange,
+                from: dateFrom,
+                to: dateTo,
+                onChange: handleCustomDateChange,
+              }}
               onClearAll={() => {
                 setStatusFilter('All');
                 setAgentFilter('All');
                 setCapacityFilter('All');
+                setDatePreset('all');
+                setDateFrom('');
+                setDateTo('');
               }}
             />
             {isGhlAdmin && (

@@ -34,6 +34,25 @@
   gap: 6px;
 }
 
+.assigned-leads-page .lead-date-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.assigned-leads-page .lead-date-primary {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.assigned-leads-page .lead-date-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 .assigned-leads-page .modal-backdrop {
   z-index: 1100;
 }

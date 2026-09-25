@@ -359,6 +359,7 @@ export interface Consultation {
   status: 'Scheduled' | 'Completed' | 'Rescheduled' | 'Cancelled' | 'No-show';
   agenda: string;
   outcomeNotes?: string;
+  referredByAgentName?: string;
 }
 
 export interface InvestmentOpportunity {

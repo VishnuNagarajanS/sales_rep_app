@@ -970,6 +970,18 @@ class StorageService {
   }
 
   // Call Preferences (sound, desktop notifs, auto-busy, default followup time)
+  getAdminCallSettings(): { allowSalesDecline: boolean; allowIrmDecline: boolean } {
+    return this.get('admin_call_settings', {
+      allowSalesDecline: true,
+      allowIrmDecline: true,
+    });
+  }
+
+  setAdminCallSettings(settings: Partial<{ allowSalesDecline: boolean; allowIrmDecline: boolean }>): void {
+    const existing = this.getAdminCallSettings();
+    this.set('admin_call_settings', { ...existing, ...settings });
+  }
+
   getCallPreferences(): {
     soundEnabled: boolean;
     desktopNotifEnabled: boolean;

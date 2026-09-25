@@ -547,6 +547,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                       </span>
                       <span style={{ fontSize: 12, fontWeight: 600 }}>{c.timestamp}</span>
                       <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>• {formatDuration(c.duration)}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>• Agent: <strong>{c.agentName || 'Unknown'}</strong></span>
                     </div>
                     <StatusChip status={c.disposition} size="sm" />
                   </div>

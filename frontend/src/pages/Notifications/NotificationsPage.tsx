@@ -7,7 +7,6 @@ import {
   Calendar,
   Send,
   AlertTriangle,
-  ShieldAlert,
   Radio,
   FileText,
   UserCheck,
@@ -303,19 +302,6 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
           maxWidth={620}
         >
           <form onSubmit={handleSendAlert} className="alert-composer-form">
-            {/* Strict Tenant Isolation Banner */}
-            <div className="alert-composer-isolation-banner">
-              <ShieldAlert size={20} color="#dc2626" style={{ flexShrink: 0 }} />
-              <div>
-                <strong style={{ display: 'block', color: 'var(--text-primary)', fontSize: 13 }}>
-                  Strict Multi-Tenant Isolation Active
-                </strong>
-                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                  This notification is strictly routed to members of <strong>{tenant?.name}</strong> ({tenant?.slug.toUpperCase()}). Members of other organizations (e.g. Jamin Bazaar) will not have access.
-                </span>
-              </div>
-            </div>
-
             {errorMsg && (
               <div className="alert-form-error">
                 <AlertTriangle size={14} /> {errorMsg}
