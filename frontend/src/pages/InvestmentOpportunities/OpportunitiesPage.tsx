@@ -10,6 +10,7 @@ import {
   MapPin,
   Clock,
   CheckCircle,
+  FileText,
 } from 'lucide-react';
 import { InvestmentOpportunity, Investor, Deal, DealActivity } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -98,11 +99,23 @@ export const OpportunitiesPage: React.FC = () => {
   const [stageModalOpp, setStageModalOpp] = useState<InvestmentOpportunity | null>(null);
   const [newStage, setNewStage] = useState<InvestmentOpportunity['stage']>('Enquiry');
 
+  // ── IRM Customer Detail Modal state ───────────────────────────────────────
+  const [detailDeal, setDetailDeal] = useState<Deal | null>(null);
+  const [amountInput, setAmountInput] = useState<string>('');
+  const [isEditingAmount, setIsEditingAmount] = useState<boolean>(false);
+  const [showConfirmDialog, setShowConfirmDialog] = useState<boolean>(false);
+
   // ── Data loading ──────────────────────────────────────────────────────────
   const loadData = () => {
     setOpps(storageService.getOpportunities(tenant?.id));
     setInvestors(storageService.getInvestors(tenant?.id));
-    setDeals(storageService.getDeals(tenant?.id));
+    const latestDeals = storageService.getDeals(tenant?.id);
+    setDeals(latestDeals);
+    setDetailDeal(prev => {
+      if (!prev) return null;
+      const fresh = latestDeals.find(d => d.id === prev.id);
+      return fresh || prev;
+    });
   };
 
   useEffect(() => {
@@ -367,6 +380,120 @@ export const OpportunitiesPage: React.FC = () => {
     return Math.max(0, days);
   };
 
+  // ── IRM Customer Detail & Investment Amount Handlers ───────────────────────
+  const handleOpenDetailModal = (deal: Deal) => {
+    setDetailDeal(deal);
+    setAmountInput(deal.value ? String(deal.value) : '');
+    setIsEditingAmount(false);
+    setShowConfirmDialog(false);
+  };
+
+  const handleCloseDetailModal = () => {
+    setDetailDeal(null);
+    setIsEditingAmount(false);
+    setShowConfirmDialog(false);
+  };
+
+  const handleEditAmount = () => {
+    if (!detailDeal) return;
+    const updatedDeal: Deal = {
+      ...detailDeal,
+      investmentAmountConfirmed: false,
+    };
+    storageService.saveDeal(updatedDeal);
+    setDetailDeal(updatedDeal);
+    setIsEditingAmount(true);
+    setAmountInput(detailDeal.value ? String(detailDeal.value) : '');
+    loadData();
+  };
+
+  const handleConfirmAmount = () => {
+    if (!detailDeal) return;
+    const numericAmount = parseFloat(amountInput) || 0;
+    const updatedDeal: Deal = {
+      ...detailDeal,
+      value: numericAmount,
+      investmentAmountConfirmed: true,
+    };
+    storageService.saveDeal(updatedDeal);
+    setDetailDeal(updatedDeal);
+    setIsEditingAmount(false);
+    setShowConfirmDialog(false);
+    loadData();
+    showToast(`Investment amount confirmed for "${detailDeal.customerName}"`);
+  };
+
+  const getDealKycStatus = (deal: Deal): 'Pending' | 'Partially Completed' | 'Completed' => {
+    const rawStatus = localStorage.getItem(`nexus_kyc_status_${deal.id}`);
+    if (rawStatus === 'Completed' || rawStatus === 'Submitted for Review' || rawStatus === 'SEBI KYC Validated') {
+      return 'Completed';
+    }
+    if (rawStatus === 'Partially Completed') {
+      return 'Partially Completed';
+    }
+    if (rawStatus === 'Pending') {
+      return 'Pending';
+    }
+
+    const savedDataStr = localStorage.getItem(`nexus_kyc_data_${deal.id}`);
+    if (savedDataStr) {
+      try {
+        const data = JSON.parse(savedDataStr);
+        if (data && typeof data === 'object') {
+          const isAllFilled =
+            Boolean(data.investorName?.trim()) &&
+            Boolean(data.panNumber?.trim()) &&
+            Boolean(data.bankAccountNumber?.trim() || data.accountNumber?.trim()) &&
+            Boolean(data.bankIfsc?.trim() || data.ifscCode?.trim()) &&
+            (Boolean(data.dematDoc) || data.hasNoDemat) &&
+            Boolean(data.nominees && data.nominees.length > 0 && data.nominees[0]?.name?.trim());
+
+          if (isAllFilled) return 'Completed';
+
+          const isPartiallyFilled =
+            Boolean(data.panNumber?.trim()) ||
+            Boolean(data.aadhaarNumber?.trim()) ||
+            Boolean(data.bankAccountNumber?.trim() || data.accountNumber?.trim()) ||
+            Boolean(data.aadhaarDoc) ||
+            Boolean(data.panDoc);
+
+          if (isPartiallyFilled) return 'Partially Completed';
+        }
+      } catch { }
+    }
+
+    if ((deal as any).kycValidated === true) {
+      return 'Completed';
+    }
+
+    return 'Pending';
+  };
+
+  const getKycFormData = (dealId: string) => {
+    const raw = localStorage.getItem(`nexus_kyc_data_${dealId}`);
+    if (!raw) return null;
+    try {
+      const data = JSON.parse(raw);
+      if (!data || typeof data !== 'object') return null;
+      const hasContent = Object.entries(data).some(([k, val]) => {
+        if (k === 'hasNoDemat' && val === true) return true;
+        if (Array.isArray(val)) {
+          return val.length > 0 && val.some((item: any) => item && (item.name?.trim() || item.relationship));
+        }
+        if (typeof val === 'object' && val !== null) {
+          return Boolean((val as any).name);
+        }
+        if (typeof val === 'string') {
+          return val.trim() !== '' && val.trim() !== '+91';
+        }
+        return Boolean(val);
+      });
+      return hasContent ? data : null;
+    } catch {
+      return null;
+    }
+  };
+
   const irmColumns: Column<Deal>[] = [
     {
       key: 'customerName',
@@ -411,9 +538,15 @@ export const OpportunitiesPage: React.FC = () => {
       header: 'Investment Amount',
       sortable: true,
       render: deal => (
-        <span style={{ color: '#10b981', fontWeight: 800, fontSize: 13 }}>
-          {formatCurrency(deal.value)}
-        </span>
+        deal.investmentAmountConfirmed ? (
+          <span style={{ color: '#10b981', fontWeight: 800, fontSize: 13 }}>
+            {formatCurrency(deal.value)}
+          </span>
+        ) : (
+          <span style={{ color: 'var(--text-muted, #94a3b8)', fontWeight: 600, fontSize: 13 }}>
+            —
+          </span>
+        )
       ),
     },
     {
@@ -437,16 +570,33 @@ export const OpportunitiesPage: React.FC = () => {
     {
       key: 'actions',
       header: 'Action',
-      render: deal => (
-        <button
-          type="button"
-          className="irm-convert-btn"
-          title="Convert deal (Mandate executed & funds committed)"
-          onClick={() => handleAdvanceToConverted(deal)}
-        >
-          <CheckCircle size={13} /> Convert
-        </button>
-      ),
+      render: deal => {
+        const isConfirmed = Boolean(deal.investmentAmountConfirmed);
+        return (
+          <button
+            type="button"
+            className="irm-convert-btn"
+            title={
+              isConfirmed
+                ? 'Convert deal (Mandate executed & funds committed)'
+                : 'Set the investment amount before converting.'
+            }
+            disabled={!isConfirmed}
+            onClick={e => {
+              e.stopPropagation();
+              if (isConfirmed) {
+                handleAdvanceToConverted(deal);
+              }
+            }}
+            style={{
+              opacity: isConfirmed ? 1 : 0.45,
+              cursor: isConfirmed ? 'pointer' : 'not-allowed',
+            }}
+          >
+            <CheckCircle size={13} /> Convert
+          </button>
+        );
+      },
     },
   ];
 
@@ -508,6 +658,7 @@ export const OpportunitiesPage: React.FC = () => {
           columns={irmColumns}
           data={irmDeals}
           keyExtractor={d => d.id}
+          onRowClick={deal => handleOpenDetailModal(deal)}
           searchPlaceholder="Search opportunities by investor, deal, or asset class..."
           emptyTitle="No Investment Opportunities"
           emptyDescription="No deals currently in the Investment Opportunity stage."
@@ -782,6 +933,543 @@ export const OpportunitiesPage: React.FC = () => {
               )}
             </div>
           )}
+        </div>
+      </Modal>
+
+      {/* ── Customer Detail Card Modal (IRM Only) ────────────────────────── */}
+      {detailDeal && (
+        <Modal
+          isOpen={!!detailDeal}
+          onClose={handleCloseDetailModal}
+          title="Customer Detail Card"
+          subtitle={`${detailDeal.customerName} • Deal Details`}
+          maxWidth={760}
+          footer={
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleCloseDetailModal}
+            >
+              Close
+            </button>
+          }
+        >
+          {(() => {
+            const kycStatus = getDealKycStatus(detailDeal);
+            const kycBadgeStyles = {
+              Completed: { bg: '#ecfdf5', color: '#059669', border: '#a7f3d0' },
+              'Partially Completed': { bg: '#fffbeb', color: '#d97706', border: '#fde68a' },
+              Pending: { bg: '#f8fafc', color: '#64748b', border: '#cbd5e1' },
+            }[kycStatus];
+            const kycData = getKycFormData(detailDeal.id);
+            const isConfirmed = Boolean(detailDeal.investmentAmountConfirmed) && !isEditingAmount;
+
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                {/* Header: Customer Name, Phone, Email */}
+                <div
+                  style={{
+                    padding: '16px 20px',
+                    borderRadius: 10,
+                    background: 'var(--bg-surface-hover, #f8fafc)',
+                    border: '1px solid var(--border-color, #e2e8f0)',
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 16,
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {detailDeal.customerName}
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 6, fontSize: 13, color: 'var(--text-secondary)' }}>
+                      {detailDeal.phone && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Phone size={13} color="var(--text-muted)" />
+                          <span>{detailDeal.phone}</span>
+                        </div>
+                      )}
+                      {detailDeal.email && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Mail size={13} color="var(--text-muted)" />
+                          <span>{detailDeal.email}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Top Row: KYC Status & Investment Amount */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+                  {/* KYC Status Section */}
+                  <div
+                    style={{
+                      padding: '16px',
+                      borderRadius: 10,
+                      border: '1px solid var(--border-color, #e2e8f0)',
+                      background: 'var(--bg-surface, #ffffff)',
+                    }}
+                  >
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>
+                      KYC Status
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          padding: '4px 12px',
+                          borderRadius: 9999,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          backgroundColor: kycBadgeStyles.bg,
+                          color: kycBadgeStyles.color,
+                          border: `1px solid ${kycBadgeStyles.border}`,
+                        }}
+                      >
+                        {kycStatus}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Investment Amount Section (Editable) */}
+                  <div
+                    style={{
+                      padding: '16px',
+                      borderRadius: 10,
+                      border: '1px solid var(--border-color, #e2e8f0)',
+                      background: 'var(--bg-surface, #ffffff)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        Investment Amount
+                      </span>
+                      {isConfirmed ? (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            padding: '3px 8px',
+                            borderRadius: 9999,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            backgroundColor: '#ecfdf5',
+                            color: '#059669',
+                            border: '1px solid #a7f3d0',
+                          }}
+                        >
+                          Confirmed
+                        </span>
+                      ) : (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            padding: '3px 8px',
+                            borderRadius: 9999,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            backgroundColor: '#fffbeb',
+                            color: '#d97706',
+                            border: '1px solid #fde68a',
+                          }}
+                        >
+                          Unconfirmed
+                        </span>
+                      )}
+                    </div>
+
+                    {isConfirmed ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ flex: 1, position: 'relative' }}>
+                          <input
+                            type="text"
+                            readOnly
+                            className="form-input"
+                            value={formatCurrency(detailDeal.value)}
+                            style={{
+                              width: '100%',
+                              fontSize: 14,
+                              fontWeight: 700,
+                              color: '#10b981',
+                              height: 38,
+                              backgroundColor: 'var(--bg-surface-hover, #f8fafc)',
+                              cursor: 'default',
+                            }}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={handleEditAmount}
+                          style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38, padding: '0 14px' }}
+                        >
+                          <Edit2 size={13} /> Edit
+                        </button>
+                      </div>
+                    ) : (
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <div style={{ position: 'relative', flex: 1 }}>
+                            <input
+                              type="number"
+                              min="0"
+                              step="100000"
+                              className="form-input"
+                              placeholder="Enter amount in ₹"
+                              value={amountInput}
+                              onChange={e => setAmountInput(e.target.value)}
+                              style={{ width: '100%', fontSize: 13, height: 38 }}
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            disabled={!amountInput || parseFloat(amountInput) <= 0}
+                            onClick={() => {
+                              const val = parseFloat(amountInput);
+                              if (val && val > 0) {
+                                setShowConfirmDialog(true);
+                              }
+                            }}
+                            style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38, padding: '0 14px' }}
+                          >
+                            <CheckCircle size={13} /> Confirm
+                          </button>
+                        </div>
+                        <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+                          Display format: <strong style={{ color: '#10b981' }}>{formatCurrency(parseFloat(amountInput) || 0)}</strong>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Form Details Section */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+                    Form Details
+                  </div>
+
+                  {!kycData ? (
+                    <div
+                      style={{
+                        padding: '24px',
+                        borderRadius: 8,
+                        background: 'var(--bg-surface-hover, #f8fafc)',
+                        border: '1px dashed var(--border-color, #cbd5e1)',
+                        color: 'var(--text-muted, #94a3b8)',
+                        fontSize: 13,
+                        textAlign: 'center',
+                      }}
+                    >
+                      Not filled yet.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                      {/* 1. Basic Details */}
+                      <div
+                        style={{
+                          border: '1px solid var(--border-color, #e2e8f0)',
+                          borderRadius: 8,
+                          padding: '16px',
+                          background: 'var(--bg-surface, #ffffff)',
+                        }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 12 }}>
+                          1. Basic Details
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px 16px', fontSize: 13 }}>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Investor Name</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2 }}>{kycData.investorName || detailDeal.customerName || '—'}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Phone</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2 }}>{kycData.phone || detailDeal.phone || '—'}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Email</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2 }}>{kycData.email || detailDeal.email || '—'}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Gender</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2 }}>{kycData.gender || '—'}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Investor Type</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2 }}>{kycData.investorType || '—'}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Resident Type</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2 }}>{kycData.residentType || '—'}</div>
+                          </div>
+                          {kycData.occupation && (
+                            <div>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Occupation</div>
+                              <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2 }}>{kycData.occupation}</div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 2. Identity Details & Address */}
+                      <div
+                        style={{
+                          border: '1px solid var(--border-color, #e2e8f0)',
+                          borderRadius: 8,
+                          padding: '16px',
+                          background: 'var(--bg-surface, #ffffff)',
+                        }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 12 }}>
+                          2. Identity Details & Address
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px 16px', fontSize: 13 }}>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>PAN Number</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginTop: 2, fontFamily: 'monospace' }}>{kycData.panNumber || '—'}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Name as per PAN</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2 }}>{kycData.nameAsPerPan || '—'}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Aadhaar Number</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2, fontFamily: 'monospace' }}>
+                              {kycData.aadhaarNumber ? (kycData.aadhaarNumber.length >= 4 ? `•••• •••• ${kycData.aadhaarNumber.slice(-4)}` : kycData.aadhaarNumber) : '—'}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Father's Name</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2 }}>{kycData.fatherName || '—'}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Date of Birth</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2 }}>{kycData.dob || '—'}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>City / State / Pincode</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2 }}>
+                              {[kycData.city, kycData.state, kycData.pincode].filter(Boolean).join(', ') || '—'}
+                            </div>
+                          </div>
+                          {kycData.address && (
+                            <div style={{ gridColumn: '1 / -1' }}>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Address</div>
+                              <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2 }}>{kycData.address}</div>
+                            </div>
+                          )}
+                          {(kycData.panDoc || kycData.aadhaarDoc) && (
+                            <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 4 }}>
+                              {kycData.panDoc && (
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, background: 'var(--bg-surface-hover, #f1f5f9)', padding: '4px 10px', borderRadius: 6 }}>
+                                  <FileText size={13} color="#0284c7" />
+                                  <span>PAN Document: {kycData.panDoc.name || 'Uploaded'}</span>
+                                </div>
+                              )}
+                              {kycData.aadhaarDoc && (
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, background: 'var(--bg-surface-hover, #f1f5f9)', padding: '4px 10px', borderRadius: 6 }}>
+                                  <FileText size={13} color="#0284c7" />
+                                  <span>Aadhaar Document: {kycData.aadhaarDoc.name || 'Uploaded'}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 3. Bank Details */}
+                      <div
+                        style={{
+                          border: '1px solid var(--border-color, #e2e8f0)',
+                          borderRadius: 8,
+                          padding: '16px',
+                          background: 'var(--bg-surface, #ffffff)',
+                        }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 12 }}>
+                          3. Bank Details
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px 16px', fontSize: 13 }}>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Bank Name</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2 }}>{kycData.bankName || '—'}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Branch Name</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2 }}>{kycData.branchName || '—'}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Account Number</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginTop: 2, fontFamily: 'monospace' }}>
+                              {kycData.accountNumber || kycData.bankAccountNumber || '—'}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>IFSC Code</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginTop: 2, fontFamily: 'monospace' }}>
+                              {kycData.ifscCode || kycData.bankIfsc || '—'}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Account Type</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2 }}>{kycData.accountType || 'Savings'}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Account Holder</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2 }}>{kycData.accountHolderName || detailDeal.customerName || '—'}</div>
+                          </div>
+                          {kycData.bankProofDoc && (
+                            <div style={{ gridColumn: '1 / -1', marginTop: 4 }}>
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, background: 'var(--bg-surface-hover, #f1f5f9)', padding: '4px 10px', borderRadius: 6 }}>
+                                <FileText size={13} color="#0284c7" />
+                                <span>Bank Proof: {kycData.bankProofDoc.name || 'Uploaded'}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 4. Demat Account */}
+                      <div
+                        style={{
+                          border: '1px solid var(--border-color, #e2e8f0)',
+                          borderRadius: 8,
+                          padding: '16px',
+                          background: 'var(--bg-surface, #ffffff)',
+                        }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 12 }}>
+                          4. Demat Account
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px 16px', fontSize: 13 }}>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Demat Status</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2 }}>
+                              {kycData.hasNoDemat ? 'No Demat Account' : 'Demat Linked'}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Account / Client ID</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2, fontFamily: 'monospace' }}>
+                              {kycData.dematAccountNumber || [kycData.dematDpId, kycData.dematClientId].filter(Boolean).join(' / ') || '—'}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Depository</div>
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginTop: 2 }}>{kycData.dematDepository || '—'}</div>
+                          </div>
+                          {kycData.dematDoc && (
+                            <div style={{ gridColumn: '1 / -1', marginTop: 4 }}>
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, background: 'var(--bg-surface-hover, #f1f5f9)', padding: '4px 10px', borderRadius: 6 }}>
+                                <FileText size={13} color="#0284c7" />
+                                <span>Demat Document: {kycData.dematDoc.name || 'Uploaded'}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 5. Nominee Details */}
+                      <div
+                        style={{
+                          border: '1px solid var(--border-color, #e2e8f0)',
+                          borderRadius: 8,
+                          padding: '16px',
+                          background: 'var(--bg-surface, #ffffff)',
+                        }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 12 }}>
+                          5. Nominee Details
+                        </div>
+                        {kycData.nominees && kycData.nominees.length > 0 && kycData.nominees.some((n: any) => n.name?.trim()) ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                            {kycData.nominees.map((nom: any, idx: number) => (
+                              <div
+                                key={nom.id || idx}
+                                style={{
+                                  display: 'grid',
+                                  gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                                  gap: '8px 14px',
+                                  fontSize: 13,
+                                  padding: '10px 14px',
+                                  borderRadius: 6,
+                                  background: 'var(--bg-surface-hover, #f8fafc)',
+                                }}
+                              >
+                                <div>
+                                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Nominee Name</div>
+                                  <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{nom.name || '—'}</div>
+                                </div>
+                                <div>
+                                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Relationship</div>
+                                  <div style={{ color: 'var(--text-primary)' }}>{nom.relationship || '—'}</div>
+                                </div>
+                                <div>
+                                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Allocation</div>
+                                  <div style={{ color: '#10b981', fontWeight: 600 }}>{nom.allocationPercentage ? `${nom.allocationPercentage}%` : '—'}</div>
+                                </div>
+                                <div>
+                                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Date of Birth</div>
+                                  <div style={{ color: 'var(--text-primary)' }}>{nom.dob || '—'}</div>
+                                </div>
+                                {nom.guardianName && (
+                                  <div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Guardian</div>
+                                    <div style={{ color: 'var(--text-primary)' }}>{nom.guardianName}</div>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No nominee details recorded.</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+        </Modal>
+      )}
+
+      {/* ── Confirm Investment Amount Dialog ──────────────────────────────── */}
+      <Modal
+        isOpen={showConfirmDialog}
+        onClose={() => setShowConfirmDialog(false)}
+        title="Confirm Investment Amount"
+        maxWidth={460}
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setShowConfirmDialog(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleConfirmAmount}
+            >
+              Confirm
+            </button>
+          </>
+        }
+      >
+        <div style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.6 }}>
+          Set investment amount to{' '}
+          <strong style={{ color: '#10b981' }}>
+            {formatCurrency(parseFloat(amountInput) || 0)}
+          </strong>{' '}
+          for <strong>{detailDeal?.customerName}</strong>? This will be used for conversion.
         </div>
       </Modal>
     </div>
