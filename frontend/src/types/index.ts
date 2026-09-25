@@ -180,6 +180,7 @@ export interface Deal {
   preferredAssetClass?: string;
   investmentRange?: string; // e.g. "₹15 Cr – ₹25 Cr", display string shown in green
   investorType?: 'AIF' | 'Co-AIF';
+  investmentAmountConfirmed?: boolean;
 }
 
 export interface DealActivity {
