@@ -1,7 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { Upload, CheckCircle2, AlertCircle } from 'lucide-react';
 import { DocumentItem } from '../../types';
-import { documentStore } from '../../services/documentStore';
 import { useAuth } from '../../context/AuthContext';
 import './DocumentUploader.css';
 
@@ -17,6 +16,21 @@ interface DocumentUploaderProps {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+const saveStoredDocument = (doc: DocumentItem): void => {
+  try {
+    const raw = localStorage.getItem('nexus_documents');
+    const docs: DocumentItem[] = raw ? JSON.parse(raw) : [];
+    const index = docs.findIndex(d => d.id === doc.id);
+    if (index >= 0) {
+      docs[index] = doc;
+    } else {
+      docs.unshift(doc);
+    }
+    localStorage.setItem('nexus_documents', JSON.stringify(docs));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
 
 function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 B';
@@ -63,7 +77,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({
         entityId,
       };
 
-      documentStore.saveDocument(doc);
+      saveStoredDocument(doc);
       onUploaded?.(doc);
       showToast('success', `"${file.name}" logged successfully.`);
     } catch {

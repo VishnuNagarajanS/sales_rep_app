@@ -23,6 +23,23 @@ public class ApplicationDbContext : DbContext
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<ExecutiveProfile> ExecutiveProfiles => Set<ExecutiveProfile>();
 
+    // ── GHL India Ventures specific tables ──────────────────────────────────
+    /// <summary>GHL pipeline deals (Sales Exec + IRM Kanban board).</summary>
+    public DbSet<GhlDeal> GhlDeals => Set<GhlDeal>();
+
+    /// <summary>Activity log entries for each GHL deal (notes, calls, stage changes).</summary>
+    public DbSet<GhlDealActivity> GhlDealActivities => Set<GhlDealActivity>();
+
+    /// <summary>HNW investor profiles managed by GHL India Ventures.</summary>
+    public DbSet<GhlInvestor> GhlInvestors => Set<GhlInvestor>();
+
+    /// <summary>Investment opportunity pipeline linked to GHL investors.</summary>
+    public DbSet<GhlInvestmentOpportunity> GhlInvestmentOpportunities => Set<GhlInvestmentOpportunity>();
+
+    // ── Platform-wide audit trail ────────────────────────────────────────────
+    /// <summary>Immutable audit log of every create/update/delete action across all tenants.</summary>
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -138,7 +155,7 @@ public class ApplicationDbContext : DbContext
                 },
                 Timezone = "Asia/Kolkata (IST)",
                 Currency = "₹ INR",
-                BusinessHours = "09:30 AM - 07:00 PM IST",
+                BusinessHours = "10:00 AM - 06:30 PM IST",
                 IsActive = true,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
@@ -157,7 +174,7 @@ public class ApplicationDbContext : DbContext
                 },
                 Timezone = "Asia/Kolkata (IST)",
                 Currency = "₹ INR",
-                BusinessHours = "09:00 AM - 06:30 PM IST",
+                BusinessHours = "10:00 AM - 06:30 PM IST",
                 IsActive = true,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             }

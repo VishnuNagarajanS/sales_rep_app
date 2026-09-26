@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Briefcase, Kanban } from 'lucide-react';
 import { Deal } from '../../types';
 import { useAuth } from '../../context/AuthContext';
-import { dealStore } from '../../services/secondaryStores';
+import { getDeals } from '../../services/ghlApiService';
 import { PIPELINE_STAGES } from '../../constants/pipelineStages';
 import { DataTable, Column } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
@@ -35,8 +35,13 @@ export const DealsPage: React.FC<DealsPageProps> = ({ onNavigate }) => {
     .filter(Boolean)
     .map(name => ({ value: name, label: name }));
 
-  const loadData = () => {
-    setDeals(dealStore.getDeals(tenant?.id));
+  const loadData = async () => {
+    try {
+      const d = await getDeals(tenant?.id);
+      setDeals(d);
+    } catch (err) {
+      console.error('Failed to load deals', err);
+    }
   };
 
   useEffect(() => {

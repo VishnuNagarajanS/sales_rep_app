@@ -169,7 +169,17 @@ export function DataTable<T>({
   }, [data, selectedKeys, keyExtractor]);
 
   return (
-    <div className="data-table-container card" style={{ padding: 0, overflow: 'hidden' }}>
+    <div
+      className="data-table-container card"
+      style={{
+        padding: 0,
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        flex: 1,
+        minHeight: 0,
+      }}
+    >
       {/* Top Bar: Search & Actions */}
       <div
         style={{
@@ -181,6 +191,7 @@ export function DataTable<T>({
           flexWrap: 'wrap',
           gap: 12,
           background: 'var(--bg-surface)',
+          flexShrink: 0,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 260 }}>
@@ -209,7 +220,11 @@ export function DataTable<T>({
               }}
             />
           </div>
-          {filtersNode}
+          {filtersNode && (
+            <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+              {filtersNode}
+            </span>
+          )}
         </div>
 
         {/* Bulk Action Bar */}
@@ -253,7 +268,7 @@ export function DataTable<T>({
           onAction={onEmptyAction}
         />
       ) : (
-        <div style={{ overflowX: 'auto' }}>
+        <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1, minHeight: 0 }}>
           <table
             style={{
               width: '100%',
@@ -263,7 +278,7 @@ export function DataTable<T>({
               tableLayout: 'fixed',
             }}
           >
-            <thead>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
               <tr
                 style={{
                   borderBottom: '1px solid var(--border-base)',
@@ -276,7 +291,18 @@ export function DataTable<T>({
                 }}
               >
                 {bulkActions && (
-                  <th style={{ width: 44, padding: '12px 16px', textAlign: 'center' }}>
+                  <th
+                    style={{
+                      width: 44,
+                      padding: '12px 16px',
+                      textAlign: 'center',
+                      position: 'sticky',
+                      top: 0,
+                      background: 'var(--bg-surface-hover)',
+                      boxShadow: 'inset 0 -1px 0 var(--border-base)',
+                      zIndex: 10,
+                    }}
+                  >
                     <input
                       type="checkbox"
                       checked={
@@ -297,6 +323,11 @@ export function DataTable<T>({
                       textAlign: col.align || 'left',
                       cursor: col.sortable ? 'pointer' : 'default',
                       userSelect: 'none',
+                      position: 'sticky',
+                      top: 0,
+                      background: 'var(--bg-surface-hover)',
+                      boxShadow: 'inset 0 -1px 0 var(--border-base)',
+                      zIndex: 10,
                     }}
                     onClick={() => col.sortable && handleSort(col.key)}
                   >
@@ -309,8 +340,8 @@ export function DataTable<T>({
                           col.align === 'right'
                             ? 'flex-end'
                             : col.align === 'center'
-                            ? 'center'
-                            : 'flex-start',
+                              ? 'center'
+                              : 'flex-start',
                       }}
                     >
                       {col.header}
@@ -331,7 +362,20 @@ export function DataTable<T>({
                   </th>
                 ))}
                 {rowActions && rowActions.length > 0 && (
-                  <th style={{ width: 64, padding: '12px 16px', textAlign: 'right' }}>
+                  <th
+                    style={{
+                      width: 80,
+                      minWidth: 80,
+                      padding: '12px 16px',
+                      textAlign: 'right',
+                      position: 'sticky',
+                      top: 0,
+                      right: 0,
+                      background: 'var(--bg-surface-hover)',
+                      boxShadow: 'inset 0 -1px 0 var(--border-base)',
+                      zIndex: 12,
+                    }}
+                  >
                     Actions
                   </th>
                 )}
@@ -394,9 +438,18 @@ export function DataTable<T>({
                         style={{
                           padding: '14px 16px',
                           textAlign: 'right',
-                          position: 'relative',
+                          position: 'sticky',
+                          right: 0,
+                          background: isSelected ? 'rgba(59, 130, 246, 0.04)' : 'var(--bg-surface)',
+                          zIndex: 1,
                         }}
                         onClick={e => e.stopPropagation()}
+                        onMouseEnter={e => {
+                          if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'var(--bg-surface-hover)';
+                        }}
+                        onMouseLeave={e => {
+                          if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'var(--bg-surface)';
+                        }}
                       >
                         <button
                           ref={el => { triggerRefs.current[rowKey] = el; }}
@@ -480,6 +533,7 @@ export function DataTable<T>({
             fontSize: 13,
             color: 'var(--text-secondary)',
             backgroundColor: 'var(--bg-surface)',
+            flexShrink: 0,
           }}
         >
           <div>

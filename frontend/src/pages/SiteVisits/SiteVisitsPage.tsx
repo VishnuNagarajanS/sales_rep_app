@@ -3,11 +3,41 @@ import { Calendar, Plus, CheckCircle2, Phone } from 'lucide-react';
 import { SiteVisit } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { siteVisitStore, auditLogStore } from '../../services/secondaryStores';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import './SiteVisitsPage.css';
+const getStoredSiteVisits = (tenantId?: string): SiteVisit[] => {
+  try {
+    const raw = localStorage.getItem('nexus_site_visits');
+    const all = raw ? JSON.parse(raw) : [];
+    return tenantId ? all.filter((s: SiteVisit) => s.companyId === tenantId) : all;
+  } catch {
+    return [];
+  }
+};
+
+const saveStoredSiteVisit = (visit: SiteVisit) => {
+  try {
+    const raw = localStorage.getItem('nexus_site_visits');
+    const all: SiteVisit[] = raw ? JSON.parse(raw) : [];
+    const idx = all.findIndex(s => s.id === visit.id);
+    if (idx >= 0) all[idx] = visit;
+    else all.unshift(visit);
+    localStorage.setItem('nexus_site_visits', JSON.stringify(all));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
+
+const addStoredAuditLog = (log: any) => {
+  try {
+    const raw = localStorage.getItem('nexus_audit_logs');
+    const all = raw ? JSON.parse(raw) : [];
+    all.unshift(log);
+    localStorage.setItem('nexus_audit_logs', JSON.stringify(all));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
 
 export const SiteVisitsPage: React.FC = () => {
   const { tenant, user } = useAuth();
@@ -25,7 +55,7 @@ export const SiteVisitsPage: React.FC = () => {
   const [notes, setNotes] = useState('');
 
   const loadData = () => {
-    setSiteVisits(siteVisitStore.getSiteVisits(tenant?.id));
+    setSiteVisits(getStoredSiteVisits(tenant?.id));
   };
 
   useEffect(() => {
@@ -55,10 +85,10 @@ export const SiteVisitsPage: React.FC = () => {
       outcomeNotes: notes,
     };
 
-    siteVisitStore.saveSiteVisit(newVisit);
+    saveStoredSiteVisit(newVisit);
 
     // Also notify
-    auditLogStore.addAuditLog({
+    addStoredAuditLog({
       id: `aud-${Date.now()}`,
       timestamp: 'Just now',
       actorName: user?.name || 'Agent',
@@ -77,7 +107,7 @@ export const SiteVisitsPage: React.FC = () => {
   };
 
   const handleMarkComplete = (visit: SiteVisit) => {
-    siteVisitStore.saveSiteVisit({ ...visit, status: 'Completed' });
+    saveStoredSiteVisit({ ...visit, status: 'Completed' });
   };
 
   const columns: Column<SiteVisit>[] = [

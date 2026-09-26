@@ -12,22 +12,63 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { SYSTEM_ROLES } from '../../constants/roles';
-import { userStore, auditLogStore } from '../../services/secondaryStores';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { User, RoleCode } from '../../types';
 import './CompanyUsersPage.css';
 
+const getStoredUsers = (tenantSlug?: string): User[] => {
+  try {
+    const raw = localStorage.getItem('nexus_users');
+    const all: User[] = raw ? JSON.parse(raw) : [];
+    return tenantSlug ? all.filter(u => !u.companySlug || u.companySlug === tenantSlug) : all;
+  } catch {
+    return [];
+  }
+};
+
+const saveStoredUser = (user: User) => {
+  try {
+    const raw = localStorage.getItem('nexus_users');
+    const all: User[] = raw ? JSON.parse(raw) : [];
+    const idx = all.findIndex(u => u.id === user.id);
+    if (idx >= 0) all[idx] = user;
+    else all.push(user);
+    localStorage.setItem('nexus_users', JSON.stringify(all));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
+
+const deleteStoredUser = (userId: string) => {
+  try {
+    const raw = localStorage.getItem('nexus_users');
+    const all: User[] = raw ? JSON.parse(raw) : [];
+    const filtered = all.filter(u => u.id !== userId);
+    localStorage.setItem('nexus_users', JSON.stringify(filtered));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
+
+const addStoredAuditLog = (log: any) => {
+  try {
+    const raw = localStorage.getItem('nexus_audit_logs');
+    const all = raw ? JSON.parse(raw) : [];
+    all.unshift(log);
+    localStorage.setItem('nexus_audit_logs', JSON.stringify(all));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
+
 export const CompanyUsersPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const [usersList, setUsersList] = useState<User[]>(() =>
-    userStore.getUsers(tenant?.slug),
+    getStoredUsers(tenant?.slug),
   );
 
   useEffect(() => {
     const handleUpdate = () => {
-      setUsersList(userStore.getUsers(tenant?.slug));
+      setUsersList(getStoredUsers(tenant?.slug));
     };
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
@@ -96,10 +137,10 @@ export const CompanyUsersPage: React.FC = () => {
       lastLogin: 'Never',
     };
 
-    userStore.saveUser(newUser);
+    saveStoredUser(newUser);
 
     // Audit log
-    auditLogStore.addAuditLog({
+    addStoredAuditLog({
       id: `aud-${Date.now()}`,
       timestamp: 'Just now',
       actorName: user?.name || 'Administrator',
@@ -121,7 +162,7 @@ export const CompanyUsersPage: React.FC = () => {
 
   // ── Row Action Handlers ───────────────────────────────────────────────────
   const handleResendInvite = (u: User) => {
-    auditLogStore.addAuditLog({
+    addStoredAuditLog({
       id: `aud-${Date.now()}`,
       timestamp: 'Just now',
       actorName: user?.name || 'Administrator',
@@ -139,9 +180,9 @@ export const CompanyUsersPage: React.FC = () => {
   const handleRevokeInvite = (u: User) => {
     if (!window.confirm(`Revoke pending invitation for ${u.name} (${u.email})?`)) return;
 
-    userStore.deleteUser(u.id);
+    deleteStoredUser(u.id);
 
-    auditLogStore.addAuditLog({
+    addStoredAuditLog({
       id: `aud-${Date.now()}`,
       timestamp: 'Just now',
       actorName: user?.name || 'Administrator',
@@ -164,9 +205,9 @@ export const CompanyUsersPage: React.FC = () => {
     )
       return;
 
-    userStore.saveUser({ ...u, status: 'Disabled' });
+    saveStoredUser({ ...u, status: 'Disabled' });
 
-    auditLogStore.addAuditLog({
+    addStoredAuditLog({
       id: `aud-${Date.now()}`,
       timestamp: 'Just now',
       actorName: user?.name || 'Administrator',
@@ -182,9 +223,9 @@ export const CompanyUsersPage: React.FC = () => {
   };
 
   const handleReactivateUser = (u: User) => {
-    userStore.saveUser({ ...u, status: 'Active' });
+    saveStoredUser({ ...u, status: 'Active' });
 
-    auditLogStore.addAuditLog({
+    addStoredAuditLog({
       id: `aud-${Date.now()}`,
       timestamp: 'Just now',
       actorName: user?.name || 'Administrator',
@@ -210,9 +251,9 @@ export const CompanyUsersPage: React.FC = () => {
     const newRole = SYSTEM_ROLES[newRoleCode] || SYSTEM_ROLES.sales_executive;
     const oldRole = editingRoleUser.role;
 
-    userStore.saveUser({ ...editingRoleUser, role: newRole });
+    saveStoredUser({ ...editingRoleUser, role: newRole });
 
-    auditLogStore.addAuditLog({
+    addStoredAuditLog({
       id: `aud-${Date.now()}`,
       timestamp: 'Just now',
       actorName: user?.name || 'Administrator',
@@ -345,9 +386,8 @@ export const CompanyUsersPage: React.FC = () => {
               gap: 8,
               padding: '10px 18px',
               borderRadius: 'var(--radius-md)',
-              border: `1px solid ${
-                toast.type === 'success' ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'
-              }`,
+              border: `1px solid ${toast.type === 'success' ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'
+                }`,
               backgroundColor:
                 toast.type === 'success'
                   ? 'rgba(16,185,129,0.12)'

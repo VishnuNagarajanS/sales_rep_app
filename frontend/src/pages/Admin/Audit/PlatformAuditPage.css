@@ -1,67 +1,347 @@
+/* PlatformAuditPage Styles — Cross-Tenant Audit Ledger */
+
+.platform-audit-page-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-bottom: 40px;
+}
+
+.audit-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.btn-export-audit {
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid #334155;
+  color: #cbd5e1;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-export-audit:hover {
+  background: #334155;
+  color: #ffffff;
+  border-color: #8b5cf6;
+}
+
+/* Filter Card */
+.audit-filter-card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.audit-search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 6px 12px;
+  width: 100%;
+}
+
+.audit-search-input {
+  background: transparent;
+  border: none;
+  color: #f1f5f9;
+  font-size: 13px;
+  width: 100%;
+  outline: none;
+}
+
+.audit-dropdown-filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.date-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 3px 8px;
+}
+
+.date-input {
+  background: transparent;
+  border: none;
+  color: #cbd5e1;
+  font-size: 11px;
+  outline: none;
+  cursor: pointer;
+}
+
+.date-sep {
+  color: #64748b;
+  font-size: 12px;
+}
+
+/* Table Card */
+.audit-table-card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.audit-data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.audit-data-table th {
+  text-align: left;
+  padding: 12px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid #1e293b;
+}
+
+.audit-data-table td {
+  padding: 12px 14px;
+  font-size: 13px;
+  color: #cbd5e1;
+  border-bottom: 1px solid #1e293b;
+  vertical-align: middle;
+}
+
+.audit-log-row:hover {
+  background: rgba(30, 41, 59, 0.4);
+}
+
+.no-logs-cell {
+  text-align: center;
+  padding: 40px !important;
+  color: #64748b;
+  font-style: italic;
+}
+
+.timestamp-badge {
+  font-size: 11px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.tenant-namespace-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+  padding: 2px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.actor-cell {
+  display: flex;
+  flex-direction: column;
+}
+
+.actor-name-text {
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.actor-email-text {
+  font-size: 10px;
+  color: #64748b;
+}
+
+.action-pill {
+  display: inline-flex;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(139, 92, 246, 0.15);
+  color: #c084fc;
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  white-space: nowrap;
+}
+
+.entity-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.entity-type-tag {
+  font-size: 11px;
+  color: #f1f5f9;
+  font-weight: 600;
+}
+
+.entity-id-code {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.audit-details-text {
+  font-size: 12px;
+  color: #cbd5e1;
+  max-width: 380px;
+  line-height: 1.4;
+}
+
+.btn-inspect-diff {
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  color: #c084fc;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-inspect-diff:hover {
+  background: rgba(139, 92, 246, 0.25);
+  color: #ffffff;
+}
+
 /* ==========================================================================
-   Platform Audit Page Styles
+   Payload Inspection Drawer Styles
    ========================================================================== */
 
-.platform-audit-page {
+.log-inspector-container {
   display: flex;
   flex-direction: column;
   gap: 20px;
 }
 
-.platform-audit-page .page-header {
+.log-meta-card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 16px;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.meta-row {
+  display: flex;
   justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 16px;
+  align-items: flex-start;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.5);
+  padding-bottom: 6px;
 }
 
-.platform-audit-page .page-title {
-  font-size: 24px;
-  font-weight: 700;
+.meta-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.meta-key {
+  color: #94a3b8;
+  font-weight: 600;
+  min-width: 140px;
+}
+
+.meta-val {
+  color: #ffffff;
+  text-align: right;
+  word-break: break-all;
+}
+
+.diff-section {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  color: #ffffff;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.platform-audit-page .page-subtitle {
+.diff-heading {
   font-size: 13px;
-  color: #94a3b8;
-  margin-top: 4px;
-}
-
-.platform-audit-timestamp {
-  font-size: 12px;
-  color: #94a3b8;
-}
-
-.platform-audit-tenant-name {
-  font-weight: 700;
-  color: #38bdf8;
-}
-
-.platform-audit-actor-name {
   font-weight: 700;
   color: #ffffff;
+  margin: 0;
 }
 
-.platform-audit-actor-email {
-  font-size: 11px;
-  color: #94a3b8;
+.diff-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
 }
 
-.platform-audit-action-tag {
-  font-family: monospace;
-  font-size: 11px;
+@media (max-width: 768px) {
+  .diff-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.diff-pane {
+  background: #060910;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.pane-header {
+  background: #111827;
+  padding: 8px 12px;
+  font-size: 10px;
   font-weight: 700;
-  padding: 2px 6px;
-  background-color: #1e293b;
-  color: #c084fc;
-  border-radius: 4px;
+  color: #94a3b8;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid #1e293b;
 }
 
-.platform-audit-desc {
-  font-size: 12px;
+.pane-body {
+  padding: 12px;
+  font-size: 11px;
   color: #cbd5e1;
+  max-height: 320px;
+  overflow-y: auto;
+  line-height: 1.5;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.before-pane .pane-body {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.03);
+}
+
+.after-pane .pane-body {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.03);
+}
+
+.drawer-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+  border-top: 1px solid #334155;
+  padding-top: 14px;
 }

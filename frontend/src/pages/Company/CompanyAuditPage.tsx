@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FileCheck, Download, Filter, Shield } from 'lucide-react';
 import { AuditLog } from '../../types';
 import { useAuth } from '../../context/AuthContext';
-import { auditLogStore } from '../../services/secondaryStores';
+import { getAuditLogs } from '../../services/ghlApiService';
 import { DataTable, Column } from '../../components/common/DataTable';
 import './CompanyAuditPage.css';
 
@@ -10,9 +10,18 @@ export const CompanyAuditPage: React.FC = () => {
   const { tenant } = useAuth();
   const [logs, setLogs] = useState<AuditLog[]>([]);
 
+  const loadData = async () => {
+    try {
+      const data = await getAuditLogs(tenant?.id);
+      setLogs(data);
+    } catch (err) {
+      console.error('Failed to load audit logs', err);
+    }
+  };
+
   useEffect(() => {
-    setLogs(auditLogStore.getAuditLogs(tenant?.id));
-    const handleUpdate = () => setLogs(auditLogStore.getAuditLogs(tenant?.id));
+    loadData();
+    const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id]);

@@ -2,10 +2,49 @@ import React, { useState, useEffect } from 'react';
 import { Grid } from 'lucide-react';
 import { Plot, PropertyProject } from '../../types';
 import { useAuth } from '../../context/AuthContext';
-import { plotStore, auditLogStore } from '../../services/secondaryStores';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import './PlotsPage.css';
+
+const getStoredPlots = (): Plot[] => {
+  try {
+    const raw = localStorage.getItem('nexus_plots');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+const getStoredProjects = (): PropertyProject[] => {
+  try {
+    const raw = localStorage.getItem('nexus_projects');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveStoredPlot = (plot: Plot) => {
+  try {
+    const raw = localStorage.getItem('nexus_plots');
+    const all: Plot[] = raw ? JSON.parse(raw) : [];
+    const idx = all.findIndex(p => p.id === plot.id);
+    if (idx >= 0) all[idx] = plot;
+    else all.push(plot);
+    localStorage.setItem('nexus_plots', JSON.stringify(all));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
+
+const addStoredAuditLog = (log: any) => {
+  try {
+    const raw = localStorage.getItem('nexus_audit_logs');
+    const all = raw ? JSON.parse(raw) : [];
+    all.unshift(log);
+    localStorage.setItem('nexus_audit_logs', JSON.stringify(all));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
 
 export const PlotsPage: React.FC = () => {
   const { tenant, user } = useAuth();
@@ -20,8 +59,8 @@ export const PlotsPage: React.FC = () => {
   const [holdDays, setHoldDays] = useState('7');
 
   const loadData = () => {
-    setPlots(plotStore.getPlots());
-    setProjects(plotStore.getProjects());
+    setPlots(getStoredPlots());
+    setProjects(getStoredProjects());
   };
 
   useEffect(() => {
@@ -56,9 +95,9 @@ export const PlotsPage: React.FC = () => {
         holdExpiry: expiryDate.toISOString().split('T')[0],
       };
 
-      plotStore.savePlot(updatedPlot);
+      saveStoredPlot(updatedPlot);
 
-      auditLogStore.addAuditLog({
+      addStoredAuditLog({
         id: `aud-${Date.now()}`,
         timestamp: 'Just now',
         actorName: user?.name || 'Agent',
@@ -85,7 +124,7 @@ export const PlotsPage: React.FC = () => {
         holdByAgent: undefined,
         holdExpiry: undefined,
       };
-      plotStore.savePlot(updatedPlot);
+      saveStoredPlot(updatedPlot);
     }
   };
 

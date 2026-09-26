@@ -63,6 +63,9 @@ export const SYSTEM_ROLES: Record<string, Role> = {
     name: 'IRM',
     code: 'irm',
     permissions: [
+      PERMISSIONS.LEADS_VIEW,
+      PERMISSIONS.FOLLOWUPS_VIEW,
+      PERMISSIONS.DEALS_VIEW,
       PERMISSIONS.INVESTORS_VIEW,
       PERMISSIONS.INVESTORS_EDIT,
       PERMISSIONS.INVESTORS_CREATE,

@@ -38,6 +38,8 @@ import { BookingsPage } from './pages/Bookings/BookingsPage';
 import { InvestorsPage } from './pages/Investors/InvestorsPage';
 import { ConsultationsPage } from './pages/Consultations/ConsultationsPage';
 import { OpportunitiesPage } from './pages/InvestmentOpportunities/OpportunitiesPage';
+import { AssignedLeadsPage } from './pages/AssignedLeads/AssignedLeadsPage';
+import { KYCPage } from './pages/KYC/KYCPage';
 
 // Company Admin
 import { CompanyUsersPage } from './pages/Company/CompanyUsersPage';
@@ -52,12 +54,21 @@ import { PlatformRolesPage } from './pages/Admin/Roles/PlatformRolesPage';
 import { PlatformFeaturesPage } from './pages/Admin/Features/PlatformFeaturesPage';
 import { PlatformCallConfigPage } from './pages/Admin/CallConfig/PlatformCallConfigPage';
 import { PlatformAuditPage } from './pages/Admin/Audit/PlatformAuditPage';
+import { PlatformSystemPage } from './pages/Admin/System/PlatformSystemPage';
 
 import { ProtectedRoute } from './components/common/Guards';
 import { Modal } from './components/common/Modal';
-import { leadsApi, followupsApi, consultationsApi, customersApi } from './services/crmApi';
+import { Investor, Customer } from './types';
+import {
+  saveLead as apiSaveLead,
+  saveFollowup as apiSaveFollowup,
+  saveConsultation as apiSaveConsultation,
+  saveDeal as apiSaveDeal,
+  saveCustomer as apiSaveCustomer,
+  getInvestors as apiGetInvestors,
+  getCustomers as apiGetCustomers,
+} from './services/ghlApiService';
 import { PERMISSIONS } from './constants/permissions';
-import { Customer } from './types';
 import './App.css';
 
 export const App: React.FC = () => {
@@ -65,23 +76,26 @@ export const App: React.FC = () => {
   const [currentRoute, setCurrentRoute] = useState<string>(() => {
     return sessionStorage.getItem('nexus_current_route') || 'dashboard';
   });
-  const [availableCustomers, setAvailableCustomers] = useState<Customer[]>([]);
 
-  // Set default route for IRM user
-  useEffect(() => {
-    if (user?.role?.code === 'irm') {
-      const savedRoute = sessionStorage.getItem('nexus_current_route');
-      if (!savedRoute) {
-        setCurrentRoute('dashboard');
-        sessionStorage.setItem('nexus_current_route', 'dashboard');
-      }
-    }
-  }, [user?.role?.code]);
+  const roleCode = user?.role?.code;
+  const isGhlAdmin =
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
+    (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
 
   // Quick Create Modal State
   const [quickCreateType, setQuickCreateType] = useState<
     'lead' | 'followup' | 'deal' | 'visit' | 'consultation' | null
   >(null);
+
+  const [investors, setInvestors] = useState<Investor[]>([]);
+  const [tenantCustomers, setTenantCustomers] = useState<Customer[]>([]);
+
+  useEffect(() => {
+    if (tenant?.id) {
+      apiGetInvestors(tenant.id).then(setInvestors).catch(() => {});
+      apiGetCustomers(tenant.id).then(setTenantCustomers).catch(() => {});
+    }
+  }, [tenant?.id, quickCreateType]);
 
   const [quickName, setQuickName] = useState('');
   const [quickPhone, setQuickPhone] = useState('+91 ');
@@ -89,7 +103,7 @@ export const App: React.FC = () => {
   const [quickLocation, setQuickLocation] = useState('');
   const [quickSource, setQuickSource] = useState('Website Inbound');
   const [quickAssetClass, setQuickAssetClass] = useState('AIF');
-  const [quickInvestmentCapacity, setQuickInvestmentCapacity] = useState('₹1 Cr – ₹5 Cr');
+  const [quickInvestmentCapacity, setQuickInvestmentCapacity] = useState('');
   const [quickNotes, setQuickNotes] = useState('');
 
   // Consultation-specific state
@@ -110,10 +124,12 @@ export const App: React.FC = () => {
   const [dealCustomerMode, setDealCustomerMode] = useState<'existing' | 'new'>('existing');
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [newCustomerName, setNewCustomerName] = useState('');
+  const [navExtraState, setNavExtraState] = useState<any>(null);
 
   // Handle route change
-  const navigate = (route: string) => {
+  const navigate = (route: string, extraState?: any) => {
     setCurrentRoute(route);
+    setNavExtraState(extraState || null);
     sessionStorage.setItem('nexus_current_route', route);
   };
 
@@ -137,66 +153,131 @@ export const App: React.FC = () => {
     setConsOutcome('');
     setScheduledDate(new Date(Date.now() + 86400000).toISOString().split('T')[0]);
     setScheduledTime('11:00');
+    // Reset deal-specific state; pre-select first available customer
     setDealCustomerMode('existing');
     setNewCustomerName('');
-    customersApi.getCustomers().then(res => {
-      if (res?.items) {
-        setAvailableCustomers(res.items.map((c: any) => ({
-          ...c,
-          id: String(c.id),
-          companyId: String(tenant?.id || ''),
-        })));
-      }
-    }).catch(() => {});
+    setSelectedCustomerId(tenantCustomers[0]?.id || '');
   };
 
-  const handleSaveQuickCreate = async (e: React.FormEvent) => {
+  const handleSaveQuickCreate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!quickName) return;
 
-    try {
-      if (quickCreateType === 'lead') {
-        await leadsApi.createLead({
-          name: quickName,
-          phone: quickPhone,
-          email: quickEmail || undefined,
-          location: quickLocation || undefined,
-          source: quickSource,
-          notes: quickNotes,
-          investmentCapacity: quickInvestmentCapacity,
+    if (quickCreateType === 'lead') {
+      const newLead = {
+        id: `lead-${Date.now()}`,
+        companyId: tenant?.id || 't-ghl-01',
+        name: quickName,
+        phone: quickPhone,
+        email: quickEmail,
+        location: quickLocation,
+        source: quickSource,
+        status: 'New' as const,
+        priority: 'Medium' as const,
+        assignedAgentId: user?.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec'),
+        assignedAgentName: user?.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer'),
+        createdAt: new Date().toISOString().split('T')[0],
+        notes: quickNotes,
+        customFields: {
           assetClass: quickAssetClass,
           preferredAssetClass: quickAssetClass,
-        });
-      } else if (quickCreateType === 'followup') {
-        const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
-        await followupsApi.createFollowup({
-          contactName: quickName,
-          contactPhone: quickPhone,
-          contactType: 'lead',
-          scheduledAt: combinedDateTime,
-          priority: 'High',
-          notes: quickNotes,
-        });
-      } else if (quickCreateType === 'consultation') {
-        await consultationsApi.scheduleConsultation({
-          investorId: consInvestorId || '1',
-          investorName: consInvestorName || quickName,
-          investorPhone: consInvestorPhone || quickPhone,
-          scheduledAt: new Date(Date.now() + 86400000 * 2).toISOString(),
-          agenda: consAgenda.trim(),
-        });
-      } else if (quickCreateType === 'deal') {
-        await customersApi.createCustomer({
-          name: quickName,
+          investmentCapacity: quickInvestmentCapacity,
+        },
+      };
+      apiSaveLead(newLead).catch(console.error);
+
+    } else if (quickCreateType === 'followup') {
+      const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
+      const newFlw = {
+        id: `flw-${Date.now()}`,
+        companyId: tenant?.id || 't-ghl-01',
+        contactId: `contact-${Date.now()}`,
+        contactName: quickName,
+        contactPhone: quickPhone,
+        contactType: 'lead' as const,
+        scheduledAt: combinedDateTime,
+        scheduledDate,
+        scheduledTime,
+        priority: 'High' as const,
+        status: 'Pending' as const,
+        notes: quickNotes,
+        assignedAgentId: user?.id || 'usr-exec',
+        assignedAgentName: user?.name || 'Agent',
+      };
+      apiSaveFollowup(newFlw).catch(console.error);
+
+    } else if (quickCreateType === 'consultation') {
+      // Task 1 — Schedule Consultation
+      const newCons = {
+        id: `cons-${Date.now()}`,
+        companyId: tenant?.id || 't-ghl-01',
+        investorId: consInvestorId || `investor-${Date.now()}`,
+        investorName: consInvestorName,
+        investorPhone: consInvestorPhone,
+        scheduledAt: consSlot.trim(),
+        consultantId: user?.id || 'usr-exec',
+        consultantName: consConsultantName.trim() || user?.name || 'Agent',
+        status: consStatus,
+        agenda: consAgenda.trim(),
+        outcomeNotes: consOutcome.trim() || undefined,
+      };
+      apiSaveConsultation(newCons).catch(console.error);
+
+    } else if (quickCreateType === 'visit') {
+      // Task 2 — Schedule Site Visit
+      // Handled via local events
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+
+    } else if (quickCreateType === 'deal') {
+      // Task 4 — Deal linked to real customer
+      let resolvedCustomerId: string;
+      let resolvedCustomerName: string;
+
+      if (dealCustomerMode === 'existing' && selectedCustomerId) {
+        // Link to the chosen existing customer
+        const existing = tenantCustomers.find(c => c.id === selectedCustomerId);
+        resolvedCustomerId = existing?.id || selectedCustomerId;
+        resolvedCustomerName = existing?.name || 'Customer';
+      } else {
+        // Create a real Customer record first so it shows in Customer 360
+        if (!newCustomerName) return;
+        resolvedCustomerId = `cust-${Date.now()}`;
+        resolvedCustomerName = newCustomerName;
+        const newCust = {
+          id: resolvedCustomerId,
+          companyId: tenant?.id || 't-ghl-01',
+          name: resolvedCustomerName,
           phone: quickPhone,
-          email: quickEmail || undefined,
-          location: quickLocation || undefined,
-          status: 'Active',
-          notes: quickNotes,
-        });
+          email: '',
+          status: 'Active' as const,
+          assignedAgentId: user?.id || 'usr-exec',
+          assignedAgentName: user?.name || 'Agent',
+          location: 'Bengaluru',
+          lastContacted: new Date().toISOString().split('T')[0],
+          openDealsCount: 1,
+          totalValue: 5000000,
+          createdAt: new Date().toISOString().split('T')[0],
+          notes: '',
+          customFields: {},
+        };
+        apiSaveCustomer(newCust).catch(console.error);
       }
-    } catch (err) {
-      console.error('Failed to create item via API:', err);
+
+      const newDeal = {
+        id: `deal-${Date.now()}`,
+        companyId: tenant?.id || 't-ghl-01',
+        title: quickName,
+        customerId: resolvedCustomerId,
+        customerName: resolvedCustomerName,
+        stage: 'new',
+        value: 5000000,
+        expectedCloseDate: '30 Days',
+        assignedAgentId: user?.id || 'usr-exec',
+        assignedAgentName: user?.name || 'Agent',
+        notes: quickNotes,
+        createdAt: new Date().toISOString().split('T')[0],
+      };
+      apiSaveDeal(newDeal).catch(console.error);
     }
 
     setQuickCreateType(null);
@@ -214,7 +295,10 @@ export const App: React.FC = () => {
         {currentRoute === 'admin-dashboard' || currentRoute === 'dashboard' ? (
           <PlatformDashboardPage onNavigate={navigate} />
         ) : currentRoute === 'admin-companies' ? (
-          <CompaniesPage />
+          <CompaniesPage
+            initialOpenWizard={Boolean(navExtraState?.openWizard)}
+            selectedTenantId={navExtraState?.selectedTenantId}
+          />
         ) : currentRoute === 'admin-users' ? (
           <PlatformUsersPage />
         ) : currentRoute === 'admin-roles' ? (
@@ -225,6 +309,8 @@ export const App: React.FC = () => {
           <PlatformCallConfigPage />
         ) : currentRoute === 'admin-audit' ? (
           <PlatformAuditPage />
+        ) : currentRoute === 'admin-system' ? (
+          <PlatformSystemPage />
         ) : (
           <PlatformDashboardPage onNavigate={navigate} />
         )}
@@ -244,6 +330,14 @@ export const App: React.FC = () => {
       ) : currentRoute === 'leads' ? (
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
           <LeadsPage />
+        </ProtectedRoute>
+      ) : currentRoute === 'assigned-leads' ? (
+        <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
+          {isGhlAdmin ? (
+            <AssignedLeadsPage />
+          ) : (
+            <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+          )}
         </ProtectedRoute>
       ) : currentRoute === 'customers' ? (
         <ProtectedRoute permission={PERMISSIONS.CUSTOMERS_VIEW}>
@@ -286,6 +380,10 @@ export const App: React.FC = () => {
       ) : currentRoute === 'bookings' ? (
         <ProtectedRoute permission={PERMISSIONS.BOOKINGS_VIEW}>
           <BookingsPage />
+        </ProtectedRoute>
+      ) : currentRoute === 'kyc' ? (
+        <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
+          <KYCPage />
         </ProtectedRoute>
       ) : currentRoute === 'investors' ? (
         <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
@@ -423,21 +521,19 @@ export const App: React.FC = () => {
               <div className="lead-custom-schema-box">
                 <div className="lead-custom-schema-title">GHL India Ventures Asset Terms</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div className="form-group">
-                    <label className="form-label">Asset Class</label>
-                    <select
-                      className="form-select"
-                      value={quickAssetClass}
-                      onChange={e => {
-                        const ac = e.target.value;
-                        setQuickAssetClass(ac);
-                        setQuickInvestmentCapacity(ac === 'CO-AIF' ? '₹10 Lakh to ₹1 Cr' : '₹1 Cr – ₹5 Cr');
-                      }}
-                    >
-                      <option value="AIF">AIF</option>
-                      <option value="CO-AIF">CO-AIF</option>
-                    </select>
-                  </div>
+                  {user?.role?.code !== 'sales_executive' && (
+                    <div className="form-group">
+                      <label className="form-label">Asset Class</label>
+                      <select
+                        className="form-select"
+                        value={quickAssetClass}
+                        onChange={e => setQuickAssetClass(e.target.value)}
+                      >
+                        <option value="AIF">AIF</option>
+                        <option value="CO-AIF">CO-AIF</option>
+                      </select>
+                    </div>
+                  )}
                   <div className="form-group">
                     <label className="form-label">Investment Capacity</label>
                     <select
@@ -445,12 +541,17 @@ export const App: React.FC = () => {
                       value={quickInvestmentCapacity}
                       onChange={e => setQuickInvestmentCapacity(e.target.value)}
                     >
-                      {quickAssetClass === 'CO-AIF'
-                        ? [<option key="co" value="₹10 Lakh to ₹1 Cr">₹10 Lakh to ₹1 Cr</option>]
-                        : ['₹1 Cr – ₹5 Cr', '₹5 Cr – ₹10 Cr', '₹10 Cr – ₹25 Cr', '₹25 Cr+'].map(o => (
-                            <option key={o} value={o}>{o}</option>
-                          ))
-                      }
+                      <option value="" disabled>Select a range</option>
+                      {[
+                        'Contact for Co-Invest Details',
+                        '₹1 Cr – ₹5 Cr',
+                        '₹5 Cr – ₹10 Cr',
+                        '₹10 Cr – ₹25 Cr',
+                        '₹25 Cr+',
+                        'Not sure yet — help me decide'
+                      ].map(o => (
+                        <option key={o} value={o}>{o}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -472,7 +573,6 @@ export const App: React.FC = () => {
             <>
               {/* ── CONSULTATION: Full form matching Schedule Consultation ── */}
               {(() => {
-                const investors = availableCustomers;
                 return (
                   <>
                     <div className="form-group">
@@ -588,121 +688,120 @@ export const App: React.FC = () => {
             </>
           ) : (
             <>
-            {/* ── Deal: existing vs. new customer picker ── */}
-            {quickCreateType === 'deal' && (() => {
-            const tenantCustomers = availableCustomers;
-            const hasCustomers = tenantCustomers.length > 0;
-            return (
-              <div className="form-group">
-                <label className="form-label">Link to Customer</label>
+              {/* ── Deal: existing vs. new customer picker ── */}
+              {quickCreateType === 'deal' && (() => {
+                const hasCustomers = tenantCustomers.length > 0;
+                return (
+                  <div className="form-group">
+                    <label className="form-label">Link to Customer</label>
 
-                {/* Segmented toggle — same style as Reports page period toggle */}
-                <div className="app-segmented-toggle">
-                  {(['existing', 'new'] as const).map(mode => (
-                    <button
-                      key={mode}
-                      type="button"
-                      className={`btn btn-sm app-segmented-btn ${dealCustomerMode === mode ? 'btn-primary' : 'btn-ghost'} ${mode === 'existing' && !hasCustomers ? 'disabled' : ''}`}
-                      disabled={mode === 'existing' && !hasCustomers}
-                      onClick={() => setDealCustomerMode(mode)}
-                    >
-                      {mode === 'existing' ? 'Existing customer' : 'New customer'}
-                    </button>
-                  ))}
+                    {/* Segmented toggle — same style as Reports page period toggle */}
+                    <div className="app-segmented-toggle">
+                      {(['existing', 'new'] as const).map(mode => (
+                        <button
+                          key={mode}
+                          type="button"
+                          className={`btn btn-sm app-segmented-btn ${dealCustomerMode === mode ? 'btn-primary' : 'btn-ghost'} ${mode === 'existing' && !hasCustomers ? 'disabled' : ''}`}
+                          disabled={mode === 'existing' && !hasCustomers}
+                          onClick={() => setDealCustomerMode(mode)}
+                        >
+                          {mode === 'existing' ? 'Existing customer' : 'New customer'}
+                        </button>
+                      ))}
+                    </div>
+
+                    {!hasCustomers && (
+                      <p className="app-no-customers-msg">
+                        No customers in this workspace yet — deal will create a new customer record.
+                      </p>
+                    )}
+
+                    {dealCustomerMode === 'existing' && hasCustomers ? (
+                      <select
+                        className="form-select"
+                        value={selectedCustomerId}
+                        onChange={e => setSelectedCustomerId(e.target.value)}
+                        required
+                      >
+                        {tenantCustomers.map(c => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}{c.phone ? ` · ${c.phone}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div>
+                        <label className="form-label app-new-customer-label">
+                          New Customer Name * — a new Customer record will be created
+                        </label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          required
+                          placeholder="Customer full name"
+                          value={newCustomerName}
+                          onChange={e => setNewCustomerName(e.target.value)}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* ── Phone (non-lead, non-deal-existing) ── */}
+              {!(quickCreateType === 'deal' && dealCustomerMode === 'existing') && (
+                <div className="form-group">
+                  <label className="form-label">Phone Number</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={quickPhone}
+                    onChange={e => setQuickPhone(e.target.value)}
+                  />
                 </div>
+              )}
 
-                {!hasCustomers && (
-                  <p className="app-no-customers-msg">
-                    No customers in this workspace yet — deal will create a new customer record.
-                  </p>
-                )}
-
-                {dealCustomerMode === 'existing' && hasCustomers ? (
-                  <select
-                    className="form-select"
-                    value={selectedCustomerId}
-                    onChange={e => setSelectedCustomerId(e.target.value)}
-                    required
-                  >
-                    {tenantCustomers.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}{c.phone ? ` · ${c.phone}` : ''}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div>
-                    <label className="form-label app-new-customer-label">
-                      New Customer Name * — a new Customer record will be created
-                    </label>
+              {/* ── Scheduled Date + Time (followup, visit) ── */}
+              {(quickCreateType === 'followup' || quickCreateType === 'visit') && (
+                <div className="app-schedule-grid">
+                  <div className="form-group">
+                    <label className="form-label">Scheduled Date *</label>
                     <input
-                      type="text"
+                      type="date"
                       className="form-input"
                       required
-                      placeholder="Customer full name"
-                      value={newCustomerName}
-                      onChange={e => setNewCustomerName(e.target.value)}
+                      value={scheduledDate}
+                      onChange={e => setScheduledDate(e.target.value)}
                     />
                   </div>
-                )}
-              </div>
-            );
-          })()}
+                  <div className="form-group">
+                    <label className="form-label">Scheduled Time *</label>
+                    <input
+                      type="time"
+                      className="form-input"
+                      required
+                      value={scheduledTime}
+                      onChange={e => setScheduledTime(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
 
-          {/* ── Phone (non-lead, non-deal-existing) ── */}
-          {!(quickCreateType === 'deal' && dealCustomerMode === 'existing') && (
-            <div className="form-group">
-              <label className="form-label">Phone Number</label>
-              <input
-                type="text"
-                className="form-input"
-                value={quickPhone}
-                onChange={e => setQuickPhone(e.target.value)}
-              />
-            </div>
-          )}
-
-          {/* ── Scheduled Date + Time (followup, visit) ── */}
-          {(quickCreateType === 'followup' || quickCreateType === 'visit') && (
-            <div className="app-schedule-grid">
+              {/* ── Notes/Agenda (non-lead types) ── */}
               <div className="form-group">
-                <label className="form-label">Scheduled Date *</label>
-                <input
-                  type="date"
-                  className="form-input"
-                  required
-                  value={scheduledDate}
-                  onChange={e => setScheduledDate(e.target.value)}
+                <label className="form-label">Quick Notes</label>
+                <textarea
+                  className="form-textarea"
+                  rows={2}
+                  value={quickNotes}
+                  onChange={e => setQuickNotes(e.target.value)}
+                  placeholder={
+                    quickCreateType === 'visit'
+                      ? 'Special requirements, preferred plots...'
+                      : 'Brief requirement summary...'
+                  }
                 />
               </div>
-              <div className="form-group">
-                <label className="form-label">Scheduled Time *</label>
-                <input
-                  type="time"
-                  className="form-input"
-                  required
-                  value={scheduledTime}
-                  onChange={e => setScheduledTime(e.target.value)}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* ── Notes/Agenda (non-lead types) ── */}
-          <div className="form-group">
-            <label className="form-label">Quick Notes</label>
-            <textarea
-              className="form-textarea"
-              rows={2}
-              value={quickNotes}
-              onChange={e => setQuickNotes(e.target.value)}
-              placeholder={
-                quickCreateType === 'visit'
-                    ? 'Special requirements, preferred plots...'
-                    : 'Brief requirement summary...'
-              }
-            />
-          </div>
             </>
           )}
 

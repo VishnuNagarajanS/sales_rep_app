@@ -12,11 +12,80 @@ import {
   Clock,
   Activity,
 } from 'lucide-react';
-import { preferenceStore, CallPreferences, PopupPosition } from '../../services/secondaryStores';
-export type { PopupPosition, CallPreferences };
-
 import { useCall } from '../../context/CallContext';
+import { useAuth } from '../../context/AuthContext';
 import './CallSettingsPage.css';
+
+export type PopupPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+
+interface CallPreferences {
+  soundEnabled: boolean;
+  desktopNotifEnabled: boolean;
+  autoBusyEnabled: boolean;
+  defaultFollowupTime: string;
+}
+
+interface AdminCallSettings {
+  allowSalesDecline: boolean;
+  allowIrmDecline: boolean;
+}
+
+const DEFAULT_PREFS: CallPreferences = {
+  soundEnabled: true,
+  desktopNotifEnabled: false,
+  autoBusyEnabled: false,
+  defaultFollowupTime: '10:00',
+};
+
+const DEFAULT_ADMIN_SETTINGS: AdminCallSettings = {
+  allowSalesDecline: true,
+  allowIrmDecline: true,
+};
+
+const getPopupPosition = (): PopupPosition => {
+  return (localStorage.getItem('nexus_popup_pos') as PopupPosition) || 'top-right';
+};
+
+const setPopupPosition = (pos: PopupPosition) => {
+  localStorage.setItem('nexus_popup_pos', pos);
+  window.dispatchEvent(new Event('nexus_storage_updated'));
+};
+
+const getCallPreferences = (): CallPreferences => {
+  try {
+    const raw = localStorage.getItem('nexus_call_prefs');
+    return raw ? { ...DEFAULT_PREFS, ...JSON.parse(raw) } : DEFAULT_PREFS;
+  } catch {
+    return DEFAULT_PREFS;
+  }
+};
+
+const setCallPreferences = (patch: Partial<CallPreferences>) => {
+  try {
+    const current = getCallPreferences();
+    const updated = { ...current, ...patch };
+    localStorage.setItem('nexus_call_prefs', JSON.stringify(updated));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
+
+const getAdminCallSettings = (): AdminCallSettings => {
+  try {
+    const raw = localStorage.getItem('nexus_admin_call_settings');
+    return raw ? { ...DEFAULT_ADMIN_SETTINGS, ...JSON.parse(raw) } : DEFAULT_ADMIN_SETTINGS;
+  } catch {
+    return DEFAULT_ADMIN_SETTINGS;
+  }
+};
+
+const setAdminCallSettings = (patch: Partial<AdminCallSettings>) => {
+  try {
+    const current = getAdminCallSettings();
+    const updated = { ...current, ...patch };
+    localStorage.setItem('nexus_admin_call_settings', JSON.stringify(updated));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
 // ── Shared inline toggle component matching this file's visual language ──────
 const SettingToggle: React.FC<{
   checked: boolean;
@@ -83,23 +152,29 @@ const playTestBeep = () => {
 };
 
 export const CallSettingsPage: React.FC = () => {
-  const [position, setPosition] = useState<PopupPosition>(() => preferenceStore.getPopupPosition());
+  const { user, tenant } = useAuth();
+  const [position, setPosition] = useState<PopupPosition>(() => getPopupPosition());
   const { simulateIncomingCall } = useCall();
 
+  const isGhlAdmin = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') && 
+    ((user?.role?.code as string) === 'company_admin' || (user?.role?.code as string) === 'admin' || user?.role?.code === 'super_admin');
+
   // ── Call preferences state ────────────────────────────────────────────────
-  const [prefs, setPrefs] = useState<CallPreferences>(() => preferenceStore.getCallPreferences());
+  const [prefs, setPrefs] = useState(() => getCallPreferences());
+  const [adminSettings, setAdminSettings] = useState(() => getAdminCallSettings());
 
   // Keep prefs in sync with other tabs / external writes
   useEffect(() => {
     const handleUpdate = () => {
-      setPosition(preferenceStore.getPopupPosition());
-      setPrefs(preferenceStore.getCallPreferences());
+      setPosition(getPopupPosition());
+      setPrefs(getCallPreferences());
+      setAdminSettings(getAdminCallSettings());
     };
-    window.addEventListener('storage', handleUpdate);
     window.addEventListener('nexus_storage_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
     return () => {
-      window.removeEventListener('storage', handleUpdate);
       window.removeEventListener('nexus_storage_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
     };
   }, []);
 
@@ -112,13 +187,19 @@ export const CallSettingsPage: React.FC = () => {
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleSelectPosition = (newPos: PopupPosition) => {
     setPosition(newPos);
-    preferenceStore.setPopupPosition(newPos);
+    setPopupPosition(newPos);
   };
 
-  const updatePref = <K extends keyof CallPreferences>(key: K, value: CallPreferences[K]) => {
+  const updatePref = <K extends keyof typeof prefs>(key: K, value: typeof prefs[K]) => {
     const next = { ...prefs, [key]: value };
     setPrefs(next);
-    preferenceStore.setCallPreferences({ [key]: value });
+    setCallPreferences({ [key]: value });
+  };
+
+  const updateAdminSetting = <K extends keyof typeof adminSettings>(key: K, value: typeof adminSettings[K]) => {
+    const next = { ...adminSettings, [key]: value };
+    setAdminSettings(next);
+    setAdminCallSettings({ [key]: value });
   };
 
   const handleToggleDesktopNotif = async (enabled: boolean) => {
@@ -585,6 +666,63 @@ export const CallSettingsPage: React.FC = () => {
         </div>
 
       </div>
+
+      {isGhlAdmin && (
+        <div style={{ marginTop: 24, paddingTop: 24, borderTop: '1px solid var(--border-base)', maxWidth: 760 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, color: 'var(--text-primary)' }}>Organization Call Controls (Admin)</h2>
+          
+          <div className="card" style={{ padding: 24, marginBottom: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flex: 1 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 'var(--radius-md)', backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Phone size={18} style={{ transform: 'rotate(135deg)' }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+                    Allow Sales Executives to Decline Calls
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3 }}>
+                    If disabled, the "Decline" button will be hidden for Sales Executives during an incoming call.
+                  </div>
+                </div>
+              </div>
+              <div style={{ flexShrink: 0 }}>
+                <SettingToggle
+                  id="toggle-sales-decline"
+                  checked={adminSettings.allowSalesDecline}
+                  onChange={v => updateAdminSetting('allowSalesDecline', v)}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="card" style={{ padding: 24 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flex: 1 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 'var(--radius-md)', backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Phone size={18} style={{ transform: 'rotate(135deg)' }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+                    Allow IRMs to Decline Calls
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3 }}>
+                    If disabled, the "Decline" button will be hidden for IRMs during an incoming call.
+                  </div>
+                </div>
+              </div>
+              <div style={{ flexShrink: 0 }}>
+                <SettingToggle
+                  id="toggle-irm-decline"
+                  checked={adminSettings.allowIrmDecline}
+                  onChange={v => updateAdminSetting('allowIrmDecline', v)}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

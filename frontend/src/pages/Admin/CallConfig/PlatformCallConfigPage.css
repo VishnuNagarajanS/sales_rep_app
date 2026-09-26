@@ -1,184 +1,429 @@
-/* ==========================================================================
-   Platform Call Config Page Styles
-   ========================================================================== */
+/* PlatformCallConfigPage Styles — Telephony Trunks & Routing */
 
-.platform-callconfig-page {
+.platform-callconfig-page-container {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  padding-bottom: 40px;
 }
 
-.platform-callconfig-page .page-header {
+.callconfig-page-header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: flex-start;
   flex-wrap: wrap;
   gap: 16px;
 }
 
-.platform-callconfig-page .page-title {
-  font-size: 24px;
-  font-weight: 700;
+.btn-allocate-did {
+  background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);
+  border: 1px solid rgba(192, 132, 252, 0.4);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(109, 40, 217, 0.35);
+}
+
+.btn-allocate-did:hover {
+  background: linear-gradient(135deg, #9333ea 0%, #7c3aed 100%);
+  transform: translateY(-1px);
+}
+
+.callconfig-success-alert {
   display: flex;
   align-items: center;
-  gap: 12px;
-  color: #ffffff;
-}
-
-.platform-callconfig-page .page-subtitle {
+  gap: 8px;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #34d399;
   font-size: 13px;
-  color: #94a3b8;
-  margin-top: 4px;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: 8px;
 }
 
-.platform-callconfig-page .card {
-  background: var(--bg-card);
-  border: 1px solid var(--border-base);
-  border-radius: var(--radius-lg);
+/* DID Table Card */
+.did-table-card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
   padding: 20px;
-  box-shadow: var(--shadow-card);
-  transition: border-color var(--transition-fast);
 }
 
-.platform-callconfig-table-card {
-  padding: 0;
-  background-color: #0f172a;
-  border-color: #334155;
-  overflow: hidden;
-}
-
-.platform-callconfig-card-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid #334155;
+.did-card-header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-}
-
-.platform-callconfig-card-title {
-  font-size: 15px;
-  font-weight: 700;
-  color: #ffffff;
-}
-
-.platform-callconfig-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-  color: #cbd5e1;
-}
-
-.platform-callconfig-thead-tr {
-  background: #1e293b;
-  border-bottom: 1px solid #334155;
-  color: #94a3b8;
-  font-size: 11px;
-  text-transform: uppercase;
-}
-
-.platform-callconfig-th-left {
-  padding: 12px 16px;
-  text-align: left;
-}
-
-.platform-callconfig-th-did {
-  padding: 12px 20px;
-  text-align: left;
-}
-
-.platform-callconfig-th-center {
-  padding: 12px 16px;
-  text-align: center;
-}
-
-.platform-callconfig-th-right {
-  padding: 12px 20px;
-  text-align: right;
-}
-
-.platform-callconfig-td-did {
-  padding: 14px 20px;
-  font-weight: 700;
-  color: #ffffff;
-  font-family: monospace;
-}
-
-.platform-callconfig-td-tenant-ghl {
-  padding: 14px 16px;
-  font-weight: 600;
-  color: #38bdf8;
-}
-
-.platform-callconfig-td-tenant-jamin {
-  padding: 14px 16px;
-  font-weight: 600;
-  color: #34d399;
-}
-
-.platform-callconfig-td-strategy {
-  padding: 14px 16px;
-}
-
-.platform-callconfig-td-center {
-  padding: 14px 16px;
-  text-align: center;
-}
-
-.platform-callconfig-ai-status {
-  color: #34d399;
-  font-weight: 600;
-}
-
-.platform-callconfig-td-right {
-  padding: 14px 20px;
-  text-align: right;
-}
-
-.platform-callconfig-online-badge {
-  color: #34d399;
-  font-weight: 700;
-}
-
-.platform-callconfig-tr-border {
-  border-top: 1px solid #1e293b;
-}
-
-/* Provider Settings Card */
-.platform-callconfig-provider-card {
-  padding: 24px;
-  background-color: #0f172a;
-  border-color: #334155;
-  max-width: 640px;
-}
-
-.platform-callconfig-provider-title {
-  font-size: 15px;
-  font-weight: 700;
-  color: #ffffff;
+  align-items: flex-start;
   margin-bottom: 16px;
 }
 
-.platform-callconfig-form-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+.did-card-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0;
 }
 
-.platform-callconfig-label {
-  color: #94a3b8;
+.did-card-desc {
   font-size: 12px;
+  color: #94a3b8;
+  margin: 3px 0 0 0;
+}
+
+.total-dids-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  padding: 4px 10px;
+  border-radius: 9999px;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.did-data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.did-data-table th {
+  text-align: left;
+  padding: 12px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid #1e293b;
+}
+
+.did-data-table td {
+  padding: 14px;
+  font-size: 13px;
+  color: #cbd5e1;
+  border-bottom: 1px solid #1e293b;
+}
+
+.did-row:hover {
+  background: rgba(30, 41, 59, 0.4);
+}
+
+.did-phone-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.did-number-text {
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  background: rgba(15, 23, 42, 0.8);
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid #334155;
+}
+
+.did-tenant-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.did-tenant-name {
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.did-queue-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.routing-strategy-tag {
+  font-size: 11px;
+  font-weight: 700;
+  color: #c084fc;
+  background: rgba(139, 92, 246, 0.12);
+  padding: 2px 6px;
+  border-radius: 4px;
+  width: fit-content;
+}
+
+.queue-name-sub {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.channels-pill {
+  font-size: 11px;
+  color: #94a3b8;
+  background: #1e293b;
+  padding: 3px 8px;
+  border-radius: 6px;
   font-weight: 600;
 }
 
-.platform-callconfig-input {
-  background-color: #1e293b;
+.ai-features-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ai-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.rec-tag {
+  font-size: 11px;
+  font-weight: 700;
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.12);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.did-status-pill {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  text-transform: uppercase;
+}
+
+.did-status-pill.online {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+}
+
+.did-status-pill.reserved {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+}
+
+.did-actions-group {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.action-btn {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #cbd5e1;
+  padding: 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: all 0.15s ease;
+}
+
+.action-btn:hover {
+  background: #334155;
   color: #ffffff;
-  border-color: #475569;
-  font-family: var(--font-sans);
-  font-size: 13px;
-  padding: 9px 12px;
-  border-radius: var(--radius-md);
-  border: 1px solid #475569;
-  outline: none;
-  width: 100%;
+}
+
+/* Two Column Split */
+.callconfig-split-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+@media (max-width: 1024px) {
+  .callconfig-split-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.carrier-settings-card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+}
+
+.carrier-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.carrier-settings-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0;
+}
+
+.carrier-settings-desc {
+  font-size: 12px;
+  color: #94a3b8;
+  margin: 3px 0 0 0;
+}
+
+.test-result-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: #d1fae5;
+  font-size: 12px;
+  margin-bottom: 16px;
+  line-height: 1.4;
+}
+
+.carrier-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.carrier-footer-action {
+  margin-top: auto;
+  border-top: 1px solid #1e293b;
+  padding-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Simulator Card */
+.call-simulator-card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+}
+
+.simulator-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.simulator-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0;
+}
+
+.simulator-desc {
+  font-size: 12px;
+  color: #94a3b8;
+  margin: 3px 0 0 0;
+}
+
+.simulator-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.btn-run-sim {
+  background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 4px 14px rgba(14, 165, 233, 0.35);
+}
+
+.simulator-terminal {
+  background: #060910;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 220px;
+  overflow: hidden;
+}
+
+.terminal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #111827;
+  padding: 8px 12px;
+  border-bottom: 1px solid #1e293b;
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
+  letter-spacing: 0.05em;
+}
+
+.btn-clear-term {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-clear-term:hover {
+  color: #ffffff;
+}
+
+.terminal-body {
+  padding: 12px;
+  font-size: 11px;
+  color: #38bdf8;
+  line-height: 1.6;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.terminal-placeholder {
+  color: #475569;
+  font-style: italic;
+  margin-top: 30px;
+  text-align: center;
+}
+
+.terminal-line {
+  word-break: break-all;
+}
+
+/* Modal Checkbox Stack */
+.checkbox-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #1e293b;
+  padding: 10px;
+  border-radius: 8px;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #e2e8f0;
+  cursor: pointer;
 }

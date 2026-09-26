@@ -1,12 +1,247 @@
-/* PlatformDashboardPage styles */
+/* PlatformDashboardPage styles — High-end Dark Console Theme */
 
 .platform-dashboard-page {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
+  padding-bottom: 30px;
 }
 
-.platform-dashboard-page .page-header {
+/* Header Section */
+.platform-header-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding-bottom: 6px;
+}
+
+.platform-badge-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.platform-pill-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  color: #c084fc;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.live-pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #10b981;
+  box-shadow: 0 0 8px #10b981;
+  animation: pulse-dot 1.8s infinite;
+}
+
+@keyframes pulse-dot {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  50% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(0.9); opacity: 0.8; }
+}
+
+.platform-version-tag {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.platform-main-title {
+  font-size: 26px;
+  font-weight: 800;
+  color: #f8fafc;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.platform-main-subtitle {
+  font-size: 13px;
+  color: #94a3b8;
+  margin: 6px 0 0 0;
+  max-width: 680px;
+  line-height: 1.5;
+}
+
+.platform-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-header-btn {
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid #334155;
+  color: #cbd5e1;
+  font-weight: 600;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.admin-header-btn:hover {
+  background: #334155;
+  color: #ffffff;
+  border-color: #475569;
+}
+
+.admin-primary-header-btn {
+  background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);
+  border: 1px solid rgba(192, 132, 252, 0.4);
+  color: #ffffff;
+  font-weight: 600;
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(109, 40, 217, 0.35);
+  transition: all 0.2s ease;
+}
+
+.admin-primary-header-btn:hover {
+  background: linear-gradient(135deg, #9333ea 0%, #7c3aed 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(109, 40, 217, 0.45);
+}
+
+/* 6-Card Telemetry Grid */
+.platform-telemetry-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.platform-telemetry-card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  padding: 18px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.platform-telemetry-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(139, 92, 246, 0.3), transparent);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.platform-telemetry-card:hover {
+  border-color: #3b82f6;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.platform-telemetry-card:hover::before {
+  opacity: 1;
+}
+
+.telemetry-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.platform-telemetry-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.telemetry-icon-box {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bg-purple-glow { background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.3); }
+.bg-blue-glow { background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); }
+.bg-emerald-glow { background: rgba(52, 211, 153, 0.15); border: 1px solid rgba(52, 211, 153, 0.3); }
+.bg-amber-glow { background: rgba(251, 191, 36, 0.15); border: 1px solid rgba(251, 191, 36, 0.3); }
+.bg-violet-glow { background: rgba(167, 139, 250, 0.15); border: 1px solid rgba(167, 139, 250, 0.3); }
+.bg-green-glow { background: rgba(74, 222, 128, 0.15); border: 1px solid rgba(74, 222, 128, 0.3); }
+
+.platform-telemetry-val {
+  font-size: 30px;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 10px 0 6px 0;
+  line-height: 1;
+}
+
+.platform-telemetry-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.status-badge-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.status-badge-inline.success {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+}
+
+.status-badge-inline.warning {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+}
+
+.trend-stat-positive {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: #34d399;
+  font-weight: 700;
+  font-size: 11px;
+}
+
+.text-muted-xs {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.text-amber { color: #fbbf24; }
+.text-violet { color: #c084fc; }
+.text-green { color: #4ade80; }
+
+/* Realtime Telemetry Bar */
+.carrier-telemetry-bar {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  padding: 14px 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -14,283 +249,397 @@
   gap: 16px;
 }
 
-.platform-dashboard-page .page-title {
-  font-size: 24px;
-  font-weight: 700;
+.carrier-bar-col {
   display: flex;
   align-items: center;
-  gap: 12px;
-  color: #ffffff;
+  gap: 10px;
 }
 
-.platform-dashboard-page .page-subtitle {
-  font-size: 13px;
-  color: #94a3b8;
-  margin-top: 4px;
+.carrier-bar-indicator.online {
+  color: #10b981;
+  font-size: 14px;
+  animation: pulse-dot 2s infinite;
 }
 
-.platform-dashboard-page .card {
-  background: var(--bg-card);
-  border: 1px solid var(--border-base);
-  border-radius: var(--radius-lg);
-  padding: 20px;
-  box-shadow: var(--shadow-card);
-  transition: border-color var(--transition-fast);
-}
-
-.platform-dashboard-page .btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  font-family: var(--font-sans);
-  font-size: 13px;
-  font-weight: 600;
-  padding: 8px 16px;
-  border-radius: var(--radius-md);
-  border: 1px solid transparent;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  white-space: nowrap;
-  user-select: none;
-}
-
-.platform-dashboard-page .btn-secondary {
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  border-color: var(--border-base);
-}
-
-.platform-dashboard-page .btn-ghost {
-  background: transparent;
-  color: var(--text-secondary);
-}
-
-.platform-dashboard-page .btn-sm {
-  padding: 5px 10px;
-  font-size: 12px;
-  border-radius: var(--radius-sm);
-}
-
-/* Telemetry Grid */
-.platform-telemetry-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 16px;
-}
-
-.platform-telemetry-card {
-  background-color: #0f172a;
-  border-color: #334155;
-}
-
-.platform-telemetry-label {
-  font-size: 12px;
+.carrier-bar-title {
+  font-size: 11px;
   font-weight: 700;
   color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
-.platform-telemetry-val {
-  font-size: 28px;
-  font-weight: 800;
-  color: #ffffff;
-  margin-top: 8px;
-}
-
-.platform-telemetry-val-purple {
-  color: #c084fc;
-}
-
-.platform-telemetry-val-green {
-  color: #34d399;
-}
-
-.platform-telemetry-sub-sky {
+.carrier-bar-desc {
   font-size: 12px;
-  color: #38bdf8;
-  margin-top: 4px;
   font-weight: 600;
+  color: #f1f5f9;
 }
 
-.platform-telemetry-sub-green {
-  font-size: 12px;
-  color: #34d399;
-  margin-top: 4px;
-  font-weight: 600;
+.carrier-bar-divider {
+  width: 1px;
+  height: 28px;
+  background: #334155;
 }
 
-.platform-telemetry-sub-muted {
-  font-size: 12px;
-  color: #94a3b8;
-  margin-top: 4px;
+/* Main Split */
+.platform-main-split {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
 }
 
-/* Performance Matrix Card & Table */
+@media (max-width: 1024px) {
+  .platform-main-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Tenant Matrix Card */
 .platform-matrix-card {
-  padding: 0;
-  background-color: #0f172a;
-  border-color: #334155;
-  overflow: hidden;
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  padding: 20px;
 }
 
 .platform-matrix-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid #334155;
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
 }
 
 .platform-matrix-title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   color: #ffffff;
+  margin: 0;
+}
+
+.platform-matrix-desc {
+  font-size: 12px;
+  color: #94a3b8;
+  margin: 2px 0 0 0;
 }
 
 .platform-matrix-manage-btn {
   color: #c084fc;
+  font-weight: 600;
+}
+
+.platform-matrix-manage-btn:hover {
+  color: #e9d5ff;
 }
 
 .platform-matrix-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
-  color: #cbd5e1;
 }
 
-.platform-matrix-thead-tr {
-  background: #1e293b;
-  border-bottom: 1px solid #334155;
-  color: #94a3b8;
+.platform-matrix-thead-tr th {
+  text-align: left;
+  padding: 10px 14px;
   font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
   text-transform: uppercase;
-}
-
-.platform-matrix-th-name {
-  padding: 12px 20px;
-  text-align: left;
-}
-
-.platform-matrix-th-tagline {
-  padding: 12px 16px;
-  text-align: left;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid #1e293b;
 }
 
 .platform-matrix-th-center {
-  padding: 12px 16px;
-  text-align: center;
+  text-align: center !important;
 }
 
 .platform-matrix-th-action {
-  padding: 12px 20px;
-  text-align: right;
+  text-align: right !important;
 }
 
 .platform-matrix-tbody-tr {
-  border-bottom: 1px solid #334155;
+  border-bottom: 1px solid #1e293b;
+  transition: background 0.15s ease;
 }
 
-.platform-matrix-td-name {
-  padding: 14px 20px;
+.platform-matrix-tbody-tr:hover {
+  background: rgba(30, 41, 59, 0.4);
+}
+
+.platform-matrix-tbody-tr td {
+  padding: 14px;
+  font-size: 13px;
+  color: #e2e8f0;
+}
+
+.tenant-name-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tenant-avatar-badge {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 12px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
 }
 
 .platform-matrix-tenant-name {
   font-weight: 700;
   color: #ffffff;
+  font-size: 14px;
 }
 
 .platform-matrix-tenant-id {
   font-size: 11px;
   color: #94a3b8;
+  margin-top: 2px;
 }
 
-.platform-matrix-td-tagline {
-  padding: 14px 16px;
+.platform-matrix-tenant-id code {
+  color: #38bdf8;
 }
 
-.platform-matrix-td-center {
-  padding: 14px 16px;
-  text-align: center;
+.tenant-plan-title {
+  font-weight: 600;
+  color: #f1f5f9;
+  font-size: 13px;
 }
 
-.platform-matrix-badge-purple {
-  padding: 3px 8px;
-  border-radius: 10px;
-  background: rgba(139, 92, 246, 0.2);
-  color: #c084fc;
+.tenant-industry-sub {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.user-count-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #1e293b;
+  color: #94a3b8;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
   font-weight: 600;
 }
 
-.platform-matrix-did {
-  font-family: monospace;
+.platform-matrix-did code {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid #334155;
+  color: #a78bfa;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 12px;
 }
 
-.platform-matrix-td-action {
-  padding: 14px 20px;
-  text-align: right;
+.status-pill {
+  display: inline-flex;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
-.platform-matrix-drill-btn {
-  background-color: #1e293b;
+.status-pill.active {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.status-pill.inactive, .status-pill.onboarding {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.status-pill.suspended {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.action-button-group {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.action-btn-support {
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  color: #c084fc;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.action-btn-support:hover {
+  background: rgba(139, 92, 246, 0.25);
+  color: #e9d5ff;
+}
+
+.action-btn-manage {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.action-btn-manage:hover {
   color: #ffffff;
-  border-color: #475569;
 }
 
-/* Security Audit Feed */
+/* Side Stack */
+.platform-side-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .platform-audit-card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
   padding: 20px;
-  background-color: #0f172a;
-  border-color: #334155;
+}
+
+.platform-audit-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 14px;
 }
 
 .platform-audit-title {
   font-size: 15px;
   font-weight: 700;
   color: #ffffff;
-  margin-bottom: 14px;
+  margin: 0;
+}
+
+.platform-audit-sub {
+  font-size: 12px;
+  color: #64748b;
+  margin: 2px 0 0 0;
 }
 
 .platform-audit-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .platform-audit-item {
-  padding: 12px 14px;
-  border-radius: var(--radius-md);
-  background-color: #1e293b;
-  border: 1px solid #334155;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #1e293b;
+}
+
+.platform-audit-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.audit-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #8b5cf6;
+  margin-top: 5px;
+  box-shadow: 0 0 6px #8b5cf6;
+}
+
+.audit-content-col {
+  flex: 1;
 }
 
 .platform-audit-item-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
 }
 
 .platform-audit-company-badge {
-  color: #38bdf8;
+  font-size: 11px;
   font-weight: 700;
-  font-size: 12px;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+  padding: 1px 6px;
+  border-radius: 4px;
 }
 
 .platform-audit-action {
-  color: #ffffff;
-  font-weight: 600;
-  font-size: 13px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #c084fc;
 }
 
 .platform-audit-details {
   font-size: 12px;
-  color: #94a3b8;
-  margin-top: 2px;
+  color: #cbd5e1;
+  line-height: 1.4;
 }
 
-.platform-audit-time {
+.platform-audit-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   color: #64748b;
+  margin-top: 4px;
+}
+
+/* Quick Tools */
+.platform-quick-tools-card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  padding: 18px;
+}
+
+.quick-tools-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 12px 0;
+}
+
+.quick-tools-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.quick-tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.quick-tool-btn:hover {
+  background: #1e293b;
+  border-color: #8b5cf6;
+  color: #ffffff;
+  transform: translateY(-1px);
 }

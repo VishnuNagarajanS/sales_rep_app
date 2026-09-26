@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, FileImage, FileSpreadsheet, Trash2, File } from 'lucide-react';
 import { DocumentItem } from '../../types';
-import { documentStore } from '../../services/documentStore';
 import { EmptyState } from './EmptyState';
 import './DocumentList.css';
 
@@ -9,12 +8,35 @@ import './DocumentList.css';
 
 interface DocumentListProps {
   entityType: DocumentItem['entityType'];
-  entityId?: string;
+  entityId: string;
   /** If true, a delete button is rendered per row. Default: false. */
   canDelete?: boolean;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+const getStoredDocuments = (entityType?: DocumentItem['entityType'], entityId?: string): DocumentItem[] => {
+  try {
+    const raw = localStorage.getItem('nexus_documents');
+    const docs: DocumentItem[] = raw ? JSON.parse(raw) : [];
+    if (entityType && entityId) {
+      return docs.filter(d => d.entityType === entityType && d.entityId === entityId);
+    }
+    return docs;
+  } catch {
+    return [];
+  }
+};
+
+const deleteStoredDocument = (id: string): void => {
+  try {
+    const raw = localStorage.getItem('nexus_documents');
+    const docs: DocumentItem[] = raw ? JSON.parse(raw) : [];
+    const filtered = docs.filter(d => d.id !== id);
+    localStorage.setItem('nexus_documents', JSON.stringify(filtered));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
 
 function getFileIcon(mimeType: string): React.ReactNode {
   if (mimeType.startsWith('image/')) {
@@ -43,18 +65,18 @@ export const DocumentList: React.FC<DocumentListProps> = ({
   const [docs, setDocs] = useState<DocumentItem[]>([]);
 
   const loadDocs = () => {
-    setDocs(documentStore.getDocuments(entityType, entityId || ''));
+    setDocs(getStoredDocuments(entityType, entityId));
   };
 
   useEffect(() => {
     loadDocs();
-    window.addEventListener('nexus_docs_updated', loadDocs);
-    return () => window.removeEventListener('nexus_docs_updated', loadDocs);
+    window.addEventListener('nexus_storage_updated', loadDocs);
+    return () => window.removeEventListener('nexus_storage_updated', loadDocs);
   }, [entityType, entityId]);
 
   const handleDelete = (id: string) => {
     if (confirm('Remove this document record?')) {
-      documentStore.deleteDocument(id);
+      deleteStoredDocument(id);
     }
   };
 

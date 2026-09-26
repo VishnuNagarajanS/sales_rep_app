@@ -1,0 +1,352 @@
+/* PlatformSystemPage Styles — Health Diagnostics & Global Config */
+
+.platform-system-page-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-bottom: 40px;
+}
+
+.system-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.system-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-new-announcement {
+  background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);
+  border: 1px solid rgba(192, 132, 252, 0.4);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(109, 40, 217, 0.35);
+}
+
+.system-success-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #34d399;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: 8px;
+}
+
+/* Diagnostics 4-Card Grid */
+.diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.diag-card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.diag-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.diag-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.diag-val {
+  font-size: 26px;
+  font-weight: 800;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 2px 0;
+}
+
+.val-unit {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-dot.green {
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+}
+
+.diag-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 4px;
+}
+
+.progress-bar-bg {
+  width: 100%;
+  height: 6px;
+  background: #1e293b;
+  border-radius: 9999px;
+  overflow: hidden;
+  margin: 6px 0;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 9999px;
+}
+
+.progress-bar-fill.purple {
+  background: linear-gradient(90deg, #8b5cf6, #c084fc);
+}
+
+.progress-bar-fill.amber {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+}
+
+/* Maintenance Banner Card */
+.maintenance-banner-card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  padding: 18px 22px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.maintenance-banner-card.active-lock {
+  border-color: rgba(239, 68, 68, 0.45);
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.maintenance-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.maintenance-icon-box {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.maintenance-icon-box.gray {
+  background: #1e293b;
+  color: #94a3b8;
+}
+
+.maintenance-icon-box.red {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  animation: pulse-border 1.5s infinite;
+}
+
+.maintenance-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0;
+}
+
+.maintenance-desc {
+  font-size: 12px;
+  color: #94a3b8;
+  margin: 3px 0 0 0;
+  max-width: 600px;
+  line-height: 1.4;
+}
+
+.btn-toggle-maint {
+  font-weight: 700;
+  padding: 8px 16px;
+}
+
+/* Announcements Card */
+.announcements-table-card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  padding: 20px;
+}
+
+.announcements-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.announcements-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0;
+}
+
+.announcements-desc {
+  font-size: 12px;
+  color: #94a3b8;
+  margin: 3px 0 0 0;
+}
+
+.announcements-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.announcements-table th {
+  text-align: left;
+  padding: 12px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid #1e293b;
+}
+
+.announcements-table td {
+  padding: 14px;
+  font-size: 13px;
+  color: #cbd5e1;
+  border-bottom: 1px solid #1e293b;
+  vertical-align: middle;
+}
+
+.ann-row:hover {
+  background: rgba(30, 41, 59, 0.4);
+}
+
+.no-ann-cell {
+  text-align: center;
+  padding: 30px !important;
+  color: #64748b;
+  font-style: italic;
+}
+
+.priority-chip {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+}
+
+.priority-chip.info {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.priority-chip.warning {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.priority-chip.critical {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.ann-title-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ann-title-text {
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.ann-message-text {
+  font-size: 12px;
+  color: #94a3b8;
+  max-width: 440px;
+  line-height: 1.4;
+}
+
+.audience-pill {
+  font-size: 11px;
+  color: #e2e8f0;
+  background: #1e293b;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.ann-meta-cell {
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+}
+
+.ann-author {
+  color: #cbd5e1;
+  font-weight: 600;
+}
+
+.ann-date {
+  color: #64748b;
+}
+
+.btn-delete-ann {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.btn-delete-ann:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.15);
+}
+
+/* Modal Form */
+.ann-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}

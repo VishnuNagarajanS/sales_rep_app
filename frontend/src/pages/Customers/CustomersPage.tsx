@@ -1,42 +1,108 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Building2,
   Phone,
   Plus,
   Play,
+  ExternalLink,
   Filter,
-  RefreshCw,
-  AlertCircle,
+  Users,
+  UserCheck,
+  Send,
+  CheckCircle,
   Clock,
-  CheckCircle2,
+  Lock,
+  Sparkles,
 } from 'lucide-react';
-import { Customer, CallRecord, Followup } from '../../types';
+import { Customer, CallRecord, Followup, Deal, Lead, IrmProfile, CustomFieldDefinition } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { customersApi, followupsApi } from '../../services/crmApi';
+import {
+  getCustomers,
+  saveCustomer as apiSaveCustomer,
+  getCalls,
+  getFollowups,
+  saveFollowup as apiSaveFollowup,
+  getDeals,
+  getLeads,
+} from '../../services/ghlApiService';
 import { StatusChip } from '../../components/common/StatusChip';
-import { Timeline, TimelineEvent } from '../../components/common/Timeline';
 import { DocumentUploader } from '../../components/common/DocumentUploader';
 import { DocumentList } from '../../components/common/DocumentList';
 import { Modal } from '../../components/common/Modal';
+import { Timeline, TimelineEvent } from '../../components/common/Timeline';
+import { MOCK_IRMS } from '../../mock_data/mockData';
 import './CustomersPage.css';
+
+const getCustomFieldDefinitions = (tenantId?: string): CustomFieldDefinition[] => {
+  try {
+    const raw = localStorage.getItem('nexus_custom_fields');
+    const all: CustomFieldDefinition[] = raw ? JSON.parse(raw) : [];
+    return tenantId ? all.filter(d => !d.companyId || d.companyId === tenantId) : all;
+  } catch {
+    return [];
+  }
+};
+
+interface AutoRecommendation {
+  customerId: string;
+  customerName: string;
+  investmentDisplay: string;
+  tier: 'Premium' | 'Very High' | 'High' | 'Medium' | 'Normal';
+  recommendedIrmId: string;
+  recommendedIrmName: string;
+  matchReason: string;
+  isEdited?: boolean;
+}
 
 export const CustomersPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
+  // Role-based scoping: Sales Executives see only their own customers.
+  // Managers / Admins / Super Admins see the full company customer list (no filter).
+  const roleCode = user?.role?.code;
+  const isExec = roleCode === 'sales_executive';
+
+  // Strict Tenant + Role isolation: IRM assignment is available ONLY in GHL India Ventures -> Sales Executive
+  const isGhlTenant = tenant?.slug === 'ghl' || tenant?.name === 'GHL India Ventures' || user?.companySlug === 'ghl' || user?.companyName === 'GHL India Ventures';
+  const isSalesExecutive = isExec || user?.role?.name === 'Sales Executive';
+  const canAssignToIRM = Boolean(isGhlTenant && isSalesExecutive);
+
+  const scopedCustomers = isExec
+    ? customers.filter(c =>
+      (c.assignedAgentId && c.assignedAgentId === user?.id) ||
+      (c.assignedAgentName && c.assignedAgentName === user?.name)
+    )
+    : customers;
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [customer360Loading, setCustomer360Loading] = useState(false);
-  const [customerCalls, setCustomerCalls] = useState<CallRecord[]>([]);
-  const [customerFollowups, setCustomerFollowups] = useState<Followup[]>([]);
-
   const [activeTab, setActiveTab] = useState<'overview' | 'calls' | 'followups' | 'timeline' | 'documents'>('overview');
   const [statusFilter, setStatusFilter] = useState('All');
   const [agentFilter, setAgentFilter] = useState('All');
+  const [assignmentFilter, setAssignmentFilter] = useState<'All' | 'Assigned' | 'Unassigned'>('All');
+
+  // Assignment mode state (Sales Executive only)
+  const [isAssignMode, setIsAssignMode] = useState(false);
+  const [assignSubMode, setAssignSubMode] = useState<'manual' | 'auto'>('manual');
+  const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<string>>(new Set());
+
+  // Manual IRM selection modal state
+  const [isManualModalOpen, setIsManualModalOpen] = useState(false);
+  const [selectedIrmId, setSelectedIrmId] = useState<string>('');
+
+  // Auto assignment preview modal state
+  const [isAutoPreviewModalOpen, setIsAutoPreviewModalOpen] = useState(false);
+  const [autoRecommendations, setAutoRecommendations] = useState<AutoRecommendation[]>([]);
+  const [editingRecommendationCustomerId, setEditingRecommendationCustomerId] = useState<string | null>(null);
+
+  // Toast feedback
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
 
   // New Customer modal state
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -47,138 +113,47 @@ export const CustomersPage: React.FC = () => {
   const [newStatus, setNewStatus] = useState<'Active' | 'VIP' | 'Inactive'>('Active');
   const [newCustomFields, setNewCustomFields] = useState<Record<string, any>>({});
   const [addErrors, setAddErrors] = useState<{ name?: string; phone?: string }>({});
-  const [savingCustomer, setSavingCustomer] = useState(false);
 
-  // Role-based scoping
-  const roleCode = user?.role?.code;
-  const isExec = roleCode === 'sales_executive';
+  const [calls, setCalls] = useState<CallRecord[]>([]);
+  const [followups, setFollowups] = useState<Followup[]>([]);
+  const [deals, setDeals] = useState<Deal[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
 
-  const fetchCustomers = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const loadData = async () => {
     try {
-      const res = await customersApi.getCustomers({
-        status: statusFilter !== 'All' ? statusFilter : undefined,
-      });
+      const [custs, cCalls, cFollowups, cDeals, cLeads] = await Promise.all([
+        getCustomers(tenant?.id),
+        getCalls(tenant?.id),
+        getFollowups(tenant?.id),
+        getDeals(tenant?.id),
+        getLeads(tenant?.id),
+      ]);
+      setCustomers(custs);
+      setCalls(cCalls);
+      setFollowups(cFollowups);
+      setDeals(cDeals);
+      setLeads(cLeads);
 
-      if (res?.items) {
-        const rawItems = res.items || [];
-        const mapped: Customer[] = rawItems.map((c: any) => ({
-          id: String(c.id),
-          companyId: String(tenant?.id || ''),
-          name: c.name || '',
-          phone: c.phone || '',
-          email: c.email || '',
-          status: (c.status as any) || 'Active',
-          assignedAgentId: String(c.assignedAgentId || ''),
-          assignedAgentName: c.assignedAgentName || 'Unassigned',
-          location: c.location || '',
-          lastContacted: c.lastContacted ? new Date(c.lastContacted).toISOString().split('T')[0] : '—',
-          openDealsCount: c.openDealsCount || 0,
-          totalValue: Number(c.totalValue || 0),
-          createdAt: c.createdAt ? new Date(c.createdAt).toISOString().split('T')[0] : '—',
-          notes: c.notes || '',
-          customFields: c.customFields || {},
-        }));
-
-        setCustomers(mapped);
-
-        if (mapped.length > 0) {
-          setSelectedCustomer(prev => {
-            if (prev) {
-              const stillExists = mapped.find(c => c.id === prev.id);
-              if (stillExists) return stillExists;
-            }
-            return mapped[0];
-          });
-        } else {
-          setSelectedCustomer(null);
-        }
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to load customers from backend API');
-    } finally {
-      setLoading(false);
-    }
-  }, [tenant?.id, statusFilter]);
-
-  useEffect(() => {
-    fetchCustomers();
-  }, [fetchCustomers]);
-
-  // Load 360 data when selected customer changes
-  useEffect(() => {
-    if (!selectedCustomer) {
-      setCustomerCalls([]);
-      setCustomerFollowups([]);
-      return;
-    }
-
-    let isMounted = true;
-    const fetch360 = async () => {
-      setCustomer360Loading(true);
-      try {
-        const res = await customersApi.getCustomer360(selectedCustomer.id);
-        if (isMounted && res) {
-          const raw360 = res;
-          // Map calls
-          const mappedCalls: CallRecord[] = (raw360.calls || []).map((c: any) => ({
-            id: String(c.id),
-            companyId: String(tenant?.id || ''),
-            tenantId: String(tenant?.id || ''),
-            contactName: selectedCustomer.name,
-            contactPhone: selectedCustomer.phone,
-            leadId: undefined,
-            contactType: 'customer',
-            agentId: String(user?.id || ''),
-            agentName: selectedCustomer.assignedAgentName || 'Agent',
-            direction: (c.direction || 'outbound').toLowerCase() as any,
-            duration: Number(c.duration || 0),
-            disposition: (c.disposition || 'Interested') as any,
-            timestamp: c.timestamp ? new Date(c.timestamp).toLocaleString('en-IN') : 'Just now',
-            notes: c.notes || '',
-          }));
-          setCustomerCalls(mappedCalls);
-
-          // Map followups
-          const mappedFollowups: Followup[] = (raw360.followups || []).map((f: any) => ({
-            id: String(f.id),
-            companyId: String(tenant?.id || ''),
-            tenantId: String(tenant?.id || ''),
-            contactName: selectedCustomer.name,
-            contactPhone: selectedCustomer.phone,
-            contactType: 'customer',
-            contactId: selectedCustomer.id,
-            assignedAgentId: String(f.assignedAgentId || ''),
-            assignedAgentName: f.assignedAgentName || 'Agent',
-            scheduledAt: f.scheduledAt ? new Date(f.scheduledAt).toLocaleString('en-IN') : '—',
-            notes: f.notes || '',
-            priority: (f.priority || 'Medium') as any,
-            status: (f.status || 'Pending') as any,
-            completedAt: f.completedAt ? new Date(f.completedAt).toLocaleString('en-IN') : undefined,
-          }));
-          setCustomerFollowups(mappedFollowups);
-        }
-      } catch {
-        // Keep existing or empty
-      } finally {
-        if (isMounted) setCustomer360Loading(false);
-      }
-    };
-
-    fetch360();
-    return () => {
-      isMounted = false;
-    };
-  }, [selectedCustomer?.id, tenant?.id, user?.id]);
-
-  const scopedCustomers = isExec
-    ? customers.filter(
-        c =>
+      const firstVisible = isExec
+        ? custs.filter(c =>
           (c.assignedAgentId && c.assignedAgentId === user?.id) ||
           (c.assignedAgentName && c.assignedAgentName === user?.name)
-      )
-    : customers;
+        )[0]
+        : custs[0];
+      if (firstVisible && !selectedCustomer) {
+        setSelectedCustomer(firstVisible);
+      }
+    } catch (err) {
+      console.error('Failed to load customers page data', err);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+    const handleUpdate = () => loadData();
+    window.addEventListener('nexus_storage_updated', handleUpdate);
+    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+  }, [tenant?.id]);
 
   const agentOptions = Array.from(new Set(scopedCustomers.map(c => c.assignedAgentName)))
     .filter(Boolean)
@@ -187,8 +162,245 @@ export const CustomersPage: React.FC = () => {
   const filteredCustomers = scopedCustomers.filter(c => {
     if (statusFilter !== 'All' && c.status !== statusFilter) return false;
     if (agentFilter !== 'All' && c.assignedAgentName !== agentFilter) return false;
+    if (canAssignToIRM) {
+      if (assignmentFilter === 'Assigned' && !(c.assignedIrmName || c.assignedIrmId)) return false;
+      if (assignmentFilter === 'Unassigned' && (c.assignedIrmName || c.assignedIrmId)) return false;
+    }
     return true;
   });
+
+  const isCustomerEligibleForIrm = (c: Customer): boolean => {
+    if (!canAssignToIRM) return false;
+    if (!c || !c.id || !c.name) return false;
+    if (c.status === 'Inactive') return false;
+    if (c.assignedIrmName || c.assignedIrmId) return false;
+    return true;
+  };
+
+  const eligibleUnassignedCustomers = canAssignToIRM
+    ? scopedCustomers.filter(isCustomerEligibleForIrm)
+    : [];
+
+  const toggleCustomerSelection = (id: string) => {
+    setSelectedCustomerIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleCancelAssignMode = () => {
+    setIsAssignMode(false);
+    setSelectedCustomerIds(new Set());
+    setAutoRecommendations([]);
+    setIsManualModalOpen(false);
+    setIsAutoPreviewModalOpen(false);
+  };
+
+  const getCustomerCapacityTier = (c: Customer): { tier: 'Premium' | 'Very High' | 'High' | 'Medium' | 'Normal'; label: string } => {
+    const raw = getInvestmentRange(c);
+    const totalVal = typeof c.totalValue === 'number' ? c.totalValue : 0;
+
+    if (/25\s*Cr|\b250\b/i.test(raw) || totalVal >= 100000000) {
+      return { tier: 'Premium', label: raw || '₹10 Cr+ (Premium)' };
+    }
+    if (/5\s*Cr\s*[-–]\s*10\s*Cr/i.test(raw) || (totalVal >= 50000000 && totalVal < 100000000)) {
+      return { tier: 'Very High', label: raw || '₹5–10 Cr (Very High)' };
+    }
+    if (/3\s*Cr\s*[-–]\s*5\s*Cr/i.test(raw) || (totalVal >= 30000000 && totalVal < 50000000)) {
+      return { tier: 'High', label: raw || '₹3–5 Cr (High)' };
+    }
+    if (/1\s*Cr\s*[-–]\s*3\s*Cr|1\s*Cr\s*[-–]\s*5\s*Cr/i.test(raw) || (totalVal >= 10000000 && totalVal < 30000000)) {
+      return { tier: 'Medium', label: raw || '₹1–3 Cr (Medium)' };
+    }
+    return { tier: 'Normal', label: raw || (totalVal > 0 ? formatCurrency(totalVal) : 'Standard Ticket') };
+  };
+
+  const runAutoAssignmentAlgorithm = (custs: Customer[]): AutoRecommendation[] => {
+    const liveCountMap: Record<string, number> = {};
+    MOCK_IRMS.forEach((irm: IrmProfile) => {
+      liveCountMap[irm.id] = customers.filter(c => c.assignedIrmName === irm.name || c.assignedIrmId === irm.id).length;
+    });
+
+    const tierPriority = { Premium: 5, 'Very High': 4, High: 3, Medium: 2, Normal: 1 };
+    const sortedCusts = [...custs].sort((a, b) => {
+      const tA = getCustomerCapacityTier(a).tier;
+      const tB = getCustomerCapacityTier(b).tier;
+      return tierPriority[tB] - tierPriority[tA];
+    });
+
+    const recommendations: AutoRecommendation[] = [];
+
+    sortedCusts.forEach(c => {
+      const { tier, label } = getCustomerCapacityTier(c);
+      const availableIrms = MOCK_IRMS.filter((i: IrmProfile) => i.status === 'Available');
+      const pool = availableIrms.length > 0 ? availableIrms : MOCK_IRMS;
+
+      let chosenIrm: IrmProfile;
+      let reason: string;
+
+      if (tier === 'Premium') {
+        const expIrms = pool.filter((i: IrmProfile) => i.experienceLevel === 'Experienced');
+        const candidatePool = expIrms.length > 0 ? expIrms : pool;
+        chosenIrm = candidatePool.reduce((min: IrmProfile, curr: IrmProfile) => liveCountMap[curr.id] < liveCountMap[min.id] ? curr : min, candidatePool[0]);
+        reason = 'Premium → Experienced (Capacity Match)';
+      } else if (tier === 'Very High') {
+        const expIrms = pool.filter((i: IrmProfile) => i.experienceLevel === 'Experienced');
+        const candidatePool = expIrms.length > 0 ? expIrms : pool;
+        chosenIrm = candidatePool.reduce((min: IrmProfile, curr: IrmProfile) => liveCountMap[curr.id] < liveCountMap[min.id] ? curr : min, candidatePool[0]);
+        reason = 'Very High → Experienced (High Performance)';
+      } else if (tier === 'High') {
+        const highIrms = pool.filter((i: IrmProfile) => i.experienceLevel === 'Experienced' || i.experienceLevel === 'Mid-Level');
+        const candidatePool = highIrms.length > 0 ? highIrms : pool;
+        chosenIrm = candidatePool.reduce((min: IrmProfile, curr: IrmProfile) => liveCountMap[curr.id] < liveCountMap[min.id] ? curr : min, candidatePool[0]);
+        reason = chosenIrm.experienceLevel === 'Experienced'
+          ? 'High-value → Experienced'
+          : 'High-value → Mid-Level (Fair Distribution)';
+      } else if (tier === 'Medium') {
+        const fresherMid = pool.filter((i: IrmProfile) => i.experienceLevel === 'Fresher' || i.experienceLevel === 'Mid-Level');
+        const candidatePool = fresherMid.length > 0 ? fresherMid : pool;
+        chosenIrm = candidatePool.reduce((min: IrmProfile, curr: IrmProfile) => liveCountMap[curr.id] < liveCountMap[min.id] ? curr : min, candidatePool[0]);
+        reason = chosenIrm.experienceLevel === 'Fresher'
+          ? 'Medium-value → Fresher (Balanced Workload)'
+          : 'Medium-value → Mid-Level (Fair Distribution)';
+      } else {
+        chosenIrm = pool.reduce((min: IrmProfile, curr: IrmProfile) => liveCountMap[curr.id] < liveCountMap[min.id] ? curr : min, pool[0]);
+        reason = 'Standard Ticket → Balanced Workload';
+      }
+
+      liveCountMap[chosenIrm.id] = (liveCountMap[chosenIrm.id] || 0) + 1;
+
+      recommendations.push({
+        customerId: c.id,
+        customerName: c.name,
+        investmentDisplay: label,
+        tier,
+        recommendedIrmId: chosenIrm.id,
+        recommendedIrmName: chosenIrm.name,
+        matchReason: reason,
+        isEdited: false,
+      });
+    });
+
+    return recommendations;
+  };
+
+  const handleSendAssignment = () => {
+    if (assignSubMode === 'manual') {
+      if (selectedCustomerIds.size === 0) return;
+      const selectedCusts = scopedCustomers.filter(c => selectedCustomerIds.has(c.id) && isCustomerEligibleForIrm(c));
+      if (selectedCusts.length === 0) return;
+
+      setSelectedIrmId(MOCK_IRMS[0]?.id || '');
+      setIsManualModalOpen(true);
+    } else {
+      if (eligibleUnassignedCustomers.length === 0) return;
+      const recs = runAutoAssignmentAlgorithm(eligibleUnassignedCustomers);
+      setAutoRecommendations(recs);
+      setIsAutoPreviewModalOpen(true);
+    }
+  };
+
+  const handleConfirmManualAssignment = async () => {
+    const selectedIrm = MOCK_IRMS.find((i: IrmProfile) => i.id === selectedIrmId);
+    if (!selectedIrm) return;
+
+    let assignedCount = 0;
+    const toUpdate: Customer[] = [];
+
+    selectedCustomerIds.forEach(cid => {
+      const cust = customers.find(c => c.id === cid);
+      if (cust && isCustomerEligibleForIrm(cust)) {
+        const updated: Customer = {
+          ...cust,
+          assignedIrmId: selectedIrm.id,
+          assignedIrmName: selectedIrm.name,
+          assignedIrmAt: new Date().toISOString(),
+          notes: `${cust.notes ? cust.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Assigned to IRM: ${selectedIrm.name} by ${user?.name || 'Sales Executive'}`,
+        };
+        toUpdate.push(updated);
+        assignedCount++;
+      }
+    });
+
+    for (const u of toUpdate) {
+      await apiSaveCustomer(u).catch(console.error);
+    }
+
+    setIsManualModalOpen(false);
+    setIsAssignMode(false);
+    setSelectedCustomerIds(new Set());
+    loadData();
+    showToast(`Successfully assigned ${assignedCount} customer(s) to ${selectedIrm.name}!`);
+  };
+
+  const handleConfirmAutoAssignment = async () => {
+    let assignedCount = 0;
+    const toUpdate: Customer[] = [];
+
+    autoRecommendations.forEach(rec => {
+      const cust = customers.find(c => c.id === rec.customerId);
+      if (cust && isCustomerEligibleForIrm(cust)) {
+        const updated: Customer = {
+          ...cust,
+          assignedIrmId: rec.recommendedIrmId,
+          assignedIrmName: rec.recommendedIrmName,
+          assignedIrmAt: new Date().toISOString(),
+          notes: `${cust.notes ? cust.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Auto-assigned to IRM: ${rec.recommendedIrmName} (${rec.matchReason})`,
+        };
+        toUpdate.push(updated);
+        assignedCount++;
+      }
+    });
+
+    for (const u of toUpdate) {
+      await apiSaveCustomer(u).catch(console.error);
+    }
+
+    setIsAutoPreviewModalOpen(false);
+    setIsAssignMode(false);
+    setSelectedCustomerIds(new Set());
+    setAutoRecommendations([]);
+    loadData();
+    showToast(`Successfully confirmed auto-assignment for ${assignedCount} customer(s)!`);
+  };
+
+  const handleUpdateSingleRecommendation = (customerId: string, newIrmId: string) => {
+    const newIrm = MOCK_IRMS.find((i: IrmProfile) => i.id === newIrmId);
+    if (!newIrm) return;
+    setAutoRecommendations(prev =>
+      prev.map(rec => {
+        if (rec.customerId === customerId) {
+          return {
+            ...rec,
+            recommendedIrmId: newIrm.id,
+            recommendedIrmName: newIrm.name,
+            matchReason: `${rec.tier} → ${newIrm.name} (Manually Adjusted)`,
+            isEdited: true,
+          };
+        }
+        return rec;
+      })
+    );
+    setEditingRecommendationCustomerId(null);
+  };
+
+  // Filter linked records for selected customer
+  const customerCalls = calls.filter(
+    c => selectedCustomer && (c.contactPhone === selectedCustomer.phone || c.contactName === selectedCustomer.name)
+  );
+
+  const customerFollowups = followups.filter(
+    f => selectedCustomer && (f.contactPhone === selectedCustomer.phone || f.contactName === selectedCustomer.name)
+  );
+
+  const customerDeals = deals.filter(
+    d => selectedCustomer && (d.customerId === selectedCustomer.id || d.customerName === selectedCustomer.name)
+  );
 
   const resetAddForm = () => {
     setNewName('');
@@ -200,7 +412,7 @@ export const CustomersPage: React.FC = () => {
     setAddErrors({});
   };
 
-  const handleAddCustomer = async () => {
+  const handleAddCustomer = () => {
     const errors: { name?: string; phone?: string } = {};
     if (!newName.trim()) errors.name = 'Name is required.';
     if (!newPhone.trim()) errors.phone = 'Phone is required.';
@@ -208,65 +420,31 @@ export const CustomersPage: React.FC = () => {
       setAddErrors(errors);
       return;
     }
-
-    setSavingCustomer(true);
-    try {
-      const res = await customersApi.createCustomer({
-        name: newName.trim(),
-        phone: newPhone.trim(),
-        email: newEmail.trim() || undefined,
-        location: newLocation.trim() || undefined,
-        status: newStatus,
-        totalValue: 0,
-        notes: '',
-        customFields: newCustomFields,
-      });
-
-      setIsAddModalOpen(false);
-      resetAddForm();
-      await fetchCustomers();
-
-      if (res?.id) {
-        const createdId = String(res.id);
-        const match = customers.find(c => c.id === createdId);
-        if (match) setSelectedCustomer(match);
-      }
-    } catch (err: any) {
-      alert(`Error creating customer: ${err.message || 'Please try again'}`);
-    } finally {
-      setSavingCustomer(false);
-    }
-  };
-
-  const handleCompleteFollowup = async (followupId: string) => {
-    try {
-      await followupsApi.completeFollowup(followupId);
-      // Refresh 360 data
-      if (selectedCustomer) {
-        const res = await customersApi.getCustomer360(selectedCustomer.id);
-        if (res?.followups) {
-          const mapped: Followup[] = res.followups.map((f: any) => ({
-            id: String(f.id),
-            companyId: String(tenant?.id || ''),
-            tenantId: String(tenant?.id || ''),
-            contactName: selectedCustomer.name,
-            contactPhone: selectedCustomer.phone,
-            contactType: 'customer',
-            contactId: selectedCustomer.id,
-            assignedAgentId: String(f.assignedAgentId || ''),
-            assignedAgentName: f.assignedAgentName || 'Agent',
-            scheduledAt: f.scheduledAt ? new Date(f.scheduledAt).toLocaleString('en-IN') : '—',
-            notes: f.notes || '',
-            priority: (f.priority || 'Medium') as any,
-            status: (f.status || 'Pending') as any,
-            completedAt: f.completedAt ? new Date(f.completedAt).toLocaleString('en-IN') : undefined,
-          }));
-          setCustomerFollowups(mapped);
-        }
-      }
-    } catch (err: any) {
-      alert(`Failed to complete follow-up: ${err.message}`);
-    }
+    const newCustomer: import('../../types').Customer = {
+      id: `cust-${Date.now()}`,
+      companyId: tenant?.id || '',
+      name: newName.trim(),
+      phone: newPhone.trim(),
+      email: newEmail.trim(),
+      status: newStatus,
+      assignedAgentId: user?.id || '',
+      assignedAgentName: user?.name || '',
+      location: newLocation.trim(),
+      lastContacted: new Date().toISOString().split('T')[0],
+      openDealsCount: 0,
+      totalValue: 0,
+      createdAt: new Date().toISOString().split('T')[0],
+      notes: '',
+      customFields: newCustomFields,
+    };
+    apiSaveCustomer(newCustomer)
+      .then(saved => {
+        setSelectedCustomer(saved);
+        loadData();
+      })
+      .catch(console.error);
+    setIsAddModalOpen(false);
+    resetAddForm();
   };
 
   const formatCurrency = (val: number) => {
@@ -275,14 +453,62 @@ export const CustomersPage: React.FC = () => {
     return `₹${val.toLocaleString('en-IN')}`;
   };
 
+  // Build leads lookup map by last 10 digits of phone once per render
+  const leadsByPhone = new Map<string, Lead>();
+  (leads || []).forEach(l => {
+    const digits = (l.phone || '').replace(/\D/g, '').slice(-10);
+    if (digits && !leadsByPhone.has(digits)) {
+      leadsByPhone.set(digits, l);
+    }
+  });
+
+  const getInvestmentRange = (c: Customer): string => {
+    const checkVal = (v: unknown): string => {
+      if (typeof v === 'string' && v.trim()) {
+        return v.trim();
+      }
+      return '';
+    };
+
+    // 1. c.customFields?.investmentCapacity
+    const c1 = checkVal(c.customFields?.investmentCapacity);
+    if (c1) return c1;
+
+    // 2. c.customFields?.budgetRange
+    const c2 = checkVal(c.customFields?.budgetRange);
+    if (c2) return c2;
+
+    // 3. matching lead from the map (by the last 10 digits of c.phone)
+    const digits = (c.phone || '').replace(/\D/g, '').slice(-10);
+    const lead = digits ? leadsByPhone.get(digits) : undefined;
+    if (lead) {
+      const l1 = checkVal(lead.customFields?.investmentCapacity);
+      if (l1) return l1;
+      const l2 = checkVal(lead.customFields?.budgetRange);
+      if (l2) return l2;
+    }
+
+    return '';
+  };
+
+  const getCustomerValueDisplay = (c: Customer): string => {
+    const range = getInvestmentRange(c);
+    if (range) return range;
+    if (typeof c.totalValue === 'number' && c.totalValue > 0) {
+      return formatCurrency(c.totalValue);
+    }
+    return '—';
+  };
+
   const rawEvents: TimelineEvent[] = [];
+
   if (selectedCustomer) {
     customerCalls.forEach(c => {
       rawEvents.push({
         id: c.id,
         type: 'call',
         title: `${c.direction === 'outbound' ? 'Outbound' : 'Inbound'} Call — ${c.disposition}`,
-        description: c.notes || undefined,
+        description: c.transcription || undefined,
         timestamp: c.timestamp,
         actorName: c.agentName,
       });
@@ -299,10 +525,21 @@ export const CustomersPage: React.FC = () => {
       });
     });
 
+    customerDeals.forEach(d => {
+      rawEvents.push({
+        id: d.id,
+        type: 'status_change',
+        title: `Deal Created — ${d.title}`,
+        description: `Stage: ${d.stage} • Value: ${formatCurrency(d.value)}`,
+        timestamp: d.createdAt,
+        actorName: d.assignedAgentName,
+      });
+    });
+
     rawEvents.push({
       id: `ev-create-${selectedCustomer.id}`,
       type: 'note',
-      title: 'Customer Account Created in Database',
+      title: 'Customer Account Created',
       timestamp: selectedCustomer.createdAt,
       actorName: selectedCustomer.assignedAgentName,
     });
@@ -325,25 +562,72 @@ export const CustomersPage: React.FC = () => {
             <Building2 size={24} color="var(--primary-600)" /> Customer 360 Profile
           </h1>
           <p className="page-subtitle">
-            Unified contact view across calls, follow-ups, timeline, and documents for {tenant?.name || 'organization'}.
+            Unified contact view across calls, deals, timeline, and documents for {tenant?.name}.
           </p>
         </div>
-        <button
-          className="btn btn-secondary btn-sm"
-          onClick={fetchCustomers}
-          disabled={loading}
-          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-        >
-          <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh DB Data
-        </button>
-      </div>
 
-      {error && (
-        <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#dc2626', padding: '10px 14px', borderRadius: 8, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <AlertCircle size={16} />
-          <span>{error}</span>
-        </div>
-      )}
+        {/* Top Action Area: Assign Leads to IRM (GHL India Ventures Sales Executive only) */}
+        {canAssignToIRM && (
+          <div className="customer-top-actions">
+            {!isAssignMode ? (
+              <button
+                type="button"
+                className="btn btn-primary customers-btn-assign-entry"
+                onClick={() => {
+                  setIsAssignMode(true);
+                  setSelectedCustomerIds(new Set());
+                }}
+              >
+                <Users size={14} /> Assign Leads to IRM
+              </button>
+            ) : (
+              <div className="assign-mode-toolbar">
+                <div className="assign-mode-segmented">
+                  <button
+                    type="button"
+                    className={`assign-seg-btn ${assignSubMode === 'manual' ? 'active' : ''}`}
+                    onClick={() => setAssignSubMode('manual')}
+                  >
+                    Manual
+                  </button>
+                  <button
+                    type="button"
+                    className={`assign-seg-btn ${assignSubMode === 'auto' ? 'active' : ''}`}
+                    onClick={() => setAssignSubMode('auto')}
+                  >
+                    Auto
+                  </button>
+                </div>
+
+                <span className="assign-counter-badge">
+                  {assignSubMode === 'manual'
+                    ? `${selectedCustomerIds.size} customer${selectedCustomerIds.size !== 1 ? 's' : ''} selected`
+                    : eligibleUnassignedCustomers.length > 0
+                      ? `${eligibleUnassignedCustomers.length} eligible customer${eligibleUnassignedCustomers.length !== 1 ? 's' : ''}`
+                      : 'No unassigned customers available for automatic assignment.'}
+                </span>
+
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm assign-send-btn"
+                  disabled={assignSubMode === 'manual' ? selectedCustomerIds.size === 0 : eligibleUnassignedCustomers.length === 0}
+                  onClick={handleSendAssignment}
+                >
+                  <Send size={13} /> Send
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm assign-cancel-btn"
+                  onClick={handleCancelAssignMode}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Customer 360 Split View: List on left, Full 360 on right */}
       <div className="customers-split-layout">
@@ -351,13 +635,10 @@ export const CustomersPage: React.FC = () => {
         <div className="customers-sidebar">
           <div className="card customers-sidebar-card">
             <div className="customers-sidebar-header">
-              <h3 className="customers-sidebar-title">Customer Accounts ({filteredCustomers.length})</h3>
+              <h3 className="customers-sidebar-title">Customer Accounts</h3>
               <button
                 className="btn btn-primary btn-sm customers-btn-new"
-                onClick={() => {
-                  resetAddForm();
-                  setIsAddModalOpen(true);
-                }}
+                onClick={() => { resetAddForm(); setIsAddModalOpen(true); }}
               >
                 <Plus size={13} /> New Customer
               </button>
@@ -372,7 +653,10 @@ export const CustomersPage: React.FC = () => {
 
               {/* Status Filter */}
               <div className="customers-filter-group">
-                <label htmlFor="filter-customer-status" className="customers-filter-tag">
+                <label
+                  htmlFor="filter-customer-status"
+                  className="customers-filter-tag"
+                >
                   Status:
                 </label>
                 <select
@@ -388,10 +672,35 @@ export const CustomersPage: React.FC = () => {
                 </select>
               </div>
 
-              {/* Agent Filter */}
-              {!isExec && agentOptions.length > 0 && (
+              {/* Assignment Status Filter (GHL India Ventures Sales Executive only) */}
+              {canAssignToIRM && (
                 <div className="customers-filter-group">
-                  <label htmlFor="filter-customer-agent" className="customers-filter-tag">
+                  <label
+                    htmlFor="filter-customer-assignment"
+                    className="customers-filter-tag"
+                  >
+                    IRM:
+                  </label>
+                  <select
+                    id="filter-customer-assignment"
+                    className={`form-select customers-filter-select ${assignmentFilter !== 'All' ? 'is-filtered' : ''}`}
+                    value={assignmentFilter}
+                    onChange={e => setAssignmentFilter(e.target.value as any)}
+                  >
+                    <option value="All">All Customers</option>
+                    <option value="Assigned">Assigned Customers</option>
+                    <option value="Unassigned">Unassigned Customers</option>
+                  </select>
+                </div>
+              )}
+
+              {/* Agent Filter */}
+              {!isExec && (
+                <div className="customers-filter-group">
+                  <label
+                    htmlFor="filter-customer-agent"
+                    className="customers-filter-tag"
+                  >
                     Agent:
                   </label>
                   <select
@@ -410,50 +719,81 @@ export const CustomersPage: React.FC = () => {
                 </div>
               )}
             </div>
-
             <div className="customers-list">
-              {loading && customers.length === 0 ? (
-                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-secondary)' }}>
-                  Loading database records...
-                </div>
-              ) : filteredCustomers.length === 0 ? (
-                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-secondary)' }}>
-                  No customer records found in database.
-                </div>
-              ) : (
-                filteredCustomers.map(c => {
-                  const isSelected = selectedCustomer?.id === c.id;
-                  return (
-                    <div
-                      key={c.id}
-                      onClick={() => setSelectedCustomer(c)}
-                      className={`customer-list-item ${isSelected ? 'is-selected' : ''}`}
-                    >
-                      <div className="customer-list-item-top">
-                        <div className="customer-list-name">{c.name}</div>
-                        <StatusChip status={c.status} size="sm" />
+              {filteredCustomers.map(c => {
+                const isSelected = selectedCustomer?.id === c.id;
+                const isEligible = isCustomerEligibleForIrm(c);
+
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() => setSelectedCustomer(c)}
+                    className={`customer-list-item ${isSelected ? 'is-selected' : ''}`}
+                  >
+                    <div className="customer-list-item-top">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                        {isAssignMode && canAssignToIRM && (
+                          assignSubMode === 'manual' ? (
+                            isEligible ? (
+                              <input
+                                type="checkbox"
+                                className="customer-select-checkbox"
+                                checked={selectedCustomerIds.has(c.id)}
+                                onChange={e => {
+                                  e.stopPropagation();
+                                  toggleCustomerSelection(c.id);
+                                }}
+                                onClick={e => e.stopPropagation()}
+                              />
+                            ) : (
+                              <span className="customer-locked-indicator" title="Already assigned to an IRM">
+                                <Lock size={12} color="var(--text-muted)" />
+                              </span>
+                            )
+                          ) : null
+                        )}
+                        <div className="customer-list-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {c.name}
+                        </div>
                       </div>
-                      <div className="customer-list-sub">
-                        {c.phone} • {c.location || 'Location not set'}
-                      </div>
-                      <div className="customer-list-bottom">
-                        <span className="customer-list-val">
-                          {c.totalValue > 0 ? formatCurrency(c.totalValue) : '—'}
-                        </span>
-                        <button
-                          className="btn btn-call btn-sm btn-icon customer-list-call-btn"
-                          onClick={e => {
-                            e.stopPropagation();
-                            initiateCall(c.name, c.phone, 'customer', c.id);
-                          }}
-                        >
-                          <Phone size={12} />
-                        </button>
-                      </div>
+                      <StatusChip status={c.status} size="sm" />
                     </div>
-                  );
-                })
-              )}
+                    <div className="customer-list-sub">
+                      {c.phone} • {c.location}
+                    </div>
+
+                    {/* Assigned / Unassigned Status Display (GHL India Ventures Sales Executive only) */}
+                    {canAssignToIRM && (
+                      <div className={`customer-irm-status-pill ${c.assignedIrmName ? 'assigned' : 'unassigned'}`}>
+                        {c.assignedIrmName ? (
+                          <>
+                            <UserCheck size={11} /> Assigned IRM: <strong>{c.assignedIrmName}</strong>
+                          </>
+                        ) : (
+                          <>
+                            <Clock size={11} /> Assignment: Unassigned
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="customer-list-bottom">
+                      <span className="customer-list-val">
+                        {getCustomerValueDisplay(c)}
+                      </span>
+                      <button
+                        className="btn btn-call btn-sm btn-icon customer-list-call-btn"
+                        onClick={e => {
+                          e.stopPropagation();
+                          initiateCall(c.name, c.phone, 'customer', c.id);
+                        }}
+                      >
+                        <Phone size={12} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -467,17 +807,11 @@ export const CustomersPage: React.FC = () => {
                 <div className="customer-cockpit-name-row">
                   <h2 className="customer-cockpit-name">{selectedCustomer.name}</h2>
                   <StatusChip status={selectedCustomer.status} />
-                  {customer360Loading && (
-                    <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                      <RefreshCw size={11} className="spin" style={{ display: 'inline', marginRight: 4 }} />
-                      Syncing 360...
-                    </span>
-                  )}
                 </div>
                 <div className="customer-cockpit-meta-row">
                   <span>📞 {selectedCustomer.phone}</span>
                   {selectedCustomer.email && <span>✉️ {selectedCustomer.email}</span>}
-                  {selectedCustomer.location && <span>📍 {selectedCustomer.location}</span>}
+                  <span>📍 {selectedCustomer.location}</span>
                 </div>
               </div>
 
@@ -516,16 +850,26 @@ export const CustomersPage: React.FC = () => {
               {activeTab === 'overview' && (
                 <div className="customer-overview-stack">
                   <div className="card customer-profile-card">
-                    <h4 className="customer-section-heading">Account & Commercial Profile</h4>
+                    <h4 className="customer-section-heading">
+                      Account & Commercial Profile
+                    </h4>
                     <div className="customer-profile-grid">
                       <div>
                         <span className="customer-profile-label">Assigned Account Manager:</span>
                         <div className="customer-profile-val">{selectedCustomer.assignedAgentName}</div>
                       </div>
+                      {canAssignToIRM && (
+                        <div>
+                          <span className="customer-profile-label">Assigned IRM:</span>
+                          <div className={selectedCustomer.assignedIrmName ? 'customer-profile-val-primary' : 'customer-profile-val'}>
+                            {selectedCustomer.assignedIrmName || 'Unassigned'}
+                          </div>
+                        </div>
+                      )}
                       <div>
-                        <span className="customer-profile-label">Portfolio / Deal Value:</span>
+                        <span className="customer-profile-label">Investment Range:</span>
                         <div className="customer-profile-val-green">
-                          {selectedCustomer.totalValue > 0 ? formatCurrency(selectedCustomer.totalValue) : '—'}
+                          {getCustomerValueDisplay(selectedCustomer)}
                         </div>
                       </div>
                       <div>
@@ -534,26 +878,51 @@ export const CustomersPage: React.FC = () => {
                       </div>
                       <div>
                         <span className="customer-profile-label">Last Contacted:</span>
-                        <div className="customer-profile-val-primary">{selectedCustomer.lastContacted}</div>
+                        <div className="customer-profile-val-primary">
+                          {selectedCustomer.lastContacted}
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  {selectedCustomer.customFields && Object.keys(selectedCustomer.customFields).length > 0 && (
-                    <div className="card customer-custom-card">
-                      <h4 className="customer-custom-heading">Attributes & Preferences</h4>
-                      <div className="customer-custom-grid">
-                        {Object.entries(selectedCustomer.customFields).map(([key, val]) => (
-                          <div key={key}>
-                            <span className="customer-custom-label">
-                              {key.replace(/([A-Z])/g, ' $1').toUpperCase()}:
-                            </span>
-                            <div className="customer-custom-val">{String(val)}</div>
-                          </div>
-                        ))}
+                  {selectedCustomer.customFields && (() => {
+                    const activeDefs = getCustomFieldDefinitions(tenant?.id)
+                      .filter((d: CustomFieldDefinition) => d.active !== false && d.module === 'customers')
+                      .sort((a: CustomFieldDefinition, b: CustomFieldDefinition) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+
+                    const rows = activeDefs
+                      .map((def: CustomFieldDefinition) => {
+                        const key = def.fieldKey || def.id;
+                        const val = selectedCustomer.customFields?.[key];
+                        if (val === undefined || val === null || val === '') return null;
+                        return {
+                          id: def.id,
+                          label: def.label || key.replace(/([A-Z])/g, ' $1'),
+                          value: String(val),
+                        };
+                      })
+                      .filter(Boolean);
+
+                    if (rows.length === 0) return null;
+
+                    return (
+                      <div className="card customer-custom-card">
+                        <h4 className="customer-custom-heading">
+                          Tenant Specific Relationship Attributes
+                        </h4>
+                        <div className="customer-custom-grid">
+                          {rows.map((item: any) => (
+                            <div key={item!.id}>
+                              <span className="customer-custom-label">
+                                {item!.label}:
+                              </span>
+                              <div className="customer-custom-val">{item!.value}</div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               )}
 
@@ -561,11 +930,14 @@ export const CustomersPage: React.FC = () => {
                 <div className="customer-calls-stack">
                   {customerCalls.length === 0 ? (
                     <div className="customer-empty-text">
-                      No calls logged yet with this customer in Neon database. Use "Click to Call" to initiate a call.
+                      No calls logged yet with this customer. Click "Click to Call" to initiate a call.
                     </div>
                   ) : (
                     customerCalls.map(c => (
-                      <div key={c.id} className="card customer-call-card">
+                      <div
+                        key={c.id}
+                        className="card customer-call-card"
+                      >
                         <div>
                           <div className="customer-call-meta">
                             <StatusChip status={c.direction} size="sm" />
@@ -574,8 +946,21 @@ export const CustomersPage: React.FC = () => {
                               Duration: {Math.floor(c.duration / 60)}m {c.duration % 60}s • {c.timestamp}
                             </span>
                           </div>
-                          {c.notes && <p className="customer-call-transcript">"{c.notes}"</p>}
+                          {c.transcription && (
+                            <p className="customer-call-transcript">
+                              "{c.transcription}"
+                            </p>
+                          )}
                         </div>
+
+                        {c.recordingUrl && (
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => alert(`Simulated Playback: Playing audio for call with ${c.contactName}`)}
+                          >
+                            <Play size={13} color="var(--primary-600)" /> Play Recording
+                          </button>
+                        )}
                       </div>
                     ))
                   )}
@@ -586,35 +971,38 @@ export const CustomersPage: React.FC = () => {
                 <div className="customer-followups-stack">
                   {customerFollowups.length === 0 ? (
                     <div className="customer-empty-text">
-                      No follow-ups recorded for this customer in database.
+                      No open follow-ups for this customer.
                     </div>
                   ) : (
                     customerFollowups.map(f => (
-                      <div key={f.id} className="customer-followup-item">
+                      <div
+                        key={f.id}
+                        className="customer-followup-item"
+                      >
                         <div>
                           <div className="customer-followup-header">
                             <span className="customer-followup-notes">{f.notes}</span>
                             <StatusChip status={f.priority} size="sm" />
-                            <StatusChip status={f.status} size="sm" />
                           </div>
                           <div className="customer-followup-due">
-                            ⏰ Scheduled: {f.scheduledAt} • Assignee: {f.assignedAgentName}
+                            ⏰ Due: {f.scheduledAt} • Assignee: {f.assignedAgentName}
                           </div>
                         </div>
 
-                        {f.status === 'Pending' && (
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => handleCompleteFollowup(f.id)}
-                          >
-                            Mark Done
-                          </button>
-                        )}
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => {
+                            apiSaveFollowup({ ...f, status: 'Completed' }).then(loadData).catch(console.error);
+                          }}
+                        >
+                          Mark Done
+                        </button>
                       </div>
                     ))
                   )}
                 </div>
               )}
+
 
               {activeTab === 'timeline' && <Timeline events={timelineEvents} />}
 
@@ -625,7 +1013,11 @@ export const CustomersPage: React.FC = () => {
                     entityId={selectedCustomer.id}
                     allowedCategories={['KYC', 'Agreement', 'Payment Receipt', 'Identity Proof', 'Other']}
                   />
-                  <DocumentList entityType="customer" entityId={selectedCustomer.id} canDelete />
+                  <DocumentList
+                    entityType="customer"
+                    entityId={selectedCustomer.id}
+                    canDelete
+                  />
                 </div>
               )}
             </div>
@@ -636,34 +1028,19 @@ export const CustomersPage: React.FC = () => {
           </div>
         )}
       </div>
-
       {/* New Customer Modal */}
       <Modal
         isOpen={isAddModalOpen}
-        onClose={() => {
-          setIsAddModalOpen(false);
-          resetAddForm();
-        }}
+        onClose={() => { setIsAddModalOpen(false); resetAddForm(); }}
         title="New Customer"
-        subtitle="Create a fresh customer account in PostgreSQL database."
+        subtitle="Create a fresh customer account and assign it to yourself."
         footer={
           <>
-            <button
-              className="btn btn-secondary"
-              onClick={() => {
-                setIsAddModalOpen(false);
-                resetAddForm();
-              }}
-              disabled={savingCustomer}
-            >
+            <button className="btn btn-secondary" onClick={() => { setIsAddModalOpen(false); resetAddForm(); }}>
               Cancel
             </button>
-            <button
-              className="btn btn-primary"
-              onClick={handleAddCustomer}
-              disabled={savingCustomer}
-            >
-              {savingCustomer ? 'Creating...' : 'Create Customer'}
+            <button className="btn btn-primary" onClick={handleAddCustomer}>
+              Create Customer
             </button>
           </>
         }
@@ -676,10 +1053,7 @@ export const CustomersPage: React.FC = () => {
               className={`form-input${addErrors.name ? ' is-invalid' : ''}`}
               placeholder="e.g. Priya Sharma"
               value={newName}
-              onChange={e => {
-                setNewName(e.target.value);
-                if (addErrors.name) setAddErrors(p => ({ ...p, name: undefined }));
-              }}
+              onChange={e => { setNewName(e.target.value); if (addErrors.name) setAddErrors(p => ({ ...p, name: undefined })); }}
             />
             {addErrors.name && <div className="form-error">{addErrors.name}</div>}
           </div>
@@ -690,10 +1064,7 @@ export const CustomersPage: React.FC = () => {
               className={`form-input${addErrors.phone ? ' is-invalid' : ''}`}
               placeholder="e.g. +91 98765 43210"
               value={newPhone}
-              onChange={e => {
-                setNewPhone(e.target.value);
-                if (addErrors.phone) setAddErrors(p => ({ ...p, phone: undefined }));
-              }}
+              onChange={e => { setNewPhone(e.target.value); if (addErrors.phone) setAddErrors(p => ({ ...p, phone: undefined })); }}
             />
             {addErrors.phone && <div className="form-error">{addErrors.phone}</div>}
           </div>
@@ -731,8 +1102,267 @@ export const CustomersPage: React.FC = () => {
               <option value="Inactive">Inactive</option>
             </select>
           </div>
+          {/* Tenant-Specific Custom Fields */}
+          {(() => {
+            const customerDefs = getCustomFieldDefinitions(tenant?.id)
+              .filter((d: CustomFieldDefinition) => d.active !== false && d.module === 'customers')
+              .sort((a: CustomFieldDefinition, b: CustomFieldDefinition) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+
+            if (customerDefs.length === 0) return null;
+
+            return customerDefs.map((def: CustomFieldDefinition) => {
+              const key = def.fieldKey || def.id;
+              const val = newCustomFields[key] ?? def.defaultValue ?? '';
+              return (
+                <div key={def.id} className="form-group">
+                  <label className="form-label">
+                    {def.label || key}
+                    {def.required ? ' *' : ''}
+                  </label>
+                  {def.fieldType === 'select' && def.options && def.options.length > 0 ? (
+                    <select
+                      className="form-select"
+                      required={def.required}
+                      value={val}
+                      onChange={e => setNewCustomFields(prev => ({ ...prev, [key]: e.target.value }))}
+                    >
+                      {!def.defaultValue && !def.options.includes(val) && (
+                        <option value="">Select {def.label}...</option>
+                      )}
+                      {def.options.map((opt: string) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type={def.fieldType === 'number' ? 'number' : 'text'}
+                      className="form-input"
+                      required={def.required}
+                      placeholder={`Enter ${def.label}...`}
+                      value={val}
+                      onChange={e => setNewCustomFields(prev => ({ ...prev, [key]: e.target.value }))}
+                    />
+                  )}
+                </div>
+              );
+            });
+          })()}
         </div>
       </Modal>
+
+      {/* ── Manual IRM Selection Modal (GHL India Ventures Sales Executive only) ── */}
+      {canAssignToIRM && (
+        <Modal
+          isOpen={isManualModalOpen}
+          onClose={() => setIsManualModalOpen(false)}
+          title="Assign Leads to IRM"
+          subtitle={`Select an IRM to assign the ${selectedCustomerIds.size} selected customer(s) to.`}
+          maxWidth={900}
+          className="irm-assign-modal"
+          footer={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setIsManualModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!selectedIrmId}
+                onClick={handleConfirmManualAssignment}
+              >
+                Confirm Assignment →
+              </button>
+            </div>
+          }
+        >
+          <div className="irm-selection-list">
+            {MOCK_IRMS.map((irm: IrmProfile) => {
+              const currentCount = customers.filter(c => c.assignedIrmName === irm.name || c.assignedIrmId === irm.id).length;
+              const workload = currentCount <= 2 ? 'Low' : currentCount <= 5 ? 'Medium' : 'High';
+              const isSelected = selectedIrmId === irm.id;
+
+              return (
+                <div
+                  key={irm.id}
+                  className={`irm-selection-item ${isSelected ? 'is-selected' : ''}`}
+                  onClick={() => setSelectedIrmId(irm.id)}
+                >
+                  {/* Col 1 – Radio */}
+                  <div className="irm-col-radio">
+                    <input
+                      type="radio"
+                      name="selectedIrm"
+                      checked={isSelected}
+                      onChange={() => setSelectedIrmId(irm.id)}
+                      style={{ accentColor: 'var(--primary-600)', width: 16, height: 16 }}
+                    />
+                  </div>
+
+                  {/* Col 2 – IRM Info */}
+                  <div className="irm-col-info">
+                    <div className="irm-item-name">{irm.name}</div>
+                    <div className="irm-item-meta-row">Experience: <strong>{irm.experience}</strong> ({irm.experienceLevel})</div>
+                    <div className="irm-item-meta-row">Performance: <strong>{irm.performance}%</strong></div>
+                    <div className="irm-item-meta-row">Customers: <strong>{currentCount}</strong></div>
+                  </div>
+
+                  {/* Col 3 – Workload */}
+                  <div className="irm-col-pill">
+                    <span className={`irm-pill workload-${workload.toLowerCase()}`}>
+                      Workload: {workload}
+                    </span>
+                  </div>
+
+                  {/* Col 4 – Availability */}
+                  <div className="irm-col-pill">
+                    <span className={`irm-pill ${irm.status.toLowerCase()}`}>
+                      {irm.status}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Modal>
+      )}
+
+      {/* ── Auto Assignment Preview Modal (GHL India Ventures Sales Executive only) ── */}
+      {canAssignToIRM && (
+        <Modal
+          isOpen={isAutoPreviewModalOpen}
+          onClose={() => setIsAutoPreviewModalOpen(false)}
+          title="Auto Assignment Preview"
+          subtitle="Capacity-to-experience smart matching with balanced workload distribution."
+          className="irm-assign-modal auto-preview-modal"
+          maxWidth={900}
+          footer={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setIsAutoPreviewModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={autoRecommendations.length === 0}
+                onClick={handleConfirmAutoAssignment}
+              >
+                Confirm Assignment ({autoRecommendations.length})
+              </button>
+            </div>
+          }
+        >
+          <p className="auto-preview-subtext">
+            Review the calculated IRM recommendations before final assignment. You can edit any individual IRM assignment if needed.
+          </p>
+
+          <div className="auto-preview-table-container">
+            <table className="auto-preview-table">
+              <colgroup>
+                <col style={{ width: '160px' }} />
+                <col style={{ width: '130px' }} />
+                <col style={{ width: '175px' }} />
+                <col />
+                <col style={{ width: '65px' }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Investment</th>
+                  <th>Recommended IRM</th>
+                  <th>Match Reason</th>
+                  <th style={{ textAlign: 'center' }}>Edit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {autoRecommendations.map(rec => (
+                  <tr key={rec.customerId}>
+                    <td title={rec.customerName}>
+                      <div className="auto-cell-customer">{rec.customerName}</div>
+                    </td>
+                    <td title={rec.investmentDisplay}>
+                      <span className="auto-cell-investment">{rec.investmentDisplay}</span>
+                    </td>
+                    <td>
+                      {editingRecommendationCustomerId === rec.customerId ? (
+                        <select
+                          className="auto-edit-select"
+                          value={rec.recommendedIrmId}
+                          onChange={e => handleUpdateSingleRecommendation(rec.customerId, e.target.value)}
+                          autoFocus
+                        >
+                          {MOCK_IRMS.map((irm: IrmProfile) => (
+                            <option key={irm.id} value={irm.id}>
+                              {irm.name} ({irm.experienceLevel}, {irm.status})
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="auto-cell-irm" title={rec.recommendedIrmName}>
+                          <span>{rec.recommendedIrmName}</span>
+                        </div>
+                      )}
+                    </td>
+                    <td title={rec.matchReason}>
+                      <span className={`auto-reason-tag ${rec.isEdited ? 'manual-edit' : ''}`}>
+                        {rec.matchReason}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm auto-edit-btn"
+                        onClick={() => {
+                          if (editingRecommendationCustomerId === rec.customerId) {
+                            setEditingRecommendationCustomerId(null);
+                          } else {
+                            setEditingRecommendationCustomerId(rec.customerId);
+                          }
+                        }}
+                      >
+                        {editingRecommendationCustomerId === rec.customerId ? 'Done' : 'Edit'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Modal>
+      )}
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 24,
+            right: 24,
+            backgroundColor: '#059669',
+            color: '#fff',
+            padding: '12px 20px',
+            borderRadius: 8,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 14,
+            fontWeight: 600,
+          }}
+        >
+          <CheckCircle size={18} /> {toastMessage}
+        </div>
+      )}
     </div>
   );
 };

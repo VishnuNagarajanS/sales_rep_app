@@ -115,19 +115,40 @@
   padding-right: 22px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-base);
+  background-color: var(--bg-surface);
   color: var(--text-primary);
+  color-scheme: dark;
   cursor: pointer;
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
 }
 
+.customers-filter-select:focus {
+  outline: none;
+  border-color: var(--primary-500);
+}
+
 .customers-filter-select.is-filtered {
-  background-color: var(--primary-50);
+  background-color: var(--bg-surface-active);
+  border-color: var(--primary-600, #dc2626);
+  color: var(--text-primary);
 }
 
 .customers-filter-select:not(.is-filtered) {
   background-color: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.customers-filter-select option {
+  background-color: var(--bg-surface, #0f172a);
+  color: var(--text-primary, #f8fafc);
+}
+
+.customers-filter-select option:checked,
+.customers-filter-select option:hover {
+  background-color: var(--primary-600, #dc2626);
+  color: #ffffff;
 }
 
 .customers-list {
@@ -545,4 +566,397 @@
   .customer-tab-btn {
     white-space: nowrap;
   }
+}
+
+/* ── Assign Leads to IRM Styles ───────────────────────────────────────────── */
+
+.customers-btn-assign-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 14px;
+}
+
+.assign-mode-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.assign-mode-segmented {
+  display: inline-flex;
+  border-radius: var(--radius-md, 6px);
+  background: var(--bg-surface, #f1f5f9);
+  padding: 3px;
+  border: 1px solid var(--border-base, #e2e8f0);
+}
+
+.assign-seg-btn {
+  border: none;
+  background: transparent;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary, #64748b);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.assign-seg-btn.active {
+  background: var(--primary-600, #0284c7);
+  color: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.assign-counter-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary, #475569);
+  padding: 4px 10px;
+  background: var(--bg-surface, #f8fafc);
+  border: 1px solid var(--border-base, #cbd5e1);
+  border-radius: 20px;
+}
+
+.customer-select-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--primary-600, #0284c7);
+  margin: 0;
+}
+
+.customer-locked-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+.customer-irm-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  margin-top: 6px;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.customer-irm-status-pill.assigned {
+  background: rgba(2, 132, 199, 0.08);
+  color: var(--primary-700, #0369a1);
+  border: 1px solid rgba(2, 132, 199, 0.2);
+}
+
+.customer-irm-status-pill.unassigned {
+  background: var(--bg-surface, #f8fafc);
+  color: var(--text-muted, #94a3b8);
+  border: 1px solid var(--border-base, #e2e8f0);
+}
+
+/* IRM Manual Selection Cards */
+.irm-selection-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 460px;
+  overflow-y: auto;
+  padding: 4px 2px;
+}
+
+.irm-selection-item {
+  /* Strict 4-column grid: [radio] [info] [workload] [availability] */
+  display: grid;
+  grid-template-columns: 28px 1fr 130px 110px;
+  align-items: center;
+  gap: 0 18px;
+  padding: 14px 20px;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--border-base, #e2e8f0);
+  background: var(--bg-card, #ffffff);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.irm-selection-item:hover {
+  border-color: var(--primary-400, #38bdf8);
+  background: rgba(2, 132, 199, 0.02);
+}
+
+.irm-selection-item.is-selected {
+  border-color: var(--primary-600, #0284c7);
+  background: rgba(2, 132, 199, 0.06);
+  box-shadow: 0 0 0 1px var(--primary-600, #0284c7);
+}
+
+/* Col 1: Radio button container */
+.irm-col-radio {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* Col 2: IRM info — name + stacked meta rows */
+.irm-col-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Col 3 + 4: Pill columns */
+.irm-col-pill {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-shrink: 0;
+}
+
+.irm-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.irm-item-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary, #0f172a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Stacked meta rows (each on its own line, same left edge) */
+.irm-item-meta-row {
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Legacy flex meta row kept for compatibility with OriginalKYCView / non-IRM modals */
+.irm-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+}
+
+.irm-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.irm-pill.available {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.irm-pill.busy {
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.irm-pill.workload-low {
+  background: rgba(59, 130, 246, 0.1);
+  color: #2563eb;
+}
+
+.irm-pill.workload-medium {
+  background: rgba(147, 51, 234, 0.1);
+  color: #7c3aed;
+}
+
+.irm-pill.workload-high {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+}
+
+/* ── Shared large fixed modal for both Manual IRM + Auto Preview (900×650) ── */
+.modal-card.irm-assign-modal {
+  width: 900px;
+  height: 650px;
+  max-width: min(900px, calc(100vw - 32px));
+  max-height: min(650px, calc(100vh - 32px));
+  min-width: min(900px, calc(100vw - 32px));
+  min-height: min(650px, calc(100vh - 32px));
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-card.irm-assign-modal .modal-header {
+  flex-shrink: 0;
+  padding: 20px 28px;
+}
+
+.modal-card.irm-assign-modal .modal-body {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 28px;
+}
+
+.modal-card.irm-assign-modal .modal-footer {
+  flex-shrink: 0;
+  padding: 16px 28px;
+  background-color: var(--bg-surface-hover);
+}
+
+/* Auto-specific: body must be overflow:hidden so the inner table container controls scroll */
+.modal-card.irm-assign-modal.auto-preview-modal .modal-body {
+  overflow: hidden;
+}
+
+.auto-preview-subtext {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0 0 12px 0;
+  flex-shrink: 0;
+}
+
+/* Auto Assignment Preview Table Container - Fixed-height Scrollable */
+.auto-preview-table-container {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  margin: 0;
+  border: 1px solid var(--border-base, #e2e8f0);
+  border-radius: 8px;
+  background: var(--bg-surface, #ffffff);
+}
+
+.auto-preview-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 13px;
+  text-align: left;
+}
+
+.auto-preview-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-surface, #f8fafc);
+  padding: 10px 12px;
+  font-weight: 600;
+  color: var(--text-secondary, #475569);
+  border-bottom: 1px solid var(--border-base, #e2e8f0);
+  white-space: nowrap;
+}
+
+.auto-preview-table td {
+  padding: 8px 12px;
+  /* removed fixed height so Match Reason column can wrap to multiple lines */
+  min-height: 48px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--border-base, #f1f5f9);
+  vertical-align: middle;
+  overflow: hidden;
+}
+
+.auto-preview-table tr:last-child td {
+  border-bottom: none;
+}
+
+.auto-cell-customer {
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auto-cell-investment {
+  font-weight: 700;
+  color: #10b981;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+
+.auto-cell-irm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--primary-600);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auto-cell-irm span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auto-reason-tag {
+  display: inline-block;
+  max-width: 100%;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(124, 58, 237, 0.08);
+  color: #6d28d9;
+  border: 1px solid rgba(124, 58, 237, 0.2);
+  /* wrap instead of truncate so full reason is visible */
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  box-sizing: border-box;
+}
+
+.auto-reason-tag.manual-edit {
+  background: rgba(245, 158, 11, 0.1);
+  color: #b45309;
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+.auto-edit-select {
+  width: 100%;
+  max-width: 100%;
+  height: 32px;
+  box-sizing: border-box;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--primary-500, #0ea5e9);
+  background: var(--bg-card, #ffffff);
+  color: var(--text-primary, #0f172a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+
+.auto-edit-btn {
+  font-size: 12px;
+  padding: 3px 10px;
+  min-width: 50px;
 }

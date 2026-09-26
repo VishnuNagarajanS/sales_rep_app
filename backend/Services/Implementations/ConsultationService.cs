@@ -93,12 +93,13 @@ public class ConsultationService : IConsultationService
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 100);
 
-        var items = await query
+        var entities = await query
             .OrderByDescending(c => c.ScheduledAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(c => MapToDto(c))
             .ToListAsync(ct);
+
+        var items = entities.Select(MapToDto).ToList();
 
         return ApiResponse<PagedResult<ConsultationResponseDto>>.SuccessResult(
             PagedResult<ConsultationResponseDto>.Create(items, totalCount, page, pageSize),

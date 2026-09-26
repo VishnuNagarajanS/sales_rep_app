@@ -3,7 +3,6 @@ import { MessageSquare, Phone, Video, ArrowLeft } from 'lucide-react';
 import { ChatConversation, ChatMember } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { userStore } from '../../services/secondaryStores';
 import * as cs from '../../services/chatStorage';
 import { ConversationList } from './ConversationList';
 import { MessageThread } from './MessageThread';
@@ -11,6 +10,16 @@ import { NewConversationModal } from './NewConversationModal';
 import { MeetingRoom } from './MeetingRoom';
 import { ChatSettingsModal } from './ChatSettingsModal';
 import './ChatPage.css';
+
+const getStoredUsers = (tenantSlug?: string): any[] => {
+  try {
+    const raw = localStorage.getItem('nexus_users');
+    const all = raw ? JSON.parse(raw) : [];
+    return tenantSlug ? all.filter((u: any) => !u.companySlug || u.companySlug === tenantSlug) : all;
+  } catch {
+    return [];
+  }
+};
 
 interface ActiveMeetingState {
   id: string;
@@ -41,14 +50,14 @@ export const ChatPage: React.FC<{ onNavigate?: (route: string) => void }> = ({ o
   // Build "me" as a ChatMember
   const me: ChatMember | null = user
     ? {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        roleCode: user.role.code,
-        roleName: user.role.name,
-        companyId,
-        status: currentPresenceStatus,
-      }
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      roleCode: user.role.code,
+      roleName: user.role.name,
+      companyId,
+      status: currentPresenceStatus,
+    }
     : null;
 
   // Sync presence to chatStorage whenever TopBar availability changes
@@ -64,8 +73,8 @@ export const ChatPage: React.FC<{ onNavigate?: (route: string) => void }> = ({ o
     const convs = cs.getConversations(companyId);
     setConversations(convs);
 
-    // Build directory from userStore users, filtered strictly to this company
-    const allUsers = userStore.getUsers(tenant?.slug);
+    // Build directory from storageService users, filtered strictly to this company
+    const allUsers = getStoredUsers(tenant?.slug);
     setDirectory(cs.buildDirectory(allUsers as any, companyId, tenant?.slug));
   }, [companyId, tenant?.slug]);
 
@@ -102,7 +111,7 @@ export const ChatPage: React.FC<{ onNavigate?: (route: string) => void }> = ({ o
   const handleStartCall = (callMode: 'video' | 'audio') => {
     if (!activeConv || !me) return;
     const meetingId = `meet-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    
+
     // 1. Post interactive call card into the active thread
     cs.sendCallCardMessage(activeConv.id, companyId, me, meetingId, callMode);
     loadData();

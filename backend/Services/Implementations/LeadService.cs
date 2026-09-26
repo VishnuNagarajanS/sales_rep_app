@@ -22,24 +22,38 @@ public class LeadService : ILeadService
 
     private static readonly string[] ExcludedStatuses = { "Not Interested", "Junk", "Converted" };
 
-    private IQueryable<Lead> GetScopedLeadsQuery()
+    private IQueryable<Lead> GetScopedLeadsQuery(LeadFilterDto? filter = null)
     {
         var role = _currentUser.Role;
         var agentId = _currentUser.UserId;
         var companyId = _currentUser.CompanyId;
 
+        int? requestedCompanyId = null;
+        if (filter != null && filter.CompanyId.HasValue)
+        {
+            requestedCompanyId = filter.CompanyId.Value;
+        }
+        else if (!string.IsNullOrWhiteSpace(filter?.CompanySlug))
+        {
+            var slug = filter.CompanySlug.Trim().ToLowerInvariant();
+            if (slug == "ghl" || slug == "1" || slug == "t-ghl-01") requestedCompanyId = 1;
+            else if (slug == "jamin" || slug == "2" || slug == "t-jamin-02") requestedCompanyId = 2;
+        }
+
         var query = _context.Leads.AsNoTracking().Include(l => l.AssignedAgent).AsQueryable();
 
         if (role == "super_admin")
         {
-            if (companyId.HasValue)
-                query = query.Where(l => l.CompanyId == companyId.Value);
+            var targetCompanyId = requestedCompanyId ?? companyId;
+            if (targetCompanyId.HasValue)
+                query = query.Where(l => l.CompanyId == targetCompanyId.Value);
             return query;
         }
 
-        if (companyId.HasValue)
+        var effectiveCompanyId = companyId ?? requestedCompanyId;
+        if (effectiveCompanyId.HasValue)
         {
-            query = query.Where(l => l.CompanyId == companyId.Value);
+            query = query.Where(l => l.CompanyId == effectiveCompanyId.Value);
         }
 
         if (role == "sales_executive" && agentId.HasValue)
@@ -78,8 +92,20 @@ public class LeadService : ILeadService
 
     public async Task<ApiResponse<PagedResult<LeadResponseDto>>> GetActiveLeadsAsync(LeadFilterDto filter, CancellationToken ct = default)
     {
-        var query = GetScopedLeadsQuery()
-            .Where(l => !ExcludedStatuses.Contains(l.Status));
+        var query = GetScopedLeadsQuery(filter);
+
+        if (string.Equals(filter.Status, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            // All leads
+        }
+        else if (!string.IsNullOrWhiteSpace(filter.Status))
+        {
+            query = query.Where(l => l.Status == filter.Status);
+        }
+        else
+        {
+            query = query.Where(l => l.Status != "Not Interested" && l.Status != "Junk");
+        }
 
         // Search
         if (!string.IsNullOrWhiteSpace(filter.Search))
@@ -90,12 +116,6 @@ public class LeadService : ILeadService
                 l.Phone.Contains(search) ||
                 l.Email.ToLower().Contains(search) ||
                 l.Location.ToLower().Contains(search));
-        }
-
-        // Status filter
-        if (!string.IsNullOrWhiteSpace(filter.Status) && !filter.Status.Equals("All", StringComparison.OrdinalIgnoreCase))
-        {
-            query = query.Where(l => l.Status == filter.Status);
         }
 
         // Priority filter
@@ -119,11 +139,12 @@ public class LeadService : ILeadService
         var page = Math.Max(1, filter.Page);
         var pageSize = Math.Clamp(filter.PageSize, 1, 100);
 
-        var items = await query
+        var entities = await query
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(l => MapToDto(l))
             .ToListAsync(ct);
+
+        var items = entities.Select(MapToDto).ToList();
 
         return ApiResponse<PagedResult<LeadResponseDto>>.SuccessResult(
             PagedResult<LeadResponseDto>.Create(items, totalCount, page, pageSize),
@@ -142,7 +163,7 @@ public class LeadService : ILeadService
     public async Task<ApiResponse<LeadResponseDto>> CreateLeadAsync(CreateLeadDto dto, CancellationToken ct = default)
     {
         var agentId = _currentUser.UserId ?? 1;
-        var companyId = _currentUser.CompanyId ?? 1;
+        var companyId = dto.CompanyId ?? _currentUser.CompanyId ?? 1;
 
         // Build Custom Fields Dictionary for GHL
         var customFields = dto.AdditionalCustomFields ?? new Dictionary<string, string>();
@@ -277,7 +298,8 @@ public class LeadService : ILeadService
             .OrderByDescending(l => l.UpdatedAt ?? l.CreatedAt);
 
         var totalCount = await query.CountAsync(ct);
-        var items = await query.Skip((page - 1) * pageSize).Take(pageSize).Select(l => MapToDto(l)).ToListAsync(ct);
+        var entities = await query.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+        var items = entities.Select(MapToDto).ToList();
 
         return ApiResponse<PagedResult<LeadResponseDto>>.SuccessResult(
             PagedResult<LeadResponseDto>.Create(items, totalCount, page, pageSize),
@@ -294,7 +316,8 @@ public class LeadService : ILeadService
             .OrderByDescending(l => l.UpdatedAt ?? l.CreatedAt);
 
         var totalCount = await query.CountAsync(ct);
-        var items = await query.Skip((page - 1) * pageSize).Take(pageSize).Select(l => MapToDto(l)).ToListAsync(ct);
+        var entities = await query.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+        var items = entities.Select(MapToDto).ToList();
 
         return ApiResponse<PagedResult<LeadResponseDto>>.SuccessResult(
             PagedResult<LeadResponseDto>.Create(items, totalCount, page, pageSize),

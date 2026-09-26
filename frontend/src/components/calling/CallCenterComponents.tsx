@@ -1,8 +1,39 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
-
 export type PopupPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+
+const getPopupPosition = (): PopupPosition => {
+  const pos = (localStorage.getItem('nexus_popup_pos') || localStorage.getItem('nexus_popup_position')) as PopupPosition;
+  if (['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(pos)) {
+    return pos;
+  }
+  return 'top-right';
+};
+
+interface CallPreferences {
+  soundEnabled: boolean;
+  desktopNotifEnabled: boolean;
+  autoBusyEnabled: boolean;
+  defaultFollowupTime: string;
+}
+
+const DEFAULT_CALL_PREFS: CallPreferences = {
+  soundEnabled: true,
+  desktopNotifEnabled: false,
+  autoBusyEnabled: true,
+  defaultFollowupTime: '10:00',
+};
+
+const getCallPreferences = (): CallPreferences => {
+  try {
+    const raw = localStorage.getItem('nexus_call_prefs') || localStorage.getItem('nexus_call_preferences');
+    return raw ? { ...DEFAULT_CALL_PREFS, ...JSON.parse(raw) } : DEFAULT_CALL_PREFS;
+  } catch {
+    return DEFAULT_CALL_PREFS;
+  }
+};
+import { MOCK_AGENTS, MOCK_IRMS } from '../../mock_data/mockData';
 
 import {
   Phone,
@@ -31,13 +62,13 @@ import {
 } from 'lucide-react';
 import { useCall, AgentAvailability } from '../../context/CallContext';
 import { useAuth } from '../../context/AuthContext';
-import { CallDisposition } from '../../types';
+import { CallDisposition, Lead, Consultation, CallRecord } from '../../types';
+import { logCall, saveConsultation } from '../../services/ghlApiService';
 import { Modal } from '../common/Modal';
 import { Drawer } from '../common/Drawer';
 import { DocumentUploader } from '../common/DocumentUploader';
 import { DocumentList } from '../common/DocumentList';
 import { EmptyState } from '../common/EmptyState';
-import { callsApi, consultationsApi } from '../../services/crmApi';
 import './CallCenterComponents.css';
 
 // --- Agent Availability Toggle ---
@@ -121,11 +152,11 @@ export const AgentAvailabilityToggle: React.FC = () => {
 // --- Global Incoming Call Popup ---
 export const IncomingCallPopup: React.FC = () => {
   const { activeCall, acceptCall, rejectCall } = useCall();
-  const [popupPosition, setPopupPosition] = useState<PopupPosition>(() => (localStorage.getItem('nexus_popup_position') as PopupPosition) || 'bottom-right');
+  const [popupPosition, setPopupPosition] = useState<PopupPosition>(() => getPopupPosition());
 
   useEffect(() => {
     const handleUpdate = () => {
-      setPopupPosition((localStorage.getItem('nexus_popup_position') as PopupPosition) || 'bottom-right');
+      setPopupPosition(getPopupPosition());
     };
     window.addEventListener('nexus_storage_updated', handleUpdate);
     window.addEventListener('storage', handleUpdate);
@@ -222,44 +253,96 @@ export const InCallBar: React.FC = () => {
   const [irmButtonRect, setIrmButtonRect] = useState<DOMRect | null>(null);
   const [irmSearchQuery, setIrmSearchQuery] = useState('');
   const [connectingIrm, setConnectingIrm] = useState<string | null>(null);
-  const [pendingIrm, setPendingIrm] = useState<{ name: string; status: string } | null>(null);
+  const [pendingIrm, setPendingIrm] = useState<{ name: string; status: string; isPrevious?: boolean } | null>(null);
   const [consultationReason, setConsultationReason] = useState('');
 
   const irmPortalRef = useRef<HTMLDivElement>(null);
   const irmButtonRef = useRef<HTMLButtonElement>(null);
 
-  const MOCK_IRMS = [
-    { name: 'Ananya Iyer', status: 'Available' },
-    { name: 'Rohan Mehta', status: 'Busy' },
-    { name: 'Priya Nair', status: 'Available' },
-  ];
+  const isIrm = user?.role?.code === 'irm';
 
-  const filteredIrms = MOCK_IRMS.filter(irm =>
-    irm.name.toLowerCase().includes(irmSearchQuery.toLowerCase())
+  // Look up the full lead record to find who previously handled this contact
+  const getStoredLeads = (): Lead[] => {
+    try {
+      return JSON.parse(localStorage.getItem('nexus_leads') || '[]');
+    } catch {
+      return [];
+    }
+  };
+  const matchedLead = activeCall?.matchedRecord?.type === 'lead'
+    ? getStoredLeads().find((l: Lead) => l.id === activeCall.matchedRecord?.id)
+    : (activeCall?.contactPhone ? getStoredLeads().find((l: Lead) => l.phone.replace(/\D/g, '').slice(-10) === activeCall.contactPhone.replace(/\D/g, '').slice(-10)) : undefined);
+  const previousAgentName = matchedLead?.assignedAgentName;
+
+  const connectOptions = isIrm
+    ? (() => {
+      const base = MOCK_AGENTS.map(a => ({ name: a.name, status: 'Available' as const }));
+      if (!previousAgentName) return base;
+      // Move the previously-assigned agent to the top of the list as the default
+      const rest = base.filter(a => a.name !== previousAgentName);
+      return [{ name: previousAgentName, status: 'Available' as const, isPrevious: true }, ...rest];
+    })()
+    : MOCK_IRMS;
+
+  const filteredConnectOptions = connectOptions.filter(o =>
+    o.name.toLowerCase().includes(irmSearchQuery.toLowerCase())
   );
 
   const handleConnectIrm = (irm: { name: string; status: string } | null, reason: string) => {
     if (!activeCall || !irm || !tenant || !user) return;
 
-    callsApi.logCall({
+    const callId = `call-${Date.now()}`;
+    const callRecord: CallRecord = {
+      id: callId,
+      companyId: tenant.id,
       contactName: activeCall.contactName,
       contactPhone: activeCall.contactPhone,
       direction: activeCall.direction,
       duration: activeCall.duration,
+      agentId: user.id,
+      agentName: user.name,
       disposition: 'Converted',
-      notes: `Connected to IRM: ${irm.name}. Reason: ${reason}`,
-      leadId: activeCall.matchedRecord?.type === 'lead' ? activeCall.matchedRecord.id : undefined,
-      customerId: activeCall.matchedRecord?.type === 'customer' ? activeCall.matchedRecord.id : undefined,
-    }).catch(err => console.error('Failed to log call:', err));
+      timestamp: new Date().toISOString(),
+      notes: isIrm
+        ? `Connected to Agent: ${irm.name}. Reason: ${reason}`
+        : `Connected to IRM: ${irm.name}. Reason: ${reason}`,
+      leadId: activeCall.matchedRecord?.id,
+    };
 
-    consultationsApi.scheduleConsultation({
-      investorId: (activeCall.matchedRecord?.type === 'customer' ? activeCall.matchedRecord.id : undefined) || '1',
+    if (tenant.slug === 'ghl' || tenant.id === 't-ghl-01') {
+      logCall(callRecord).catch(console.error);
+    } else {
+      try {
+        const calls = JSON.parse(localStorage.getItem('nexus_calls') || '[]');
+        calls.unshift(callRecord);
+        localStorage.setItem('nexus_calls', JSON.stringify(calls));
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+      } catch { }
+    }
+
+    const consult: Consultation = {
+      id: `cns-${Date.now()}`,
+      companyId: user?.companyId || tenant.id,
+      investorId: activeCall.matchedRecord?.id || '',
       investorName: activeCall.contactName,
       investorPhone: activeCall.contactPhone,
       scheduledAt: new Date().toISOString(),
-      agenda: reason,
-      notes: `Connected to IRM: ${irm.name}`,
-    }).catch(err => console.error('Failed to schedule consultation:', err));
+      consultantId: irm.name,
+      consultantName: irm.name,
+      status: 'Scheduled',
+      agenda: isIrm ? `Connected to Agent: ${reason}` : reason,
+    };
+
+    if (tenant.slug === 'ghl' || tenant.id === 't-ghl-01') {
+      saveConsultation(consult).catch(console.error);
+    } else {
+      try {
+        const consultations = JSON.parse(localStorage.getItem('nexus_consultations') || '[]');
+        consultations.unshift(consult);
+        localStorage.setItem('nexus_consultations', JSON.stringify(consultations));
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+      } catch { }
+    }
 
     endCall(true);
 
@@ -300,7 +383,7 @@ export const InCallBar: React.FC = () => {
 
   // Compute initial pixel position from the configured popup corner
   const getCornerStyles = (): React.CSSProperties => {
-    const pos = (localStorage.getItem('nexus_popup_position') as PopupPosition) || 'top-right';
+    const pos = getPopupPosition();
     switch (pos) {
       case 'top-left': return { top: 24, left: 24, bottom: 'auto', right: 'auto' };
       case 'bottom-left': return { bottom: 24, left: 24, top: 'auto', right: 'auto' };
@@ -580,10 +663,12 @@ export const InCallBar: React.FC = () => {
             </div>
           )}
 
-          {/* ── IRM connect toast ── */}
+          {/* ── IRM / Agent connect toast ── */}
           {connectingIrm && (
             <div style={{ fontSize: 12, color: '#38bdf8', padding: '4px 8px' }}>
-              Call ended. Connected to {connectingIrm} — moved to Consultations.
+              {isIrm
+                ? `Call ended. Connected to ${connectingIrm} — reconnected with Agent.`
+                : `Call ended. Connected to ${connectingIrm} — moved to Consultations.`}
             </div>
           )}
 
@@ -629,11 +714,11 @@ export const InCallBar: React.FC = () => {
               <ExternalLink size={13} /> Meet
             </button>
 
-            {/* Connect IRM */}
+            {/* Connect IRM / Connect Agent */}
             <button
               ref={irmButtonRef}
               className="btn btn-sm incall-btn-action incall-btn-irm"
-              title="Connect to an IRM"
+              title={isIrm ? 'Connect to an Agent' : 'Connect to an IRM'}
               onClick={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 setIrmButtonRect(rect);
@@ -641,7 +726,7 @@ export const InCallBar: React.FC = () => {
                 setIrmSearchQuery('');
               }}
             >
-              <Users size={13} /> Connect IRM
+              <Users size={13} /> {isIrm ? 'Connect Agent' : 'Connect IRM'}
             </button>
 
             {irmMenuOpen && irmButtonRect && ReactDOM.createPortal(
@@ -664,7 +749,7 @@ export const InCallBar: React.FC = () => {
                 <input
                   type="text"
                   autoFocus
-                  placeholder="Search IRM by name..."
+                  placeholder={isIrm ? 'Search agent by name...' : 'Search IRM by name...'}
                   value={irmSearchQuery}
                   onChange={e => setIrmSearchQuery(e.target.value)}
                   style={{
@@ -681,17 +766,17 @@ export const InCallBar: React.FC = () => {
                   }}
                 />
 
-                {filteredIrms.length === 0 && (
+                {filteredConnectOptions.length === 0 && (
                   <div style={{ padding: '8px', fontSize: 12, color: '#64748b', textAlign: 'center' }}>
-                    No IRM found
+                    {isIrm ? 'No agent found' : 'No IRM found'}
                   </div>
                 )}
 
-                {filteredIrms.map(irm => (
+                {filteredConnectOptions.map(o => (
                   <div
-                    key={irm.name}
+                    key={o.name}
                     onClick={() => {
-                      setPendingIrm(irm);
+                      setPendingIrm(o);
                       setIrmMenuOpen(false);
                       setIrmSearchQuery('');
                     }}
@@ -713,11 +798,26 @@ export const InCallBar: React.FC = () => {
                         width: 8,
                         height: 8,
                         borderRadius: '50%',
-                        background: irm.status === 'Available' ? '#22c55e' : '#d97706',
+                        background: o.status === 'Available' ? '#22c55e' : '#d97706',
                       }}
                     />
-                    {irm.name}
-                    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94a3b8' }}>{irm.status}</span>
+                    {o.name}
+                    {isIrm && (o as any).isPrevious && (
+                      <span
+                        style={{
+                          marginLeft: 6,
+                          fontSize: 10,
+                          color: 'var(--primary-600, #38bdf8)',
+                          background: 'rgba(56, 189, 248, 0.12)',
+                          padding: '1px 5px',
+                          borderRadius: 4,
+                          fontWeight: 500,
+                        }}
+                      >
+                        Previously handled
+                      </span>
+                    )}
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94a3b8' }}>{o.status}</span>
                   </div>
                 ))}
               </div>,
@@ -762,12 +862,12 @@ export const InCallBar: React.FC = () => {
                     Connect {pendingIrm.name} to this call
                   </div>
                   <label style={{ display: 'block', fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>
-                    Reason for Consultation *
+                    {isIrm ? 'Reason for Connecting Agent *' : 'Reason for Consultation *'}
                   </label>
                   <textarea
                     autoFocus
                     rows={3}
-                    placeholder="Enter reason for consultation..."
+                    placeholder={isIrm ? 'Enter reason for connecting agent...' : 'Enter reason for consultation...'}
                     value={consultationReason}
                     onChange={e => setConsultationReason(e.target.value)}
                     style={{
@@ -994,7 +1094,7 @@ export const DispositionModal: React.FC = () => {
     setReason('');
     setScheduleFollowup(false);
     setFollowupDate(freshTomorrow);
-    setFollowupTime('11:00');
+    setFollowupTime(getCallPreferences().defaultFollowupTime);
     setFollowupPriority('High');
   }, [lastCallRecord?.id]);
 

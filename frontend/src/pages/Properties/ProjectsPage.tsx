@@ -2,9 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { MapPin, Grid } from 'lucide-react';
 import { PropertyProject } from '../../types';
 import { useAuth } from '../../context/AuthContext';
-import { plotStore } from '../../services/secondaryStores';
 import { StatusChip } from '../../components/common/StatusChip';
 import './ProjectsPage.css';
+
+const getStoredProjects = (): PropertyProject[] => {
+  try {
+    const raw = localStorage.getItem('nexus_projects');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
 
 interface ProjectsPageProps {
   onNavigate: (route: string) => void;
@@ -15,8 +23,8 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
   const [projects, setProjects] = useState<PropertyProject[]>([]);
 
   useEffect(() => {
-    setProjects(plotStore.getProjects());
-    const handleUpdate = () => setProjects(plotStore.getProjects());
+    setProjects(getStoredProjects());
+    const handleUpdate = () => setProjects(getStoredProjects());
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, []);

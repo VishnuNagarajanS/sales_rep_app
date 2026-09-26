@@ -191,6 +191,22 @@ h6 {
   width: 100%;
 }
 
+.admin-theme .form-select,
+.dark-theme .form-select {
+  color-scheme: dark;
+}
+
+.form-select option {
+  background-color: var(--bg-surface, #0f172a);
+  color: var(--text-primary, #f8fafc);
+}
+
+.form-select option:checked,
+.form-select option:hover {
+  background-color: var(--primary-600, #dc2626);
+  color: #ffffff;
+}
+
 .form-input:focus,
 .form-select:focus,
 .form-textarea:focus {

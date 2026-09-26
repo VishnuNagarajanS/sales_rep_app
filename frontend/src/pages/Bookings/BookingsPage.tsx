@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CheckCircle, Plus } from 'lucide-react';
-import { Booking } from '../../types';
+import { Booking, Plot, AuditLog } from '../../types';
 import { useAuth } from '../../context/AuthContext';
-import { bookingStore, plotStore, auditLogStore } from '../../services/secondaryStores';
 import { DataTable, Column } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
@@ -10,6 +9,59 @@ import { Drawer } from '../../components/common/Drawer';
 import { DocumentUploader } from '../../components/common/DocumentUploader';
 import { DocumentList } from '../../components/common/DocumentList';
 import './BookingsPage.css';
+
+const getStoredBookings = (companyId?: string): Booking[] => {
+  try {
+    const raw = localStorage.getItem('nexus_bookings');
+    const all: Booking[] = raw ? JSON.parse(raw) : [];
+    return companyId ? all.filter(b => b.companyId === companyId) : all;
+  } catch {
+    return [];
+  }
+};
+
+const saveStoredBooking = (booking: Booking) => {
+  try {
+    const raw = localStorage.getItem('nexus_bookings');
+    const all: Booking[] = raw ? JSON.parse(raw) : [];
+    const idx = all.findIndex(b => b.id === booking.id);
+    if (idx >= 0) all[idx] = booking;
+    else all.unshift(booking);
+    localStorage.setItem('nexus_bookings', JSON.stringify(all));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
+
+const getStoredPlots = (): Plot[] => {
+  try {
+    const raw = localStorage.getItem('nexus_plots');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveStoredPlot = (plot: Plot) => {
+  try {
+    const raw = localStorage.getItem('nexus_plots');
+    const all: Plot[] = raw ? JSON.parse(raw) : [];
+    const idx = all.findIndex(p => p.id === plot.id);
+    if (idx >= 0) all[idx] = plot;
+    else all.push(plot);
+    localStorage.setItem('nexus_plots', JSON.stringify(all));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
+
+const addStoredAuditLog = (log: any) => {
+  try {
+    const raw = localStorage.getItem('nexus_audit_logs');
+    const all = raw ? JSON.parse(raw) : [];
+    all.unshift(log);
+    localStorage.setItem('nexus_audit_logs', JSON.stringify(all));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
 
 export const BookingsPage: React.FC = () => {
   const { tenant, user } = useAuth();
@@ -26,7 +78,7 @@ export const BookingsPage: React.FC = () => {
   const [paymentTerms, setPaymentTerms] = useState('Token ₹5L paid via RTGS. 20% on agreement signing, 80% on registration.');
 
   const loadData = () => {
-    setBookings(bookingStore.getBookings(tenant?.id));
+    setBookings(getStoredBookings(tenant?.id));
   };
 
   useEffect(() => {
@@ -59,20 +111,20 @@ export const BookingsPage: React.FC = () => {
       paymentTerms,
     };
 
-    bookingStore.saveBooking(newBooking);
+    saveStoredBooking(newBooking);
 
     // Update matching plot to Sold
-    const plots = plotStore.getPlots();
-    const targetPlot = plots.find(p => p.plotNumber.toLowerCase() === plotNumber.toLowerCase());
+    const plots = getStoredPlots();
+    const targetPlot = plots.find((p: Plot) => p.plotNumber.toLowerCase() === plotNumber.toLowerCase());
     if (targetPlot) {
-      plotStore.savePlot({
+      saveStoredPlot({
         ...targetPlot,
         status: 'Sold',
         holdByCustomer: customerName,
       });
     }
 
-    auditLogStore.addAuditLog({
+    addStoredAuditLog({
       id: `aud-${Date.now()}`,
       timestamp: 'Just now',
       actorName: user?.name || 'Agent',

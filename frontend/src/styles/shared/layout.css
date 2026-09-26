@@ -47,6 +47,13 @@
   min-height: 0 !important;
 }
 
+.page-scrollable.page-static-layout,
+.page-scrollable:has(.assigned-leads-page) {
+  overflow: hidden !important;
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
 .admin-theme .main-content-area,
 .admin-theme .page-scrollable {
   background: #090d16 !important;
@@ -68,9 +75,82 @@
 }
 
 
+/* Support Impersonation Banner */
+.support-impersonation-banner {
+  background: linear-gradient(90deg, #1e1b4b 0%, #312e81 100%);
+  border-bottom: 2px solid #6366f1;
+  padding: 8px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #e0e7ff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  z-index: 50;
+}
+
+.support-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.support-badge {
+  background: #4f46e5;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  letter-spacing: 0.05em;
+}
+
+.btn-exit-support {
+  background: #ffffff;
+  color: #1e1b4b !important;
+  font-weight: 700;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.btn-exit-support:hover {
+  background: #f1f5f9;
+}
+
+/* Global Fleet Broadcast Banner */
+.platform-broadcast-banner {
+  padding: 7px 24px;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 40;
+}
+
+.platform-broadcast-banner.priority-info {
+  background: rgba(14, 165, 233, 0.15);
+  border-bottom: 1px solid rgba(14, 165, 233, 0.35);
+  color: #38bdf8;
+}
+
+.platform-broadcast-banner.priority-warning {
+  background: rgba(245, 158, 11, 0.15);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
+}
+
+.platform-broadcast-banner.priority-critical {
+  background: rgba(239, 68, 68, 0.15);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.35);
+  color: #f87171;
+}
+
 @media (max-width: 768px) {
   .page-scrollable {
     padding: 16px;
     gap: 16px;
   }
 }
+

@@ -19,6 +19,7 @@ public class Followup
         set => AssignedAgentId = value;
     }
 
+    [NotMapped]
     public int? LeadId { get; set; }
 
     public string ContactId { get; set; } = string.Empty;

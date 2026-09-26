@@ -4,6 +4,7 @@ public class CreateLeadDto
 {
     public string Name { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
+    public int? CompanyId { get; set; }
     public string? Email { get; set; }
     public string? Location { get; set; }
     public string? Source { get; set; } = "Website Inbound";

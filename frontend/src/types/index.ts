@@ -141,6 +141,21 @@ export interface Customer {
   lastContactedAt?: string;
   createdBy?: string;
   updatedBy?: string;
+  assignedIrmId?: string;
+  assignedIrmName?: string;
+  assignedIrmAt?: string;
+}
+
+export interface IrmProfile {
+  id: string;
+  name: string;
+  experience: string;
+  experienceYears: number;
+  experienceLevel: 'Experienced' | 'Mid-Level' | 'Fresher';
+  performance: number;
+  status: 'Available' | 'Busy';
+  email: string;
+  phone: string;
 }
 
 export interface Deal {
@@ -158,6 +173,26 @@ export interface Deal {
   lostReason?: string;
   createdAt: string;
   stageEnteredAt?: string;
+  phone?: string;
+  email?: string;
+  priority?: 'High' | 'Medium' | 'Low';
+  location?: string;
+  preferredAssetClass?: string;
+  investmentRange?: string; // e.g. "₹15 Cr – ₹25 Cr", display string shown in green
+  investorType?: 'AIF' | 'Co-AIF';
+}
+
+export interface DealActivity {
+  id: string;
+  dealId: string;
+  companyId: string;
+  type: 'note' | 'call' | 'whatsapp' | 'meeting' | 'stage_change';
+  text: string;
+  fromStage?: string; // for stage_change entries
+  toStage?: string;   // for stage_change entries
+  loggedByName: string;
+  loggedByRole: string; // e.g. "IRM"
+  timestamp: string;
 }
 
 export type CallDisposition =
@@ -219,6 +254,7 @@ export interface Followup {
   notes: string;
   assignedAgentId: string;
   assignedAgentName: string;
+  assignedRole?: string;
   followupType?: 'call' | 'meeting' | 'email' | 'whatsapp';
   scheduledDate?: string;
   scheduledTime?: string;
@@ -323,6 +359,7 @@ export interface Consultation {
   status: 'Scheduled' | 'Completed' | 'Rescheduled' | 'Cancelled' | 'No-show';
   agenda: string;
   outcomeNotes?: string;
+  referredByAgentName?: string;
 }
 
 export interface InvestmentOpportunity {
@@ -361,12 +398,21 @@ export interface AuditLog {
 
 export interface NotificationItem {
   id: string;
-  type: 'lead' | 'call' | 'followup' | 'visit' | 'booking' | 'system';
+  type: 'lead' | 'call' | 'followup' | 'visit' | 'booking' | 'system' | 'alert' | 'broadcast';
   title: string;
   message: string;
   timestamp: string;
   read: boolean;
   link?: string;
+  companyId?: string;
+  companySlug?: string;
+  targetUserId?: string; // 'all' or specific user ID
+  targetUserName?: string;
+  targetRole?: string; // 'all' | 'sales_executive' | 'irm' | etc.
+  createdById?: string;
+  createdByName?: string;
+  priority?: 'normal' | 'important' | 'urgent';
+  createdAt?: string;
 }
 
 export interface DocumentItem {
@@ -653,3 +699,100 @@ export interface ChatSettings {
     whoCanCreateGroups: 'everyone' | 'managers_admins';
   };
 }
+
+// ============================================================================
+// Super Admin Platform Types
+// ============================================================================
+
+export interface SubscriptionPackage {
+  id: string;
+  name: string;
+  code: string;
+  description: string;
+  tier: 'Starter' | 'Growth' | 'Enterprise';
+  priceMonthly: number;
+  currency: string;
+  maxUsers: number;
+  maxStorageGb: number;
+  features: string[];
+  isPopular?: boolean;
+  isActive: boolean;
+  enrolledTenantsCount?: number;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface TenantDidMapping {
+  id: string;
+  phoneNumber: string;
+  tenantId: string;
+  tenantName: string;
+  tenantSlug: string;
+  routingStrategy: 'Round-Robin' | 'Skill/Priority' | 'Least-Busy Rep' | 'Direct Extension';
+  queueName: string;
+  enableRecording: boolean;
+  enableAiWhisper: boolean;
+  status: 'Online' | 'Offline' | 'Reserved';
+  channelsCount: number;
+  allocatedAt: string;
+  notes?: string;
+}
+
+export interface PlatformCarrierSettings {
+  primaryCarrier: string;
+  secondaryCarrier: string;
+  sipRealm: string;
+  webrtcGatewayUrl: string;
+  recordingRetentionDays: number;
+  maxConcurrentChannels: number;
+  emergencyRoutingEnabled: boolean;
+  whisperAiModel: string;
+  lastTestedAt?: string;
+  testStatus?: 'Success' | 'Degraded' | 'Offline';
+}
+
+export interface SystemDiagnostics {
+  apiStatus: 'Healthy' | 'Degraded' | 'Down';
+  apiLatencyMs: number;
+  dbPoolActive: number;
+  dbPoolMax: number;
+  dbLatencyMs: number;
+  memoryUsedMb: number;
+  memoryLimitMb: number;
+  storageUsedGb: number;
+  storageLimitGb: number;
+  activeSessions: number;
+  activeWebSockets: number;
+  telephonyDropRate: number;
+  systemUptimePercentage: number;
+  lastBackupAt: string;
+}
+
+export interface BroadcastAnnouncement {
+  id: string;
+  title: string;
+  message: string;
+  priority: 'info' | 'warning' | 'critical';
+  targetAudience: 'all' | 'tenant_admins' | 'sales_reps';
+  targetTenantId?: string; // null or 'all' for all tenants
+  isActive: boolean;
+  createdAt: string;
+  createdBy: string;
+  expiresAt?: string;
+}
+
+export interface PlatformMetrics {
+  totalTenants: number;
+  activeTenants: number;
+  onboardingTenants: number;
+  suspendedTenants: number;
+  totalUsers: number;
+  activeUsers: number;
+  callsToday: number;
+  callsConnected: number;
+  totalLeads: number;
+  totalPipelineValue: number;
+  totalCustomers: number;
+  systemHealthScore: number;
+}
+

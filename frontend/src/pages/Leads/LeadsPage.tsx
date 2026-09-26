@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Papa from 'papaparse';
 import {
   Users,
@@ -10,10 +10,10 @@ import {
   Edit,
   ExternalLink,
 } from 'lucide-react';
-import { Lead } from '../../types';
+import { Lead, Customer, Deal } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { leadsApi, LeadDto } from '../../services/crmApi';
+import { getLeads, saveLead as apiSaveLead, saveCustomer as apiSaveCustomer, saveOpportunity as apiSaveOpportunity, getFollowups, isTenantMatch } from '../../services/ghlApiService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { StatusChip } from '../../components/common/StatusChip';
@@ -21,48 +21,42 @@ import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
 import './LeadsPage.css';
 
-const AIF_CAPACITY_OPTIONS = [
+const CAPACITY_OPTIONS = [
+  'Contact for Co-Invest Details',
   '₹1 Cr – ₹5 Cr',
   '₹5 Cr – ₹10 Cr',
   '₹10 Cr – ₹25 Cr',
   '₹25 Cr+',
+  'Not sure yet — help me decide'
 ];
 
-const CO_AIF_CAPACITY_OPTIONS = [
-  '₹10 Lakh to ₹1 Cr',
-];
-
-const mapDtoToLead = (dto: LeadDto): Lead => ({
-  id: String(dto.id),
-  companyId: String(dto.companyId),
-  name: dto.name,
-  phone: dto.phone,
-  email: dto.email || '',
-  location: dto.location || '',
-  source: dto.source || 'Website Inbound',
-  status: (dto.status as any) || 'New',
-  priority: (dto.priority as any) || 'Medium',
-  assignedAgentId: String(dto.assignedAgentId),
-  assignedAgentName: dto.assignedAgentName || 'Agent',
-  nextFollowupDate: dto.nextFollowupDate,
-  createdAt: dto.createdAt ? dto.createdAt.split('T')[0] : new Date().toISOString().split('T')[0],
-  notes: dto.notes || '',
-  customFields: dto.customFields || {},
-});
+import { MOCK_AGENTS } from '../../mock_data/mockData';
+export { MOCK_AGENTS };
 
 export const LeadsPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
 
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isConverting, setIsConverting] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
 
   const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk'];
 
+  // Role-based scoping: Sales Executives and IRMs see only their own leads.
+  // Managers / Admins / Super Admins see the full company lead list (no filter).
+  // Inactive / moved leads (Interested, Follow-up Required, Not Interested, Junk, Converted) are excluded from active Leads.
+  const roleCode = user?.role?.code;
+  const isExec = roleCode === 'sales_executive';
+  const isLeadScopedUser = roleCode === 'sales_executive' || roleCode === 'irm';
+  const isIrm = roleCode === 'irm';
+  const currentTenantId = tenant?.id || tenant?.slug;
+  const tenantLeads = leads.filter(l => isTenantMatch(l.companyId, currentTenantId));
+  const scopedLeads = (isLeadScopedUser
+    ? tenantLeads.filter(l =>
+      (l.assignedAgentId && l.assignedAgentId === user?.id) ||
+      (l.assignedAgentName && l.assignedAgentName === user?.name)
+    )
+    : tenantLeads
+  ).filter(l => !MOVED_LEAD_STATUSES.includes(l.status));
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
@@ -80,6 +74,105 @@ export const LeadsPage: React.FC = () => {
 
   // Filter states
   const [statusFilter, setStatusFilter] = useState('All');
+  const [capacityFilter, setCapacityFilter] = useState('All');
+  const [agentFilter, setAgentFilter] = useState('All');
+  const [datePreset, setDatePreset] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
+
+  const agentOptions = useMemo(() => {
+    return Array.from(
+      new Set(scopedLeads.map(l => l.assignedAgentName).filter((n): n is string => !!n))
+    )
+      .sort()
+      .map(name => ({ value: name, label: name }));
+  }, [scopedLeads]);
+
+  const formatDateYMD = (d: Date): string => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const getPresetDates = (preset: string): { from: string; to: string } => {
+    const now = new Date();
+    const todayStr = formatDateYMD(now);
+
+    switch (preset) {
+      case 'today':
+        return { from: todayStr, to: todayStr };
+      case 'yesterday': {
+        const yest = new Date(now);
+        yest.setDate(yest.getDate() - 1);
+        const yestStr = formatDateYMD(yest);
+        return { from: yestStr, to: yestStr };
+      }
+      case 'this_week': {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 6);
+        return { from: formatDateYMD(d), to: todayStr };
+      }
+      case 'this_month': {
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        return { from: formatDateYMD(startOfMonth), to: formatDateYMD(endOfMonth) };
+      }
+      case 'last_30_days': {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 29);
+        return { from: formatDateYMD(d), to: todayStr };
+      }
+      default:
+        return { from: '', to: '' };
+    }
+  };
+
+  const handleDatePresetChange = (preset: string) => {
+    if (preset === 'all') {
+      setDatePreset('all');
+      setDateFrom('');
+      setDateTo('');
+    } else if (preset === 'custom') {
+      setDatePreset('custom');
+    } else {
+      const { from, to } = getPresetDates(preset);
+      setDatePreset(preset);
+      setDateFrom(from);
+      setDateTo(to);
+    }
+  };
+
+  const handleCustomDateChange = (from: string, to: string) => {
+    setDatePreset('custom');
+    setDateFrom(from);
+    setDateTo(to);
+  };
+
+  // GHL Admin assign-mode state
+  const isGhlAdmin =
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
+    (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
+  const [assignMode, setAssignMode] = useState<'manual' | 'auto'>('manual');
+  const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
+  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+  const [assignStep, setAssignStep] = useState<'pick-agent' | 'confirm'>('pick-agent');
+  const [assignSelectedAgent, setAssignSelectedAgent] = useState<typeof MOCK_AGENTS[0] | null>(null);
+  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [aiDistribution, setAiDistribution] = useState<Record<number, Lead[]>>({});
+  const [isAiEditMode, setIsAiEditMode] = useState(false);
+  const [assignedLeadIds, setAssignedLeadIds] = useState<Set<string>>(new Set());
+  const [agentAssignments, setAgentAssignments] = useState<
+    Array<{ leadId: string; leadName: string; agentId: number; agentName: string; assignedAt: string }>
+  >(() => {
+    try {
+      const saved = sessionStorage.getItem('ghl_mock_agent_assignments');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [toast, setToast] = useState<string | null>(null);
 
   // Form state
   const [formData, setFormData] = useState<Partial<Lead>>({});
@@ -92,64 +185,250 @@ export const LeadsPage: React.FC = () => {
     'AIF';
 
   const handleAssetClassChange = (newAssetClass: string) => {
-    let newCapacity = formData.customFields?.investmentCapacity;
-    if (newAssetClass === 'CO-AIF') {
-      newCapacity = '₹10 Lakh to ₹1 Cr';
-    } else if (newAssetClass === 'AIF') {
-      if (!AIF_CAPACITY_OPTIONS.includes(newCapacity)) {
-        newCapacity = '₹1 Cr – ₹5 Cr';
-      }
-    }
     setFormData(prev => ({
       ...prev,
       customFields: {
         ...prev.customFields,
         assetClass: newAssetClass,
         preferredAssetClass: newAssetClass,
-        investmentCapacity: newCapacity,
       },
     }));
   };
 
+  const [ghlPendingFollowups, setGhlPendingFollowups] = useState<any[]>([]);
+
   const loadData = async () => {
-    setIsLoading(true);
-    setLoadError(null);
-    try {
-      const data = await leadsApi.getActiveLeads({
-        status: statusFilter !== 'All' ? statusFilter : undefined,
-      });
-      const mapped = (data.items || []).map(mapDtoToLead);
-      setLeads(mapped);
-      setSelectedLead(prev => {
-        if (!prev) return null;
-        const found = mapped.find(l => l.id === prev.id);
-        if (!found || MOVED_LEAD_STATUSES.includes(found.status)) {
-          setIsDetailDrawerOpen(false);
-          setIsEditDrawerOpen(false);
-          return null;
-        }
-        return found;
-      });
-    } catch (err: any) {
-      setLoadError(err.message || 'Failed to load leads from PostgreSQL.');
-    } finally {
-      setIsLoading(false);
-    }
+    const updated = await getLeads(tenant?.id);
+    setLeads(updated);
+    setSelectedLead(prev => {
+      if (!prev) return null;
+      const found = updated.find(l => l.id === prev.id);
+      if (!found || MOVED_LEAD_STATUSES.includes(found.status)) {
+        setIsDetailDrawerOpen(false);
+        setIsEditDrawerOpen(false);
+        return null;
+      }
+      return found;
+    });
   };
+
+  const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
 
   useEffect(() => {
     loadData();
-  }, [tenant?.id, statusFilter]);
+    if (isGhlSalesExec) {
+      getFollowups(tenant?.id).then(fus => setGhlPendingFollowups(fus.filter(f => f.status === 'Pending')));
+    }
+    const handleUpdate = () => loadData();
+    window.addEventListener('nexus_storage_updated', handleUpdate);
+    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+  }, [tenant?.id]);
 
-  const filteredLeads = leads.filter(lead => {
-    if (statusFilter !== 'All' && (lead.status as string) !== statusFilter) return false;
+  const matchCapacity = (lead: Lead, filterRange: string): boolean => {
+    if (!filterRange || filterRange === 'All') return true;
+    const rawCap = (
+      lead.customFields?.investmentCapacity ||
+      lead.customFields?.budgetRange ||
+      (lead as any).investmentAmount ||
+      ''
+    ).trim();
+
+    if (!rawCap) return false;
+
+    const normalize = (s: string) => s.replace(/[–—]/g, '-').replace(/\s+/g, ' ').trim().toLowerCase();
+    const nCap = normalize(rawCap);
+    const nFilter = normalize(filterRange);
+
+    if (nCap === nFilter) return true;
+
+    // Match range buckets
+    if (filterRange === '₹1 Cr – ₹5 Cr') {
+      return (
+        nCap.includes('1 cr') ||
+        nCap.includes('1.5 cr') ||
+        nCap.includes('2 cr') ||
+        nCap.includes('3 cr') ||
+        nCap.includes('4 cr') ||
+        nCap.includes('5 cr') ||
+        nCap.includes('75l')
+      );
+    }
+    if (filterRange === '₹5 Cr – ₹10 Cr') {
+      return (
+        nCap.includes('5 cr') ||
+        nCap.includes('6 cr') ||
+        nCap.includes('7 cr') ||
+        nCap.includes('8 cr') ||
+        nCap.includes('10 cr')
+      );
+    }
+    if (filterRange === '₹10 Cr – ₹25 Cr') {
+      return (
+        nCap.includes('10 cr') ||
+        nCap.includes('15 cr') ||
+        nCap.includes('20 cr') ||
+        nCap.includes('25 cr')
+      );
+    }
+    if (filterRange === '₹25 Cr+') {
+      return (
+        nCap.includes('25 cr') ||
+        nCap.includes('25cr') ||
+        nCap.includes('30 cr') ||
+        nCap.includes('50 cr')
+      );
+    }
+    if (filterRange === 'Contact for Co-Invest Details') {
+      return nCap.includes('co-invest') || nCap.includes('contact');
+    }
+    if (filterRange === 'Not sure yet — help me decide') {
+      return nCap.includes('not sure') || nCap.includes('help');
+    }
+
+    return false;
+  };
+
+  const filteredLeads = scopedLeads.filter(lead => {
+    if (assignedLeadIds.has(lead.id)) return false;
+    if (isGhlSalesExec && lead.status !== 'Callback') {
+      const leadPhoneDigits = (lead.phone || '').replace(/\D/g, '').slice(-10);
+      const hasPendingFollowup = ghlPendingFollowups.some(f => {
+        if (f.contactId && f.contactId !== 'contact-new' && f.contactId === lead.id) {
+          return true;
+        }
+        const fPhoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+        return fPhoneDigits && leadPhoneDigits && fPhoneDigits === leadPhoneDigits;
+      });
+      if (hasPendingFollowup) return false;
+    }
+    if (!isGhlAdmin && statusFilter !== 'All' && (lead.status as string) !== statusFilter) return false;
+    if (agentFilter !== 'All' && lead.assignedAgentName !== agentFilter) return false;
+    if (capacityFilter !== 'All') {
+      if (!matchCapacity(lead, capacityFilter)) return false;
+    }
+
+    // Date range filter
+    if (datePreset !== 'all' || dateFrom || dateTo) {
+      const rawDate = lead.createdAt;
+      if (!rawDate) return datePreset === 'all';
+      const dateStr = /^\d{4}-\d{2}-\d{2}/.test(rawDate)
+        ? rawDate.substring(0, 10)
+        : formatDateYMD(new Date(rawDate));
+      if (dateFrom && dateStr < dateFrom) return false;
+      if (dateTo && dateStr > dateTo) return false;
+    }
+
     return true;
   });
 
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3500);
+  };
+
+  const handleManualAssignConfirm = () => {
+    if (!assignSelectedAgent) return;
+    const newAssigned = new Set(assignedLeadIds);
+    const newRecords: Array<{ leadId: string; leadName: string; agentId: number; agentName: string; assignedAt: string }> = [];
+    selectedLeadIds.forEach(id => {
+      newAssigned.add(id);
+      const lead = leads.find(l => l.id === id);
+      newRecords.push({
+        leadId: id,
+        leadName: lead?.name || 'Unknown Lead',
+        agentId: assignSelectedAgent.id,
+        agentName: assignSelectedAgent.name,
+        assignedAt: new Date().toISOString(),
+      });
+    });
+    setAssignedLeadIds(newAssigned);
+    setAgentAssignments(prev => {
+      const updated = [...prev, ...newRecords];
+      try { sessionStorage.setItem('ghl_mock_agent_assignments', JSON.stringify(updated)); } catch { }
+      (window as any).__ghlAssignments = updated;
+      return updated;
+    });
+    console.log('[GHL Admin Leads Assignment - Manual]', newRecords);
+    const count = selectedLeadIds.size;
+    setSelectedLeadIds(new Set());
+    setIsAssignModalOpen(false);
+    setAssignStep('pick-agent');
+    setAssignSelectedAgent(null);
+    showToast(`✓ ${count} lead${count !== 1 ? 's' : ''} assigned to ${assignSelectedAgent.name}`);
+  };
+
+  const handleOpenAiSuggestion = () => {
+    const pool = filteredLeads;
+    const dist: Record<number, Lead[]> = {};
+    MOCK_AGENTS.forEach(a => { dist[a.id] = []; });
+    pool.forEach((lead, i) => {
+      const agent = MOCK_AGENTS[i % MOCK_AGENTS.length];
+      dist[agent.id].push(lead);
+    });
+    setAiDistribution(dist);
+    setIsAiEditMode(false);
+    setIsAiModalOpen(true);
+  };
+
+  const handleAiMoveLead = (leadId: string, fromAgentId: number, direction: 'left' | 'right') => {
+    const agentIds = MOCK_AGENTS.map(a => a.id);
+    const fromIdx = agentIds.indexOf(fromAgentId);
+    const toIdx = direction === 'left' ? fromIdx - 1 : fromIdx + 1;
+    if (toIdx < 0 || toIdx >= agentIds.length) return;
+    const toAgentId = agentIds[toIdx];
+    setAiDistribution(prev => {
+      const fromLeads = [...(prev[fromAgentId] || [])].filter(l => l.id !== leadId);
+      const movedLead = (prev[fromAgentId] || []).find(l => l.id === leadId);
+      if (!movedLead) return prev;
+      const toLeads = [...(prev[toAgentId] || []), movedLead];
+      return { ...prev, [fromAgentId]: fromLeads, [toAgentId]: toLeads };
+    });
+  };
+
+  const handleAiConfirm = () => {
+    const newAssigned = new Set(assignedLeadIds);
+    const newRecords: Array<{ leadId: string; leadName: string; agentId: number; agentName: string; assignedAt: string }> = [];
+    let count = 0;
+    Object.entries(aiDistribution).forEach(([agentIdStr, agentLeads]) => {
+      const agentId = Number(agentIdStr);
+      const agent = MOCK_AGENTS.find(a => a.id === agentId);
+      agentLeads.forEach(l => {
+        newAssigned.add(l.id);
+        count++;
+        newRecords.push({
+          leadId: l.id,
+          leadName: l.name,
+          agentId,
+          agentName: agent?.name || 'Agent',
+          assignedAt: new Date().toISOString(),
+        });
+      });
+    });
+    setAssignedLeadIds(newAssigned);
+    setAgentAssignments(prev => {
+      const updated = [...prev, ...newRecords];
+      try { sessionStorage.setItem('ghl_mock_agent_assignments', JSON.stringify(updated)); } catch { }
+      (window as any).__ghlAssignments = updated;
+      return updated;
+    });
+    console.log('[GHL Admin Leads Assignment - AI Round Robin]', newRecords);
+    setIsAiModalOpen(false);
+    showToast(`✓ ${count} lead${count !== 1 ? 's' : ''} assigned via AI Suggestion`);
+  };
+
   const handleOpenCreate = () => {
+    if (!user) {
+      console.warn('[LeadsPage] Cannot create lead: user session is not yet loaded.');
+      return;
+    }
+    const defaultAgentId = user.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec');
+    const defaultAgentName = user.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer');
+
+    const targetCompany = tenant?.id || (tenant?.slug === 'jamin' ? 't-jamin-02' : 't-ghl-01');
+
     setFormData({
-      id: '',
-      companyId: tenant?.id || '1',
+      id: `lead-${Date.now()}`,
+      companyId: targetCompany,
       name: '',
       phone: '+91 ',
       email: '',
@@ -157,13 +436,13 @@ export const LeadsPage: React.FC = () => {
       source: 'Website Inbound',
       status: 'New',
       priority: 'Medium',
-      assignedAgentId: user?.id || '1',
-      assignedAgentName: user?.name || 'Agent',
+      assignedAgentId: defaultAgentId,
+      assignedAgentName: defaultAgentName,
       createdAt: new Date().toISOString().split('T')[0],
       notes: '',
       customFields: tenant?.slug === 'jamin'
         ? { budgetRange: '₹45L - ₹65L', preferredLocation: 'Devanahalli North', readyToRegister: 'Immediate' }
-        : { investmentCapacity: '₹1 Cr – ₹5 Cr', assetClass: 'AIF', preferredAssetClass: 'AIF', horizon: '3-5 Years' },
+        : { investmentCapacity: '', assetClass: 'AIF', preferredAssetClass: 'AIF', horizon: '3-5 Years' },
     });
     setIsEditDrawerOpen(true);
   };
@@ -173,68 +452,68 @@ export const LeadsPage: React.FC = () => {
     setIsEditDrawerOpen(true);
   };
 
-  const handleSaveLead = async (e: React.FormEvent) => {
+  const handleSaveLead = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.phone) return;
 
-    setIsSaving(true);
-    try {
-      const isExisting = leads.some(l => l.id === formData.id);
-      const isNumericId = formData.id && !isNaN(Number(formData.id)) && Number(formData.id) > 0;
+    // Pull real agent ID and name at save-time to prevent stale/fallback placeholder IDs from leaking
+    const resolvedAgentId = (isLeadScopedUser && user?.id)
+      ? user.id
+      : (formData.assignedAgentId && formData.assignedAgentId !== 'usr-exec' ? formData.assignedAgentId : (user?.id || 'usr-exec'));
+    const resolvedAgentName = (isLeadScopedUser && user?.name)
+      ? user.name
+      : (formData.assignedAgentName && formData.assignedAgentName !== 'Agent' ? formData.assignedAgentName : (user?.name || 'Agent'));
 
-      if (isExisting && isNumericId) {
-        await leadsApi.updateLead(Number(formData.id), {
-          name: formData.name,
-          phone: formData.phone,
-          email: formData.email,
-          location: formData.location,
-          source: formData.source,
-          status: formData.status,
-          priority: formData.priority,
-          notes: formData.notes,
-          nextFollowupDate: formData.nextFollowupDate,
-          investmentCapacity: formData.customFields?.investmentCapacity,
-          assetClass: formData.customFields?.assetClass,
-          preferredAssetClass: formData.customFields?.preferredAssetClass,
-          horizon: formData.customFields?.horizon,
-          additionalCustomFields: formData.customFields,
-        });
+    const isExistingById = leads.some(l => l.id === formData.id);
+    const targetCompanyId = formData.companyId || tenant?.id || (tenant?.slug === 'jamin' ? 't-jamin-02' : 't-ghl-01');
+
+    let leadToSave: Lead;
+    let isUpdated = isExistingById;
+
+    if (!isExistingById) {
+      const existingMatch = leads.find(l => l.phone === formData.phone && (!targetCompanyId || l.companyId === targetCompanyId));
+      if (existingMatch) {
+        isUpdated = true;
+        leadToSave = {
+          ...existingMatch,
+          ...formData,
+          id: existingMatch.id, // Preserve existing ID
+          companyId: existingMatch.companyId || targetCompanyId,
+          status: formData.status || existingMatch.status || 'New',
+          assignedAgentId: resolvedAgentId || existingMatch.assignedAgentId,
+          assignedAgentName: resolvedAgentName || existingMatch.assignedAgentName,
+          customFields: {
+            ...(existingMatch.customFields || {}),
+            ...(formData.customFields || {}),
+          },
+        };
       } else {
-        await leadsApi.createLead({
-          name: formData.name,
-          phone: formData.phone,
-          email: formData.email,
-          location: formData.location,
-          source: formData.source || 'Website Inbound',
-          priority: formData.priority || 'Medium',
-          notes: formData.notes,
-          investmentCapacity: formData.customFields?.investmentCapacity,
-          assetClass: formData.customFields?.assetClass,
-          preferredAssetClass: formData.customFields?.preferredAssetClass,
-          horizon: formData.customFields?.horizon,
-          additionalCustomFields: formData.customFields,
-        });
+        leadToSave = {
+          ...formData,
+          status: formData.status || 'New',
+          assignedAgentId: resolvedAgentId,
+          assignedAgentName: resolvedAgentName,
+          companyId: targetCompanyId,
+          createdAt: formData.createdAt || new Date().toISOString().split('T')[0],
+        } as Lead;
       }
-
-      setIsEditDrawerOpen(false);
-      await loadData();
-    } catch (err: any) {
-      alert(err.message || 'Failed to save lead to database.');
-    } finally {
-      setIsSaving(false);
+    } else {
+      leadToSave = {
+        ...formData,
+        status: formData.status || 'New',
+        assignedAgentId: resolvedAgentId,
+        assignedAgentName: resolvedAgentName,
+        companyId: targetCompanyId,
+      } as Lead;
     }
+
+    apiSaveLead(leadToSave).catch(console.error);
+    setIsEditDrawerOpen(false);
   };
 
-  const handleDeleteLead = async (lead: Lead) => {
-    if (confirm(`Mark lead ${lead.name} as Junk?`)) {
-      try {
-        if (!isNaN(Number(lead.id))) {
-          await leadsApi.updateLead(Number(lead.id), { status: 'Junk' });
-          await loadData();
-        }
-      } catch (err: any) {
-        alert(err.message || 'Failed to update lead.');
-      }
+  const handleDeleteLead = (lead: Lead) => {
+    if (confirm(`Delete lead ${lead.name}?`)) {
+      apiSaveLead({ ...lead, status: 'Junk' }).catch(console.error); // soft-delete via status
     }
   };
 
@@ -249,25 +528,50 @@ export const LeadsPage: React.FC = () => {
   };
 
   const handleConfirmConvert = async () => {
-    if (!selectedLead) return;
+    if (!selectedLead || !tenant) return;
 
-    setIsConverting(true);
-    try {
-      if (!isNaN(Number(selectedLead.id))) {
-        await leadsApi.convertLead(Number(selectedLead.id), {
-          dealTitle: convertDealTitle,
-          dealValue: convertDealValue,
-          notes: selectedLead.notes,
-        });
-      }
-      setIsConvertModalOpen(false);
-      setIsDetailDrawerOpen(false);
-      await loadData();
-    } catch (err: any) {
-      alert(err.message || 'Failed to convert lead.');
-    } finally {
-      setIsConverting(false);
-    }
+    // 1. Create Customer
+    const newCustomer: Customer = {
+      id: `cust-${Date.now()}`,
+      companyId: tenant.id,
+      name: selectedLead.name,
+      phone: selectedLead.phone,
+      email: selectedLead.email,
+      status: 'Active',
+      assignedAgentId: selectedLead.assignedAgentId,
+      assignedAgentName: selectedLead.assignedAgentName,
+      location: selectedLead.location,
+      lastContacted: 'Today',
+      openDealsCount: 1,
+      totalValue: convertDealValue,
+      createdAt: new Date().toISOString().split('T')[0],
+      notes: `Converted from lead. Original notes: ${selectedLead.notes}`,
+      customFields: selectedLead.customFields,
+    };
+    const savedCustomer = await apiSaveCustomer(newCustomer).catch(() => newCustomer);
+
+    // 2. Create Opportunity (maps to Deal/Investment Opportunity in GHL)
+    const newDeal: Deal = {
+      id: `deal-${Date.now()}`,
+      companyId: tenant.id,
+      title: convertDealTitle,
+      customerId: savedCustomer.id,
+      customerName: savedCustomer.name,
+      stage: tenant.slug === 'jamin' ? 'site_visit' : 'consultation',
+      value: convertDealValue,
+      expectedCloseDate: 'Within 30 Days',
+      assignedAgentId: selectedLead.assignedAgentId,
+      assignedAgentName: selectedLead.assignedAgentName,
+      notes: `Deal initiated upon converting lead ${selectedLead.name}.`,
+      createdAt: new Date().toISOString().split('T')[0],
+    };
+    await apiSaveOpportunity({ id: newDeal.id, companyId: newDeal.companyId, investorId: savedCustomer.id, investorName: savedCustomer.name, title: newDeal.title, stage: 'Enquiry', targetAmount: convertDealValue, committedAmount: 0, assignedAgentId: selectedLead.assignedAgentId || '', assignedAgentName: selectedLead.assignedAgentName || '', expectedCloseDate: 'Within 30 Days', notes: newDeal.notes || '' }).catch(console.error);
+
+    // 3. Mark Lead as Converted
+    await apiSaveLead({ ...selectedLead, status: 'Converted' }).catch(console.error);
+
+    setIsConvertModalOpen(false);
+    setIsDetailDrawerOpen(false);
   };
 
   const handleFileSelect = (file: File) => {
@@ -304,34 +608,46 @@ export const LeadsPage: React.FC = () => {
   };
 
   const handleImportLeads = async () => {
-    setIsImporting(true);
     let successCount = 0;
     let skipCount = 0;
+    const companyId = tenant?.id || 't-ghl-01';
+    const promises: Promise<any>[] = [];
 
-    for (const row of parsedRows) {
+    parsedRows.forEach((row, index) => {
       const nameVal = row[columnMap['name']];
       const phoneVal = row[columnMap['phone']];
-      if (!nameVal || !phoneVal) {
-        skipCount++;
-        continue;
-      }
-      try {
-        await leadsApi.createLead({
-          name: nameVal.trim(),
-          phone: phoneVal.trim(),
-          email: row[columnMap['email']]?.trim(),
-          location: row[columnMap['location']]?.trim(),
-          source: row[columnMap['source']]?.trim() || 'CSV Import',
-          priority: row[columnMap['priority']] || 'Medium',
-        });
-        successCount++;
-      } catch {
-        skipCount++;
-      }
-    }
-    setIsImporting(false);
+
+      if (!nameVal || !phoneVal) { skipCount++; return; }
+
+      const emailVal = row[columnMap['email']] || '';
+      const locationVal = row[columnMap['location']] || '';
+      const sourceVal = row[columnMap['source']] || 'CSV Import';
+      const rawPriority = row[columnMap['priority']];
+      let priorityVal = 'Medium';
+      if (['Low', 'Medium', 'High', 'Urgent'].includes(String(rawPriority))) priorityVal = rawPriority;
+
+      const newLead: Lead = {
+        id: `lead-${Date.now()}-${index}`,
+        companyId,
+        name: nameVal,
+        phone: phoneVal,
+        email: emailVal,
+        location: locationVal,
+        source: sourceVal,
+        priority: priorityVal as any,
+        status: 'New',
+        assignedAgentId: user?.id || 'usr-exec',
+        assignedAgentName: user?.name || 'Agent',
+        createdAt: new Date().toISOString().split('T')[0],
+        notes: '',
+        customFields: {}
+      };
+      promises.push(apiSaveLead(newLead).then(() => { successCount++; }).catch(() => { skipCount++; }));
+    });
+
+    await Promise.all(promises);
     setImportResults({ success: successCount, skipped: skipCount });
-    await loadData();
+    loadData();
   };
 
   const resetImportState = () => {
@@ -343,8 +659,85 @@ export const LeadsPage: React.FC = () => {
     setImportResults(null);
   };
 
-  // Columns for DataTable (Exactly 7 defined columns + 1 Action column via rowActions = 8 columns)
+  // Columns for DataTable
+  const statusColumn: Column<Lead> = {
+    key: 'status',
+    header: 'Status',
+    sortable: true,
+    render: l => {
+      if ((l.status as string) === 'Callback') {
+        return (
+          <span
+            className="status-chip status-chip-callback"
+            style={{
+              backgroundColor: 'rgba(59, 130, 246, 0.12)',
+              color: '#2563eb',
+              borderColor: 'rgba(59, 130, 246, 0.3)',
+              fontSize: '11px',
+              padding: '2px 8px',
+            }}
+          >
+            <span className="status-dot" style={{ backgroundColor: '#2563eb' }} />
+            Callback
+          </span>
+        );
+      }
+      return <StatusChip status={l.status} size="sm" />;
+    },
+  };
+
+  const sourceColumn: Column<Lead> = {
+    key: 'source',
+    header: 'Source',
+    sortable: true,
+    render: l => <span className="lead-text-muted">{l.source}</span>,
+  };
+
+  const assignedAgentColumn: Column<Lead> = {
+    key: 'assignedAgentName',
+    header: 'Assigned Agent',
+    sortable: true,
+    width: '18%',
+    render: l => {
+      const agentName = (l.assignedAgentName && l.assignedAgentName !== 'Agent')
+        ? l.assignedAgentName
+        : (l.assignedAgentId === user?.id && user?.name ? user.name : (l.assignedAgentName || '—'));
+      return <span className="lead-text-muted">{agentName}</span>;
+    },
+  };
+
   const columns: Column<Lead>[] = [
+    ...(isGhlAdmin && assignMode === 'manual' ? [{
+      key: 'select',
+      header: (
+        <input
+          type="checkbox"
+          className="assign-checkbox"
+          checked={filteredLeads.length > 0 && filteredLeads.every(l => selectedLeadIds.has(l.id))}
+          onChange={e => {
+            if (e.target.checked) setSelectedLeadIds(new Set(filteredLeads.map(l => l.id)));
+            else setSelectedLeadIds(new Set());
+          }}
+        />
+      ) as unknown as string,
+      align: 'center' as const,
+      render: (l: Lead) => (
+        <input
+          type="checkbox"
+          className="assign-checkbox"
+          checked={selectedLeadIds.has(l.id)}
+          onChange={e => {
+            e.stopPropagation();
+            setSelectedLeadIds(prev => {
+              const next = new Set(prev);
+              if (e.target.checked) next.add(l.id); else next.delete(l.id);
+              return next;
+            });
+          }}
+          onClick={e => e.stopPropagation()}
+        />
+      ),
+    } as Column<Lead>] : []),
     {
       key: 'name',
       header: 'Lead Name & Contact',
@@ -381,37 +774,7 @@ export const LeadsPage: React.FC = () => {
         return <span className="lead-investment-val">{amount}</span>;
       },
     },
-    {
-      key: 'status',
-      header: 'Status',
-      sortable: true,
-      render: l => {
-        if ((l.status as string) === 'Callback') {
-          return (
-            <span
-              className="status-chip status-chip-callback"
-              style={{
-                backgroundColor: 'rgba(59, 130, 246, 0.12)',
-                color: '#2563eb',
-                borderColor: 'rgba(59, 130, 246, 0.3)',
-                fontSize: '11px',
-                padding: '2px 8px',
-              }}
-            >
-              <span className="status-dot" style={{ backgroundColor: '#2563eb' }} />
-              Callback
-            </span>
-          );
-        }
-        return <StatusChip status={l.status} size="sm" />;
-      },
-    },
-    {
-      key: 'source',
-      header: 'Source',
-      sortable: true,
-      render: l => <span className="lead-text-muted">{l.source}</span>,
-    },
+    ...(isIrm ? [assignedAgentColumn] : [statusColumn, sourceColumn]),
     {
       key: 'quickCall',
       header: 'Quick Call',
@@ -482,19 +845,6 @@ export const LeadsPage: React.FC = () => {
         </div>
       </div>
 
-      {loadError && (
-        <div className="card" style={{ padding: '12px 16px', marginBottom: '16px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', color: '#ef4444', borderRadius: '8px' }}>
-          <strong>Error loading leads:</strong> {loadError}
-          <button className="btn btn-sm btn-secondary" style={{ marginLeft: '12px' }} onClick={loadData}>Retry</button>
-        </div>
-      )}
-
-      {isLoading && (
-        <div style={{ textAlign: 'center', padding: '16px', color: 'var(--text-secondary)' }}>
-          Loading leads from PostgreSQL database...
-        </div>
-      )}
-
       {/* Leads Table */}
       <DataTable
         columns={columns}
@@ -511,24 +861,86 @@ export const LeadsPage: React.FC = () => {
         emptyActionLabel="+ Add First Lead"
         onEmptyAction={handleOpenCreate}
         filtersNode={
-          <FilterBar
-            filters={[
-              {
-                key: 'status',
-                label: 'Status',
-                value: statusFilter,
-                onChange: setStatusFilter,
-                options: [
-                  { value: 'New', label: 'New' },
-                  { value: 'Callback', label: 'Callback' },
-                  { value: 'No Response', label: 'No Response' },
-                ],
-              },
-            ]}
-            onClearAll={() => {
-              setStatusFilter('All');
-            }}
-          />
+          <div className="leads-toolbar">
+            <FilterBar
+              filters={[
+                ...(isGhlAdmin ? [] : [{
+                  key: 'status',
+                  label: 'Status',
+                  value: statusFilter,
+                  onChange: setStatusFilter,
+                  options: [
+                    { value: 'New', label: 'New' },
+                    { value: 'Callback', label: 'Callback' },
+                    { value: 'No Response', label: 'No Response' },
+                  ],
+                }]),
+                ...(!isExec ? [{
+                  key: 'agent',
+                  label: 'Agent',
+                  value: agentFilter,
+                  onChange: setAgentFilter,
+                  options: agentOptions,
+                }] : []),
+                ...(isGhlAdmin ? [{
+                  key: 'investmentCapacity',
+                  label: 'Investment Capacity Range',
+                  value: capacityFilter,
+                  onChange: setCapacityFilter,
+                  placeholder: 'Select a range',
+                  options: CAPACITY_OPTIONS.map(o => ({ value: o, label: o })),
+                }] : []),
+              ]}
+              dateRange={{
+                preset: datePreset,
+                onPresetChange: handleDatePresetChange,
+                from: dateFrom,
+                to: dateTo,
+                onChange: handleCustomDateChange,
+              }}
+              onClearAll={() => {
+                setStatusFilter('All');
+                setAgentFilter('All');
+                setCapacityFilter('All');
+                setDatePreset('all');
+                setDateFrom('');
+                setDateTo('');
+              }}
+            />
+            {isGhlAdmin && (
+              <div className="assign-toggle">
+                <span className="assign-toggle-label">Assign:</span>
+                <div className="assign-toggle-group">
+                  <button
+                    className={`assign-toggle-btn${assignMode === 'manual' ? ' active' : ''}`}
+                    onClick={() => { setAssignMode('manual'); setSelectedLeadIds(new Set()); }}
+                  >Manual</button>
+                  <button
+                    className={`assign-toggle-btn${assignMode === 'auto' ? ' active' : ''}`}
+                    onClick={() => { setAssignMode('auto'); setSelectedLeadIds(new Set()); }}
+                  >Auto</button>
+                </div>
+                {assignMode === 'auto' && (
+                  <div className="assign-auto-bar">
+                    <button className="btn btn-primary btn-sm" onClick={handleOpenAiSuggestion}>
+                      ✦ AI Suggestion
+                    </button>
+                    <div style={{ position: 'relative', display: 'inline-flex' }}>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        disabled
+                        title="Coming soon"
+                        style={{ cursor: 'not-allowed', opacity: 0.6 }}
+                      >
+                        📊 Based on Performance
+                      </button>
+                      <span className="coming-soon-badge">Coming soon</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         }
       />
 
@@ -599,14 +1011,32 @@ export const LeadsPage: React.FC = () => {
 
             {/* Tenant-Specific Dynamic Custom Fields */}
             {(() => {
-              if (!selectedLead.customFields) return null;
-              const rows = Object.entries(selectedLead.customFields)
-                .filter(([key, val]) => key !== 'dispositionReason' && val !== undefined && val !== null && val !== '')
-                .map(([key, val]) => ({
-                  id: key,
-                  label: key.replace(/([A-Z])/g, ' $1').toUpperCase(),
-                  value: String(val),
-                }));
+              const getStoredCustomFieldDefinitions = (tId?: string): any[] => {
+                try {
+                  const raw = localStorage.getItem('nexus_custom_fields');
+                  const all = raw ? JSON.parse(raw) : [];
+                  return tId ? all.filter((d: any) => !d.tenantId || d.tenantId === tId) : all;
+                } catch {
+                  return [];
+                }
+              };
+              const activeDefs = getStoredCustomFieldDefinitions(tenant?.id)
+                .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
+                .filter(d => !(isExec && (d.fieldKey === 'assetClass' || d.fieldKey === 'preferredAssetClass')))
+                .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+
+              const rows = activeDefs
+                .map(def => {
+                  const key = def.fieldKey || def.id;
+                  const val = selectedLead.customFields?.[key];
+                  if (val === undefined || val === null || val === '') return null;
+                  return {
+                    id: def.id,
+                    label: def.label || key.replace(/([A-Z])/g, ' $1'),
+                    value: String(val),
+                  };
+                })
+                .filter(Boolean);
 
               if (rows.length === 0) return null;
 
@@ -617,11 +1047,11 @@ export const LeadsPage: React.FC = () => {
                   </h4>
                   <div className="lead-detail-grid">
                     {rows.map(item => (
-                      <div key={item.id}>
+                      <div key={item!.id}>
                         <span className="lead-custom-label">
-                          {item.label}:
+                          {item!.label}:
                         </span>
-                        <div className="lead-custom-value">{item.value}</div>
+                        <div className="lead-custom-value">{item!.value}</div>
                       </div>
                     ))}
                   </div>
@@ -782,25 +1212,24 @@ export const LeadsPage: React.FC = () => {
               </div>
             ) : (
               <div className="lead-form-grid-2">
-                <div className="form-group">
-                  <label className="form-label">Asset Class</label>
-                  <select
-                    className="form-select"
-                    value={currentAssetClass}
-                    onChange={e => handleAssetClassChange(e.target.value)}
-                  >
-                    <option value="AIF">AIF</option>
-                    <option value="CO-AIF">CO-AIF</option>
-                  </select>
-                </div>
+                {!isExec && (
+                  <div className="form-group">
+                    <label className="form-label">Asset Class</label>
+                    <select
+                      className="form-select"
+                      value={currentAssetClass}
+                      onChange={e => handleAssetClassChange(e.target.value)}
+                    >
+                      <option value="AIF">AIF</option>
+                      <option value="CO-AIF">CO-AIF</option>
+                    </select>
+                  </div>
+                )}
                 <div className="form-group">
                   <label className="form-label">Investment Capacity</label>
                   <select
                     className="form-select"
-                    value={
-                      formData.customFields?.investmentCapacity ||
-                      (currentAssetClass === 'CO-AIF' ? '₹10 Lakh to ₹1 Cr' : '₹1 Cr – ₹5 Cr')
-                    }
+                    value={formData.customFields?.investmentCapacity || ''}
                     onChange={e =>
                       setFormData(prev => ({
                         ...prev,
@@ -808,17 +1237,12 @@ export const LeadsPage: React.FC = () => {
                       }))
                     }
                   >
-                    {currentAssetClass === 'CO-AIF'
-                      ? CO_AIF_CAPACITY_OPTIONS.map(opt => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))
-                      : AIF_CAPACITY_OPTIONS.map(opt => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
+                    <option value="" disabled>Select a range</option>
+                    {CAPACITY_OPTIONS.map(opt => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -1057,6 +1481,171 @@ export const LeadsPage: React.FC = () => {
           )}
         </div>
       </Modal>
+
+      {/* ── GHL Admin: Manual selection action bar ──────────────────────── */}
+      {isGhlAdmin && assignMode === 'manual' && selectedLeadIds.size > 0 && (
+        <div className="assign-action-bar">
+          <span className="assign-action-bar-text">
+            {selectedLeadIds.size} lead{selectedLeadIds.size !== 1 ? 's' : ''} selected
+          </span>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => setSelectedLeadIds(new Set())}
+          >
+            Clear
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={() => {
+              setAssignStep('pick-agent');
+              setAssignSelectedAgent(null);
+              setIsAssignModalOpen(true);
+            }}
+          >
+            Send {selectedLeadIds.size} Lead{selectedLeadIds.size !== 1 ? 's' : ''} →
+          </button>
+        </div>
+      )}
+
+      {/* ── Assign Agent Modal ───────────────────────────────────────────── */}
+      {isAssignModalOpen && (
+        <div className="assign-modal-overlay" onClick={() => setIsAssignModalOpen(false)}>
+          <div className="assign-modal" onClick={e => e.stopPropagation()}>
+            <div className="assign-modal-header">
+              <h3 className="assign-modal-title">Assign Leads to Agent</h3>
+              <button className="assign-modal-close" onClick={() => setIsAssignModalOpen(false)}>✕</button>
+            </div>
+
+            {assignStep === 'pick-agent' ? (
+              <>
+                <p className="assign-modal-sub">Select an agent to assign the {selectedLeadIds.size} selected lead{selectedLeadIds.size !== 1 ? 's' : ''} to:</p>
+                <div className="assign-agent-list">
+                  {MOCK_AGENTS.map(agent => (
+                    <label key={agent.id} className={`assign-agent-row${assignSelectedAgent?.id === agent.id ? ' selected' : ''}`}>
+                      <input
+                        type="radio"
+                        name="assignAgent"
+                        value={agent.id}
+                        checked={assignSelectedAgent?.id === agent.id}
+                        onChange={() => setAssignSelectedAgent(agent)}
+                      />
+                      <div className="assign-agent-avatar">{agent.name[0]}</div>
+                      <span className="assign-agent-name">{agent.name}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="assign-modal-footer">
+                  <button className="btn btn-secondary" onClick={() => setIsAssignModalOpen(false)}>Cancel</button>
+                  <button
+                    className="btn btn-primary"
+                    disabled={!assignSelectedAgent}
+                    onClick={() => setAssignStep('confirm')}
+                  >
+                    Next →
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="assign-confirm-box">
+                  <div className="assign-confirm-label">Are you confirming this agent:</div>
+                  <div className="assign-confirm-agent">---- {assignSelectedAgent?.name} ----</div>
+                  <div className="assign-confirm-detail">
+                    {selectedLeadIds.size} lead{selectedLeadIds.size !== 1 ? 's' : ''} will be assigned and removed from the pool.
+                  </div>
+                </div>
+                <div className="assign-modal-footer">
+                  <button className="btn btn-secondary" onClick={() => setIsAssignModalOpen(false)}>Cancel</button>
+                  <button className="btn btn-ghost" onClick={() => setAssignStep('pick-agent')}>← Back</button>
+                  <button className="btn btn-primary" onClick={handleManualAssignConfirm}>Confirm</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── AI Distribution Modal ────────────────────────────────────────── */}
+      {isAiModalOpen && (
+        <div className="assign-modal-overlay" onClick={() => setIsAiModalOpen(false)}>
+          <div className="ai-dist-modal" onClick={e => e.stopPropagation()}>
+            <div className="assign-modal-header">
+              <div>
+                <h3 className="assign-modal-title">✦ AI Suggestion — Round Robin</h3>
+                <p className="assign-modal-sub" style={{ margin: '2px 0 0' }}>
+                  {Object.values(aiDistribution).flat().length} leads distributed across {MOCK_AGENTS.length} agents
+                </p>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  className={`btn btn-sm ${isAiEditMode ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setIsAiEditMode(e => !e)}
+                >
+                  {isAiEditMode ? '✓ Done Editing' : '✎ Edit'}
+                </button>
+                <button className="assign-modal-close" onClick={() => setIsAiModalOpen(false)}>✕</button>
+              </div>
+            </div>
+
+            <div className="ai-dist-grid">
+              {MOCK_AGENTS.map((agent, agentIdx) => {
+                const agentLeads = aiDistribution[agent.id] || [];
+                return (
+                  <div key={agent.id} className="ai-dist-col">
+                    <div className="ai-dist-col-header">
+                      <div className="ai-dist-avatar">{agent.name[0]}</div>
+                      <span className="ai-dist-agent-name">{agent.name}</span>
+                      <span className="ai-dist-count">{agentLeads.length}</span>
+                    </div>
+                    <div className="ai-dist-col-body">
+                      {agentLeads.length === 0 ? (
+                        <div className="ai-dist-empty">No leads</div>
+                      ) : (
+                        agentLeads.map(lead => (
+                          <div key={lead.id} className="ai-dist-lead-card">
+                            <div className="ai-dist-lead-name">{lead.name}</div>
+                            <div className="ai-dist-lead-phone">{lead.phone}</div>
+                            {isAiEditMode && (
+                              <div className="ai-dist-move-btns">
+                                <button
+                                  className="ai-move-btn"
+                                  disabled={agentIdx === 0}
+                                  onClick={() => handleAiMoveLead(lead.id, agent.id, 'left')}
+                                  title="Move left"
+                                >◀</button>
+                                <button
+                                  className="ai-move-btn"
+                                  disabled={agentIdx === MOCK_AGENTS.length - 1}
+                                  onClick={() => handleAiMoveLead(lead.id, agent.id, 'right')}
+                                  title="Move right"
+                                >▶</button>
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="assign-modal-footer" style={{ borderTop: '1px solid var(--border-base)', marginTop: 0 }}>
+              <button className="btn btn-secondary" onClick={() => setIsAiModalOpen(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleAiConfirm}>
+                Confirm Distribution
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Toast notification ───────────────────────────────────────────── */}
+      {toast && (
+        <div className="assign-toast">
+          {toast}
+        </div>
+      )}
     </div>
   );
 };

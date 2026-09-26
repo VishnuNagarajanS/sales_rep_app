@@ -99,12 +99,13 @@ public class CustomerService : ICustomerService
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 100);
 
-        var items = await query
+        var entities = await query
             .OrderByDescending(c => c.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(c => MapToDto(c))
             .ToListAsync(ct);
+
+        var items = entities.Select(MapToDto).ToList();
 
         return ApiResponse<PagedResult<CustomerResponseDto>>.SuccessResult(
             PagedResult<CustomerResponseDto>.Create(items, totalCount, page, pageSize),

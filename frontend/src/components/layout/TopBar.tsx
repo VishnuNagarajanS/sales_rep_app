@@ -7,14 +7,56 @@ import {
   LogOut,
   Sun,
   Moon,
+  Download,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { AgentAvailabilityToggle } from '../calling/CallCenterComponents';
 import { PersonaSwitcher } from './PersonaSwitcher';
 import { FEATURES } from '../../constants/features';
-import { notificationStore } from '../../services/secondaryStores';
+import { getLeads, getCustomers, getDeals, getInvestors } from '../../services/ghlApiService';
+import { Lead, Customer, Deal, Investor, NotificationItem } from '../../types';
 import './TopBar.css';
+
+const getStoredNotifications = (tenantId?: string, userId?: string, roleCode?: string): NotificationItem[] => {
+  try {
+    const raw = localStorage.getItem('nexus_notifications');
+    const all = raw ? JSON.parse(raw) : [];
+    return all.filter((n: any) => {
+      if (n.tenantId && tenantId && n.tenantId !== tenantId) return false;
+      if (n.recipientUserId && userId && n.recipientUserId !== userId) return false;
+      if (n.recipientRoleCode && roleCode && n.recipientRoleCode !== roleCode) return false;
+      return true;
+    });
+  } catch {
+    return [];
+  }
+};
+
+const markAllStoredNotificationsRead = (tenantId?: string, userId?: string) => {
+  try {
+    const raw = localStorage.getItem('nexus_notifications');
+    const all = raw ? JSON.parse(raw) : [];
+    all.forEach((n: any) => {
+      if ((!tenantId || n.tenantId === tenantId) && (!userId || n.recipientUserId === userId)) {
+        n.read = true;
+      }
+    });
+    localStorage.setItem('nexus_notifications', JSON.stringify(all));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
+
+const markStoredNotificationRead = (id: string) => {
+  try {
+    const raw = localStorage.getItem('nexus_notifications');
+    const all = raw ? JSON.parse(raw) : [];
+    const item = all.find((n: any) => n.id === id);
+    if (item) item.read = true;
+    localStorage.setItem('nexus_notifications', JSON.stringify(all));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
 
 interface TopBarProps {
   onNavigate: (route: string, extraState?: any) => void;
@@ -25,6 +67,11 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
   const { user, tenant, isSuperAdmin, logout, enabledFeatures } = useAuth();
   const { theme, toggleTheme } = useTheme();
 
+  const roleCode = user?.role?.code;
+  const isGhlAdmin =
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
+    (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
+
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -32,7 +79,9 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
 
   // Notifications state
   const [isNotifOpen, setIsNotifOpen] = useState(false);
-  const [notifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState(() =>
+    getStoredNotifications(tenant?.id, user?.id, user?.role?.code)
+  );
 
   // Quick New state
   const [isNewMenuOpen, setIsNewMenuOpen] = useState(false);
@@ -40,17 +89,108 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
   // User menu
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
+  // Search entities
+  const [searchLeads, setSearchLeads] = useState<Lead[]>([]);
+  const [searchCustomers, setSearchCustomers] = useState<Customer[]>([]);
+  const [searchDeals, setSearchDeals] = useState<Deal[]>([]);
+  const [searchInvestors, setSearchInvestors] = useState<Investor[]>([]);
+
+  useEffect(() => {
+    if (!tenant?.id) return;
+    let mounted = true;
+    const fetchSearchData = () => {
+      if (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') {
+        Promise.all([
+          getLeads(tenant.id).catch(() => []),
+          getCustomers(tenant.id).catch(() => []),
+          getDeals(tenant.id).catch(() => []),
+          getInvestors(tenant.id).catch(() => []),
+        ]).then(([l, c, d, i]) => {
+          if (mounted) {
+            setSearchLeads(l || []);
+            setSearchCustomers(c || []);
+            setSearchDeals(d || []);
+            setSearchInvestors(i || []);
+          }
+        });
+      } else {
+        try {
+          setSearchLeads(JSON.parse(localStorage.getItem('nexus_leads') || '[]'));
+          setSearchCustomers(JSON.parse(localStorage.getItem('nexus_customers') || '[]'));
+          setSearchDeals(JSON.parse(localStorage.getItem('nexus_deals') || '[]'));
+          setSearchInvestors(JSON.parse(localStorage.getItem('nexus_investors') || '[]'));
+        } catch {}
+      }
+    };
+    fetchSearchData();
+    window.addEventListener('nexus_storage_updated', fetchSearchData);
+    return () => {
+      mounted = false;
+      window.removeEventListener('nexus_storage_updated', fetchSearchData);
+    };
+  }, [tenant?.id, tenant?.slug]);
+
+  // Sync notifications with tenant and user scoping
+  useEffect(() => {
+    const handleUpdate = () => {
+      setNotifications(getStoredNotifications(tenant?.id, user?.id, user?.role?.code));
+    };
+    handleUpdate();
+    window.addEventListener('nexus_storage_updated', handleUpdate);
+    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+  }, [tenant?.id, tenant?.slug, user?.id, user?.role?.code]);
+
   // Global search items
-  const searchResults = React.useMemo<{
-    leads: any[];
-    customers: any[];
-    deals: any[];
-    plots: any[];
-    investors: any[];
-  } | null>(() => {
+  const searchResults = React.useMemo(() => {
     if (!searchQuery.trim()) return null;
-    return { leads: [], customers: [], deals: [], plots: [], investors: [] };
-  }, [searchQuery]);
+    const q = searchQuery.toLowerCase();
+
+    const leads = searchLeads.filter(l =>
+      l.name.toLowerCase().includes(q) || l.phone.includes(q) || (l.email && l.email.toLowerCase().includes(q))
+    );
+
+    const customers = searchCustomers.filter(c =>
+      c.name.toLowerCase().includes(q) || c.phone.includes(q) || (c.email && c.email.toLowerCase().includes(q))
+    );
+
+    const deals = searchDeals.filter(d =>
+      d.title.toLowerCase().includes(q) || (d.customerName && d.customerName.toLowerCase().includes(q))
+    );
+
+    const plots = enabledFeatures.includes(FEATURES.PROPERTIES)
+      ? (JSON.parse(localStorage.getItem('nexus_plots') || '[]') as any[]).filter(p => p.plotNumber?.toLowerCase().includes(q))
+      : [];
+
+    const investors = enabledFeatures.includes(FEATURES.INVESTORS)
+      ? searchInvestors.filter(i =>
+        i.name.toLowerCase().includes(q) || i.phone.includes(q)
+      )
+      : [];
+
+    const roleCode = user?.role?.code;
+    const isExec = roleCode === 'sales_executive';
+    const isIrm = roleCode === 'irm';
+    const scopedLeads = isIrm
+      ? []
+      : isExec
+      ? leads.filter(l => l.assignedAgentId === user?.id || l.assignedAgentName === user?.name)
+      : leads;
+    const scopedCustomers = isIrm
+      ? []
+      : isExec
+      ? customers.filter(c => c.assignedAgentId === user?.id || c.assignedAgentName === user?.name)
+      : customers;
+    const scopedDeals = isIrm
+      ? []
+      : isExec
+      ? deals.filter(d => d.assignedAgentId === user?.id || d.assignedAgentName === user?.name)
+      : deals;
+    const scopedInvestors = (isExec || isIrm)
+      ? investors.filter(i => i.assignedAgentId === user?.id || i.assignedAgentName === user?.name)
+      : investors;
+
+    return { leads: scopedLeads, customers: scopedCustomers, deals: scopedDeals, plots: isIrm ? [] : plots, investors: scopedInvestors };
+  }, [searchQuery, tenant?.id, enabledFeatures, user?.id, user?.name, user?.role?.code]);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -208,6 +348,19 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
 
       {/* Right Controls */}
       <div className="topbar-right-controls">
+        {isGhlAdmin && (
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => {
+              alert("Downloading comprehensive report for all users...");
+            }}
+            title="Export Report"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <Download size={14} /> Export Report
+          </button>
+        )}
+
         {/* Theme Toggle (Available for all roles except Super Admin) */}
         {!isSuperAdmin && (
           <button
@@ -303,36 +456,92 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
               />
               <div className="card animate-slide-down topbar-notif-dropdown">
                 <div className="topbar-notif-header">
-                  <span style={{ fontWeight: 700, fontSize: 13 }}>Notifications</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13 }}>Notifications</span>
+                    <span style={{ fontSize: 10, background: 'var(--bg-surface-hover)', padding: '1px 6px', borderRadius: 10, color: 'var(--text-muted)' }}>
+                      {tenant?.name}
+                    </span>
+                  </div>
                   <button
                     className="btn btn-ghost btn-sm"
                     style={{ fontSize: 11, padding: 0, color: 'var(--primary-600)' }}
-                    onClick={() => notificationStore.markAllNotificationsRead()}
+                    onClick={() => markAllStoredNotificationsRead(tenant?.id, user?.id)}
                   >
                     Mark all read
                   </button>
                 </div>
 
                 <div className="topbar-notif-list">
-                  {notifications.map(n => (
-                    <div
-                      key={n.id}
-                      className={`btn-ghost topbar-notif-item ${!n.read ? 'unread' : ''}`}
+                  {notifications.length === 0 ? (
+                    <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+                      No notifications for {tenant?.name}. You're all caught up!
+                    </div>
+                  ) : (
+                    notifications.map(n => (
+                      <div
+                        key={n.id}
+                        className={`btn-ghost topbar-notif-item ${!n.read ? 'unread' : ''}`}
+                        onClick={() => {
+                          markStoredNotificationRead(n.id);
+                          if (n.link) onNavigate(n.link.replace('/', ''));
+                          setIsNotifOpen(false);
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
+                            {n.priority === 'urgent' && (
+                              <span style={{ fontSize: 9, fontWeight: 700, background: '#dc2626', color: '#fff', padding: '1px 5px', borderRadius: 4, textTransform: 'uppercase' }}>
+                                Urgent
+                              </span>
+                            )}
+                            {n.type === 'broadcast' && (
+                              <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', padding: '1px 5px', borderRadius: 4 }}>
+                                Alert
+                              </span>
+                            )}
+                            <span style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {n.title}
+                            </span>
+                          </div>
+                          <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>{n.timestamp}</span>
+                        </div>
+                        <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 3, lineHeight: 1.4 }}>
+                          {n.message}
+                        </p>
+                        {n.createdByName && (
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
+                            📢 By {n.createdByName}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderTop: '1px solid var(--border-base)', background: 'var(--bg-surface-hover)' }}>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ fontSize: 11, padding: '2px 6px', color: 'var(--text-secondary)' }}
+                    onClick={() => {
+                      setIsNotifOpen(false);
+                      onNavigate('notifications');
+                    }}
+                  >
+                    View All Center →
+                  </button>
+                  {((user?.role?.code as string) === 'company_admin' || (user?.role?.code as string) === 'admin' || user?.role?.code === 'super_admin') && (
+                    <button
+                      className="btn btn-primary btn-sm"
+                      style={{ fontSize: 11, padding: '3px 8px', gap: 4 }}
                       onClick={() => {
-                        notificationStore.markNotificationRead(n.id);
-                        if (n.link) onNavigate(n.link.replace('/', ''));
+                        sessionStorage.setItem('nexus_open_alert_modal', 'true');
                         setIsNotifOpen(false);
+                        onNavigate('notifications');
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span style={{ fontWeight: 600, fontSize: 12 }}>{n.title}</span>
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{n.timestamp}</span>
-                      </div>
-                      <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 3 }}>
-                        {n.message}
-                      </p>
-                    </div>
-                  ))}
+                      <Plus size={12} /> Send Alert
+                    </button>
+                  )}
                 </div>
               </div>
             </>

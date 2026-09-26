@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { ArrowRight, Lock, Mail, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Shield, Building2, UserCheck, ArrowRight, Lock, Mail, AlertCircle, TrendingUp } from 'lucide-react';
 import './AuthLayout.css';
 
 export const AuthLayout: React.FC = () => {
-  const { login, loginError } = useAuth();
-  const [email, setEmail] = useState('ananya@ghlindiatrust.com');
+  const { login, switchPersona, loginError } = useAuth();
+  const [email, setEmail] = useState('vikram@ghlindiatrust.com');
   const [password, setPassword] = useState('Password@123');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -14,11 +14,6 @@ export const AuthLayout: React.FC = () => {
     setIsLoading(true);
     await login(email, password);
     setIsLoading(false);
-  };
-
-  const handleSelectAccount = (accEmail: string) => {
-    setEmail(accEmail);
-    setPassword('Password@123');
   };
 
   return (
@@ -31,57 +26,73 @@ export const AuthLayout: React.FC = () => {
           </div>
           <h2 className="auth-title">NexusSales Platform</h2>
           <p className="auth-subtitle">
-            Enterprise Sales CRM & PostgreSQL Cloud Database
+            Multi-Tenant Sales CRM & Real-Time Calling Engine
           </p>
         </div>
 
-        {/* Real Database Accounts Helper Chips */}
+        {/* Demo Fast Login Presets */}
         <div className="auth-presets-container">
           <div className="auth-presets-label">
-            Quick-Select Test Account (Neon PostgreSQL Database)
+            Quick One-Click Demo Sign-in
           </div>
           <div className="auth-presets-grid">
             <button
               type="button"
-              className={`btn btn-secondary btn-sm auth-preset-btn ${email === 'ananya@ghlindiatrust.com' ? 'border-primary' : ''}`}
-              onClick={() => handleSelectAccount('ananya@ghlindiatrust.com')}
+              className="btn btn-secondary btn-sm auth-preset-btn"
+              onClick={() => switchPersona('company_admin', 'ghl')}
             >
+              <Building2 size={14} color="#ef4444" />
               <div>
-                <div className="auth-preset-title">Ananya Iyer</div>
-                <div className="auth-preset-subtitle">Sales Executive (GHL)</div>
+                <div className="auth-preset-title">GHL India Admin</div>
+                <div className="auth-preset-subtitle">Wealth / Investors</div>
               </div>
             </button>
 
             <button
               type="button"
-              className={`btn btn-secondary btn-sm auth-preset-btn ${email === 'vikram@ghlindiatrust.com' ? 'border-primary' : ''}`}
-              onClick={() => handleSelectAccount('vikram@ghlindiatrust.com')}
+              className="btn btn-secondary btn-sm auth-preset-btn"
+              onClick={() => switchPersona('company_admin', 'jamin')}
             >
+              <Building2 size={14} color="#e10600" />
               <div>
-                <div className="auth-preset-title">Vikram Malhotra</div>
-                <div className="auth-preset-subtitle">Company Admin (GHL)</div>
+                <div className="auth-preset-title">Jamin Bazaar Admin</div>
+                <div className="auth-preset-subtitle">Plots / Operations</div>
               </div>
             </button>
 
             <button
               type="button"
-              className={`btn btn-secondary btn-sm auth-preset-btn ${email === 'kavita@jaminbazaar.com' ? 'border-primary' : ''}`}
-              onClick={() => handleSelectAccount('kavita@jaminbazaar.com')}
+              className="btn btn-secondary btn-sm auth-preset-btn"
+              onClick={() => switchPersona('sales_executive', 'ghl')}
             >
+              <UserCheck size={14} color="#ef4444" />
               <div>
-                <div className="auth-preset-title">Kavita Rao</div>
-                <div className="auth-preset-subtitle">Company Admin (Jamin)</div>
+                <div className="auth-preset-title">GHL Sales Agent</div>
+                <div className="auth-preset-subtitle">Ananya Iyer</div>
               </div>
             </button>
 
             <button
               type="button"
-              className={`btn btn-secondary btn-sm auth-preset-btn ${email === 'alex@nexusplatform.io' ? 'border-primary' : ''}`}
-              onClick={() => handleSelectAccount('alex@nexusplatform.io')}
+              className="btn btn-secondary btn-sm auth-preset-btn"
+              onClick={() => switchPersona('irm', 'ghl')}
             >
+              <TrendingUp size={14} color="#ef4444" />
               <div>
-                <div className="auth-preset-title">Alex Rivera</div>
-                <div className="auth-preset-subtitle">Super Admin</div>
+                <div className="auth-preset-title">GHL IRM</div>
+                <div className="auth-preset-subtitle">Rohan Varma</div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm auth-preset-btn"
+              onClick={() => switchPersona('super_admin')}
+            >
+              <Shield size={14} color="#8b5cf6" />
+              <div>
+                <div className="auth-preset-title">Super Admin</div>
+                <div className="auth-preset-subtitle">Operator Console</div>
               </div>
             </button>
           </div>
@@ -89,11 +100,11 @@ export const AuthLayout: React.FC = () => {
 
         <div className="auth-divider">
           <div className="auth-divider-line" />
-          <span>sign in with database credentials</span>
+          <span>or sign in with credentials</span>
           <div className="auth-divider-line" />
         </div>
 
-        {/* Standard Authenticated Form */}
+        {/* Standard Form */}
         <form onSubmit={handleSubmit} className="auth-form">
           <div className="form-group">
             <label className="form-label auth-form-label">Work Email</label>
@@ -112,6 +123,9 @@ export const AuthLayout: React.FC = () => {
           <div className="form-group">
             <div className="auth-password-header">
               <label className="form-label auth-form-label">Password</label>
+              <a href="#forgot" className="auth-forgot-link">
+                Forgot?
+              </a>
             </div>
             <div className="auth-input-wrapper">
               <Lock size={15} className="auth-input-icon" />
@@ -137,7 +151,7 @@ export const AuthLayout: React.FC = () => {
             className="btn btn-primary auth-submit-btn"
             disabled={isLoading}
           >
-            {isLoading ? 'Signing in...' : 'Sign in'} <ArrowRight size={16} />
+            {isLoading ? 'Signing in...' : 'Sign In to Organization'} <ArrowRight size={16} />
           </button>
         </form>
       </div>

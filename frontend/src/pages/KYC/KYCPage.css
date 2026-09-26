@@ -1,0 +1,522 @@
+/* ==========================================================================
+   KYC & Qualified Investor Page Styles
+   ========================================================================== */
+
+.kyc-page-container {
+  padding: 24px;
+  width: 100%;
+  /* Expand to fill the full available vertical space from page-scrollable */
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Make the DataTable grow to fill the remaining space in the KYC page
+   so the empty-state area occupies the full viewport height instead of
+   collapsing and leaving a blank background below.
+   Scoped to .kyc-page-container so it cannot affect any other page. */
+.kyc-page-container .data-table-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Stretch the empty-state card to fill the card height when no rows exist */
+.kyc-page-container .data-table-container .empty-state-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0;
+  box-shadow: none;
+  border-top: none;
+}
+
+.kyc-customer-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.kyc-deal-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.kyc-contact-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.kyc-contact-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.kyc-badge-verified {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 12px;
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.kyc-badge-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 12px;
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.kyc-badge-review {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 12px;
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.kyc-days-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: var(--bg-surface-hover);
+  color: var(--text-muted);
+  border: 1px solid var(--border-base);
+}
+
+.kyc-advance-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  background-color: var(--primary-600);
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+  white-space: nowrap;
+}
+
+.kyc-advance-btn:hover {
+  background-color: var(--primary-700);
+}
+
+.kyc-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.kyc-doc-card {
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kyc-doc-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.kyc-doc-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ==========================================================================
+   5-Step KYC & Documents Flow Styles (GHL India Ventures -> IRM)
+   ========================================================================== */
+
+.kyc-flow-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-lg, 12px);
+  padding: 28px;
+  box-shadow: var(--shadow-sm);
+}
+
+.kyc-flow-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-base);
+}
+
+.kyc-flow-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.kyc-flow-back-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-surface-hover);
+}
+
+/* Stepper progress header */
+.kyc-stepper-wrapper {
+  margin-bottom: 32px;
+}
+
+.kyc-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.kyc-stepper-line-bg {
+  position: absolute;
+  top: 18px;
+  left: 36px;
+  right: 36px;
+  height: 3px;
+  background: var(--border-base);
+  z-index: 1;
+}
+
+.kyc-stepper-line-progress {
+  position: absolute;
+  top: 18px;
+  left: 36px;
+  height: 3px;
+  background: var(--primary-600);
+  z-index: 2;
+  transition: width 0.3s ease;
+}
+
+.kyc-step-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  z-index: 3;
+  cursor: pointer;
+  user-select: none;
+}
+
+.kyc-step-circle {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  border: 2px solid var(--border-base);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  transition: all var(--transition-fast);
+}
+
+.kyc-step-item.active .kyc-step-circle {
+  border-color: var(--primary-600);
+  background: var(--primary-600);
+  color: #ffffff;
+  box-shadow: 0 0 0 4px rgba(6, 182, 212, 0.2);
+}
+
+.kyc-step-item.completed .kyc-step-circle {
+  border-color: #10b981;
+  background: #10b981;
+  color: #ffffff;
+}
+
+.kyc-step-label {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.kyc-step-item.active .kyc-step-label {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.kyc-step-item.completed .kyc-step-label {
+  color: var(--text-secondary);
+}
+
+/* Step container body */
+.kyc-step-body {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.kyc-step-header {
+  margin-bottom: 24px;
+}
+
+.kyc-step-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kyc-step-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* Form layouts */
+.kyc-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.kyc-form-grid-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.kyc-form-grid-full {
+  grid-column: 1 / -1;
+}
+
+.kyc-field-error {
+  color: #ef4444;
+  font-size: 11px;
+  font-weight: 500;
+  margin-top: 4px;
+}
+
+.form-input.kyc-input-error,
+.form-select.kyc-input-error,
+.form-textarea.kyc-input-error {
+  border-color: #ef4444 !important;
+  background-color: rgba(239, 68, 68, 0.03);
+}
+
+/* File upload zones */
+.kyc-upload-dropzone {
+  border: 2px dashed var(--border-base);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  background: var(--bg-surface-hover);
+  text-align: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 110px;
+}
+
+.kyc-upload-dropzone:hover {
+  border-color: var(--primary-500);
+  background: rgba(6, 182, 212, 0.04);
+}
+
+.kyc-upload-dropzone.has-error {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.03);
+}
+
+.kyc-uploaded-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: var(--radius-md);
+  margin-top: 6px;
+}
+
+.kyc-uploaded-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.kyc-uploaded-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kyc-uploaded-size {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.kyc-remove-upload-btn {
+  background: none;
+  border: none;
+  color: #ef4444;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition-fast);
+}
+
+.kyc-remove-upload-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+/* Demat Account Skip Card */
+.kyc-demat-card {
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+  padding: 18px 20px;
+  margin-bottom: 20px;
+}
+
+.kyc-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.kyc-checkbox-input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary-600);
+  cursor: pointer;
+}
+
+/* Nominee Cards */
+.kyc-nominee-box {
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+  padding: 18px 20px;
+  margin-bottom: 16px;
+  position: relative;
+}
+
+.kyc-nominee-box-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-base);
+}
+
+.kyc-nominee-box-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Action Navigation Bar */
+.kyc-nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-base);
+}
+
+.kyc-nav-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.kyc-nav-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+@media (max-width: 768px) {
+  .kyc-stepper {
+    flex-direction: column;
+    gap: 16px;
+  }
+  .kyc-stepper-line-bg,
+  .kyc-stepper-line-progress {
+    display: none;
+  }
+  .kyc-form-grid,
+  .kyc-form-grid-3 {
+    grid-template-columns: 1fr;
+  }
+}

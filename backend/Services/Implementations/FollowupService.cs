@@ -106,13 +106,14 @@ public class FollowupService : IFollowupService
         var page = Math.Max(1, filter.Page);
         var pageSize = Math.Clamp(filter.PageSize, 1, 100);
 
-        var items = await query
+        var entities = await query
             .OrderBy(f => f.Status == "Pending" ? 0 : 1)
             .ThenBy(f => f.ScheduledAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(f => MapToDto(f))
             .ToListAsync(ct);
+
+        var items = entities.Select(MapToDto).ToList();
 
         return ApiResponse<PagedResult<FollowupResponseDto>>.SuccessResult(
             PagedResult<FollowupResponseDto>.Create(items, totalCount, page, pageSize),

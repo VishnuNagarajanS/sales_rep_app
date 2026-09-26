@@ -25,9 +25,11 @@ import {
   Trash2,
   MessageSquare,
   User as UserIcon,
+  UserCheck,
+  Server,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { followupsApi } from '../../services/crmApi';
+import { getFollowups } from '../../services/ghlApiService';
 import { FEATURES } from '../../constants/features';
 import { PERMISSIONS } from '../../constants/permissions';
 import './Sidebar.css';
@@ -55,23 +57,42 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
   const { isSuperAdmin, tenant, enabledFeatures, permissions, user } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [isCollapseHovered, setIsCollapseHovered] = useState(false);
-  const [pendingFollowupsCount, setPendingFollowupsCount] = useState(0);
 
+  const roleCode = user?.role?.code;
+  const isGhlAdmin =
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
+    (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
   const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
   const isIrm = user?.role?.code === 'irm';
+  const isGhlIrm = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.name === 'GHL India Ventures' || user?.companySlug === 'ghl' || user?.companyName === 'GHL India Ventures') && isIrm;
+
+  const [pendingFollowupsCount, setPendingFollowupsCount] = useState(0);
 
   useEffect(() => {
-    let isMounted = true;
-    if (isGhlSalesExec) {
-      followupsApi.getFollowups({ status: 'Pending' }).then(res => {
-        if (isMounted && res) {
-          const items = res.items || [];
-          setPendingFollowupsCount(items.length);
-        }
-      }).catch(() => {});
+    if (!isGhlSalesExec || !tenant?.id) {
+      setPendingFollowupsCount(0);
+      return;
     }
-    return () => { isMounted = false; };
-  }, [isGhlSalesExec]);
+    let mounted = true;
+    const updateFollowups = () => {
+      getFollowups(tenant.id)
+        .then(followups => {
+          if (mounted) {
+            const count = (followups || []).filter(
+              f => f.status === 'Pending' && (f.assignedAgentId === user?.id || f.assignedAgentName === user?.name)
+            ).length;
+            setPendingFollowupsCount(count);
+          }
+        })
+        .catch(() => {});
+    };
+    updateFollowups();
+    window.addEventListener('nexus_storage_updated', updateFollowups);
+    return () => {
+      mounted = false;
+      window.removeEventListener('nexus_storage_updated', updateFollowups);
+    };
+  }, [tenant?.id, isGhlSalesExec, user?.id, user?.name]);
 
   const companyId = (user?.companyId as string | undefined) ?? tenant?.id ?? '';
   const [unreadChatCount, setUnreadChatCount] = useState(0);
@@ -109,6 +130,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
         { id: 'admin-features', label: 'Feature Packages', icon: <Sparkles size={18} /> },
         { id: 'admin-call-config', label: 'Call Configuration', icon: <PhoneCall size={18} /> },
         { id: 'admin-audit', label: 'Platform Audit Logs', icon: <FileCheck size={18} /> },
+        { id: 'admin-system', label: 'System & Health', icon: <Server size={18} /> },
       ],
     },
   ];
@@ -124,6 +146,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
       header: 'Sales',
       items: [
         { id: 'leads', label: 'Leads', icon: <Users size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
+        ...(isGhlAdmin ? [{ id: 'assigned-leads', label: 'Assigned Leads', icon: <UserCheck size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW }] : []),
         { id: 'customers', label: 'Customers 360', icon: <Building2 size={18} />, feature: FEATURES.CUSTOMERS, permission: PERMISSIONS.CUSTOMERS_VIEW },
         { id: 'pipeline', label: 'Pipeline', icon: <Kanban size={18} />, feature: FEATURES.DEALS, permission: PERMISSIONS.DEALS_VIEW },
         { id: 'deals', label: 'Deals', icon: <Briefcase size={18} />, feature: FEATURES.DEALS, permission: PERMISSIONS.DEALS_VIEW },
@@ -188,6 +211,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
       header: 'Sales',
       items: [
         { id: 'leads', label: 'Leads', icon: <Users size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
+        ...(isGhlAdmin ? [{ id: 'assigned-leads', label: 'Assigned Leads', icon: <UserCheck size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW }] : []),
         { id: 'followups', label: 'Follow-ups', icon: <CalendarCheck size={18} />, feature: FEATURES.FOLLOWUPS, permission: PERMISSIONS.FOLLOWUPS_VIEW },
         { id: 'consultations', label: 'Consultations', icon: <Calendar size={18} />, feature: FEATURES.CONSULTATIONS, permission: PERMISSIONS.CONSULTATIONS_VIEW },
         { id: 'customers', label: 'Customers 360', icon: <Building2 size={18} />, feature: FEATURES.CUSTOMERS, permission: PERMISSIONS.CUSTOMERS_VIEW },
@@ -235,9 +259,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
     {
       header: 'Investors',
       items: [
-        { id: 'investors', label: 'Investors 360', icon: <TrendingUp size={18} />, feature: FEATURES.INVESTORS, permission: PERMISSIONS.INVESTORS_VIEW },
-        { id: 'consultations', label: 'Consultations', icon: <Calendar size={18} />, feature: FEATURES.CONSULTATIONS, permission: PERMISSIONS.CONSULTATIONS_VIEW },
+        { id: 'leads', label: 'My Leads', icon: <Users size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
+        { id: 'followups', label: 'Follow-up', icon: <CalendarCheck size={18} />, feature: FEATURES.FOLLOWUPS, permission: PERMISSIONS.FOLLOWUPS_VIEW },
+        { id: 'kyc', label: 'KYC', icon: <FileCheck size={18} />, feature: FEATURES.INVESTORS, permission: PERMISSIONS.INVESTORS_VIEW },
         { id: 'opportunities', label: 'Opportunities', icon: <Briefcase size={18} />, feature: FEATURES.INVESTMENT_OPPORTUNITIES, permission: PERMISSIONS.OPPORTUNITIES_VIEW },
+        { id: 'investors', label: 'Investor 360', icon: <TrendingUp size={18} />, feature: FEATURES.INVESTORS, permission: PERMISSIONS.INVESTORS_VIEW },
+        ...(isGhlIrm ? [{ id: 'pipeline', label: 'Pipeline', icon: <Kanban size={18} />, feature: FEATURES.DEALS, permission: PERMISSIONS.DEALS_VIEW }] : []),
       ],
     },
     {
@@ -274,7 +301,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
   const filterSection = (section: NavSection): NavItem[] => {
     return section.items.filter(item => {
       if (item.feature && !enabledFeatures.includes(item.feature)) return false;
-      if (item.permission && !permissions.includes(item.permission)) return false;
+      if (item.permission && !permissions.includes(item.permission)) {
+        if (isIrm && (item.permission === PERMISSIONS.LEADS_VIEW || item.permission === PERMISSIONS.FOLLOWUPS_VIEW || item.permission === PERMISSIONS.DEALS_VIEW)) {
+          return true;
+        }
+        return false;
+      }
       return true;
     });
   };
