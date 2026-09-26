@@ -112,6 +112,34 @@ export const JunkPage: React.FC = () => {
         </span>
       ),
     },
+    {
+      key: 'reason',
+      header: 'Reason',
+      render: (r: Lead) => {
+        const reasonText = r.customFields?.dispositionReason as string | undefined;
+        if (!reasonText) return <span style={{ color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>—</span>;
+        const firstLine = reasonText.split('\n')[0];
+        const isTruncated = firstLine.length < reasonText.length || firstLine.length > 60;
+        const displayText = firstLine.length > 60 ? firstLine.slice(0, 60) + '…' : firstLine;
+        return (
+          <span
+            title={reasonText}
+            style={{
+              fontSize: 12,
+              color: 'var(--text-secondary)',
+              maxWidth: 200,
+              display: 'block',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              cursor: isTruncated ? 'help' : 'default',
+            }}
+          >
+            {displayText}
+          </span>
+        );
+      },
+    },
   ];
 
   const actions: RowAction<Lead>[] = [

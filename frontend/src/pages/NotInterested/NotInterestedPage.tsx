@@ -79,6 +79,50 @@ export const NotInterestedPage: React.FC = () => {
     }
   };
 
+  const getNotInterestedReason = (lead: Lead): string => {
+    // 1. Check customFields (saved during call disposition wrap-up)
+    if (lead.customFields?.dispositionReason?.trim()) {
+      return lead.customFields.dispositionReason.trim();
+    }
+
+    // 2. Parse from lead notes if present
+    if (lead.notes) {
+      const match = lead.notes.match(/Not Interested Reason:\s*([^\n]+)/i);
+      if (match && match[1]?.trim()) {
+        return match[1].trim();
+      }
+    }
+
+    // 3. Fallback to latest call log with disposition 'Not Interested'
+    const calls = storageService
+      .getCalls(tenant?.id)
+      .filter(c => (c.contactPhone === lead.phone || c.contactName === lead.name) && c.disposition === 'Not Interested');
+    if (calls.length > 0) {
+      const latestCall = calls.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+      if (latestCall.notes) {
+        const reasonMatch = latestCall.notes.match(/Reason:\s*([^\n]+)/i);
+        if (reasonMatch && reasonMatch[1]?.trim()) {
+          return reasonMatch[1].trim();
+        }
+        return latestCall.notes.trim();
+      }
+    }
+
+    return 'No specific reason provided';
+  };
+
+  const getCustomerNotes = (lead: Lead): string => {
+    if (lead.customFields?.customerNotes && typeof lead.customFields.customerNotes === 'string' && lead.customFields.customerNotes.trim()) {
+      return lead.customFields.customerNotes.trim();
+    }
+    if (!lead.notes) return '';
+    const cleaned = lead.notes
+      .split(/\n\n?\[\d{1,2}\/\d{1,2}\/\d{4}[^\]]*\]\s*Not Interested Reason:?/i)[0]
+      .replace(/(?:\[.*?\]\s*)?Not Interested Reason:[\s\S]*$/i, '')
+      .trim();
+    return cleaned;
+  };
+
   const columns: Column<Lead>[] = [
     {
       key: 'name',
@@ -111,6 +155,30 @@ export const NotInterestedPage: React.FC = () => {
           {r.source}
         </span>
       ),
+    },
+    {
+      key: 'reason',
+      header: 'Reason',
+      render: (r: Lead) => {
+        const reasonText = getNotInterestedReason(r);
+        const hasReason = reasonText !== 'No specific reason provided';
+        return (
+          <div
+            title={reasonText}
+            style={{
+              fontSize: 13,
+              maxWidth: 280,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              color: hasReason ? 'var(--text-primary)' : 'var(--text-muted)',
+              fontStyle: hasReason ? 'normal' : 'italic',
+            }}
+          >
+            {reasonText}
+          </div>
+        );
+      },
     },
   ];
 
@@ -176,6 +244,17 @@ export const NotInterestedPage: React.FC = () => {
           keyExtractor={(r) => r.id}
           rowActions={actions}
           emptyTitle="No leads marked as Not Interested."
+          searchPlaceholder="Search leads by name, phone, or reason..."
+          searchFilter={(item, query) => {
+            const q = query.toLowerCase();
+            const reason = getNotInterestedReason(item).toLowerCase();
+            return (
+              item.name.toLowerCase().includes(q) ||
+              item.phone.toLowerCase().includes(q) ||
+              item.source.toLowerCase().includes(q) ||
+              reason.includes(q)
+            );
+          }}
           onRowClick={isGhlSalesExec ? (row) => { setSelectedLead(row); setIsDetailDrawerOpen(true); } : undefined}
         />
       </div>
@@ -213,7 +292,7 @@ export const NotInterestedPage: React.FC = () => {
                     Not Interested
                   </div>
                   <div style={{ fontSize: 13, color: '#831843', marginTop: 2 }}>
-                    {selectedLead.customFields?.dispositionReason || 'No specific reason provided.'}
+                    {getNotInterestedReason(selectedLead)}
                   </div>
                 </div>
                 <button
@@ -275,14 +354,51 @@ export const NotInterestedPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Reason Details */}
+              {/* Notes & Requirements (Customer) and Reason (Agent) */}
               <div className="card">
-                <h4 style={{ fontSize: 13, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 12, fontWeight: 700 }}>
-                  Reason Details
-                </h4>
-                <p style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
-                  {selectedLead.customFields?.dispositionReason || 'No specific reason provided.'}
-                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div>
+                    <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em' }}>
+                      NOTES & REQUIREMENTS
+                    </span>
+                    <div
+                      style={{
+                        backgroundColor: 'var(--bg-surface-hover)',
+                        border: '1px solid var(--border-color, rgba(255, 255, 255, 0.08))',
+                        padding: '8px 12px',
+                        borderRadius: 6,
+                        marginTop: 4,
+                        fontSize: 13,
+                        color: 'var(--text-primary)',
+                        lineHeight: 1.5,
+                        wordBreak: 'break-word',
+                      }}
+                    >
+                      {getCustomerNotes(selectedLead) || 'No notes submitted by customer.'}
+                    </div>
+                  </div>
+
+                  <div>
+                    <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em' }}>
+                      REASON
+                    </span>
+                    <div
+                      style={{
+                        backgroundColor: 'rgba(239, 68, 68, 0.04)',
+                        border: '1px solid rgba(239, 68, 68, 0.35)',
+                        padding: '8px 12px',
+                        borderRadius: 6,
+                        marginTop: 4,
+                        fontSize: 13,
+                        color: 'var(--text-primary)',
+                        lineHeight: 1.5,
+                        wordBreak: 'break-word',
+                      }}
+                    >
+                      {getNotInterestedReason(selectedLead)}
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Activity History Timeline */}

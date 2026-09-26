@@ -1,13 +1,10 @@
 import { ChatConversation, ChatMessage, ChatMember, ChatAttachment } from '../types';
-import { isMockMode } from '../mock/runtime/mockConfig';
-import { ensureDemoConversations as ensureMockDemoConversations } from '../mock/chat/demoConversations';
 
 // ── Storage keys ──────────────────────────────────────────────────────────────
-const getPrefix = () => (isMockMode() ? 'nexus_mock_chat_' : 'nexus_dev_chat_');
-const getConvsKey = () => `${getPrefix()}conversations`;
-const msgKey = (id: string) => `${getPrefix()}messages_${id}`;
-const getPresenceKey = () => `${getPrefix()}presence`;
-const getTypingKey = () => `${getPrefix()}typing`;
+const CONVS_KEY = 'nexus_chat_conversations';
+const msgKey = (id: string) => `nexus_chat_messages_${id}`;
+const PRESENCE_KEY = 'nexus_chat_presence';
+const TYPING_KEY = 'nexus_chat_typing';
 
 function emit() {
   window.dispatchEvent(new CustomEvent('nexus_chat_updated'));
@@ -16,11 +13,7 @@ function emit() {
 // ── Conversations ─────────────────────────────────────────────────────────────
 export function getConversations(companyId: string): ChatConversation[] {
   try {
-    const key = getConvsKey();
-    let raw = localStorage.getItem(key);
-    if (!raw && isMockMode()) {
-      raw = localStorage.getItem('nexus_chat_conversations');
-    }
+    const raw = localStorage.getItem(CONVS_KEY);
     const all: ChatConversation[] = raw ? JSON.parse(raw) : [];
     return all.filter(c => c.companyId === companyId);
   } catch {
@@ -30,11 +23,7 @@ export function getConversations(companyId: string): ChatConversation[] {
 
 export function getConversation(id: string): ChatConversation | null {
   try {
-    const key = getConvsKey();
-    let raw = localStorage.getItem(key);
-    if (!raw && isMockMode()) {
-      raw = localStorage.getItem('nexus_chat_conversations');
-    }
+    const raw = localStorage.getItem(CONVS_KEY);
     const all: ChatConversation[] = raw ? JSON.parse(raw) : [];
     return all.find(c => c.id === id) ?? null;
   } catch {
@@ -44,15 +33,11 @@ export function getConversation(id: string): ChatConversation | null {
 
 export function saveConversation(conv: ChatConversation): void {
   try {
-    const key = getConvsKey();
-    let raw = localStorage.getItem(key);
-    if (!raw && isMockMode()) {
-      raw = localStorage.getItem('nexus_chat_conversations');
-    }
+    const raw = localStorage.getItem(CONVS_KEY);
     const all: ChatConversation[] = raw ? JSON.parse(raw) : [];
     const idx = all.findIndex(c => c.id === conv.id);
     if (idx >= 0) { all[idx] = conv; } else { all.unshift(conv); }
-    localStorage.setItem(key, JSON.stringify(all));
+    localStorage.setItem(CONVS_KEY, JSON.stringify(all));
     emit();
   } catch {}
 }
@@ -86,11 +71,7 @@ export function createGroup(companyId: string, name: string, members: ChatMember
 // ── Messages ──────────────────────────────────────────────────────────────────
 export function getMessages(conversationId: string): ChatMessage[] {
   try {
-    const key = msgKey(conversationId);
-    let raw = localStorage.getItem(key);
-    if (!raw && isMockMode()) {
-      raw = localStorage.getItem(`nexus_chat_messages_${conversationId}`);
-    }
+    const raw = localStorage.getItem(msgKey(conversationId));
     return raw ? JSON.parse(raw) : [];
   } catch { return []; }
 }
@@ -121,11 +102,7 @@ export function sendMessage(
 
   // Update lastMessage on conversation
   try {
-    const key = getConvsKey();
-    let raw = localStorage.getItem(key);
-    if (!raw && isMockMode()) {
-      raw = localStorage.getItem('nexus_chat_conversations');
-    }
+    const raw = localStorage.getItem(CONVS_KEY);
     const all: ChatConversation[] = raw ? JSON.parse(raw) : [];
     const ci = all.findIndex(c => c.id === conversationId && c.companyId === companyId);
     if (ci >= 0) {
@@ -134,7 +111,7 @@ export function sendMessage(
         : (attachments && attachments.length > 0 ? `📎 ${attachments[0].name}` : '');
       all[ci].lastMessage = { content: previewText, senderName: msg.senderName, isDeleted: false };
       all[ci].updatedAt = msg.createdAt;
-      localStorage.setItem(key, JSON.stringify(all));
+      localStorage.setItem(CONVS_KEY, JSON.stringify(all));
     }
   } catch {}
 
@@ -162,92 +139,61 @@ export function deleteMessage(conversationId: string, messageId: string): void {
 
 export function toggleReaction(conversationId: string, messageId: string, emoji: string, userId: string, userName: string): void {
   const msgs = getMessages(conversationId);
-  const msg = msgs.find(m => m.id === messageId);
-  if (!msg) return;
-  if (!msg.reactions) msg.reactions = [];
-  const existing = msg.reactions.find(r => r.emoji === emoji && r.userId === userId);
-  if (existing) {
-    msg.reactions = msg.reactions.filter(r => !(r.emoji === emoji && r.userId === userId));
-  } else {
-    msg.reactions.push({ emoji, userId, userName });
-  }
+  const idx = msgs.findIndex(m => m.id === messageId);
+  if (idx < 0) return;
+  const msg = { ...msgs[idx], reactions: [...msgs[idx].reactions] };
+  const rxIdx = msg.reactions.findIndex(r => r.emoji === emoji && r.userId === userId);
+  if (rxIdx >= 0) { msg.reactions.splice(rxIdx, 1); } else { msg.reactions.push({ emoji, userId, userName }); }
+  msgs[idx] = { ...msg, updatedAt: new Date().toISOString() };
   localStorage.setItem(msgKey(conversationId), JSON.stringify(msgs));
   emit();
 }
 
-// ── Presence & Typing ─────────────────────────────────────────────────────────
-export function getPresence(): Record<string, string> {
+export function markRead(conversationId: string, companyId: string): void {
   try {
-    const key = getPresenceKey();
-    let raw = localStorage.getItem(key);
-    if (!raw && isMockMode()) {
-      raw = localStorage.getItem('nexus_chat_presence');
-    }
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
+    const raw = localStorage.getItem(CONVS_KEY);
+    if (!raw) return;
+    const all: ChatConversation[] = JSON.parse(raw);
+    const idx = all.findIndex(c => c.id === conversationId && c.companyId === companyId);
+    if (idx >= 0) { all[idx].unreadCount = 0; localStorage.setItem(CONVS_KEY, JSON.stringify(all)); emit(); }
+  } catch {}
+}
+
+// ── Presence ──────────────────────────────────────────────────────────────────
+export function getPresence(): Record<string, 'online' | 'offline'> {
+  try { const raw = localStorage.getItem(PRESENCE_KEY); return raw ? JSON.parse(raw) : {}; } catch { return {}; }
 }
 
 export function setPresence(userId: string, status: 'online' | 'offline'): void {
-  try {
-    const p = getPresence();
-    p[userId] = status;
-    localStorage.setItem(getPresenceKey(), JSON.stringify(p));
-    emit();
-  } catch {}
+  const p = getPresence(); p[userId] = status;
+  localStorage.setItem(PRESENCE_KEY, JSON.stringify(p));
 }
 
-export function markRead(conversationId: string, companyId?: string): void {
-  try {
-    const key = getConvsKey();
-    let raw = localStorage.getItem(key);
-    if (!raw && isMockMode()) {
-      raw = localStorage.getItem('nexus_chat_conversations');
-    }
-    if (!raw) return;
-    const all: ChatConversation[] = JSON.parse(raw);
-    const idx = all.findIndex(c => c.id === conversationId && (!companyId || c.companyId === companyId));
-    if (idx >= 0) {
-      all[idx].unreadCount = 0;
-      localStorage.setItem(key, JSON.stringify(all));
-      emit();
-    }
-  } catch {}
-}
-
-export interface TypingEntry {
-  userId: string;
-  userName: string;
-  ts: number;
-}
+// ── Typing ────────────────────────────────────────────────────────────────────
+export interface TypingEntry { userId: string; userName: string; ts: number; }
 
 export function setTyping(conversationId: string, entry: TypingEntry | null): void {
   try {
-    const raw = localStorage.getItem(getTypingKey());
+    const raw = localStorage.getItem(TYPING_KEY);
     const map: Record<string, TypingEntry | null> = raw ? JSON.parse(raw) : {};
-    if (entry) {
-      map[conversationId] = entry;
-    } else {
-      delete map[conversationId];
-    }
-    localStorage.setItem(getTypingKey(), JSON.stringify(map));
+    if (entry) { map[conversationId] = entry; } else { delete map[conversationId]; }
+    localStorage.setItem(TYPING_KEY, JSON.stringify(map));
   } catch {}
 }
 
 export function getTyping(conversationId: string, currentUserId: string): TypingEntry | null {
   try {
-    const raw = localStorage.getItem(getTypingKey());
+    const raw = localStorage.getItem(TYPING_KEY);
     const map: Record<string, TypingEntry | null> = raw ? JSON.parse(raw) : {};
     const entry = map[conversationId];
     if (!entry || entry.userId === currentUserId || Date.now() - entry.ts > 3000) return null;
     return entry;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
-// ── Member Directory ──────────────────────────────────────────────────────────
+// ── Directory ─────────────────────────────────────────────────────────────────
 export function buildDirectory(
-  users: Array<{ id: string; name: string; email: string; role?: { code: string; name: string }; companyId?: string; companySlug?: string }>,
+  users: Array<{ id: string; name: string; email?: string; role?: { code: string; name: string }; companyId?: string; companySlug?: string }>,
   companyId: string,
   tenantSlug?: string,
 ): ChatMember[] {
@@ -270,28 +216,246 @@ export function buildDirectory(
     }));
 }
 
-// ── Seed Demo Conversations (Only in Mock Mode) ────────────────────────────────
+// ── Seed Demo Conversations ───────────────────────────────────────────────────
 export function ensureDemoConversations(companyId: string, tenantSlug?: string): void {
-  if (!isMockMode()) {
-    return;
+  const existing = getConversations(companyId);
+  if (existing.length > 0) return;
+
+  const isGhl = companyId.includes('ghl') || tenantSlug === 'ghl';
+  const isJamin = companyId.includes('jamin') || tenantSlug === 'jamin';
+
+  if (isGhl) {
+    const admin: ChatMember = {
+      id: 'usr-ghl-admin',
+      name: 'Vikram Malhotra',
+      email: 'vikram.malhotra@ghl.com',
+      roleCode: 'company_admin',
+      roleName: 'Company Admin',
+      companyId,
+      status: 'online',
+    };
+    const exec: ChatMember = {
+      id: 'usr-ghl-exec',
+      name: 'Ananya Iyer',
+      email: 'ananya.iyer@ghl.com',
+      roleCode: 'sales_executive',
+      roleName: 'Sales Executive',
+      companyId,
+      status: 'online',
+    };
+
+    const grpId = `conv-grp-ghl-sales`;
+    const grp: ChatConversation = {
+      id: grpId,
+      companyId,
+      type: 'group',
+      name: 'GHL Sales Strategy',
+      memberIds: [admin.id, exec.id],
+      members: [admin, exec],
+      unreadCount: 0,
+      createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
+      updatedAt: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
+      lastMessage: {
+        content: 'Please prioritize the HNW investor consultations today.',
+        senderName: 'Vikram Malhotra',
+        isDeleted: false,
+      },
+    };
+
+    const grpMsgs: ChatMessage[] = [
+      {
+        id: 'msg-ghl-grp-1',
+        conversationId: grpId,
+        senderId: admin.id,
+        senderName: admin.name,
+        content: 'Good morning team! Let’s review today’s pipeline targets.',
+        isDeleted: false,
+        isEdited: false,
+        createdAt: new Date(Date.now() - 3600000 * 4).toISOString(),
+        updatedAt: new Date(Date.now() - 3600000 * 4).toISOString(),
+        reactions: [{ emoji: '👍', userId: exec.id, userName: exec.name }],
+      },
+      {
+        id: 'msg-ghl-grp-2',
+        conversationId: grpId,
+        senderId: exec.id,
+        senderName: exec.name,
+        content: 'Morning Vikram! I have 3 consultations scheduled for the Brigade Gateway project.',
+        isDeleted: false,
+        isEdited: false,
+        createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
+        updatedAt: new Date(Date.now() - 3600000 * 2).toISOString(),
+        reactions: [{ emoji: '🔥', userId: admin.id, userName: admin.name }],
+      },
+      {
+        id: 'msg-ghl-grp-3',
+        conversationId: grpId,
+        senderId: admin.id,
+        senderName: admin.name,
+        content: 'Please prioritize the HNW investor consultations today.',
+        isDeleted: false,
+        isEdited: false,
+        createdAt: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
+        updatedAt: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
+        reactions: [],
+      },
+    ];
+
+    const dmId = `conv-dm-ghl-exec-admin`;
+    const dm: ChatConversation = {
+      id: dmId,
+      companyId,
+      type: 'dm',
+      memberIds: [admin.id, exec.id],
+      members: [admin, exec],
+      unreadCount: 0,
+      createdAt: new Date(Date.now() - 3600000 * 8).toISOString(),
+      updatedAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
+      lastMessage: {
+        content: 'All documents for Dr. Rajesh Nambiar are uploaded and verified.',
+        senderName: 'Ananya Iyer',
+        isDeleted: false,
+      },
+    };
+
+    const dmMsgs: ChatMessage[] = [
+      {
+        id: 'msg-ghl-dm-1',
+        conversationId: dmId,
+        senderId: admin.id,
+        senderName: admin.name,
+        content: 'Hi Ananya, could you update the status on Dr. Rajesh Nambiar’s deal?',
+        isDeleted: false,
+        isEdited: false,
+        createdAt: new Date(Date.now() - 3600000 * 1).toISOString(),
+        updatedAt: new Date(Date.now() - 3600000 * 1).toISOString(),
+        reactions: [],
+      },
+      {
+        id: 'msg-ghl-dm-2',
+        conversationId: dmId,
+        senderId: exec.id,
+        senderName: exec.name,
+        content: 'All documents for Dr. Rajesh Nambiar are uploaded and verified.',
+        isDeleted: false,
+        isEdited: false,
+        createdAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
+        updatedAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
+        reactions: [{ emoji: '👏', userId: admin.id, userName: admin.name }],
+        attachments: [
+          {
+            id: 'att-demo-rajesh-docs',
+            name: 'Dr_Rajesh_KYC_Verification.pdf',
+            size: 2450000,
+            type: 'application/pdf',
+            category: 'PDF',
+            permission: 'read_only',
+            dataUrl: 'data:application/pdf;base64,JVBERi0xLjQKJcTl8uXrp...',
+          },
+          {
+            id: 'att-demo-site-plan',
+            name: 'Greenfield_Meadows_MasterPlan.png',
+            size: 1120000,
+            type: 'image/png',
+            category: 'Image',
+            permission: 'view_download',
+            dataUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="250" viewBox="0 0 400 250"><rect width="400" height="250" fill="%231e293b"/><text x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%2394a3b8" font-family="sans-serif" font-size="16">Master Plan Preview</text></svg>',
+          },
+        ],
+      },
+      {
+        id: 'msg-ghl-dm-3',
+        conversationId: dmId,
+        senderId: admin.id,
+        senderName: admin.name,
+        content: `[CALL:{"type":"call","meetingId":"meet-demo-ghl","callMode":"video","status":"ended","duration":"12m 45s","hostId":"usr-ghl-admin","hostName":"Vikram Malhotra","startedAt":"${new Date(Date.now() - 1000 * 60 * 20).toISOString()}"}]`,
+        isDeleted: false,
+        isEdited: false,
+        createdAt: new Date(Date.now() - 1000 * 60 * 20).toISOString(),
+        updatedAt: new Date(Date.now() - 1000 * 60 * 20).toISOString(),
+        reactions: [],
+      },
+    ];
+
+    saveConversation(grp);
+    saveConversation(dm);
+    localStorage.setItem(msgKey(grpId), JSON.stringify(grpMsgs));
+    localStorage.setItem(msgKey(dmId), JSON.stringify(dmMsgs));
+  } else if (isJamin) {
+    const admin: ChatMember = {
+      id: 'usr-jamin-admin',
+      name: 'Kavita Rao',
+      email: 'kavita.rao@jaminbazaar.com',
+      roleCode: 'company_admin',
+      roleName: 'Company Admin',
+      companyId,
+      status: 'online',
+    };
+    const exec: ChatMember = {
+      id: 'usr-jamin-exec',
+      name: 'Pooja Hegde',
+      email: 'pooja.hegde@jaminbazaar.com',
+      roleCode: 'sales_executive',
+      roleName: 'Sales Executive',
+      companyId,
+      status: 'online',
+    };
+
+    const dmId = `conv-dm-jamin-exec-admin`;
+    const dm: ChatConversation = {
+      id: dmId,
+      companyId,
+      type: 'dm',
+      memberIds: [admin.id, exec.id],
+      members: [admin, exec],
+      unreadCount: 0,
+      createdAt: new Date(Date.now() - 3600000 * 6).toISOString(),
+      updatedAt: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
+      lastMessage: {
+        content: 'The site visit for Greenfield Meadows Phase 2 is confirmed for tomorrow.',
+        senderName: 'Pooja Hegde',
+        isDeleted: false,
+      },
+    };
+
+    const dmMsgs: ChatMessage[] = [
+      {
+        id: 'msg-jamin-dm-1',
+        conversationId: dmId,
+        senderId: admin.id,
+        senderName: admin.name,
+        content: 'Hi Pooja, please confirm the weekend site visits schedule.',
+        isDeleted: false,
+        isEdited: false,
+        createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
+        updatedAt: new Date(Date.now() - 3600000 * 2).toISOString(),
+        reactions: [],
+      },
+      {
+        id: 'msg-jamin-dm-2',
+        conversationId: dmId,
+        senderId: exec.id,
+        senderName: exec.name,
+        content: 'The site visit for Greenfield Meadows Phase 2 is confirmed for tomorrow.',
+        isDeleted: false,
+        isEdited: false,
+        createdAt: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
+        updatedAt: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
+        reactions: [{ emoji: '✅', userId: admin.id, userName: admin.name }],
+      },
+    ];
+
+    saveConversation(dm);
+    localStorage.setItem(msgKey(dmId), JSON.stringify(dmMsgs));
   }
-  ensureMockDemoConversations(companyId, tenantSlug, {
-    getConversations,
-    saveConversation,
-    setRawMessages: (id, msgs) => {
-      try {
-        localStorage.setItem(msgKey(id), JSON.stringify(msgs));
-      } catch {}
-    },
-  });
 }
 
 // ── Conversation Settings & Organization ──────────────────────────────────────
-const getSettingsKey = (companyId: string, userId: string) => `${getPrefix()}settings_${companyId}_${userId}`;
+const SETTINGS_KEY = (companyId: string, userId: string) => `nexus_chat_settings_${companyId}_${userId}`;
 
 export function getChatSettings(companyId: string, userId: string): any {
   try {
-    const raw = localStorage.getItem(getSettingsKey(companyId, userId));
+    const raw = localStorage.getItem(SETTINGS_KEY(companyId, userId));
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -300,22 +464,20 @@ export function getChatSettings(companyId: string, userId: string): any {
 
 export function saveChatSettings(companyId: string, userId: string, settings: any): void {
   try {
-    localStorage.setItem(getSettingsKey(companyId, userId), JSON.stringify(settings));
+    localStorage.setItem(SETTINGS_KEY(companyId, userId), JSON.stringify(settings));
     emit();
   } catch {}
 }
 
 export function togglePinConversation(conversationId: string): void {
   try {
-    const key = getConvsKey();
-    let raw = localStorage.getItem(key);
-    if (!raw && isMockMode()) raw = localStorage.getItem('nexus_chat_conversations');
+    const raw = localStorage.getItem(CONVS_KEY);
     if (!raw) return;
     const all: ChatConversation[] = JSON.parse(raw);
     const conv = all.find(c => c.id === conversationId);
     if (conv) {
       conv.isPinned = !conv.isPinned;
-      localStorage.setItem(key, JSON.stringify(all));
+      localStorage.setItem(CONVS_KEY, JSON.stringify(all));
       emit();
     }
   } catch {}
@@ -323,15 +485,13 @@ export function togglePinConversation(conversationId: string): void {
 
 export function toggleMuteConversation(conversationId: string): void {
   try {
-    const key = getConvsKey();
-    let raw = localStorage.getItem(key);
-    if (!raw && isMockMode()) raw = localStorage.getItem('nexus_chat_conversations');
+    const raw = localStorage.getItem(CONVS_KEY);
     if (!raw) return;
     const all: ChatConversation[] = JSON.parse(raw);
     const conv = all.find(c => c.id === conversationId);
     if (conv) {
       conv.isMuted = !conv.isMuted;
-      localStorage.setItem(key, JSON.stringify(all));
+      localStorage.setItem(CONVS_KEY, JSON.stringify(all));
       emit();
     }
   } catch {}
@@ -339,16 +499,14 @@ export function toggleMuteConversation(conversationId: string): void {
 
 export function renameConversation(conversationId: string, newName: string): void {
   try {
-    const key = getConvsKey();
-    let raw = localStorage.getItem(key);
-    if (!raw && isMockMode()) raw = localStorage.getItem('nexus_chat_conversations');
+    const raw = localStorage.getItem(CONVS_KEY);
     if (!raw) return;
     const all: ChatConversation[] = JSON.parse(raw);
     const conv = all.find(c => c.id === conversationId);
     if (conv) {
       conv.name = newName;
       conv.updatedAt = new Date().toISOString();
-      localStorage.setItem(key, JSON.stringify(all));
+      localStorage.setItem(CONVS_KEY, JSON.stringify(all));
       emit();
     }
   } catch {}
@@ -357,15 +515,13 @@ export function renameConversation(conversationId: string, newName: string): voi
 export function clearConversationMessages(conversationId: string): void {
   try {
     localStorage.setItem(msgKey(conversationId), JSON.stringify([]));
-    const key = getConvsKey();
-    let raw = localStorage.getItem(key);
-    if (!raw && isMockMode()) raw = localStorage.getItem('nexus_chat_conversations');
+    const raw = localStorage.getItem(CONVS_KEY);
     if (raw) {
       const all: ChatConversation[] = JSON.parse(raw);
       const conv = all.find(c => c.id === conversationId);
       if (conv) {
         conv.lastMessage = undefined;
-        localStorage.setItem(key, JSON.stringify(all));
+        localStorage.setItem(CONVS_KEY, JSON.stringify(all));
       }
     }
     emit();
@@ -374,16 +530,14 @@ export function clearConversationMessages(conversationId: string): void {
 
 export function leaveConversation(conversationId: string, userId: string): void {
   try {
-    const key = getConvsKey();
-    let raw = localStorage.getItem(key);
-    if (!raw && isMockMode()) raw = localStorage.getItem('nexus_chat_conversations');
+    const raw = localStorage.getItem(CONVS_KEY);
     if (!raw) return;
     const all: ChatConversation[] = JSON.parse(raw);
     const conv = all.find(c => c.id === conversationId);
     if (conv) {
       conv.memberIds = conv.memberIds.filter(id => id !== userId);
       conv.members = conv.members.filter(m => m.id !== userId);
-      localStorage.setItem(key, JSON.stringify(all));
+      localStorage.setItem(CONVS_KEY, JSON.stringify(all));
       emit();
     }
   } catch {}
@@ -439,3 +593,4 @@ export function updateCallCardMessage(
     }
   } catch {}
 }
+

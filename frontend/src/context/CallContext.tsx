@@ -1,8 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { CallDisposition, CallRecord, Lead, Customer, Deal } from '../types';
 import { storageService } from '../services/storageService';
-import { executiveApi } from '../services/executiveApi';
-import { IS_MOCK_ENV } from '../config/runtime';
 import { useAuth } from './AuthContext';
 
 export type AgentAvailability = 'Available' | 'Busy' | 'Offline';
@@ -46,7 +44,7 @@ interface CallContextType {
   simulateIncomingCall: (name?: string, phone?: string) => void;
   acceptCall: () => void;
   rejectCall: () => void;
-  endCall: () => void;
+  endCall: (skipDisposition?: boolean | unknown) => void;
   toggleMute: () => void;
   toggleHold: () => void;
   toggleExpanded: () => void;
@@ -183,12 +181,16 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const endCall = () => {
+  const endCall = (skipDisposition?: boolean | unknown) => {
     if (activeCall) {
       const finishedCall = { ...activeCall, status: 'ended' as CallStatus };
       setLastCallRecord(finishedCall);
       setActiveCall(null);
-      setShowDispositionModal(true);
+      if (skipDisposition === true) {
+        setAvailability(prev => prev === 'Busy' ? 'Available' : prev);
+      } else {
+        setShowDispositionModal(true);
+      }
     }
   };
 
@@ -248,19 +250,9 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         timestamp: new Date().toISOString(),
         recordingUrl: 'https://cdn.nexusplatform.io/recordings/sample.mp3',
         transcription: `Automated Call Transcript: Agent ${user.name} connected with ${lastCallRecord.contactName}. Call disposition marked as ${disposition}.`,
-        notes: reason ? `${notes}\n\nReason: ${reason}` : (notes || lastCallRecord.quickNotes),
+        notes: notes || lastCallRecord.quickNotes || undefined,
+        reason: reason || undefined,
       };
-
-      if (!IS_MOCK_ENV && user.role.code === 'sales_executive') {
-        void executiveApi.processDisposition({
-          contactName: callRecord.contactName,
-          contactPhone: callRecord.contactPhone,
-          direction: callRecord.direction,
-          duration: callRecord.duration,
-          disposition,
-          notes: callRecord.notes,
-        }).catch(error => console.error('Failed to persist call disposition', error));
-      }
 
       storageService.addCall(callRecord);
 
@@ -280,9 +272,14 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Locate matched lead if any
       const leadId = lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : null;
       const allLeads = storageService.getLeads(tenant.id);
+      const normalize = (p: string) => (p || '').replace(/\D/g, '').slice(-10);
+      const callPhoneDigits = normalize(lastCallRecord.contactPhone);
       const matchedLead = leadId
         ? allLeads.find(l => l.id === leadId)
-        : allLeads.find(l => l.phone === lastCallRecord.contactPhone || (l.name && l.name.toLowerCase() === lastCallRecord.contactName.toLowerCase()));
+        : allLeads.find(l =>
+            (callPhoneDigits && normalize(l.phone) === callPhoneDigits) ||
+            (l.name && l.name.toLowerCase() === lastCallRecord.contactName.toLowerCase())
+          );
 
       // 1. Interested -> Move to Customer 360, remove from active Leads
       if (disposition === 'Interested') {
@@ -420,7 +417,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const reasonText = reason || notes || 'Not Interested';
         if (matchedLead) {
           matchedLead.status = 'Not Interested';
-          matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Not Interested Reason: ${reasonText}`;
           matchedLead.customFields = { ...matchedLead.customFields, dispositionReason: reasonText };
           storageService.saveLead(matchedLead);
         } else {
@@ -437,7 +433,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             assignedAgentId: user.id,
             assignedAgentName: user.name,
             createdAt: new Date().toISOString().split('T')[0],
-            notes: `[${new Date().toLocaleDateString()}] Not Interested Reason: ${reasonText}`,
+            notes: '',
             customFields: { dispositionReason: reasonText },
           };
           storageService.saveLead(newLead);
@@ -449,7 +445,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const reasonText = reason || notes || 'Wrong Number';
         if (matchedLead) {
           matchedLead.status = 'Junk';
-          matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Junk / Wrong Number Reason: ${reasonText}`;
           matchedLead.customFields = { ...matchedLead.customFields, dispositionReason: reasonText };
           storageService.saveLead(matchedLead);
         } else {
@@ -466,7 +461,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             assignedAgentId: user.id,
             assignedAgentName: user.name,
             createdAt: new Date().toISOString().split('T')[0],
-            notes: `[${new Date().toLocaleDateString()}] Wrong Number Reason: ${reasonText}`,
+            notes: '',
             customFields: { dispositionReason: reasonText },
           };
           storageService.saveLead(newLead);

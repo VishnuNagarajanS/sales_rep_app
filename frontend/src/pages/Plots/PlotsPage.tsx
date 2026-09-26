@@ -52,7 +52,7 @@ export const PlotsPage: React.FC = () => {
         ...selectedPlot,
         status: 'Hold',
         holdByCustomer: holdCustomer,
-        holdByAgent: user?.name || 'Agent',
+        holdByAgent: user?.name || 'Pooja Hegde',
         holdExpiry: expiryDate.toISOString().split('T')[0],
       };
 
@@ -62,7 +62,7 @@ export const PlotsPage: React.FC = () => {
         id: `aud-${Date.now()}`,
         timestamp: 'Just now',
         actorName: user?.name || 'Agent',
-        actorEmail: user?.email || '',
+        actorEmail: user?.email || 'agent@jamin.com',
         action: 'PLOT_HOLD_CREATED',
         entityType: 'Plot',
         entityId: selectedPlot.id,

@@ -1,18 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { BarChart3, Download, TrendingUp, PhoneCall, Users, Award, MapPin, Calendar, Clock, DollarSign, Building } from 'lucide-react';
+import { BarChart3, Download, TrendingUp, PhoneCall, Users, Award, MapPin, Building } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
-import { executiveApi } from '../../services/executiveApi';
-import { IS_MOCK_ENV } from '../../config/runtime';
 import { PIPELINE_STAGES } from '../../constants/pipelineStages';
 import { FEATURES } from '../../constants/features';
 import { EmptyState } from '../../components/common/EmptyState';
-import { Lead, Deal, CallRecord, SiteVisit, Booking, Consultation, InvestmentOpportunity } from '../../types';
+import { Lead, Deal, CallRecord, SiteVisit, Booking, Consultation, InvestmentOpportunity, Followup, Customer } from '../../types';
 import './ReportsPage.css';
 
 export const ReportsPage: React.FC = () => {
   const { tenant, user, enabledFeatures } = useAuth();
   const [period, setPeriod] = useState<'week' | 'month' | 'quarter'>('month');
+  const [myPerfPeriod, setMyPerfPeriod] = useState<'week' | 'month' | 'year'>('month');
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
@@ -21,16 +20,19 @@ export const ReportsPage: React.FC = () => {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [consultations, setConsultations] = useState<Consultation[]>([]);
   const [opportunities, setOpportunities] = useState<InvestmentOpportunity[]>([]);
-  const [executiveReport, setExecutiveReport] = useState<Awaited<ReturnType<typeof executiveApi.getReport>> | null>(null);
+  const [followups, setFollowups] = useState<Followup[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
 
   const loadData = () => {
-    setLeads(storageService.getLeads(tenant?.id));
-    setDeals(storageService.getDeals(tenant?.id));
-    setCalls(storageService.getCalls(tenant?.id));
-    setSiteVisits(storageService.getSiteVisits(tenant?.id));
-    setBookings(storageService.getBookings(tenant?.id));
-    setConsultations(storageService.getConsultations(tenant?.id));
-    setOpportunities(storageService.getOpportunities(tenant?.id));
+    setLeads(storageService.getLeads(tenant?.id) || []);
+    setDeals(storageService.getDeals(tenant?.id) || []);
+    setCalls(storageService.getCalls(tenant?.id) || []);
+    setSiteVisits(storageService.getSiteVisits(tenant?.id) || []);
+    setBookings(storageService.getBookings(tenant?.id) || []);
+    setConsultations(storageService.getConsultations(tenant?.id) || []);
+    setOpportunities(storageService.getOpportunities(tenant?.id) || []);
+    setFollowups(storageService.getFollowups(tenant?.id) || []);
+    setCustomers(storageService.getCustomers(tenant?.id) || []);
   };
 
   useEffect(() => {
@@ -39,14 +41,6 @@ export const ReportsPage: React.FC = () => {
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id]);
-
-  useEffect(() => {
-    if (IS_MOCK_ENV || user?.role?.code !== 'sales_executive') {
-      setExecutiveReport(null);
-      return;
-    }
-    executiveApi.getReport().then(setExecutiveReport).catch(() => setExecutiveReport(null));
-  }, [user?.id, period]);
 
   // Currency Formatter
   const formatCurrency = (val: number) => {
@@ -93,6 +87,7 @@ export const ReportsPage: React.FC = () => {
   };
 
   const isExec = user?.role?.code === 'sales_executive';
+  const isGhlExec = isExec && tenant?.slug === 'ghl';
 
   const scopedLeads = isExec
     ? leads.filter(l => (l.assignedAgentId && l.assignedAgentId === user?.id) || (l.assignedAgentName && l.assignedAgentName === user?.name))
@@ -113,17 +108,13 @@ export const ReportsPage: React.FC = () => {
     : null;
 
   // Telephone connect rate
-  const totalCalls = executiveReport?.totalCalls ?? scopedCalls.length;
+  const totalCalls = scopedCalls.length;
   const connectedCalls = scopedCalls.filter(c => c.duration > 0);
-  const connectRate = executiveReport
-    ? executiveReport.connectRatePercent.toFixed(1)
-    : totalCalls > 0
+  const connectRate = totalCalls > 0
     ? ((connectedCalls.length / totalCalls) * 100).toFixed(1)
     : null;
   const totalConnectedDuration = connectedCalls.reduce((sum, c) => sum + (c.duration || 0), 0);
-  const avgDuration = executiveReport
-    ? formatDuration(Math.round(executiveReport.averageDurationSeconds))
-    : connectedCalls.length > 0
+  const avgDuration = connectedCalls.length > 0
     ? formatDuration(Math.round(totalConnectedDuration / connectedCalls.length))
     : '0s';
 
@@ -142,15 +133,77 @@ export const ReportsPage: React.FC = () => {
   const wonDeals = scopedDeals.filter(d => d.stage === wonStageId || d.stage === 'won' || d.stage === 'converted');
   const closedValue = wonDeals.reduce((sum, d) => sum + (d.value || 0), 0);
 
-  // Conversion Funnel steps
-  const funnelSteps = stages.map((stage, idx) => {
-    const count = scopedDeals.filter(d => d.stage === stage.id).length;
-    const pct = scopedDeals.length > 0 ? `${((count / scopedDeals.length) * 100).toFixed(1)}%` : '0%';
+  const scopedCustomers = isExec
+    ? customers.filter(c => (c.assignedAgentId && c.assignedAgentId === user?.id) || (c.assignedAgentName && c.assignedAgentName === user?.name))
+    : customers;
+
+  const scopedFollowups = isExec
+    ? followups.filter(f => (f.assignedAgentId && f.assignedAgentId === user?.id) || (f.assignedAgentName && f.assignedAgentName === user?.name))
+    : followups;
+
+  // 1. Leads (total leads is the 100% base)
+  const totalLeads = scopedLeads.length;
+
+  // 2. Follow-ups (Pending, excluding Not Interested / Junk leads, deduplicated by contact)
+  const excludedLeadContactIds = new Set<string>();
+  const excludedLeadPhones = new Set<string>();
+  (leads || []).forEach(l => {
+    if (l.status === 'Not Interested' || l.status === 'Junk') {
+      if (l.id) excludedLeadContactIds.add(l.id);
+      const digits = (l.phone || '').replace(/\D/g, '').slice(-10);
+      if (digits) excludedLeadPhones.add(digits);
+    }
+  });
+
+  const seenFollowupContacts = new Set<string>();
+  const uniquePendingFollowups = (scopedFollowups || []).filter(f => {
+    if (f.status !== 'Pending') return false;
+    const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+    const isExcludedLead =
+      (Boolean(f.contactId) && f.contactId !== 'contact-new' && excludedLeadContactIds.has(f.contactId!)) ||
+      (Boolean(fPhone) && excludedLeadPhones.has(fPhone));
+    if (isExcludedLead) return false;
+
+    const contactKey = (f.contactId && f.contactId !== 'contact-new')
+      ? f.contactId
+      : (fPhone || f.id);
+    if (!contactKey || seenFollowupContacts.has(contactKey)) return false;
+    seenFollowupContacts.add(contactKey);
+    return true;
+  });
+  const followupsCount = uniquePendingFollowups.length;
+
+  // 3. Consultations (all consultations for the tenant - unscoped)
+  const consultationsCount = (consultations || []).length;
+
+  // 4. Customers 360
+  const customersCount = (scopedCustomers || []).length;
+
+  // 5. Not-Interested
+  const notInterestedCount = (scopedLeads || []).filter(l => l.status === 'Not Interested').length;
+
+  // 6. Junk
+  const junkCount = (scopedLeads || []).filter(l => l.status === 'Junk').length;
+
+  const stepConfigs = [
+    { label: '1. Leads', count: totalLeads, color: '#3b82f6' },
+    { label: '2. Follow-ups', count: followupsCount, color: '#f59e0b' },
+    { label: '3. Consultations', count: consultationsCount, color: '#8b5cf6' },
+    { label: '4. Customers 360', count: customersCount, color: '#10b981' },
+    { label: '5. Not-Interested', count: notInterestedCount, color: '#64748b' },
+    { label: '6. Junk', count: junkCount, color: '#ef4444' },
+  ];
+
+  const funnelSteps = stepConfigs.map(step => {
+    const rawPct = totalLeads > 0 ? (step.count / totalLeads) * 100 : 0;
+    const pct = totalLeads > 0 ? `${rawPct.toFixed(1)}%` : '0%';
+    const barWidth = `${Math.min(Math.max(rawPct, 0), 100)}%`;
     return {
-      label: `${idx + 1}. ${stage.name}`,
-      count,
+      label: step.label,
+      count: step.count,
       pct,
-      color: stage.color || '#3b82f6',
+      barWidth,
+      color: step.color,
     };
   });
 
@@ -279,6 +332,41 @@ export const ReportsPage: React.FC = () => {
     alert(`Generating automated ${tenant?.name || 'Workspace'} performance report for CSV download...`);
   };
 
+  // ── My Performance (GHL Exec only) ────────────────────────────────────────
+  const isWithinMyPerfPeriod = (dateStr: string): boolean => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return false;
+    const now = new Date();
+    const diffDays = (now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24);
+    if (diffDays < 0) return true;
+    if (myPerfPeriod === 'week') return diffDays <= 7;
+    if (myPerfPeriod === 'month') {
+      return diffDays <= 30 || (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear());
+    }
+    // year
+    return d.getFullYear() === now.getFullYear();
+  };
+
+  const myPerfCalls = scopedCalls.filter(c => isWithinMyPerfPeriod(c.timestamp));
+  const myPerfConnected = myPerfCalls.filter(c => (c.duration || 0) > 0);
+  const myPerfConnectRate = myPerfCalls.length > 0
+    ? ((myPerfConnected.length / myPerfCalls.length) * 100).toFixed(1)
+    : null;
+  const myPerfAvgDuration = myPerfConnected.length > 0
+    ? formatDuration(Math.round(myPerfConnected.reduce((s, c) => s + (c.duration || 0), 0) / myPerfConnected.length))
+    : '0s';
+  const myPerfLeads = scopedLeads.filter(l => isWithinMyPerfPeriod(l.createdAt));
+  const myPerfConverted = myPerfLeads.filter(l => l.status === 'Converted').length;
+  const myPerfConvRate = myPerfLeads.length > 0
+    ? ((myPerfConverted / myPerfLeads.length) * 100).toFixed(1)
+    : null;
+  const myPerfWonDeals = scopedDeals.filter(d =>
+    (d.stage === wonStageId || d.stage === 'won' || d.stage === 'converted') &&
+    isWithinMyPerfPeriod((d as any).closedAt || (d as any).updatedAt || '')
+  );
+  const myPerfClosedValue = myPerfWonDeals.reduce((s, d) => s + (d.value || 0), 0);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       {/* Header */}
@@ -399,11 +487,11 @@ export const ReportsPage: React.FC = () => {
             {isExec ? 'My Conversion Funnel' : 'Lead-to-Close Conversion Funnel'}
           </h3>
 
-          {deals.length === 0 ? (
+          {totalLeads === 0 ? (
             <EmptyState
               icon={<TrendingUp size={24} />}
-              title="No Pipeline Deals"
-              description="No deals currently in the pipeline to construct a conversion funnel."
+              title="No Leads Yet"
+              description="No leads recorded yet to build the sales funnel."
             />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -417,7 +505,7 @@ export const ReportsPage: React.FC = () => {
                     <div
                       style={{
                         height: '100%',
-                        width: step.pct,
+                        width: step.barWidth,
                         backgroundColor: step.color,
                         borderRadius: 5,
                         transition: 'width 0.8s ease-in-out',
@@ -460,62 +548,113 @@ export const ReportsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Agent Performance Leaderboard (Manager/Admin View) */}
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-base)', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Award size={18} color="#f59e0b" />
-          <h3 style={{ fontSize: 15, fontWeight: 700 }}>Sales Agent Performance Leaderboard</h3>
-        </div>
-
-        {leaderboard.length === 0 ? (
-          <div style={{ padding: 24 }}>
-            <EmptyState
-              icon={<Award size={24} />}
-              title="No Agent Records"
-              description="No sales agent performance data logged yet."
-            />
+      {/* Agent Performance Leaderboard — hidden for GHL Sales Executive */}
+      {!isGhlExec && (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-base)', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Award size={18} color="#f59e0b" />
+            <h3 style={{ fontSize: 15, fontWeight: 700 }}>Sales Agent Performance Leaderboard</h3>
           </div>
-        ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: 'var(--bg-surface-hover)', borderBottom: '1px solid var(--border-base)', color: 'var(--text-secondary)', fontSize: 11, textTransform: 'uppercase' }}>
-                <th style={{ padding: '10px 20px', textAlign: 'left' }}>Sales Agent</th>
-                <th style={{ padding: '10px 16px', textAlign: 'center' }}>Calls Made</th>
-                <th style={{ padding: '10px 16px', textAlign: 'center' }}>Avg Duration</th>
-                <th style={{ padding: '10px 16px', textAlign: 'center' }}>Leads Converted</th>
-                <th style={{ padding: '10px 20px', textAlign: 'right' }}>Total Revenue Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              {leaderboard.map((agent, aIdx) => {
-                const isCurrentUser = user?.id ? agent.id === user.id : agent.name === user?.name;
-                return (
-                  <tr key={agent.id || aIdx} style={{
-                    borderBottom: '1px solid var(--border-base)',
-                    backgroundColor: isCurrentUser ? 'rgba(37, 99, 235, 0.05)' : 'transparent',
-                    fontWeight: isCurrentUser ? 700 : 'normal'
-                  }}>
-                    <td style={{ padding: '14px 20px' }}>
-                      <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{agent.name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{agent.role || 'Sales Representative'}</div>
-                    </td>
-                    <td style={{ padding: '14px 16px', textAlign: 'center', fontWeight: 600 }}>{agent.calls}</td>
-                    <td style={{ padding: '14px 16px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                      {agent.calls > 0 ? formatDuration(Math.round(agent.totalDuration / agent.calls)) : '0s'}
-                    </td>
-                    <td style={{ padding: '14px 16px', textAlign: 'center', fontWeight: 700, color: '#059669' }}>
-                      {agent.convertedLeads}
-                    </td>
-                    <td style={{ padding: '14px 20px', textAlign: 'right', fontWeight: 800, color: '#2563eb' }}>
-                      {formatCurrency(agent.revenue)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
+
+          {leaderboard.length === 0 ? (
+            <div style={{ padding: 24 }}>
+              <EmptyState
+                icon={<Award size={24} />}
+                title="No Agent Records"
+                description="No sales agent performance data logged yet."
+              />
+            </div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: 'var(--bg-surface-hover)', borderBottom: '1px solid var(--border-base)', color: 'var(--text-secondary)', fontSize: 11, textTransform: 'uppercase' }}>
+                  <th style={{ padding: '10px 20px', textAlign: 'left' }}>Sales Agent</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'center' }}>Calls Made</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'center' }}>Avg Duration</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'center' }}>Leads Converted</th>
+                  <th style={{ padding: '10px 20px', textAlign: 'right' }}>Total Revenue Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {leaderboard.map((agent, aIdx) => {
+                  const isCurrentUser = user?.id ? agent.id === user.id : agent.name === user?.name;
+                  return (
+                    <tr key={agent.id || aIdx} style={{
+                      borderBottom: '1px solid var(--border-base)',
+                      backgroundColor: isCurrentUser ? 'rgba(37, 99, 235, 0.05)' : 'transparent',
+                      fontWeight: isCurrentUser ? 700 : 'normal'
+                    }}>
+                      <td style={{ padding: '14px 20px' }}>
+                        <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{agent.name}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{agent.role || 'Sales Representative'}</div>
+                      </td>
+                      <td style={{ padding: '14px 16px', textAlign: 'center', fontWeight: 600 }}>{agent.calls}</td>
+                      <td style={{ padding: '14px 16px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                        {agent.calls > 0 ? formatDuration(Math.round(agent.totalDuration / agent.calls)) : '0s'}
+                      </td>
+                      <td style={{ padding: '14px 16px', textAlign: 'center', fontWeight: 700, color: '#059669' }}>
+                        {agent.convertedLeads}
+                      </td>
+                      <td style={{ padding: '14px 20px', textAlign: 'right', fontWeight: 800, color: '#2563eb' }}>
+                        {formatCurrency(agent.revenue)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* My Performance — GHL Sales Executive only */}
+      {isGhlExec && (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-base)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Award size={18} color="#f59e0b" />
+              <h3 style={{ fontSize: 15, fontWeight: 700 }}>My Performance</h3>
+            </div>
+            <div style={{ display: 'flex', backgroundColor: 'var(--bg-surface-hover)', borderRadius: 'var(--radius-md)', padding: 3 }}>
+              {(['week', 'month', 'year'] as const).map(p => (
+                <button
+                  key={p}
+                  className={`btn btn-sm ${myPerfPeriod === p ? 'btn-primary' : 'btn-ghost'}`}
+                  style={{ textTransform: 'capitalize', fontSize: 12, padding: '4px 12px' }}
+                  onClick={() => setMyPerfPeriod(p)}
+                >
+                  This {p}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 0 }}>
+            {[
+              { label: 'Calls Made', value: myPerfCalls.length, sub: `${myPerfConnected.length} connected`, color: '#2563eb' },
+              { label: 'Connect Rate', value: myPerfConnectRate !== null ? `${myPerfConnectRate}%` : '—', sub: `Avg ${myPerfAvgDuration}`, color: '#059669' },
+              { label: 'Leads Inbound', value: myPerfLeads.length, sub: `${myPerfConverted} converted`, color: '#7c3aed' },
+              { label: 'Conversion Rate', value: myPerfConvRate !== null ? `${myPerfConvRate}%` : '—', sub: `${myPerfConverted} of ${myPerfLeads.length}`, color: '#f59e0b' },
+              { label: 'Closed Value', value: formatCurrency(myPerfClosedValue), sub: `${myPerfWonDeals.length} deal${myPerfWonDeals.length !== 1 ? 's' : ''}`, color: '#10b981' },
+            ].map((tile, idx, arr) => (
+              <div
+                key={tile.label}
+                style={{
+                  padding: '20px 24px',
+                  borderRight: idx < arr.length - 1 ? '1px solid var(--border-base)' : 'none',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 4,
+                }}
+              >
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{tile.label}</div>
+                <div style={{ fontSize: 26, fontWeight: 800, color: tile.color, marginTop: 4 }}>{tile.value}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{tile.sub}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Tenant Specific Analytics Cards (Task 2) */}
       {enabledFeatures?.includes(FEATURES.SITE_VISITS) && (() => {
@@ -580,7 +719,7 @@ export const ReportsPage: React.FC = () => {
         );
       })()}
 
-      {enabledFeatures?.includes(FEATURES.INVESTORS) && (() => {
+      {!isGhlExec && enabledFeatures?.includes(FEATURES.INVESTORS) && (() => {
         const scopedConsultations = isExec
           ? consultations.filter(c => (c.consultantId && c.consultantId === user?.id) || (c.consultantName && c.consultantName === user?.name))
           : consultations;

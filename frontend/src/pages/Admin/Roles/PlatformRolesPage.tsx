@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Shield, Check, Save } from 'lucide-react';
 import { PERMISSIONS } from '../../../constants/permissions';
-import { storageService } from '../../../services/storageService';
+import { SYSTEM_ROLES } from '../../../constants/roles';
 import './PlatformRolesPage.css';
 
 export const PlatformRolesPage: React.FC = () => {
@@ -82,9 +82,8 @@ export const PlatformRolesPage: React.FC = () => {
     { code: 'sales_executive', name: 'Sales Executive', desc: 'Own Assigned Records' },
   ];
 
-  const rolesMap = storageService.getRoles();
   const hasPermission = (roleCode: string, perm: string) => {
-    return rolesMap[roleCode]?.permissions.includes(perm);
+    return SYSTEM_ROLES[roleCode]?.permissions.includes(perm);
   };
 
   return (

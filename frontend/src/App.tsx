@@ -38,6 +38,8 @@ import { BookingsPage } from './pages/Bookings/BookingsPage';
 import { InvestorsPage } from './pages/Investors/InvestorsPage';
 import { ConsultationsPage } from './pages/Consultations/ConsultationsPage';
 import { OpportunitiesPage } from './pages/InvestmentOpportunities/OpportunitiesPage';
+import { AssignedLeadsPage } from './pages/AssignedLeads/AssignedLeadsPage';
+import { KYCPage } from './pages/KYC/KYCPage';
 
 // Company Admin
 import { CompanyUsersPage } from './pages/Company/CompanyUsersPage';
@@ -57,8 +59,6 @@ import { ProtectedRoute } from './components/common/Guards';
 import { Modal } from './components/common/Modal';
 import { storageService } from './services/storageService';
 import { PERMISSIONS } from './constants/permissions';
-import { isMockMode } from './mock/runtime/mockConfig';
-import { mockBootstrap } from './mock/runtime/mockBootstrap';
 import './App.css';
 
 export const App: React.FC = () => {
@@ -67,10 +67,22 @@ export const App: React.FC = () => {
     return sessionStorage.getItem('nexus_current_route') || 'dashboard';
   });
 
-  // Initialize mock data strictly in mock mode
+  const roleCode = user?.role?.code;
+  const isGhlAdmin =
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
+    (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
+
+  // Seed initial mock data on clean install / empty session
   useEffect(() => {
-    if (isMockMode()) {
-      mockBootstrap();
+    if (storageService.getUsers().length === 0) {
+      storageService.loadMockDataFromSeparateFolder();
+    }
+  }, []);
+
+  // Seed initial mock data on clean install / empty session
+  useEffect(() => {
+    if (storageService.getUsers().length === 0) {
+      storageService.loadMockDataFromSeparateFolder();
     }
   }, []);
 
@@ -96,7 +108,7 @@ export const App: React.FC = () => {
   const [quickLocation, setQuickLocation] = useState('');
   const [quickSource, setQuickSource] = useState('Website Inbound');
   const [quickAssetClass, setQuickAssetClass] = useState('AIF');
-  const [quickInvestmentCapacity, setQuickInvestmentCapacity] = useState('₹1 Cr – ₹5 Cr');
+  const [quickInvestmentCapacity, setQuickInvestmentCapacity] = useState('');
   const [quickNotes, setQuickNotes] = useState('');
 
   // Consultation-specific state
@@ -158,7 +170,7 @@ export const App: React.FC = () => {
     if (quickCreateType === 'lead') {
       storageService.saveLead({
         id: `lead-${Date.now()}`,
-        companyId: tenant?.id || '',
+        companyId: tenant?.id || 't-ghl-01',
         name: quickName,
         phone: quickPhone,
         email: quickEmail,
@@ -166,8 +178,8 @@ export const App: React.FC = () => {
         source: quickSource,
         status: 'New',
         priority: 'Medium',
-        assignedAgentId: user?.id || '',
-        assignedAgentName: user?.name || '',
+        assignedAgentId: user?.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec'),
+        assignedAgentName: user?.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer'),
         createdAt: new Date().toISOString().split('T')[0],
         notes: quickNotes,
         customFields: {
@@ -181,7 +193,7 @@ export const App: React.FC = () => {
       const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
       storageService.saveFollowup({
         id: `flw-${Date.now()}`,
-        companyId: tenant?.id || '',
+        companyId: tenant?.id || 't-ghl-01',
         contactId: `contact-${Date.now()}`,
         contactName: quickName,
         contactPhone: quickPhone,
@@ -192,21 +204,21 @@ export const App: React.FC = () => {
         priority: 'High',
         status: 'Pending',
         notes: quickNotes,
-        assignedAgentId: user?.id || '',
-        assignedAgentName: user?.name || '',
+        assignedAgentId: user?.id || 'usr-exec',
+        assignedAgentName: user?.name || 'Agent',
       });
 
     } else if (quickCreateType === 'consultation') {
       // Task 1 — Schedule Consultation
       storageService.saveConsultation({
         id: `cons-${Date.now()}`,
-        companyId: tenant?.id || '',
+        companyId: tenant?.id || 't-ghl-01',
         investorId: consInvestorId || `investor-${Date.now()}`,
         investorName: consInvestorName,
         investorPhone: consInvestorPhone,
         scheduledAt: consSlot.trim(),
-        consultantId: user?.id || '',
-        consultantName: consConsultantName.trim() || user?.name || '',
+        consultantId: user?.id || 'usr-exec',
+        consultantName: consConsultantName.trim() || user?.name || 'Agent',
         status: consStatus,
         agenda: consAgenda.trim(),
         outcomeNotes: consOutcome.trim() || undefined,
@@ -217,15 +229,15 @@ export const App: React.FC = () => {
       const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
       storageService.saveSiteVisit({
         id: `visit-${Date.now()}`,
-        companyId: tenant?.id || '',
+        companyId: tenant?.id || 't-jamin-02',
         customerId: `cust-${Date.now()}`,
         customerName: quickName,
         customerPhone: quickPhone,
-        projectId: '',
-        projectName: '',
+        projectId: 'proj-01',
+        projectName: 'Greenfield Meadows Phase 2',
         scheduledAt: combinedDateTime,
-        assignedAgentId: user?.id || '',
-        assignedAgentName: user?.name || '',
+        assignedAgentId: user?.id || 'usr-exec',
+        assignedAgentName: user?.name || 'Agent',
         status: 'Scheduled',
         outcomeNotes: quickNotes,
       });
@@ -248,13 +260,13 @@ export const App: React.FC = () => {
         resolvedCustomerName = newCustomerName;
         storageService.saveCustomer({
           id: resolvedCustomerId,
-          companyId: tenant?.id || '',
+          companyId: tenant?.id || 't-ghl-01',
           name: resolvedCustomerName,
           phone: quickPhone,
           email: '',
           status: 'Active',
-          assignedAgentId: user?.id || '',
-          assignedAgentName: user?.name || '',
+          assignedAgentId: user?.id || 'usr-exec',
+          assignedAgentName: user?.name || 'Agent',
           location: 'Bengaluru',
           lastContacted: new Date().toISOString().split('T')[0],
           openDealsCount: 1,
@@ -267,15 +279,15 @@ export const App: React.FC = () => {
 
       storageService.saveDeal({
         id: `deal-${Date.now()}`,
-        companyId: tenant?.id || '',
+        companyId: tenant?.id || 't-ghl-01',
         title: quickName,
         customerId: resolvedCustomerId,
         customerName: resolvedCustomerName,
         stage: 'new',
         value: 5000000,
         expectedCloseDate: '30 Days',
-        assignedAgentId: user?.id || '',
-        assignedAgentName: user?.name || '',
+        assignedAgentId: user?.id || 'usr-exec',
+        assignedAgentName: user?.name || 'Agent',
         notes: quickNotes,
         createdAt: new Date().toISOString().split('T')[0],
       });
@@ -327,6 +339,14 @@ export const App: React.FC = () => {
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
           <LeadsPage />
         </ProtectedRoute>
+      ) : currentRoute === 'assigned-leads' ? (
+        <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
+          {isGhlAdmin ? (
+            <AssignedLeadsPage />
+          ) : (
+            <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+          )}
+        </ProtectedRoute>
       ) : currentRoute === 'customers' ? (
         <ProtectedRoute permission={PERMISSIONS.CUSTOMERS_VIEW}>
           <CustomersPage />
@@ -368,6 +388,10 @@ export const App: React.FC = () => {
       ) : currentRoute === 'bookings' ? (
         <ProtectedRoute permission={PERMISSIONS.BOOKINGS_VIEW}>
           <BookingsPage />
+        </ProtectedRoute>
+      ) : currentRoute === 'kyc' ? (
+        <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
+          <KYCPage />
         </ProtectedRoute>
       ) : currentRoute === 'investors' ? (
         <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
@@ -505,21 +529,19 @@ export const App: React.FC = () => {
               <div className="lead-custom-schema-box">
                 <div className="lead-custom-schema-title">GHL India Ventures Asset Terms</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div className="form-group">
-                    <label className="form-label">Asset Class</label>
-                    <select
-                      className="form-select"
-                      value={quickAssetClass}
-                      onChange={e => {
-                        const ac = e.target.value;
-                        setQuickAssetClass(ac);
-                        setQuickInvestmentCapacity(ac === 'CO-AIF' ? '₹10 Lakh to ₹1 Cr' : '₹1 Cr – ₹5 Cr');
-                      }}
-                    >
-                      <option value="AIF">AIF</option>
-                      <option value="CO-AIF">CO-AIF</option>
-                    </select>
-                  </div>
+                  {user?.role?.code !== 'sales_executive' && (
+                    <div className="form-group">
+                      <label className="form-label">Asset Class</label>
+                      <select
+                        className="form-select"
+                        value={quickAssetClass}
+                        onChange={e => setQuickAssetClass(e.target.value)}
+                      >
+                        <option value="AIF">AIF</option>
+                        <option value="CO-AIF">CO-AIF</option>
+                      </select>
+                    </div>
+                  )}
                   <div className="form-group">
                     <label className="form-label">Investment Capacity</label>
                     <select
@@ -527,12 +549,17 @@ export const App: React.FC = () => {
                       value={quickInvestmentCapacity}
                       onChange={e => setQuickInvestmentCapacity(e.target.value)}
                     >
-                      {quickAssetClass === 'CO-AIF'
-                        ? [<option key="co" value="₹10 Lakh to ₹1 Cr">₹10 Lakh to ₹1 Cr</option>]
-                        : ['₹1 Cr – ₹5 Cr', '₹5 Cr – ₹10 Cr', '₹10 Cr – ₹25 Cr', '₹25 Cr+'].map(o => (
-                            <option key={o} value={o}>{o}</option>
-                          ))
-                      }
+                      <option value="" disabled>Select a range</option>
+                      {[
+                        'Contact for Co-Invest Details',
+                        '₹1 Cr – ₹5 Cr',
+                        '₹5 Cr – ₹10 Cr',
+                        '₹10 Cr – ₹25 Cr',
+                        '₹25 Cr+',
+                        'Not sure yet — help me decide'
+                      ].map(o => (
+                        <option key={o} value={o}>{o}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -670,121 +697,121 @@ export const App: React.FC = () => {
             </>
           ) : (
             <>
-            {/* ── Deal: existing vs. new customer picker ── */}
-            {quickCreateType === 'deal' && (() => {
-            const tenantCustomers = storageService.getCustomers(tenant?.id);
-            const hasCustomers = tenantCustomers.length > 0;
-            return (
-              <div className="form-group">
-                <label className="form-label">Link to Customer</label>
+              {/* ── Deal: existing vs. new customer picker ── */}
+              {quickCreateType === 'deal' && (() => {
+                const tenantCustomers = storageService.getCustomers(tenant?.id);
+                const hasCustomers = tenantCustomers.length > 0;
+                return (
+                  <div className="form-group">
+                    <label className="form-label">Link to Customer</label>
 
-                {/* Segmented toggle — same style as Reports page period toggle */}
-                <div className="app-segmented-toggle">
-                  {(['existing', 'new'] as const).map(mode => (
-                    <button
-                      key={mode}
-                      type="button"
-                      className={`btn btn-sm app-segmented-btn ${dealCustomerMode === mode ? 'btn-primary' : 'btn-ghost'} ${mode === 'existing' && !hasCustomers ? 'disabled' : ''}`}
-                      disabled={mode === 'existing' && !hasCustomers}
-                      onClick={() => setDealCustomerMode(mode)}
-                    >
-                      {mode === 'existing' ? 'Existing customer' : 'New customer'}
-                    </button>
-                  ))}
+                    {/* Segmented toggle — same style as Reports page period toggle */}
+                    <div className="app-segmented-toggle">
+                      {(['existing', 'new'] as const).map(mode => (
+                        <button
+                          key={mode}
+                          type="button"
+                          className={`btn btn-sm app-segmented-btn ${dealCustomerMode === mode ? 'btn-primary' : 'btn-ghost'} ${mode === 'existing' && !hasCustomers ? 'disabled' : ''}`}
+                          disabled={mode === 'existing' && !hasCustomers}
+                          onClick={() => setDealCustomerMode(mode)}
+                        >
+                          {mode === 'existing' ? 'Existing customer' : 'New customer'}
+                        </button>
+                      ))}
+                    </div>
+
+                    {!hasCustomers && (
+                      <p className="app-no-customers-msg">
+                        No customers in this workspace yet — deal will create a new customer record.
+                      </p>
+                    )}
+
+                    {dealCustomerMode === 'existing' && hasCustomers ? (
+                      <select
+                        className="form-select"
+                        value={selectedCustomerId}
+                        onChange={e => setSelectedCustomerId(e.target.value)}
+                        required
+                      >
+                        {tenantCustomers.map(c => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}{c.phone ? ` · ${c.phone}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div>
+                        <label className="form-label app-new-customer-label">
+                          New Customer Name * — a new Customer record will be created
+                        </label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          required
+                          placeholder="Customer full name"
+                          value={newCustomerName}
+                          onChange={e => setNewCustomerName(e.target.value)}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* ── Phone (non-lead, non-deal-existing) ── */}
+              {!(quickCreateType === 'deal' && dealCustomerMode === 'existing') && (
+                <div className="form-group">
+                  <label className="form-label">Phone Number</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={quickPhone}
+                    onChange={e => setQuickPhone(e.target.value)}
+                  />
                 </div>
+              )}
 
-                {!hasCustomers && (
-                  <p className="app-no-customers-msg">
-                    No customers in this workspace yet — deal will create a new customer record.
-                  </p>
-                )}
-
-                {dealCustomerMode === 'existing' && hasCustomers ? (
-                  <select
-                    className="form-select"
-                    value={selectedCustomerId}
-                    onChange={e => setSelectedCustomerId(e.target.value)}
-                    required
-                  >
-                    {tenantCustomers.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}{c.phone ? ` · ${c.phone}` : ''}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div>
-                    <label className="form-label app-new-customer-label">
-                      New Customer Name * — a new Customer record will be created
-                    </label>
+              {/* ── Scheduled Date + Time (followup, visit) ── */}
+              {(quickCreateType === 'followup' || quickCreateType === 'visit') && (
+                <div className="app-schedule-grid">
+                  <div className="form-group">
+                    <label className="form-label">Scheduled Date *</label>
                     <input
-                      type="text"
+                      type="date"
                       className="form-input"
                       required
-                      placeholder="Customer full name"
-                      value={newCustomerName}
-                      onChange={e => setNewCustomerName(e.target.value)}
+                      value={scheduledDate}
+                      onChange={e => setScheduledDate(e.target.value)}
                     />
                   </div>
-                )}
-              </div>
-            );
-          })()}
+                  <div className="form-group">
+                    <label className="form-label">Scheduled Time *</label>
+                    <input
+                      type="time"
+                      className="form-input"
+                      required
+                      value={scheduledTime}
+                      onChange={e => setScheduledTime(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
 
-          {/* ── Phone (non-lead, non-deal-existing) ── */}
-          {!(quickCreateType === 'deal' && dealCustomerMode === 'existing') && (
-            <div className="form-group">
-              <label className="form-label">Phone Number</label>
-              <input
-                type="text"
-                className="form-input"
-                value={quickPhone}
-                onChange={e => setQuickPhone(e.target.value)}
-              />
-            </div>
-          )}
-
-          {/* ── Scheduled Date + Time (followup, visit) ── */}
-          {(quickCreateType === 'followup' || quickCreateType === 'visit') && (
-            <div className="app-schedule-grid">
+              {/* ── Notes/Agenda (non-lead types) ── */}
               <div className="form-group">
-                <label className="form-label">Scheduled Date *</label>
-                <input
-                  type="date"
-                  className="form-input"
-                  required
-                  value={scheduledDate}
-                  onChange={e => setScheduledDate(e.target.value)}
+                <label className="form-label">Quick Notes</label>
+                <textarea
+                  className="form-textarea"
+                  rows={2}
+                  value={quickNotes}
+                  onChange={e => setQuickNotes(e.target.value)}
+                  placeholder={
+                    quickCreateType === 'visit'
+                      ? 'Special requirements, preferred plots...'
+                      : 'Brief requirement summary...'
+                  }
                 />
               </div>
-              <div className="form-group">
-                <label className="form-label">Scheduled Time *</label>
-                <input
-                  type="time"
-                  className="form-input"
-                  required
-                  value={scheduledTime}
-                  onChange={e => setScheduledTime(e.target.value)}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* ── Notes/Agenda (non-lead types) ── */}
-          <div className="form-group">
-            <label className="form-label">Quick Notes</label>
-            <textarea
-              className="form-textarea"
-              rows={2}
-              value={quickNotes}
-              onChange={e => setQuickNotes(e.target.value)}
-              placeholder={
-                quickCreateType === 'visit'
-                    ? 'Special requirements, preferred plots...'
-                    : 'Brief requirement summary...'
-              }
-            />
-          </div>
             </>
           )}
 

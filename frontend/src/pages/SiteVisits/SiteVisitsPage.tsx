@@ -41,7 +41,7 @@ export const SiteVisitsPage: React.FC = () => {
 
     const newVisit: SiteVisit = {
       id: `sv-${Date.now()}`,
-      companyId: tenant?.id || '',
+      companyId: tenant?.id || 't-jamin-02',
       customerId: `cust-${Date.now()}`,
       customerName,
       customerPhone,
@@ -49,8 +49,8 @@ export const SiteVisitsPage: React.FC = () => {
       projectName,
       plotNumber,
       scheduledAt,
-      assignedAgentId: user?.id || '',
-      assignedAgentName: user?.name || 'Agent',
+      assignedAgentId: user?.id || 'usr-exec',
+      assignedAgentName: user?.name || 'Pooja Hegde',
       status: 'Scheduled',
       outcomeNotes: notes,
     };

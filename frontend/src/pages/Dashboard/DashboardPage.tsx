@@ -16,8 +16,6 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
-import { executiveApi } from '../../services/executiveApi';
-import { IS_MOCK_ENV } from '../../config/runtime';
 import { StatusChip } from '../../components/common/StatusChip';
 import { FEATURES } from '../../constants/features';
 import './DashboardPage.css';
@@ -39,7 +37,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
   const [consultations, setConsultations] = useState(storageService.getConsultations(tenant?.id));
   const [investors, setInvestors] = useState(storageService.getInvestors(tenant?.id));
   const [opportunities, setOpportunities] = useState(storageService.getOpportunities(tenant?.id));
-  const [executiveDashboard, setExecutiveDashboard] = useState<Awaited<ReturnType<typeof executiveApi.getDashboard>> | null>(null);
 
   // Sync with storage updates
   useEffect(() => {
@@ -57,14 +54,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id]);
 
-  useEffect(() => {
-    if (IS_MOCK_ENV || user?.role?.code !== 'sales_executive') {
-      setExecutiveDashboard(null);
-      return;
-    }
-    executiveApi.getDashboard().then(setExecutiveDashboard).catch(() => setExecutiveDashboard(null));
-  }, [user?.id]);
-
   // ── Role-based scoping (Task 2 & IRM) ────────────────────────────────────
   const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
@@ -76,6 +65,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
       (l.assignedAgentName && l.assignedAgentName === user?.name)
     )
     : leads;
+
+  // IRM "My Leads" KPI — leads assigned to this IRM that the agent has marked Interested
+  const myInterestedLeads = isIrm
+    ? leads.filter(l =>
+      l.status === 'Interested' &&
+      ((l.assignedAgentId && l.assignedAgentId === user?.id) ||
+        (l.assignedAgentName && l.assignedAgentName === user?.name))
+    )
+    : [];
 
   const scopedDeals = isExec
     ? deals.filter(d =>
@@ -128,9 +126,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
     f => f.status === 'Pending' && f.scheduledAt.toLowerCase().includes('yesterday')
   );
   const pendingFollowups = scopedFollowups.filter(f => f.status === 'Pending');
-  const activeLeadCount = executiveDashboard?.activeLeads.value ?? scopedLeads.length;
-  const pendingFollowupCount = executiveDashboard?.pendingFollowups.value ?? pendingFollowups.length;
-  const overdueFollowupCount = executiveDashboard?.overdueFollowups ?? overdueFollowups.length;
 
   // Task 1a — real "+N this week" delta from scopedLeads.createdAt
   const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -174,9 +169,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
 
   const upcomingConsultations = scopedConsultations.filter(c => c.status === 'Scheduled');
 
-  const investorsThisWeek = scopedInvestors.filter(inv => {
-    if (!inv.createdAt) return false;
-    const d = new Date(inv.createdAt);
+  const myInterestedLeadsThisWeek = myInterestedLeads.filter(l => {
+    if (!l.createdAt) return false;
+    const d = new Date(l.createdAt);
     return !isNaN(d.getTime()) && d.getTime() >= sevenDaysAgo;
   }).length;
 
@@ -194,9 +189,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
     connectedCalls.length > 0
       ? formatDuration(Math.round(totalConnectedDuration / connectedCalls.length))
       : '0s';
-  const dashboardAvgDuration = executiveDashboard
-    ? formatDuration(Math.round(executiveDashboard.averageTalkTimeSeconds))
-    : avgDuration;
 
   // Task 4 — missed calls: duration === 0 or disposition === 'No Response'
   const missedCalls = scopedCalls.filter(
@@ -216,7 +208,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
     pendingfollowups: isExec ? 'MY PENDING FOLLOW-UPS' : 'PENDING FOLLOW-UPS',
     callslogged: isExec ? 'MY CALLS LOGGED' : 'CALLS LOGGED',
     pipelinevalue: isExec ? 'MY PIPELINE VALUE' : 'PIPELINE VALUE',
-    investorsKpi: 'MY ASSIGNED INVESTORS',
+    myLeadsKpi: 'MY LEADS',
     bannerSubtitle: isIrm
       ? "Here's your high-net-worth investor portfolio, active opportunities, and advisory schedule."
       : isExec
@@ -286,19 +278,19 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
       <div className="dashboard-kpi-grid">
         {isIrm ? (
           <>
-            {/* IRM Card 1: Total Investors */}
-            <div className="card card-hover dashboard-kpi-card" onClick={() => onNavigate('investors')}>
+            {/* IRM Card 1: My Leads (Interested leads assigned to this agent) */}
+            <div className="card card-hover dashboard-kpi-card" onClick={() => onNavigate('leads')}>
               <div className="dashboard-kpi-header">
-                <span className="dashboard-kpi-label">{label.investorsKpi}</span>
+                <span className="dashboard-kpi-label">{label.myLeadsKpi}</span>
                 <div className="dashboard-kpi-icon-box leads">
                   <Users size={18} />
                 </div>
               </div>
               <div className="dashboard-kpi-value">
-                {scopedInvestors.length}
+                {myInterestedLeads.length}
               </div>
               <div className="dashboard-kpi-delta-positive">
-                <ArrowUpRight size={14} /> +{investorsThisWeek} this week
+                <ArrowUpRight size={14} /> +{myInterestedLeadsThisWeek} this week
               </div>
             </div>
 
@@ -363,7 +355,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                 </div>
               </div>
               <div className="dashboard-kpi-value">
-                {activeLeadCount}
+                {scopedLeads.length}
               </div>
               <div className="dashboard-kpi-delta-positive">
                 <ArrowUpRight size={14} /> +{leadsThisWeek} this week
@@ -379,12 +371,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                 </div>
               </div>
               <div className="dashboard-kpi-value">
-                {pendingFollowupCount}
+                {pendingFollowups.length}
               </div>
-              <div className={`dashboard-kpi-followup-status ${overdueFollowupCount > 0 ? 'overdue' : 'on-time'}`}>
-                {overdueFollowupCount > 0 ? (
+              <div className={`dashboard-kpi-followup-status ${overdueFollowups.length > 0 ? 'overdue' : 'on-time'}`}>
+                {overdueFollowups.length > 0 ? (
                   <>
-                    <AlertCircle size={14} /> {overdueFollowupCount} overdue item!
+                    <AlertCircle size={14} /> {overdueFollowups.length} overdue item!
                   </>
                 ) : (
                   'All scheduled on time'
@@ -401,13 +393,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                 </div>
               </div>
               <div className="dashboard-kpi-value">
-                {executiveDashboard?.callsLoggedToday ?? scopedCalls.length}
+                {scopedCalls.length}
               </div>
               {/* Task 4 — Missed Calls inline stat for Sales Executive */}
               {isExec ? (
                 <div className="dashboard-kpi-exec-row">
                   <span className="dashboard-kpi-subtext">
-                    Avg duration: {dashboardAvgDuration}
+                    Avg duration: {avgDuration}
                   </span>
                   <span className={`dashboard-missed-pill ${missedCalls > 0 ? 'has-missed' : 'none'}`}>
                     <PhoneMissed size={11} />
@@ -416,7 +408,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                 </div>
               ) : (
                 <div className="dashboard-kpi-subtext">
-                  Avg duration: {dashboardAvgDuration}
+                  Avg duration: {avgDuration}
                 </div>
               )}
             </div>
@@ -508,7 +500,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                     <tr key={inv.id} className="dashboard-table-tbody-tr">
                       <td className="dashboard-table-td">
                         <div className="dashboard-contact-name">{inv.name}</div>
-                        <div className="dashboard-contact-meta">{inv.phone} • {inv.preferredAssetClass || 'Equity & Commercial'}</div>
+                        <div className="dashboard-contact-meta">{inv.phone}{isExec ? '' : ` • ${inv.preferredAssetClass || 'Equity & Commercial'}`}</div>
                       </td>
                       <td className="dashboard-table-td">
                         <StatusChip status={inv.status} size="sm" />

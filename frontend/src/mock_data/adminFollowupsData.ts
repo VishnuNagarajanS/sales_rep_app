@@ -1,0 +1,266 @@
+import { Followup } from '../types';
+import { SALES_EXECUTIVE_USERS, IRM_USERS } from './adminKanbanData';
+
+export { SALES_EXECUTIVE_USERS, IRM_USERS };
+
+export type FollowupRoleFilter = 'sales_executive' | 'irm';
+
+export const ADMIN_FOLLOWUP_REPRESENTATIVES: Record<FollowupRoleFilter, Array<{ id: string; name: string; role: string }>> = {
+  sales_executive: SALES_EXECUTIVE_USERS,
+  irm: IRM_USERS,
+};
+
+export const INITIAL_ADMIN_FOLLOWUPS: Followup[] = [
+  // ── Priya Sharma (Sales Executive) ─────────────────────────────────────────
+  {
+    id: 'flw-se-ps-01',
+    companyId: 't-ghl-01',
+    contactId: 'lead-se-ps-01',
+    contactName: 'Vikramaditya Singhania',
+    contactPhone: '+91 98300 12345',
+    contactType: 'lead',
+    scheduledAt: 'Today, 02:30 PM',
+    priority: 'High',
+    status: 'Pending',
+    notes: 'Follow-up call on commercial real estate portfolio presentation and floor layout options for CBD tower.',
+    assignedAgentId: 'usr-ghl-exec-02',
+    assignedAgentName: 'Priya Sharma',
+    assignedRole: 'Sales Executive',
+  },
+  {
+    id: 'flw-se-ps-02',
+    companyId: 't-ghl-01',
+    contactId: 'lead-se-ps-02',
+    contactName: 'Sunita Narang',
+    contactPhone: '+91 98112 34567',
+    contactType: 'lead',
+    scheduledAt: 'Today, 05:15 PM',
+    priority: 'Medium',
+    status: 'Pending',
+    notes: 'Review luxury 4BHK floor plans and payment milestone structure for Jubilee Hills residency.',
+    assignedAgentId: 'usr-ghl-exec-02',
+    assignedAgentName: 'Priya Sharma',
+    assignedRole: 'Sales Executive',
+  },
+  {
+    id: 'flw-se-ps-03',
+    companyId: 't-ghl-01',
+    contactId: 'lead-se-ps-03',
+    contactName: 'Arunachalam Muruganantham',
+    contactPhone: '+91 94432 12345',
+    contactType: 'lead',
+    scheduledAt: 'Yesterday, 03:00 PM',
+    priority: 'High',
+    status: 'Pending',
+    notes: 'Overdue follow-up: discuss financing schedule and bank pre-approval status for commercial showroom.',
+    assignedAgentId: 'usr-ghl-exec-02',
+    assignedAgentName: 'Priya Sharma',
+    assignedRole: 'Sales Executive',
+  },
+
+  // ── Rahul Verma (Sales Executive) ──────────────────────────────────────────
+  {
+    id: 'flw-se-rv-01',
+    companyId: 't-ghl-01',
+    contactId: 'lead-se-rv-01',
+    contactName: 'Capt. Raghuram Rajan',
+    contactPhone: '+91 98401 23456',
+    contactType: 'lead',
+    scheduledAt: 'Today, 11:30 AM',
+    priority: 'High',
+    status: 'Pending',
+    notes: 'Confirm site inspection date for Whitefield commercial parcel and zoning verification clearance.',
+    assignedAgentId: 'usr-ghl-exec-03',
+    assignedAgentName: 'Rahul Verma',
+    assignedRole: 'Sales Executive',
+  },
+  {
+    id: 'flw-se-rv-02',
+    companyId: 't-ghl-01',
+    contactId: 'lead-se-rv-02',
+    contactName: 'Deepika Padukone Family Office',
+    contactPhone: '+91 98201 98765',
+    contactType: 'lead',
+    scheduledAt: 'Today, 06:00 PM',
+    priority: 'Medium',
+    status: 'Pending',
+    notes: 'Share updated legal clearance, title report, and RERA sanction documents for beachfront development.',
+    assignedAgentId: 'usr-ghl-exec-03',
+    assignedAgentName: 'Rahul Verma',
+    assignedRole: 'Sales Executive',
+  },
+  {
+    id: 'flw-se-rv-03',
+    companyId: 't-ghl-01',
+    contactId: 'lead-se-rv-03',
+    contactName: 'Kishore Biyani Trust',
+    contactPhone: '+91 98210 54321',
+    contactType: 'lead',
+    scheduledAt: 'Yesterday, 04:00 PM',
+    priority: 'Low',
+    status: 'Pending',
+    notes: 'Overdue task: follow-up regarding token advance schedule and lease deed draft covenants.',
+    assignedAgentId: 'usr-ghl-exec-03',
+    assignedAgentName: 'Rahul Verma',
+    assignedRole: 'Sales Executive',
+  },
+
+  // ── Rohan Varma (IRM) ───────────────────────────────────────────────────────
+  {
+    id: 'flw-irm-rv-01',
+    companyId: 't-ghl-01',
+    contactId: 'inv-irm-rv-01',
+    contactName: 'Aditya Birla Family Trust',
+    contactPhone: '+91 98200 44550',
+    contactType: 'investor',
+    scheduledAt: 'Today, 03:30 PM',
+    priority: 'High',
+    status: 'Pending',
+    notes: 'Institutional pool follow-up: discuss ₹15 Cr Cat II AIF Commercial Real Estate commitment & term sheet.',
+    assignedAgentId: 'usr-ghl-irm',
+    assignedAgentName: 'Rohan Varma',
+    assignedRole: 'IRM',
+  },
+  {
+    id: 'flw-irm-rv-02',
+    companyId: 't-ghl-01',
+    contactId: 'inv-irm-rv-02',
+    contactName: 'Dr. Farokh Udwadia',
+    contactPhone: '+91 98203 11223',
+    contactType: 'investor',
+    scheduledAt: 'Today, 05:00 PM',
+    priority: 'High',
+    status: 'Pending',
+    notes: 'Private wealth consultation follow-up: send audited fund IRR sheets and waterfall distribution model.',
+    assignedAgentId: 'usr-ghl-irm',
+    assignedAgentName: 'Rohan Varma',
+    assignedRole: 'IRM',
+  },
+  {
+    id: 'flw-irm-rv-03',
+    companyId: 't-ghl-01',
+    contactId: 'inv-irm-rv-03',
+    contactName: 'Kalyan Jewellers Family Office',
+    contactPhone: '+91 98470 55667',
+    contactType: 'investor',
+    scheduledAt: 'Yesterday, 02:00 PM',
+    priority: 'Medium',
+    status: 'Pending',
+    notes: 'Overdue IRM task: SEBI accredited investor compliance documentation and KYC verification for ₹10 Cr pool.',
+    assignedAgentId: 'usr-ghl-irm',
+    assignedAgentName: 'Rohan Varma',
+    assignedRole: 'IRM',
+  },
+
+  // ── Meera Nair (IRM) ────────────────────────────────────────────────────────
+  {
+    id: 'flw-irm-mn-01',
+    companyId: 't-ghl-01',
+    contactId: 'inv-irm-mn-01',
+    contactName: 'Siddharth Munjal (Apex Wealth)',
+    contactPhone: '+91 98100 66778',
+    contactType: 'investor',
+    scheduledAt: 'Today, 01:45 PM',
+    priority: 'High',
+    status: 'Pending',
+    notes: 'Follow-up on ₹10 Cr pre-leased warehousing term sheet and tax structure memo with managing partner.',
+    assignedAgentId: 'usr-ghl-irm-02',
+    assignedAgentName: 'Meera Nair',
+    assignedRole: 'IRM',
+  },
+  {
+    id: 'flw-irm-mn-02',
+    companyId: 't-ghl-01',
+    contactId: 'inv-irm-mn-02',
+    contactName: 'Radhika Merchant Trust',
+    contactPhone: '+91 98205 77889',
+    contactType: 'investor',
+    scheduledAt: 'Yesterday, 05:30 PM',
+    priority: 'High',
+    status: 'Pending',
+    notes: 'Overdue IRM task: term sheet review for warehousing debt tranche and quarterly dividend yield projections.',
+    assignedAgentId: 'usr-ghl-irm-02',
+    assignedAgentName: 'Meera Nair',
+    assignedRole: 'IRM',
+  },
+  {
+    id: 'flw-irm-mn-03',
+    companyId: 't-ghl-01',
+    contactId: 'inv-irm-mn-03',
+    contactName: 'Anand Mahindra Ventures',
+    contactPhone: '+91 98209 88776',
+    contactType: 'investor',
+    scheduledAt: 'Today, 04:15 PM',
+    priority: 'Low',
+    status: 'Pending',
+    notes: 'Quarterly investor newsletter discussion and upcoming fund launch webinar invitation for CIO.',
+    assignedAgentId: 'usr-ghl-irm-02',
+    assignedAgentName: 'Meera Nair',
+    assignedRole: 'IRM',
+  },
+
+  // ── Sameer Joshi (IRM) ──────────────────────────────────────────────────────
+  {
+    id: 'flw-irm-sj-01',
+    companyId: 't-ghl-01',
+    contactId: 'inv-irm-sj-01',
+    contactName: 'Cyrus Poonawalla Group',
+    contactPhone: '+91 98220 33445',
+    contactType: 'investor',
+    scheduledAt: 'Today, 12:00 PM',
+    priority: 'High',
+    status: 'Pending',
+    notes: 'Follow-up with Family Office CIO regarding ₹20 Cr co-investment syndicate and allocation sizing.',
+    assignedAgentId: 'usr-ghl-irm-03',
+    assignedAgentName: 'Sameer Joshi',
+    assignedRole: 'IRM',
+  },
+  {
+    id: 'flw-irm-sj-02',
+    companyId: 't-ghl-01',
+    contactId: 'inv-irm-sj-02',
+    contactName: 'Torrent Pharma Family Trust',
+    contactPhone: '+91 98250 11234',
+    contactType: 'investor',
+    scheduledAt: 'Yesterday, 11:00 AM',
+    priority: 'High',
+    status: 'Pending',
+    notes: 'Overdue IRM task: AIF drawdown schedule confirmation and signature on escrow bank agreement.',
+    assignedAgentId: 'usr-ghl-irm-03',
+    assignedAgentName: 'Sameer Joshi',
+    assignedRole: 'IRM',
+  },
+  {
+    id: 'flw-irm-sj-03',
+    companyId: 't-ghl-01',
+    contactId: 'inv-irm-sj-03',
+    contactName: 'Harsh Goenka Holdings',
+    contactPhone: '+91 98202 66778',
+    contactType: 'investor',
+    scheduledAt: 'Today, 04:45 PM',
+    priority: 'Medium',
+    status: 'Pending',
+    notes: 'Clarify exit timelines and LP advisory committee rights under private placement memorandum.',
+    assignedAgentId: 'usr-ghl-irm-03',
+    assignedAgentName: 'Sameer Joshi',
+    assignedRole: 'IRM',
+  },
+];
+
+/**
+ * Ensures that all representative mock follow-ups exist in the current follow-ups list.
+ * Preserves all existing real-time followups (such as Ananya Iyer's recorded leads).
+ */
+export function ensureInitialAdminFollowups(existing: Followup[]): { list: Followup[]; modified: boolean } {
+  const existingIds = new Set(existing.map(f => f.id));
+  const missing = INITIAL_ADMIN_FOLLOWUPS.filter(f => !existingIds.has(f.id));
+
+  if (missing.length === 0) {
+    return { list: existing, modified: false };
+  }
+
+  return {
+    list: [...existing, ...missing],
+    modified: true,
+  };
+}

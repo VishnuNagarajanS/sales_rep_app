@@ -4,12 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --mode dev",
-    "dev:mock": "vite --mode mock",
-    "dev:api": "vite --mode dev",
-    "build": "tsc -b && vite build --mode dev",
-    "build:mock": "tsc -b && vite build --mode mock",
-    "build:dev": "tsc -b && vite build --mode dev",
+    "dev": "vite",
+    "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview"
   },

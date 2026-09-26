@@ -1,16 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { History, Phone, FileText, Download, AlertCircle } from 'lucide-react';
+import { History, Phone, FileText, Download, AlertCircle, Users } from 'lucide-react';
 import Papa from 'papaparse';
-import { CallRecord } from '../../types';
+import { CallRecord, User } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
-import { executiveApi } from '../../services/executiveApi';
-import { IS_MOCK_ENV } from '../../config/runtime';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
 import { FilterBar } from '../../components/common/FilterBar';
+import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
 import './CallHistoryPage.css';
 
 export const CallHistoryPage: React.FC = () => {
@@ -18,32 +17,94 @@ export const CallHistoryPage: React.FC = () => {
   const { initiateCall } = useCall();
 
   const [calls, setCalls] = useState<CallRecord[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [selectedCall, setSelectedCall] = useState<CallRecord | null>(null);
-  const [dispositionFilter, setDispositionFilter] = useState('All');
-  const [directionFilter, setDirectionFilter] = useState('All');
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [transcriptCall, setTranscriptCall] = useState<CallRecord | null>(null);
+  
+  const [roleFilter, setRoleFilter] = useState('All');
+  const [agentFilter, setAgentFilter] = useState('All');
+  const [datePreset, setDatePreset] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
 
-  const loadData = async () => {
-    try {
-      setLoadError(null);
-      if (!IS_MOCK_ENV && user?.role.code === 'sales_executive' && user) {
-        setCalls(await executiveApi.getCalls(user, tenant));
-      } else {
-        setCalls(storageService.getCalls(tenant?.id));
-      }
-    } catch (error) {
-      setLoadError(error instanceof Error ? error.message : 'Unable to load call history.');
-    }
+  const loadData = () => {
+    setCalls(storageService.getCalls(tenant?.id));
+    setUsers(storageService.getUsers(tenant?.slug));
   };
 
   useEffect(() => {
-    void loadData();
+    loadData();
     const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
-  }, [tenant?.id, user?.id]);
+  }, [tenant?.id]);
 
-  // ── Task 2: Role-scoping (same pattern as DashboardPage.tsx scopedCalls) ──
+  // ── Date formatting helpers ────────────────────────────────────────────────
+  const formatDateYMD = (d: Date): string => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const getPresetDates = (preset: string): { from: string; to: string } => {
+    const now = new Date();
+    const todayStr = formatDateYMD(now);
+    switch (preset) {
+      case 'today': return { from: todayStr, to: todayStr };
+      case 'yesterday': {
+        const yest = new Date(now);
+        yest.setDate(yest.getDate() - 1);
+        return { from: formatDateYMD(yest), to: formatDateYMD(yest) };
+      }
+      case 'this_week': {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 6);
+        return { from: formatDateYMD(d), to: todayStr };
+      }
+      case 'this_month': {
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        return { from: formatDateYMD(startOfMonth), to: formatDateYMD(endOfMonth) };
+      }
+      case 'last_30_days': {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 29);
+        return { from: formatDateYMD(d), to: todayStr };
+      }
+      default: return { from: '', to: '' };
+    }
+  };
+
+  const handleDatePresetChange = (preset: string) => {
+    if (preset === 'all') {
+      setDatePreset('all');
+      setDateFrom('');
+      setDateTo('');
+    } else if (preset === 'custom') {
+      setDatePreset('custom');
+    } else {
+      const { from, to } = getPresetDates(preset);
+      setDatePreset(preset);
+      setDateFrom(from);
+      setDateTo(to);
+    }
+  };
+
+  const parseDateFromTimestamp = (ts: string): string => {
+    if (!ts) return '';
+    if (ts.startsWith('Today')) return formatDateYMD(new Date());
+    if (ts.startsWith('Yesterday')) {
+      const d = new Date();
+      d.setDate(d.getDate() - 1);
+      return formatDateYMD(d);
+    }
+    const d = new Date(ts);
+    if (!isNaN(d.getTime())) return formatDateYMD(d);
+    return '';
+  };
+
+  // ── Task 2: Role-scoping ───────────────────────────────────────────────────
   const isExec = user?.role?.code === 'sales_executive';
   const scopedCalls = isExec
     ? calls.filter(c =>
@@ -52,10 +113,39 @@ export const CallHistoryPage: React.FC = () => {
     )
     : calls;
 
+  const agentRoleMap = React.useMemo(() => {
+    const map = new Map<string, string>();
+    users.forEach(u => map.set(u.id, u.role?.name || 'Unknown'));
+    return map;
+  }, [users]);
+
+  const roleOptions = React.useMemo(() => {
+    const roles = new Set<string>();
+    scopedCalls.forEach(c => {
+      roles.add(agentRoleMap.get(c.agentId) || 'Unknown');
+    });
+    return Array.from(roles).filter(Boolean).map(r => ({ value: r, label: r }));
+  }, [scopedCalls, agentRoleMap]);
+
+  const agentOptions = React.useMemo(() => {
+    const agents = new Set<string>();
+    scopedCalls.forEach(c => {
+      if (c.agentName) agents.add(c.agentName);
+    });
+    return Array.from(agents).filter(Boolean).map(a => ({ value: a, label: a }));
+  }, [scopedCalls]);
+
   // ── Filters applied on top of role-scoped calls ───────────────────────────
   const filteredCalls = scopedCalls.filter(c => {
-    if (dispositionFilter !== 'All' && c.disposition !== dispositionFilter) return false;
-    if (directionFilter !== 'All' && c.direction !== directionFilter) return false;
+    if (agentFilter !== 'All' && c.agentName !== agentFilter) return false;
+    if (roleFilter !== 'All' && (agentRoleMap.get(c.agentId) || 'Unknown') !== roleFilter) return false;
+    
+    if (datePreset !== 'all' && dateFrom && dateTo) {
+      const callDate = parseDateFromTimestamp(c.timestamp);
+      if (callDate) {
+        if (callDate < dateFrom || callDate > dateTo) return false;
+      }
+    }
     return true;
   });
 
@@ -99,58 +189,76 @@ export const CallHistoryPage: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const isIrmConnectedCall = (c: CallRecord | null): boolean =>
+    !!(c && (c.notes || '').trim().startsWith('Connected to IRM:'));
+
   // ── Table columns ─────────────────────────────────────────────────────────
   const columns: Column<CallRecord>[] = [
     {
       key: 'timestamp',
       header: 'Date & Time',
+      width: '16%',
       sortable: true,
       render: c => <span style={{ fontSize: 12, fontWeight: 500 }}>{formatTimestamp(c.timestamp)}</span>,
     },
     {
       key: 'contactName',
       header: 'Contact',
+      width: '20%',
       sortable: true,
-      render: c => (
-        <div>
-          <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{c.contactName}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.contactPhone}</div>
-        </div>
-      ),
+      render: c => {
+        const connectedViaIrm = isIrmConnectedCall(c);
+        return (
+          <div>
+            <div style={{ fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              {c.contactName}
+              {connectedViaIrm && (
+                <span title="Connected via IRM" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                  <Users size={13} color="var(--primary-600)" />
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.contactPhone}</div>
+          </div>
+        );
+      },
+    },
+    {
+      key: 'agentName',
+      header: 'Called By',
+      width: '16%',
+      sortable: true,
+      render: c => <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{c.agentName || '—'}</span>,
     },
     {
       key: 'direction',
       header: 'Direction',
+      width: '16%',
       sortable: true,
       render: c => <StatusChip status={c.direction} size="sm" />,
     },
     {
       key: 'duration',
       header: 'Duration',
+      width: '16%',
       sortable: true,
       render: c => <span style={{ fontSize: 12 }}>{formatDuration(c.duration)}</span>,
     },
     {
-      key: 'agentName',
-      header: 'Agent',
-      sortable: true,
-      render: c => <span style={{ fontSize: 12 }}>{c.agentName}</span>,
-    },
-    {
       key: 'disposition',
       header: 'Outcome / Disposition',
+      width: '16%',
       sortable: true,
       render: c => <StatusChip status={c.disposition} size="sm" />,
     },
-    // Task 1: "Listen" / recording column removed — replaced by row-click detail drawer
   ];
 
   // ── Row actions ───────────────────────────────────────────────────────────
   const rowActions: RowAction<CallRecord>[] = [
     {
-      label: 'View Call Log & Transcript',
+      label: 'View Transcript',
       icon: <FileText size={14} style={{ marginRight: 6 }} />,
-      onClick: c => setSelectedCall(c),
+      onClick: c => setTranscriptCall(c),
     },
     // Task 4: Call Back quick action
     {
@@ -159,6 +267,34 @@ export const CallHistoryPage: React.FC = () => {
       onClick: c => initiateCall(c.contactName, c.contactPhone),
     },
   ];
+
+  // ── Related consultation for contact profile drawer ───────────────────────
+  const matchingConsultations = selectedCall
+    ? storageService
+        .getConsultations(tenant?.id)
+        .filter(c => {
+          const sPhone = (selectedCall.contactPhone || '').replace(/\D/g, '').slice(-10);
+          const cPhone = (c.investorPhone || '').replace(/\D/g, '').slice(-10);
+          const phoneMatch = !!(sPhone && cPhone && sPhone === cPhone);
+          const idMatch = !!(
+            (selectedCall.investorId && c.investorId === selectedCall.investorId) ||
+            (selectedCall.leadId && c.investorId === selectedCall.leadId)
+          );
+          return idMatch || phoneMatch;
+        })
+        .sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime())
+    : [];
+
+  const relatedConsultation =
+    matchingConsultations.find(c => c.status === 'Scheduled') || matchingConsultations[0];
+
+  const irmConsultationReason = (() => {
+    if (!selectedCall || !isIrmConnectedCall(selectedCall)) return undefined;
+    const match = (selectedCall.notes || '').match(/Reason:\s*([\s\S]*)$/i);
+    const parsedReason = match && match[1]?.trim();
+    if (parsedReason) return parsedReason;
+    return relatedConsultation?.agenda;
+  })();
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -191,54 +327,95 @@ export const CallHistoryPage: React.FC = () => {
           <FilterBar
             filters={[
               {
-                key: 'disposition',
-                label: 'Disposition',
-                value: dispositionFilter,
-                onChange: setDispositionFilter,
-                options: [
-                  { value: 'Interested', label: 'Interested' },
-                  { value: 'Not Interested', label: 'Not Interested' },
-                  { value: 'Follow-up Required', label: 'Follow-up Required' },
-                  { value: 'Call Back', label: 'Call Back' },
-                  { value: 'Wrong Number', label: 'Wrong Number' },
-                  { value: 'Converted', label: 'Converted' },
-                  { value: 'No Response', label: 'No Response' },
-                ],
+                key: 'role',
+                label: 'Role',
+                value: roleFilter,
+                onChange: setRoleFilter,
+                options: roleOptions,
               },
               {
-                key: 'direction',
-                label: 'Direction',
-                value: directionFilter,
-                onChange: setDirectionFilter,
+                key: 'agent',
+                label: 'Agent',
+                value: agentFilter,
+                onChange: setAgentFilter,
+                options: agentOptions,
+              },
+              {
+                key: 'dateRange',
+                label: 'Date Range',
+                value: datePreset,
+                onChange: handleDatePresetChange,
                 options: [
-                  { value: 'inbound', label: 'Inbound' },
-                  { value: 'outbound', label: 'Outbound' },
+                  { value: 'all', label: 'All Time' },
+                  { value: 'today', label: 'Today' },
+                  { value: 'yesterday', label: 'Yesterday' },
+                  { value: 'this_week', label: 'This Week' },
+                  { value: 'this_month', label: 'This Month' },
+                  { value: 'last_30_days', label: 'Last 30 Days' },
+                  { value: 'custom', label: 'Custom Range' },
                 ],
               },
             ]}
             onClearAll={() => {
-              setDispositionFilter('All');
-              setDirectionFilter('All');
+              setRoleFilter('All');
+              setAgentFilter('All');
+              setDatePreset('all');
+              setDateFrom('');
+              setDateTo('');
             }}
           />
         }
       />
-      {loadError && (
-        <div className="auth-error-alert">
-          <AlertCircle size={16} />
-          <span>{loadError}</span>
+
+      {datePreset === 'custom' && (
+        <div style={{ padding: '0 24px', display: 'flex', gap: 12, alignItems: 'center', marginTop: '-12px', marginBottom: 12 }}>
+          <input
+            type="date"
+            className="form-input"
+            value={dateFrom}
+            onChange={e => setDateFrom(e.target.value)}
+          />
+          <span style={{ color: 'var(--text-muted)' }}>to</span>
+          <input
+            type="date"
+            className="form-input"
+            value={dateTo}
+            onChange={e => setDateTo(e.target.value)}
+          />
         </div>
       )}
 
-      {/* Call Detail Drawer */}
+      {/* Contact Profile Drawer (opened on row click) */}
       <Drawer
         isOpen={!!selectedCall}
         onClose={() => setSelectedCall(null)}
-        title="Call Detail & Transcription"
-        subtitle={`${selectedCall?.contactName} (${selectedCall?.contactPhone}) • ${selectedCall ? formatTimestamp(selectedCall.timestamp) : ''}`}
-        width={560}
+        title={selectedCall?.contactName || 'Contact Profile'}
+        subtitle={`Phone: ${selectedCall?.contactPhone || '—'} • ${tenant?.name}`}
+        width={600}
       >
         {selectedCall && (
+          <LeadDetailDrawerContent
+            contactName={selectedCall.contactName}
+            contactPhone={selectedCall.contactPhone}
+            contactId={selectedCall.leadId || selectedCall.investorId || selectedCall.customerId}
+            tenantId={tenant?.id}
+            tenantName={tenant?.name}
+            consultationReason={irmConsultationReason}
+            hideAutoNotes={true}
+            onCall={() => initiateCall(selectedCall.contactName, selectedCall.contactPhone)}
+          />
+        )}
+      </Drawer>
+
+      {/* Single Call Detail & Transcript Drawer (accessible via row action) */}
+      <Drawer
+        isOpen={!!transcriptCall}
+        onClose={() => setTranscriptCall(null)}
+        title="Call Detail & Transcription"
+        subtitle={`${transcriptCall?.contactName} (${transcriptCall?.contactPhone}) • ${transcriptCall ? formatTimestamp(transcriptCall.timestamp) : ''}`}
+        width={560}
+      >
+        {transcriptCall && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             {/* Outcome Overview */}
             <div
@@ -254,12 +431,12 @@ export const CallHistoryPage: React.FC = () => {
             >
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <StatusChip status={selectedCall.direction} />
-                  <StatusChip status={selectedCall.disposition} />
+                  <StatusChip status={transcriptCall.direction} />
+                  <StatusChip status={transcriptCall.disposition} />
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
-                  Agent: <strong>{selectedCall.agentName}</strong> • Duration:{' '}
-                  <strong>{formatDuration(selectedCall.duration)}</strong>
+                  Agent: <strong>{transcriptCall.agentName}</strong> • Duration:{' '}
+                  <strong>{formatDuration(transcriptCall.duration)}</strong>
                 </div>
               </div>
 
@@ -267,7 +444,7 @@ export const CallHistoryPage: React.FC = () => {
               <button
                 className="btn btn-primary btn-sm"
                 style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)' }}
-                onClick={() => initiateCall(selectedCall.contactName, selectedCall.contactPhone)}
+                onClick={() => initiateCall(transcriptCall.contactName, transcriptCall.contactPhone)}
               >
                 <Phone size={13} /> Call Back
               </button>
@@ -300,7 +477,7 @@ export const CallHistoryPage: React.FC = () => {
                 Automated Call Transcript
               </h4>
               <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, fontStyle: 'italic' }}>
-                {selectedCall.transcription || 'Transcription processing completed.'}
+                {transcriptCall.transcription || 'Transcription processing completed.'}
               </p>
             </div>
 
@@ -310,7 +487,7 @@ export const CallHistoryPage: React.FC = () => {
                 Agent Post-Call Notes
               </h4>
               <p style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.5 }}>
-                {selectedCall.notes || 'No custom agent notes entered during disposition.'}
+                {transcriptCall.notes || 'No custom agent notes entered during disposition.'}
               </p>
             </div>
           </div>

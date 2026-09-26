@@ -26,9 +26,8 @@ import {
   X,
   MessageSquare,
 } from 'lucide-react';
-import { ChatConversation, ChatMember, ChatSettings, Tenant } from '../../types';
+import { ChatConversation, ChatMember, ChatSettings } from '../../types';
 import * as cs from '../../services/chatStorage';
-import { storageService } from '../../services/storageService';
 
 interface Props {
   isOpen: boolean;
@@ -75,7 +74,7 @@ const DEFAULT_SETTINGS: ChatSettings = {
     readReceipts: true,
     typingIndicator: true,
     whoCanDm: 'everyone',
-    priorityAccess: [],
+    priorityAccess: ['Ananya Iyer', 'Karthik Rao'],
     blockedContacts: [],
     participateInSurveys: true,
   },
@@ -637,13 +636,8 @@ export const ChatSettingsModal: React.FC<Props> = ({
                   value={settings.accounts?.activeTenant || companyId}
                   onChange={e => handleSelectChange('accounts', 'activeTenant', e.target.value)}
                 >
-                  {storageService.getTenants().length > 0 ? (
-                    storageService.getTenants().map((t: Tenant) => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))
-                  ) : (
-                    <option value={companyId}>Active Workspace</option>
-                  )}
+                  <option value="t-ghl-01">GHL India Ventures (AIF & High-Yield Private Placement)</option>
+                  <option value="t-jamin-02">Jamin Bazaar (Direct Land Plot Booking & Estates)</option>
                 </select>
               </div>
             </div>

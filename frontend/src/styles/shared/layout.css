@@ -47,6 +47,13 @@
   min-height: 0 !important;
 }
 
+.page-scrollable.page-static-layout,
+.page-scrollable:has(.assigned-leads-page) {
+  overflow: hidden !important;
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
 .admin-theme .main-content-area,
 .admin-theme .page-scrollable {
   background: #090d16 !important;

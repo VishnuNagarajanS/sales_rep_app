@@ -445,6 +445,12 @@
   color: #93c5fd;
 }
 
+.incall-btn-irm {
+  background-color: #2e1065;
+  border: 1px solid #7c3aed;
+  color: #c4b5fd;
+}
+
 .incall-btn-ctrl-round {
   border-radius: 50%;
   border: 1px solid #475569;

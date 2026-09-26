@@ -34,6 +34,8 @@
 }
 
 .filterbar-select {
+  width: auto;
+  flex-shrink: 0;
   height: 32px;
   font-size: 12px;
   padding-top: 0;
@@ -49,13 +51,44 @@
 }
 
 .filterbar-select.active {
-  background-color: var(--primary-50);
+  background-color: var(--bg-surface-active);
+  border-color: var(--primary-600, var(--primary-500));
+}
+
+.filterbar-select option {
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.filterbar-select option:checked,
+.filterbar-select option:hover {
+  background-color: var(--primary-600, var(--primary-500));
+  color: #ffffff;
 }
 
 .filterbar-date-group {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.filterbar-custom-dates {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  animation: filterbarFadeIn 0.2s ease-in-out;
+}
+
+@keyframes filterbarFadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .filterbar-date-input {
@@ -63,16 +96,20 @@
   font-size: 12px;
   padding-top: 0;
   padding-bottom: 0;
-  padding-left: 10px;
-  padding-right: 10px;
+  padding-left: 8px;
+  padding-right: 8px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-base);
   background-color: var(--bg-surface);
-  min-width: 130px;
+  color: var(--text-primary);
+  color-scheme: dark;
+  min-width: 125px;
+  cursor: pointer;
 }
 
 .filterbar-date-input.active {
-  background-color: var(--primary-50);
+  background-color: var(--bg-surface-active);
+  border-color: var(--primary-600, var(--primary-500));
 }
 
 .filterbar-clear-btn {
