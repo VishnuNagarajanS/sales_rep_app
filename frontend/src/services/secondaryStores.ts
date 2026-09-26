@@ -207,7 +207,7 @@ let usersMemory: User[] = [
     companyId: 't-ghl-01',
     companySlug: 'ghl',
     companyName: 'GHL India Ventures',
-    role: { id: 'r-sales-mgr', name: 'Sales Manager', code: 'sales_manager', permissions: [] },
+    role: { id: 'r-cadmin', name: 'Company Admin', code: 'company_admin', permissions: [] },
     status: 'Active',
     lastLogin: 'Today',
   },

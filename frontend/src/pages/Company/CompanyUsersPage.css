@@ -83,3 +83,69 @@
   gap: 10px;
   margin-top: 8px;
 }
+
+/* GHL Admin Filter Bar */
+.company-users-filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+}
+
+.company-users-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.company-users-filter-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.company-users-filter-select {
+  width: auto;
+  min-width: 170px;
+  height: 36px;
+  padding: 6px 12px;
+}
+
+/* Credential Box for Password Reset / Instant Creation */
+.company-temp-password-box {
+  background: var(--bg-surface-hover);
+  border: 1px dashed var(--border-base);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.company-temp-password-text {
+  font-family: var(--font-mono, monospace);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--primary-600);
+  letter-spacing: 0.5px;
+}
+
+.company-user-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .company-user-form-row {
+    grid-template-columns: 1fr;
+  }
+}
+

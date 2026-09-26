@@ -29,6 +29,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { Tenant, User, SubscriptionPackage } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
 import { FEATURES } from '../../../constants/features';
+import { SYSTEM_ROLES } from '../../../constants/roles';
 import { Modal } from '../../../components/common/Modal';
 import { Drawer } from '../../../components/common/Drawer';
 import './CompaniesPage.css';
@@ -92,7 +93,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPhone, setNewUserPhone] = useState('+91 98450 ');
-  const [newUserRole, setNewUserRole] = useState<'company_admin' | 'sales_manager' | 'sales_executive' | 'irm'>('sales_executive');
+  const [newUserRole, setNewUserRole] = useState<'company_admin'>('company_admin');
 
   const loadData = () => {
     const allTenants = superAdminService.getTenants();
@@ -167,11 +168,12 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       name: newUserName,
       email: newUserEmail,
       phone: newUserPhone,
-      role: roles[newUserRole],
+      role: roles.company_admin || SYSTEM_ROLES.company_admin,
       companyId: selectedTenant.id,
       companySlug: selectedTenant.slug,
       companyName: selectedTenant.name,
       status: 'Active',
+      designation: 'Company Administrator',
     });
     setDrawerUsers(superAdminService.getUsers({ companyId: selectedTenant.id }));
     setIsAddUserModalOpen(false);
@@ -1340,13 +1342,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
               <label className="form-label">Role Assignment</label>
               <select
                 className="form-control"
-                value={newUserRole}
-                onChange={e => setNewUserRole(e.target.value as any)}
+                value="company_admin"
+                disabled
               >
-                <option value="sales_executive">Sales Executive (Field Rep / Telecaller)</option>
-                <option value="sales_manager">Sales Manager (Team Lead)</option>
                 <option value="company_admin">Company Admin</option>
-                <option value="irm">Institutional Relationship Manager (IRM)</option>
               </select>
             </div>
 

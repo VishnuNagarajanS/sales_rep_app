@@ -42,8 +42,8 @@ export const PlatformUsersPage: React.FC = () => {
   const [newEmail, setNewEmail] = useState('');
   const [newPhone, setNewPhone] = useState('+91 98450 ');
   const [newCompanyId, setNewCompanyId] = useState('');
-  const [newRoleCode, setNewRoleCode] = useState('sales_executive');
-  const [newDesignation, setNewDesignation] = useState('Sales Professional');
+  const [newRoleCode, setNewRoleCode] = useState('company_admin');
+  const [newDesignation, setNewDesignation] = useState('Organization Administrator');
   const [newEmployeeCode, setNewEmployeeCode] = useState('');
 
   // Edit User Drawer state
@@ -105,7 +105,7 @@ export const PlatformUsersPage: React.FC = () => {
     if (!newName || !newEmail) return;
 
     const isPlatform = provisionUserType === 'platform_admin';
-    const targetRole = isPlatform ? roles.super_admin : roles[newRoleCode] || roles.sales_executive;
+    const targetRole = isPlatform ? roles.super_admin : roles.company_admin;
     const targetCompany = isPlatform ? undefined : newCompanyId || tenants[0]?.id;
 
     superAdminService.createUser({
@@ -204,7 +204,7 @@ export const PlatformUsersPage: React.FC = () => {
           </div>
           <h1 className="page-main-title">Cross-Tenant Identity & Directory</h1>
           <p className="page-main-desc">
-            Global directory of platform administrators, company admins, managers, and frontline sales executives.
+            Global directory of platform administrators, company admins, sales executives, and relationship managers.
           </p>
         </div>
 
@@ -264,7 +264,6 @@ export const PlatformUsersPage: React.FC = () => {
             <option value="all">All Roles</option>
             <option value="super_admin">Super Admin</option>
             <option value="company_admin">Company Admin</option>
-            <option value="sales_manager">Sales Manager</option>
             <option value="sales_executive">Sales Executive</option>
             <option value="irm">IRM</option>
           </select>
@@ -487,14 +486,14 @@ export const PlatformUsersPage: React.FC = () => {
                     <label className="form-label required">Role Scope</label>
                     <select
                       className="form-control"
-                      value={newRoleCode}
-                      onChange={e => setNewRoleCode(e.target.value)}
+                      value="company_admin"
+                      disabled
                     >
-                      <option value="sales_executive">Sales Executive (Field Rep / Telecaller)</option>
-                      <option value="sales_manager">Sales Manager (Team Lead)</option>
                       <option value="company_admin">Company Admin (Tenant Root)</option>
-                      <option value="irm">Institutional Relationship Manager (IRM)</option>
                     </select>
+                    <span style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', display: 'block' }}>
+                      Super Admin creates Company Admins. Company Admins manage their own Sales Executives and IRMs.
+                    </span>
                   </div>
 
                   <div className="form-group">
@@ -607,13 +606,21 @@ export const PlatformUsersPage: React.FC = () => {
                 className="form-control"
                 value={editRoleCode}
                 onChange={e => setEditRoleCode(e.target.value)}
+                disabled={editRoleCode === 'sales_executive' || editRoleCode === 'irm'}
               >
-                <option value="super_admin">Super Admin</option>
-                <option value="company_admin">Company Admin</option>
-                <option value="sales_manager">Sales Manager</option>
-                <option value="sales_executive">Sales Executive</option>
-                <option value="irm">IRM</option>
+                <option value="company_admin">Company Admin (Tenant Root)</option>
+                <option value="super_admin">Super Admin (Platform Root)</option>
+                {(editRoleCode === 'sales_executive' || editRoleCode === 'irm') && (
+                  <option value={editRoleCode} disabled>
+                    {editRoleCode === 'irm' ? 'IRM (Managed by Company Admin)' : 'Sales Executive (Managed by Company Admin)'}
+                  </option>
+                )}
               </select>
+              {(editRoleCode === 'sales_executive' || editRoleCode === 'irm') && (
+                <span style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', display: 'block' }}>
+                  Company-level operational roles are managed directly by the Company Admin.
+                </span>
+              )}
             </div>
 
             <div className="drawer-actions-row">

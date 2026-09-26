@@ -170,7 +170,7 @@ export const ChatSettingsModal: React.FC<Props> = ({
   }, [activeConversation]);
 
   const isAdmin = me.roleCode === 'company_admin' || me.roleCode === 'super_admin';
-  const isManagerOrAdmin = isAdmin || me.roleCode === 'sales_manager';
+  const isManagerOrAdmin = isAdmin;
 
   const handleToggle = (category: keyof ChatSettings, key: string) => {
     setSettings(prev => {

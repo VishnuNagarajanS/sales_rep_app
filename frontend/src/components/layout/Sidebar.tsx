@@ -60,8 +60,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
 
   const roleCode = user?.role?.code;
   const isGhlAdmin =
+    !isSuperAdmin &&
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
-    (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
+    (roleCode === 'company_admin' || (roleCode as string) === 'admin');
   const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
   const isIrm = user?.role?.code === 'irm';
   const isGhlIrm = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.name === 'GHL India Ventures' || user?.companySlug === 'ghl' || user?.companyName === 'GHL India Ventures') && isIrm;
@@ -343,14 +344,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
           alignItems: 'center',
           justifyContent: collapsed
             ? 'center'
-            : tenant?.slug === 'ghl'
-              ? 'center'
-              : 'space-between',
+            : isSuperAdmin
+              ? 'space-between'
+              : tenant?.slug === 'ghl'
+                ? 'center'
+                : 'space-between',
           padding: collapsed
             ? '0'
-            : tenant?.slug === 'ghl'
-              ? '0 48px'
-              : '0 20px',
+            : isSuperAdmin
+              ? '0 20px'
+              : tenant?.slug === 'ghl'
+                ? '0 48px'
+                : '0 20px',
           borderBottom: `1px solid ${isSuperAdmin ? '#1e293b' : 'var(--border-base)'}`,
           position: 'relative',
         }}
@@ -433,6 +438,50 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
               {tenant?.name?.charAt(0) || 'T'}
             </div>
           )
+        ) : isSuperAdmin ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden' }}>
+            <div
+              style={{
+                width: 38,
+                height: 38,
+                minWidth: 38,
+                borderRadius: 10,
+                background: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 900,
+                fontSize: 13,
+              }}
+            >
+              ⚡
+            </div>
+            <div style={{ overflow: 'hidden', whiteSpace: 'nowrap' }}>
+              <div
+                style={{
+                  fontFamily: 'var(--font-display)',
+                  fontWeight: 800,
+                  fontSize: 15,
+                  color: '#ffffff',
+                  letterSpacing: '-0.02em',
+                }}
+              >
+                Platform Operator
+              </div>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: '#94a3b8',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  fontWeight: 600,
+                }}
+              >
+                SUPER ADMIN CONSOLE
+              </div>
+            </div>
+          </div>
         ) : tenant?.slug === 'jamin' ? (
           <div style={{ display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
             <img
@@ -470,7 +519,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
               }}
             />
           </div>
-        ) : !isSuperAdmin ? (
+        ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden' }}>
             {tenant?.logo ? (
               <img
@@ -527,50 +576,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
                 </div>
               </>
             )}
-          </div>
-        ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden' }}>
-            <div
-              style={{
-                width: 38,
-                height: 38,
-                minWidth: 38,
-                borderRadius: 10,
-                background: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)',
-                color: '#ffffff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontWeight: 900,
-                fontSize: 13,
-              }}
-            >
-              ⚡
-            </div>
-            <div style={{ overflow: 'hidden', whiteSpace: 'nowrap' }}>
-              <div
-                style={{
-                  fontFamily: 'var(--font-display)',
-                  fontWeight: 800,
-                  fontSize: 15,
-                  color: isSuperAdmin ? '#ffffff' : 'var(--text-primary)',
-                  letterSpacing: '-0.02em',
-                }}
-              >
-                Platform Operator
-              </div>
-              <div
-                style={{
-                  fontSize: 10,
-                  color: '#94a3b8',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  fontWeight: 600,
-                }}
-              >
-                Super Admin Console
-              </div>
-            </div>
           </div>
         )}
 

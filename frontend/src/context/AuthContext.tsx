@@ -76,6 +76,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const [tenant, setTenant] = useState<Tenant | null>(() => {
+    // If the restored user is a Super Admin, tenant is null unless active in support mode
+    const savedUser = sessionStorage.getItem('nexus_current_user');
+    if (savedUser) {
+      try {
+        const parsedUser = JSON.parse(savedUser);
+        if (parsedUser?.role?.code === 'super_admin') {
+          const supportModeTenant = sessionStorage.getItem('nexus_support_mode_tenant');
+          if (supportModeTenant) {
+            return JSON.parse(supportModeTenant);
+          }
+          return null;
+        }
+      } catch { }
+    }
     const saved = sessionStorage.getItem('nexus_current_tenant');
     if (saved) {
       try { return JSON.parse(saved); } catch { }

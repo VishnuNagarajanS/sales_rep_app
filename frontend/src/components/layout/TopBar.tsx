@@ -69,8 +69,9 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
 
   const roleCode = user?.role?.code;
   const isGhlAdmin =
+    !isSuperAdmin &&
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
-    (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
+    (roleCode === 'company_admin' || (roleCode as string) === 'admin');
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');

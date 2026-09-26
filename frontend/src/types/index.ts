@@ -35,7 +35,7 @@ export interface Tenant {
   updatedAt?: string;
 }
 
-export type RoleCode = 'super_admin' | 'company_admin' | 'sales_manager' | 'sales_executive' | 'irm';
+export type RoleCode = 'super_admin' | 'company_admin' | 'sales_executive' | 'irm';
 
 export interface Role {
   id: string;

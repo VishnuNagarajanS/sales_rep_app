@@ -39,10 +39,10 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
 
       {/* Main Content Area */}
       <div className="main-content-area admin-layout-main">
-        <TopBar onNavigate={onNavigate} onOpenQuickCreate={() => {}} />
+        <TopBar onNavigate={onNavigate} onOpenQuickCreate={() => { }} />
 
         {/* Global Environment Banner */}
-        <div className="admin-platform-banner">
+        {/* <div className="admin-platform-banner">
           <span>⚡ PLATFORM OPERATOR CONSOLE — SYSTEM-WIDE GOVERNANCE & MULTI-TENANT PROVISIONING</span>
           <div className="admin-status-cluster">
             {maintenance.enabled && (
@@ -50,7 +50,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
             )}
             <span className="admin-platform-status">API v2.4 • System Health: 99.98%</span>
           </div>
-        </div>
+        </div> */}
 
         {/* Global Broadcast Announcement Banner (if active) */}
         {activeAnnouncement && (

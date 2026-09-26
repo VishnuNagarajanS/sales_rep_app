@@ -518,6 +518,18 @@ class SuperAdminService {
           },
         ];
         localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+      } else {
+        // Sanitize: re-map any legacy sales_manager to sales_executive
+        let modified = false;
+        users.forEach(u => {
+          if ((u.role as any)?.code === 'sales_manager') {
+            u.role = SYSTEM_ROLES.sales_executive;
+            modified = true;
+          }
+        });
+        if (modified) {
+          localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+        }
       }
 
       if (!filters) return users;
@@ -563,21 +575,30 @@ class SuperAdminService {
       }
     }
 
+    // Service-level rule: Super Admin can ONLY provision Company Admin for tenant organizations.
+    // Operational roles (Sales Executive and IRM) are reserved for Company Admin creation.
+    let resolvedRole = userData.role;
+    if (userData.companyId) {
+      resolvedRole = SYSTEM_ROLES.company_admin;
+    } else if (!resolvedRole) {
+      resolvedRole = SYSTEM_ROLES.super_admin;
+    }
+
     const newUser: User = {
       id: newId,
       name: userData.name || 'New User',
       email: (userData.email || '').toLowerCase().trim(),
       phone: userData.phone || '+91 98000 00000',
-      role: userData.role || SYSTEM_ROLES.sales_executive,
       companyId: userData.companyId,
       companySlug,
       companyName,
       status: (userData.status as any) || 'Active',
       lastLogin: 'Never (Invited)',
-      designation: userData.designation || 'Sales Professional',
+      designation: userData.designation || (userData.companyId ? 'Company Administrator' : 'Platform Administrator'),
       employeeCode: userData.employeeCode || `EMP-${Date.now().toString().slice(-4)}`,
       createdAt: new Date().toISOString(),
       ...userData,
+      role: resolvedRole,
     };
 
     users.push(newUser);
@@ -716,7 +737,12 @@ class SuperAdminService {
         localStorage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(SYSTEM_ROLES));
         return SYSTEM_ROLES;
       }
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      if (parsed.sales_manager) {
+        delete parsed.sales_manager;
+        localStorage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(parsed));
+      }
+      return parsed;
     } catch {
       return SYSTEM_ROLES;
     }

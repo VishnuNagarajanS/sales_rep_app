@@ -131,7 +131,7 @@ export const PlatformRolesPage: React.FC = () => {
   ];
 
   // List of active roles to display as matrix columns
-  const activeRoleList = Object.values(roles);
+  const activeRoleList = Object.values(roles).filter(r => (r.code as string) !== 'sales_manager');
 
   const hasPermission = (roleCode: string, permKey: string): boolean => {
     return Boolean(roles[roleCode]?.permissions?.includes(permKey));
@@ -262,8 +262,6 @@ export const PlatformRolesPage: React.FC = () => {
                 ? 'Platform operator with unrestricted access across all tenants.'
                 : r.code === 'company_admin'
                 ? 'Tenant root administrator managing team users and company setup.'
-                : r.code === 'sales_manager'
-                ? 'Team squad leader with re-assignment and performance oversight.'
                 : r.code === 'irm'
                 ? 'Institutional Relationship Manager for HNW wealth & CRE.'
                 : 'Frontline sales representative executing dialer outreach.'}
@@ -408,7 +406,6 @@ export const PlatformRolesPage: React.FC = () => {
                 onChange={e => setBaseTemplateRole(e.target.value)}
               >
                 <option value="sales_executive">Sales Executive (Field Rep)</option>
-                <option value="sales_manager">Sales Manager (Team Lead)</option>
                 <option value="company_admin">Company Admin (Tenant Root)</option>
                 <option value="irm">IRM (Wealth Management)</option>
               </select>
