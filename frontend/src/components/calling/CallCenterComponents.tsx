@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { storageService, PopupPosition } from '../../services/storageService';
-import { MOCK_AGENTS, MOCK_IRMS } from '../../mock_data/mockData';
 
 import {
   Phone,
@@ -221,32 +220,16 @@ export const InCallBar: React.FC = () => {
   const [irmButtonRect, setIrmButtonRect] = useState<DOMRect | null>(null);
   const [irmSearchQuery, setIrmSearchQuery] = useState('');
   const [connectingIrm, setConnectingIrm] = useState<string | null>(null);
-  const [pendingIrm, setPendingIrm] = useState<{ name: string; status: string; isPrevious?: boolean } | null>(null);
+  const [pendingIrm, setPendingIrm] = useState<{ name: string; status: string } | null>(null);
   const [consultationReason, setConsultationReason] = useState('');
 
   const irmPortalRef = useRef<HTMLDivElement>(null);
   const irmButtonRef = useRef<HTMLButtonElement>(null);
 
-  const isIrm = user?.role?.code === 'irm';
+  const availableIrms = storageService.getAvailableIrms();
 
-  // Look up the full lead record to find who previously handled this contact
-  const matchedLead = activeCall?.matchedRecord?.type === 'lead'
-    ? storageService.getLeads(tenant?.id).find(l => l.id === activeCall.matchedRecord?.id)
-    : (activeCall?.contactPhone ? storageService.findLeadByPhone(activeCall.contactPhone, tenant?.id) : undefined);
-  const previousAgentName = matchedLead?.assignedAgentName;
-
-  const connectOptions = isIrm
-    ? (() => {
-        const base = MOCK_AGENTS.map(a => ({ name: a.name, status: 'Available' as const }));
-        if (!previousAgentName) return base;
-        // Move the previously-assigned agent to the top of the list as the default
-        const rest = base.filter(a => a.name !== previousAgentName);
-        return [{ name: previousAgentName, status: 'Available' as const, isPrevious: true }, ...rest];
-      })()
-    : MOCK_IRMS;
-
-  const filteredConnectOptions = connectOptions.filter(o =>
-    o.name.toLowerCase().includes(irmSearchQuery.toLowerCase())
+  const filteredIrms = availableIrms.filter(irm =>
+    irm.name.toLowerCase().includes(irmSearchQuery.toLowerCase())
   );
 
   const handleConnectIrm = (irm: { name: string; status: string } | null, reason: string) => {
@@ -265,9 +248,7 @@ export const InCallBar: React.FC = () => {
       agentName: user.name,
       disposition: 'Converted',
       timestamp: new Date().toISOString(),
-      notes: isIrm
-        ? `Connected to Agent: ${irm.name}. Reason: ${reason}`
-        : `Connected to IRM: ${irm.name}. Reason: ${reason}`,
+      notes: `Connected to IRM: ${irm.name}. Reason: ${reason}`,
       leadId: activeCall.matchedRecord?.id,
       investorId: activeCall.matchedRecord?.id,
     });
@@ -296,7 +277,7 @@ export const InCallBar: React.FC = () => {
       consultantId: irm.name,
       consultantName: irm.name,
       status: 'Scheduled',
-      agenda: isIrm ? `Connected to Agent: ${reason}` : reason,
+      agenda: reason,
     });
 
     endCall(true);
@@ -618,12 +599,10 @@ export const InCallBar: React.FC = () => {
             </div>
           )}
 
-          {/* ── IRM / Agent connect toast ── */}
+          {/* ── IRM connect toast ── */}
           {connectingIrm && (
             <div style={{ fontSize: 12, color: '#38bdf8', padding: '4px 8px' }}>
-              {isIrm
-                ? `Call ended. Connected to ${connectingIrm} — reconnected with Agent.`
-                : `Call ended. Connected to ${connectingIrm} — moved to Consultations.`}
+              Call ended. Connected to {connectingIrm} — moved to Consultations.
             </div>
           )}
 
@@ -669,11 +648,11 @@ export const InCallBar: React.FC = () => {
               <ExternalLink size={13} /> Meet
             </button>
 
-            {/* Connect IRM / Connect Agent */}
+            {/* Connect IRM */}
             <button
               ref={irmButtonRef}
               className="btn btn-sm incall-btn-action incall-btn-irm"
-              title={isIrm ? 'Connect to an Agent' : 'Connect to an IRM'}
+              title="Connect to an IRM"
               onClick={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 setIrmButtonRect(rect);
@@ -681,7 +660,7 @@ export const InCallBar: React.FC = () => {
                 setIrmSearchQuery('');
               }}
             >
-              <Users size={13} /> {isIrm ? 'Connect Agent' : 'Connect IRM'}
+              <Users size={13} /> Connect IRM
             </button>
 
             {irmMenuOpen && irmButtonRect && ReactDOM.createPortal(
@@ -704,7 +683,7 @@ export const InCallBar: React.FC = () => {
                 <input
                   type="text"
                   autoFocus
-                  placeholder={isIrm ? 'Search agent by name...' : 'Search IRM by name...'}
+                  placeholder="Search IRM by name..."
                   value={irmSearchQuery}
                   onChange={e => setIrmSearchQuery(e.target.value)}
                   style={{
@@ -721,17 +700,17 @@ export const InCallBar: React.FC = () => {
                   }}
                 />
 
-                {filteredConnectOptions.length === 0 && (
+                {filteredIrms.length === 0 && (
                   <div style={{ padding: '8px', fontSize: 12, color: '#64748b', textAlign: 'center' }}>
-                    {isIrm ? 'No agent found' : 'No IRM found'}
+                    No IRM found
                   </div>
                 )}
 
-                {filteredConnectOptions.map(o => (
+                {filteredIrms.map(irm => (
                   <div
-                    key={o.name}
+                    key={irm.name}
                     onClick={() => {
-                      setPendingIrm(o);
+                      setPendingIrm(irm);
                       setIrmMenuOpen(false);
                       setIrmSearchQuery('');
                     }}
@@ -753,26 +732,11 @@ export const InCallBar: React.FC = () => {
                         width: 8,
                         height: 8,
                         borderRadius: '50%',
-                        background: o.status === 'Available' ? '#22c55e' : '#d97706',
+                        background: irm.status === 'Available' ? '#22c55e' : '#d97706',
                       }}
                     />
-                    {o.name}
-                    {isIrm && (o as any).isPrevious && (
-                      <span
-                        style={{
-                          marginLeft: 6,
-                          fontSize: 10,
-                          color: 'var(--primary-600, #38bdf8)',
-                          background: 'rgba(56, 189, 248, 0.12)',
-                          padding: '1px 5px',
-                          borderRadius: 4,
-                          fontWeight: 500,
-                        }}
-                      >
-                        Previously handled
-                      </span>
-                    )}
-                    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94a3b8' }}>{o.status}</span>
+                    {irm.name}
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94a3b8' }}>{irm.status}</span>
                   </div>
                 ))}
               </div>,
@@ -817,12 +781,12 @@ export const InCallBar: React.FC = () => {
                     Connect {pendingIrm.name} to this call
                   </div>
                   <label style={{ display: 'block', fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>
-                    {isIrm ? 'Reason for Connecting Agent *' : 'Reason for Consultation *'}
+                    Reason for Consultation *
                   </label>
                   <textarea
                     autoFocus
                     rows={3}
-                    placeholder={isIrm ? 'Enter reason for connecting agent...' : 'Enter reason for consultation...'}
+                    placeholder="Enter reason for consultation..."
                     value={consultationReason}
                     onChange={e => setConsultationReason(e.target.value)}
                     style={{
@@ -1044,25 +1008,20 @@ export const DispositionModal: React.FC = () => {
     const d = new Date();
     d.setDate(d.getDate() + 1);
     const freshTomorrow = d.toISOString().slice(0, 10);
-    const isFollowup = !!lastCallRecord.sourceFollowupId;
-    const isIrmLead = user?.role?.code === 'irm' && lastCallRecord.matchedRecord?.type === 'lead';
-    const defaultDispo: CallDisposition = isIrmLead && !isFollowup ? 'Follow-up Required' : 'Interested';
-    setDisposition(defaultDispo);
+    setDisposition('Interested');
     setNotes('');
     setReason('');
-    setScheduleFollowup(defaultDispo === 'Follow-up Required');
+    setScheduleFollowup(false);
     setFollowupDate(freshTomorrow);
     setFollowupTime(storageService.getCallPreferences().defaultFollowupTime);
     setFollowupPriority('High');
-  }, [lastCallRecord?.id, lastCallRecord?.matchedRecord?.type, lastCallRecord?.sourceFollowupId, user?.role?.code]);
+  }, [lastCallRecord?.id]);
 
   if (!showDispositionModal || !lastCallRecord) return null;
 
-  const isGhlSalesExec = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') && user?.role?.code === 'sales_executive';
+  const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
   // This call was launched from the Follow-ups page (a previously scheduled follow-up task).
   const isFollowupCall = !!lastCallRecord.sourceFollowupId;
-  const isIrm = user?.role?.code === 'irm';
-  const isIrmLeadCall = isIrm && lastCallRecord.matchedRecord?.type === 'lead';
 
   const allDispositions: CallDisposition[] = [
     'Interested',
@@ -1079,19 +1038,11 @@ export const DispositionModal: React.FC = () => {
   // is expected to have reached the contact.
   const FOLLOWUP_CALL_OUTCOMES: CallDisposition[] = ['Interested', 'Follow-up Required', 'Not Interested'];
 
-  // For IRM follow-up calls, outcomes are restricted to Interested and Follow-up Required only.
-  const IRM_FOLLOWUP_CALL_OUTCOMES: CallDisposition[] = ['Interested', 'Follow-up Required'];
-
-  // For IRM calls against Lead records, restrict to Follow-up Required and Converted
-  const IRM_LEAD_OUTCOMES: CallDisposition[] = ['Follow-up Required', 'Converted'];
-
   const dispositions: CallDisposition[] = isFollowupCall
-    ? (isIrm ? IRM_FOLLOWUP_CALL_OUTCOMES : FOLLOWUP_CALL_OUTCOMES)
-    : isIrmLeadCall
-      ? IRM_LEAD_OUTCOMES
-      : isGhlSalesExec
-        ? allDispositions.filter(d => d !== 'Converted')
-        : allDispositions;
+    ? FOLLOWUP_CALL_OUTCOMES
+    : isGhlSalesExec
+      ? allDispositions.filter(d => d !== 'Converted')
+      : allDispositions;
 
   const handleSave = () => {
     // Combine date + time into a proper ISO string so scheduledAt is parseable

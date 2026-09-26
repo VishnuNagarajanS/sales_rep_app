@@ -66,15 +66,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
     )
     : leads;
 
-  // IRM "My Leads" KPI — leads assigned to this IRM that the agent has marked Interested
-  const myInterestedLeads = isIrm
-    ? leads.filter(l =>
-      l.status === 'Interested' &&
-      ((l.assignedAgentId && l.assignedAgentId === user?.id) ||
-        (l.assignedAgentName && l.assignedAgentName === user?.name))
-    )
-    : [];
-
   const scopedDeals = isExec
     ? deals.filter(d =>
       (d.assignedAgentId && d.assignedAgentId === user?.id) ||
@@ -169,9 +160,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
 
   const upcomingConsultations = scopedConsultations.filter(c => c.status === 'Scheduled');
 
-  const myInterestedLeadsThisWeek = myInterestedLeads.filter(l => {
-    if (!l.createdAt) return false;
-    const d = new Date(l.createdAt);
+  const investorsThisWeek = scopedInvestors.filter(inv => {
+    if (!inv.createdAt) return false;
+    const d = new Date(inv.createdAt);
     return !isNaN(d.getTime()) && d.getTime() >= sevenDaysAgo;
   }).length;
 
@@ -208,7 +199,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
     pendingfollowups: isExec ? 'MY PENDING FOLLOW-UPS' : 'PENDING FOLLOW-UPS',
     callslogged: isExec ? 'MY CALLS LOGGED' : 'CALLS LOGGED',
     pipelinevalue: isExec ? 'MY PIPELINE VALUE' : 'PIPELINE VALUE',
-    myLeadsKpi: 'MY LEADS',
+    investorsKpi: 'MY ASSIGNED INVESTORS',
     bannerSubtitle: isIrm
       ? "Here's your high-net-worth investor portfolio, active opportunities, and advisory schedule."
       : isExec
@@ -278,19 +269,19 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
       <div className="dashboard-kpi-grid">
         {isIrm ? (
           <>
-            {/* IRM Card 1: My Leads (Interested leads assigned to this agent) */}
-            <div className="card card-hover dashboard-kpi-card" onClick={() => onNavigate('leads')}>
+            {/* IRM Card 1: Total Investors */}
+            <div className="card card-hover dashboard-kpi-card" onClick={() => onNavigate('investors')}>
               <div className="dashboard-kpi-header">
-                <span className="dashboard-kpi-label">{label.myLeadsKpi}</span>
+                <span className="dashboard-kpi-label">{label.investorsKpi}</span>
                 <div className="dashboard-kpi-icon-box leads">
                   <Users size={18} />
                 </div>
               </div>
               <div className="dashboard-kpi-value">
-                {myInterestedLeads.length}
+                {scopedInvestors.length}
               </div>
               <div className="dashboard-kpi-delta-positive">
-                <ArrowUpRight size={14} /> +{myInterestedLeadsThisWeek} this week
+                <ArrowUpRight size={14} /> +{investorsThisWeek} this week
               </div>
             </div>
 
@@ -500,7 +491,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                     <tr key={inv.id} className="dashboard-table-tbody-tr">
                       <td className="dashboard-table-td">
                         <div className="dashboard-contact-name">{inv.name}</div>
-                        <div className="dashboard-contact-meta">{inv.phone}{isExec ? '' : ` • ${inv.preferredAssetClass || 'Equity & Commercial'}`}</div>
+                        <div className="dashboard-contact-meta">{inv.phone} • {inv.preferredAssetClass || 'Equity & Commercial'}</div>
                       </td>
                       <td className="dashboard-table-td">
                         <StatusChip status={inv.status} size="sm" />

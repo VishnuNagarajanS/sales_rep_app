@@ -34,8 +34,6 @@
 }
 
 .filterbar-select {
-  width: auto;
-  flex-shrink: 0;
   height: 32px;
   font-size: 12px;
   padding-top: 0;
@@ -69,26 +67,7 @@
 .filterbar-date-group {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.filterbar-custom-dates {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  animation: filterbarFadeIn 0.2s ease-in-out;
-}
-
-@keyframes filterbarFadeIn {
-  from {
-    opacity: 0;
-    transform: translateX(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+  gap: 5px;
 }
 
 .filterbar-date-input {
@@ -96,15 +75,12 @@
   font-size: 12px;
   padding-top: 0;
   padding-bottom: 0;
-  padding-left: 8px;
-  padding-right: 8px;
+  padding-left: 10px;
+  padding-right: 10px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-base);
   background-color: var(--bg-surface);
-  color: var(--text-primary);
-  color-scheme: dark;
-  min-width: 125px;
-  cursor: pointer;
+  min-width: 130px;
 }
 
 .filterbar-date-input.active {

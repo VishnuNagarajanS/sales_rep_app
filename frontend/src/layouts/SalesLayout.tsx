@@ -34,17 +34,7 @@ export const SalesLayout: React.FC<SalesLayoutProps> = ({
         <TopBar onNavigate={onNavigate} onOpenQuickCreate={onOpenQuickCreate} />
 
         {/* Dynamic Page Content */}
-        <main
-          className={`page-scrollable ${
-            currentRoute === 'chat'
-              ? 'page-chat-layout'
-              : currentRoute === 'assigned-leads'
-              ? 'page-static-layout'
-              : ''
-          }`}
-        >
-          {children}
-        </main>
+        <main className={`page-scrollable ${currentRoute === 'chat' ? 'page-chat-layout' : ''}`}>{children}</main>
       </div>
 
       {/* Global Persistent Call Surfaces (Section 3.3 & 7.6) */}

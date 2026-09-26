@@ -36,7 +36,6 @@ interface ConsultationForm {
   status: Consultation['status'];
   agenda: string;
   outcomeNotes: string;
-  referredByAgentName: string;
 }
 
 const BLANK_FORM: ConsultationForm = {
@@ -49,7 +48,6 @@ const BLANK_FORM: ConsultationForm = {
   status: 'Scheduled',
   agenda: '',
   outcomeNotes: '',
-  referredByAgentName: '',
 };
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -67,7 +65,6 @@ export const ConsultationsPage: React.FC = () => {
 
   // ── Filters ───────────────────────────────────────────────────────────────
   const [consultantFilter, setConsultantFilter] = useState('All');
-  const [agentFilter, setAgentFilter] = useState('All');
 
   // ── Create / Edit / Reschedule Modal ──────────────────────────────────────
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -160,19 +157,12 @@ export const ConsultationsPage: React.FC = () => {
   const consultantOptions = Array.from(
     new Set(latestByInvestor.map(c => c.consultantName)),
   )
-    .filter((name): name is string => Boolean(name))
-    .map(name => ({ value: name, label: name }));
-
-  const agentOptions = Array.from(
-    new Set(latestByInvestor.map(c => c.referredByAgentName)),
-  )
-    .filter((name): name is string => Boolean(name))
+    .filter(Boolean)
     .map(name => ({ value: name, label: name }));
 
   // ── Filtered list (operates on deduplicated latestByInvestor) ─────────────
   const filteredConsultations = latestByInvestor.filter(c => {
     if (consultantFilter !== 'All' && c.consultantName !== consultantFilter) return false;
-    if (agentFilter !== 'All' && c.referredByAgentName !== agentFilter) return false;
     return true;
   });
 
@@ -186,7 +176,6 @@ export const ConsultationsPage: React.FC = () => {
       agenda: 'Commercial REIT yield analysis & pass-through taxation discussion.',
       consultantId: user?.id ?? '',
       consultantName: user?.name ?? 'Advisor',
-      referredByAgentName: user?.role?.code === 'sales_executive' ? (user?.name ?? '') : '',
     });
     setFormErrors({});
     setIsModalOpen(true);
@@ -205,7 +194,6 @@ export const ConsultationsPage: React.FC = () => {
       status: 'Rescheduled',
       agenda: c.agenda || '',
       outcomeNotes: c.outcomeNotes || '',
-      referredByAgentName: c.referredByAgentName || '',
     });
     setFormErrors({});
     setIsModalOpen(true);
@@ -238,17 +226,16 @@ export const ConsultationsPage: React.FC = () => {
     const isEdit = !!editingConsultation;
     const cons: Consultation = {
       id: editingConsultation ? editingConsultation.id : `cns-${Date.now()}`,
-      companyId: tenant?.id || 't-ghl-01',
+      companyId: tenant?.id || '',
       investorId: form.investorId,
       investorName: form.investorName,
       investorPhone: form.investorPhone,
       scheduledAt: form.scheduledAt.trim(),
-      consultantId: form.consultantId.trim() || (user?.id ?? 'usr-admin'),
+      consultantId: form.consultantId.trim() || (user?.id ?? ''),
       consultantName: form.consultantName.trim() || (user?.name ?? 'Advisor'),
       status: form.status,
       agenda: form.agenda.trim(),
       outcomeNotes: form.outcomeNotes.trim() || undefined,
-      referredByAgentName: form.referredByAgentName.trim() || undefined,
     };
 
     storageService.saveConsultation(cons);
@@ -283,7 +270,7 @@ export const ConsultationsPage: React.FC = () => {
       key: 'scheduledAt',
       header: 'Session Slot',
       sortable: true,
-      width: '16%',
+      width: '18%',
       render: c => (
         <div>
           <div className="consultation-slot-title">{c.scheduledAt}</div>
@@ -293,7 +280,7 @@ export const ConsultationsPage: React.FC = () => {
     },
     {
       key: 'investorName',
-      header: 'Customer Profile',
+      header: 'Investor Profile',
       sortable: true,
       width: '18%',
       render: c => (
@@ -304,19 +291,9 @@ export const ConsultationsPage: React.FC = () => {
       ),
     },
     {
-      key: 'referredByAgentName',
-      header: 'Referred By (Sales Agent)',
-      width: '18%',
-      render: c => (
-        <span className="consultation-advisor-name">
-          {c.referredByAgentName || '—'}
-        </span>
-      ),
-    },
-    {
       key: 'agenda',
       header: 'Reason for Consultation',
-      width: '26%',
+      width: '38%',
       render: c => (
         <div>
           <span className="consultation-agenda-text">{c.agenda}</span>
@@ -346,7 +323,7 @@ export const ConsultationsPage: React.FC = () => {
   // ── Row actions ───────────────────────────────────────────────────────────
   const rowActions: RowAction<Consultation>[] = [
     {
-      label: 'Call Customer',
+      label: 'Call Investor',
       icon: <Phone size={14} color="#059669" style={{ marginRight: 6 }} />,
       onClick: c => initiateCall(c.investorName, c.investorPhone, 'customer', c.investorId),
     },
@@ -400,17 +377,9 @@ export const ConsultationsPage: React.FC = () => {
                 onChange: setConsultantFilter,
                 options: consultantOptions,
               },
-              {
-                key: 'agent',
-                label: 'Sales Agent',
-                value: agentFilter,
-                onChange: setAgentFilter,
-                options: agentOptions,
-              },
             ]}
             onClearAll={() => {
               setConsultantFilter('All');
-              setAgentFilter('All');
             }}
           />
         }
@@ -569,18 +538,6 @@ export const ConsultationsPage: React.FC = () => {
                 ))}
               </select>
             </div>
-          </div>
-
-          {/* Referred By */}
-          <div className="form-group">
-            <label className="form-label">Referred By (Sales Agent)</label>
-            <input
-              id="consultation-form-referredby"
-              className="form-input"
-              placeholder="e.g. Suresh Kumar"
-              value={form.referredByAgentName || ''}
-              onChange={e => setField('referredByAgentName', e.target.value)}
-            />
           </div>
 
           {/* Discussion Agenda */}

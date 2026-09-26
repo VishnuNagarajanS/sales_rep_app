@@ -1,5 +1,12 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
+export interface ApiResponse<T = any> {
+  success: boolean;
+  message?: string;
+  data?: T;
+  errors?: string[];
+}
+
 class ApiClient {
   private getHeaders(): HeadersInit {
     const token = sessionStorage.getItem('nexus_auth_token') || localStorage.getItem('nexus_auth_token');

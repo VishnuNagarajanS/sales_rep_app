@@ -11,7 +11,6 @@ import {
 } from 'lucide-react';
 import { CallDisposition, Consultation } from '../../types';
 import { storageService } from '../../services/storageService';
-import { useAuth } from '../../context/AuthContext';
 import { StatusChip } from './StatusChip';
 
 interface LeadDetailDrawerContentProps {
@@ -42,8 +41,6 @@ interface LeadDetailDrawerContentProps {
   consultationHistory?: Consultation[];
   /** Optional — when true, strips system-generated disposition lines from Notes & Requirements */
   hideAutoNotes?: boolean;
-  /** Optional — when provided, renders only the specified sections */
-  sectionsOnly?: ('callRecordings' | 'summary' | 'details' | 'consultations')[];
 }
 
 export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = ({
@@ -56,11 +53,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   consultationReason,
   consultationHistory,
   hideAutoNotes = false,
-  sectionsOnly,
 }) => {
-  const { user } = useAuth();
-  const isSalesExecutive = user?.role?.code === 'sales_executive';
-
   const [expandedTranscripts, setExpandedTranscripts] = useState<Record<string, boolean>>({});
   const [callTab, setCallTab] = useState<'agent' | 'irm'>('agent');
   const [isPreviousConsultationsOpen, setIsPreviousConsultationsOpen] = useState(true);
@@ -100,16 +93,8 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
     return true;
   });
 
-  const isIrmCall = (c: any) =>
-    (c.notes || '').startsWith('Connected to IRM:') ||
-    (c.agentId || '').toLowerCase().includes('irm') ||
-    (c.agentName || '').toLowerCase().includes('irm') ||
-    ['Rohan Varma', 'Arun Kumar', 'Ananya Mehta', 'Rohan Mehta', 'Priya Nair', 'Karthik Sundaram'].some(n =>
-      (c.agentName || '').toLowerCase().includes(n.toLowerCase())
-    );
-
-  const agentCalls = selectedCalls.filter(c => !isIrmCall(c));
-  const irmCalls = selectedCalls.filter(c => isIrmCall(c));
+  const agentCalls = selectedCalls.filter(c => !(c.notes || '').startsWith('Connected to IRM:'));
+  const irmCalls = selectedCalls.filter(c => (c.notes || '').startsWith('Connected to IRM:'));
   const tabCalls = callTab === 'agent' ? agentCalls : irmCalls;
 
   // ── Active follow-up count ───────────────────────────────────────────────────
@@ -172,36 +157,33 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
       {/* ── Activity Summary Badge ───────────────────────────────────────────── */}
-      {(!sectionsOnly || sectionsOnly.includes('summary')) && (
-        <div
-          style={{
-            backgroundColor: 'var(--bg-surface-hover)',
-            border: '1px solid var(--border-base)',
-            borderRadius: 'var(--radius-lg)',
-            padding: '14px 18px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-          }}
-        >
-          <div>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700 }}>
-              Total Activity Summary
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 800, marginTop: 2, color: 'var(--primary-600)' }}>
-              {selectedCalls.length} {selectedCalls.length === 1 ? 'Call Recorded' : 'Calls Recorded'}
-              {activeFollowupCount > 0 && ` • ${activeFollowupCount} Active Follow-up${activeFollowupCount > 1 ? 's' : ''}`}
-            </div>
+      <div
+        style={{
+          backgroundColor: 'var(--bg-surface-hover)',
+          border: '1px solid var(--border-base)',
+          borderRadius: 'var(--radius-lg)',
+          padding: '14px 18px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700 }}>
+            Total Activity Summary
           </div>
-          <button className="btn btn-call btn-sm" onClick={onCall}>
-            <Phone size={13} /> Call Now
-          </button>
+          <div style={{ fontSize: 16, fontWeight: 800, marginTop: 2, color: 'var(--primary-600)' }}>
+            {selectedCalls.length} {selectedCalls.length === 1 ? 'Call Recorded' : 'Calls Recorded'}
+            {activeFollowupCount > 0 && ` • ${activeFollowupCount} Active Follow-up${activeFollowupCount > 1 ? 's' : ''}`}
+          </div>
         </div>
-      )}
+        <button className="btn btn-call btn-sm" onClick={onCall}>
+          <Phone size={13} /> Call Now
+        </button>
+      </div>
 
       {/* ── Lead / Investor Details ──────────────────────────────────────────── */}
-      {(!sectionsOnly || sectionsOnly.includes('details')) && (
-        <div className="card">
+      <div className="card">
         <h4 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
           <Building2 size={16} color="var(--primary-600)" /> Lead / Investor Details
         </h4>
@@ -345,7 +327,6 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                 .map(def => {
                   const key = def.fieldKey || def.id;
                   if (key === 'dispositionReason' || key === 'customerNotes') return null;
-                  if (isSalesExecutive && key === 'preferredAssetClass') return null;
                   const val = selectedLead.customFields?.[key];
                   if (val === undefined || val === null || val === '') return null;
                   return { id: def.id, label: def.label || key.replace(/([A-Z])/g, ' $1'), value: String(val) };
@@ -385,10 +366,9 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
           </div>
         )}
       </div>
-      )}
 
       {/* ── Previous Consultations ─────────────────────────────────────── */}
-      {(!sectionsOnly || sectionsOnly.includes('consultations')) && consultationHistory && consultationHistory.length > 0 && (
+      {consultationHistory && consultationHistory.length > 0 && (
         <div className="card">
           <div
             style={{
@@ -489,8 +469,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
       )}
 
       {/* ── Call Recordings ────────────────────────────────────────────── */}
-      {(!sectionsOnly || sectionsOnly.includes('callRecordings')) && (
-        <div className="card">
+      <div className="card">
         <h4 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
           <Phone size={16} color="var(--primary-600)" /> Call Recordings
         </h4>
@@ -547,7 +526,6 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                       </span>
                       <span style={{ fontSize: 12, fontWeight: 600 }}>{c.timestamp}</span>
                       <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>• {formatDuration(c.duration)}</span>
-                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>• Agent: <strong>{c.agentName || 'Unknown'}</strong></span>
                     </div>
                     <StatusChip status={c.disposition} size="sm" />
                   </div>
@@ -615,7 +593,6 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
           </div>
         )}
       </div>
-      )}
     </div>
   );
 };
