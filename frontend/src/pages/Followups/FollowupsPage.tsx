@@ -19,12 +19,7 @@ import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { Drawer } from '../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
-import {
-  FollowupRoleFilter,
-  SALES_EXECUTIVE_USERS,
-  IRM_USERS,
-} from '../../mock_data/adminFollowupsData';
-import { DateRangePreset } from '../../mock_data/adminKanbanData';
+import { FollowupRoleFilter, DateRangePreset } from '../../types/kanban';
 import './FollowupsPage.css';
 import '../Leads/LeadsPage.css';
 
@@ -90,8 +85,11 @@ export const FollowupsPage: React.FC = () => {
   };
 
   const personOptions = useMemo(() => {
-    return selectedRole === 'sales_executive' ? SALES_EXECUTIVE_USERS : IRM_USERS;
-  }, [selectedRole]);
+    if (selectedRole === 'sales_executive') {
+      return storageService.getAgents(tenant?.id);
+    }
+    return storageService.getIrms(tenant?.id);
+  }, [selectedRole, tenant?.id]);
 
   const loadData = () => {
     if (tenant?.slug === 'ghl') {
@@ -430,9 +428,10 @@ export const FollowupsPage: React.FC = () => {
       if (f.assignedRole.toLowerCase().includes('irm')) return 'IRM';
       return 'Sales Executive';
     }
+    const irmsList = storageService.getIrms(tenant?.id);
     if (
-      IRM_USERS.some(
-        u =>
+      irmsList.some(
+        (u: any) =>
           u.name.toLowerCase() === (f.assignedAgentName || '').toLowerCase() ||
           u.id === f.assignedAgentId
       )
@@ -685,7 +684,7 @@ export const FollowupsPage: React.FC = () => {
                 <option value="All">
                   {selectedRole === 'sales_executive' ? 'All Sales Executives' : 'All IRMs'}
                 </option>
-                {personOptions.map(p => (
+                {personOptions.map((p: any) => (
                   <option key={p.id} value={p.name}>
                     {p.name}
                   </option>
@@ -950,29 +949,31 @@ export const FollowupsPage: React.FC = () => {
           width={720}
           footer={
             drawerFollowup && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 10 }}>
-                {/* Red marked area on the left: Ready for KYC button */}
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{
-                    backgroundColor: '#7c3aed',
-                    borderColor: '#7c3aed',
-                    color: '#ffffff',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    fontWeight: 600,
-                    padding: '8px 16px',
-                  }}
-                  onClick={handleMoveToKyc}
-                  title="Move customer to KYC module and mark follow-up completed"
-                >
-                  <ShieldCheck size={16} /> Ready for KYC
-                </button>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: isExec ? 'flex-end' : 'space-between', width: '100%', gap: 10 }}>
+                {/* Ready for KYC button (Hidden for Sales Executive, available for IRM / Admins) */}
+                {!isExec && (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{
+                      backgroundColor: '#7c3aed',
+                      borderColor: '#7c3aed',
+                      color: '#ffffff',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontWeight: 600,
+                      padding: '8px 16px',
+                    }}
+                    onClick={handleMoveToKyc}
+                    title="Move customer to KYC module and mark follow-up completed"
+                  >
+                    <ShieldCheck size={16} /> Ready for KYC
+                  </button>
+                )}
 
                 {/* Right side buttons */}
-                <div style={{ display: 'flex', gap: 10 }}>
+                <div style={{ display: 'flex', gap: 10, marginLeft: isExec ? 'auto' : undefined }}>
                   <button
                     className="btn btn-secondary"
                     onClick={() => {
@@ -1262,122 +1263,124 @@ export const FollowupsPage: React.FC = () => {
                 </div>
 
                 {/* ── GHL India Ventures Custom Attributes (with Set by IRM Checkbox) ── */}
-                <div className="card lead-custom-card">
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                    <h4 className="lead-custom-title" style={{ margin: 0 }}>
-                      {tenant?.name || 'GHL India Ventures'} Custom Attributes
-                    </h4>
-                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', fontWeight: 600, color: 'var(--text-primary)' }}>
-                      <input
-                        type="checkbox"
-                        checked={isPrefConfirmed || isEditingPref}
-                        onChange={e => handleTogglePrefCheckbox(e.target.checked, matchingLead, matchingCustomer)}
-                        style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--primary-600)' }}
-                      />
-                      <span>Set by IRM</span>
-                    </label>
-                  </div>
+                {!isExec && (
+                  <div className="card lead-custom-card">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                      <h4 className="lead-custom-title" style={{ margin: 0 }}>
+                        {tenant?.name || 'GHL India Ventures'} Custom Attributes
+                      </h4>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', fontWeight: 600, color: 'var(--text-primary)' }}>
+                        <input
+                          type="checkbox"
+                          checked={isPrefConfirmed || isEditingPref}
+                          onChange={e => handleTogglePrefCheckbox(e.target.checked, matchingLead, matchingCustomer)}
+                          style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--primary-600)' }}
+                        />
+                        <span>Set by IRM</span>
+                      </label>
+                    </div>
 
-                  {isEditingPref ? (
-                    <div>
-                      <div className="lead-detail-grid" style={{ gap: 14 }}>
-                        <div>
-                          <label className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
-                            Preferred Asset Class:
-                          </label>
-                          <select
-                            className="form-select"
-                            value={prefAssetClass}
-                            onChange={e => setPrefAssetClass(e.target.value)}
-                            style={{ width: '100%', fontSize: 13, height: 36 }}
-                          >
-                            <option value="CO-AIF">CO-AIF</option>
-                            <option value="AIF">AIF</option>
-                          </select>
+                    {isEditingPref ? (
+                      <div>
+                        <div className="lead-detail-grid" style={{ gap: 14 }}>
+                          <div>
+                            <label className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                              Preferred Asset Class:
+                            </label>
+                            <select
+                              className="form-select"
+                              value={prefAssetClass}
+                              onChange={e => setPrefAssetClass(e.target.value)}
+                              style={{ width: '100%', fontSize: 13, height: 36 }}
+                            >
+                              <option value="CO-AIF">CO-AIF</option>
+                              <option value="AIF">AIF</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                              Investment Horizon:
+                            </label>
+                            <select
+                              className="form-select"
+                              value={prefHorizon}
+                              onChange={e => setPrefHorizon(e.target.value)}
+                              style={{ width: '100%', fontSize: 13, height: 36 }}
+                            >
+                              <option value="1-2 Years">1-2 Years</option>
+                              <option value="3-5 Years">3-5 Years</option>
+                              <option value="5-7 Years">5-7 Years</option>
+                              <option value="7-10 Years">7-10 Years</option>
+                              <option value="10+ Years">10+ Years</option>
+                            </select>
+                          </div>
                         </div>
-                        <div>
-                          <label className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
-                            Investment Horizon:
-                          </label>
-                          <select
-                            className="form-select"
-                            value={prefHorizon}
-                            onChange={e => setPrefHorizon(e.target.value)}
-                            style={{ width: '100%', fontSize: 13, height: 36 }}
+
+                        <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                          {isPrefConfirmed && (
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => setIsEditingPref(false)}
+                            >
+                              Cancel
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                            onClick={() => handleSavePreferences(matchingLead, matchingCustomer)}
                           >
-                            <option value="1-2 Years">1-2 Years</option>
-                            <option value="3-5 Years">3-5 Years</option>
-                            <option value="5-7 Years">5-7 Years</option>
-                            <option value="7-10 Years">7-10 Years</option>
-                            <option value="10+ Years">10+ Years</option>
-                          </select>
+                            <CheckCircle size={14} /> Confirm Preferences
+                          </button>
                         </div>
                       </div>
-
-                      <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                        {isPrefConfirmed && (
+                    ) : isPrefConfirmed ? (
+                      <div>
+                        <div className="lead-detail-grid">
+                          <div>
+                            <span className="lead-custom-label">Preferred Asset Class:</span>
+                            <div className="lead-custom-value">{prefAssetClass}</div>
+                          </div>
+                          <div>
+                            <span className="lead-custom-label">Investment Horizon:</span>
+                            <div className="lead-custom-value">{prefHorizon}</div>
+                          </div>
+                        </div>
+                        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
+                            <CheckCircle size={13} /> Confirmed by IRM — Visible in other modules
+                          </div>
                           <button
                             type="button"
                             className="btn btn-secondary btn-sm"
-                            onClick={() => setIsEditingPref(false)}
+                            style={{ fontSize: 11, padding: '3px 8px', height: 'auto' }}
+                            onClick={() => setIsEditingPref(true)}
                           >
-                            Cancel
+                            Edit
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-sm"
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                          onClick={() => handleSavePreferences(matchingLead, matchingCustomer)}
-                        >
-                          <CheckCircle size={14} /> Confirm Preferences
-                        </button>
-                      </div>
-                    </div>
-                  ) : isPrefConfirmed ? (
-                    <div>
-                      <div className="lead-detail-grid">
-                        <div>
-                          <span className="lead-custom-label">Preferred Asset Class:</span>
-                          <div className="lead-custom-value">{prefAssetClass}</div>
-                        </div>
-                        <div>
-                          <span className="lead-custom-label">Investment Horizon:</span>
-                          <div className="lead-custom-value">{prefHorizon}</div>
                         </div>
                       </div>
-                      <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
-                          <CheckCircle size={13} /> Confirmed by IRM — Visible in other modules
-                        </div>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          style={{ fontSize: 11, padding: '3px 8px', height: 'auto' }}
-                          onClick={() => setIsEditingPref(true)}
-                        >
-                          Edit
-                        </button>
+                    ) : (
+                      <div style={{ padding: '12px 14px', background: 'var(--bg-surface)', borderRadius: 6, fontSize: 12, color: 'var(--text-muted)' }}>
+                        Preferred Asset Class and Investment Horizon have not been set by IRM yet. Check <strong>"Set by IRM"</strong> above to configure and confirm them.
                       </div>
-                    </div>
-                  ) : (
-                    <div style={{ padding: '12px 14px', background: 'var(--bg-surface)', borderRadius: 6, fontSize: 12, color: 'var(--text-muted)' }}>
-                      Preferred Asset Class and Investment Horizon have not been set by IRM yet. Check <strong>"Set by IRM"</strong> above to configure and confirm them.
-                    </div>
-                  )}
+                    )}
 
-                  {/* Any other custom attributes from intake */}
-                  {customFieldRows.length > 0 && (
-                    <div className="lead-detail-grid" style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-base)' }}>
-                      {customFieldRows.map(item => (
-                        <div key={item!.id}>
-                          <span className="lead-custom-label">{item!.label}:</span>
-                          <div className="lead-custom-value">{item!.value}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                    {/* Any other custom attributes from intake */}
+                    {customFieldRows.length > 0 && (
+                      <div className="lead-detail-grid" style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-base)' }}>
+                        {customFieldRows.map(item => (
+                          <div key={item!.id}>
+                            <span className="lead-custom-label">{item!.label}:</span>
+                            <div className="lead-custom-value">{item!.value}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* ── Message from User ── */}
                 <div className="card lead-custom-card">

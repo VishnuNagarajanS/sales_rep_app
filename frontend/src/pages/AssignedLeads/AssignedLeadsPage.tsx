@@ -13,7 +13,6 @@ import { DataTable, Column, RowAction } from '../../components/common/DataTable'
 import { FilterBar } from '../../components/common/FilterBar';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
-import { MOCK_AGENTS } from '../../mock_data/mockData';
 import './AssignedLeadsPage.css';
 
 export const AssignedLeadsPage: React.FC = () => {
@@ -159,9 +158,9 @@ export const AssignedLeadsPage: React.FC = () => {
     setIsEditDrawerOpen(true);
   };
 
-  // Populate agent options from MOCK_AGENTS, ensuring the current assigned agent is included
+  // Populate agent options from storageService.getAgents(), ensuring the current assigned agent is included
   const agentOptions = useMemo<Array<{ id: string | number; name: string }>>(() => {
-    const list: Array<{ id: string | number; name: string }> = [...MOCK_AGENTS];
+    const list: Array<{ id: string | number; name: string }> = [...storageService.getAgents(tenant?.id)];
     if (formData.assignedAgentName && !list.some(a => a.name.toLowerCase() === formData.assignedAgentName?.toLowerCase())) {
       list.unshift({ id: 'current', name: formData.assignedAgentName });
     }

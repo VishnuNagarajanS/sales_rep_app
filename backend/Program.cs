@@ -72,6 +72,13 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
+// Ensure database and seed data are initialized
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<backend.Data.ApplicationDbContext>();
+    db.Database.EnsureCreated();
+}
+
 // Global Exception Handling Middleware
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 

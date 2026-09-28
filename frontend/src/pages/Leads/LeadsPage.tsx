@@ -31,14 +31,12 @@ const CAPACITY_OPTIONS = [
   'Not sure yet — help me decide'
 ];
 
-import { MOCK_AGENTS } from '../../mock_data/mockData';
-export { MOCK_AGENTS };
-
 export const LeadsPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
 
   const [leads, setLeads] = useState<Lead[]>([]);
+  const agentsList = useMemo(() => storageService.getAgents(tenant?.id), [tenant?.id]);
 
   const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk'];
 
@@ -156,13 +154,13 @@ export const LeadsPage: React.FC = () => {
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [assignStep, setAssignStep] = useState<'pick-agent' | 'confirm'>('pick-agent');
-  const [assignSelectedAgent, setAssignSelectedAgent] = useState<typeof MOCK_AGENTS[0] | null>(null);
+  const [assignSelectedAgent, setAssignSelectedAgent] = useState<{ id: number | string; name: string } | null>(null);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
-  const [aiDistribution, setAiDistribution] = useState<Record<number, Lead[]>>({});
+  const [aiDistribution, setAiDistribution] = useState<Record<string, Lead[]>>({});
   const [isAiEditMode, setIsAiEditMode] = useState(false);
   const [assignedLeadIds, setAssignedLeadIds] = useState<Set<string>>(new Set());
   const [agentAssignments, setAgentAssignments] = useState<
-    Array<{ leadId: string; leadName: string; agentId: number; agentName: string; assignedAt: string }>
+    Array<{ leadId: string; leadName: string; agentId: number | string; agentName: string; assignedAt: string }>
   >(() => {
     try {
       const saved = sessionStorage.getItem('ghl_mock_agent_assignments');
@@ -327,7 +325,7 @@ export const LeadsPage: React.FC = () => {
   const handleManualAssignConfirm = () => {
     if (!assignSelectedAgent) return;
     const newAssigned = new Set(assignedLeadIds);
-    const newRecords: Array<{ leadId: string; leadName: string; agentId: number; agentName: string; assignedAt: string }> = [];
+    const newRecords: Array<{ leadId: string; leadName: string; agentId: number | string; agentName: string; assignedAt: string }> = [];
     selectedLeadIds.forEach(id => {
       newAssigned.add(id);
       const lead = leads.find(l => l.id === id);
@@ -357,46 +355,47 @@ export const LeadsPage: React.FC = () => {
 
   const handleOpenAiSuggestion = () => {
     const pool = filteredLeads;
-    const dist: Record<number, Lead[]> = {};
-    MOCK_AGENTS.forEach(a => { dist[a.id] = []; });
-    pool.forEach((lead, i) => {
-      const agent = MOCK_AGENTS[i % MOCK_AGENTS.length];
-      dist[agent.id].push(lead);
-    });
+    const dist: Record<string, Lead[]> = {};
+    agentsList.forEach(a => { dist[String(a.id)] = []; });
+    if (agentsList.length > 0) {
+      pool.forEach((lead, i) => {
+        const agent = agentsList[i % agentsList.length];
+        dist[String(agent.id)].push(lead);
+      });
+    }
     setAiDistribution(dist);
     setIsAiEditMode(false);
     setIsAiModalOpen(true);
   };
 
-  const handleAiMoveLead = (leadId: string, fromAgentId: number, direction: 'left' | 'right') => {
-    const agentIds = MOCK_AGENTS.map(a => a.id);
-    const fromIdx = agentIds.indexOf(fromAgentId);
+  const handleAiMoveLead = (leadId: string, fromAgentId: number | string, direction: 'left' | 'right') => {
+    const agentIds = agentsList.map(a => String(a.id));
+    const fromIdx = agentIds.indexOf(String(fromAgentId));
     const toIdx = direction === 'left' ? fromIdx - 1 : fromIdx + 1;
     if (toIdx < 0 || toIdx >= agentIds.length) return;
     const toAgentId = agentIds[toIdx];
     setAiDistribution(prev => {
-      const fromLeads = [...(prev[fromAgentId] || [])].filter(l => l.id !== leadId);
-      const movedLead = (prev[fromAgentId] || []).find(l => l.id === leadId);
+      const fromLeads = [...(prev[String(fromAgentId)] || [])].filter(l => l.id !== leadId);
+      const movedLead = (prev[String(fromAgentId)] || []).find(l => l.id === leadId);
       if (!movedLead) return prev;
       const toLeads = [...(prev[toAgentId] || []), movedLead];
-      return { ...prev, [fromAgentId]: fromLeads, [toAgentId]: toLeads };
+      return { ...prev, [String(fromAgentId)]: fromLeads, [toAgentId]: toLeads };
     });
   };
 
   const handleAiConfirm = () => {
     const newAssigned = new Set(assignedLeadIds);
-    const newRecords: Array<{ leadId: string; leadName: string; agentId: number; agentName: string; assignedAt: string }> = [];
+    const newRecords: Array<{ leadId: string; leadName: string; agentId: number | string; agentName: string; assignedAt: string }> = [];
     let count = 0;
     Object.entries(aiDistribution).forEach(([agentIdStr, agentLeads]) => {
-      const agentId = Number(agentIdStr);
-      const agent = MOCK_AGENTS.find(a => a.id === agentId);
+      const agent = agentsList.find(a => String(a.id) === agentIdStr);
       agentLeads.forEach(l => {
         newAssigned.add(l.id);
         count++;
         newRecords.push({
           leadId: l.id,
           leadName: l.name,
-          agentId,
+          agentId: agent ? agent.id : agentIdStr,
           agentName: agent?.name || 'Agent',
           assignedAt: new Date().toISOString(),
         });
@@ -1629,7 +1628,7 @@ export const LeadsPage: React.FC = () => {
               <>
                 <p className="assign-modal-sub">Select an agent to assign the {selectedLeadIds.size} selected lead{selectedLeadIds.size !== 1 ? 's' : ''} to:</p>
                 <div className="assign-agent-list">
-                  {MOCK_AGENTS.map(agent => (
+                  {agentsList.map(agent => (
                     <label key={agent.id} className={`assign-agent-row${assignSelectedAgent?.id === agent.id ? ' selected' : ''}`}>
                       <input
                         type="radio"
@@ -1682,7 +1681,7 @@ export const LeadsPage: React.FC = () => {
               <div>
                 <h3 className="assign-modal-title">✦ AI Suggestion — Round Robin</h3>
                 <p className="assign-modal-sub" style={{ margin: '2px 0 0' }}>
-                  {Object.values(aiDistribution).flat().length} leads distributed across {MOCK_AGENTS.length} agents
+                  {Object.values(aiDistribution).flat().length} leads distributed across {agentsList.length} agents
                 </p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1697,8 +1696,8 @@ export const LeadsPage: React.FC = () => {
             </div>
 
             <div className="ai-dist-grid">
-              {MOCK_AGENTS.map((agent, agentIdx) => {
-                const agentLeads = aiDistribution[agent.id] || [];
+              {agentsList.map((agent, agentIdx) => {
+                const agentLeads = aiDistribution[String(agent.id)] || [];
                 return (
                   <div key={agent.id} className="ai-dist-col">
                     <div className="ai-dist-col-header">
@@ -1724,7 +1723,7 @@ export const LeadsPage: React.FC = () => {
                                 >◀</button>
                                 <button
                                   className="ai-move-btn"
-                                  disabled={agentIdx === MOCK_AGENTS.length - 1}
+                                  disabled={agentIdx === agentsList.length - 1}
                                   onClick={() => handleAiMoveLead(lead.id, agent.id, 'right')}
                                   title="Move right"
                                 >▶</button>

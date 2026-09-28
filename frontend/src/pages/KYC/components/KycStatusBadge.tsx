@@ -93,19 +93,8 @@ export const KycStatusBadge: React.FC<KycStatusBadgeProps> = ({ status }) => {
   }
 };
 
-// TODO(logic): In production, fetch this live customer KYC status from the backend/webhook.
+import { getCustomerKycStatus as getKycStatusFromService } from '../../../services/kycService';
+
 export const getMockCustomerKycStatus = (dealId: string, currentStatus?: string): CustomerKycStatus => {
-  if (currentStatus === 'completed') return 'Verified';
-  
-  // Deterministic mock status generation based on dealId so each row shows a realistic variation
-  const charCode = (dealId || '').split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-  const statuses: CustomerKycStatus[] = [
-    'Link Sent',
-    'In Progress',
-    'Submitted',
-    'Under Verification',
-    'Needs Correction',
-    'Pending',
-  ];
-  return statuses[charCode % statuses.length];
+  return getKycStatusFromService(dealId, currentStatus);
 };

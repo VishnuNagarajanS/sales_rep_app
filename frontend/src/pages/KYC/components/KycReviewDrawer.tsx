@@ -19,6 +19,7 @@ import {
   Send,
 } from 'lucide-react';
 import { Deal } from '../../../types';
+import { getKycReviewData } from '../../../services/kycService';
 import './KycLinkComponents.css';
 
 interface KycReviewDrawerProps {
@@ -41,85 +42,57 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
 
   if (!isOpen || !deal) return null;
 
-  // TODO(logic): In production, fetch this review submission data from backend endpoint /api/kyc/submissions/:dealId
-  const mockReviewData = {
-    refId: `GHL-KYC-${deal.id.slice(-6).toUpperCase()}-2026`,
-    submissionDate: '24 Sep 2026, 04:32 PM',
-    ipAddress: '49.207.214.18 (Bengaluru, KA)',
-    userAgent: 'Mobile Safari • iOS 18.2 (iPhone 16 Pro)',
-
+  const mockReviewData = getKycReviewData(deal) || {
+    refId: `KYC-${(deal.id || '').slice(-6).toUpperCase()}`,
+    submissionDate: 'Pending Submission',
+    ipAddress: 'N/A',
+    userAgent: 'N/A',
     basicDetails: {
       investorName: deal.customerName,
-      phone: deal.phone || '+91 98450 12345',
-      email: deal.email || 'investor@example.com',
-      gender: 'Male',
-      investorType: deal.investorType || 'Individual / HNI',
+      phone: deal.phone || '',
+      email: deal.email || '',
+      gender: 'N/A',
+      investorType: deal.investorType || 'Individual',
       residentType: 'Resident Indian',
-      occupation: 'Business Owner / Private Investor',
+      occupation: 'N/A',
     },
-
     identityDetails: {
-      panNumber: 'ABCDE****F', // Masked per requirements
+      panNumber: 'Not provided',
       nameAsPerPan: deal.customerName.toUpperCase(),
-      aadhaarNumber: 'XXXX XXXX 8921', // Masked per requirements
-      fatherName: 'Late Dr. R. K. ' + deal.customerName.split(' ')[0],
-      dob: '14 May 1984',
-      address: 'Plot 42, Green Glen Layout, Bellandur, Bengaluru, Karnataka - 560103',
-      courierAddress: 'Same as permanent address',
+      aadhaarNumber: 'Not provided',
+      fatherName: 'Not provided',
+      dob: 'Not provided',
+      address: 'Not provided',
+      courierAddress: 'Not provided',
     },
-
     bankDetails: {
       accountHolderName: deal.customerName,
-      bankName: 'HDFC Bank Ltd',
-      accountNumber: '••••••••5678', // Masked to last 4
+      bankName: 'Not provided',
+      accountNumber: 'Not provided',
       accountType: 'Savings Account',
-      ifscCode: 'HDFC0000240',
-      branchName: 'Koramangala 4th Block, Bengaluru',
+      ifscCode: 'Not provided',
+      branchName: 'Not provided',
     },
-
     dematDetails: {
-      hasNoDemat: false,
-      dematAccountNumber: '12081600••••••••',
-      dematDepository: 'CDSL',
-      dematDpId: '12081600',
-      dematClientId: '00349812',
+      hasNoDemat: true,
+      dematAccountNumber: 'Not provided',
+      dematDepository: 'N/A',
+      dematDpId: 'N/A',
+      dematClientId: 'N/A',
     },
-
-    nominees: [
-      {
-        name: 'Sunita ' + (deal.customerName.split(' ')[1] || 'Varma'),
-        relationship: 'Spouse',
-        dob: '22 Aug 1986',
-        allocationPercentage: 100,
-        address: 'Same as investor address',
-      },
-    ],
-
-    documents: [
-      { id: 'doc-1', name: 'PAN_Card_Front_Official.pdf', size: '1.2 MB', verified: true },
-      { id: 'doc-2', name: 'Aadhaar_Offline_XML_EKYC.pdf', size: '2.4 MB', verified: true },
-      { id: 'doc-3', name: 'HDFC_Cancelled_Cheque_Proof.pdf', size: '1.8 MB', verified: true },
-      { id: 'doc-4', name: 'CDSL_Client_Master_Report.pdf', size: '850 KB', verified: true },
-    ],
-
+    nominees: [],
+    documents: [],
     consent: {
-      acceptedAt: '24 Sep 2026, 04:32:15 PM IST',
-      termsVersion: 'v2.4-ghl-sebi-undertaking-2026',
-      ipHash: '49.207.214.18 (Verified GPS Geo-fence: Karnataka, IN)',
+      acceptedAt: 'Pending',
+      termsVersion: 'N/A',
+      ipHash: 'N/A',
     },
-
     liveness: {
-      capturedAt: '24 Sep 2026, 04:31:02 PM',
-      matchScore: '98.4%',
-      livenessStatus: 'Live Person Confirmed (Passive + Active Blink Check Passed)',
+      capturedAt: 'N/A',
+      matchScore: 'N/A',
+      livenessStatus: 'Pending Verification',
     },
-
-    providerVerifications: [
-      { name: 'NSDL PAN Status', status: 'pass', detail: 'Valid & Active (Name 100% Match)' },
-      { name: 'NPCI Bank Penny Drop', status: 'pass', detail: 'Account Active • Name Match 96%' },
-      { name: 'UIDAI Aadhaar eKYC', status: 'pass', detail: 'Digitally Signed XML Verified' },
-      { name: 'AI Face Liveness & Match', status: 'pass', detail: 'Score 98.4% • No spoofing detected' },
-    ],
+    providerVerifications: [],
   };
 
   const handleApprove = () => {

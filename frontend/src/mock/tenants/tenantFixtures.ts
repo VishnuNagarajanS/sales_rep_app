@@ -1,7 +1,7 @@
-import { Tenant } from '../types';
-import { FEATURES } from './features';
+import { Tenant } from '../../types';
+import { FEATURES } from '../../constants/features';
 
-export const DEFAULT_TENANTS: Record<string, Tenant> = {
+export const MOCK_TENANTS: Record<string, Tenant> = {
   ghl: {
     id: 't-ghl-01',
     name: 'GHL India Ventures',
@@ -63,3 +63,5 @@ export const DEFAULT_TENANTS: Record<string, Tenant> = {
     status: 'Active',
   },
 };
+
+export const DEFAULT_MOCK_TENANTS = MOCK_TENANTS;

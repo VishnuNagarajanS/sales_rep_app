@@ -1,6 +1,249 @@
-@backend_HostAddress = http://localhost:5106/swagger
+@host = http://localhost:5106
+@token = 
 
-GET {{backend_HostAddress}}/weatherforecast/
-Accept: application/json
+### 1. Authenticate (Get JWT Token)
+# @name login
+POST {{host}}/api/auth/login
+Content-Type: application/json
 
-###
+{
+  "email": "vikram@ghlindiatrust.com",
+  "password": "Password@123"
+}
+
+### Save Token from login response:
+# Paste the token string from login response into the @token variable above or use:
+# @token = {{login.response.body.data.token}}
+
+### ─────────────────────────────────────────────────────────────
+### 2. IRM Dashboard & KPIs
+### ─────────────────────────────────────────────────────────────
+
+### Get IRM Dashboard Metrics
+GET {{host}}/api/irm/dashboard/metrics
+Authorization: Bearer {{token}}
+
+### ─────────────────────────────────────────────────────────────
+### 3. Investor Management
+### ─────────────────────────────────────────────────────────────
+
+### List All Investors
+GET {{host}}/api/irm/investors
+Authorization: Bearer {{token}}
+
+### Filter Investors by Status
+GET {{host}}/api/irm/investors?status=Lead
+Authorization: Bearer {{token}}
+
+### Create New Investor Lead
+# @name createInvestor
+POST {{host}}/api/irm/investors
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "name": "Rajesh Singhania",
+  "phone": "+91 98200 44556",
+  "email": "rajesh.singhania@apexcapital.in",
+  "investmentCapacity": "₹5 Cr – ₹10 Cr",
+  "preferredAssetClass": "AIF",
+  "riskTolerance": "Moderate",
+  "investmentMandate": "Growth focused Category II AIF with real estate allocation",
+  "referralSource": "Wealth Partner Direct",
+  "notes": "Met at Bangalore Real Estate Investors Conclave 2026"
+}
+
+### Get Investor by ID (Includes Full Activity Feed)
+GET {{host}}/api/irm/investors/1
+Authorization: Bearer {{token}}
+
+### Update Investor Details
+PUT {{host}}/api/irm/investors/1
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "status": "ActiveInvestor",
+  "committedAum": "₹5.0 Cr",
+  "notes": "Mandate confirmed, KYC pending review"
+}
+
+### ─────────────────────────────────────────────────────────────
+### 4. KYC Management
+### ─────────────────────────────────────────────────────────────
+
+### Fetch KYC by Investor ID
+GET {{host}}/api/irm/kyc/1
+Authorization: Bearer {{token}}
+
+### Generate & Send Public KYC Verification Link
+POST {{host}}/api/irm/kyc/send-link
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "investorId": 1,
+  "phone": "+91 98200 44556",
+  "email": "rajesh.singhania@apexcapital.in"
+}
+
+### Submit KYC Information (Step-by-step or final submit)
+POST {{host}}/api/irm/kyc/submit
+Content-Type: application/json
+
+{
+  "investorId": 1,
+  "investorName": "Rajesh Singhania",
+  "phone": "+91 98200 44556",
+  "email": "rajesh.singhania@apexcapital.in",
+  "gender": "Male",
+  "investorType": "Individual",
+  "residentType": "Resident",
+  "occupation": "Industrialist",
+  "panNumber": "ABCPS1234F",
+  "aadhaarNumber": "4567 8901 2345",
+  "addressLine1": "Flat 14B, Sky Towers, MG Road",
+  "city": "Bengaluru",
+  "state": "Karnataka",
+  "pincode": "560001",
+  "country": "India",
+  "bankName": "HDFC Bank",
+  "accountNumber": "50100234567890",
+  "ifscCode": "HDFC0000053",
+  "accountType": "Savings",
+  "isFinalSubmit": true
+}
+
+### Review KYC (Approve / Reject / ReuploadRequested)
+POST {{host}}/api/irm/kyc/1/review
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "action": "Approved",
+  "remarks": "PAN & Bank verified successfully. Investor cleared for Category II AIF."
+}
+
+### ─────────────────────────────────────────────────────────────
+### 5. Consultations
+### ─────────────────────────────────────────────────────────────
+
+### List Consultations
+GET {{host}}/api/irm/consultations
+Authorization: Bearer {{token}}
+
+### Schedule a Consultation
+POST {{host}}/api/irm/consultations
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "investorId": 1,
+  "investorName": "Rajesh Singhania",
+  "investorPhone": "+91 98200 44556",
+  "scheduledAt": "2026-10-01T11:00:00Z",
+  "agenda": "Review Commercial Yield Fund tranche 2 allocation and expected IRR"
+}
+
+### Record Consultation Outcome
+PUT {{host}}/api/irm/consultations/1/outcome
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "status": "Completed",
+  "outcomeNotes": "Investor agreed to allocate ₹3 Cr in Q4."
+}
+
+### ─────────────────────────────────────────────────────────────
+### 6. Investment Opportunities & Commitments
+### ─────────────────────────────────────────────────────────────
+
+### List Opportunities
+GET {{host}}/api/irm/opportunities
+Authorization: Bearer {{token}}
+
+### Create Opportunity
+POST {{host}}/api/irm/opportunities
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "title": "Prime Bengaluru Commercial Yield Fund II",
+  "assetClass": "Commercial AIF",
+  "description": "Grade-A office park pre-leased to Fortune 500 GCCs with 8.5% entry cap rate",
+  "targetIrr": 16.5,
+  "minTicketSize": 10000000,
+  "tenure": "5 Years",
+  "riskLevel": "Moderate",
+  "totalTargetCorpus": 1000000000
+}
+
+### Record a Pitch
+POST {{host}}/api/irm/opportunities/1/pitch
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "investorId": 1,
+  "pitchNotes": "Shared factsheet and financial model over Teams call."
+}
+
+### Record Committed Capital
+POST {{host}}/api/irm/opportunities/1/commit
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "investorId": 1,
+  "committedAmount": 30000000,
+  "commitmentNotes": "Signed term sheet received for ₹3 Cr"
+}
+
+### ─────────────────────────────────────────────────────────────
+### 7. IRM Kanban Pipeline Board
+### ─────────────────────────────────────────────────────────────
+
+### Get Kanban Stages & Cards
+GET {{host}}/api/irm/pipeline
+Authorization: Bearer {{token}}
+
+### Move Card to Stage (leads | followup | qualified_investor | investment_opportunity | converted)
+PUT {{host}}/api/irm/pipeline/1/move
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "targetStageId": "qualified_investor"
+}
+
+### ─────────────────────────────────────────────────────────────
+### 8. Follow-ups & Calls
+### ─────────────────────────────────────────────────────────────
+
+### List IRM Followups
+GET {{host}}/api/irm/followups
+Authorization: Bearer {{token}}
+
+### Complete Followup
+PUT {{host}}/api/irm/followups/1/complete
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "outcomeNotes": "Client confirmed call schedule for Thursday"
+}
+
+### Log Call Outcome
+POST {{host}}/api/irm/calls
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "investorId": 1,
+  "investorName": "Rajesh Singhania",
+  "investorPhone": "+91 98200 44556",
+  "durationSeconds": 340,
+  "outcome": "Interested",
+  "notes": "Discussed ticket size flexibility, requested tranche breakdown."
+}

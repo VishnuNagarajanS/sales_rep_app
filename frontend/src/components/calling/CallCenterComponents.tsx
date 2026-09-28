@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { storageService, PopupPosition } from '../../services/storageService';
-import { MOCK_AGENTS, MOCK_IRMS } from '../../mock_data/mockData';
 
 import {
   Phone,
@@ -237,13 +236,13 @@ export const InCallBar: React.FC = () => {
 
   const connectOptions = isIrm
     ? (() => {
-        const base = MOCK_AGENTS.map(a => ({ name: a.name, status: 'Available' as const }));
+        const base = storageService.getAgents(tenant?.id).map(a => ({ name: a.name, status: 'Available' as const }));
         if (!previousAgentName) return base;
         // Move the previously-assigned agent to the top of the list as the default
         const rest = base.filter(a => a.name !== previousAgentName);
         return [{ name: previousAgentName, status: 'Available' as const, isPrevious: true }, ...rest];
       })()
-    : MOCK_IRMS;
+    : storageService.getIrms(tenant?.id);
 
   const filteredConnectOptions = connectOptions.filter(o =>
     o.name.toLowerCase().includes(irmSearchQuery.toLowerCase())

@@ -3,6 +3,7 @@ import { useAuth } from './context/AuthContext';
 import { AuthLayout } from './layouts/AuthLayout';
 import { SalesLayout } from './layouts/SalesLayout';
 import { AdminLayout } from './layouts/AdminLayout';
+import { isMockMode } from './config/environment';
 
 // Sales Core Pages
 import { DashboardPage } from './pages/Dashboard/DashboardPage';
@@ -72,17 +73,12 @@ export const App: React.FC = () => {
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
 
-  // Seed initial mock data on clean install / empty session
+  // In mock mode only, run idempotent mock bootstrap if not yet initialized
   useEffect(() => {
-    if (storageService.getUsers().length === 0) {
-      storageService.loadMockDataFromSeparateFolder();
-    }
-  }, []);
-
-  // Seed initial mock data on clean install / empty session
-  useEffect(() => {
-    if (storageService.getUsers().length === 0) {
-      storageService.loadMockDataFromSeparateFolder();
+    if (isMockMode()) {
+      import('./mock/runtime/mockBootstrap').then(({ runMockBootstrap }) => {
+        runMockBootstrap();
+      });
     }
   }, []);
 
@@ -94,8 +90,11 @@ export const App: React.FC = () => {
         setCurrentRoute('dashboard');
         sessionStorage.setItem('nexus_current_route', 'dashboard');
       }
+    } else if (user?.role?.code === 'sales_executive' && currentRoute === 'kyc') {
+      setCurrentRoute('dashboard');
+      sessionStorage.setItem('nexus_current_route', 'dashboard');
     }
-  }, [user?.role?.code]);
+  }, [user?.role?.code, currentRoute]);
 
   // Quick Create Modal State
   const [quickCreateType, setQuickCreateType] = useState<
@@ -390,9 +389,13 @@ export const App: React.FC = () => {
           <BookingsPage />
         </ProtectedRoute>
       ) : currentRoute === 'kyc' ? (
-        <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
-          <KYCPage />
-        </ProtectedRoute>
+        user?.role?.code === 'sales_executive' ? (
+          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+        ) : (
+          <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
+            <KYCPage />
+          </ProtectedRoute>
+        )
       ) : currentRoute === 'investors' ? (
         <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
           <InvestorsPage />

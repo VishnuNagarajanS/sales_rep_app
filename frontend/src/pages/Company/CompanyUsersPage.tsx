@@ -11,7 +11,6 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { SYSTEM_ROLES } from '../../constants/roles';
 import { storageService } from '../../services/storageService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
@@ -41,9 +40,11 @@ export const CompanyUsersPage: React.FC = () => {
   };
 
   // ── Assignable Tenant Roles ──────────────────────────────────────────────
-  const assignableRoles = Object.values(SYSTEM_ROLES).filter(
-    r => r.code !== 'super_admin' && r.code !== 'company_admin'
-  );
+  const assignableRoles = React.useMemo(() => {
+    return storageService.getRoles().filter(
+      r => r.code !== 'super_admin' && r.code !== 'company_admin'
+    );
+  }, []);
 
   // ── Invite Modal State ────────────────────────────────────────────────────
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
@@ -82,7 +83,13 @@ export const CompanyUsersPage: React.FC = () => {
       return;
     }
 
-    const assignedRole = SYSTEM_ROLES[inviteRole] || SYSTEM_ROLES.sales_executive;
+    const roles = storageService.getRoles();
+    const assignedRole = roles.find(r => r.code === inviteRole) || {
+      id: `role-${inviteRole}`,
+      name: inviteRole.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      code: inviteRole,
+      permissions: [],
+    };
     const newUser: User = {
       id: `usr-${Date.now()}`,
       name: trimmedName,
@@ -207,7 +214,13 @@ export const CompanyUsersPage: React.FC = () => {
   const handleSaveRole = () => {
     if (!editingRoleUser) return;
 
-    const newRole = SYSTEM_ROLES[newRoleCode] || SYSTEM_ROLES.sales_executive;
+    const roles = storageService.getRoles();
+    const newRole = roles.find(r => r.code === newRoleCode) || {
+      id: `role-${newRoleCode}`,
+      name: newRoleCode.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      code: newRoleCode,
+      permissions: [],
+    };
     const oldRole = editingRoleUser.role;
 
     storageService.saveUser({ ...editingRoleUser, role: newRole });
@@ -230,6 +243,32 @@ export const CompanyUsersPage: React.FC = () => {
     showToast('success', `Updated role for ${editingRoleUser.name} to ${newRole.name}.`);
     setEditingRoleUser(null);
   };
+
+  // ── Roles Summary & Expand State ─────────────────────────────────────────
+  const [expandedRoleCode, setExpandedRoleCode] = useState<string | null>(null);
+
+  const roleSummary = React.useMemo(() => {
+    const groups: Record<string, { roleCode: string; roleName: string; total: number; active: number }> = {};
+    usersList.forEach(u => {
+      if (u.role.code === 'company_admin' || u.role.code === 'super_admin') return;
+      if (!groups[u.role.code]) {
+        groups[u.role.code] = { roleCode: u.role.code, roleName: u.role.name, total: 0, active: 0 };
+      }
+      groups[u.role.code].total += 1;
+      if (u.status === 'Active') groups[u.role.code].active += 1;
+    });
+    return Object.values(groups);
+  }, [usersList]);
+
+  const usersByRoleCode = React.useMemo(() => {
+    const groups: Record<string, User[]> = {};
+    usersList.forEach(u => {
+      if (u.role.code === 'company_admin' || u.role.code === 'super_admin') return; // admins never shown here
+      if (!groups[u.role.code]) groups[u.role.code] = [];
+      groups[u.role.code].push(u);
+    });
+    return groups;
+  }, [usersList]);
 
   // ── Table Columns ─────────────────────────────────────────────────────────
   const columns: Column<User>[] = [
@@ -324,6 +363,42 @@ export const CompanyUsersPage: React.FC = () => {
         </button>
       </div>
 
+      {/* ── Roles summary ───────────────────────────────────────────────── */}
+      <div className="company-users-role-summary">
+        <h3 className="company-users-role-summary-title">Roles</h3>
+        <div className="company-users-role-cards">
+          {roleSummary.map(r => (
+            <div
+              key={r.roleCode}
+              className={`card company-users-role-card${expandedRoleCode === r.roleCode ? ' is-expanded' : ''}`}
+              onClick={() => setExpandedRoleCode(prev => (prev === r.roleCode ? null : r.roleCode))}
+            >
+              <div className="company-users-role-card-title">{r.roleName}</div>
+              <div className="company-users-role-card-stat">
+                <span className="company-users-role-card-label">Total Count of Employees</span>
+                <span className="company-users-role-card-value">{r.total}</span>
+              </div>
+              <div className="company-users-role-card-stat">
+                <span className="company-users-role-card-label">Active</span>
+                <span className="company-users-role-card-value">{r.active} / {r.total}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {expandedRoleCode && (
+          <div className="company-users-role-detail">
+            <DataTable
+              columns={columns}
+              data={usersByRoleCode[expandedRoleCode] || []}
+              keyExtractor={u => u.id}
+              rowActions={rowActions}
+              searchPlaceholder="Search users by name or email..."
+            />
+          </div>
+        )}
+      </div>
+
       {/* ── Fixed-position Toast (top-center) ────────────────────────────── */}
       {toast && (
         <>
@@ -369,15 +444,6 @@ export const CompanyUsersPage: React.FC = () => {
           </div>
         </>
       )}
-
-      {/* ── Data Table ───────────────────────────────────────────────────── */}
-      <DataTable
-        columns={columns}
-        data={usersList}
-        keyExtractor={u => u.id}
-        rowActions={rowActions}
-        searchPlaceholder="Search users by name or email..."
-      />
 
       {/* ── Invite Modal ─────────────────────────────────────────────────── */}
       <Modal

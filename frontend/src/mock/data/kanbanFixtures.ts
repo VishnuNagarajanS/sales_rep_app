@@ -1,50 +1,20 @@
-export type KanbanRole = 'sales_executive' | 'irm';
+import type {
+  KanbanRole,
+  PriorityLevel,
+  DateRangePreset,
+  ActivityLogItem,
+  AdminKanbanCard,
+  KanbanStageDef,
+} from '../../types/kanban';
 
-export type PriorityLevel = 'High' | 'Medium' | 'Low';
-
-export type DateRangePreset = 'today' | 'this_week' | 'this_month' | 'custom';
-
-export interface ActivityLogItem {
-  id: string;
-  timestamp: string; // e.g., '24 Sep 2026, 02:30 PM'
-  isoDate: string; // e.g., '2026-09-24T14:30:00.000Z'
-  performedBy: string; // e.g., 'Ananya Iyer'
-  performedByRole: string; // e.g., 'Sales Executive'
-  type: 'call' | 'note' | 'stage_change' | 'meeting' | 'whatsapp' | 'compliance';
-  stageTransition?: {
-    from: string;
-    to: string;
-  };
-  details: string; // e.g., 'Call completed. Pitch deck emailed. Client requested follow-up on Friday.'
-}
-
-export interface AdminKanbanCard {
-  id: string;
-  role: KanbanRole;
-  stageId: string;
-  title: string; // Lead / Investor Name
-  phone: string;
-  email: string;
-  assignedPersonId: string;
-  assignedPersonName: string;
-  stageEnteredAt: string; // ISO date string
-  createdAt: string; // ISO date string
-  lastActivityDate: string; // ISO date string
-  lastActionSnippet: string; // e.g., 'Call completed. Pitch deck emailed.'
-  priority: PriorityLevel;
-  value?: number;
-  investmentAmount?: string;
-  preferredAssetClass?: string;
-  location?: string;
-  activityLogs: ActivityLogItem[];
-}
-
-export interface KanbanStageDef {
-  id: string;
-  name: string;
-  description: string;
-  color: string;
-}
+export type {
+  KanbanRole,
+  PriorityLevel,
+  DateRangePreset,
+  ActivityLogItem,
+  AdminKanbanCard,
+  KanbanStageDef,
+};
 
 // ── 5 Stages for Sales Executive ──────────────────────────────────────────
 export const SALES_EXECUTIVE_STAGES: KanbanStageDef[] = [
@@ -583,98 +553,3 @@ export const INITIAL_ADMIN_KANBAN_CARDS: AdminKanbanCard[] = [
     ],
   },
 ];
-
-// ── Storage Service Helpers ───────────────────────────────────────────────
-const KANBAN_STORAGE_KEY = 'nexus_admin_kanban_cards_v1';
-
-export const adminKanbanService = {
-  getCards(): AdminKanbanCard[] {
-    try {
-      const data = localStorage.getItem(KANBAN_STORAGE_KEY);
-      if (data) {
-        return JSON.parse(data);
-      }
-    } catch (e) {
-      console.error('Failed to load admin kanban cards:', e);
-    }
-    // Seed initial data
-    this.saveCards(INITIAL_ADMIN_KANBAN_CARDS);
-    return INITIAL_ADMIN_KANBAN_CARDS;
-  },
-
-  saveCards(cards: AdminKanbanCard[]): void {
-    try {
-      localStorage.setItem(KANBAN_STORAGE_KEY, JSON.stringify(cards));
-      window.dispatchEvent(new Event('nexus_admin_kanban_updated'));
-    } catch (e) {
-      console.error('Failed to save admin kanban cards:', e);
-    }
-  },
-
-  updateCardStage(cardId: string, newStageId: string, actorName = 'Vikram Malhotra', actorRole = 'Company Admin'): AdminKanbanCard | null {
-    const cards = this.getCards();
-    const card = cards.find(c => c.id === cardId);
-    if (!card) return null;
-
-    const stages = card.role === 'sales_executive' ? SALES_EXECUTIVE_STAGES : IRM_STAGES;
-    const oldStage = stages.find(s => s.id === card.stageId)?.name || card.stageId;
-    const newStage = stages.find(s => s.id === newStageId)?.name || newStageId;
-
-    const now = new Date();
-    const nowIsoStr = now.toISOString();
-
-    const newActivity: ActivityLogItem = {
-      id: `act-${Date.now()}`,
-      timestamp: formatDateSnippet(nowIsoStr),
-      isoDate: nowIsoStr,
-      performedBy: actorName,
-      performedByRole: actorRole,
-      type: 'stage_change',
-      stageTransition: {
-        from: oldStage,
-        to: newStage,
-      },
-      details: `Stage updated from "${oldStage}" to "${newStage}".`,
-    };
-
-    const updatedCard: AdminKanbanCard = {
-      ...card,
-      stageId: newStageId,
-      stageEnteredAt: nowIsoStr,
-      lastActivityDate: nowIsoStr,
-      lastActionSnippet: `Stage changed to ${newStage}`,
-      activityLogs: [newActivity, ...card.activityLogs],
-    };
-
-    const newCards = cards.map(c => c.id === cardId ? updatedCard : c);
-    this.saveCards(newCards);
-    return updatedCard;
-  },
-
-  addActivityLog(cardId: string, activity: Omit<ActivityLogItem, 'id' | 'timestamp' | 'isoDate'>): AdminKanbanCard | null {
-    const cards = this.getCards();
-    const card = cards.find(c => c.id === cardId);
-    if (!card) return null;
-
-    const now = new Date();
-    const nowIsoStr = now.toISOString();
-
-    const newActivity: ActivityLogItem = {
-      ...activity,
-      id: `act-${Date.now()}`,
-      timestamp: formatDateSnippet(nowIsoStr),
-      isoDate: nowIsoStr,
-    };
-
-    const updatedCard: AdminKanbanCard = {
-      ...card,
-      lastActivityDate: nowIsoStr,
-      lastActionSnippet: activity.details,
-      activityLogs: [newActivity, ...card.activityLogs],
-    };
-
-    const newCards = cards.map(c => c.id === cardId ? updatedCard : c);
-    this.saveCards(newCards);
-    return updatedCard;
-  },
-};

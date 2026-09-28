@@ -1,9 +1,8 @@
-import { Followup } from '../types';
-import { SALES_EXECUTIVE_USERS, IRM_USERS } from './adminKanbanData';
+import { Followup } from '../../types';
+import { FollowupRoleFilter } from '../../types/kanban';
+import { SALES_EXECUTIVE_USERS, IRM_USERS } from './kanbanFixtures';
 
 export { SALES_EXECUTIVE_USERS, IRM_USERS };
-
-export type FollowupRoleFilter = 'sales_executive' | 'irm';
 
 export const ADMIN_FOLLOWUP_REPRESENTATIVES: Record<FollowupRoleFilter, Array<{ id: string; name: string; role: string }>> = {
   sales_executive: SALES_EXECUTIVE_USERS,

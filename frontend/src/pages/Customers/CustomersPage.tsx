@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Building2,
   Phone,
@@ -23,7 +23,6 @@ import { Timeline, TimelineEvent } from '../../components/common/Timeline';
 import { DocumentUploader } from '../../components/common/DocumentUploader';
 import { DocumentList } from '../../components/common/DocumentList';
 import { Modal } from '../../components/common/Modal';
-import { MOCK_IRMS, INITIAL_CUSTOMERS } from '../../mock_data/mockData';
 import './CustomersPage.css';
 
 interface AutoRecommendation {
@@ -42,6 +41,7 @@ export const CustomersPage: React.FC = () => {
   const { initiateCall } = useCall();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const irms = useMemo(() => storageService.getIrms(tenant?.id), [tenant?.id]);
 
   // Role-based scoping: Sales Executives see only their own customers.
   // Managers / Admins / Super Admins see the full company customer list (no filter).
@@ -101,17 +101,7 @@ export const CustomersPage: React.FC = () => {
   const [deals, setDeals] = useState<Deal[]>([]);
 
   const loadData = () => {
-    let custs = storageService.getCustomers(tenant?.id);
-    if (custs.length === 0) {
-      INITIAL_CUSTOMERS.filter(c => c.companyId === tenant?.id).forEach(c => storageService.saveCustomer(c));
-      custs = storageService.getCustomers(tenant?.id);
-    } else if (canAssignToIRM) {
-      const hasExecCusts = custs.some(c => (c.assignedAgentId && c.assignedAgentId === user?.id) || (c.assignedAgentName && c.assignedAgentName === user?.name));
-      if (!hasExecCusts) {
-        INITIAL_CUSTOMERS.filter(c => c.companyId === tenant?.id && c.assignedAgentName === 'Ananya Iyer').forEach(c => storageService.saveCustomer(c));
-        custs = storageService.getCustomers(tenant?.id);
-      }
-    }
+    const custs = storageService.getCustomers(tenant?.id);
     setCustomers(custs);
     // Auto-select from the scoped list so an exec doesn't land on a customer
     // that is invisible in their own filtered left-panel list.
@@ -203,7 +193,7 @@ export const CustomersPage: React.FC = () => {
 
   const runAutoAssignmentAlgorithm = (custs: Customer[]): AutoRecommendation[] => {
     const liveCountMap: Record<string, number> = {};
-    MOCK_IRMS.forEach(irm => {
+    irms.forEach(irm => {
       liveCountMap[irm.id] = customers.filter(c => c.assignedIrmName === irm.name || c.assignedIrmId === irm.id).length;
     });
 
@@ -218,8 +208,8 @@ export const CustomersPage: React.FC = () => {
 
     sortedCusts.forEach(c => {
       const { tier, label } = getCustomerCapacityTier(c);
-      const availableIrms = MOCK_IRMS.filter(i => i.status === 'Available');
-      const pool = availableIrms.length > 0 ? availableIrms : MOCK_IRMS;
+      const availableIrms = irms.filter(i => i.status === 'Available');
+      const pool = availableIrms.length > 0 ? availableIrms : irms;
 
       let chosenIrm: IrmProfile;
       let reason: string;
@@ -276,7 +266,7 @@ export const CustomersPage: React.FC = () => {
       const selectedCusts = scopedCustomers.filter(c => selectedCustomerIds.has(c.id) && isCustomerEligibleForIrm(c));
       if (selectedCusts.length === 0) return;
 
-      setSelectedIrmId(MOCK_IRMS[0]?.id || '');
+      setSelectedIrmId(irms[0]?.id || '');
       setIsManualModalOpen(true);
     } else {
       if (eligibleUnassignedCustomers.length === 0) return;
@@ -287,7 +277,7 @@ export const CustomersPage: React.FC = () => {
   };
 
   const handleConfirmManualAssignment = () => {
-    const selectedIrm = MOCK_IRMS.find(i => i.id === selectedIrmId);
+    const selectedIrm = irms.find(i => i.id === selectedIrmId);
     if (!selectedIrm) return;
 
     let assignedCount = 0;
@@ -343,7 +333,7 @@ export const CustomersPage: React.FC = () => {
   };
 
   const handleUpdateSingleRecommendation = (customerId: string, newIrmId: string) => {
-    const newIrm = MOCK_IRMS.find(i => i.id === newIrmId);
+    const newIrm = irms.find(i => i.id === newIrmId);
     if (!newIrm) return;
     setAutoRecommendations(prev =>
       prev.map(rec => {
@@ -1153,7 +1143,7 @@ export const CustomersPage: React.FC = () => {
           }
         >
           <div className="irm-selection-list">
-            {MOCK_IRMS.map(irm => {
+            {irms.map(irm => {
               const currentCount = customers.filter(c => c.assignedIrmName === irm.name || c.assignedIrmId === irm.id).length;
               const workload = currentCount <= 2 ? 'Low' : currentCount <= 5 ? 'Medium' : 'High';
               const isSelected = selectedIrmId === irm.id;
@@ -1271,7 +1261,7 @@ export const CustomersPage: React.FC = () => {
                           onChange={e => handleUpdateSingleRecommendation(rec.customerId, e.target.value)}
                           autoFocus
                         >
-                          {MOCK_IRMS.map(irm => (
+                          {irms.map(irm => (
                             <option key={irm.id} value={irm.id}>
                               {irm.name} ({irm.experienceLevel}, {irm.status})
                             </option>

@@ -700,3 +700,5 @@ export interface ChatSettings {
     whoCanCreateGroups: 'everyone' | 'managers_admins';
   };
 }
+
+export * from './kanban';
