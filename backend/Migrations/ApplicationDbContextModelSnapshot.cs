@@ -62,14 +62,29 @@ namespace backend.Migrations
                     b.Property<int>("DurationSeconds")
                         .HasColumnType("integer");
 
+                    b.Property<string>("HangupReason")
+                        .HasColumnType("text");
+
                     b.Property<int?>("LeadId")
                         .HasColumnType("integer");
 
                     b.Property<string>("Notes")
                         .HasColumnType("text");
 
+                    b.Property<string>("RecordingUrl")
+                        .HasColumnType("text");
+
                     b.Property<DateTime>("StartedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Transcription")
+                        .HasColumnType("text");
+
+                    b.Property<int>("TransferCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("TransferredToUserId")
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
@@ -133,6 +148,240 @@ namespace backend.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Consultations");
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.Customer", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AssignedToUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("KycStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("Pending");
+
+                    b.Property<string>("Location")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Phone")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("Active");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssignedToUserId");
+
+                    b.HasIndex("CompanyId", "Phone");
+
+                    b.ToTable("Customers");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            AssignedToUserId = 3,
+                            CompanyId = 1,
+                            CreatedAt = new DateTime(2026, 1, 15, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Email = "dr.rajesh.varma@healthcare.org",
+                            KycStatus = "Verified",
+                            Location = "Indiranagar, Bengaluru",
+                            Name = "Dr. Rajesh K. Varma",
+                            Notes = "Senior Cardiologist. Interested in commercial healthcare real estate.",
+                            Phone = "+91 98800 23456",
+                            Status = "Active"
+                        },
+                        new
+                        {
+                            Id = 2,
+                            AssignedToUserId = 3,
+                            CompanyId = 1,
+                            CreatedAt = new DateTime(2026, 2, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Email = "meera.nambiar@techglobal.in",
+                            KycStatus = "Submitted",
+                            Location = "Koramangala, Bengaluru",
+                            Name = "Meera Nambiar",
+                            Notes = "Tech VP, looking for fractional Grade-A office spaces.",
+                            Phone = "+91 98800 34567",
+                            Status = "VIP"
+                        });
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.CustomerKyc", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AddressLine1")
+                        .HasColumnType("text");
+
+                    b.Property<string>("AddressLine2")
+                        .HasColumnType("text");
+
+                    b.Property<string>("City")
+                        .HasColumnType("text");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Country")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("CustomerId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("DateOfBirth")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DocumentNumber")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("DocumentType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("FullNameAsPerDocument")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Gender")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Nationality")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PostalCode")
+                        .HasColumnType("text");
+
+                    b.Property<string>("RejectionReason")
+                        .HasColumnType("text");
+
+                    b.Property<string>("State")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("Pending");
+
+                    b.Property<DateTime?>("SubmittedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("VerificationRemarks")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("VerifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("VerifiedByUserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("VerifiedByUserId");
+
+                    b.HasIndex("CompanyId", "CustomerId");
+
+                    b.ToTable("CustomerKycs");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            AddressLine1 = "Plot 42, 12th Main",
+                            AddressLine2 = "HAL 2nd Stage, Indiranagar",
+                            City = "Bengaluru",
+                            CompanyId = 1,
+                            Country = "India",
+                            CreatedAt = new DateTime(2026, 1, 16, 10, 30, 0, 0, DateTimeKind.Utc),
+                            CustomerId = 1,
+                            DateOfBirth = new DateTime(1978, 5, 20, 0, 0, 0, 0, DateTimeKind.Utc),
+                            DocumentNumber = "ABCDE1234F",
+                            DocumentType = "PAN",
+                            FullNameAsPerDocument = "Dr. Rajesh Kumar Varma",
+                            Gender = "Male",
+                            Nationality = "Indian",
+                            PostalCode = "560038",
+                            State = "Karnataka",
+                            Status = "Verified",
+                            SubmittedAt = new DateTime(2026, 1, 16, 10, 30, 0, 0, DateTimeKind.Utc),
+                            VerificationRemarks = "PAN card and medical council registration verified.",
+                            VerifiedAt = new DateTime(2026, 1, 17, 14, 0, 0, 0, DateTimeKind.Utc),
+                            VerifiedByUserId = 2
+                        },
+                        new
+                        {
+                            Id = 2,
+                            AddressLine1 = "Villa 8, Greenwood Enclave",
+                            City = "Bengaluru",
+                            CompanyId = 1,
+                            Country = "India",
+                            CreatedAt = new DateTime(2026, 2, 2, 11, 0, 0, 0, DateTimeKind.Utc),
+                            CustomerId = 2,
+                            DateOfBirth = new DateTime(1985, 11, 12, 0, 0, 0, 0, DateTimeKind.Utc),
+                            DocumentNumber = "9876-5432-1098",
+                            DocumentType = "Aadhaar",
+                            FullNameAsPerDocument = "Meera Nambiar",
+                            Gender = "Female",
+                            Nationality = "Indian",
+                            PostalCode = "560034",
+                            State = "Karnataka",
+                            Status = "Submitted",
+                            SubmittedAt = new DateTime(2026, 2, 2, 11, 0, 0, 0, DateTimeKind.Utc),
+                            VerificationRemarks = "Aadhaar e-KYC documents submitted, pending manager sign-off."
+                        });
                 });
 
             modelBuilder.Entity("backend.Models.Entities.ExecutiveProfile", b =>
@@ -223,6 +472,100 @@ namespace backend.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Followups");
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.KycDocument", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasDefaultValue("KYC");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int?>("CustomerId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("CustomerKycId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DocumentName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<int>("EntityId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<long>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("OriginalFileName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("RejectionReason")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("Pending");
+
+                    b.Property<string>("StoragePath")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("StoredFileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("UploadedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("VerifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("VerifiedByUserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("CustomerKycId");
+
+                    b.HasIndex("UploadedByUserId");
+
+                    b.HasIndex("VerifiedByUserId");
+
+                    b.HasIndex("CompanyId", "CustomerId");
+
+                    b.ToTable("KycDocuments");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.Lead", b =>
@@ -419,6 +762,14 @@ namespace backend.Migrations
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Name = "Sales Executive",
                             Permissions = new List<string> { "leads.view", "leads.create", "leads.update", "leads.convert", "customers.view", "customers.create", "customers.update", "deals.view", "deals.create", "deals.update", "calls.make", "calls.receive", "calls.view", "followups.view", "followups.create", "followups.update", "properties.view", "site_visits.view", "site_visits.create", "bookings.view", "bookings.create", "investors.view", "investors.create", "consultations.view", "consultations.create", "opportunities.view", "opportunities.create", "reports.view" }
+                        },
+                        new
+                        {
+                            Id = 5,
+                            Code = "irm",
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Name = "IRM Agent",
+                            Permissions = new List<string> { "leads.view", "leads.create", "leads.update", "leads.assign", "calls.make", "calls.receive", "calls.view", "calls.recordings.play", "followups.view", "followups.create", "followups.update", "reports.view" }
                         });
                 });
 
@@ -646,6 +997,18 @@ namespace backend.Migrations
                             Phone = "+91 98450 33445",
                             RoleId = 2,
                             Status = "Active"
+                        },
+                        new
+                        {
+                            Id = 5,
+                            CompanyId = 1,
+                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Email = "priya.irm@ghlindiatrust.com",
+                            Name = "Priya Sharma",
+                            PasswordHash = "$2a$11$z2c3Nc1pe7Tqmxj6Rm15NOt8vuAyyKfqzGtBKpiFU2NcPZxsjt5p.",
+                            Phone = "+91 98450 44556",
+                            RoleId = 5,
+                            Status = "Active"
                         });
                 });
 
@@ -658,6 +1021,66 @@ namespace backend.Migrations
                         .IsRequired();
 
                     b.Navigation("Agent");
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.Customer", b =>
+                {
+                    b.HasOne("backend.Models.Entities.User", "AssignedToUser")
+                        .WithMany()
+                        .HasForeignKey("AssignedToUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("AssignedToUser");
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.CustomerKyc", b =>
+                {
+                    b.HasOne("backend.Models.Entities.Customer", "Customer")
+                        .WithMany("KycRecords")
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("backend.Models.Entities.User", "VerifiedByUser")
+                        .WithMany()
+                        .HasForeignKey("VerifiedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Customer");
+
+                    b.Navigation("VerifiedByUser");
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.KycDocument", b =>
+                {
+                    b.HasOne("backend.Models.Entities.Customer", "Customer")
+                        .WithMany("Documents")
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("backend.Models.Entities.CustomerKyc", "CustomerKyc")
+                        .WithMany("Documents")
+                        .HasForeignKey("CustomerKycId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("backend.Models.Entities.User", "UploadedByUser")
+                        .WithMany()
+                        .HasForeignKey("UploadedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("backend.Models.Entities.User", "VerifiedByUser")
+                        .WithMany()
+                        .HasForeignKey("VerifiedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Customer");
+
+                    b.Navigation("CustomerKyc");
+
+                    b.Navigation("UploadedByUser");
+
+                    b.Navigation("VerifiedByUser");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.User", b =>
@@ -676,6 +1099,18 @@ namespace backend.Migrations
                     b.Navigation("Company");
 
                     b.Navigation("Role");
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.Customer", b =>
+                {
+                    b.Navigation("Documents");
+
+                    b.Navigation("KycRecords");
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.CustomerKyc", b =>
+                {
+                    b.Navigation("Documents");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.Role", b =>

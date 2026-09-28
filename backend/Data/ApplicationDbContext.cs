@@ -21,6 +21,9 @@ public class ApplicationDbContext : DbContext
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<ExecutiveProfile> ExecutiveProfiles => Set<ExecutiveProfile>();
     public DbSet<Consultation> Consultations => Set<Consultation>();
+    public DbSet<Customer> Customers => Set<Customer>();
+    public DbSet<CustomerKyc> CustomerKycs => Set<CustomerKyc>();
+    public DbSet<KycDocument> KycDocuments => Set<KycDocument>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -29,17 +32,78 @@ public class ApplicationDbContext : DbContext
         // Apply entity configurations
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
 
-        // Seed initial roles, tenants, and demo users
+        // Configure Customer and KYC entities
+        modelBuilder.Entity<Customer>(entity =>
+        {
+            entity.HasKey(c => c.Id);
+            entity.Property(c => c.Name).IsRequired().HasMaxLength(150);
+            entity.Property(c => c.Phone).IsRequired().HasMaxLength(50);
+            entity.Property(c => c.Email).HasMaxLength(150);
+            entity.Property(c => c.Status).HasMaxLength(50).HasDefaultValue("Active");
+            entity.Property(c => c.KycStatus).HasMaxLength(50).HasDefaultValue("Pending");
+            entity.HasIndex(c => new { c.CompanyId, c.Phone });
+            entity.HasOne(c => c.AssignedToUser)
+                .WithMany()
+                .HasForeignKey(c => c.AssignedToUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<CustomerKyc>(entity =>
+        {
+            entity.HasKey(k => k.Id);
+            entity.Property(k => k.DocumentType).IsRequired().HasMaxLength(50);
+            entity.Property(k => k.DocumentNumber).IsRequired().HasMaxLength(100);
+            entity.Property(k => k.Status).HasMaxLength(50).HasDefaultValue("Pending");
+            entity.HasIndex(k => new { k.CompanyId, k.CustomerId });
+            entity.HasOne(k => k.Customer)
+                .WithMany(c => c.KycRecords)
+                .HasForeignKey(k => k.CustomerId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(k => k.VerifiedByUser)
+                .WithMany()
+                .HasForeignKey(k => k.VerifiedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<KycDocument>(entity =>
+        {
+            entity.HasKey(d => d.Id);
+            entity.Property(d => d.DocumentName).IsRequired().HasMaxLength(255);
+            entity.Property(d => d.StoredFileName).IsRequired().HasMaxLength(255);
+            entity.Property(d => d.StoragePath).IsRequired().HasMaxLength(500);
+            entity.Property(d => d.Category).HasMaxLength(100).HasDefaultValue("KYC");
+            entity.Property(d => d.Status).HasMaxLength(50).HasDefaultValue("Pending");
+            entity.HasIndex(d => new { d.CompanyId, d.CustomerId });
+            entity.HasOne(d => d.Customer)
+                .WithMany(c => c.Documents)
+                .HasForeignKey(d => d.CustomerId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(d => d.CustomerKyc)
+                .WithMany(k => k.Documents)
+                .HasForeignKey(d => d.CustomerKycId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(d => d.UploadedByUser)
+                .WithMany()
+                .HasForeignKey(d => d.UploadedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(d => d.VerifiedByUser)
+                .WithMany()
+                .HasForeignKey(d => d.VerifiedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // Seed initial roles, tenants, demo users, and KYC demo data
         SeedData(modelBuilder);
     }
 
     private static void SeedData(ModelBuilder modelBuilder)
     {
-        // 1. Roles (Integer IDs 1, 2, 3, 4)
+        // 1. Roles (Integer IDs 1, 2, 3, 4, 5)
         var superAdminRoleId = 1;
         var companyAdminRoleId = 2;
         var salesManagerRoleId = 3;
         var salesExecutiveRoleId = 4;
+        var irmRoleId = 5;
 
         modelBuilder.Entity<Role>().HasData(
             new Role
@@ -114,6 +178,21 @@ public class ApplicationDbContext : DbContext
                     "followups.view", "followups.create", "followups.update",
                     "properties.view", "site_visits.view", "site_visits.create", "bookings.view", "bookings.create",
                     "investors.view", "investors.create", "consultations.view", "consultations.create", "opportunities.view", "opportunities.create",
+                    "reports.view"
+                },
+                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            },
+            // IRM Role — Inbound Routing & Relationship Manager
+            new Role
+            {
+                Id = irmRoleId,
+                Name = "IRM Agent",
+                Code = "irm",
+                Permissions = new List<string>
+                {
+                    "leads.view", "leads.create", "leads.update", "leads.assign",
+                    "calls.make", "calls.receive", "calls.view", "calls.recordings.play",
+                    "followups.view", "followups.create", "followups.update",
                     "reports.view"
                 },
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
@@ -217,6 +296,100 @@ public class ApplicationDbContext : DbContext
                 CompanyId = 2,
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            },
+            // GHL IRM Agent (Priya) — Inbound Routing & Relationship Manager
+            new User
+            {
+                Id = 5,
+                Name = "Priya Sharma",
+                Email = "priya.irm@ghlindiatrust.com",
+                PasswordHash = passwordHash,
+                Phone = "+91 98450 44556",
+                RoleId = irmRoleId,
+                CompanyId = 1,
+                Status = UserStatus.Active,
+                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            }
+        );
+
+        // 4. Seed Demo Customers
+        modelBuilder.Entity<Customer>().HasData(
+            new Customer
+            {
+                Id = 1,
+                CompanyId = 1,
+                AssignedToUserId = 3, // Ananya (Sales Executive)
+                Name = "Dr. Rajesh K. Varma",
+                Email = "dr.rajesh.varma@healthcare.org",
+                Phone = "+91 98800 23456",
+                Location = "Indiranagar, Bengaluru",
+                Status = "Active",
+                KycStatus = "Verified",
+                Notes = "Senior Cardiologist. Interested in commercial healthcare real estate.",
+                CreatedAt = new DateTime(2026, 1, 15, 0, 0, 0, DateTimeKind.Utc)
+            },
+            new Customer
+            {
+                Id = 2,
+                CompanyId = 1,
+                AssignedToUserId = 3,
+                Name = "Meera Nambiar",
+                Email = "meera.nambiar@techglobal.in",
+                Phone = "+91 98800 34567",
+                Location = "Koramangala, Bengaluru",
+                Status = "VIP",
+                KycStatus = "Submitted",
+                Notes = "Tech VP, looking for fractional Grade-A office spaces.",
+                CreatedAt = new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc)
+            }
+        );
+
+        // 5. Seed Demo KYC Record
+        modelBuilder.Entity<CustomerKyc>().HasData(
+            new CustomerKyc
+            {
+                Id = 1,
+                CompanyId = 1,
+                CustomerId = 1,
+                DocumentType = "PAN",
+                DocumentNumber = "ABCDE1234F",
+                FullNameAsPerDocument = "Dr. Rajesh Kumar Varma",
+                DateOfBirth = new DateTime(1978, 5, 20, 0, 0, 0, DateTimeKind.Utc),
+                Gender = "Male",
+                Nationality = "Indian",
+                AddressLine1 = "Plot 42, 12th Main",
+                AddressLine2 = "HAL 2nd Stage, Indiranagar",
+                City = "Bengaluru",
+                State = "Karnataka",
+                PostalCode = "560038",
+                Country = "India",
+                Status = "Verified",
+                SubmittedAt = new DateTime(2026, 1, 16, 10, 30, 0, DateTimeKind.Utc),
+                VerifiedAt = new DateTime(2026, 1, 17, 14, 0, 0, DateTimeKind.Utc),
+                VerifiedByUserId = 2, // Vikram (Admin)
+                VerificationRemarks = "PAN card and medical council registration verified.",
+                CreatedAt = new DateTime(2026, 1, 16, 10, 30, 0, DateTimeKind.Utc)
+            },
+            new CustomerKyc
+            {
+                Id = 2,
+                CompanyId = 1,
+                CustomerId = 2,
+                DocumentType = "Aadhaar",
+                DocumentNumber = "9876-5432-1098",
+                FullNameAsPerDocument = "Meera Nambiar",
+                DateOfBirth = new DateTime(1985, 11, 12, 0, 0, 0, DateTimeKind.Utc),
+                Gender = "Female",
+                Nationality = "Indian",
+                AddressLine1 = "Villa 8, Greenwood Enclave",
+                City = "Bengaluru",
+                State = "Karnataka",
+                PostalCode = "560034",
+                Country = "India",
+                Status = "Submitted",
+                SubmittedAt = new DateTime(2026, 2, 2, 11, 0, 0, DateTimeKind.Utc),
+                VerificationRemarks = "Aadhaar e-KYC documents submitted, pending manager sign-off.",
+                CreatedAt = new DateTime(2026, 2, 2, 11, 0, 0, DateTimeKind.Utc)
             }
         );
     }
