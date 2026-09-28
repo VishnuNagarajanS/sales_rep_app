@@ -32,14 +32,10 @@ public static class ServiceExtensions
         // 4. Services
         services.AddScoped<IJwtService, JwtService>();
         services.AddScoped<IAuthService, AuthService>();
-
-        services.AddDev1Services();
+        services.AddScoped<IAdminUserService, AdminUserService>();
 
         // 5. Validators
         services.AddValidatorsFromAssemblyContaining<LoginRequestValidator>();
-
-        // 6. Developer 2 CRM Sales Pipeline Services
-        services.AddDev2Services();
 
         return services;
     }

@@ -181,11 +181,6 @@ export const ConsultationsPage: React.FC = () => {
     .filter((name): name is string => Boolean(name))
     .map(name => ({ value: name, label: name }));
 
-  const agentOptions = Array.from(
-    new Set(latestByInvestor.map(c => c.referredByAgentName)),
-  )
-    .filter(Boolean)
-    .map(name => ({ value: name, label: name }));
 
   // ── Filtered list (operates on deduplicated latestByInvestor) ─────────────
   const filteredConsultations = latestByInvestor.filter(c => {
