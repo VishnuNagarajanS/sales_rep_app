@@ -9,8 +9,9 @@ import {
   Trash2,
   Edit,
   ExternalLink,
+  Calendar,
 } from 'lucide-react';
-import { Lead, Customer, Deal } from '../../types';
+import { Lead, Customer, Deal, Followup, SiteVisit } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
@@ -147,6 +148,46 @@ export const LeadsPage: React.FC = () => {
     setDateFrom(from);
     setDateTo(to);
   };
+
+  // Tenant flags
+  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02';
+  const canJaminAssign =
+    isJamin &&
+    (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin' || roleCode === 'sales_manager' || roleCode === 'manager');
+  const [jaminAssignMode, setJaminAssignMode] = useState<'none' | 'manual' | 'auto'>('none');
+  const [selectedJaminLeadIds, setSelectedJaminLeadIds] = useState<Set<string>>(new Set());
+  const [isJaminAssignModalOpen, setIsJaminAssignModalOpen] = useState(false);
+  const [jaminSelectedAgent, setJaminSelectedAgent] = useState<{ id: string; name: string; email: string } | null>(null);
+  const [isJaminAiModalOpen, setIsJaminAiModalOpen] = useState(false);
+  const [jaminAiDistribution, setJaminAiDistribution] = useState<Record<string, Lead[]>>({});
+  const [isJaminAiEditMode, setIsJaminAiEditMode] = useState(false);
+
+  const jaminAgents = [
+    { id: 'usr-jamin-exec', name: 'Pooja Hegde', email: 'pooja@jaminbazaar.com' },
+    { id: 'usr-jamin-exec-02', name: 'Vikram Malhotra', email: 'vikram@jaminbazaar.com' },
+    { id: 'usr-jamin-exec-03', name: 'Suresh Kumar', email: 'suresh@jaminbazaar.com' },
+  ];
+
+  // Jamin Quick Schedule Follow-up state
+  const [isJaminScheduleModalOpen, setIsJaminScheduleModalOpen] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState('');
+  const [scheduleTime, setScheduleTime] = useState('11:00');
+  const [scheduleType, setScheduleType] = useState<'call' | 'meeting' | 'whatsapp'>('call');
+  const [scheduleNotes, setScheduleNotes] = useState('');
+  const [scheduleAgentId, setScheduleAgentId] = useState('');
+
+  // Jamin Lead Site Visit state
+  const [isLeadSiteVisitModalOpen, setIsLeadSiteVisitModalOpen] = useState(false);
+  const [leadVisitProject, setLeadVisitProject] = useState('Greenfield Meadows Phase 2');
+  const [leadVisitPlot, setLeadVisitPlot] = useState('Plot #15');
+  const [leadVisitDate, setLeadVisitDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split('T')[0];
+  });
+  const [leadVisitTimeSlot, setLeadVisitTimeSlot] = useState('11:00 AM');
+  const [leadVisitNotes, setLeadVisitNotes] = useState('');
+  const [leadVisitHostAgent, setLeadVisitHostAgent] = useState('Pooja Hegde');
 
   // GHL Admin assign-mode state
   const isGhlAdmin =
@@ -324,6 +365,350 @@ export const LeadsPage: React.FC = () => {
     setTimeout(() => setToast(null), 3500);
   };
 
+  const handleJaminManualAssignConfirm = () => {
+    if (!jaminSelectedAgent) return;
+    const count = selectedJaminLeadIds.size;
+    const updated = leads.map(l => {
+      if (selectedJaminLeadIds.has(l.id)) {
+        const u = {
+          ...l,
+          assignedAgentId: jaminSelectedAgent.id,
+          assignedAgentName: jaminSelectedAgent.name,
+        };
+        storageService.saveLead(u);
+        return u;
+      }
+      return l;
+    });
+
+    setLeads(updated);
+    storageService.addAuditLog({
+      id: `aud-${Date.now()}`,
+      timestamp: 'Just now',
+      actorName: user?.name || 'Admin',
+      actorEmail: user?.email || 'admin@jaminbazaar.com',
+      action: 'LEADS_ASSIGNED',
+      entityType: 'Lead',
+      entityId: Array.from(selectedJaminLeadIds).join(','),
+      companyId: tenant?.id,
+      companyName: tenant?.name,
+      details: `Assigned ${count} lead(s) to ${jaminSelectedAgent.name}.`,
+    });
+
+    setIsJaminAssignModalOpen(false);
+    setSelectedJaminLeadIds(new Set());
+    showToast(`✓ Successfully assigned ${count} lead(s) to ${jaminSelectedAgent.name}`);
+  };
+
+  const handleOpenJaminAiSuggestion = () => {
+    const pool = selectedJaminLeadIds.size > 0
+      ? filteredLeads.filter(l => selectedJaminLeadIds.has(l.id))
+      : filteredLeads;
+
+    if (pool.length === 0) {
+      alert('No leads available to distribute.');
+      return;
+    }
+
+    const dist: Record<string, Lead[]> = {};
+    jaminAgents.forEach(a => { dist[a.id] = []; });
+    pool.forEach((lead, i) => {
+      const agent = jaminAgents[i % jaminAgents.length];
+      dist[agent.id].push(lead);
+    });
+    setAiDistribution({});
+    setJaminAiDistribution(dist);
+    setIsJaminAiEditMode(false);
+    setIsJaminAiModalOpen(true);
+  };
+
+  const handleJaminAiMoveLead = (leadId: string, fromAgentId: string, direction: 'left' | 'right') => {
+    const agentIds = jaminAgents.map(a => a.id);
+    const fromIdx = agentIds.indexOf(fromAgentId);
+    const toIdx = direction === 'left' ? fromIdx - 1 : fromIdx + 1;
+    if (toIdx < 0 || toIdx >= agentIds.length) return;
+    const toAgentId = agentIds[toIdx];
+    setJaminAiDistribution(prev => {
+      const fromLeads = [...(prev[fromAgentId] || [])].filter(l => l.id !== leadId);
+      const movedLead = (prev[fromAgentId] || []).find(l => l.id === leadId);
+      if (!movedLead) return prev;
+      const toLeads = [...(prev[toAgentId] || []), movedLead];
+      return { ...prev, [fromAgentId]: fromLeads, [toAgentId]: toLeads };
+    });
+  };
+
+  const handleJaminAiConfirm = () => {
+    let count = 0;
+    const updated = leads.map(l => {
+      for (const [agentId, agentLeads] of Object.entries(jaminAiDistribution)) {
+        const found = agentLeads.find(al => al.id === l.id);
+        if (found) {
+          const agent = jaminAgents.find(a => a.id === agentId);
+          count++;
+          const u = {
+            ...l,
+            assignedAgentId: agentId,
+            assignedAgentName: agent?.name || 'Agent',
+          };
+          storageService.saveLead(u);
+          return u;
+        }
+      }
+      return l;
+    });
+
+    setLeads(updated);
+    storageService.addAuditLog({
+      id: `aud-${Date.now()}`,
+      timestamp: 'Just now',
+      actorName: user?.name || 'Admin',
+      actorEmail: user?.email || 'admin@jaminbazaar.com',
+      action: 'LEADS_AUTO_ASSIGNED',
+      entityType: 'Lead',
+      entityId: `bulk-ai-${Date.now()}`,
+      companyId: tenant?.id,
+      companyName: tenant?.name,
+      details: `AI Round-robin distributed ${count} lead(s) across ${jaminAgents.length} sales agents.`,
+    });
+
+    setIsJaminAiModalOpen(false);
+    setSelectedJaminLeadIds(new Set());
+    showToast(`✓ Successfully distributed ${count} lead(s) across ${jaminAgents.length} agents!`);
+  };
+
+  const handleJaminAutoRoundRobin = () => {
+    const targetLeads = selectedJaminLeadIds.size > 0
+      ? filteredLeads.filter(l => selectedJaminLeadIds.has(l.id))
+      : filteredLeads;
+
+    if (targetLeads.length === 0) {
+      alert('No leads available to auto-assign.');
+      return;
+    }
+
+    let agentIdx = 0;
+    const updated = leads.map(l => {
+      const match = targetLeads.find(t => t.id === l.id);
+      if (match) {
+        const agent = jaminAgents[agentIdx % jaminAgents.length];
+        agentIdx++;
+        const u = {
+          ...l,
+          assignedAgentId: agent.id,
+          assignedAgentName: agent.name,
+        };
+        storageService.saveLead(u);
+        return u;
+      }
+      return l;
+    });
+
+    setLeads(updated);
+    storageService.addAuditLog({
+      id: `aud-${Date.now()}`,
+      timestamp: 'Just now',
+      actorName: user?.name || 'Admin',
+      actorEmail: user?.email || 'admin@jaminbazaar.com',
+      action: 'LEADS_AUTO_ASSIGNED',
+      entityType: 'Lead',
+      entityId: `auto-${Date.now()}`,
+      companyId: tenant?.id,
+      companyName: tenant?.name,
+      details: `Round-robin auto assigned ${targetLeads.length} lead(s) across ${jaminAgents.length} sales agents.`,
+    });
+
+    setSelectedJaminLeadIds(new Set());
+    showToast(`⚡ Auto assigned ${targetLeads.length} lead(s) across ${jaminAgents.length} agents via Round-Robin!`);
+  };
+
+  const handleOpenJaminSchedule = (lead: Lead) => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const defDate = formatDateYMD(tomorrow);
+
+    setScheduleDate(defDate);
+    setScheduleTime('11:00');
+    setScheduleType((lead.nextFollowupType as any) || 'call');
+    setScheduleNotes('');
+    setScheduleAgentId(lead.assignedAgentId || (jaminAgents[0]?.id || ''));
+    setIsJaminScheduleModalOpen(true);
+  };
+
+  const setQuickDatePreset = (daysFromNow: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + daysFromNow);
+    setScheduleDate(formatDateYMD(d));
+  };
+
+  const handleSaveJaminSchedule = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedLead || !scheduleDate) return;
+
+    const formattedFollowupString = `${scheduleDate}${scheduleTime ? ' ' + scheduleTime : ''}`;
+
+    // 1. Update lead record
+    const updatedLead: Lead = {
+      ...selectedLead,
+      nextFollowupDate: formattedFollowupString,
+      nextFollowupType: scheduleType,
+    };
+    storageService.saveLead(updatedLead);
+    setSelectedLead(updatedLead);
+    setLeads(prev => prev.map(l => l.id === updatedLead.id ? updatedLead : l));
+
+    // 2. Check for existing Pending follow-up for this lead to update/reschedule
+    const allFollowups = storageService.getFollowups(tenant?.id || 't-jamin-02');
+    const cleanLeadPhone = (selectedLead.phone || '').replace(/\D/g, '').slice(-10);
+    const existingPending = allFollowups.find(
+      f =>
+        f.status === 'Pending' &&
+        (f.contactId === selectedLead.id ||
+          (cleanLeadPhone && (f.contactPhone || '').replace(/\D/g, '').slice(-10) === cleanLeadPhone))
+    );
+
+    const targetAgentId = scheduleAgentId || selectedLead.assignedAgentId || user?.id || 'usr-jamin-exec';
+    const targetAgent = jaminAgents.find(a => a.id === targetAgentId) || {
+      name:
+        selectedLead.assignedAgentName && selectedLead.assignedAgentName !== 'Unassigned'
+          ? selectedLead.assignedAgentName
+          : (user?.name || 'Agent'),
+    };
+
+    const resolvedNotes =
+      scheduleNotes ||
+      (scheduleType === 'whatsapp'
+        ? 'WhatsApp discussion on plot requirements'
+        : scheduleType === 'meeting'
+          ? 'Discussion meeting on property selection'
+          : 'Phone call follow-up on property requirements');
+
+    if (existingPending) {
+      // Mark previous pending follow-up as Rescheduled
+      storageService.saveFollowup({
+        ...existingPending,
+        status: 'Rescheduled',
+      });
+    }
+
+    const newFollowup: Followup = {
+      id: `fup-${Date.now()}`,
+      companyId: tenant?.id || 't-jamin-02',
+      contactId: selectedLead.id,
+      contactName: selectedLead.name,
+      contactPhone: selectedLead.phone,
+      contactType: 'lead',
+      scheduledAt: formattedFollowupString,
+      scheduledDate: scheduleDate,
+      scheduledTime: scheduleTime || '11:00 AM',
+      priority: 'Medium',
+      status: 'Pending',
+      followupType: scheduleType as any,
+      notes: resolvedNotes,
+      assignedAgentId: targetAgentId,
+      assignedAgentName: targetAgent.name,
+      createdBy: user?.name || 'Admin',
+    };
+    storageService.saveFollowup(newFollowup);
+
+    // 3. Add Audit log
+    storageService.addAuditLog({
+      id: `aud-${Date.now()}`,
+      timestamp: 'Just now',
+      actorName: user?.name || 'Agent',
+      actorEmail: user?.email || 'agent@jaminbazaar.com',
+      action: 'FOLLOWUP_SCHEDULED',
+      entityType: 'Lead',
+      entityId: selectedLead.id,
+      companyId: tenant?.id,
+      companyName: tenant?.name,
+      details: `Scheduled ${scheduleType} follow-up for ${selectedLead.name} on ${formattedFollowupString}.`,
+    });
+
+    setIsJaminScheduleModalOpen(false);
+    showToast(`✓ Follow-up scheduled for ${selectedLead.name} on ${scheduleDate}!`);
+  };
+
+  const leadSiteVisits = useMemo(() => {
+    if (!selectedLead || !isJamin) return [];
+    const visits = storageService.getSiteVisits(tenant?.id);
+    const cleanPhone = (selectedLead.phone || '').replace(/\D/g, '').slice(-10);
+    return visits.filter(
+      v =>
+        v.customerId === selectedLead.id ||
+        v.leadId === selectedLead.id ||
+        (cleanPhone && (v.customerPhone || '').replace(/\D/g, '').slice(-10) === cleanPhone)
+    );
+  }, [selectedLead, isJamin, tenant?.id]);
+
+  const handleOpenLeadSiteVisitModal = (lead: Lead) => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    setLeadVisitProject('Greenfield Meadows Phase 2');
+    setLeadVisitPlot('Plot #15');
+    setLeadVisitDate(d.toISOString().split('T')[0]);
+    setLeadVisitTimeSlot('11:00 AM');
+    setLeadVisitNotes('');
+    setLeadVisitHostAgent(
+      lead.assignedAgentName && lead.assignedAgentName !== 'Unassigned'
+        ? lead.assignedAgentName
+        : (user?.name || 'Pooja Hegde')
+    );
+    setIsLeadSiteVisitModalOpen(true);
+  };
+
+  const handleSaveLeadSiteVisit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedLead) return;
+
+    const hostAg = jaminAgents.find(a => a.name === leadVisitHostAgent);
+
+    const dateFormatted = (() => {
+      try {
+        const [y, m, d] = leadVisitDate.split('-');
+        const dateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+        return `${dateObj.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })} • ${leadVisitTimeSlot}`;
+      } catch {
+        return `${leadVisitDate} • ${leadVisitTimeSlot}`;
+      }
+    })();
+
+    const newVisit: SiteVisit = {
+      id: `sv-${Date.now()}`,
+      companyId: tenant?.id || 't-jamin-02',
+      customerId: selectedLead.id,
+      customerName: selectedLead.name,
+      customerPhone: selectedLead.phone,
+      contactType: 'lead',
+      leadId: selectedLead.id,
+      projectId: 'proj-01',
+      projectName: leadVisitProject,
+      plotNumber: leadVisitPlot,
+      scheduledAt: dateFormatted,
+      assignedAgentId: hostAg?.id || selectedLead.assignedAgentId || user?.id || 'usr-jamin-exec',
+      assignedAgentName: leadVisitHostAgent || 'Pooja Hegde',
+      status: 'Scheduled',
+      outcomeNotes: leadVisitNotes,
+    };
+
+    storageService.saveSiteVisit(newVisit);
+
+    storageService.addAuditLog({
+      id: `aud-${Date.now()}`,
+      timestamp: 'Just now',
+      actorName: user?.name || 'Agent',
+      actorEmail: user?.email || 'agent@jamin.com',
+      action: 'SITE_VISIT_SCHEDULED',
+      entityType: 'SiteVisit',
+      entityId: newVisit.id,
+      companyId: tenant?.id,
+      companyName: tenant?.name,
+      details: `Scheduled site visit for LEAD: ${selectedLead.name} at ${leadVisitProject} (${leadVisitPlot}).`,
+    });
+
+    setIsLeadSiteVisitModalOpen(false);
+    showToast(`✓ Site visit scheduled for ${selectedLead.name}!`);
+  };
+
   const handleManualAssignConfirm = () => {
     if (!assignSelectedAgent) return;
     const newAssigned = new Set(assignedLeadIds);
@@ -419,8 +804,12 @@ export const LeadsPage: React.FC = () => {
       console.warn('[LeadsPage] Cannot create lead: user session is not yet loaded.');
       return;
     }
-    const defaultAgentId = user.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec');
-    const defaultAgentName = user.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer');
+    const defaultAgentId = (isJamin && canJaminAssign)
+      ? ''
+      : (user.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec'));
+    const defaultAgentName = (isJamin && canJaminAssign)
+      ? 'Unassigned'
+      : (user.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer'));
 
     setFormData({
       id: `lead-${Date.now()}`,
@@ -437,7 +826,7 @@ export const LeadsPage: React.FC = () => {
       createdAt: new Date().toISOString().split('T')[0],
       notes: '',
       customFields: tenant?.slug === 'jamin'
-        ? { budgetRange: '₹45L - ₹65L', preferredLocation: 'Devanahalli North', readyToRegister: 'Immediate' }
+        ? {}
         : { investmentCapacity: '', assetClass: 'AIF', preferredAssetClass: 'AIF', horizon: '3-5 Years' },
     });
     setIsEditDrawerOpen(true);
@@ -453,12 +842,19 @@ export const LeadsPage: React.FC = () => {
     if (!formData.name || !formData.phone) return;
 
     // Pull real agent ID and name at save-time to prevent stale/fallback placeholder IDs from leaking
-    const resolvedAgentId = (isLeadScopedUser && user?.id)
-      ? user.id
-      : (formData.assignedAgentId && formData.assignedAgentId !== 'usr-exec' ? formData.assignedAgentId : (user?.id || 'usr-exec'));
-    const resolvedAgentName = (isLeadScopedUser && user?.name)
-      ? user.name
-      : (formData.assignedAgentName && formData.assignedAgentName !== 'Agent' ? formData.assignedAgentName : (user?.name || 'Agent'));
+    const isJaminUser = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02';
+    const isJaminUnassigned = isJaminUser && (!formData.assignedAgentId || formData.assignedAgentId === 'unassigned');
+
+    const resolvedAgentId = isJaminUnassigned
+      ? ''
+      : (isLeadScopedUser && user?.id)
+        ? user.id
+        : (formData.assignedAgentId && formData.assignedAgentId !== 'usr-exec' ? formData.assignedAgentId : (user?.id || 'usr-exec'));
+    const resolvedAgentName = isJaminUnassigned
+      ? 'Unassigned'
+      : (isLeadScopedUser && user?.name)
+        ? user.name
+        : (formData.assignedAgentName && formData.assignedAgentName !== 'Agent' ? formData.assignedAgentName : (user?.name || 'Agent'));
 
     const isExistingById = leads.some(l => l.id === formData.id);
     const targetCompanyId = formData.companyId || tenant?.id || 't-ghl-01';
@@ -765,7 +1161,7 @@ export const LeadsPage: React.FC = () => {
             else setSelectedLeadIds(new Set());
           }}
         />
-      ) as unknown as string,
+      ),
       align: 'center' as const,
       render: (l: Lead) => (
         <input
@@ -775,6 +1171,39 @@ export const LeadsPage: React.FC = () => {
           onChange={e => {
             e.stopPropagation();
             setSelectedLeadIds(prev => {
+              const next = new Set(prev);
+              if (e.target.checked) next.add(l.id); else next.delete(l.id);
+              return next;
+            });
+          }}
+          onClick={e => e.stopPropagation()}
+        />
+      ),
+    } as Column<Lead>] : []),
+    ...(canJaminAssign && jaminAssignMode === 'manual' ? [{
+      key: 'jamin-select',
+      header: (
+        <input
+          type="checkbox"
+          className="assign-checkbox jamin-checkbox"
+          checked={filteredLeads.length > 0 && filteredLeads.every(l => selectedJaminLeadIds.has(l.id))}
+          onChange={e => {
+            if (e.target.checked) setSelectedJaminLeadIds(new Set(filteredLeads.map(l => l.id)));
+            else setSelectedJaminLeadIds(new Set());
+          }}
+        />
+      ),
+      width: '40px',
+      align: 'center' as const,
+      className: 'col-select',
+      render: (l: Lead) => (
+        <input
+          type="checkbox"
+          className="assign-checkbox jamin-checkbox"
+          checked={selectedJaminLeadIds.has(l.id)}
+          onChange={e => {
+            e.stopPropagation();
+            setSelectedJaminLeadIds(prev => {
               const next = new Set(prev);
               if (e.target.checked) next.add(l.id); else next.delete(l.id);
               return next;
@@ -823,8 +1252,15 @@ export const LeadsPage: React.FC = () => {
     ...(isIrm ? [assignedAgentColumn] : [statusColumn, sourceColumn]),
     {
       key: 'quickCall',
-      header: 'Quick Call',
+      header: (
+        <div style={{ lineHeight: '1.15', textAlign: 'center', fontSize: '11px', fontWeight: 600 }}>
+          <div>Quick</div>
+          <div>Call</div>
+        </div>
+      ),
+      width: '56px',
       align: 'center',
+      className: 'col-quick-call',
       render: l => (
         <div className="lead-quick-call-cell">
           <button
@@ -909,10 +1345,13 @@ export const LeadsPage: React.FC = () => {
         filtersNode={
           <div className="leads-toolbar">
             <FilterBar
+              showLabel={!isJamin}
+              hideItemLabels={isJamin}
               filters={[
                 ...(isGhlAdmin ? [] : [{
                   key: 'status',
                   label: 'Status',
+                  allLabel: isJamin ? 'All Statuses' : 'All',
                   value: statusFilter,
                   onChange: setStatusFilter,
                   options: [
@@ -924,6 +1363,7 @@ export const LeadsPage: React.FC = () => {
                 ...(!isExec ? [{
                   key: 'agent',
                   label: 'Agent',
+                  allLabel: isJamin ? 'All Agents' : 'All',
                   value: agentFilter,
                   onChange: setAgentFilter,
                   options: agentOptions,
@@ -938,6 +1378,7 @@ export const LeadsPage: React.FC = () => {
                 }] : []),
               ]}
               dateRange={{
+                label: isJamin ? '' : 'Date Range',
                 preset: datePreset,
                 onPresetChange: handleDatePresetChange,
                 from: dateFrom,
@@ -953,6 +1394,58 @@ export const LeadsPage: React.FC = () => {
                 setDateTo('');
               }}
             />
+            {canJaminAssign && (
+              <div className="assign-toggle">
+                <span className="assign-toggle-label">Assign:</span>
+                <div className="assign-toggle-group">
+                  <button
+                    type="button"
+                    className={`assign-toggle-btn${jaminAssignMode === 'manual' ? ' active' : ''}`}
+                    onClick={() => {
+                      setJaminAssignMode(prev => prev === 'manual' ? 'none' : 'manual');
+                      setSelectedJaminLeadIds(new Set());
+                    }}
+                    title="Manual lead assignment"
+                  >
+                    Manual
+                  </button>
+                  <button
+                    type="button"
+                    className={`assign-toggle-btn${jaminAssignMode === 'auto' ? ' active' : ''}`}
+                    onClick={() => {
+                      setJaminAssignMode(prev => prev === 'auto' ? 'none' : 'auto');
+                      setSelectedJaminLeadIds(new Set());
+                    }}
+                    title="Automated round-robin lead assignment"
+                  >
+                    Auto
+                  </button>
+                </div>
+                {jaminAssignMode === 'auto' && (
+                  <div className="assign-auto-bar">
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={handleOpenJaminAiSuggestion}
+                    >
+                      ✦ AI Suggestion
+                    </button>
+                    <div style={{ position: 'relative', display: 'inline-flex' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled
+                        title="Coming soon"
+                        style={{ cursor: 'not-allowed', opacity: 0.6 }}
+                      >
+                        📊 Based on Performance
+                      </button>
+                      <span className="coming-soon-badge">Coming soon</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             {isGhlAdmin && (
               <div className="assign-toggle">
                 <span className="assign-toggle-label">Assign:</span>
@@ -1020,179 +1513,274 @@ export const LeadsPage: React.FC = () => {
         }
       >
         {selectedLead && (() => {
-            const isGhlIrm = isIrm && (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01');
+          const isGhlIrm = isIrm && (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01');
 
-            /** ── Investment Capacity value ── */
-            const investmentCapacity =
-              selectedLead.customFields?.investmentCapacity ||
-              selectedLead.customFields?.capacityRange ||
-              selectedLead.customFields?.investmentRange ||
-              (selectedLead as any).investmentRange ||
-              null;
+          /** ── Investment Capacity value ── */
+          const investmentCapacity =
+            selectedLead.customFields?.investmentCapacity ||
+            selectedLead.customFields?.capacityRange ||
+            selectedLead.customFields?.investmentRange ||
+            (selectedLead as any).investmentRange ||
+            null;
 
-            /** ── User-facing message ── */
-            const userMessage =
-              (selectedLead as any).message ||
-              (selectedLead as any).userMessage ||
-              selectedLead.customFields?.message ||
-              selectedLead.customFields?.userMessage ||
-              selectedLead.notes ||
-              null;
-
-
+          /** ── User-facing message ── */
+          const userMessage =
+            (selectedLead as any).message ||
+            (selectedLead as any).userMessage ||
+            selectedLead.customFields?.message ||
+            selectedLead.customFields?.userMessage ||
+            selectedLead.notes ||
+            null;
 
 
-            return (
-              <>
-                {/* ── Quick Info Banner (Assigned Agent) ── */}
-                <div className="lead-quick-banner">
-                  <div className="lead-assigned-note">
-                    Assigned to <strong>{selectedLead.assignedAgentName}</strong>
-                  </div>
+
+
+          return (
+            <>
+              {/* ── Quick Info Banner (Assigned Agent) ── */}
+              <div className="lead-quick-banner">
+                <div className="lead-assigned-note">
+                  Assigned to <strong>{selectedLead.assignedAgentName}</strong>
                 </div>
+              </div>
 
-                {/* ── Contact & Profile Details ── */}
-                <div className="card lead-detail-card">
-                  <h4 className="lead-detail-title">Contact &amp; Profile Details</h4>
-                  <div className="lead-detail-grid">
-                    <div>
-                      <span className="lead-detail-label">Email:</span>
-                      <div className="lead-detail-value">{selectedLead.email || '—'}</div>
-                    </div>
-                    <div>
-                      <span className="lead-detail-label">Location:</span>
-                      <div className="lead-detail-value">{selectedLead.location || '—'}</div>
-                    </div>
-                    <div>
-                      <span className="lead-detail-label">Lead Source:</span>
-                      <div className="lead-detail-value">{selectedLead.source}</div>
-                    </div>
-                    <div>
-                      <span className="lead-detail-label">Follow-up:</span>
-                      <div className="lead-detail-value lead-followup-text has-date">
-                        {selectedLead.nextFollowupDate || 'Not scheduled'}
+              {/* ── Contact & Profile Details ── */}
+              <div className="card lead-detail-card">
+                <h4 className="lead-detail-title">Contact &amp; Profile Details</h4>
+                <div className="lead-detail-grid">
+                  <div>
+                    <span className="lead-detail-label">Email:</span>
+                    <div className="lead-detail-value">{selectedLead.email || '—'}</div>
+                  </div>
+                  <div>
+                    <span className="lead-detail-label">Location:</span>
+                    <div className="lead-detail-value">{selectedLead.location || '—'}</div>
+                  </div>
+                  <div>
+                    <span className="lead-detail-label">Lead Source:</span>
+                    <div className="lead-detail-value">{selectedLead.source}</div>
+                  </div>
+                  <div>
+                    <span className="lead-detail-label">Follow-up:</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px', flexWrap: 'wrap' }}>
+                      <div className="lead-detail-value lead-followup-text has-date" style={{ margin: 0 }}>
+                        {selectedLead.nextFollowupDate ? (
+                          <span>
+                            {selectedLead.nextFollowupType && (
+                              <span style={{ marginRight: '6px', fontWeight: 600 }}>
+                                {selectedLead.nextFollowupType === 'call' && 'Phone Call'}
+                                {selectedLead.nextFollowupType === 'whatsapp' && 'WhatsApp'}
+                                {selectedLead.nextFollowupType === 'meeting' && 'Meeting'}
+                                {!['call', 'whatsapp', 'meeting'].includes(selectedLead.nextFollowupType) && selectedLead.nextFollowupType}
+                                {' •'}
+                              </span>
+                            )}
+                            {selectedLead.nextFollowupDate}
+                          </span>
+                        ) : (
+                          'Not scheduled'
+                        )}
                       </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* ── GHL IRM: Investment Capacity (replaces Preferred Asset Class + Investment Horizon unless confirmed by IRM) ── */}
-                {isGhlIrm ? (
-                  <div className="card lead-custom-card">
-                    <h4 className="lead-custom-title">Investment Details</h4>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                      <div>
-                        <span className="lead-detail-label">Investment Capacity:</span>
-                        <div
-                          className="lead-detail-value"
+                      {isJamin && (
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() => handleOpenJaminSchedule(selectedLead)}
                           style={{
-                            marginTop: 4,
-                            fontSize: 16,
-                            fontWeight: 700,
-                            color: '#10b981',
-                            letterSpacing: '0.01em',
+                            padding: '2px 8px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            borderRadius: '4px',
+                            border: '1px solid #dc2626',
+                            background: '#fef2f2',
+                            color: '#dc2626',
+                            cursor: 'pointer',
                           }}
                         >
-                          {investmentCapacity || '—'}
-                        </div>
-                      </div>
-
-                      {/* Only show Preferred Asset Class & Horizon if set & confirmed by IRM */}
-                      {Boolean(
-                        selectedLead.customFields?.irmPreferencesConfirmed ||
-                        (() => {
-                          try {
-                            const raw = localStorage.getItem(`nexus_irm_pref_${selectedLead.id}`) ||
-                              localStorage.getItem(`nexus_irm_pref_${(selectedLead.phone || '').replace(/\D/g, '').slice(-10)}`);
-                            if (raw) return JSON.parse(raw)?.confirmed === true;
-                          } catch {}
-                          return false;
-                        })()
-                      ) && (() => {
-                        const localData = (() => {
-                          try {
-                            const raw = localStorage.getItem(`nexus_irm_pref_${selectedLead.id}`) ||
-                              localStorage.getItem(`nexus_irm_pref_${(selectedLead.phone || '').replace(/\D/g, '').slice(-10)}`);
-                            if (raw) return JSON.parse(raw);
-                          } catch {}
-                          return null;
-                        })();
-                        const assetClass = selectedLead.customFields?.preferredAssetClass || localData?.preferredAssetClass || '—';
-                        const horizon = selectedLead.customFields?.horizon || selectedLead.customFields?.investmentHorizon || localData?.horizon || '—';
-
-                        return (
-                          <div className="lead-detail-grid" style={{ marginTop: 4, paddingTop: 10, borderTop: '1px solid var(--border-base)' }}>
-                            <div>
-                              <span className="lead-detail-label">Preferred Asset Class:</span>
-                              <div className="lead-detail-value">{assetClass}</div>
-                            </div>
-                            <div>
-                              <span className="lead-detail-label">Investment Horizon:</span>
-                              <div className="lead-detail-value">{horizon}</div>
-                            </div>
-                          </div>
-                        );
-                      })()}
+                          <Calendar size={12} /> {selectedLead.nextFollowupDate ? 'Reschedule' : 'Schedule'}
+                        </button>
+                      )}
                     </div>
                   </div>
-                ) : (
-                  /* Non-IRM tenants: show the generic custom attributes exactly as before */
-                  (() => {
-                    const activeDefs = storageService
-                      .getCustomFieldDefinitions(tenant?.id)
-                      .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
-                      .filter(d => !(isExec && (d.fieldKey === 'assetClass' || d.fieldKey === 'preferredAssetClass')))
-                      .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
-                    const rows = activeDefs
-                      .map(def => {
-                        const key = def.fieldKey || def.id;
-                        const val = selectedLead.customFields?.[key];
-                        if (val === undefined || val === null || val === '') return null;
-                        return { id: def.id, label: def.label || key.replace(/([A-Z])/g, ' $1'), value: String(val) };
-                      })
-                      .filter(Boolean);
-                    if (rows.length === 0) return null;
-                    return (
-                      <div className="card lead-custom-card">
-                        <h4 className="lead-custom-title">{tenant?.name} Custom Attributes</h4>
-                        <div className="lead-detail-grid">
-                          {rows.map(item => (
-                            <div key={item!.id}>
-                              <span className="lead-custom-label">{item!.label}:</span>
-                              <div className="lead-custom-value">{item!.value}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })()
-                )}
+                </div>
+              </div>
 
-                {/* ── Message from User ── */}
+              {/* Jamin Bazaar: Linked Site Visits */}
+              {isJamin && (
+                <div className="card lead-detail-card" style={{ marginTop: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <h4 className="lead-detail-title" style={{ margin: 0 }}>
+                      Site Visits ({leadSiteVisits.length})
+                    </h4>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-secondary"
+                      onClick={() => handleOpenLeadSiteVisitModal(selectedLead)}
+                      style={{ fontSize: '11px', padding: '3px 9px', color: '#dc2626', borderColor: '#fca5a5' }}
+                    >
+                      + Book Site Visit
+                    </button>
+                  </div>
+                  {leadSiteVisits.length === 0 ? (
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '6px 0' }}>
+                      No site visits booked for this lead yet.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {leadSiteVisits.map(sv => (
+                        <div
+                          key={sv.id}
+                          style={{
+                            padding: '10px 12px',
+                            borderRadius: 6,
+                            background: 'var(--bg-card-subtle, #f9fafb)',
+                            border: '1px solid var(--border-base)',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: '13px' }}>
+                              {sv.projectName} — <span style={{ color: '#dc2626' }}>{sv.plotNumber || 'General Tour'}</span>
+                            </div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: 2 }}>
+                              Slot: <strong>{sv.scheduledAt}</strong> • Host: {sv.assignedAgentName}
+                            </div>
+                            {sv.outcomeNotes && (
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: 3, fontStyle: 'italic' }}>
+                                "{sv.outcomeNotes}"
+                              </div>
+                            )}
+                          </div>
+                          <StatusChip status={sv.status} size="sm" />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── GHL IRM: Investment Capacity (replaces Preferred Asset Class + Investment Horizon unless confirmed by IRM) ── */}
+              {isGhlIrm ? (
                 <div className="card lead-custom-card">
-                  <h4 className="lead-custom-title">Message from User</h4>
-                  <div className="lead-user-message-box">
-                    {userMessage ? (
-                      <div className="lead-user-message-text">{userMessage}</div>
-                    ) : (
-                      <div className="lead-user-message-empty">No message available</div>
-                    )}
+                  <h4 className="lead-custom-title">Investment Details</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div>
+                      <span className="lead-detail-label">Investment Capacity:</span>
+                      <div
+                        className="lead-detail-value"
+                        style={{
+                          marginTop: 4,
+                          fontSize: 16,
+                          fontWeight: 700,
+                          color: '#10b981',
+                          letterSpacing: '0.01em',
+                        }}
+                      >
+                        {investmentCapacity || '—'}
+                      </div>
+                    </div>
+
+                    {/* Only show Preferred Asset Class & Horizon if set & confirmed by IRM */}
+                    {Boolean(
+                      selectedLead.customFields?.irmPreferencesConfirmed ||
+                      (() => {
+                        try {
+                          const raw = localStorage.getItem(`nexus_irm_pref_${selectedLead.id}`) ||
+                            localStorage.getItem(`nexus_irm_pref_${(selectedLead.phone || '').replace(/\D/g, '').slice(-10)}`);
+                          if (raw) return JSON.parse(raw)?.confirmed === true;
+                        } catch { }
+                        return false;
+                      })()
+                    ) && (() => {
+                      const localData = (() => {
+                        try {
+                          const raw = localStorage.getItem(`nexus_irm_pref_${selectedLead.id}`) ||
+                            localStorage.getItem(`nexus_irm_pref_${(selectedLead.phone || '').replace(/\D/g, '').slice(-10)}`);
+                          if (raw) return JSON.parse(raw);
+                        } catch { }
+                        return null;
+                      })();
+                      const assetClass = selectedLead.customFields?.preferredAssetClass || localData?.preferredAssetClass || '—';
+                      const horizon = selectedLead.customFields?.horizon || selectedLead.customFields?.investmentHorizon || localData?.horizon || '—';
+
+                      return (
+                        <div className="lead-detail-grid" style={{ marginTop: 4, paddingTop: 10, borderTop: '1px solid var(--border-base)' }}>
+                          <div>
+                            <span className="lead-detail-label">Preferred Asset Class:</span>
+                            <div className="lead-detail-value">{assetClass}</div>
+                          </div>
+                          <div>
+                            <span className="lead-detail-label">Investment Horizon:</span>
+                            <div className="lead-detail-value">{horizon}</div>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
+              ) : (
+                /* Non-IRM tenants: show the generic custom attributes exactly as before */
+                (() => {
+                  const activeDefs = storageService
+                    .getCustomFieldDefinitions(tenant?.id)
+                    .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
+                    .filter(d => !(isExec && (d.fieldKey === 'assetClass' || d.fieldKey === 'preferredAssetClass')))
+                    .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+                  const rows = activeDefs
+                    .map(def => {
+                      const key = def.fieldKey || def.id;
+                      const val = selectedLead.customFields?.[key];
+                      if (val === undefined || val === null || val === '') return null;
+                      return { id: def.id, label: def.label || key.replace(/([A-Z])/g, ' $1'), value: String(val) };
+                    })
+                    .filter(Boolean);
+                  if (rows.length === 0) return null;
+                  return (
+                    <div className="card lead-custom-card">
+                      <h4 className="lead-custom-title">{tenant?.name} Custom Attributes</h4>
+                      <div className="lead-detail-grid">
+                        {rows.map(item => (
+                          <div key={item!.id}>
+                            <span className="lead-custom-label">{item!.label}:</span>
+                            <div className="lead-custom-value">{item!.value}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()
+              )}
 
-                <LeadDetailDrawerContent
-                  contactName={selectedLead.name}
-                  contactPhone={selectedLead.phone}
-                  contactId={selectedLead.id}
-                  contactType="lead"
-                  tenantId={tenant?.id}
-                  tenantName={tenant?.name}
-                  onCall={() => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id)}
-                  sectionsOnly={['callRecordings']}
-                />
-              </>
-            );
-          })()}
+              {/* ── Message from User ── */}
+              <div className="card lead-custom-card">
+                <h4 className="lead-custom-title">Message from User</h4>
+                <div className="lead-user-message-box">
+                  {userMessage ? (
+                    <div className="lead-user-message-text">{userMessage}</div>
+                  ) : (
+                    <div className="lead-user-message-empty">No message available</div>
+                  )}
+                </div>
+              </div>
+
+              <LeadDetailDrawerContent
+                contactName={selectedLead.name}
+                contactPhone={selectedLead.phone}
+                contactId={selectedLead.id}
+                contactType="lead"
+                tenantId={tenant?.id}
+                tenantName={tenant?.name}
+                onCall={() => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id)}
+                sectionsOnly={['callRecordings']}
+              />
+            </>
+          );
+        })()}
       </Drawer>
 
       {/* Create / Edit Drawer */}
@@ -1274,6 +1862,53 @@ export const LeadsPage: React.FC = () => {
               </select>
             </div>
           </div>
+
+          {/* Jamin Bazaar: Assigned Sales Agent */}
+          {isJamin && (
+            <div className="form-group">
+              <label className="form-label">
+                Assigned Sales Agent <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '12px' }}></span>
+              </label>
+              {canJaminAssign ? (
+                <select
+                  className="form-select"
+                  value={formData.assignedAgentId || ''}
+                  onChange={e => {
+                    const val = e.target.value;
+                    if (!val) {
+                      setFormData(prev => ({
+                        ...prev,
+                        assignedAgentId: '',
+                        assignedAgentName: 'Unassigned',
+                      }));
+                    } else {
+                      const agent = jaminAgents.find(a => a.id === val);
+                      setFormData(prev => ({
+                        ...prev,
+                        assignedAgentId: val,
+                        assignedAgentName: agent?.name || 'Agent',
+                      }));
+                    }
+                  }}
+                >
+                  <option value="">-- Unassigned--</option>
+                  {jaminAgents.map(ag => (
+                    <option key={ag.id} value={ag.id}>
+                      {ag.name} ({ag.email})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  className="form-input"
+                  disabled
+                  value={formData.assignedAgentName || (formData.assignedAgentId ? 'Agent' : 'Unassigned')}
+                  style={{ background: 'var(--bg-card-subtle, #f9fafb)', cursor: 'not-allowed', color: 'var(--text-muted)' }}
+                />
+              )}
+            </div>
+          )}
 
           {/* DYNAMIC TENANT CUSTOM FIELDS (Blueprint Section 7.3) */}
           <div className="lead-custom-schema-box">
@@ -1590,6 +2225,449 @@ export const LeadsPage: React.FC = () => {
           )}
         </div>
       </Modal>
+
+      {/* ── Jamin: Manual selection action bar ──────────────────────────── */}
+      {canJaminAssign && jaminAssignMode === 'manual' && selectedJaminLeadIds.size > 0 && (
+        <div className="assign-action-bar">
+          <span className="assign-action-bar-text">
+            {selectedJaminLeadIds.size} lead{selectedJaminLeadIds.size !== 1 ? 's' : ''} selected
+          </span>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => setSelectedJaminLeadIds(new Set())}
+          >
+            Clear
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={() => {
+              setJaminSelectedAgent(null);
+              setIsJaminAssignModalOpen(true);
+            }}
+          >
+            Assign {selectedJaminLeadIds.size} Lead{selectedJaminLeadIds.size !== 1 ? 's' : ''} →
+          </button>
+        </div>
+      )}
+
+      {/* ── Jamin: Assign Agent Modal ────────────────────────────────────── */}
+      {isJaminAssignModalOpen && (
+        <div className="assign-modal-overlay" onClick={() => setIsJaminAssignModalOpen(false)}>
+          <div className="assign-modal" onClick={e => e.stopPropagation()}>
+            <div className="assign-modal-header">
+              <h3 className="assign-modal-title">Assign Leads to Sales Agent</h3>
+              <button className="assign-modal-close" onClick={() => setIsJaminAssignModalOpen(false)}>✕</button>
+            </div>
+            <p className="assign-modal-sub">
+              Select an agent to assign the {selectedJaminLeadIds.size} selected lead{selectedJaminLeadIds.size !== 1 ? 's' : ''} to:
+            </p>
+            <div className="assign-agent-list">
+              {jaminAgents.map(agent => (
+                <label
+                  key={agent.id}
+                  className={`assign-agent-row${jaminSelectedAgent?.id === agent.id ? ' selected' : ''}`}
+                >
+                  <input
+                    type="radio"
+                    name="jaminAssignAgent"
+                    value={agent.id}
+                    checked={jaminSelectedAgent?.id === agent.id}
+                    onChange={() => setJaminSelectedAgent(agent)}
+                  />
+                  <div className="assign-agent-avatar">
+                    {agent.name[0]}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <span className="assign-agent-name">{agent.name}</span>
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{agent.email}</span>
+                  </div>
+                </label>
+              ))}
+            </div>
+            <div className="assign-modal-footer">
+              <button className="btn btn-secondary" onClick={() => setIsJaminAssignModalOpen(false)}>Cancel</button>
+              <button
+                className="btn btn-primary"
+                disabled={!jaminSelectedAgent}
+                onClick={handleJaminManualAssignConfirm}
+              >
+                Confirm Assignment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Jamin: AI Distribution Modal ────────────────────────────────── */}
+      {isJaminAiModalOpen && (
+        <div className="assign-modal-overlay" onClick={() => setIsJaminAiModalOpen(false)}>
+          <div className="ai-dist-modal" onClick={e => e.stopPropagation()}>
+            <div className="assign-modal-header">
+              <div>
+                <h3 className="assign-modal-title">✦ AI Suggestion — Round Robin</h3>
+                <p className="assign-modal-sub" style={{ margin: '2px 0 0' }}>
+                  {Object.values(jaminAiDistribution).flat().length} leads distributed across {jaminAgents.length} agents
+                </p>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  className={`btn btn-sm ${isJaminAiEditMode ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setIsJaminAiEditMode(e => !e)}
+                >
+                  {isAiEditMode || isJaminAiEditMode ? '✓ Done Editing' : '✎ Edit'}
+                </button>
+                <button className="assign-modal-close" onClick={() => setIsJaminAiModalOpen(false)}>✕</button>
+              </div>
+            </div>
+
+            <div className="ai-dist-grid">
+              {jaminAgents.map((agent, agentIdx) => {
+                const agentLeads = jaminAiDistribution[agent.id] || [];
+                return (
+                  <div key={agent.id} className="ai-dist-col">
+                    <div className="ai-dist-col-header">
+                      <div className="ai-dist-avatar">{agent.name[0]}</div>
+                      <span className="ai-dist-agent-name">{agent.name}</span>
+                      <span className="ai-dist-count">{agentLeads.length}</span>
+                    </div>
+                    <div className="ai-dist-col-body">
+                      {agentLeads.length === 0 ? (
+                        <div className="ai-dist-empty">No leads</div>
+                      ) : (
+                        agentLeads.map(lead => (
+                          <div key={lead.id} className="ai-dist-lead-card">
+                            <div className="ai-dist-lead-name">{lead.name}</div>
+                            <div className="ai-dist-lead-phone">{lead.phone}</div>
+                            {isJaminAiEditMode && (
+                              <div className="ai-dist-move-btns">
+                                <button
+                                  className="ai-move-btn"
+                                  disabled={agentIdx === 0}
+                                  onClick={() => handleJaminAiMoveLead(lead.id, agent.id, 'left')}
+                                  title="Move left"
+                                >◀</button>
+                                <button
+                                  className="ai-move-btn"
+                                  disabled={agentIdx === jaminAgents.length - 1}
+                                  onClick={() => handleJaminAiMoveLead(lead.id, agent.id, 'right')}
+                                  title="Move right"
+                                >▶</button>
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="assign-modal-footer" style={{ borderTop: '1px solid var(--border-base)', marginTop: 0 }}>
+              <button className="btn btn-secondary" onClick={() => setIsJaminAiModalOpen(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleJaminAiConfirm}>
+                Confirm Distribution
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Jamin: Quick Schedule Follow-up Modal ──────────────────────── */}
+      {isJamin && (
+        <Modal
+          isOpen={isJaminScheduleModalOpen && !!selectedLead}
+          onClose={() => setIsJaminScheduleModalOpen(false)}
+          title={`Schedule Follow-up: ${selectedLead?.name || ''}`}
+        >
+          <form onSubmit={handleSaveJaminSchedule} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: -6 }}>
+              Contact: <strong>{selectedLead?.phone}</strong>
+              {selectedLead?.assignedAgentName && selectedLead.assignedAgentName !== 'Unassigned' && (
+                <span> • Assigned to <strong>{selectedLead.assignedAgentName}</strong></span>
+              )}
+            </div>
+
+            {/* Quick Presets */}
+            <div>
+              <label className="form-label" style={{ marginBottom: 6 }}>Quick Date Presets</label>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setQuickDatePreset(1)}
+                  style={{ fontSize: '12px', padding: '4px 10px' }}
+                >
+                  Tomorrow
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setQuickDatePreset(2)}
+                  style={{ fontSize: '12px', padding: '4px 10px' }}
+                >
+                  In 2 Days
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setQuickDatePreset(7)}
+                  style={{ fontSize: '12px', padding: '4px 10px' }}
+                >
+                  In 1 Week
+                </button>
+              </div>
+            </div>
+
+            {/* Date & Time Grid */}
+            <div className="lead-form-grid-2">
+              <div className="form-group">
+                <label className="form-label">Follow-up Date *</label>
+                <input
+                  type="date"
+                  className="form-input"
+                  required
+                  value={scheduleDate}
+                  min={formatDateYMD(new Date())}
+                  onChange={e => setScheduleDate(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Follow-up Time</label>
+                <input
+                  type="time"
+                  className="form-input"
+                  value={scheduleTime}
+                  onChange={e => setScheduleTime(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* Follow-up Type */}
+            <div className="form-group">
+              <label className="form-label">Activity Type</label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                {[
+                  { id: 'call', label: 'Phone Call' },
+                  { id: 'whatsapp', label: 'WhatsApp' },
+                  { id: 'meeting', label: 'Meeting' },
+                ].map(t => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setScheduleType(t.id as any)}
+                    style={{
+                      padding: '8px 4px',
+                      fontSize: '12px',
+                      borderRadius: '6px',
+                      border: scheduleType === t.id ? '2px solid #dc2626' : '1px solid var(--border-base)',
+                      background: scheduleType === t.id ? '#fef2f2' : 'var(--bg-card)',
+                      color: scheduleType === t.id ? '#dc2626' : 'var(--text-primary)',
+                      fontWeight: scheduleType === t.id ? 600 : 400,
+                      cursor: 'pointer',
+                      textAlign: 'center',
+                    }}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Assigned Executive */}
+            {canJaminAssign && (
+              <div className="form-group">
+                <label className="form-label">Assigned Executive</label>
+                <select
+                  className="form-select"
+                  value={scheduleAgentId}
+                  onChange={e => setScheduleAgentId(e.target.value)}
+                >
+                  {jaminAgents.map(ag => (
+                    <option key={ag.id} value={ag.id}>
+                      {ag.name} ({ag.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Notes */}
+            <div className="form-group">
+              <label className="form-label">Follow-up Notes</label>
+              <textarea
+                className="form-textarea"
+                rows={2}
+                value={scheduleNotes}
+                onChange={e => setScheduleNotes(e.target.value)}
+                placeholder="e.g. Call client regarding plot availability..."
+              />
+            </div>
+
+            {/* Modal Actions */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setIsJaminScheduleModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                style={{
+                  background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                  borderColor: '#dc2626',
+                  color: '#ffffff',
+                  fontWeight: 600,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <Calendar size={14} /> Confirm Follow-up
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ── Jamin: Book Site Visit for Lead Modal ──────────────────────── */}
+      {isJamin && (
+        <Modal
+          isOpen={isLeadSiteVisitModalOpen && !!selectedLead}
+          onClose={() => setIsLeadSiteVisitModalOpen(false)}
+          title={`Schedule Site Visit: ${selectedLead?.name || ''}`}
+          subtitle={`Book layout walkthrough for ${selectedLead?.phone}`}
+        >
+          <form onSubmit={handleSaveLeadSiteVisit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div className="sitevisit-form-grid-2">
+              <div className="form-group">
+                <label className="form-label">Client Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  disabled
+                  value={selectedLead?.name || ''}
+                  style={{ background: 'var(--bg-card-subtle, #f9fafb)', cursor: 'not-allowed' }}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Mobile Number</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  disabled
+                  value={selectedLead?.phone || ''}
+                  style={{ background: 'var(--bg-card-subtle, #f9fafb)', cursor: 'not-allowed' }}
+                />
+              </div>
+            </div>
+
+            <div className="sitevisit-form-grid-2">
+              <div className="form-group">
+                <label className="form-label">Visit Date *</label>
+                <input
+                  type="date"
+                  className="form-input"
+                  required
+                  min={new Date().toISOString().split('T')[0]}
+                  value={leadVisitDate}
+                  onChange={e => setLeadVisitDate(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Time Slot *</label>
+                <select
+                  className="form-select"
+                  required
+                  value={leadVisitTimeSlot}
+                  onChange={e => setLeadVisitTimeSlot(e.target.value)}
+                >
+                  <option value="09:30 AM">09:30 AM (Morning Tour)</option>
+                  <option value="11:00 AM">11:00 AM (Mid-Day Walkthrough)</option>
+                  <option value="02:00 PM">02:00 PM (Afternoon Tour)</option>
+                  <option value="03:30 PM">03:30 PM (Late Afternoon Slot)</option>
+                  <option value="05:00 PM">05:00 PM (Sunset Inspection)</option>
+                </select>
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Host Escort Agent</label>
+              <select
+                className="form-select"
+                value={leadVisitHostAgent}
+                onChange={e => setLeadVisitHostAgent(e.target.value)}
+              >
+                {jaminAgents.map(ag => (
+                  <option key={ag.id} value={ag.name}>
+                    {ag.name} ({ag.email})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="sitevisit-form-grid-2">
+              <div className="form-group">
+                <label className="form-label">Project</label>
+                <select
+                  className="form-select"
+                  value={leadVisitProject}
+                  onChange={e => setLeadVisitProject(e.target.value)}
+                >
+                  <option value="Greenfield Meadows Phase 2">Greenfield Meadows Phase 2</option>
+                  <option value="Valley Crest Country Estates">Valley Crest Country Estates</option>
+                  <option value="Emerald Orchid Enclave">Emerald Orchid Enclave</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Plot Number Target</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={leadVisitPlot}
+                  onChange={e => setLeadVisitPlot(e.target.value)}
+                  placeholder="e.g. Plot #15"
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Logistics / Pickup Notes</label>
+              <textarea
+                className="form-textarea"
+                rows={2}
+                value={leadVisitNotes}
+                onChange={e => setLeadVisitNotes(e.target.value)}
+                placeholder="e.g. Metro pickup required, visiting with family..."
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setIsLeadSiteVisitModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                style={{
+                  background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                  borderColor: '#dc2626',
+                  color: '#ffffff',
+                  fontWeight: 600,
+                }}
+              >
+                Confirm Site Visit
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
 
       {/* ── GHL Admin: Manual selection action bar ──────────────────────── */}
       {isGhlAdmin && assignMode === 'manual' && selectedLeadIds.size > 0 && (

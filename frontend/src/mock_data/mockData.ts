@@ -293,6 +293,30 @@ export const USERS: User[] = [
     status: 'Active',
     lastLogin: 'Today, 10:15 AM',
   },
+  {
+    id: 'usr-jamin-exec-02',
+    name: 'Vikram Malhotra',
+    email: 'vikram@jaminbazaar.com',
+    phone: '+91 98451 99882',
+    role: ROLES.sales_executive,
+    companyId: 't-jamin-02',
+    companySlug: 'jamin',
+    companyName: 'Jamin Bazaar',
+    status: 'Active',
+    lastLogin: 'Today, 11:00 AM',
+  },
+  {
+    id: 'usr-jamin-exec-03',
+    name: 'Suresh Kumar',
+    email: 'suresh@jaminbazaar.com',
+    phone: '+91 97410 88776',
+    role: ROLES.sales_executive,
+    companyId: 't-jamin-02',
+    companySlug: 'jamin',
+    companyName: 'Jamin Bazaar',
+    status: 'Active',
+    lastLogin: 'Today, 09:30 AM',
+  },
 ];
 
 export const INITIAL_LEADS: Lead[] = [

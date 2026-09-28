@@ -35,7 +35,28 @@ export const FollowupsPage: React.FC = () => {
   const [followups, setFollowups] = useState<Followup[]>([]);
   const [activeTab, setActiveTab] = useState<'all' | 'due' | 'overdue'>('all');
   const [rescheduleItem, setRescheduleItem] = useState<Followup | null>(null);
-  const [newDate, setNewDate] = useState('');
+  const [rescheduleDate, setRescheduleDate] = useState('');
+  const [rescheduleTime, setRescheduleTime] = useState('11:00 AM');
+  const [rescheduleType, setRescheduleType] = useState<'call' | 'whatsapp' | 'meeting'>('call');
+  const [rescheduleAgentId, setRescheduleAgentId] = useState('');
+  const [rescheduleNotes, setRescheduleNotes] = useState('');
+
+  const handleOpenRescheduleModal = (f: Followup) => {
+    setRescheduleItem(f);
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    setRescheduleDate(f.scheduledDate || d.toISOString().split('T')[0]);
+    setRescheduleTime(f.scheduledTime || '11:00 AM');
+    setRescheduleType((f.followupType as any) || 'call');
+    setRescheduleAgentId(f.assignedAgentId || user?.id || '');
+    setRescheduleNotes(f.notes || '');
+  };
+
+  const setQuickDatePreset = (daysAhead: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + daysAhead);
+    setRescheduleDate(d.toISOString().split('T')[0]);
+  };
 
   // Profile Drawer state for GHL Sales Exec & Admin
   const [drawerFollowup, setDrawerFollowup] = useState<Followup | null>(null);
@@ -412,16 +433,67 @@ export const FollowupsPage: React.FC = () => {
     showToast(`✓ ${drawerFollowup.contactName} moved to KYC module!`);
   };
 
-  const handleSaveReschedule = () => {
-    if (rescheduleItem && newDate) {
-      storageService.saveFollowup({
-        ...rescheduleItem,
-        scheduledAt: newDate,
-        status: 'Pending',
+  const handleSaveReschedule = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!rescheduleItem || !rescheduleDate) return;
+
+    const formattedFollowupString = `${rescheduleDate}${rescheduleTime ? ' ' + rescheduleTime : ''}`;
+
+    // Mark previous followup as Rescheduled
+    storageService.saveFollowup({
+      ...rescheduleItem,
+      status: 'Rescheduled',
+    });
+
+    const isJamin = tenant?.slug === 'jamin';
+    const jaminAgents = [
+      { id: 'usr-jamin-exec', name: 'Pooja Hegde', email: 'pooja@jaminbazaar.com' },
+      { id: 'usr-jamin-exec-02', name: 'Vikram Malhotra', email: 'vikram@jaminbazaar.com' },
+      { id: 'usr-jamin-exec-03', name: 'Suresh Kumar', email: 'suresh@jaminbazaar.com' },
+    ];
+    const targetAgent = isJamin
+      ? jaminAgents.find(a => a.id === rescheduleAgentId || a.name === rescheduleAgentId)
+      : (personOptions as any[]).find(p => p.id === rescheduleAgentId || p.name === rescheduleAgentId);
+
+    const newFollowup: Followup = {
+      id: `fup-${Date.now()}`,
+      companyId: rescheduleItem.companyId,
+      contactId: rescheduleItem.contactId,
+      contactName: rescheduleItem.contactName,
+      contactPhone: rescheduleItem.contactPhone,
+      contactType: rescheduleItem.contactType,
+      scheduledAt: formattedFollowupString,
+      scheduledDate: rescheduleDate,
+      scheduledTime: rescheduleTime || '11:00 AM',
+      priority: rescheduleItem.priority || 'Medium',
+      status: 'Pending',
+      followupType: rescheduleType,
+      notes: rescheduleNotes || `${rescheduleType === 'whatsapp' ? 'WhatsApp' : rescheduleType === 'meeting' ? 'Meeting' : 'Phone call'} follow-up`,
+      assignedAgentId: rescheduleAgentId || rescheduleItem.assignedAgentId,
+      assignedAgentName: targetAgent?.name || rescheduleItem.assignedAgentName,
+      assignedRole: rescheduleItem.assignedRole,
+      createdBy: user?.name || 'Agent',
+    };
+    storageService.saveFollowup(newFollowup);
+
+    // Also update lead record if matching
+    const leads = storageService.getLeads(tenant?.id) || [];
+    const lead = leads.find(l =>
+      (rescheduleItem.contactId && rescheduleItem.contactId !== 'contact-new' && l.id === rescheduleItem.contactId) ||
+      (rescheduleItem.contactPhone && (l.phone || '').replace(/\D/g, '').slice(-10) === (rescheduleItem.contactPhone || '').replace(/\D/g, '').slice(-10))
+    );
+    if (lead) {
+      storageService.saveLead({
+        ...lead,
+        nextFollowupDate: formattedFollowupString,
+        nextFollowupType: rescheduleType,
       });
-      setRescheduleItem(null);
-      setNewDate('');
     }
+
+    setRescheduleItem(null);
+    loadData();
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+    showToast(`✓ Follow-up rescheduled for ${rescheduleItem.contactName} on ${rescheduleDate}!`);
   };
 
   // Helper to determine the assigned role of any followup
@@ -880,7 +952,7 @@ export const FollowupsPage: React.FC = () => {
                     className="btn btn-secondary btn-sm"
                     onClick={e => {
                       e.stopPropagation();
-                      setRescheduleItem(f);
+                      handleOpenRescheduleModal(f);
                     }}
                   >
                     Reschedule
@@ -911,29 +983,160 @@ export const FollowupsPage: React.FC = () => {
       <Modal
         isOpen={!!rescheduleItem}
         onClose={() => setRescheduleItem(null)}
-        title="Reschedule Follow-up"
-        subtitle={`Adjust scheduled reminder date for ${rescheduleItem?.contactName}`}
-        footer={
-          <>
-            <button className="btn btn-secondary" onClick={() => setRescheduleItem(null)}>
+        title={`Reschedule Follow-up: ${rescheduleItem?.contactName || ''}`}
+        subtitle={`Select date, time & channel for ${rescheduleItem?.contactPhone || ''}`}
+      >
+        <form onSubmit={handleSaveReschedule} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Quick Presets */}
+          <div>
+            <label className="form-label" style={{ marginBottom: 6 }}>Quick Date Presets</label>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setQuickDatePreset(1)}
+                style={{ fontSize: '12px', padding: '4px 10px' }}
+              >
+                Tomorrow
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setQuickDatePreset(2)}
+                style={{ fontSize: '12px', padding: '4px 10px' }}
+              >
+                In 2 Days
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setQuickDatePreset(7)}
+                style={{ fontSize: '12px', padding: '4px 10px' }}
+              >
+                In 1 Week
+              </button>
+            </div>
+          </div>
+
+          {/* Date & Time Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="form-group">
+              <label className="form-label">Follow-up Date *</label>
+              <input
+                type="date"
+                className="form-input"
+                required
+                value={rescheduleDate}
+                min={new Date().toISOString().split('T')[0]}
+                onChange={e => setRescheduleDate(e.target.value)}
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Follow-up Time</label>
+              <input
+                type="time"
+                className="form-input"
+                value={rescheduleTime}
+                onChange={e => setRescheduleTime(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Activity Type */}
+          <div className="form-group">
+            <label className="form-label">Activity Type</label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              {[
+                { id: 'call', label: 'Phone Call' },
+                { id: 'whatsapp', label: 'WhatsApp' },
+                { id: 'meeting', label: 'Meeting' },
+              ].map(t => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setRescheduleType(t.id as any)}
+                  style={{
+                    padding: '8px 4px',
+                    fontSize: '12px',
+                    borderRadius: '6px',
+                    border: rescheduleType === t.id ? '2px solid #dc2626' : '1px solid var(--border-base)',
+                    background: rescheduleType === t.id ? '#fef2f2' : 'var(--bg-card)',
+                    color: rescheduleType === t.id ? '#dc2626' : 'var(--text-primary)',
+                    fontWeight: rescheduleType === t.id ? 600 : 400,
+                    cursor: 'pointer',
+                    textAlign: 'center',
+                  }}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Assigned Executive */}
+          <div className="form-group">
+            <label className="form-label">Assigned Executive</label>
+            <select
+              className="form-select"
+              value={rescheduleAgentId}
+              onChange={e => setRescheduleAgentId(e.target.value)}
+            >
+              {tenant?.slug === 'jamin'
+                ? [
+                    { id: 'usr-jamin-exec', name: 'Pooja Hegde (pooja@jaminbazaar.com)' },
+                    { id: 'usr-jamin-exec-02', name: 'Vikram Malhotra (vikram@jaminbazaar.com)' },
+                    { id: 'usr-jamin-exec-03', name: 'Suresh Kumar (suresh@jaminbazaar.com)' },
+                  ].map(ag => (
+                    <option key={ag.id} value={ag.id}>
+                      {ag.name}
+                    </option>
+                  ))
+                : personOptions.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+            </select>
+          </div>
+
+          {/* Notes */}
+          <div className="form-group">
+            <label className="form-label">Follow-up Notes</label>
+            <textarea
+              className="form-textarea"
+              rows={2}
+              value={rescheduleNotes}
+              onChange={e => setRescheduleNotes(e.target.value)}
+              placeholder="e.g. Call client regarding plot availability..."
+            />
+          </div>
+
+          {/* Modal Actions */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setRescheduleItem(null)}
+            >
               Cancel
             </button>
-            <button className="btn btn-primary" onClick={handleSaveReschedule}>
-              Save New Slot
+            <button
+              type="submit"
+              className="btn btn-primary"
+              style={{
+                background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                borderColor: '#dc2626',
+                color: '#ffffff',
+                fontWeight: 600,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              <Calendar size={14} /> Confirm Reschedule
             </button>
-          </>
-        }
-      >
-        <div className="form-group">
-          <label className="form-label">New Date & Time</label>
-          <input
-            type="text"
-            className="form-input"
-            value={newDate}
-            onChange={e => setNewDate(e.target.value)}
-            placeholder="e.g. Next Monday, 10:00 AM"
-          />
-        </div>
+          </div>
+        </form>
       </Modal>
 
       {/* Contact Profile & Detailed Attribution Drawer */}
@@ -976,7 +1179,7 @@ export const FollowupsPage: React.FC = () => {
                   <button
                     className="btn btn-secondary"
                     onClick={() => {
-                      setRescheduleItem(drawerFollowup);
+                      handleOpenRescheduleModal(drawerFollowup);
                       setDrawerFollowup(null);
                     }}
                   >

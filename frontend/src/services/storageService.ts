@@ -58,6 +58,23 @@ class StorageService {
     }
   }
 
+  private cleanupDuplicateLeads(): void {
+    try {
+      const leads = this.get<Lead[]>('leads', []);
+      if (!leads || leads.length === 0) return;
+      const seen = new Set<string>();
+      const unique = leads.filter(l => {
+        const key = `${l.companyId}_${(l.phone || '').replace(/\D/g, '').slice(-10) || l.id}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      this.set('leads', unique);
+    } catch (e) {
+      console.error('Error in cleanupDuplicateLeads:', e);
+    }
+  }
+
   private get<T>(key: string, fallback: T): T {
     try {
       const data = localStorage.getItem(`nexus_${key}`);
@@ -289,18 +306,42 @@ class StorageService {
     this.set('calls', calls);
   }
 
-  // Follow-ups (Defaults to empty [] - real-time data only)
   getFollowups(companyId?: string): Followup[] {
     const raw = this.get<Followup[]>('followups', []) || [];
     const { list, modified } = ensureInitialAdminFollowups(raw);
-    if (modified) {
+    let notesCleaned = false;
+    const sanitizedList = list.map(f => {
+      if (f.notes && (/via leads 360/i.test(f.notes) || /scheduled via leads/i.test(f.notes))) {
+        notesCleaned = true;
+        let cleaned = f.notes;
+        if (/follow-up\s+whatsapp\s+scheduled/i.test(cleaned)) {
+          cleaned = 'WhatsApp follow-up on property inquiry';
+        } else if (/follow-up\s+call\s+scheduled/i.test(cleaned)) {
+          cleaned = 'Phone call follow-up on property inquiry';
+        } else if (/follow-up\s+meeting\s+scheduled/i.test(cleaned)) {
+          cleaned = 'Meeting follow-up on property inquiry';
+        } else {
+          cleaned = cleaned
+            .replace(/\s*\(?via Leads\s*360\)?/gi, '')
+            .replace(/\s*scheduled via Leads\s*360/gi, '')
+            .trim();
+        }
+        return {
+          ...f,
+          notes: cleaned || 'Follow-up on property inquiry',
+        };
+      }
+      return f;
+    });
+
+    if (modified || notesCleaned) {
       try {
-        localStorage.setItem('nexus_followups', JSON.stringify(list));
+        localStorage.setItem('nexus_followups', JSON.stringify(sanitizedList));
       } catch (e) {
         console.error('Failed to seed admin followups', e);
       }
     }
-    return companyId ? list.filter(f => f.companyId === companyId) : list;
+    return companyId ? sanitizedList.filter(f => f.companyId === companyId) : sanitizedList;
   }
 
   cleanupGhlPendingFollowups(companyId?: string): void {

@@ -14,11 +14,12 @@ import './DataTable.css';
 
 export interface Column<T> {
   key: string;
-  header: string;
+  header: React.ReactNode;
   render?: (item: T) => React.ReactNode;
   sortable?: boolean;
   width?: string;
   align?: 'left' | 'center' | 'right';
+  className?: string;
 }
 
 export interface RowAction<T> {
@@ -317,6 +318,7 @@ export function DataTable<T>({
                 {columns.map(col => (
                   <th
                     key={col.key}
+                    className={col.className}
                     style={{
                       padding: '12px 16px',
                       width: col.width,
@@ -421,6 +423,7 @@ export function DataTable<T>({
                     {columns.map(col => (
                       <td
                         key={col.key}
+                        className={col.className}
                         style={{
                           padding: '14px 16px',
                           textAlign: col.align || 'left',

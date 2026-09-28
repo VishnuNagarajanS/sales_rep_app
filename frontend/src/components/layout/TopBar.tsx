@@ -44,9 +44,12 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
 
   // Quick New state
   const [isNewMenuOpen, setIsNewMenuOpen] = useState(false);
+  const newMenuRef = useRef<HTMLDivElement>(null);
 
   // User menu
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const notifRef = useRef<HTMLDivElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
 
   // Sync notifications with tenant and user scoping
   useEffect(() => {
@@ -57,6 +60,64 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id, tenant?.slug, user?.id, user?.role?.code]);
+
+  // Close any open dropdown when clicking or touching anywhere outside, scrolling, or pressing Escape
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (isNewMenuOpen && newMenuRef.current && !newMenuRef.current.contains(target)) {
+        setIsNewMenuOpen(false);
+      }
+      if (isNotifOpen && notifRef.current && !notifRef.current.contains(target)) {
+        setIsNotifOpen(false);
+      }
+      if (isUserMenuOpen && userMenuRef.current && !userMenuRef.current.contains(target)) {
+        setIsUserMenuOpen(false);
+      }
+      if (isSearchOpen && searchRef.current && !searchRef.current.contains(target)) {
+        setIsSearchOpen(false);
+      }
+    };
+
+    const handleScrollOrWheel = (e: Event) => {
+      const target = e.target as Node;
+      if (isNewMenuOpen && (!newMenuRef.current || !newMenuRef.current.contains(target))) {
+        setIsNewMenuOpen(false);
+      }
+      if (isNotifOpen && (!notifRef.current || !notifRef.current.contains(target))) {
+        setIsNotifOpen(false);
+      }
+      if (isUserMenuOpen && (!userMenuRef.current || !userMenuRef.current.contains(target))) {
+        setIsUserMenuOpen(false);
+      }
+      if (isSearchOpen && (!searchRef.current || !searchRef.current.contains(target))) {
+        setIsSearchOpen(false);
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsNewMenuOpen(false);
+        setIsNotifOpen(false);
+        setIsUserMenuOpen(false);
+        setIsSearchOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('touchstart', handleOutsideClick);
+    document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('scroll', handleScrollOrWheel, true);
+    window.addEventListener('wheel', handleScrollOrWheel, { passive: true } as any);
+
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('touchstart', handleOutsideClick);
+      document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('scroll', handleScrollOrWheel, true);
+      window.removeEventListener('wheel', handleScrollOrWheel as any);
+    };
+  }, [isNewMenuOpen, isNotifOpen, isUserMenuOpen, isSearchOpen]);
 
   // Global search items
   const searchResults = React.useMemo(() => {
@@ -142,12 +203,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
 
         {/* Global Search Results Dropdown */}
         {isSearchOpen && searchResults && (
-          <>
-            <div
-              className="topbar-dropdown-backdrop"
-              onClick={() => setIsSearchOpen(false)}
-            />
-            <div className="card animate-slide-down topbar-search-results">
+          <div className="card animate-slide-down topbar-search-results">
               {searchResults.leads.length === 0 &&
                 searchResults.customers.length === 0 &&
                 searchResults.deals.length === 0 &&
@@ -260,7 +316,6 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
                 </>
               )}
             </div>
-          </>
         )}
       </div>
 
@@ -299,21 +354,16 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
 
         {/* "+ New" Action Menu */}
         {!isSuperAdmin && (
-          <div style={{ position: 'relative' }}>
+          <div style={{ position: 'relative' }} ref={newMenuRef}>
             <button
               className="btn btn-primary btn-sm topbar-new-btn"
-              onClick={() => setIsNewMenuOpen(!isNewMenuOpen)}
+              onClick={() => setIsNewMenuOpen(prev => !prev)}
             >
               <Plus size={15} /> New <ChevronDown size={12} />
             </button>
 
             {isNewMenuOpen && (
-              <>
-                <div
-                  className="topbar-dropdown-backdrop"
-                  onClick={() => setIsNewMenuOpen(false)}
-                />
-                <div className="card animate-slide-down topbar-menu-dropdown">
+              <div className="card animate-slide-down topbar-menu-dropdown">
                   <button
                     className="btn btn-ghost btn-sm topbar-menu-item-btn"
                     onClick={() => {
@@ -347,16 +397,15 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
                     </button>
                   )}
                 </div>
-              </>
             )}
           </div>
         )}
 
         {/* Notifications Bell */}
-        <div style={{ position: 'relative' }}>
+        <div style={{ position: 'relative' }} ref={notifRef}>
           <button
             className="btn btn-ghost btn-icon btn-sm topbar-notif-btn"
-            onClick={() => setIsNotifOpen(!isNotifOpen)}
+            onClick={() => setIsNotifOpen(prev => !prev)}
           >
             <Bell size={18} stroke="url(#redGradient)" />
             {unreadCount > 0 && (
@@ -367,12 +416,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
           </button>
 
           {isNotifOpen && (
-            <>
-              <div
-                className="topbar-dropdown-backdrop"
-                onClick={() => setIsNotifOpen(false)}
-              />
-              <div className="card animate-slide-down topbar-notif-dropdown">
+            <div className="card animate-slide-down topbar-notif-dropdown">
                 <div className="topbar-notif-header">
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ fontWeight: 700, fontSize: 13 }}>Notifications</span>
@@ -462,15 +506,14 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
                   )}
                 </div>
               </div>
-            </>
           )}
         </div>
 
         {/* User Profile Avatar / Menu */}
-        <div style={{ position: 'relative' }}>
+        <div style={{ position: 'relative' }} ref={userMenuRef}>
           <button
             className="topbar-user-avatar-btn"
-            onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+            onClick={() => setIsUserMenuOpen(prev => !prev)}
           >
             <div
               className="topbar-user-avatar"
@@ -485,12 +528,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
           </button>
 
           {isUserMenuOpen && (
-            <>
-              <div
-                className="topbar-dropdown-backdrop"
-                onClick={() => setIsUserMenuOpen(false)}
-              />
-              <div className="card animate-slide-down topbar-user-dropdown">
+            <div className="card animate-slide-down topbar-user-dropdown">
                 <div className="topbar-user-dropdown-header">
                   <div style={{ fontWeight: 700, fontSize: 13 }}>{user?.name}</div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{user?.email}</div>
@@ -513,7 +551,6 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
                   </button>
                 </div>
               </div>
-            </>
           )}
         </div>
       </div>

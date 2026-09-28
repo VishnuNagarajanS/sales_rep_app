@@ -158,6 +158,12 @@ export const CallCenterPage: React.FC = () => {
   }[availability] ?? '#64748b';
 
   // ── Dial pad handlers ─────────────────────────────────────────────────────────
+  const handleDialNumberChange = (val: string) => {
+    // Strictly prevent alphabets and invalid phone characters
+    const sanitized = val.replace(/[a-zA-Z]/g, '').replace(/[^0-9+\s\-*#()]/g, '');
+    setDialNumber(sanitized);
+  };
+
   const handleDial = (digit: string) => {
     setDialNumber(prev => prev + digit);
   };
@@ -311,11 +317,18 @@ export const CallCenterPage: React.FC = () => {
 
           <div className="form-group">
             <input
-              type="text"
+              type="tel"
+              inputMode="tel"
               className="form-input"
               style={{ height: 42, fontSize: 16, fontWeight: 700, textAlign: 'center', letterSpacing: '0.05em' }}
               value={dialNumber}
-              onChange={e => setDialNumber(e.target.value)}
+              onChange={e => handleDialNumberChange(e.target.value)}
+              onKeyDown={e => {
+                // Block alphabetic characters directly on key press
+                if (e.key.length === 1 && /[a-zA-Z]/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                  e.preventDefault();
+                }
+              }}
               placeholder="+91 Phone number"
             />
           </div>
