@@ -166,6 +166,8 @@ The database has been seeded with standard roles, tenants, and demo users. All d
 | `2` | Company Admin | GHL India (`1`) | `vikram@ghlindiatrust.com` | `Password@123` |
 | `3` | Sales Executive | GHL India (`1`) | `ananya@ghlindiatrust.com` | `Password@123` |
 | `4` | Company Admin | Jamin Bazaar (`2`) | `kavita@jaminbazaar.com` | `Password@123` |
+| `5` | IRM | GHL India (`1`) | `rohan.varma@ghlindiatrust.com` | `Password@123` |
+| `6` | IRM | GHL India (`1`) | `priya.irm@ghlindiatrust.com` | `Password@123` |
 
 ---
 

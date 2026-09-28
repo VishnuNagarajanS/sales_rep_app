@@ -12,10 +12,12 @@ namespace backend.Controllers.Irm;
 public class IrmKycController : ControllerBase
 {
     private readonly IKycService _kycService;
+    private readonly IOtpService _otpService;
 
-    public IrmKycController(IKycService kycService)
+    public IrmKycController(IKycService kycService, IOtpService otpService)
     {
         _kycService = kycService;
+        _otpService = otpService;
     }
 
     [HttpGet("{investorId:int}")]
@@ -72,6 +74,28 @@ public class IrmKycController : ControllerBase
     {
         var companyId = User.GetCompanyId();
         var result = await _kycService.ReviewKycAsync(id, companyId, dto, ct);
+        if (!result.Success)
+            return BadRequest(result);
+
+        return Ok(result);
+    }
+
+    [HttpPost("otp/send")]
+    [AllowAnonymous]
+    public async Task<IActionResult> SendOtp([FromBody] SendKycOtpRequestDto dto, CancellationToken ct)
+    {
+        var result = await _otpService.SendKycOtpAsync(dto, ct);
+        if (!result.Success)
+            return BadRequest(result);
+
+        return Ok(result);
+    }
+
+    [HttpPost("otp/verify")]
+    [AllowAnonymous]
+    public async Task<IActionResult> VerifyOtp([FromBody] VerifyKycOtpRequestDto dto, CancellationToken ct)
+    {
+        var result = await _otpService.VerifyKycOtpAsync(dto, ct);
         if (!result.Success)
             return BadRequest(result);
 

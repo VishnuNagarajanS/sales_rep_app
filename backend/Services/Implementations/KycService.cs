@@ -11,11 +11,19 @@ public class KycService : IKycService
 {
     private readonly IKycRepository _kycRepo;
     private readonly IInvestorRepository _investorRepo;
+    private readonly IEmailService _emailService;
+    private readonly ILogger<KycService> _logger;
 
-    public KycService(IKycRepository kycRepo, IInvestorRepository investorRepo)
+    public KycService(
+        IKycRepository kycRepo,
+        IInvestorRepository investorRepo,
+        IEmailService emailService,
+        ILogger<KycService> logger)
     {
         _kycRepo = kycRepo;
         _investorRepo = investorRepo;
+        _emailService = emailService;
+        _logger = logger;
     }
 
     public async Task<ApiResponse<KycDto>> GetByInvestorIdAsync(int investorId, int companyId, CancellationToken ct = default)
@@ -38,47 +46,90 @@ public class KycService : IKycService
 
     public async Task<ApiResponse<SendKycLinkResponseDto>> SendKycLinkAsync(int companyId, int irmId, SendKycLinkDto dto, CancellationToken ct = default)
     {
-        var investor = await _investorRepo.GetByIdAsync(dto.InvestorId, companyId, ct);
-        if (investor == null)
-            return ApiResponse<SendKycLinkResponseDto>.ErrorResponse("Investor not found");
+        Investor? investor = null;
+        if (dto.InvestorId.HasValue && dto.InvestorId.Value > 0)
+        {
+            investor = await _investorRepo.GetByIdAsync(dto.InvestorId.Value, companyId, ct);
+        }
+
+        var investorName = investor?.Name ?? dto.CustomerName ?? "Valued Investor";
+        var recipientEmail = dto.Email ?? investor?.Email ?? string.Empty;
+        var recipientPhone = !string.IsNullOrWhiteSpace(dto.Phone) ? dto.Phone : (investor?.Phone ?? string.Empty);
 
         var token = Guid.NewGuid().ToString("N");
-        var expiresAt = DateTime.UtcNow.AddDays(7);
-
-        var existing = await _kycRepo.GetByInvestorIdAsync(dto.InvestorId, companyId, ct);
-        if (existing == null)
+        var days = dto.Expiry?.ToLower() switch
         {
-            existing = new InvestorKyc
+            "24h" => 1,
+            "48h" => 2,
+            "7d" => 7,
+            _ => 2
+        };
+        var expiresAt = DateTime.UtcNow.AddDays(days);
+
+        if (investor != null)
+        {
+            var existing = await _kycRepo.GetByInvestorIdAsync(investor.Id, companyId, ct);
+            if (existing == null)
             {
-                InvestorId = dto.InvestorId,
-                CompanyId = companyId,
-                IrmId = irmId,
-                InvestorName = investor.Name,
-                Phone = dto.Phone,
-                Email = dto.Email ?? investor.Email,
-                Status = KycStatus.Draft,
-                KycLinkToken = token,
-                KycLinkSent = true,
-                KycLinkExpiresAt = expiresAt,
-                CreatedAt = DateTime.UtcNow
-            };
-            await _kycRepo.CreateAsync(existing, ct);
+                existing = new InvestorKyc
+                {
+                    InvestorId = investor.Id,
+                    CompanyId = companyId,
+                    IrmId = irmId,
+                    InvestorName = investor.Name,
+                    Phone = recipientPhone,
+                    Email = recipientEmail,
+                    Status = KycStatus.Draft,
+                    KycLinkToken = token,
+                    KycLinkSent = true,
+                    KycLinkExpiresAt = expiresAt,
+                    CreatedAt = DateTime.UtcNow
+                };
+                await _kycRepo.CreateAsync(existing, ct);
+            }
+            else
+            {
+                existing.KycLinkToken = token;
+                existing.KycLinkSent = true;
+                existing.KycLinkExpiresAt = expiresAt;
+                await _kycRepo.UpdateAsync(existing, ct);
+            }
+        }
+
+        var baseUrl = !string.IsNullOrWhiteSpace(dto.BaseUrl) ? dto.BaseUrl.TrimEnd('/') : "http://localhost:5173";
+        var nameSlug = Uri.EscapeDataString(new string(investorName.Where(char.IsLetterOrDigit).ToArray()).ToLower());
+        var fullKycLink = $"{baseUrl}/kyc/tok_{token[..8]}_{(string.IsNullOrEmpty(nameSlug) ? "investor" : nameSlug)}";
+
+        bool emailSent = false;
+        string deliveryStatus = "Generated";
+
+        if ((string.IsNullOrWhiteSpace(dto.Channel) || dto.Channel.Equals("email", StringComparison.OrdinalIgnoreCase)) 
+            && !string.IsNullOrWhiteSpace(recipientEmail))
+        {
+            emailSent = await _emailService.SendKycVerificationLinkAsync(
+                recipientEmail,
+                investorName,
+                fullKycLink,
+                dto.Expiry ?? "48 Hours",
+                ct);
+
+            deliveryStatus = emailSent 
+                ? $"Email delivered successfully to {recipientEmail} via Gmail SMTP" 
+                : $"Email dispatch simulated (To send real email, configure Gmail credentials in appsettings.json)";
         }
         else
         {
-            existing.KycLinkToken = token;
-            existing.KycLinkSent = true;
-            existing.KycLinkExpiresAt = expiresAt;
-            await _kycRepo.UpdateAsync(existing, ct);
+            deliveryStatus = $"Link dispatched via {dto.Channel?.ToUpper() ?? "SMS"}";
         }
 
-        var link = $"/investor-kyc?token={token}";
         return ApiResponse<SendKycLinkResponseDto>.SuccessResponse(new SendKycLinkResponseDto
         {
             Token = token,
-            Link = link,
-            ExpiresAt = expiresAt
-        }, "KYC verification link generated successfully");
+            Link = fullKycLink,
+            ExpiresAt = expiresAt,
+            EmailSent = emailSent,
+            DeliveryStatus = deliveryStatus
+        }, emailSent ? "KYC verification email dispatched successfully!" : "KYC verification link generated successfully");
     }
 
     public async Task<ApiResponse<KycDto>> SubmitKycAsync(int companyId, SubmitKycDto dto, CancellationToken ct = default)

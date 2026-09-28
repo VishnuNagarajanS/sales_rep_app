@@ -43,6 +43,7 @@ public class ApplicationDbContext : DbContext
         var companyAdminRoleId = 2;
         var salesManagerRoleId = 3;
         var salesExecutiveRoleId = 4;
+        var irmRoleId = 5;
 
         modelBuilder.Entity<Role>().HasData(
             new Role
@@ -120,6 +121,23 @@ public class ApplicationDbContext : DbContext
                     "reports.view"
                 },
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            },
+            new Role
+            {
+                Id = irmRoleId,
+                Name = "IRM",
+                Code = "irm",
+                Permissions = new List<string>
+                {
+                    "leads.view", "followups.view", "followups.create", "followups.update",
+                    "deals.view", "deals.create", "deals.update",
+                    "investors.view", "investors.create", "investors.update",
+                    "consultations.view", "consultations.create", "consultations.update",
+                    "opportunities.view", "opportunities.create", "opportunities.update",
+                    "calls.make", "calls.receive", "calls.view",
+                    "reports.view", "chat.view", "chat.send"
+                },
+                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             }
         );
 
@@ -165,7 +183,7 @@ public class ApplicationDbContext : DbContext
             }
         );
 
-        // 3. Demo Users (Integer IDs 1, 2, 3, 4 - Password: Password@123)
+        // 3. Demo Users (Password: Password@123)
         var passwordHash = "$2a$11$z2c3Nc1pe7Tqmxj6Rm15NOt8vuAyyKfqzGtBKpiFU2NcPZxsjt5p.";
 
         modelBuilder.Entity<User>().HasData(
@@ -218,6 +236,32 @@ public class ApplicationDbContext : DbContext
                 Phone = "+91 98450 33445",
                 RoleId = companyAdminRoleId,
                 CompanyId = 2,
+                Status = UserStatus.Active,
+                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            },
+            // GHL IRM (Rohan Varma)
+            new User
+            {
+                Id = 5,
+                Name = "Rohan Varma",
+                Email = "rohan.varma@ghlindiatrust.com",
+                PasswordHash = passwordHash,
+                Phone = "+91 98110 77889",
+                RoleId = irmRoleId,
+                CompanyId = 1,
+                Status = UserStatus.Active,
+                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            },
+            // GHL IRM (Priya Sharma)
+            new User
+            {
+                Id = 6,
+                Name = "Priya Sharma",
+                Email = "priya.irm@ghlindiatrust.com",
+                PasswordHash = passwordHash,
+                Phone = "+91 98450 66778",
+                RoleId = irmRoleId,
+                CompanyId = 1,
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             }

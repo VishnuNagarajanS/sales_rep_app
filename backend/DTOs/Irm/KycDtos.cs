@@ -59,9 +59,13 @@ public class KycDto
 
 public class SendKycLinkDto
 {
-    public int InvestorId { get; set; }
+    public int? InvestorId { get; set; }
+    public string? CustomerName { get; set; }
     public string Phone { get; set; } = string.Empty;
     public string? Email { get; set; }
+    public string Channel { get; set; } = "email";
+    public string Expiry { get; set; } = "48h";
+    public string? BaseUrl { get; set; }
 }
 
 public class SendKycLinkResponseDto
@@ -69,6 +73,8 @@ public class SendKycLinkResponseDto
     public string Token { get; set; } = string.Empty;
     public string Link { get; set; } = string.Empty;
     public DateTime ExpiresAt { get; set; }
+    public bool EmailSent { get; set; }
+    public string DeliveryStatus { get; set; } = string.Empty;
 }
 
 public class SubmitKycDto
@@ -115,3 +121,33 @@ public class KycReviewDto
     public string Action { get; set; } = string.Empty;
     public string? Remarks { get; set; }
 }
+
+// ── KYC OTP DTOs ─────────────────────────────────────────────────────────────
+
+public class SendKycOtpRequestDto
+{
+    public string Token { get; set; } = string.Empty;
+    public string? Email { get; set; }
+}
+
+public class SendKycOtpResponseDto
+{
+    public bool Success { get; set; }
+    public string MaskedEmail { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+    public int ExpiresInSeconds { get; set; } = 300;
+}
+
+public class VerifyKycOtpRequestDto
+{
+    public string Token { get; set; } = string.Empty;
+    public string? Email { get; set; }
+    public string Otp { get; set; } = string.Empty;
+}
+
+public class VerifyKycOtpResponseDto
+{
+    public bool Verified { get; set; }
+    public string Message { get; set; } = string.Empty;
+}
+
