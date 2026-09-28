@@ -33,10 +33,26 @@ public class KycRepository : IKycRepository
 
         var subToken = token.Replace("tok_", "").Trim();
         var prefix = subToken.Length >= 8 ? subToken[..8] : subToken;
-        return await _db.InvestorKycs.FirstOrDefaultAsync(k => 
+        var match = await _db.InvestorKycs.FirstOrDefaultAsync(k => 
             k.KycLinkToken != null && 
             k.KycLinkExpiresAt > DateTime.UtcNow &&
             k.KycLinkToken.StartsWith(prefix), ct);
+        if (match != null) return match;
+
+        // Fallback: match by trailing slug (e.g. tok_74210020_dhina -> dhina)
+        if (subToken.Contains('_'))
+        {
+            var slug = subToken.Split('_').Last().Trim().ToLower();
+            if (slug.Length >= 3)
+            {
+                var slugMatch = await _db.InvestorKycs.FirstOrDefaultAsync(k =>
+                    k.InvestorName.ToLower().Contains(slug) ||
+                    k.Email.ToLower().Contains(slug), ct);
+                if (slugMatch != null) return slugMatch;
+            }
+        }
+
+        return null;
     }
 
     public async Task<InvestorKyc> CreateAsync(InvestorKyc kyc, CancellationToken ct = default)

@@ -17,11 +17,9 @@ public static class ServiceExtensions
     public static IServiceCollection AddApplicationServices(this IServiceCollection services, IConfiguration configuration)
     {
         // 1. Database Context
-        var useInMemory = configuration.GetValue<bool>("UseInMemoryDatabase", true)
-                          || string.IsNullOrEmpty(configuration.GetConnectionString("DefaultConnection"))
-                          || configuration.GetConnectionString("DefaultConnection")!.Equals("InMemory", StringComparison.OrdinalIgnoreCase);
-
         var connectionString = configuration.GetConnectionString("DefaultConnection");
+        var hasValidConnectionString = !string.IsNullOrWhiteSpace(connectionString) && !connectionString.Equals("InMemory", StringComparison.OrdinalIgnoreCase);
+        var useInMemory = configuration.GetValue<bool>("UseInMemoryDatabase", !hasValidConnectionString) || !hasValidConnectionString;
 
         services.AddDbContext<ApplicationDbContext>(options =>
         {

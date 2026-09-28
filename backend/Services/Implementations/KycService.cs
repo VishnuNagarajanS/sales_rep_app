@@ -66,34 +66,45 @@ public class KycService : IKycService
         };
         var expiresAt = DateTime.UtcNow.AddDays(days);
 
+        InvestorKyc? existing = null;
         if (investor != null)
         {
-            var existing = await _kycRepo.GetByInvestorIdAsync(investor.Id, companyId, ct);
-            if (existing == null)
+            existing = await _kycRepo.GetByInvestorIdAsync(investor.Id, companyId, ct);
+        }
+
+        if (existing == null && !string.IsNullOrWhiteSpace(recipientEmail))
+        {
+            var all = await _kycRepo.GetAllAsync(companyId, null, ct);
+            existing = all.FirstOrDefault(k => string.Equals(k.Email, recipientEmail, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (existing == null)
+        {
+            existing = new InvestorKyc
             {
-                existing = new InvestorKyc
-                {
-                    InvestorId = investor.Id,
-                    CompanyId = companyId,
-                    IrmId = irmId,
-                    InvestorName = investor.Name,
-                    Phone = recipientPhone,
-                    Email = recipientEmail,
-                    Status = KycStatus.Draft,
-                    KycLinkToken = token,
-                    KycLinkSent = true,
-                    KycLinkExpiresAt = expiresAt,
-                    CreatedAt = DateTime.UtcNow
-                };
-                await _kycRepo.CreateAsync(existing, ct);
-            }
-            else
-            {
-                existing.KycLinkToken = token;
-                existing.KycLinkSent = true;
-                existing.KycLinkExpiresAt = expiresAt;
-                await _kycRepo.UpdateAsync(existing, ct);
-            }
+                InvestorId = investor?.Id ?? 0,
+                CompanyId = companyId,
+                IrmId = irmId,
+                InvestorName = investorName,
+                Phone = recipientPhone,
+                Email = recipientEmail,
+                Status = KycStatus.Draft,
+                KycLinkToken = token,
+                KycLinkSent = true,
+                KycLinkExpiresAt = expiresAt,
+                CreatedAt = DateTime.UtcNow
+            };
+            await _kycRepo.CreateAsync(existing, ct);
+        }
+        else
+        {
+            existing.KycLinkToken = token;
+            existing.KycLinkSent = true;
+            existing.KycLinkExpiresAt = expiresAt;
+            if (!string.IsNullOrWhiteSpace(recipientEmail)) existing.Email = recipientEmail;
+            if (!string.IsNullOrWhiteSpace(recipientPhone)) existing.Phone = recipientPhone;
+            if (!string.IsNullOrWhiteSpace(investorName)) existing.InvestorName = investorName;
+            await _kycRepo.UpdateAsync(existing, ct);
         }
 
         var baseUrl = !string.IsNullOrWhiteSpace(dto.BaseUrl) ? dto.BaseUrl.TrimEnd('/') : "http://localhost:5173";
@@ -134,7 +145,24 @@ public class KycService : IKycService
 
     public async Task<ApiResponse<KycDto>> SubmitKycAsync(int companyId, SubmitKycDto dto, CancellationToken ct = default)
     {
-        var kyc = await _kycRepo.GetByInvestorIdAsync(dto.InvestorId, companyId, ct);
+        InvestorKyc? kyc = null;
+
+        if (!string.IsNullOrWhiteSpace(dto.Token))
+        {
+            kyc = await _kycRepo.GetByTokenAsync(dto.Token, ct);
+        }
+
+        if (kyc == null && dto.InvestorId > 0)
+        {
+            kyc = await _kycRepo.GetByInvestorIdAsync(dto.InvestorId, companyId, ct);
+        }
+
+        if (kyc == null && !string.IsNullOrWhiteSpace(dto.Email))
+        {
+            var all = await _kycRepo.GetAllAsync(companyId, null, ct);
+            kyc = all.FirstOrDefault(k => string.Equals(k.Email, dto.Email, StringComparison.OrdinalIgnoreCase));
+        }
+
         if (kyc == null)
         {
             kyc = new InvestorKyc
@@ -145,31 +173,32 @@ public class KycService : IKycService
             };
         }
 
-        kyc.InvestorName = dto.InvestorName;
-        kyc.Phone = dto.Phone;
-        kyc.Email = dto.Email;
-        kyc.Gender = dto.Gender;
-        kyc.InvestorType = dto.InvestorType;
-        kyc.ResidentType = dto.ResidentType;
-        kyc.Occupation = dto.Occupation;
+        kyc.InvestorName = !string.IsNullOrWhiteSpace(dto.InvestorName) ? dto.InvestorName : kyc.InvestorName;
+        kyc.Phone = !string.IsNullOrWhiteSpace(dto.Phone) ? dto.Phone : kyc.Phone;
+        kyc.Email = !string.IsNullOrWhiteSpace(dto.Email) ? dto.Email : kyc.Email;
+        kyc.Gender = dto.Gender ?? kyc.Gender;
+        kyc.InvestorType = dto.InvestorType ?? kyc.InvestorType;
+        kyc.ResidentType = dto.ResidentType ?? kyc.ResidentType;
+        kyc.Occupation = dto.Occupation ?? kyc.Occupation;
 
-        kyc.PanNumber = dto.PanNumber;
-        kyc.AadhaarNumber = dto.AadhaarNumber;
-        kyc.AddressLine1 = dto.AddressLine1;
-        kyc.AddressLine2 = dto.AddressLine2;
-        kyc.City = dto.City;
-        kyc.State = dto.State;
-        kyc.Pincode = dto.Pincode;
-        kyc.Country = dto.Country;
+        kyc.PanNumber = dto.PanNumber ?? kyc.PanNumber;
+        kyc.AadhaarNumber = dto.AadhaarNumber ?? kyc.AadhaarNumber;
+        kyc.AddressLine1 = dto.AddressLine1 ?? kyc.AddressLine1;
+        kyc.AddressLine2 = dto.AddressLine2 ?? kyc.AddressLine2;
+        kyc.City = dto.City ?? kyc.City;
+        kyc.State = dto.State ?? kyc.State;
+        kyc.Pincode = dto.Pincode ?? kyc.Pincode;
+        kyc.Country = dto.Country ?? kyc.Country;
 
-        kyc.BankName = dto.BankName;
-        kyc.AccountNumber = dto.AccountNumber;
-        kyc.IfscCode = dto.IfscCode;
-        kyc.AccountType = dto.AccountType;
-        kyc.DematAccountNumber = dto.DematAccountNumber;
-        kyc.DpId = dto.DpId;
+        kyc.BankName = dto.BankName ?? kyc.BankName;
+        kyc.AccountNumber = dto.AccountNumber ?? kyc.AccountNumber;
+        kyc.IfscCode = dto.IfscCode ?? kyc.IfscCode;
+        kyc.AccountType = dto.AccountType ?? kyc.AccountType;
+        kyc.DematAccountNumber = dto.DematAccountNumber ?? kyc.DematAccountNumber;
+        kyc.DpId = dto.DpId ?? kyc.DpId;
 
-        kyc.NomineesJson = dto.NomineesJson;
+        kyc.NomineesJson = dto.NomineesJson ?? kyc.NomineesJson;
+        kyc.UpdatedAt = DateTime.UtcNow;
 
         if (dto.IsFinalSubmit)
         {
@@ -225,6 +254,26 @@ public class KycService : IKycService
             return ApiResponse<KycDto>.ErrorResponse("Invalid or expired KYC token");
 
         return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc));
+    }
+
+    public async Task<ApiResponse<KycDto>> GetByEmailAsync(string email, int companyId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+            return ApiResponse<KycDto>.ErrorResponse("Email is required");
+
+        var all = await _kycRepo.GetAllAsync(companyId, null, ct);
+        var kyc = all.FirstOrDefault(k => string.Equals(k.Email, email, StringComparison.OrdinalIgnoreCase));
+        if (kyc == null)
+            return ApiResponse<KycDto>.ErrorResponse("KYC record not found for this email");
+
+        return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc));
+    }
+
+    public async Task<ApiResponse<List<KycDto>>> GetAllAsync(int companyId, string? status, CancellationToken ct = default)
+    {
+        var list = await _kycRepo.GetAllAsync(companyId, status, ct);
+        var dtos = list.Select(MapToDto).ToList();
+        return ApiResponse<List<KycDto>>.SuccessResponse(dtos);
     }
 
     private static KycDto MapToDto(InvestorKyc k) => new()

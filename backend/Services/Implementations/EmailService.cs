@@ -26,7 +26,7 @@ public class EmailService : IEmailService
         string expiryWindow,
         CancellationToken ct = default)
     {
-        var subject = $"Action Required: Complete Your KYC Verification - GHL India Ventures";
+        var subject = $"Your KYC Onboarding Link - GHL India Ventures";
 
         var body = $@"
 <!DOCTYPE html>

@@ -79,6 +79,7 @@ public class SendKycLinkResponseDto
 
 public class SubmitKycDto
 {
+    public string? Token { get; set; }
     public int InvestorId { get; set; }
 
     // Step 1

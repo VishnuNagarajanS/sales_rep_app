@@ -32,12 +32,33 @@ public class IrmKycController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("by-email")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetByEmail([FromQuery] string email, CancellationToken ct)
+    {
+        var companyId = User.Identity?.IsAuthenticated == true ? User.GetCompanyId() : 1;
+        var result = await _kycService.GetByEmailAsync(email, companyId, ct);
+        if (!result.Success)
+            return NotFound(result);
+
+        return Ok(result);
+    }
+
+    [HttpGet("all")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetAllKycs([FromQuery] string? status, CancellationToken ct)
+    {
+        var companyId = User.Identity?.IsAuthenticated == true ? User.GetCompanyId() : 1;
+        var result = await _kycService.GetAllAsync(companyId, status, ct);
+        return Ok(result);
+    }
+
     [HttpPost("send-link")]
-    [Authorize]
+    [AllowAnonymous]
     public async Task<IActionResult> SendKycLink([FromBody] SendKycLinkDto dto, CancellationToken ct)
     {
-        var companyId = User.GetCompanyId();
-        var irmId = User.GetUserId();
+        var companyId = User.Identity?.IsAuthenticated == true ? User.GetCompanyId() : 1;
+        var irmId = User.Identity?.IsAuthenticated == true ? User.GetUserId() : 5;
         var result = await _kycService.SendKycLinkAsync(companyId, irmId, dto, ct);
         if (!result.Success)
             return BadRequest(result);
