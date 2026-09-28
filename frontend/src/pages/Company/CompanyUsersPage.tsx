@@ -15,12 +15,12 @@ import {
   Check,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { SYSTEM_ROLES } from '../../constants/roles';
 import { storageService } from '../../services/storageService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { User, RoleCode } from '../../types';
+import { SYSTEM_ROLES } from '../../constants/roles';
 import './CompanyUsersPage.css';
 
 const getStoredUsers = (tenantSlug?: string, tenantId?: string): User[] => {
@@ -47,7 +47,7 @@ const saveStoredUser = (user: User) => {
     localStorage.setItem('nexus_users', JSON.stringify(all));
     window.dispatchEvent(new Event('nexus_storage_updated'));
     window.dispatchEvent(new Event('nexus_admin_updated'));
-  } catch {}
+  } catch { }
 };
 
 const deleteStoredUser = (userId: string) => {
@@ -58,7 +58,7 @@ const deleteStoredUser = (userId: string) => {
     localStorage.setItem('nexus_users', JSON.stringify(filtered));
     window.dispatchEvent(new Event('nexus_storage_updated'));
     window.dispatchEvent(new Event('nexus_admin_updated'));
-  } catch {}
+  } catch { }
 };
 
 const addStoredAuditLog = (log: any) => {
@@ -69,7 +69,7 @@ const addStoredAuditLog = (log: any) => {
     localStorage.setItem('nexus_audit_logs', JSON.stringify(all));
     window.dispatchEvent(new Event('nexus_storage_updated'));
     window.dispatchEvent(new Event('nexus_admin_updated'));
-  } catch {}
+  } catch { }
 };
 
 export const CompanyUsersPage: React.FC = () => {
@@ -103,10 +103,9 @@ export const CompanyUsersPage: React.FC = () => {
     setTimeout(() => setToast(null), 3500);
   };
 
-  // ── Assignable Company Roles ──────────────────────────────────────────────
+  // ── Assignable Tenant Roles ──────────────────────────────────────────────
   const assignableRoles = React.useMemo(() => {
-    const list = storageService.getRoles ? storageService.getRoles() : Object.values(SYSTEM_ROLES);
-    return list.filter(
+    return storageService.getRoles().filter(
       r => r.code !== 'super_admin' && r.code !== 'company_admin'
     );
   }, []);
@@ -166,12 +165,12 @@ export const CompanyUsersPage: React.FC = () => {
       return;
     }
 
-    const roles = storageService.getRoles ? storageService.getRoles() : Object.values(SYSTEM_ROLES);
-    const assignedRole = roles.find(r => r.code === inviteRole) || SYSTEM_ROLES[inviteRole] || SYSTEM_ROLES.sales_executive;
+    const assignedRole = SYSTEM_ROLES[inviteRole] || SYSTEM_ROLES.sales_executive;
     const isInstant = creationMode === 'instant_password';
     const tempPass = isInstant
       ? `Nexus#${Math.floor(1000 + Math.random() * 9000)}`
       : undefined;
+
     const newUser: User = {
       id: `usr-${tenant?.slug || 'ghl'}-${Date.now().toString(36)}`,
       name: trimmedName,
@@ -394,20 +393,14 @@ export const CompanyUsersPage: React.FC = () => {
   }, [usersList]);
 
   const usersByRoleCode = React.useMemo(() => {
-    const map: Record<string, User[]> = {};
+    const groups: Record<string, User[]> = {};
     usersList.forEach(u => {
-      if (!map[u.role.code]) map[u.role.code] = [];
-      map[u.role.code].push(u);
+      if (u.role.code === 'company_admin' || u.role.code === 'super_admin') return; // admins never shown here
+      if (!groups[u.role.code]) groups[u.role.code] = [];
+      groups[u.role.code].push(u);
     });
-    return map;
+    return groups;
   }, [usersList]);
-
-  // ── Filtered Dataset ──────────────────────────────────────────────────────
-  const filteredUsersList = usersList.filter(u => {
-    if (roleFilter !== 'all' && u.role.code !== roleFilter) return false;
-    if (statusFilter !== 'all' && u.status !== statusFilter) return false;
-    return true;
-  });
 
   // ── Table Columns ─────────────────────────────────────────────────────────
   const columns: Column<User>[] = [
@@ -589,9 +582,8 @@ export const CompanyUsersPage: React.FC = () => {
               gap: 8,
               padding: '10px 18px',
               borderRadius: 'var(--radius-md)',
-              border: `1px solid ${
-                toast.type === 'success' ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'
-              }`,
+              border: `1px solid ${toast.type === 'success' ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'
+                }`,
               backgroundColor:
                 toast.type === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
               backdropFilter: 'blur(6px)',
@@ -612,92 +604,7 @@ export const CompanyUsersPage: React.FC = () => {
         </>
       )}
 
-      {/* ── Roles summary ───────────────────────────────────────────────── */}
-      <div className="company-users-role-summary">
-        <h3 className="company-users-role-summary-title">Roles</h3>
-        <div className="company-users-role-cards">
-          {roleSummary.map(r => (
-            <div
-              key={r.roleCode}
-              className={`card company-users-role-card${expandedRoleCode === r.roleCode ? ' is-expanded' : ''}`}
-              onClick={() => {
-                setExpandedRoleCode(prev => (prev === r.roleCode ? null : r.roleCode));
-                setRoleFilter(prev => (prev === r.roleCode ? 'all' : r.roleCode));
-              }}
-            >
-              <div className="company-users-role-card-title">{r.roleName}</div>
-              <div className="company-users-role-card-stat">
-                <span className="company-users-role-card-label">Total Count of Employees</span>
-                <span className="company-users-role-card-value">{r.total}</span>
-              </div>
-              <div className="company-users-role-card-stat">
-                <span className="company-users-role-card-label">Active</span>
-                <span className="company-users-role-card-value">{r.active} / {r.total}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ── Filter Bar ───────────────────────────────────────────────────── */}
-      <div className="company-users-filter-bar">
-        <div className="company-users-filter-item">
-          <label className="company-users-filter-label">Filter by Role:</label>
-          <select
-            className="form-select company-users-filter-select"
-            value={roleFilter}
-            onChange={e => {
-              setRoleFilter(e.target.value);
-              setExpandedRoleCode(e.target.value === 'all' ? null : e.target.value);
-            }}
-          >
-            <option value="all">All Roles</option>
-            <option value="sales_executive">Sales Executive</option>
-            <option value="irm">Institutional Relationship Manager (IRM)</option>
-            <option value="company_admin">Company Admin</option>
-          </select>
-        </div>
-
-        <div className="company-users-filter-item">
-          <label className="company-users-filter-label">Filter by Status:</label>
-          <select
-            className="form-select company-users-filter-select"
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value)}
-          >
-            <option value="all">All Statuses</option>
-            <option value="Active">Active</option>
-            <option value="Invited">Invited</option>
-            <option value="Disabled">Disabled</option>
-          </select>
-        </div>
-
-        {(roleFilter !== 'all' || statusFilter !== 'all') && (
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => {
-              setRoleFilter('all');
-              setStatusFilter('all');
-              setExpandedRoleCode(null);
-            }}
-            style={{ alignSelf: 'flex-end', height: '36px' }}
-          >
-            Reset Filters
-          </button>
-        )}
-      </div>
-
-      {/* ── Data Table ───────────────────────────────────────────────────── */}
-      <DataTable
-        columns={columns}
-        data={filteredUsersList}
-        keyExtractor={u => u.id}
-        rowActions={rowActions}
-        searchPlaceholder="Search team members by name, email, or designation..."
-      />
-
-      {/* ── Add / Invite Member Modal ────────────────────────────────────── */}
+      {/* ── Invite Modal ─────────────────────────────────────────────────── */}
       <Modal
         isOpen={isInviteModalOpen}
         onClose={() => setIsInviteModalOpen(false)}

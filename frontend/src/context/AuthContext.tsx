@@ -1,9 +1,30 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, Tenant, TenantSlug, RoleCode } from '../types';
+import { DEFAULT_TENANTS } from '../constants/defaultTenants';
+import { SYSTEM_ROLES } from '../constants/roles';
 import { FEATURES } from '../constants/features';
 import { storageService } from '../services/storageService';
 import { apiClient } from '../services/apiClient';
 import { isMockMode } from '../config/environment';
+
+const getStoredTenants = (): Tenant[] => {
+  try {
+    const raw = localStorage.getItem('nexus_tenants');
+    return raw ? JSON.parse(raw) : [DEFAULT_TENANTS.ghl, DEFAULT_TENANTS.jamin];
+  } catch {
+    return [DEFAULT_TENANTS.ghl, DEFAULT_TENANTS.jamin];
+  }
+};
+
+const getStoredUsers = (tenantSlug?: string): User[] => {
+  try {
+    const raw = localStorage.getItem('nexus_users');
+    const users: User[] = raw ? JSON.parse(raw) : [];
+    return tenantSlug ? users.filter((u: User) => u.companySlug === tenantSlug) : users;
+  } catch {
+    return [];
+  }
+};
 
 const saveStoredUser = (targetUser: User) => {
   try {
@@ -18,6 +39,8 @@ const saveStoredUser = (targetUser: User) => {
     localStorage.setItem('nexus_users', JSON.stringify(users));
   } catch {}
 };
+
+export { getStoredTenants, getStoredUsers, saveStoredUser };
 
 interface AuthContextType {
   user: User | null;
@@ -55,8 +78,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const saved = sessionStorage.getItem('nexus_current_user');
     if (saved) {
       try {
-        return JSON.parse(saved);
-      } catch {}
+        const parsed = JSON.parse(saved);
+        if (parsed?.role?.code && SYSTEM_ROLES[parsed.role.code]) {
+          parsed.role.permissions = Array.from(
+            new Set([...(parsed.role.permissions || []), ...SYSTEM_ROLES[parsed.role.code].permissions])
+          );
+        }
+        return parsed;
+      } catch {
+        return null;
+      }
     }
     return null;
   });
@@ -129,8 +160,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     // In mock mode, retrieve mock fixtures from registered provider
-    const MOCK_ROLES = mockAuthProviderInstance?.getRoles() || {};
-    const MOCK_TENANTS = mockAuthProviderInstance?.getTenants() || {};
+    const MOCK_ROLES = mockAuthProviderInstance?.getRoles() || SYSTEM_ROLES || {};
+    const MOCK_TENANTS = mockAuthProviderInstance?.getTenants() || DEFAULT_TENANTS || {};
 
     if (roleCode === 'super_admin') {
       const superUser: User = {
@@ -267,8 +298,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
-    const MOCK_ROLES = mockAuthProviderInstance?.getRoles() || {};
-    const MOCK_TENANTS = mockAuthProviderInstance?.getTenants() || {};
+    const MOCK_ROLES = mockAuthProviderInstance?.getRoles() || SYSTEM_ROLES || {};
+    const MOCK_TENANTS = mockAuthProviderInstance?.getTenants() || DEFAULT_TENANTS || {};
 
     const allTenants = storageService.getTenants();
     const targetTenant =

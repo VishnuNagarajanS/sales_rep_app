@@ -48,9 +48,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
 
-  if (isGhlAdmin) {
-    return <AdminKanbanBoard onOpenQuickCreate={onOpenQuickCreate} />;
-  }
 
   const canUpdateDeals = useCan('deals.update');
   const isIrm = roleCode === 'irm';
@@ -328,6 +325,10 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   const irmDealActivities = dealActivities.length > 0
     ? dealActivities
     : (irmDetailDeal ? storageService.getDealActivities(irmDetailDeal.id, tenant?.id) : []);
+
+  if (isGhlAdmin) {
+    return <AdminKanbanBoard onOpenQuickCreate={onOpenQuickCreate} />;
+  }
 
   return (
     <div className="pipeline-page-container">

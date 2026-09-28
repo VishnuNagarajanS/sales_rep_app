@@ -15,6 +15,7 @@ import {
 import { useCall } from '../../context/CallContext';
 import { useAuth } from '../../context/AuthContext';
 import './CallSettingsPage.css';
+import { storageService } from '../../services/storageService';
 
 export type PopupPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 
@@ -66,7 +67,7 @@ const setCallPreferences = (patch: Partial<CallPreferences>) => {
     const updated = { ...current, ...patch };
     localStorage.setItem('nexus_call_prefs', JSON.stringify(updated));
     window.dispatchEvent(new Event('nexus_storage_updated'));
-  } catch {}
+  } catch { }
 };
 
 const getAdminCallSettings = (): AdminCallSettings => {
@@ -84,7 +85,7 @@ const setAdminCallSettings = (patch: Partial<AdminCallSettings>) => {
     const updated = { ...current, ...patch };
     localStorage.setItem('nexus_admin_call_settings', JSON.stringify(updated));
     window.dispatchEvent(new Event('nexus_storage_updated'));
-  } catch {}
+  } catch { }
 };
 // ── Shared inline toggle component matching this file's visual language ──────
 const SettingToggle: React.FC<{
@@ -153,22 +154,22 @@ const playTestBeep = () => {
 
 export const CallSettingsPage: React.FC = () => {
   const { user, tenant } = useAuth();
-  const [position, setPosition] = useState<PopupPosition>(() => getPopupPosition());
+  const [position, setPosition] = useState<PopupPosition>(() => storageService.getPopupPosition());
   const { simulateIncomingCall } = useCall();
 
-  const isGhlAdmin = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') && 
+  const isGhlAdmin = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
     ((user?.role?.code as string) === 'company_admin' || (user?.role?.code as string) === 'admin' || user?.role?.code === 'super_admin');
 
   // ── Call preferences state ────────────────────────────────────────────────
-  const [prefs, setPrefs] = useState(() => getCallPreferences());
-  const [adminSettings, setAdminSettings] = useState(() => getAdminCallSettings());
+  const [prefs, setPrefs] = useState(() => storageService.getCallPreferences());
+  const [adminSettings, setAdminSettings] = useState(() => storageService.getAdminCallSettings());
 
   // Keep prefs in sync with other tabs / external writes
   useEffect(() => {
     const handleUpdate = () => {
-      setPosition(getPopupPosition());
-      setPrefs(getCallPreferences());
-      setAdminSettings(getAdminCallSettings());
+      setPosition(storageService.getPopupPosition());
+      setPrefs(storageService.getCallPreferences());
+      setAdminSettings(storageService.getAdminCallSettings());
     };
     window.addEventListener('nexus_storage_updated', handleUpdate);
     window.addEventListener('storage', handleUpdate);
@@ -200,6 +201,7 @@ export const CallSettingsPage: React.FC = () => {
     const next = { ...adminSettings, [key]: value };
     setAdminSettings(next);
     setAdminCallSettings({ [key]: value });
+    storageService.setAdminCallSettings({ [key]: value });
   };
 
   const handleToggleDesktopNotif = async (enabled: boolean) => {
@@ -670,7 +672,7 @@ export const CallSettingsPage: React.FC = () => {
       {isGhlAdmin && (
         <div style={{ marginTop: 24, paddingTop: 24, borderTop: '1px solid var(--border-base)', maxWidth: 760 }}>
           <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, color: 'var(--text-primary)' }}>Organization Call Controls (Admin)</h2>
-          
+
           <div className="card" style={{ padding: 24, marginBottom: 20 }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flex: 1 }}>

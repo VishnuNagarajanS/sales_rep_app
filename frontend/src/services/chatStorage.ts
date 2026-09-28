@@ -46,7 +46,7 @@ export function saveConversation(conv: ChatConversation): void {
     }
     localStorage.setItem(getConvsKey(), JSON.stringify(all));
     emit();
-  } catch {}
+  } catch { }
 }
 
 export function getOrCreateDm(companyId: string, meId: string, them: ChatMember, me: ChatMember): ChatConversation {
@@ -131,7 +131,7 @@ export function sendMessage(
       all[ci].updatedAt = msg.createdAt;
       localStorage.setItem(getConvsKey(), JSON.stringify(all));
     }
-  } catch {}
+  } catch { }
 
   emit();
   return msg;
@@ -182,7 +182,7 @@ export function markRead(conversationId: string, companyId: string): void {
       localStorage.setItem(getConvsKey(), JSON.stringify(all));
       emit();
     }
-  } catch {}
+  } catch { }
 }
 
 // ── Presence ──────────────────────────────────────────────────────────────────
@@ -218,7 +218,7 @@ export function setTyping(conversationId: string, entry: TypingEntry | null): vo
       delete map[conversationId];
     }
     localStorage.setItem(getTypingKey(), JSON.stringify(map));
-  } catch {}
+  } catch { }
 }
 
 export function getTyping(conversationId: string, currentUserId: string): TypingEntry | null {
@@ -278,11 +278,12 @@ export function ensureDemoConversations(companyId: string, tenantSlug?: string):
   const demoData = demoChatLoader(companyId, tenantSlug);
   if (!demoData) return;
 
+
   demoData.conversations.forEach((c: any) => saveConversation(c));
   Object.entries(demoData.messagesByConversationId).forEach(([cId, msgs]: [string, any]) => {
     try {
       localStorage.setItem(getMsgKey(cId), JSON.stringify(msgs));
-    } catch {}
+    } catch { }
   });
   emit();
 }
@@ -301,7 +302,7 @@ export function saveChatSettings(companyId: string, userId: string, settings: an
   try {
     localStorage.setItem(getSettingsKey(companyId, userId), JSON.stringify(settings));
     emit();
-  } catch {}
+  } catch { }
 }
 
 export function togglePinConversation(conversationId: string): void {
@@ -315,7 +316,7 @@ export function togglePinConversation(conversationId: string): void {
       localStorage.setItem(getConvsKey(), JSON.stringify(all));
       emit();
     }
-  } catch {}
+  } catch { }
 }
 
 export function toggleMuteConversation(conversationId: string): void {
@@ -329,7 +330,7 @@ export function toggleMuteConversation(conversationId: string): void {
       localStorage.setItem(getConvsKey(), JSON.stringify(all));
       emit();
     }
-  } catch {}
+  } catch { }
 }
 
 export function renameConversation(conversationId: string, newName: string): void {
@@ -344,7 +345,7 @@ export function renameConversation(conversationId: string, newName: string): voi
       localStorage.setItem(getConvsKey(), JSON.stringify(all));
       emit();
     }
-  } catch {}
+  } catch { }
 }
 
 export function clearConversationMessages(conversationId: string): void {
@@ -360,7 +361,7 @@ export function clearConversationMessages(conversationId: string): void {
       }
     }
     emit();
-  } catch {}
+  } catch { }
 }
 
 export function leaveConversation(conversationId: string, userId: string): void {
@@ -375,7 +376,7 @@ export function leaveConversation(conversationId: string, userId: string): void 
       localStorage.setItem(getConvsKey(), JSON.stringify(all));
       emit();
     }
-  } catch {}
+  } catch { }
 }
 
 // ── Call Cards ────────────────────────────────────────────────────────────────
@@ -419,12 +420,12 @@ export function updateCallCardMessage(
             msg.updatedAt = new Date().toISOString();
             updated = true;
           }
-        } catch {}
+        } catch { }
       }
     }
     if (updated) {
       localStorage.setItem(getMsgKey(conversationId), JSON.stringify(msgs));
       emit();
     }
-  } catch {}
+  } catch { }
 }

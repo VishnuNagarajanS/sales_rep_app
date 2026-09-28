@@ -30,7 +30,6 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { getFollowups } from '../../services/ghlApiService';
-import { storageService } from '../../services/storageService';
 import { FEATURES } from '../../constants/features';
 import { PERMISSIONS } from '../../constants/permissions';
 import './Sidebar.css';
@@ -61,9 +60,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
 
   const roleCode = user?.role?.code;
   const isGhlAdmin =
-    !isSuperAdmin &&
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
-    (roleCode === 'company_admin' || (roleCode as string) === 'admin');
+    (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
   const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
   const isIrm = user?.role?.code === 'irm';
   const isGhlIrm = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.name === 'GHL India Ventures' || user?.companySlug === 'ghl' || user?.companyName === 'GHL India Ventures') && isIrm;
@@ -86,7 +84,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
             setPendingFollowupsCount(count);
           }
         })
-        .catch(() => {});
+        .catch(() => { });
     };
     updateFollowups();
     window.addEventListener('nexus_storage_updated', updateFollowups);

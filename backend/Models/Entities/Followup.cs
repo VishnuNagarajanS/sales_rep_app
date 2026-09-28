@@ -13,7 +13,13 @@ public class Followup
     public int AssignedAgentId { get; set; }
     public User? AssignedAgent { get; set; }
 
-    // Navigation and alias for IRM workflows
+    [NotMapped]
+    public int UserId
+    {
+        get => AssignedAgentId;
+        set => AssignedAgentId = value;
+    }
+
     [NotMapped]
     public int AssignedToId
     {
@@ -29,24 +35,17 @@ public class Followup
     }
 
     public string AssignedToName { get; set; } = string.Empty;
-    public string AssignedToRole { get; set; } = string.Empty;   // irm | sales_executive
+    public string AssignedToRole { get; set; } = string.Empty; // irm | sales_executive
 
-    // Optional link to an Investor (IRM followup)
+    // Can be linked to either an Investor (IRM followup) or a Lead (Sales followup)
     public int? InvestorId { get; set; }
     public Investor? Investor { get; set; }
     public string? InvestorName { get; set; }
 
     [NotMapped]
-    public int UserId
-    {
-        get => AssignedAgentId;
-        set => AssignedAgentId = value;
-    }
-
-    [NotMapped]
     public int? LeadId { get; set; }
 
-    public string? ContactId { get; set; } = string.Empty;
+    public string ContactId { get; set; } = string.Empty;
     public string ContactType { get; set; } = "lead"; // "lead" | "customer" | "investor"
     public string ContactName { get; set; } = string.Empty;
     public string ContactPhone { get; set; } = string.Empty;
@@ -54,13 +53,14 @@ public class Followup
     public DateTime ScheduledAt { get; set; }
     public string Priority { get; set; } = "Medium"; // Low, Medium, High, Urgent
     public FollowupStatus Status { get; set; } = FollowupStatus.Pending;
-
     public string Notes { get; set; } = string.Empty;
+
     public string? Agenda { get; set; }
     public string? OutcomeNotes { get; set; }
 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime? UpdatedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public DateTime? RescheduledTo { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? UpdatedAt { get; set; }
 }
