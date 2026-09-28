@@ -290,9 +290,8 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({ onOpenQuickC
         {/* Right Section: View Indicator Badge & Action */}
         <div className="admin-kanban-meta-group">
           <span
-            className={`pipeline-role-tag ${
-              selectedRole === 'sales_executive' ? 'tag-sales-exec' : 'tag-irm'
-            }`}
+            className={`pipeline-role-tag ${selectedRole === 'sales_executive' ? 'tag-sales-exec' : 'tag-irm'
+              }`}
           >
             {selectedRole === 'sales_executive' ? (
               <>

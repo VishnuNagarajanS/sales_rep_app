@@ -18,9 +18,10 @@ import {
   MessageCircle,
 } from 'lucide-react';
 import { Deal, DealActivity, Lead, Followup } from '../../types';
+import { storageService } from '../../services/storageService';
 import { useAuth } from '../../context/AuthContext';
 import { useCan } from '../../components/common/Guards';
-import { storageService } from '../../services/storageService';
+import { getDeals, saveDeal as apiSaveDeal, addDealActivity as apiAddDealActivity, getDealActivities as apiGetDealActivities } from '../../services/ghlApiService';
 import { PIPELINE_STAGES } from '../../constants/pipelineStages';
 import { Modal } from '../../components/common/Modal';
 import { FilterBar } from '../../components/common/FilterBar';
@@ -47,9 +48,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
 
-  if (isGhlAdmin) {
-    return <AdminKanbanBoard onOpenQuickCreate={onOpenQuickCreate} />;
-  }
 
   const canUpdateDeals = useCan('deals.update');
   const isIrm = roleCode === 'irm';
@@ -65,6 +63,8 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   // IRM-specific state
   const [cardIndex, setCardIndex] = useState<Record<string, number>>({});
   const [irmDetailDeal, setIrmDetailDeal] = useState<Deal | null>(null);
+  const [activityType, setActivityType] = useState<'note' | 'call' | 'whatsapp' | 'meeting'>('note');
+  const [activityText, setActivityText] = useState('');
 
   // Role-based scoping: Sales Executives see only their own deals.
   // Managers / Admins / Super Admins see every deal in the company (no filter).
@@ -153,8 +153,18 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     .filter(Boolean)
     .map(name => ({ value: name, label: name }));
 
-  const loadData = () => {
-    const latestDeals = storageService.getDeals(tenant?.id);
+  const [dealActivities, setDealActivities] = useState<DealActivity[]>([]);
+
+  const loadData = async () => {
+    let latestDeals: Deal[] = [];
+    try {
+      latestDeals = await getDeals(tenant?.id);
+      if (!latestDeals || latestDeals.length === 0) {
+        latestDeals = storageService.getDeals(tenant?.id) || [];
+      }
+    } catch {
+      latestDeals = storageService.getDeals(tenant?.id) || [];
+    }
     setDeals(latestDeals);
     setLeads(storageService.getLeads(tenant?.id) || []);
     setFollowups(storageService.getFollowups(tenant?.id) || []);
@@ -165,6 +175,20 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   };
 
   useEffect(() => {
+    if (!irmDetailDeal?.id) {
+      setDealActivities([]);
+      return;
+    }
+    let mounted = true;
+    apiGetDealActivities(irmDetailDeal.id)
+      .then(acts => {
+        if (mounted) setDealActivities(acts || []);
+      })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, [irmDetailDeal?.id, tenant?.id]);
+
+  useEffect(() => {
     loadData();
     const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
@@ -172,7 +196,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   }, [tenant?.id]);
 
   // Stages derived dynamically from current tenant slug!
-
   const stages = tenant?.slug === 'jamin'
     ? PIPELINE_STAGES.jamin
     : tenant?.slug === 'ghl'
@@ -194,10 +217,11 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
         stageEnteredAt: new Date().toISOString(),
       };
       storageService.saveDeal(updatedDeal);
+      apiSaveDeal(updatedDeal).catch(console.error);
     }
   };
 
-  const handleIrmMoveStage = (targetStageId: string) => {
+  const handleIrmMoveStage = async (targetStageId: string) => {
     if (!irmDetailDeal || irmDetailDeal.stage === targetStageId) return;
     const currentStage = stages.find(s => s.id === irmDetailDeal.stage);
     const targetStage = stages.find(s => s.id === targetStageId);
@@ -210,8 +234,9 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       stageEnteredAt: new Date().toISOString(),
     };
     storageService.saveDeal(updatedDeal);
+    await apiSaveDeal(updatedDeal).catch(console.error);
 
-    const newActivity: DealActivity = {
+    const moveActivity: DealActivity = {
       id: `act-${Date.now()}`,
       dealId: irmDetailDeal.id,
       companyId: tenant?.id || '',
@@ -223,28 +248,45 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       loggedByRole: 'IRM',
       timestamp: new Date().toISOString(),
     };
-    storageService.addDealActivity(newActivity);
+    storageService.addDealActivity(moveActivity);
+    await apiAddDealActivity(moveActivity).catch(console.error);
 
     setIrmDetailDeal(updatedDeal);
+    setDealActivities(prev => [moveActivity, ...prev]);
+    loadData();
+  };
+
+  const handleLogActivity = () => {
+    if (!irmDetailDeal || !activityText.trim()) return;
+
+    const newActivity: DealActivity = {
+      id: `act-${Date.now()}`,
+      dealId: irmDetailDeal.id,
+      companyId: tenant?.id || '',
+      type: activityType,
+      text: activityText.trim(),
+      loggedByName: user?.name || 'IRM User',
+      loggedByRole: 'IRM',
+      timestamp: new Date().toISOString(),
+    };
+
+    storageService.addDealActivity(newActivity);
+    apiAddDealActivity(newActivity).catch(console.error);
+    setActivityText('');
+    setDealActivities(prev => [newActivity, ...prev]);
     loadData();
   };
 
   const handleMarkWon = (deal: Deal) => {
-    storageService.saveDeal({
-      ...deal,
-      stage: wonStageId,
-      stageEnteredAt: new Date().toISOString(),
-    });
+    const updated = { ...deal, stage: wonStageId, stageEnteredAt: new Date().toISOString() };
+    storageService.saveDeal(updated);
+    apiSaveDeal(updated).catch(console.error);
+    loadData();
   };
 
   const handleConfirmLost = () => {
     if (selectedDealForLoss) {
-      storageService.saveDeal({
-        ...selectedDealForLoss,
-        stage: 'lost',
-        lostReason: lossReason,
-        stageEnteredAt: new Date().toISOString(),
-      });
+      apiSaveDeal({ ...selectedDealForLoss, stage: 'lost', lostReason: lossReason, stageEnteredAt: new Date().toISOString() }).catch(console.error);
       setSelectedDealForLoss(null);
     }
   };
@@ -280,9 +322,13 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     });
   };
 
-  const irmDealActivities = irmDetailDeal
-    ? storageService.getDealActivities(irmDetailDeal.id, tenant?.id)
-    : [];
+  const irmDealActivities = dealActivities.length > 0
+    ? dealActivities
+    : (irmDetailDeal ? storageService.getDealActivities(irmDetailDeal.id, tenant?.id) : []);
+
+  if (isGhlAdmin) {
+    return <AdminKanbanBoard onOpenQuickCreate={onOpenQuickCreate} />;
+  }
 
   return (
     <div className="pipeline-page-container">
@@ -438,7 +484,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                               {daysInStage}d in stage
                             </span>
                           </div>
-
 
                           {/* Footer: Investment range + pagination */}
                           <div className="irm-card-footer">
@@ -740,7 +785,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
               </div>
             </div>
 
-
             {/* Activity History & Stage Transitions */}
             <div className="irm-activity-card">
               <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 700 }}>
@@ -752,7 +796,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                 </div>
               ) : (
                 <div className="irm-timeline">
-                  {irmDealActivities.map(act => {
+                  {irmDealActivities.map((act: DealActivity) => {
                     const isStageChange = act.type === 'stage_change';
                     return (
                       <div key={act.id} className="irm-timeline-node">

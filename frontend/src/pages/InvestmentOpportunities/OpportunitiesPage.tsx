@@ -16,6 +16,16 @@ import { InvestmentOpportunity, Investor, Deal, DealActivity } from '../../types
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
+import { isMockMode } from '../../config/environment';
+import {
+  getOpportunities,
+  saveOpportunity as apiSaveOpportunity,
+  deleteOpportunity as apiDeleteOpportunity,
+  getInvestors,
+  getDeals,
+  saveDeal as apiSaveDeal,
+  addDealActivity as apiAddDealActivity,
+} from '../../services/ghlApiService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { FilterBar } from '../../components/common/FilterBar';
@@ -106,16 +116,44 @@ export const OpportunitiesPage: React.FC = () => {
   const [showConfirmDialog, setShowConfirmDialog] = useState<boolean>(false);
 
   // ── Data loading ──────────────────────────────────────────────────────────
-  const loadData = () => {
-    setOpps(storageService.getOpportunities(tenant?.id));
-    setInvestors(storageService.getInvestors(tenant?.id));
-    const latestDeals = storageService.getDeals(tenant?.id);
-    setDeals(latestDeals);
-    setDetailDeal(prev => {
-      if (!prev) return null;
-      const fresh = latestDeals.find(d => d.id === prev.id);
-      return fresh || prev;
-    });
+  const loadData = async () => {
+    if (isMockMode()) {
+      setOpps(storageService.getOpportunities(tenant?.id));
+      setInvestors(storageService.getInvestors(tenant?.id));
+      const latestDeals = storageService.getDeals(tenant?.id);
+      setDeals(latestDeals);
+      setDetailDeal(prev => {
+        if (!prev) return null;
+        const fresh = latestDeals.find(d => d.id === prev.id);
+        return fresh || prev;
+      });
+      return;
+    }
+    try {
+      const [oppsData, investorsData, dealsData] = await Promise.all([
+        getOpportunities(tenant?.id),
+        getInvestors(tenant?.id),
+        getDeals(tenant?.id),
+      ]);
+      setOpps(oppsData || []);
+      setInvestors(investorsData || []);
+      setDeals(dealsData || []);
+      setDetailDeal(prev => {
+        if (!prev) return null;
+        const fresh = (dealsData || []).find(d => d.id === prev.id);
+        return fresh || prev;
+      });
+    } catch {
+      setOpps(storageService.getOpportunities(tenant?.id));
+      setInvestors(storageService.getInvestors(tenant?.id));
+      const latestDeals = storageService.getDeals(tenant?.id);
+      setDeals(latestDeals);
+      setDetailDeal(prev => {
+        if (!prev) return null;
+        const fresh = latestDeals.find(d => d.id === prev.id);
+        return fresh || prev;
+      });
+    }
   };
 
   useEffect(() => {
@@ -220,14 +258,14 @@ export const OpportunitiesPage: React.FC = () => {
       notes: form.notes.trim(),
     };
 
-    storageService.saveOpportunity(opp);
+    apiSaveOpportunity(opp).catch(console.error);
     closeModal();
   };
 
   // ── Delete handler ────────────────────────────────────────────────────────
   const handleDeleteOpp = (o: InvestmentOpportunity) => {
     if (!window.confirm(`Delete opportunity "${o.title}"? This cannot be undone.`)) return;
-    storageService.deleteOpportunity(o.id);
+    apiDeleteOpportunity(o.id).catch(console.error);
   };
 
   // ── Move Stage handlers ───────────────────────────────────────────────────
@@ -238,7 +276,7 @@ export const OpportunitiesPage: React.FC = () => {
 
   const handleMoveStage = () => {
     if (!stageModalOpp) return;
-    storageService.saveOpportunity({ ...stageModalOpp, stage: newStage });
+    apiSaveOpportunity({ ...stageModalOpp, stage: newStage }).catch(console.error);
     setStageModalOpp(null);
   };
 
@@ -321,7 +359,7 @@ export const OpportunitiesPage: React.FC = () => {
   // ── IRM Stage & Investor Type Handlers ─────────────────────────────────────
   const irmDeals = deals.filter(d => d.stage === 'investment_opportunity');
 
-  const handleSetInvestorType = (deal: Deal, type: 'AIF' | 'Co-AIF') => {
+  const handleSetInvestorType = async (deal: Deal, type: 'AIF' | 'Co-AIF') => {
     const updatedDeal: Deal = {
       ...deal,
       investorType: type,
@@ -340,11 +378,16 @@ export const OpportunitiesPage: React.FC = () => {
     };
     storageService.addDealActivity(activity);
 
+    if (!isMockMode()) {
+      await apiSaveDeal(updatedDeal).catch(console.error);
+      await apiAddDealActivity(activity).catch(console.error);
+    }
+
     loadData();
     showToast(`Investor structure for "${deal.customerName}" set to ${type}`);
   };
 
-  const handleAdvanceToConverted = (deal: Deal) => {
+  const handleAdvanceToConverted = async (deal: Deal) => {
     const updatedDeal: Deal = {
       ...deal,
       stage: 'converted',
@@ -365,6 +408,11 @@ export const OpportunitiesPage: React.FC = () => {
       timestamp: new Date().toISOString(),
     };
     storageService.addDealActivity(activity);
+
+    if (!isMockMode()) {
+      await apiSaveDeal(updatedDeal).catch(console.error);
+      await apiAddDealActivity(activity).catch(console.error);
+    }
 
     loadData();
     showToast(`Deal "${deal.customerName}" converted successfully!`);
@@ -559,6 +607,33 @@ export const OpportunitiesPage: React.FC = () => {
       ),
     },
     {
+      key: 'investorType',
+      header: 'Investor Structure (AIF / Co-AIF)',
+      render: deal => {
+        const currentType = deal.investorType || 'AIF';
+        return (
+          <div className="irm-investor-type-toggle" onClick={e => e.stopPropagation()}>
+            <button
+              type="button"
+              className={`irm-type-btn ${currentType === 'AIF' ? 'active' : ''}`}
+              title="Classify as Direct AIF Investor"
+              onClick={() => handleSetInvestorType(deal, 'AIF')}
+            >
+              AIF
+            </button>
+            <button
+              type="button"
+              className={`irm-type-btn ${currentType === 'Co-AIF' ? 'active' : ''}`}
+              title="Classify as Co-Investment AIF Investor"
+              onClick={() => handleSetInvestorType(deal, 'Co-AIF')}
+            >
+              Co-AIF
+            </button>
+          </div>
+        );
+      },
+    },
+    {
       key: 'assignedAgentName',
       header: 'Assigned IRM',
       render: deal => (
@@ -573,28 +648,40 @@ export const OpportunitiesPage: React.FC = () => {
       render: deal => {
         const isConfirmed = Boolean(deal.investmentAmountConfirmed);
         return (
-          <button
-            type="button"
-            className="irm-convert-btn"
-            title={
-              isConfirmed
-                ? 'Convert deal (Mandate executed & funds committed)'
-                : 'Set the investment amount before converting.'
-            }
-            disabled={!isConfirmed}
-            onClick={e => {
-              e.stopPropagation();
-              if (isConfirmed) {
-                handleAdvanceToConverted(deal);
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} onClick={e => e.stopPropagation()}>
+            {deal.phone && (
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost btn-icon"
+                title={`Call ${deal.customerName}`}
+                onClick={() => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.id)}
+              >
+                <Phone size={14} color="#059669" />
+              </button>
+            )}
+            <button
+              type="button"
+              className="irm-convert-btn"
+              title={
+                isConfirmed
+                  ? 'Convert deal (Mandate executed & funds committed)'
+                  : 'Set the investment amount before converting.'
               }
-            }}
-            style={{
-              opacity: isConfirmed ? 1 : 0.45,
-              cursor: isConfirmed ? 'pointer' : 'not-allowed',
-            }}
-          >
-            <CheckCircle size={13} /> Convert
-          </button>
+              disabled={!isConfirmed}
+              onClick={e => {
+                e.stopPropagation();
+                if (isConfirmed) {
+                  handleAdvanceToConverted(deal);
+                }
+              }}
+              style={{
+                opacity: isConfirmed ? 1 : 0.45,
+                cursor: isConfirmed ? 'pointer' : 'not-allowed',
+              }}
+            >
+              <CheckCircle size={13} /> Convert
+            </button>
+          </div>
         );
       },
     },

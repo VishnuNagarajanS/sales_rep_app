@@ -11,15 +11,27 @@ import {
   CheckCircle,
   Pencil,
 } from 'lucide-react';
-import { Followup, Deal, Lead, Customer } from '../../types';
+import { Followup, CallRecord, Deal, Lead, Customer } from '../../types';
+import { storageService } from '../../services/storageService';
+import { isMockMode } from '../../config/environment';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import {
+  getFollowups,
+  saveFollowup as apiSaveFollowup,
+  getCalls,
+  getLeads,
+} from '../../services/ghlApiService';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { Drawer } from '../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
-import { FollowupRoleFilter, DateRangePreset } from '../../types/kanban';
+import {
+  FollowupRoleFilter,
+  SALES_EXECUTIVE_USERS,
+  IRM_USERS,
+} from '../../mock_data/adminFollowupsData';
+import { DateRangePreset } from '../../types/kanban';
 import './FollowupsPage.css';
 import '../Leads/LeadsPage.css';
 
@@ -28,6 +40,8 @@ export const FollowupsPage: React.FC = () => {
   const { initiateCall } = useCall();
 
   const [followups, setFollowups] = useState<Followup[]>([]);
+  const [callsList, setCallsList] = useState<CallRecord[]>([]);
+  const [allLeads, setAllLeads] = useState<Lead[]>([]);
   const [activeTab, setActiveTab] = useState<'all' | 'due' | 'overdue'>('all');
   const [rescheduleItem, setRescheduleItem] = useState<Followup | null>(null);
   const [newDate, setNewDate] = useState('');
@@ -78,7 +92,6 @@ export const FollowupsPage: React.FC = () => {
   const [customEndDate, setCustomEndDate] = useState<string>(() => {
     return new Date().toISOString().split('T')[0];
   });
-
   const handleRoleChange = (newRole: FollowupRoleFilter) => {
     setSelectedRole(newRole);
     setSelectedPerson('All');
@@ -86,16 +99,23 @@ export const FollowupsPage: React.FC = () => {
 
   const personOptions = useMemo(() => {
     if (selectedRole === 'sales_executive') {
-      return storageService.getAgents(tenant?.id);
+      return storageService.getAgents ? storageService.getAgents(tenant?.id) : SALES_EXECUTIVE_USERS;
     }
-    return storageService.getIrms(tenant?.id);
   }, [selectedRole, tenant?.id]);
 
-  const loadData = () => {
-    if (tenant?.slug === 'ghl') {
-      storageService.cleanupGhlPendingFollowups(tenant?.id);
+  const loadData = async () => {
+    try {
+      const [data, calls, leads] = await Promise.all([
+        getFollowups(tenant?.id),
+        getCalls(tenant?.id),
+        getLeads(tenant?.id),
+      ]);
+      setFollowups(data || []);
+      setCallsList(calls || []);
+      setAllLeads(leads || []);
+    } catch (err) {
+      console.error('Failed to load followups data', err);
     }
-    setFollowups(storageService.getFollowups(tenant?.id) || []);
   };
 
   useEffect(() => {
@@ -412,11 +432,7 @@ export const FollowupsPage: React.FC = () => {
 
   const handleSaveReschedule = () => {
     if (rescheduleItem && newDate) {
-      storageService.saveFollowup({
-        ...rescheduleItem,
-        scheduledAt: newDate,
-        status: 'Pending',
-      });
+      apiSaveFollowup({ ...rescheduleItem, scheduledAt: newDate, status: 'Pending' }).catch(console.error);
       setRescheduleItem(null);
       setNewDate('');
     }
@@ -428,7 +444,7 @@ export const FollowupsPage: React.FC = () => {
       if (f.assignedRole.toLowerCase().includes('irm')) return 'IRM';
       return 'Sales Executive';
     }
-    const irmsList = storageService.getIrms(tenant?.id);
+    const irmsList = storageService.getIrms ? storageService.getIrms(tenant?.id) : IRM_USERS;
     if (
       irmsList.some(
         (u: any) =>
@@ -575,15 +591,13 @@ export const FollowupsPage: React.FC = () => {
     }
   }
 
-  const callsList = storageService.getCalls(tenant?.id) || [];
-
   const getCallCountForFollowup = (f: Followup): number => {
     const fPhoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-    return callsList.filter(c => {
+    return callsList.filter((c: CallRecord) => {
       if (
         f.contactId &&
         f.contactId !== 'contact-new' &&
-        (c.leadId === f.contactId || c.contactId === f.contactId)
+        (c.leadId === f.contactId || (c as any).contactId === f.contactId)
       ) {
         return true;
       }
@@ -595,16 +609,15 @@ export const FollowupsPage: React.FC = () => {
   // ── GHL cross-reference safety filter ─────────────────────────────────────
   if (isGhlSalesExec || isGhlAdmin) {
     try {
-      const allLeads = storageService.getLeads(tenant?.id) || [];
       const niJunkLeadIds = new Set<string>(
         allLeads
-          .filter(l => l.status === 'Not Interested' || l.status === 'Junk')
-          .map(l => l.id)
+          .filter((l: Lead) => l.status === 'Not Interested' || l.status === 'Junk')
+          .map((l: Lead) => l.id)
       );
       const niJunkPhones = new Set<string>(
         allLeads
-          .filter(l => l.status === 'Not Interested' || l.status === 'Junk')
-          .map(l => (l.phone || '').replace(/\D/g, '').slice(-10))
+          .filter((l: Lead) => l.status === 'Not Interested' || l.status === 'Junk')
+          .map((l: Lead) => (l.phone || '').replace(/\D/g, '').slice(-10))
           .filter(Boolean)
       );
 
@@ -684,7 +697,7 @@ export const FollowupsPage: React.FC = () => {
                 <option value="All">
                   {selectedRole === 'sales_executive' ? 'All Sales Executives' : 'All IRMs'}
                 </option>
-                {personOptions.map((p: any) => (
+                {(personOptions || []).map((p: any) => (
                   <option key={p.id} value={p.name}>
                     {p.name}
                   </option>
@@ -942,7 +955,11 @@ export const FollowupsPage: React.FC = () => {
           onClose={() => setDrawerFollowup(null)}
           title={drawerFollowup?.contactName || 'Contact Profile'}
           subtitle={
-            drawerFollowup?.contactPhone
+            isAdmin
+              ? `Phone: ${drawerFollowup?.contactPhone || '—'} • Assigned to: ${
+                  drawerFollowup?.assignedAgentName || 'Unassigned'
+                } (${drawerFollowupRole})`
+              : drawerFollowup?.contactPhone
               ? `Phone: ${drawerFollowup.contactPhone} • ${tenant?.name || 'GHL India'}`
               : (tenant?.name || '')
           }

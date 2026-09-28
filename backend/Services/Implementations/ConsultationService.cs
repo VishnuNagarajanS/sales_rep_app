@@ -1,29 +1,199 @@
+using backend.Authentication.Interfaces;
+using backend.Data;
 using backend.DTOs.Common;
+using backend.DTOs.Consultations;
 using backend.DTOs.Irm;
 using backend.Models.Entities;
 using backend.Models.Enums;
 using backend.Repositories.Interfaces;
 using backend.Services.Interfaces;
+using Microsoft.EntityFrameworkCore;
 
 namespace backend.Services.Implementations;
 
 public class ConsultationService : IConsultationService
 {
+    private readonly ApplicationDbContext _context;
+    private readonly ICurrentUserService _currentUser;
     private readonly IConsultationRepository _consultationRepo;
     private readonly IInvestorRepository _investorRepo;
     private readonly IUserRepository _userRepo;
 
-    public ConsultationService(IConsultationRepository consultationRepo, IInvestorRepository investorRepo, IUserRepository userRepo)
+    public ConsultationService(
+        ApplicationDbContext context,
+        ICurrentUserService currentUser,
+        IConsultationRepository consultationRepo,
+        IInvestorRepository investorRepo,
+        IUserRepository userRepo)
     {
+        _context = context;
+        _currentUser = currentUser;
         _consultationRepo = consultationRepo;
         _investorRepo = investorRepo;
         _userRepo = userRepo;
     }
 
-    public async Task<ApiResponse<List<ConsultationDto>>> GetAllAsync(int companyId, int? consultantId, string? status, DateTime? from, DateTime? to, CancellationToken ct = default)
+    // ── Sales Executive Scoped Queries & Methods ─────────────────────────────
+
+    private IQueryable<Consultation> GetScopedConsultationsQuery()
+    {
+        var role = _currentUser.Role;
+        var consultantId = _currentUser.UserId;
+        var companyId = _currentUser.CompanyId;
+
+        var query = _context.Consultations.AsNoTracking().Include(c => c.Consultant).AsQueryable();
+
+        if (role == "super_admin")
+        {
+            if (companyId.HasValue)
+                query = query.Where(c => c.CompanyId == companyId.Value);
+            return query;
+        }
+
+        if (companyId.HasValue)
+        {
+            query = query.Where(c => c.CompanyId == companyId.Value);
+        }
+
+        if (role == "sales_executive" && consultantId.HasValue)
+        {
+            query = query.Where(c => c.ConsultantId == consultantId.Value);
+        }
+
+        return query;
+    }
+
+    private async Task<Consultation?> FindScopedConsultationAsync(int id, CancellationToken ct)
+    {
+        var role = _currentUser.Role;
+        var consultantId = _currentUser.UserId;
+        var companyId = _currentUser.CompanyId;
+
+        var query = _context.Consultations.Include(c => c.Consultant).Where(c => c.Id == id);
+
+        if (role == "super_admin")
+        {
+            return await query.FirstOrDefaultAsync(ct);
+        }
+
+        if (companyId.HasValue)
+        {
+            query = query.Where(c => c.CompanyId == companyId.Value);
+        }
+
+        if (role == "sales_executive" && consultantId.HasValue)
+        {
+            query = query.Where(c => c.ConsultantId == consultantId.Value);
+        }
+
+        return await query.FirstOrDefaultAsync(ct);
+    }
+
+    public async Task<ApiResponse<PagedResult<ConsultationResponseDto>>> GetConsultationsAsync(
+        string? status, string? search, int page = 1, int pageSize = 10, CancellationToken ct = default)
+    {
+        var query = GetScopedConsultationsQuery();
+
+        if (!string.IsNullOrWhiteSpace(status) && !status.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            if (Enum.TryParse<ConsultationStatus>(status, true, out var parsedStatus))
+            {
+                query = query.Where(c => c.Status == parsedStatus);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim().ToLower();
+            query = query.Where(c => c.InvestorName.ToLower().Contains(s) || c.InvestorPhone.Contains(s));
+        }
+
+        var totalCount = await query.CountAsync(ct);
+
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+
+        var entities = await query
+            .OrderByDescending(c => c.ScheduledAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(ct);
+
+        var items = entities.Select(MapToSalesExecDto).ToList();
+
+        return ApiResponse<PagedResult<ConsultationResponseDto>>.SuccessResult(
+            PagedResult<ConsultationResponseDto>.Create(items, totalCount, page, pageSize),
+            "Consultations retrieved successfully.");
+    }
+
+    public async Task<ApiResponse<ConsultationResponseDto>> GetConsultationByIdAsync(int id, CancellationToken ct = default)
+    {
+        var consultation = await FindScopedConsultationAsync(id, ct);
+        if (consultation == null)
+            return ApiResponse<ConsultationResponseDto>.FailureResult("Consultation not found or access denied.");
+
+        return ApiResponse<ConsultationResponseDto>.SuccessResult(MapToSalesExecDto(consultation));
+    }
+
+    public async Task<ApiResponse<ConsultationResponseDto>> ScheduleConsultationAsync(
+        ScheduleConsultationDto dto, CancellationToken ct = default)
+    {
+        var consultantId = _currentUser.UserId ?? 1;
+        var companyId = _currentUser.CompanyId ?? 1;
+
+        int.TryParse(dto.InvestorId, out var investorId);
+
+        var consultation = new Consultation
+        {
+            CompanyId = companyId,
+            ConsultantId = consultantId,
+            InvestorId = investorId,
+            InvestorName = dto.InvestorName.Trim(),
+            InvestorPhone = dto.InvestorPhone.Trim(),
+            ScheduledAt = dto.ScheduledAt,
+            Status = ConsultationStatus.Scheduled,
+            Agenda = dto.Agenda?.Trim() ?? string.Empty,
+            OutcomeNotes = dto.Notes?.Trim() ?? string.Empty,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _context.Consultations.Add(consultation);
+        await _context.SaveChangesAsync(ct);
+
+        await _context.Entry(consultation).Reference(c => c.Consultant).LoadAsync(ct);
+
+        return ApiResponse<ConsultationResponseDto>.SuccessResult(MapToSalesExecDto(consultation), "Consultation scheduled successfully.");
+    }
+
+    public async Task<ApiResponse<ConsultationResponseDto>> UpdateConsultationAsync(
+        int id, backend.DTOs.Consultations.UpdateConsultationDto dto, CancellationToken ct = default)
+    {
+        var consultation = await FindScopedConsultationAsync(id, ct);
+        if (consultation == null)
+            return ApiResponse<ConsultationResponseDto>.FailureResult("Consultation not found or access denied.");
+
+        if (dto.ScheduledAt.HasValue) consultation.ScheduledAt = dto.ScheduledAt.Value;
+        if (!string.IsNullOrWhiteSpace(dto.Status) && Enum.TryParse<ConsultationStatus>(dto.Status, true, out var st))
+        {
+            consultation.Status = st;
+        }
+        if (dto.Agenda != null) consultation.Agenda = dto.Agenda.Trim();
+        if (dto.OutcomeNotes != null) consultation.OutcomeNotes = dto.OutcomeNotes.Trim();
+
+        consultation.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(ct);
+
+        return ApiResponse<ConsultationResponseDto>.SuccessResult(MapToSalesExecDto(consultation), "Consultation updated successfully.");
+    }
+
+    // ── IRM Repository-Backed Methods ────────────────────────────────────────
+
+    public async Task<ApiResponse<List<ConsultationDto>>> GetAllAsync(
+        int companyId, int? consultantId, string? status, DateTime? from, DateTime? to, CancellationToken ct = default)
     {
         var list = await _consultationRepo.GetAllAsync(companyId, consultantId, status, from, to, ct);
-        return ApiResponse<List<ConsultationDto>>.SuccessResponse(list.Select(MapToDto).ToList());
+        return ApiResponse<List<ConsultationDto>>.SuccessResponse(list.Select(MapToIrmDto).ToList());
     }
 
     public async Task<ApiResponse<ConsultationDto>> GetByIdAsync(int id, int companyId, CancellationToken ct = default)
@@ -32,10 +202,11 @@ public class ConsultationService : IConsultationService
         if (c == null)
             return ApiResponse<ConsultationDto>.ErrorResponse("Consultation not found");
 
-        return ApiResponse<ConsultationDto>.SuccessResponse(MapToDto(c));
+        return ApiResponse<ConsultationDto>.SuccessResponse(MapToIrmDto(c));
     }
 
-    public async Task<ApiResponse<ConsultationDto>> CreateAsync(int companyId, int consultantId, CreateConsultationDto dto, CancellationToken ct = default)
+    public async Task<ApiResponse<ConsultationDto>> CreateAsync(
+        int companyId, int consultantId, CreateConsultationDto dto, CancellationToken ct = default)
     {
         var user = await _userRepo.GetByIdAsync(consultantId, ct);
         var investor = await _investorRepo.GetByIdAsync(dto.InvestorId, companyId, ct);
@@ -56,10 +227,11 @@ public class ConsultationService : IConsultationService
         };
 
         var created = await _consultationRepo.CreateAsync(consultation, ct);
-        return ApiResponse<ConsultationDto>.SuccessResponse(MapToDto(created), "Consultation scheduled successfully");
+        return ApiResponse<ConsultationDto>.SuccessResponse(MapToIrmDto(created), "Consultation scheduled successfully");
     }
 
-    public async Task<ApiResponse<ConsultationDto>> UpdateAsync(int id, int companyId, UpdateConsultationDto dto, CancellationToken ct = default)
+    public async Task<ApiResponse<ConsultationDto>> UpdateAsync(
+        int id, int companyId, backend.DTOs.Irm.UpdateConsultationDto dto, CancellationToken ct = default)
     {
         var c = await _consultationRepo.GetByIdAsync(id, companyId, ct);
         if (c == null)
@@ -80,10 +252,11 @@ public class ConsultationService : IConsultationService
             c.Agenda = dto.Agenda;
 
         var updated = await _consultationRepo.UpdateAsync(c, ct);
-        return ApiResponse<ConsultationDto>.SuccessResponse(MapToDto(updated), "Consultation updated successfully");
+        return ApiResponse<ConsultationDto>.SuccessResponse(MapToIrmDto(updated), "Consultation updated successfully");
     }
 
-    public async Task<ApiResponse<ConsultationDto>> RecordOutcomeAsync(int id, int companyId, ConsultationOutcomeDto dto, CancellationToken ct = default)
+    public async Task<ApiResponse<ConsultationDto>> RecordOutcomeAsync(
+        int id, int companyId, ConsultationOutcomeDto dto, CancellationToken ct = default)
     {
         var c = await _consultationRepo.GetByIdAsync(id, companyId, ct);
         if (c == null)
@@ -100,7 +273,7 @@ public class ConsultationService : IConsultationService
         }
 
         var updated = await _consultationRepo.UpdateAsync(c, ct);
-        return ApiResponse<ConsultationDto>.SuccessResponse(MapToDto(updated), "Consultation outcome recorded");
+        return ApiResponse<ConsultationDto>.SuccessResponse(MapToIrmDto(updated), "Consultation outcome recorded");
     }
 
     public async Task<ApiResponse<bool>> DeleteAsync(int id, int companyId, CancellationToken ct = default)
@@ -113,7 +286,29 @@ public class ConsultationService : IConsultationService
         return ApiResponse<bool>.SuccessResponse(true, "Consultation cancelled successfully");
     }
 
-    private static ConsultationDto MapToDto(Consultation c) => new()
+    // ── Mapping Helpers ──────────────────────────────────────────────────────
+
+    private static ConsultationResponseDto MapToSalesExecDto(Consultation c)
+    {
+        return new ConsultationResponseDto
+        {
+            Id = c.Id,
+            CompanyId = c.CompanyId,
+            ConsultantId = c.ConsultantId,
+            ConsultantName = c.Consultant?.Name ?? c.ConsultantName,
+            InvestorId = c.InvestorId.ToString(),
+            InvestorName = c.InvestorName,
+            InvestorPhone = c.InvestorPhone,
+            ScheduledAt = c.ScheduledAt,
+            Status = c.Status.ToString(),
+            Agenda = c.Agenda,
+            OutcomeNotes = c.OutcomeNotes ?? string.Empty,
+            CreatedAt = c.CreatedAt,
+            UpdatedAt = c.UpdatedAt
+        };
+    }
+
+    private static ConsultationDto MapToIrmDto(Consultation c) => new()
     {
         Id = c.Id,
         InvestorId = c.InvestorId,

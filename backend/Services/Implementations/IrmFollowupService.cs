@@ -47,7 +47,7 @@ public class IrmFollowupService : IIrmFollowupService
             AssignedToRole = assignedToRole,
             ContactName = dto.ContactName,
             ContactPhone = dto.ContactPhone,
-            ContactId = dto.ContactId,
+            ContactId = dto.ContactId ?? string.Empty,
             ScheduledAt = dto.ScheduledAt,
             Status = FollowupStatus.Pending,
             Agenda = dto.Agenda,

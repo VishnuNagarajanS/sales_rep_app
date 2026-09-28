@@ -1,0 +1,12 @@
+{
+  "name": "sales-rep-platform",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "dev:mock": "npm --prefix frontend run dev:mock",
+    "dev:api": "npm --prefix frontend run dev:api",
+    "build": "npm --prefix frontend run build",
+    "build:mock": "npm --prefix frontend run build:mock",
+    "build:dev": "npm --prefix frontend run build:dev"
+  }
+}

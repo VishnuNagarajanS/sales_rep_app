@@ -13,13 +13,14 @@ import {
 import { Lead, Customer, Deal } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import { getLeads, saveLead as apiSaveLead, saveCustomer as apiSaveCustomer, saveOpportunity as apiSaveOpportunity, getFollowups, isTenantMatch } from '../../services/ghlApiService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
+import { storageService } from '../../services/storageService';
 import './LeadsPage.css';
 
 const CAPACITY_OPTIONS = [
@@ -30,6 +31,8 @@ const CAPACITY_OPTIONS = [
   '₹25 Cr+',
   'Not sure yet — help me decide'
 ];
+import { MOCK_AGENTS } from '../../mock_data/mockData';
+export { MOCK_AGENTS };
 
 export const LeadsPage: React.FC = () => {
   const { tenant, user } = useAuth();
@@ -47,12 +50,14 @@ export const LeadsPage: React.FC = () => {
   const isExec = roleCode === 'sales_executive';
   const isLeadScopedUser = roleCode === 'sales_executive' || roleCode === 'irm';
   const isIrm = roleCode === 'irm';
+  const currentTenantId = tenant?.id || tenant?.slug;
+  const tenantLeads = leads.filter(l => !l.companyId || l.companyId === currentTenantId || l.companyId === tenant?.id || l.companyId === tenant?.slug);
   const scopedLeads = (isLeadScopedUser
-    ? leads.filter(l =>
+    ? tenantLeads.filter(l =>
       (l.assignedAgentId && l.assignedAgentId === user?.id) ||
       (l.assignedAgentName && l.assignedAgentName === user?.name)
     )
-    : leads
+    : tenantLeads
   ).filter(l => !MOVED_LEAD_STATUSES.includes(l.status));
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
@@ -192,8 +197,10 @@ export const LeadsPage: React.FC = () => {
     }));
   };
 
-  const loadData = () => {
-    const updated = storageService.getLeads(tenant?.id);
+  const [ghlPendingFollowups, setGhlPendingFollowups] = useState<any[]>([]);
+
+  const loadData = async () => {
+    const updated = await getLeads(tenant?.id);
     setLeads(updated);
     setSelectedLead(prev => {
       if (!prev) return null;
@@ -207,18 +214,17 @@ export const LeadsPage: React.FC = () => {
     });
   };
 
+  const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
+
   useEffect(() => {
-    storageService.cleanupDuplicateLeads(tenant?.id);
     loadData();
+    if (isGhlSalesExec) {
+      getFollowups(tenant?.id).then(fus => setGhlPendingFollowups(fus.filter(f => f.status === 'Pending')));
+    }
     const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id]);
-
-  const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
-  const ghlPendingFollowups = isGhlSalesExec
-    ? (storageService.getFollowups(tenant?.id) || []).filter(f => f.status === 'Pending')
-    : [];
 
   const matchCapacity = (lead: Lead, filterRange: string): boolean => {
     if (!filterRange || filterRange === 'All') return true;
@@ -356,7 +362,7 @@ export const LeadsPage: React.FC = () => {
   const handleOpenAiSuggestion = () => {
     const pool = filteredLeads;
     const dist: Record<string, Lead[]> = {};
-    agentsList.forEach(a => { dist[String(a.id)] = []; });
+    agentsList.forEach((a: any) => { dist[String(a.id)] = []; });
     if (agentsList.length > 0) {
       pool.forEach((lead, i) => {
         const agent = agentsList[i % agentsList.length];
@@ -369,7 +375,7 @@ export const LeadsPage: React.FC = () => {
   };
 
   const handleAiMoveLead = (leadId: string, fromAgentId: number | string, direction: 'left' | 'right') => {
-    const agentIds = agentsList.map(a => String(a.id));
+    const agentIds = agentsList.map((a: any) => String(a.id));
     const fromIdx = agentIds.indexOf(String(fromAgentId));
     const toIdx = direction === 'left' ? fromIdx - 1 : fromIdx + 1;
     if (toIdx < 0 || toIdx >= agentIds.length) return;
@@ -388,7 +394,7 @@ export const LeadsPage: React.FC = () => {
     const newRecords: Array<{ leadId: string; leadName: string; agentId: number | string; agentName: string; assignedAt: string }> = [];
     let count = 0;
     Object.entries(aiDistribution).forEach(([agentIdStr, agentLeads]) => {
-      const agent = agentsList.find(a => String(a.id) === agentIdStr);
+      const agent = agentsList.find((a: any) => String(a.id) === agentIdStr);
       agentLeads.forEach(l => {
         newAssigned.add(l.id);
         count++;
@@ -419,11 +425,13 @@ export const LeadsPage: React.FC = () => {
       return;
     }
     const defaultAgentId = user.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec');
-    const defaultAgentName = user.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer');
+    const defaultAgentName = user.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Naveen');
+
+    const targetCompany = tenant?.id || (tenant?.slug === 'jamin' ? 't-jamin-02' : 't-ghl-01');
 
     setFormData({
       id: `lead-${Date.now()}`,
-      companyId: tenant?.id || 't-ghl-01',
+      companyId: targetCompany,
       name: '',
       phone: '+91 ',
       email: '',
@@ -460,13 +468,13 @@ export const LeadsPage: React.FC = () => {
       : (formData.assignedAgentName && formData.assignedAgentName !== 'Agent' ? formData.assignedAgentName : (user?.name || 'Agent'));
 
     const isExistingById = leads.some(l => l.id === formData.id);
-    const targetCompanyId = formData.companyId || tenant?.id || 't-ghl-01';
+    const targetCompanyId = formData.companyId || tenant?.id || (tenant?.slug === 'jamin' ? 't-jamin-02' : 't-ghl-01');
 
     let leadToSave: Lead;
     let isUpdated = isExistingById;
 
     if (!isExistingById) {
-      const existingMatch = storageService.findLeadByPhone(formData.phone, targetCompanyId);
+      const existingMatch = leads.find(l => l.phone === formData.phone && (!targetCompanyId || l.companyId === targetCompanyId));
       if (existingMatch) {
         isUpdated = true;
         leadToSave = {
@@ -502,27 +510,13 @@ export const LeadsPage: React.FC = () => {
       } as Lead;
     }
 
-    storageService.saveLead(leadToSave);
-
-    storageService.addAuditLog({
-      id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
-      actorName: user?.name || resolvedAgentName,
-      actorEmail: user?.email || 'agent@nexus.io',
-      action: isUpdated ? 'LEAD_UPDATED' : 'LEAD_CREATED',
-      entityType: 'Lead',
-      entityId: leadToSave.id,
-      companyId: tenant?.id,
-      companyName: tenant?.name,
-      details: `Lead record ${leadToSave.name} (${leadToSave.phone}) saved.`,
-    });
-
+    apiSaveLead(leadToSave).catch(console.error);
     setIsEditDrawerOpen(false);
   };
 
   const handleDeleteLead = (lead: Lead) => {
     if (confirm(`Delete lead ${lead.name}?`)) {
-      storageService.deleteLead(lead.id);
+      apiSaveLead({ ...lead, status: 'Junk' }).catch(console.error); // soft-delete via status
     }
   };
 
@@ -536,7 +530,7 @@ export const LeadsPage: React.FC = () => {
     setIsConvertModalOpen(true);
   };
 
-  const handleConfirmConvert = () => {
+  const handleConfirmConvert = async () => {
     if (!selectedLead || !tenant) return;
 
     // 1. Create Customer
@@ -557,15 +551,15 @@ export const LeadsPage: React.FC = () => {
       notes: `Converted from lead. Original notes: ${selectedLead.notes}`,
       customFields: selectedLead.customFields,
     };
-    storageService.saveCustomer(newCustomer);
+    const savedCustomer = await apiSaveCustomer(newCustomer).catch(() => newCustomer);
 
-    // 2. Create Deal
+    // 2. Create Opportunity (maps to Deal/Investment Opportunity in GHL)
     const newDeal: Deal = {
       id: `deal-${Date.now()}`,
       companyId: tenant.id,
       title: convertDealTitle,
-      customerId: newCustomer.id,
-      customerName: newCustomer.name,
+      customerId: savedCustomer.id,
+      customerName: savedCustomer.name,
       stage: tenant.slug === 'jamin' ? 'site_visit' : 'consultation',
       value: convertDealValue,
       expectedCloseDate: 'Within 30 Days',
@@ -574,10 +568,10 @@ export const LeadsPage: React.FC = () => {
       notes: `Deal initiated upon converting lead ${selectedLead.name}.`,
       createdAt: new Date().toISOString().split('T')[0],
     };
-    storageService.saveDeal(newDeal);
+    await apiSaveOpportunity({ id: newDeal.id, companyId: newDeal.companyId, investorId: savedCustomer.id, investorName: savedCustomer.name, title: newDeal.title, stage: 'Enquiry', targetAmount: convertDealValue, committedAmount: 0, assignedAgentId: selectedLead.assignedAgentId || '', assignedAgentName: selectedLead.assignedAgentName || '', expectedCloseDate: 'Within 30 Days', notes: newDeal.notes || '' }).catch(console.error);
 
     // 3. Mark Lead as Converted
-    storageService.saveLead({ ...selectedLead, status: 'Converted' });
+    await apiSaveLead({ ...selectedLead, status: 'Converted' }).catch(console.error);
 
     setIsConvertModalOpen(false);
     setIsDetailDrawerOpen(false);
@@ -616,46 +610,24 @@ export const LeadsPage: React.FC = () => {
     if (file) handleFileSelect(file);
   };
 
-  const handleImportLeads = () => {
+  const handleImportLeads = async () => {
     let successCount = 0;
     let skipCount = 0;
-    let updatedCount = 0;
     const companyId = tenant?.id || 't-ghl-01';
+    const promises: Promise<any>[] = [];
 
     parsedRows.forEach((row, index) => {
       const nameVal = row[columnMap['name']];
       const phoneVal = row[columnMap['phone']];
 
-      if (!nameVal || !phoneVal) {
-        skipCount++;
-        return;
-      }
+      if (!nameVal || !phoneVal) { skipCount++; return; }
 
       const emailVal = row[columnMap['email']] || '';
       const locationVal = row[columnMap['location']] || '';
       const sourceVal = row[columnMap['source']] || 'CSV Import';
       const rawPriority = row[columnMap['priority']];
       let priorityVal = 'Medium';
-      if (['Low', 'Medium', 'High', 'Urgent'].includes(String(rawPriority))) {
-        priorityVal = rawPriority;
-      }
-
-      // Check for existing lead by phone in this company
-      const existingMatch = storageService.findLeadByPhone(phoneVal, companyId);
-      if (existingMatch) {
-        const updatedLead: Lead = {
-          ...existingMatch,
-          name: nameVal || existingMatch.name,
-          email: emailVal || existingMatch.email,
-          location: locationVal || existingMatch.location,
-          source: sourceVal || existingMatch.source,
-          priority: (priorityVal as any) || existingMatch.priority,
-        };
-        storageService.saveLead(updatedLead);
-        updatedCount++;
-        successCount++;
-        return;
-      }
+      if (['Low', 'Medium', 'High', 'Urgent'].includes(String(rawPriority))) priorityVal = rawPriority;
 
       const newLead: Lead = {
         id: `lead-${Date.now()}-${index}`,
@@ -673,24 +645,10 @@ export const LeadsPage: React.FC = () => {
         notes: '',
         customFields: {}
       };
-
-      storageService.saveLead(newLead);
-      successCount++;
+      promises.push(apiSaveLead(newLead).then(() => { successCount++; }).catch(() => { skipCount++; }));
     });
 
-    storageService.addAuditLog({
-      id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
-      actorName: user?.name || 'Agent',
-      actorEmail: user?.email || 'agent@nexus.io',
-      action: 'LEADS_BULK_IMPORTED',
-      entityType: 'Lead',
-      entityId: `batch-${Date.now()}`,
-      companyId: tenant?.id,
-      companyName: tenant?.name,
-      details: `Bulk imported ${successCount} leads (${updatedCount} updated, ${successCount - updatedCount} created), skipped ${skipCount}.`,
-    });
-
+    await Promise.all(promises);
     setImportResults({ success: successCount, skipped: skipCount });
     loadData();
   };
@@ -1139,11 +1097,11 @@ export const LeadsPage: React.FC = () => {
                   (() => {
                     const activeDefs = storageService
                       .getCustomFieldDefinitions(tenant?.id)
-                      .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
-                      .filter(d => !(isExec && (d.fieldKey === 'assetClass' || d.fieldKey === 'preferredAssetClass')))
-                      .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+                      .filter((d: any) => d.active !== false && (d.module === 'leads' || !d.module))
+                      .filter((d: any) => !(isExec && (d.fieldKey === 'assetClass' || d.fieldKey === 'preferredAssetClass')))
+                      .sort((a: any, b: any) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
                     const rows = activeDefs
-                      .map(def => {
+                      .map((def: any) => {
                         const key = def.fieldKey || def.id;
                         const val = selectedLead.customFields?.[key];
                         if (val === undefined || val === null || val === '') return null;
@@ -1155,7 +1113,7 @@ export const LeadsPage: React.FC = () => {
                       <div className="card lead-custom-card">
                         <h4 className="lead-custom-title">{tenant?.name} Custom Attributes</h4>
                         <div className="lead-detail-grid">
-                          {rows.map(item => (
+                          {rows.map((item: any) => (
                             <div key={item!.id}>
                               <span className="lead-custom-label">{item!.label}:</span>
                               <div className="lead-custom-value">{item!.value}</div>
@@ -1628,7 +1586,7 @@ export const LeadsPage: React.FC = () => {
               <>
                 <p className="assign-modal-sub">Select an agent to assign the {selectedLeadIds.size} selected lead{selectedLeadIds.size !== 1 ? 's' : ''} to:</p>
                 <div className="assign-agent-list">
-                  {agentsList.map(agent => (
+                  {agentsList.map((agent: any) => (
                     <label key={agent.id} className={`assign-agent-row${assignSelectedAgent?.id === agent.id ? ' selected' : ''}`}>
                       <input
                         type="radio"
@@ -1696,7 +1654,7 @@ export const LeadsPage: React.FC = () => {
             </div>
 
             <div className="ai-dist-grid">
-              {agentsList.map((agent, agentIdx) => {
+              {agentsList.map((agent: any, agentIdx: number) => {
                 const agentLeads = aiDistribution[String(agent.id)] || [];
                 return (
                   <div key={agent.id} className="ai-dist-col">

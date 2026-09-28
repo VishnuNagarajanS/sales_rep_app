@@ -14,14 +14,37 @@ public class ApplicationDbContext : DbContext
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<Lead> Leads => Set<Lead>();
+    public DbSet<Customer> Customers => Set<Customer>();
+    public DbSet<Followup> Followups => Set<Followup>();
+    public DbSet<Consultation> Consultations => Set<Consultation>();
+    public DbSet<CallRecord> CallRecords => Set<CallRecord>();
+    public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+    public DbSet<ExecutiveProfile> ExecutiveProfiles => Set<ExecutiveProfile>();
+
+    // ── GHL India Ventures specific tables ──────────────────────────────────
+    /// <summary>GHL pipeline deals (Sales Exec + IRM Kanban board).</summary>
+    public DbSet<GhlDeal> GhlDeals => Set<GhlDeal>();
+
+    /// <summary>Activity log entries for each GHL deal (notes, calls, stage changes).</summary>
+    public DbSet<GhlDealActivity> GhlDealActivities => Set<GhlDealActivity>();
+
+    /// <summary>HNW investor profiles managed by GHL India Ventures.</summary>
+    public DbSet<GhlInvestor> GhlInvestors => Set<GhlInvestor>();
+
+    /// <summary>Investment opportunity pipeline linked to GHL investors.</summary>
+    public DbSet<GhlInvestmentOpportunity> GhlInvestmentOpportunities => Set<GhlInvestmentOpportunity>();
+
+    // ── Platform-wide audit trail ────────────────────────────────────────────
+    /// <summary>Immutable audit log of every create/update/delete action across all tenants.</summary>
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     // IRM Entities
     public DbSet<Investor> Investors => Set<Investor>();
     public DbSet<InvestorKyc> InvestorKycs => Set<InvestorKyc>();
-    public DbSet<Consultation> Consultations => Set<Consultation>();
     public DbSet<InvestmentOpportunity> InvestmentOpportunities => Set<InvestmentOpportunity>();
     public DbSet<OpportunityPitch> OpportunityPitches => Set<OpportunityPitch>();
-    public DbSet<Followup> Followups => Set<Followup>();
     public DbSet<InvestorCall> InvestorCalls => Set<InvestorCall>();
     public DbSet<IrmPipelineCard> IrmPipelineCards => Set<IrmPipelineCard>();
 
@@ -41,9 +64,8 @@ public class ApplicationDbContext : DbContext
         // 1. Roles (Integer IDs 1, 2, 3, 4)
         var superAdminRoleId = 1;
         var companyAdminRoleId = 2;
-        var salesManagerRoleId = 3;
-        var salesExecutiveRoleId = 4;
-        var irmRoleId = 5;
+        var salesExecutiveRoleId = 3;
+        var irmRoleId = 4;
 
         modelBuilder.Entity<Role>().HasData(
             new Role
@@ -82,25 +104,6 @@ public class ApplicationDbContext : DbContext
                     "investors.view", "investors.create", "consultations.view", "consultations.create", "opportunities.view", "opportunities.create",
                     "reports.view", "reports.export",
                     "users.view", "users.manage", "roles.view", "settings.view", "settings.update", "audit.view"
-                },
-                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-            },
-            new Role
-            {
-                Id = salesManagerRoleId,
-                Name = "Sales Manager",
-                Code = "sales_manager",
-                Permissions = new List<string>
-                {
-                    "leads.view", "leads.create", "leads.update", "leads.assign", "leads.export", "leads.convert",
-                    "customers.view", "customers.create", "customers.update",
-                    "deals.view", "deals.create", "deals.update",
-                    "calls.make", "calls.receive", "calls.view", "calls.recordings.play",
-                    "followups.view", "followups.create", "followups.update",
-                    "properties.view", "properties.update", "site_visits.view", "site_visits.create", "bookings.view", "bookings.create",
-                    "investors.view", "investors.create", "consultations.view", "consultations.create", "opportunities.view", "opportunities.create",
-                    "reports.view", "reports.export",
-                    "users.view"
                 },
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
@@ -158,7 +161,7 @@ public class ApplicationDbContext : DbContext
                 },
                 Timezone = "Asia/Kolkata (IST)",
                 Currency = "₹ INR",
-                BusinessHours = "09:30 AM - 07:00 PM IST",
+                BusinessHours = "10:00 AM - 06:30 PM IST",
                 IsActive = true,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
@@ -177,22 +180,22 @@ public class ApplicationDbContext : DbContext
                 },
                 Timezone = "Asia/Kolkata (IST)",
                 Currency = "₹ INR",
-                BusinessHours = "09:00 AM - 06:30 PM IST",
+                BusinessHours = "10:00 AM - 06:30 PM IST",
                 IsActive = true,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             }
         );
 
-        // 3. Demo Users (Password: Password@123)
+        // 3. Demo Users (Integer IDs 1 to 6 - Password: Password@123)
         var passwordHash = "$2a$11$z2c3Nc1pe7Tqmxj6Rm15NOt8vuAyyKfqzGtBKpiFU2NcPZxsjt5p.";
 
         modelBuilder.Entity<User>().HasData(
-            // Super Admin
+            // 1. Super Admin (Yanosh - Global Platform Console)
             new User
             {
                 Id = 1,
-                Name = "Alex Rivera (Super Admin)",
-                Email = "alex@nexusplatform.io",
+                Name = "Yanosh",
+                Email = "yanosh@ghlindiaventures.com",
                 PasswordHash = passwordHash,
                 Phone = "+91 98800 11000",
                 RoleId = superAdminRoleId,
@@ -200,12 +203,12 @@ public class ApplicationDbContext : DbContext
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
-            // GHL Company Admin (Vikram)
+            // 2. GHL Company Admin (Vishnu)
             new User
             {
                 Id = 2,
-                Name = "Vikram Malhotra",
-                Email = "vikram@ghlindiatrust.com",
+                Name = "Vishnu",
+                Email = "vishnu@ghlindiaventures.com",
                 PasswordHash = passwordHash,
                 Phone = "+91 98450 11223",
                 RoleId = companyAdminRoleId,
@@ -213,12 +216,12 @@ public class ApplicationDbContext : DbContext
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
-            // GHL Sales Executive (Ananya)
+            // 3. GHL Sales Executive (Naveen)
             new User
             {
                 Id = 3,
-                Name = "Ananya Iyer",
-                Email = "ananya@ghlindiatrust.com",
+                Name = "Naveen",
+                Email = "naveen@ghlindiaventures.com",
                 PasswordHash = passwordHash,
                 Phone = "+91 98450 22334",
                 RoleId = salesExecutiveRoleId,
@@ -226,12 +229,12 @@ public class ApplicationDbContext : DbContext
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
-            // Jamin Company Admin (Kavita)
+            // 4. Jamin Company Admin (Mani)
             new User
             {
                 Id = 4,
-                Name = "Kavita Rao",
-                Email = "kavita@jaminbazaar.com",
+                Name = "Mani",
+                Email = "mani@ghlindiaventures.com",
                 PasswordHash = passwordHash,
                 Phone = "+91 98450 33445",
                 RoleId = companyAdminRoleId,
@@ -239,12 +242,12 @@ public class ApplicationDbContext : DbContext
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
-            // GHL IRM (Rohan Varma)
+            // 5. GHL IRM (Dhinakaran)
             new User
             {
                 Id = 5,
-                Name = "Rohan Varma",
-                Email = "rohan.varma@ghlindiatrust.com",
+                Name = "Dhinakaran",
+                Email = "dhinakaran@ghlindiaventures.com",
                 PasswordHash = passwordHash,
                 Phone = "+91 98110 77889",
                 RoleId = irmRoleId,
@@ -252,16 +255,16 @@ public class ApplicationDbContext : DbContext
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
-            // GHL IRM (Priya Sharma)
+            // 6. Jamin Sales Executive (Rajesh Sharma)
             new User
             {
                 Id = 6,
-                Name = "Priya Sharma",
-                Email = "priya.irm@ghlindiatrust.com",
+                Name = "Rajesh Sharma",
+                Email = "rajesh@jaminbazaar.com",
                 PasswordHash = passwordHash,
-                Phone = "+91 98450 66778",
-                RoleId = irmRoleId,
-                CompanyId = 1,
+                Phone = "+91 98450 44556",
+                RoleId = salesExecutiveRoleId,
+                CompanyId = 2,
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             }
@@ -283,8 +286,8 @@ public class ApplicationDbContext : DbContext
                 InvestmentMandate = "Growth focused Category II AIF with commercial allocation",
                 CommittedAum = "₹5.0 Cr",
                 ReferralSource = "Wealth Partner Direct",
-                AssignedIrmId = 2,
-                AssignedIrmName = "Vikram Malhotra",
+                AssignedIrmId = 5,
+                AssignedIrmName = "Dhinakaran",
                 Notes = "Senior HNI investor with portfolio in Bangalore",
                 CreatedAt = new DateTime(2026, 1, 15, 0, 0, 0, DateTimeKind.Utc)
             },
@@ -300,8 +303,8 @@ public class ApplicationDbContext : DbContext
                 PreferredAssetClass = "Commercial AIF",
                 RiskTolerance = "Aggressive",
                 InvestmentMandate = "High-yield commercial development tranches",
-                AssignedIrmId = 2,
-                AssignedIrmName = "Vikram Malhotra",
+                AssignedIrmId = 5,
+                AssignedIrmName = "Dhinakaran",
                 Notes = "Family office lead referred via CFO network",
                 CreatedAt = new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc)
             }
@@ -313,7 +316,7 @@ public class ApplicationDbContext : DbContext
             {
                 Id = 1,
                 CompanyId = 1,
-                CreatedByIrmId = 2,
+                CreatedByIrmId = 5,
                 Title = "Prime Bengaluru Commercial Yield Fund II",
                 AssetClass = "Commercial AIF",
                 Description = "Grade-A office park pre-leased to Fortune 500 GCCs with 8.5% entry cap rate",
@@ -335,8 +338,8 @@ public class ApplicationDbContext : DbContext
                 Id = 1,
                 CompanyId = 1,
                 InvestorId = 1,
-                AssignedIrmId = 2,
-                AssignedIrmName = "Vikram Malhotra",
+                AssignedIrmId = 5,
+                AssignedIrmName = "Dhinakaran",
                 InvestorName = "Rajesh Singhania",
                 InvestorPhone = "+91 98200 44556",
                 InvestorEmail = "rajesh.singhania@apexcapital.in",
@@ -353,8 +356,8 @@ public class ApplicationDbContext : DbContext
                 Id = 2,
                 CompanyId = 1,
                 InvestorId = 2,
-                AssignedIrmId = 2,
-                AssignedIrmName = "Vikram Malhotra",
+                AssignedIrmId = 5,
+                AssignedIrmName = "Dhinakaran",
                 InvestorName = "Meera Nambiar",
                 InvestorPhone = "+91 98450 99881",
                 InvestorEmail = "meera.nambiar@nambiarholdings.com",

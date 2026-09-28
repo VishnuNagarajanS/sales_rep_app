@@ -96,12 +96,27 @@ export const mockStorageAdapter = {
   saveUsers(users: User[]): void {
     setRaw(MOCK_STORAGE_KEYS.USERS, users);
   },
+  saveUser(user: User): void {
+    const users = getRaw<User>(MOCK_STORAGE_KEYS.USERS);
+    const idx = users.findIndex(u => u.id === user.id);
+    if (idx >= 0) users[idx] = user;
+    else users.push(user);
+    setRaw(MOCK_STORAGE_KEYS.USERS, users);
+  },
+  deleteUser(id: string): void {
+    const users = getRaw<User>(MOCK_STORAGE_KEYS.USERS).filter(u => u.id !== id);
+    setRaw(MOCK_STORAGE_KEYS.USERS, users);
+  },
 
   // Leads
   getLeads(companyId?: string): Lead[] {
     return filterByCompany(getRaw<Lead>(MOCK_STORAGE_KEYS.LEADS), companyId);
   },
   saveLeads(leads: Lead[]): void {
+    setRaw(MOCK_STORAGE_KEYS.LEADS, leads);
+  },
+  deleteLead(id: string): void {
+    const leads = getRaw<Lead>(MOCK_STORAGE_KEYS.LEADS).filter(l => l.id !== id);
     setRaw(MOCK_STORAGE_KEYS.LEADS, leads);
   },
 
@@ -134,6 +149,10 @@ export const mockStorageAdapter = {
     return filterByCompany(getRaw<Followup>(MOCK_STORAGE_KEYS.FOLLOWUPS), companyId);
   },
   saveFollowups(followups: Followup[]): void {
+    setRaw(MOCK_STORAGE_KEYS.FOLLOWUPS, followups);
+  },
+  deleteFollowup(id: string): void {
+    const followups = getRaw<Followup>(MOCK_STORAGE_KEYS.FOLLOWUPS).filter(f => f.id !== id);
     setRaw(MOCK_STORAGE_KEYS.FOLLOWUPS, followups);
   },
 

@@ -1,9 +1,46 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, Tenant, TenantSlug, RoleCode } from '../types';
+import { DEFAULT_TENANTS } from '../constants/defaultTenants';
+import { SYSTEM_ROLES } from '../constants/roles';
 import { FEATURES } from '../constants/features';
 import { storageService } from '../services/storageService';
 import { apiClient } from '../services/apiClient';
 import { isMockMode } from '../config/environment';
+
+const getStoredTenants = (): Tenant[] => {
+  try {
+    const raw = localStorage.getItem('nexus_tenants');
+    return raw ? JSON.parse(raw) : [DEFAULT_TENANTS.ghl, DEFAULT_TENANTS.jamin];
+  } catch {
+    return [DEFAULT_TENANTS.ghl, DEFAULT_TENANTS.jamin];
+  }
+};
+
+const getStoredUsers = (tenantSlug?: string): User[] => {
+  try {
+    const raw = localStorage.getItem('nexus_users');
+    const users: User[] = raw ? JSON.parse(raw) : [];
+    return tenantSlug ? users.filter((u: User) => u.companySlug === tenantSlug) : users;
+  } catch {
+    return [];
+  }
+};
+
+const saveStoredUser = (targetUser: User) => {
+  try {
+    const raw = localStorage.getItem('nexus_users');
+    const users: User[] = raw ? JSON.parse(raw) : [];
+    const idx = users.findIndex(u => u.id === targetUser.id);
+    if (idx >= 0) {
+      users[idx] = targetUser;
+    } else {
+      users.push(targetUser);
+    }
+    localStorage.setItem('nexus_users', JSON.stringify(users));
+  } catch {}
+};
+
+export { getStoredTenants, getStoredUsers, saveStoredUser };
 
 interface AuthContextType {
   user: User | null;
@@ -41,14 +78,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const saved = sessionStorage.getItem('nexus_current_user');
     if (saved) {
       try {
-        return JSON.parse(saved);
-      } catch {}
+        const parsed = JSON.parse(saved);
+        if (parsed?.role?.code && SYSTEM_ROLES[parsed.role.code]) {
+          parsed.role.permissions = Array.from(
+            new Set([...(parsed.role.permissions || []), ...SYSTEM_ROLES[parsed.role.code].permissions])
+          );
+        }
+        return parsed;
+      } catch {
+        return null;
+      }
     }
     return null;
   });
 
   // Tenant state
   const [tenant, setTenant] = useState<Tenant | null>(() => {
+    // If the restored user is a Super Admin, tenant is null unless active in support mode
+    const savedUser = sessionStorage.getItem('nexus_current_user');
+    if (savedUser) {
+      try {
+        const parsedUser = JSON.parse(savedUser);
+        if (parsedUser?.role?.code === 'super_admin') {
+          const supportModeTenant = sessionStorage.getItem('nexus_support_mode_tenant');
+          if (supportModeTenant) {
+            return JSON.parse(supportModeTenant);
+          }
+          return null;
+        }
+      } catch {}
+    }
     const saved = sessionStorage.getItem('nexus_current_tenant');
     if (saved) {
       try {
@@ -86,8 +145,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isSuperAdmin = user?.role?.code === 'super_admin';
 
   // Derive enabled features from live tenant object
-  const enabledFeatures = isSuperAdmin
-    ? Object.values(FEATURES)
+  const enabledFeatures: string[] = isSuperAdmin
+    ? (Object.values(FEATURES) as string[])
     : tenant?.enabledFeatures || [];
 
   // Derive permissions directly from live user role
@@ -101,14 +160,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     // In mock mode, retrieve mock fixtures from registered provider
-    const MOCK_ROLES = mockAuthProviderInstance?.getRoles() || {};
-    const MOCK_TENANTS = mockAuthProviderInstance?.getTenants() || {};
+    const MOCK_ROLES = mockAuthProviderInstance?.getRoles() || SYSTEM_ROLES || {};
+    const MOCK_TENANTS = mockAuthProviderInstance?.getTenants() || DEFAULT_TENANTS || {};
 
     if (roleCode === 'super_admin') {
       const superUser: User = {
         id: 'usr-super-01',
-        name: 'Alex Rivera (Super Admin)',
-        email: 'alex@nexusplatform.io',
+        name: 'Yanosh',
+        email: 'yanosh@ghlindiaventures.com',
         phone: '+91 98800 11000',
         role: MOCK_ROLES.super_admin,
         status: 'Active',
@@ -143,18 +202,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       name:
         roleCode === 'company_admin'
           ? slug === 'ghl'
-            ? 'Vikram Malhotra'
+            ? 'Vishnu'
             : slug === 'jamin'
-              ? 'Kavita Rao'
+              ? 'Mani'
               : `${targetTenant.name} Admin`
           : roleCode === 'irm'
-            ? 'Rohan Varma'
+            ? 'Dhinakaran'
             : slug === 'ghl'
-              ? 'Ananya Iyer'
+              ? 'Naveen'
               : slug === 'jamin'
                 ? 'Pooja Hegde'
                 : `${targetTenant.name} Agent`,
-      email: `${roleCode}@${slug}.com`,
+      email:
+        roleCode === 'company_admin'
+          ? slug === 'ghl'
+            ? 'vishnu@ghlindiaventures.com'
+            : 'mani@ghlindiaventures.com'
+          : roleCode === 'irm'
+            ? 'dhinakaran@ghlindiaventures.com'
+            : slug === 'ghl'
+              ? 'naveen@ghlindiaventures.com'
+              : `sales@${slug}.com`,
       phone: '+91 98450 00000',
       role: MOCK_ROLES[roleCode] || MOCK_ROLES.company_admin,
       companyId: targetTenant.id,
@@ -164,7 +232,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       lastLogin: 'Just now',
     };
 
-    storageService.saveUser(targetUser);
+    saveStoredUser(targetUser);
     setUser(targetUser);
   };
 
@@ -230,8 +298,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
-    const MOCK_ROLES = mockAuthProviderInstance?.getRoles() || {};
-    const MOCK_TENANTS = mockAuthProviderInstance?.getTenants() || {};
+    const MOCK_ROLES = mockAuthProviderInstance?.getRoles() || SYSTEM_ROLES || {};
+    const MOCK_TENANTS = mockAuthProviderInstance?.getTenants() || DEFAULT_TENANTS || {};
 
     const allTenants = storageService.getTenants();
     const targetTenant =
@@ -253,7 +321,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       lastLogin: 'Just now',
     };
 
-    storageService.saveUser(authenticatedUser);
+    saveStoredUser(authenticatedUser);
     setUser(authenticatedUser);
     return true;
   };

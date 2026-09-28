@@ -5,16 +5,28 @@ import {
   Edit,
   ExternalLink,
 } from 'lucide-react';
-import { Lead } from '../../types';
+import { Lead, CustomFieldDefinition } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
+import { getLeads, saveLead as apiSaveLead } from '../../services/ghlApiService';
+import { isMockMode } from '../../config/environment';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
+import { MOCK_AGENTS } from '../../mock_data/mockData';
 import './AssignedLeadsPage.css';
 
+const getCustomFieldDefinitions = (tenantId?: string): CustomFieldDefinition[] => {
+  try {
+    const raw = localStorage.getItem('nexus_custom_fields');
+    const all: CustomFieldDefinition[] = raw ? JSON.parse(raw) : [];
+    return tenantId ? all.filter(d => !d.companyId || d.companyId === tenantId) : all;
+  } catch {
+    return [];
+  }
+};
 export const AssignedLeadsPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
@@ -113,35 +125,48 @@ export const AssignedLeadsPage: React.FC = () => {
     setDateTo(to);
   };
 
-  const loadData = () => {
-    const allLeads = storageService.getLeads(tenant?.id);
-
-    // Merge any mock assignments from session storage if present
-    let sessionAssignments: Array<{ leadId: string; agentId: number; agentName: string }> = [];
+  const loadData = async () => {
     try {
-      const raw = sessionStorage.getItem('ghl_mock_agent_assignments');
-      if (raw) sessionAssignments = JSON.parse(raw);
-    } catch { }
-
-    const assigned = allLeads
-      .map(lead => {
-        const sessionAssigned = sessionAssignments.find(a => a.leadId === lead.id);
-        if (sessionAssigned) {
-          return {
-            ...lead,
-            assignedAgentId: String(sessionAssigned.agentId),
-            assignedAgentName: sessionAssigned.agentName,
-          };
+      let allLeads: Lead[] = [];
+      if (isMockMode()) {
+        allLeads = storageService.getLeads(tenant?.id);
+      } else {
+        try {
+          allLeads = await getLeads(tenant?.id);
+        } catch {
+          allLeads = storageService.getLeads(tenant?.id);
         }
-        return lead;
-      })
-      .filter(lead => (lead as any).assignmentStatus === 'assigned' || Boolean(lead.assignedAgentId));
+      }
 
-    setLeads(assigned);
-    setSelectedLead(prev => {
-      if (!prev) return null;
-      return assigned.find(l => l.id === prev.id) || null;
-    });
+      // Merge any mock assignments from session storage if present
+      let sessionAssignments: Array<{ leadId: string; agentId: number | string; agentName: string }> = [];
+      try {
+        const raw = sessionStorage.getItem('ghl_mock_agent_assignments');
+        if (raw) sessionAssignments = JSON.parse(raw);
+      } catch { }
+
+      const assigned = allLeads
+        .map(lead => {
+          const sessionAssigned = sessionAssignments.find(a => a.leadId === lead.id);
+          if (sessionAssigned) {
+            return {
+              ...lead,
+              assignedAgentId: String(sessionAssigned.agentId),
+              assignedAgentName: sessionAssigned.agentName,
+            };
+          }
+          return lead;
+        })
+        .filter(lead => (lead as any).assignmentStatus === 'assigned' || Boolean(lead.assignedAgentId));
+
+      setLeads(assigned);
+      setSelectedLead(prev => {
+        if (!prev) return null;
+        return assigned.find(l => l.id === prev.id) || null;
+      });
+    } catch (err) {
+      console.error('Failed to load assigned leads', err);
+    }
   };
 
   useEffect(() => {
@@ -158,9 +183,9 @@ export const AssignedLeadsPage: React.FC = () => {
     setIsEditDrawerOpen(true);
   };
 
-  // Populate agent options from storageService.getAgents(), ensuring the current assigned agent is included
+  // Populate agent options from storageService or MOCK_AGENTS, ensuring the current assigned agent is included
   const agentOptions = useMemo<Array<{ id: string | number; name: string }>>(() => {
-    const list: Array<{ id: string | number; name: string }> = [...storageService.getAgents(tenant?.id)];
+    const list: Array<{ id: string | number; name: string }> = storageService.getAgents ? [...storageService.getAgents(tenant?.id)] : [...MOCK_AGENTS];
     if (formData.assignedAgentName && !list.some(a => a.name.toLowerCase() === formData.assignedAgentName?.toLowerCase())) {
       list.unshift({ id: 'current', name: formData.assignedAgentName });
     }
@@ -211,7 +236,20 @@ export const AssignedLeadsPage: React.FC = () => {
       companyId: formData.companyId || tenant?.id || 't-ghl-01',
     };
 
-    storageService.saveLead(leadToSave);
+    if (isMockMode()) {
+      storageService.saveLead(leadToSave);
+      loadData();
+    } else {
+      apiSaveLead(leadToSave)
+        .then(() => {
+          storageService.saveLead(leadToSave);
+          loadData();
+        })
+        .catch(() => {
+          storageService.saveLead(leadToSave);
+          loadData();
+        });
+    }
 
     // Keep session mock assignments in sync if tracked
     try {
@@ -231,7 +269,6 @@ export const AssignedLeadsPage: React.FC = () => {
     } catch {}
 
     setIsEditDrawerOpen(false);
-    loadData();
   };
 
   // Table columns exactly matching the requested specification
@@ -514,8 +551,10 @@ export const AssignedLeadsPage: React.FC = () => {
 
             {/* Tenant-Specific Dynamic Custom Fields */}
             {(() => {
-              const activeDefs = storageService
-                .getCustomFieldDefinitions(tenant?.id)
+              const activeDefs = (storageService.getCustomFieldDefinitions
+                ? storageService.getCustomFieldDefinitions(tenant?.id)
+                : getCustomFieldDefinitions(tenant?.id)
+              )
                 .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
                 .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
 

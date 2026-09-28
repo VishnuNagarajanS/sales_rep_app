@@ -32,6 +32,14 @@ import { Deal, DealActivity, DocumentItem, Lead, Customer } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
+import {
+  getDeals,
+  saveDeal as apiSaveDeal,
+  addDealActivity as apiAddDealActivity,
+  getLeads,
+  getCustomers,
+} from '../../services/ghlApiService';
+import { isMockMode } from '../../config/environment';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { Modal } from '../../components/common/Modal';
@@ -283,14 +291,32 @@ const GhlIrmKycView: React.FC = () => {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [sameAsPermanent, setSameAsPermanent] = useState(false);
 
-  const loadData = () => {
-    const allDeals = storageService.getDeals(tenant?.id) || [];
-    setDeals(allDeals.filter(d => d.stage === 'qualified_investor'));
-    setLeads(storageService.getLeads(tenant?.id) || []);
-    setCustomers(storageService.getCustomers(tenant?.id) || []);
+  const loadData = async () => {
+    if (isMockMode()) {
+      const allDeals = storageService.getDeals(tenant?.id) || [];
+      setDeals(allDeals.filter(d => d.stage === 'qualified_investor'));
+      setLeads(storageService.getLeads(tenant?.id) || []);
+      setCustomers(storageService.getCustomers(tenant?.id) || []);
+    } else {
+      try {
+        const [allDeals, apiLeads, apiCustomers] = await Promise.all([
+          getDeals(tenant?.id),
+          getLeads(tenant?.id),
+          getCustomers(tenant?.id),
+        ]);
+        setDeals((allDeals || []).filter(d => d.stage === 'qualified_investor'));
+        setLeads(apiLeads || []);
+        setCustomers(apiCustomers || []);
+      } catch {
+        const allDeals = storageService.getDeals(tenant?.id) || [];
+        setDeals(allDeals.filter(d => d.stage === 'qualified_investor'));
+        setLeads(storageService.getLeads(tenant?.id) || []);
+        setCustomers(storageService.getCustomers(tenant?.id) || []);
+      }
+    }
 
     fetch('/api/irm/kyc/all')
-      .then(res => res.ok ? res.json() : null)
+      .then(res => (res.ok ? res.json() : null))
       .then(json => {
         if (json?.success && Array.isArray(json.data)) {
           const map: Record<string, any> = {};

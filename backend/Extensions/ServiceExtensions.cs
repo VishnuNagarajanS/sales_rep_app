@@ -64,8 +64,13 @@ public static class ServiceExtensions
         services.AddScoped<IInvestorCallService, InvestorCallService>();
         services.AddScoped<IIrmDashboardService, IrmDashboardService>();
 
+        services.AddDev1Services();
+
         // 5. Validators
         services.AddValidatorsFromAssemblyContaining<LoginRequestValidator>();
+
+        // 6. Developer 2 CRM Sales Pipeline Services
+        services.AddDev2Services();
 
         return services;
     }

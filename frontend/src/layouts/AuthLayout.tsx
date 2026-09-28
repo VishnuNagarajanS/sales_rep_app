@@ -6,7 +6,7 @@ import './AuthLayout.css';
 
 export const AuthLayout: React.FC = () => {
   const { login, switchPersona, loginError } = useAuth();
-  const [email, setEmail] = useState('vikram@ghlindiatrust.com');
+  const [email, setEmail] = useState('vishnu@ghlindiaventures.com');
   const [password, setPassword] = useState('Password@123');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -59,7 +59,7 @@ export const AuthLayout: React.FC = () => {
                   <Building2 size={14} color="#e10600" />
                   <div>
                     <div className="auth-preset-title">Jamin Bazaar Admin</div>
-                    <div className="auth-preset-subtitle">Plots / Operations</div>
+                    <div className="auth-preset-subtitle">Mani</div>
                   </div>
                 </button>
 
@@ -71,7 +71,7 @@ export const AuthLayout: React.FC = () => {
                   <UserCheck size={14} color="#ef4444" />
                   <div>
                     <div className="auth-preset-title">GHL Sales Agent</div>
-                    <div className="auth-preset-subtitle">Ananya Iyer</div>
+                    <div className="auth-preset-subtitle">Naveen</div>
                   </div>
                 </button>
 
@@ -83,7 +83,7 @@ export const AuthLayout: React.FC = () => {
                   <TrendingUp size={14} color="#ef4444" />
                   <div>
                     <div className="auth-preset-title">GHL IRM</div>
-                    <div className="auth-preset-subtitle">Rohan Varma</div>
+                    <div className="auth-preset-subtitle">Dhinakaran</div>
                   </div>
                 </button>
 
@@ -95,7 +95,7 @@ export const AuthLayout: React.FC = () => {
                   <Shield size={14} color="#8b5cf6" />
                   <div>
                     <div className="auth-preset-title">Super Admin</div>
-                    <div className="auth-preset-subtitle">Operator Console</div>
+                    <div className="auth-preset-subtitle">Yanosh</div>
                   </div>
                 </button>
               </div>
@@ -129,7 +129,7 @@ export const AuthLayout: React.FC = () => {
             <div className="auth-password-header">
               <label className="form-label auth-form-label">Password</label>
               <a href="#forgot" className="auth-forgot-link">
-                Forgot?
+                Forgot Password?
               </a>
             </div>
             <div className="auth-input-wrapper">
@@ -156,7 +156,7 @@ export const AuthLayout: React.FC = () => {
             className="btn btn-primary auth-submit-btn"
             disabled={isLoading}
           >
-            {isLoading ? 'Signing in...' : 'Sign In to Organization'} <ArrowRight size={16} />
+            {isLoading ? 'Signing in...' : 'Sign in'} <ArrowRight size={16} />
           </button>
         </form>
       </div>

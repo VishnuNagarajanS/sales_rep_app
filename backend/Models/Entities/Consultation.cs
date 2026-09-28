@@ -6,16 +6,16 @@ public class Consultation
 {
     public int Id { get; set; }
 
-    public int InvestorId { get; set; }
-    public Investor Investor { get; set; } = null!;
-
     public int CompanyId { get; set; }
-    public Tenant Company { get; set; } = null!;
+    public Tenant? Company { get; set; }
 
     // The IRM conducting the consultation
     public int ConsultantId { get; set; }
-    public User Consultant { get; set; } = null!;
+    public User? Consultant { get; set; }
     public string ConsultantName { get; set; } = string.Empty;
+
+    public int InvestorId { get; set; }
+    public Investor? Investor { get; set; }
 
     public string InvestorName { get; set; } = string.Empty;
     public string InvestorPhone { get; set; } = string.Empty;

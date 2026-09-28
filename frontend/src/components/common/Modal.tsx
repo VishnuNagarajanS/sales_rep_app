@@ -8,10 +8,18 @@ interface ModalProps {
   title: string;
   subtitle?: string;
   children: React.ReactNode;
+  size?: 'sm' | 'md' | 'lg' | 'xl' | string;
   maxWidth?: string | number;
   footer?: React.ReactNode;
   className?: string;
 }
+
+const MODAL_SIZE_MAP: Record<string, number> = {
+  sm: 440,
+  md: 560,
+  lg: 820,
+  xl: 1040,
+};
 
 export const Modal: React.FC<ModalProps> = ({
   isOpen,
@@ -19,10 +27,12 @@ export const Modal: React.FC<ModalProps> = ({
   title,
   subtitle,
   children,
-  maxWidth = 560,
+  size,
+  maxWidth,
   footer,
   className = '',
 }) => {
+  const resolvedMaxWidth = maxWidth ?? (size ? (MODAL_SIZE_MAP[size] ?? size) : 560);
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isOpen) {
@@ -40,7 +50,7 @@ export const Modal: React.FC<ModalProps> = ({
       <div
         className={`card animate-slide-down modal-card ${className}`.trim()}
         style={{
-          maxWidth: typeof maxWidth === 'number' ? `${maxWidth}px` : maxWidth,
+          maxWidth: typeof resolvedMaxWidth === 'number' ? `${resolvedMaxWidth}px` : resolvedMaxWidth,
         }}
         onClick={e => e.stopPropagation()}
       >

@@ -4,8 +4,8 @@ import { MOCK_ROLES } from '../roles/roleFixtures';
 export const MOCK_USERS: User[] = [
   {
     id: 'usr-super-01',
-    name: 'Alex Rivera (Super Admin)',
-    email: 'alex@nexusplatform.io',
+    name: 'Yanosh',
+    email: 'yanosh@ghlindiaventures.com',
     phone: '+91 98800 11000',
     role: MOCK_ROLES.super_admin,
     status: 'Active',
@@ -13,8 +13,8 @@ export const MOCK_USERS: User[] = [
   },
   {
     id: 'usr-ghl-admin',
-    name: 'Vikram Malhotra',
-    email: 'vikram@ghlindiatrust.com',
+    name: 'Vishnu',
+    email: 'vishnu@ghlindiaventures.com',
     phone: '+91 98450 22334',
     role: MOCK_ROLES.company_admin,
     companyId: 't-ghl-01',
@@ -25,8 +25,8 @@ export const MOCK_USERS: User[] = [
   },
   {
     id: 'usr-ghl-exec',
-    name: 'Ananya Iyer',
-    email: 'ananya@ghlindiatrust.com',
+    name: 'Naveen',
+    email: 'naveen@ghlindiaventures.com',
     phone: '+91 97420 55667',
     role: MOCK_ROLES.sales_executive,
     companyId: 't-ghl-01',
@@ -37,8 +37,8 @@ export const MOCK_USERS: User[] = [
   },
   {
     id: 'usr-ghl-irm',
-    name: 'Rohan Varma',
-    email: 'rohan.varma@ghlindiatrust.com',
+    name: 'Dhinakaran',
+    email: 'dhinakaran@ghlindiaventures.com',
     phone: '+91 98110 77889',
     role: MOCK_ROLES.irm,
     companyId: 't-ghl-01',
@@ -100,8 +100,8 @@ export const MOCK_USERS: User[] = [
   },
   {
     id: 'usr-jamin-admin',
-    name: 'Kavita Rao',
-    email: 'kavita@jaminbazaar.com',
+    name: 'Mani',
+    email: 'mani@ghlindiaventures.com',
     phone: '+91 98860 33445',
     role: MOCK_ROLES.company_admin,
     companyId: 't-jamin-02',

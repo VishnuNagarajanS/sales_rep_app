@@ -2,8 +2,8 @@ import { ChatConversation, ChatMember } from '../../types';
 
 export const GHL_CHAT_ADMIN: ChatMember = {
   id: 'usr-ghl-admin',
-  name: 'Vikram Malhotra',
-  email: 'vikram.malhotra@ghl.com',
+  name: 'Vishnu',
+  email: 'vishnu@ghlindiaventures.com',
   roleCode: 'company_admin',
   roleName: 'Company Admin',
   companyId: 't-ghl-01',
@@ -12,8 +12,8 @@ export const GHL_CHAT_ADMIN: ChatMember = {
 
 export const GHL_CHAT_EXEC: ChatMember = {
   id: 'usr-ghl-exec',
-  name: 'Ananya Iyer',
-  email: 'ananya.iyer@ghl.com',
+  name: 'Naveen',
+  email: 'naveen@ghlindiaventures.com',
   roleCode: 'sales_executive',
   roleName: 'Sales Executive',
   companyId: 't-ghl-01',
@@ -22,8 +22,8 @@ export const GHL_CHAT_EXEC: ChatMember = {
 
 export const JAMIN_CHAT_ADMIN: ChatMember = {
   id: 'usr-jamin-admin',
-  name: 'Kavita Rao',
-  email: 'kavita.rao@jaminbazaar.com',
+  name: 'Mani',
+  email: 'mani@ghlindiaventures.com',
   roleCode: 'company_admin',
   roleName: 'Company Admin',
   companyId: 't-jamin-02',
@@ -52,7 +52,7 @@ export const GHL_GROUP_CONVERSATION: ChatConversation = {
   updatedAt: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
   lastMessage: {
     content: 'Please prioritize the HNW investor consultations today.',
-    senderName: 'Vikram Malhotra',
+    senderName: 'Vishnu',
     isDeleted: false,
   },
 };
@@ -68,7 +68,7 @@ export const GHL_DM_CONVERSATION: ChatConversation = {
   updatedAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
   lastMessage: {
     content: 'All documents for Dr. Rajesh Nambiar are uploaded and verified.',
-    senderName: 'Ananya Iyer',
+    senderName: 'Naveen',
     isDeleted: false,
   },
 };
