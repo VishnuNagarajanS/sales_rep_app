@@ -202,16 +202,16 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       },
       wizardAdminEmail
         ? {
-            name: wizardAdminName || 'Primary Administrator',
-            email: wizardAdminEmail,
-            phone: wizardAdminPhone,
-          }
+          name: wizardAdminName || 'Primary Administrator',
+          email: wizardAdminEmail,
+          phone: wizardAdminPhone,
+        }
         : undefined,
       wizardDidNumber
         ? {
-            phoneNumber: wizardDidNumber,
-            routingStrategy: wizardRoutingStrategy,
-          }
+          phoneNumber: wizardDidNumber,
+          routingStrategy: wizardRoutingStrategy,
+        }
         : undefined
     );
 
@@ -558,9 +558,8 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
               ].map(s => (
                 <div
                   key={s.step}
-                  className={`wizard-step-item ${wizardStep === s.step ? 'active' : ''} ${
-                    wizardStep > s.step ? 'completed' : ''
-                  }`}
+                  className={`wizard-step-item ${wizardStep === s.step ? 'active' : ''} ${wizardStep > s.step ? 'completed' : ''
+                    }`}
                   onClick={() => {
                     if (wizardStep > s.step) setWizardStep(s.step);
                   }}
