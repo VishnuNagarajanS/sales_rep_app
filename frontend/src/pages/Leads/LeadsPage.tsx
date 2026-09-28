@@ -13,6 +13,7 @@ import {
 import { Lead, Customer, Deal } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
+import { apiClient } from '../../services/apiClient';
 import { storageService } from '../../services/storageService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
@@ -448,7 +449,7 @@ export const LeadsPage: React.FC = () => {
     setIsEditDrawerOpen(true);
   };
 
-  const handleSaveLead = (e: React.FormEvent) => {
+  const handleSaveLead = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.phone) return;
 
@@ -503,6 +504,44 @@ export const LeadsPage: React.FC = () => {
       } as Lead;
     }
 
+    try {
+      if (!isUpdated) {
+        // Create in backend
+        const res = await apiClient.post<any>('/sales-executive/leads', {
+          name: leadToSave.name,
+          phone: leadToSave.phone,
+          companyId: typeof targetCompanyId === 'number' ? targetCompanyId : parseInt(targetCompanyId, 10) || 1,
+          email: leadToSave.email,
+          location: leadToSave.location,
+          source: leadToSave.source,
+          priority: leadToSave.priority,
+          notes: leadToSave.notes,
+          investmentCapacity: leadToSave.customFields?.investmentCapacity || ''
+        });
+        if (res.success && res.data) {
+          leadToSave.id = `db-${res.data.id}`;
+        }
+      } else {
+        // Update in backend
+        if (leadToSave.id.toString().startsWith('db-')) {
+          const dbId = leadToSave.id.toString().replace('db-', '');
+          await apiClient.put<any>(`/sales-executive/leads/${dbId}`, {
+            name: leadToSave.name,
+            phone: leadToSave.phone,
+            companyId: typeof targetCompanyId === 'number' ? targetCompanyId : parseInt(targetCompanyId, 10) || 1,
+            email: leadToSave.email,
+            location: leadToSave.location,
+            source: leadToSave.source,
+            priority: leadToSave.priority,
+            notes: leadToSave.notes,
+            investmentCapacity: leadToSave.customFields?.investmentCapacity || ''
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to save to backend DB', err);
+    }
+
     storageService.saveLead(leadToSave);
 
     storageService.addAuditLog({
@@ -521,9 +560,18 @@ export const LeadsPage: React.FC = () => {
     setIsEditDrawerOpen(false);
   };
 
-  const handleDeleteLead = (lead: Lead) => {
+  const handleDeleteLead = async (lead: Lead) => {
     if (confirm(`Delete lead ${lead.name}?`)) {
+      try {
+        if (lead.id.toString().startsWith('db-')) {
+          const dbId = lead.id.toString().replace('db-', '');
+          await apiClient.delete(`/sales-executive/leads/${dbId}`);
+        }
+      } catch (err) {
+        console.error('Failed to delete lead from DB', err);
+      }
       storageService.deleteLead(lead.id);
+      loadData();
     }
   };
 
@@ -1758,3 +1806,4 @@ export const LeadsPage: React.FC = () => {
     </div>
   );
 };
+

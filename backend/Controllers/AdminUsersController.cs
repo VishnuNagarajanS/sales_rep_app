@@ -9,7 +9,7 @@ namespace backend.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "CompanyAdmin,SuperAdmin")] // Assuming standard JWT role claims setup
+[Authorize(Roles = "company_admin,super_admin")]
 public class AdminUsersController : ControllerBase
 {
     private readonly IAdminUserService _adminUserService;
@@ -21,8 +21,7 @@ public class AdminUsersController : ControllerBase
 
     private int GetCompanyId()
     {
-        // Extract CompanyId from JWT claims. This depends on how it's stored in Auth token.
-        var claim = User.FindFirst("CompanyId");
+        var claim = User.FindFirst("company_id");
         if (claim != null && int.TryParse(claim.Value, out var companyId))
         {
             return companyId;

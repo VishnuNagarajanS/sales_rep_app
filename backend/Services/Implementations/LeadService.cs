@@ -406,4 +406,16 @@ public class LeadService : ILeadService
             return new Dictionary<string, string>();
         }
     }
+
+    public async Task<ApiResponse<object>> DeleteLeadAsync(int id, CancellationToken ct = default)
+    {
+        var lead = await FindScopedLeadAsync(id, ct);
+        if (lead == null) return ApiResponse<object>.FailureResult("Lead not found or access denied.");
+
+        _context.Leads.Remove(lead);
+        await _context.SaveChangesAsync(ct);
+
+        return ApiResponse<object>.SuccessResult(null, "Lead deleted successfully.");
+    }
 }
+

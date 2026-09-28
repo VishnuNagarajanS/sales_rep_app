@@ -11,7 +11,9 @@
   },
   "dependencies": {
     "lucide-react": "^1.44.0",
+    "node-fetch": "^3.3.2",
     "papaparse": "^5.7.0",
+    "pg": "^8.23.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

@@ -11,10 +11,12 @@ namespace backend.Services.Implementations;
 public class AdminUserService : IAdminUserService
 {
     private readonly ApplicationDbContext _context;
+    private readonly backend.Services.Email.IEmailService _emailService;
 
-    public AdminUserService(ApplicationDbContext context)
+    public AdminUserService(ApplicationDbContext context, backend.Services.Email.IEmailService emailService)
     {
         _context = context;
+        _emailService = emailService;
     }
 
     public async Task<ApiResponse<List<AdminUserDto>>> GetUsersByCompanyAsync(int companyId, CancellationToken cancellationToken = default)
@@ -29,7 +31,7 @@ public class AdminUserService : IAdminUserService
                 Email = u.Email,
                 Phone = u.Phone,
                 RoleId = u.RoleId,
-                RoleName = u.Role.Name,
+                RoleName = u.Role != null ? u.Role.Name : "Unknown",
                 Status = u.Status,
                 LastLoginAt = u.LastLoginAt,
                 AvatarUrl = u.AvatarUrl,
@@ -52,7 +54,7 @@ public class AdminUserService : IAdminUserService
                 Email = u.Email,
                 Phone = u.Phone,
                 RoleId = u.RoleId,
-                RoleName = u.Role.Name,
+                RoleName = u.Role != null ? u.Role.Name : "Unknown",
                 Status = u.Status,
                 LastLoginAt = u.LastLoginAt,
                 AvatarUrl = u.AvatarUrl,
@@ -89,8 +91,21 @@ public class AdminUserService : IAdminUserService
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
             RoleId = request.RoleId,
             CompanyId = companyId,
+            Status = request.Status,
             CreatedAt = DateTime.UtcNow
         };
+
+        if (request.Status == backend.Models.Enums.UserStatus.Invited)
+        {
+            var loginUrl = "http://localhost:5173/auth/login";
+            var emailBody = $@"
+                <h3>Welcome to GHL India Ventures, {request.Name}!</h3>
+                <p>You have been invited to join the platform as a <b>{role.Name}</b>.</p>
+                <p>Your temporary password is: <strong>{request.Password}</strong></p>
+                <p>Please login at <a href='{loginUrl}'>{loginUrl}</a> and change your password.</p>";
+                
+            await _emailService.SendEmailAsync(request.Email, "Invitation to GHL India Ventures", emailBody);
+        }
 
         _context.Users.Add(newUser);
         await _context.SaveChangesAsync(cancellationToken);

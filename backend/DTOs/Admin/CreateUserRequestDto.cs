@@ -7,4 +7,5 @@ public class CreateUserRequestDto
     public string Phone { get; set; } = string.Empty;
     public string Password { get; set; } = string.Empty;
     public int RoleId { get; set; }
+    public backend.Models.Enums.UserStatus Status { get; set; }
 }

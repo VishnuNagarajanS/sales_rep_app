@@ -21,44 +21,7 @@ import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { User, RoleCode } from '../../types';
 import './CompanyUsersPage.css';
-
-const getStoredUsers = (tenantSlug?: string, tenantId?: string): User[] => {
-  try {
-    const raw = localStorage.getItem('nexus_users');
-    const all: User[] = raw ? JSON.parse(raw) : [];
-    return all.filter(u => {
-      if (tenantId && u.companyId === tenantId) return true;
-      if (tenantSlug && u.companySlug === tenantSlug) return true;
-      return false;
-    });
-  } catch {
-    return [];
-  }
-};
-
-const saveStoredUser = (user: User) => {
-  try {
-    const raw = localStorage.getItem('nexus_users');
-    const all: User[] = raw ? JSON.parse(raw) : [];
-    const idx = all.findIndex(u => u.id === user.id);
-    if (idx >= 0) all[idx] = user;
-    else all.push(user);
-    localStorage.setItem('nexus_users', JSON.stringify(all));
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-    window.dispatchEvent(new Event('nexus_admin_updated'));
-  } catch {}
-};
-
-const deleteStoredUser = (userId: string) => {
-  try {
-    const raw = localStorage.getItem('nexus_users');
-    const all: User[] = raw ? JSON.parse(raw) : [];
-    const filtered = all.filter(u => u.id !== userId);
-    localStorage.setItem('nexus_users', JSON.stringify(filtered));
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-    window.dispatchEvent(new Event('nexus_admin_updated'));
-  } catch {}
-};
+import { adminUserService } from '../../services/adminUserService';
 
 const addStoredAuditLog = (log: any) => {
   try {
@@ -73,16 +36,21 @@ const addStoredAuditLog = (log: any) => {
 
 export const CompanyUsersPage: React.FC = () => {
   const { tenant, user } = useAuth();
-  const [usersList, setUsersList] = useState<User[]>(() =>
-    getStoredUsers(tenant?.slug, tenant?.id),
-  );
+  const [usersList, setUsersList] = useState<User[]>([]);
 
   // ── Filters ───────────────────────────────────────────────────────────────
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
-  const loadData = () => {
-    setUsersList(getStoredUsers(tenant?.slug, tenant?.id));
+  const loadData = async () => {
+    if (!tenant?.id) return;
+    try {
+      const data = await adminUserService.getUsers(tenant.id);
+      setUsersList(data);
+    } catch (err) {
+      console.error('Failed to load users', err);
+      showToast('error', 'Failed to load users from backend.');
+    }
   };
 
   useEffect(() => {
@@ -93,7 +61,7 @@ export const CompanyUsersPage: React.FC = () => {
       window.removeEventListener('nexus_storage_updated', loadData);
       window.removeEventListener('nexus_admin_updated', loadData);
     };
-  }, [tenant?.slug, tenant?.id]);
+  }, [tenant?.id]);
 
   // ── Toast feedback ────────────────────────────────────────────────────────
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -146,7 +114,7 @@ export const CompanyUsersPage: React.FC = () => {
     setIsInviteModalOpen(true);
   };
 
-  const handleCreateOrInvite = (e: React.FormEvent) => {
+  const handleCreateOrInvite = async (e: React.FormEvent) => {
     e.preventDefault();
     setInviteError(null);
 
@@ -183,7 +151,16 @@ export const CompanyUsersPage: React.FC = () => {
       lastLogin: isInstant ? 'Pending First Login' : 'Never',
     };
 
-    saveStoredUser(newUser);
+    try {
+      await adminUserService.createUser({
+        ...newUser,
+        password: tempPass
+      });
+      loadData();
+    } catch (err: any) {
+      setInviteError(err.message || 'Failed to create user on backend.');
+      return;
+    }
 
     // Audit log
     addStoredAuditLog({
@@ -217,7 +194,7 @@ export const CompanyUsersPage: React.FC = () => {
     setEditRoleCode(u.role.code);
   };
 
-  const handleSaveEditUser = () => {
+  const handleSaveEditUser = async () => {
     if (!editingUser) return;
 
     const updatedRole = SYSTEM_ROLES[editRoleCode] || editingUser.role;
@@ -231,7 +208,13 @@ export const CompanyUsersPage: React.FC = () => {
       role: updatedRole,
     };
 
-    saveStoredUser(updated);
+    try {
+      await adminUserService.updateUser(updated.id, updated);
+      loadData();
+    } catch (err) {
+      showToast('error', 'Failed to update profile.');
+      return;
+    }
 
     addStoredAuditLog({
       id: `aud-${Date.now()}`,
@@ -296,10 +279,16 @@ export const CompanyUsersPage: React.FC = () => {
     showToast('success', `Invitation email resent to ${u.email}.`);
   };
 
-  const handleRevokeInvite = (u: User) => {
+  const handleRevokeInvite = async (u: User) => {
     if (!window.confirm(`Revoke pending invitation for ${u.name} (${u.email})?`)) return;
 
-    deleteStoredUser(u.id);
+    try {
+      await adminUserService.deleteUser(u.id, tenant?.id || '');
+      loadData();
+    } catch (err) {
+      showToast('error', 'Failed to revoke invite.');
+      return;
+    }
 
     addStoredAuditLog({
       id: `aud-${Date.now()}`,
@@ -316,10 +305,16 @@ export const CompanyUsersPage: React.FC = () => {
     showToast('success', `Invitation for ${u.name} has been revoked.`);
   };
 
-  const handleDeactivateUser = (u: User) => {
+  const handleDeactivateUser = async (u: User) => {
     if (!window.confirm(`Deactivate account for ${u.name}? They will lose active system access.`)) return;
 
-    saveStoredUser({ ...u, status: 'Disabled' });
+    try {
+      await adminUserService.updateUser(u.id, { ...u, status: 'Disabled' });
+      loadData();
+    } catch (err) {
+      showToast('error', 'Failed to deactivate user.');
+      return;
+    }
 
     addStoredAuditLog({
       id: `aud-${Date.now()}`,
@@ -336,8 +331,14 @@ export const CompanyUsersPage: React.FC = () => {
     showToast('success', `User account for ${u.name} has been deactivated.`);
   };
 
-  const handleReactivateUser = (u: User) => {
-    saveStoredUser({ ...u, status: 'Active' });
+  const handleReactivateUser = async (u: User) => {
+    try {
+      await adminUserService.updateUser(u.id, { ...u, status: 'Active' });
+      loadData();
+    } catch (err) {
+      showToast('error', 'Failed to reactivate user.');
+      return;
+    }
 
     addStoredAuditLog({
       id: `aud-${Date.now()}`,
@@ -354,10 +355,16 @@ export const CompanyUsersPage: React.FC = () => {
     showToast('success', `User account for ${u.name} reactivated.`);
   };
 
-  const handleDeleteUser = (u: User) => {
+  const handleDeleteUser = async (u: User) => {
     if (!window.confirm(`Permanently remove ${u.name} (${u.email}) from ${tenant?.name}? This cannot be undone.`)) return;
 
-    deleteStoredUser(u.id);
+    try {
+      await adminUserService.deleteUser(u.id, tenant?.id || '');
+      loadData();
+    } catch (err) {
+      showToast('error', 'Failed to delete user.');
+      return;
+    }
 
     addStoredAuditLog({
       id: `aud-${Date.now()}`,

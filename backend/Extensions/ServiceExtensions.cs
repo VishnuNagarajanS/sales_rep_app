@@ -31,8 +31,12 @@ public static class ServiceExtensions
 
         // 4. Services
         services.AddScoped<IJwtService, JwtService>();
+        services.AddHttpContextAccessor();
+        services.AddScoped<ICurrentUserService, CurrentUserService>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IAdminUserService, AdminUserService>();
+        services.AddScoped<ILeadService, LeadService>();
+        services.AddScoped<backend.Services.Email.IEmailService, backend.Services.Email.SmtpEmailService>();
 
         // 5. Validators
         services.AddValidatorsFromAssemblyContaining<LoginRequestValidator>();

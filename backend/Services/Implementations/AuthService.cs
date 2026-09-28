@@ -93,10 +93,17 @@ public class AuthService : IAuthService
             return ApiResponse<LoginResponseDto>.FailureResult("Invalid email or password.");
         }
 
-        if (user.Status != UserStatus.Active)
+        if (user.Status == UserStatus.Disabled)
         {
-            _logger.LogWarning("Login attempt for non-active user: {Email}, Status: {Status}", request.Email, user.Status);
-            return ApiResponse<LoginResponseDto>.FailureResult("Your account is currently not active. Please contact your administrator.");
+            _logger.LogWarning("Login attempt for disabled user: {Email}, Status: {Status}", request.Email, user.Status);
+            return ApiResponse<LoginResponseDto>.FailureResult("Your account is currently disabled. Please contact your administrator.");
+        }
+
+        // Auto-activate invited users on their first successful login
+        if (user.Status == UserStatus.Invited)
+        {
+            user.Status = UserStatus.Active;
+            _logger.LogInformation("User {Email} activated upon first login.", request.Email);
         }
 
         if (user.Company != null && !user.Company.IsActive)
