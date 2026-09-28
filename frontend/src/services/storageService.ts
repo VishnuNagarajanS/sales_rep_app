@@ -28,6 +28,7 @@ import {
   CustomFieldDefinition,
   ProductService,
   IrmProfile,
+  AdminKanbanCard,
 } from '../types';
 import { isMockMode } from '../config/environment';
 
@@ -38,11 +39,8 @@ export interface MockStorageAdapter {
   saveRoles: (roles: Role[]) => void;
   getUsers: (tenantId?: string) => User[];
   saveUsers: (users: User[]) => void;
-  saveUser: (user: User) => void;
-  deleteUser: (id: string) => void;
   getLeads: (companyId?: string) => Lead[];
   saveLeads: (leads: Lead[]) => void;
-  deleteLead: (id: string) => void;
   getCustomers: (companyId?: string) => Customer[];
   saveCustomers: (customers: Customer[]) => void;
   getDeals: (companyId?: string) => Deal[];
@@ -51,7 +49,6 @@ export interface MockStorageAdapter {
   saveCalls: (calls: CallRecord[]) => void;
   getFollowups: (companyId?: string) => Followup[];
   saveFollowups: (followups: Followup[]) => void;
-  deleteFollowup: (id: string) => void;
   getProjects: (companyId?: string) => PropertyProject[];
   saveProjects: (projects: PropertyProject[]) => void;
   getPlots: () => Plot[];
@@ -85,11 +82,8 @@ const defaultMockStorageAdapter: MockStorageAdapter = {
   saveRoles: () => {},
   getUsers: (): User[] => [],
   saveUsers: () => {},
-  saveUser: () => {},
-  deleteUser: () => {},
   getLeads: (): Lead[] => [],
   saveLeads: () => {},
-  deleteLead: () => {},
   getCustomers: (): Customer[] => [],
   saveCustomers: () => {},
   getDeals: (): Deal[] => [],
@@ -98,7 +92,6 @@ const defaultMockStorageAdapter: MockStorageAdapter = {
   saveCalls: () => {},
   getFollowups: (): Followup[] => [],
   saveFollowups: () => {},
-  deleteFollowup: () => {},
   getProjects: (): PropertyProject[] => [],
   saveProjects: () => {},
   getPlots: (): Plot[] => [],

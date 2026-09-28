@@ -628,6 +628,7 @@ const GhlIrmKycView: React.FC = () => {
       });
     }
   };
+  void handleOpenSectionEdit;
 
   const handleSaveSectionEdit = () => {
     if (!selectedCustomerDeal) return;
@@ -1295,7 +1296,7 @@ const GhlIrmKycView: React.FC = () => {
     {
       key: 'actions',
       header: 'Actions',
-      width: '65px',
+      width: '80px',
       align: 'center',
       render: deal => (
         <KycRowActionsMenu
@@ -1381,13 +1382,6 @@ const GhlIrmKycView: React.FC = () => {
                 <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
                   Your Profile
                 </h1>
-                <button
-                  type="button"
-                  className="btn-edit-profile"
-                  onClick={() => startKycFlow(deal)}
-                >
-                  <FileText size={14} /> Edit Profile
-                </button>
               </div>
             </div>
 
@@ -1499,15 +1493,6 @@ const GhlIrmKycView: React.FC = () => {
                     {renderField('Investment Capacity', getCustomerFilledCapacity(deal))}
                     {renderField('Preferred Asset Class', getIrmPreferredAssetClass(deal))}
                   </div>
-                  <div className="kyc-card-footer-action">
-                    <button
-                      type="button"
-                      className="btn-card-edit"
-                      onClick={() => handleOpenSectionEdit('personal')}
-                    >
-                      <Edit2 size={13} /> Edit
-                    </button>
-                  </div>
                 </div>
 
                 {/* 2. Address & Identity */}
@@ -1525,15 +1510,6 @@ const GhlIrmKycView: React.FC = () => {
                     {renderField('Country', data.country || 'India')}
                     {renderField('Aadhaar Document', data.aadhaarDoc?.name)}
                     {renderField('PAN Document', data.panDoc?.name)}
-                  </div>
-                  <div className="kyc-card-footer-action">
-                    <button
-                      type="button"
-                      className="btn-card-edit"
-                      onClick={() => handleOpenSectionEdit('address')}
-                    >
-                      <Edit2 size={13} /> Edit
-                    </button>
                   </div>
                 </div>
 
