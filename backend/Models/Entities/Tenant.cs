@@ -18,4 +18,6 @@ public class Tenant
 
     // Navigation properties
     public ICollection<User> Users { get; set; } = new List<User>();
+    public ICollection<Lead> Leads { get; set; } = new List<Lead>();
+    public ICollection<SiteVisit> SiteVisits { get; set; } = new List<SiteVisit>();
 }

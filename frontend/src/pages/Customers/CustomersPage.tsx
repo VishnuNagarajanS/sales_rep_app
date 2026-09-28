@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Building2,
   Phone,
@@ -13,8 +13,9 @@ import {
   Clock,
   Lock,
   Sparkles,
+  Calendar,
 } from 'lucide-react';
-import { Customer, CallRecord, Followup, Deal, Lead, IrmProfile } from '../../types';
+import { Customer, CallRecord, Followup, Deal, Lead, IrmProfile, SiteVisit } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
@@ -59,8 +60,9 @@ export const CustomersPage: React.FC = () => {
       (c.assignedAgentName && c.assignedAgentName === user?.name)
     )
     : customers;
+  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02';
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'calls' | 'followups' | 'timeline' | 'documents'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'calls' | 'followups' | 'timeline' | 'documents' | 'site_visits'>('overview');
   const [statusFilter, setStatusFilter] = useState('All');
   const [agentFilter, setAgentFilter] = useState('All');
   const [assignmentFilter, setAssignmentFilter] = useState<'All' | 'Assigned' | 'Unassigned'>('All');
@@ -367,13 +369,118 @@ export const CustomersPage: React.FC = () => {
     c => selectedCustomer && (c.contactPhone === selectedCustomer.phone || c.contactName === selectedCustomer.name)
   );
 
-  const customerFollowups = followups.filter(
-    f => selectedCustomer && (f.contactPhone === selectedCustomer.phone || f.contactName === selectedCustomer.name)
-  );
+  const customerFollowups = useMemo(() => {
+    if (!selectedCustomer) return [];
+    const cleanCustomerPhone = (selectedCustomer.phone || '').replace(/\D/g, '').slice(-10);
+    return followups.filter(
+      f =>
+        f.contactPhone === selectedCustomer.phone ||
+        f.contactName === selectedCustomer.name ||
+        (f.contactId && f.contactId === selectedCustomer.id) ||
+        (cleanCustomerPhone &&
+          (f.contactPhone || '').replace(/\D/g, '').slice(-10) === cleanCustomerPhone)
+    );
+  }, [followups, selectedCustomer]);
 
   const customerDeals = deals.filter(
     d => selectedCustomer && (d.customerId === selectedCustomer.id || d.customerName === selectedCustomer.name)
   );
+
+  const customerSiteVisits = useMemo(() => {
+    if (!selectedCustomer || !isJamin) return [];
+    const visits = storageService.getSiteVisits(tenant?.id);
+    const cleanPhone = (selectedCustomer.phone || '').replace(/\D/g, '').slice(-10);
+    return visits.filter(
+      v =>
+        v.customerId === selectedCustomer.id ||
+        (cleanPhone && (v.customerPhone || '').replace(/\D/g, '').slice(-10) === cleanPhone)
+    );
+  }, [selectedCustomer, isJamin, tenant?.id]);
+
+  // Jamin Bazaar: Site Visit scheduling state
+  const [isSiteVisitModalOpen, setIsSiteVisitModalOpen] = useState(false);
+  const getTomorrowDate = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split('T')[0];
+  };
+
+  const [svProject, setSvProject] = useState('Greenfield Meadows Phase 2');
+  const [svPlot, setSvPlot] = useState('Plot #15');
+  const [svDate, setSvDate] = useState(getTomorrowDate);
+  const [svTimeSlot, setSvTimeSlot] = useState('11:00 AM');
+  const [svHostAgent, setSvHostAgent] = useState('Pooja Hegde');
+  const [svNotes, setSvNotes] = useState('');
+
+  const jaminAgents = [
+    { id: 'usr-jamin-exec', name: 'Pooja Hegde', email: 'pooja@jaminbazaar.com' },
+    { id: 'usr-jamin-exec-02', name: 'Vikram Malhotra', email: 'vikram@jaminbazaar.com' },
+    { id: 'usr-jamin-exec-03', name: 'Suresh Kumar', email: 'suresh@jaminbazaar.com' },
+  ];
+
+  const handleOpenScheduleSiteVisit = () => {
+    setSvProject('Greenfield Meadows Phase 2');
+    setSvPlot('Plot #15');
+    setSvDate(getTomorrowDate());
+    setSvTimeSlot('11:00 AM');
+    setSvHostAgent(selectedCustomer?.assignedAgentName || user?.name || 'Pooja Hegde');
+    setSvNotes('');
+    setIsSiteVisitModalOpen(true);
+  };
+
+  const handleSaveCustomerSiteVisit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCustomer) return;
+
+    const hostAg = jaminAgents.find(a => a.name === svHostAgent);
+
+    const dateFormatted = (() => {
+      try {
+        const [y, m, d] = svDate.split('-');
+        const dateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+        return `${dateObj.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })} • ${svTimeSlot}`;
+      } catch {
+        return `${svDate} • ${svTimeSlot}`;
+      }
+    })();
+
+    const newVisit: SiteVisit = {
+      id: `sv-${Date.now()}`,
+      companyId: tenant?.id || 't-jamin-02',
+      customerId: selectedCustomer.id,
+      customerName: selectedCustomer.name,
+      customerPhone: selectedCustomer.phone,
+      contactType: 'customer',
+      projectId: 'proj-01',
+      projectName: svProject,
+      plotNumber: svPlot,
+      scheduledAt: dateFormatted,
+      assignedAgentId: hostAg?.id || user?.id || 'usr-jamin-exec',
+      assignedAgentName: svHostAgent,
+      status: 'Scheduled',
+      outcomeNotes: svNotes,
+    };
+
+    storageService.saveSiteVisit(newVisit);
+
+    storageService.addAuditLog({
+      id: `aud-${Date.now()}`,
+      timestamp: 'Just now',
+      actorName: user?.name || 'Agent',
+      actorEmail: user?.email || 'agent@jaminbazaar.com',
+      action: 'SITE_VISIT_SCHEDULED',
+      entityType: 'SiteVisit',
+      entityId: newVisit.id,
+      companyId: tenant?.id,
+      companyName: tenant?.name,
+      details: `Scheduled site visit for customer ${selectedCustomer.name} at ${svProject} (${svPlot}).`,
+    });
+
+    setIsSiteVisitModalOpen(false);
+    loadData();
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+    showToast(`✓ Site visit scheduled for ${selectedCustomer.name}!`);
+  };
 
   const resetAddForm = () => {
     setNewName('');
@@ -665,27 +772,27 @@ export const CustomersPage: React.FC = () => {
 
               {/* Agent Filter */}
               {!isExec && (
-              <div className="customers-filter-group">
-                <label
-                  htmlFor="filter-customer-agent"
-                  className="customers-filter-tag"
-                >
-                  Agent:
-                </label>
-                <select
-                  id="filter-customer-agent"
-                  className={`form-select customers-filter-select ${agentFilter !== 'All' && agentFilter !== '' ? 'is-filtered' : ''}`}
-                  value={agentFilter}
-                  onChange={e => setAgentFilter(e.target.value)}
-                >
-                  <option value="All">All</option>
-                  {agentOptions.map(opt => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                <div className="customers-filter-group">
+                  <label
+                    htmlFor="filter-customer-agent"
+                    className="customers-filter-tag"
+                  >
+                    Agent:
+                  </label>
+                  <select
+                    id="filter-customer-agent"
+                    className={`form-select customers-filter-select ${agentFilter !== 'All' && agentFilter !== '' ? 'is-filtered' : ''}`}
+                    value={agentFilter}
+                    onChange={e => setAgentFilter(e.target.value)}
+                  >
+                    <option value="All">All</option>
+                    {agentOptions.map(opt => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               )}
             </div>
             <div className="customers-list">
@@ -785,7 +892,7 @@ export const CustomersPage: React.FC = () => {
               </div>
 
               {/* Quick Actions */}
-              <div className="customer-cockpit-actions">
+              <div className="customer-cockpit-actions" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <button
                   className="btn btn-primary customer-call-btn"
                   onClick={() => initiateCall(selectedCustomer.name, selectedCustomer.phone, 'customer', selectedCustomer.id)}
@@ -801,6 +908,7 @@ export const CustomersPage: React.FC = () => {
                 { id: 'overview', label: 'Overview' },
                 { id: 'calls', label: `Calls (${customerCalls.length})` },
                 { id: 'followups', label: `Follow-ups (${customerFollowups.length})` },
+                ...(isJamin ? [{ id: 'site_visits', label: `Site Visits (${customerSiteVisits.length})` }] : []),
                 { id: 'timeline', label: 'Activity Timeline' },
                 { id: 'documents', label: 'Documents' },
               ].map(tab => (
@@ -944,37 +1052,164 @@ export const CustomersPage: React.FC = () => {
                       No open follow-ups for this customer.
                     </div>
                   ) : (
-                    customerFollowups.map(f => (
-                      <div
-                        key={f.id}
-                        className="customer-followup-item"
-                      >
-                        <div>
-                          <div className="customer-followup-header">
-                            <span className="customer-followup-notes">{f.notes}</span>
-                            <StatusChip status={f.priority} size="sm" />
-                          </div>
-                          <div className="customer-followup-due">
-                            ⏰ Due: {f.scheduledAt} • Assignee: {f.assignedAgentName}
-                          </div>
-                        </div>
+                    customerFollowups.map(f => {
+                      const cleanDate = (() => {
+                        if (!f.scheduledAt) return 'Not scheduled';
+                        try {
+                          const d = new Date(f.scheduledAt);
+                          if (!isNaN(d.getTime())) {
+                            return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) +
+                              ', ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+                          }
+                        } catch { }
+                        return f.scheduledAt.replace('T', ' ').replace(/\.\d+Z$/, '');
+                      })();
 
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => {
-                            storageService.saveFollowup({ ...f, status: 'Completed' });
-                          }}
+                      const isOverdue = (() => {
+                        if (f.status === 'Completed' || f.status === 'Cancelled' || f.status === 'Rescheduled') return false;
+                        if (!f.scheduledAt) return false;
+                        try {
+                          const d = new Date(f.scheduledAt);
+                          return !isNaN(d.getTime()) && d.getTime() < Date.now();
+                        } catch {
+                          return false;
+                        }
+                      })();
+
+                      const effectiveStatus: string =
+                        f.status === 'Completed'
+                          ? 'Completed'
+                          : f.status === 'Rescheduled'
+                            ? 'Rescheduled'
+                            : isOverdue
+                              ? 'Overdue'
+                              : f.status || 'Pending';
+
+                      const displayNote = (() => {
+                        if (!f.notes) return 'Follow-up on property inquiry';
+                        if (/follow-up\s+whatsapp\s+scheduled/i.test(f.notes)) return 'WhatsApp follow-up on property inquiry';
+                        if (/follow-up\s+call\s+scheduled/i.test(f.notes)) return 'Phone call follow-up on property inquiry';
+                        if (/follow-up\s+meeting\s+scheduled/i.test(f.notes)) return 'Meeting follow-up on property inquiry';
+                        return f.notes.replace(/\s*\(?via Leads\s*360\)?/gi, '').replace(/\s*scheduled via Leads\s*360/gi, '').trim() || 'Follow-up on property inquiry';
+                      })();
+
+                      return (
+                        <div
+                          key={f.id}
+                          className="customer-followup-item"
+                          style={{ opacity: f.status === 'Completed' ? 0.75 : 1 }}
                         >
-                          Mark Done
-                        </button>
-                      </div>
-                    ))
+                          <div>
+                            <div className="customer-followup-header" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <span
+                                className="customer-followup-notes"
+                                style={{ textDecoration: f.status === 'Completed' ? 'line-through' : 'none' }}
+                              >
+                                {displayNote}
+                              </span>
+                              <StatusChip status={effectiveStatus} size="sm" />
+                              <StatusChip status={f.priority} size="sm" />
+                            </div>
+                            <div className="customer-followup-due" style={{ color: 'var(--text-secondary)', marginTop: 4 }}>
+                              Due: <strong>{cleanDate}</strong> • Assignee: {f.assignedAgentName}
+                            </div>
+                          </div>
+
+                          {f.status === 'Completed' ? (
+                            <span style={{ fontSize: '12px', color: '#059669', fontWeight: 600, padding: '4px 8px' }}>
+                              ✓ Done
+                            </span>
+                          ) : (
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => {
+                                storageService.saveFollowup({ ...f, status: 'Completed', completedAt: new Date().toISOString() });
+                                loadData();
+                                showToast('Follow-up marked as completed.');
+                              }}
+                            >
+                              Mark Done
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               )}
 
 
               {activeTab === 'timeline' && <Timeline events={timelineEvents} />}
+
+              {isJamin && activeTab === 'site_visits' && (
+                <div className="card" style={{ padding: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <div>
+                      <h4 className="customer-section-heading" style={{ margin: 0 }}>
+                        Site Visits for {selectedCustomer?.name}
+                      </h4>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                        {customerSiteVisits.length} recorded
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={handleOpenScheduleSiteVisit}
+                      style={{
+                        background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                        borderColor: '#dc2626',
+                        color: '#ffffff',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        fontWeight: 600,
+                      }}
+                    >
+                      <Plus size={14} /> Schedule Site Visit
+                    </button>
+                  </div>
+                  {customerSiteVisits.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-secondary)', fontSize: 13 }}>
+                      No site visits recorded for this customer yet.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {customerSiteVisits.map(sv => (
+                        <div
+                          key={sv.id}
+                          style={{
+                            border: '1px solid var(--border-base)',
+                            borderRadius: 8,
+                            padding: '12px 14px',
+                            background: 'var(--bg-card-subtle, #f9fafb)',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: 14 }}>
+                              {sv.projectName} — <span style={{ color: '#dc2626' }}>{sv.plotNumber || 'General Layout Tour'}</span>
+                            </div>
+                            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
+                              Slot: <strong>{sv.scheduledAt}</strong> • Host: {sv.assignedAgentName}
+                            </div>
+                            {sv.outcomeNotes && (
+                              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, fontStyle: 'italic' }}>
+                                "{sv.outcomeNotes}"
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <StatusChip status={sv.status} size="sm" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {activeTab === 'documents' && selectedCustomer && (
                 <div className="customer-docs-stack">
@@ -1308,6 +1543,146 @@ export const CustomersPage: React.FC = () => {
               </tbody>
             </table>
           </div>
+        </Modal>
+      )}
+
+      {/* ── Jamin: Schedule Site Visit Modal for Customer ── */}
+      {isJamin && selectedCustomer && (
+        <Modal
+          isOpen={isSiteVisitModalOpen}
+          onClose={() => setIsSiteVisitModalOpen(false)}
+          title={`Schedule Site Visit: ${selectedCustomer.name}`}
+          subtitle={`Book layout walkthrough for ${selectedCustomer.phone}`}
+        >
+          <form onSubmit={handleSaveCustomerSiteVisit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="form-group">
+                <label className="form-label">Client Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  disabled
+                  value={selectedCustomer.name}
+                  style={{ background: 'var(--bg-card-subtle, #f9fafb)', cursor: 'not-allowed' }}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Mobile Number</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  disabled
+                  value={selectedCustomer.phone}
+                  style={{ background: 'var(--bg-card-subtle, #f9fafb)', cursor: 'not-allowed' }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="form-group">
+                <label className="form-label">Visit Date *</label>
+                <input
+                  type="date"
+                  className="form-input"
+                  required
+                  min={new Date().toISOString().split('T')[0]}
+                  value={svDate}
+                  onChange={e => setSvDate(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Time Slot *</label>
+                <select
+                  className="form-select"
+                  required
+                  value={svTimeSlot}
+                  onChange={e => setSvTimeSlot(e.target.value)}
+                >
+                  <option value="09:30 AM">09:30 AM (Morning Tour)</option>
+                  <option value="11:00 AM">11:00 AM (Mid-Day Walkthrough)</option>
+                  <option value="02:00 PM">02:00 PM (Afternoon Tour)</option>
+                  <option value="03:30 PM">03:30 PM (Late Afternoon Slot)</option>
+                  <option value="05:00 PM">05:00 PM (Sunset Inspection)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="form-group">
+                <label className="form-label">Host Escort Agent</label>
+                <select
+                  className="form-select"
+                  value={svHostAgent}
+                  onChange={e => setSvHostAgent(e.target.value)}
+                >
+                  {jaminAgents.map(ag => (
+                    <option key={ag.id} value={ag.name}>
+                      {ag.name} ({ag.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Project</label>
+                <select
+                  className="form-select"
+                  value={svProject}
+                  onChange={e => setSvProject(e.target.value)}
+                >
+                  <option value="Greenfield Meadows Phase 2">Greenfield Meadows Phase 2</option>
+                  <option value="Valley Crest Country Estates">Valley Crest Country Estates</option>
+                  <option value="Emerald Orchid Enclave">Emerald Orchid Enclave</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Plot Number Target</label>
+              <input
+                type="text"
+                className="form-input"
+                value={svPlot}
+                onChange={e => setSvPlot(e.target.value)}
+                placeholder="e.g. Plot #15"
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Logistics / Pickup Notes</label>
+              <textarea
+                className="form-textarea"
+                rows={2}
+                value={svNotes}
+                onChange={e => setSvNotes(e.target.value)}
+                placeholder="e.g. Needs cab pickup from metro station, visiting with family..."
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setIsSiteVisitModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                style={{
+                  background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                  borderColor: '#dc2626',
+                  color: '#ffffff',
+                  fontWeight: 600,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <Calendar size={14} /> Confirm Schedule
+              </button>
+            </div>
+          </form>
         </Modal>
       )}
 

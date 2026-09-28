@@ -143,64 +143,64 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
             </div>
           </div>
 
-          <div className="activity-summary-grid">
-            <div className="activity-summary-stat">
-              <span className="stat-label">Assigned Owner</span>
-              <span className="stat-val">
-                <User size={13} /> {card.assignedPersonName}
-              </span>
-            </div>
+  <div className="activity-summary-grid">
+    <div className="activity-summary-stat">
+      <span className="stat-label">Assigned Owner</span>
+      <span className="stat-val">
+        <User size={13} /> {card.assignedPersonName}
+      </span>
+    </div>
 
-            <div className="activity-summary-stat">
-              <span className="stat-label">Current Stage Duration</span>
-              <span className="stat-val">
-                <Clock size={13} /> {daysInStage === 0 ? 'Entered today' : `${daysInStage} days in this stage`}
-              </span>
-            </div>
+    <div className="activity-summary-stat">
+      <span className="stat-label">Current Stage Duration</span>
+      <span className="stat-val">
+        <Clock size={13} /> {daysInStage === 0 ? 'Entered today' : `${daysInStage} days in this stage`}
+      </span>
+    </div>
 
-            {card.investmentAmount && (
-              <div className="activity-summary-stat">
-                <span className="stat-label">Investment Capacity / Size</span>
-                <span className="stat-val text-emerald">
-                  <TrendingUp size={13} /> {card.investmentAmount}
-                </span>
-              </div>
-            )}
+    {card.investmentAmount && (
+      <div className="activity-summary-stat">
+        <span className="stat-label">Investment Capacity / Size</span>
+        <span className="stat-val text-emerald">
+          <TrendingUp size={13} /> {card.investmentAmount}
+        </span>
+      </div>
+    )}
 
 
-          </div>
+  </div>
 
-          {/* Quick Stage Switcher */}
-          <div className="activity-stage-switcher">
-            <span className="switcher-label">Move Stage:</span>
-            <div className="switcher-buttons">
-              {stages.map((stage) => {
-                const isActive = stage.id === card.stageId;
-                return (
-                  <button
-                    key={stage.id}
-                    type="button"
-                    className={`stage-pill-btn ${isActive ? 'active' : ''}`}
-                    style={{
-                      borderColor: isActive ? stage.color : undefined,
-                      backgroundColor: isActive ? `${stage.color}15` : undefined,
-                      color: isActive ? stage.color : undefined,
-                    }}
-                    onClick={() => handleStageChange(stage.id)}
-                  >
-                    <span
-                      className="stage-pill-dot"
-                      style={{ backgroundColor: stage.color }}
-                    />
-                    {stage.name}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+{/* Quick Stage Switcher */ }
+<div className="activity-stage-switcher">
+  <span className="switcher-label">Move Stage:</span>
+  <div className="switcher-buttons">
+    {stages.map((stage) => {
+      const isActive = stage.id === card.stageId;
+      return (
+        <button
+          key={stage.id}
+          type="button"
+          className={`stage-pill-btn ${isActive ? 'active' : ''}`}
+          style={{
+            borderColor: isActive ? stage.color : undefined,
+            backgroundColor: isActive ? `${stage.color}15` : undefined,
+            color: isActive ? stage.color : undefined,
+          }}
+          onClick={() => handleStageChange(stage.id)}
+        >
+          <span
+            className="stage-pill-dot"
+            style={{ backgroundColor: stage.color }}
+          />
+          {stage.name}
+        </button>
+      );
+    })}
+  </div>
+</div>
         </div>
 
-
+        {/* Add Note / Activity Form Removed */}
 
         {/* Chronological Timeline */}
         <div className="activity-timeline-section">
@@ -251,8 +251,8 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
               </div>
             ))}
           </div>
-        </div>
-      </div>
-    </Drawer>
+        </div >
+      </div >
+    </Drawer >
   );
 };

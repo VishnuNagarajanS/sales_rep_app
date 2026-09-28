@@ -87,6 +87,7 @@ export interface Lead {
   assignedAgentId: string;
   assignedAgentName: string;
   nextFollowupDate?: string;
+  nextFollowupType?: string;
   createdAt: string;
   notes: string;
   customFields: Record<string, any>;
@@ -180,6 +181,7 @@ export interface Deal {
   preferredAssetClass?: string;
   investmentRange?: string; // e.g. "₹15 Cr – ₹25 Cr", display string shown in green
   investorType?: 'AIF' | 'Co-AIF';
+  investmentAmountConfirmed?: boolean;
 }
 
 export interface DealActivity {
@@ -250,7 +252,7 @@ export interface Followup {
   contactType: 'lead' | 'customer' | 'investor';
   scheduledAt: string;
   priority: 'Low' | 'Medium' | 'High';
-  status: 'Pending' | 'Completed' | 'Cancelled';
+  status: 'Pending' | 'Completed' | 'Cancelled' | 'Overdue' | 'Rescheduled';
   notes: string;
   assignedAgentId: string;
   assignedAgentName: string;
@@ -307,6 +309,8 @@ export interface SiteVisit {
   assignedAgentName: string;
   status: 'Scheduled' | 'Completed' | 'Rescheduled' | 'Cancelled' | 'No-show';
   outcomeNotes?: string;
+  contactType?: 'lead' | 'customer';
+  leadId?: string;
 }
 
 export interface Booking {
@@ -359,6 +363,7 @@ export interface Consultation {
   status: 'Scheduled' | 'Completed' | 'Rescheduled' | 'Cancelled' | 'No-show';
   agenda: string;
   outcomeNotes?: string;
+  referredByAgentName?: string;
 }
 
 export interface InvestmentOpportunity {

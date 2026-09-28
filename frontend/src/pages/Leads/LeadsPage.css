@@ -454,6 +454,27 @@
   width: 100%;
 }
 
+.col-quick-call,
+th.col-quick-call,
+td.col-quick-call {
+  width: 56px !important;
+  max-width: 56px !important;
+  min-width: 50px !important;
+  padding-left: 4px !important;
+  padding-right: 4px !important;
+  text-align: center !important;
+}
+
+.col-select,
+th.col-select,
+td.col-select {
+  width: 40px !important;
+  max-width: 44px !important;
+  padding-left: 4px !important;
+  padding-right: 4px !important;
+  text-align: center !important;
+}
+
 .leads-page .btn-icon,
 .leads-page .customer-list-call-btn {
   padding: 0 !important;

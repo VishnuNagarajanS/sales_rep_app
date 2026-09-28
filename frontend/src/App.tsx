@@ -59,12 +59,66 @@ import { ProtectedRoute } from './components/common/Guards';
 import { Modal } from './components/common/Modal';
 import { storageService } from './services/storageService';
 import { PERMISSIONS } from './constants/permissions';
+import { FEATURES } from './constants/features';
 import './App.css';
+
+// Allowed routes corresponding to sidebar options
+const SIDEBAR_ROUTES = [
+  'dashboard',
+  'leads',
+  'assigned-leads',
+  'customers',
+  'pipeline',
+  'deals',
+  'followups',
+  'call-center',
+  'call-history',
+  'call-settings',
+  'projects',
+  'plots',
+  'site-visits',
+  'bookings',
+  'investors',
+  'consultations',
+  'opportunities',
+  'kyc',
+  'not-interested',
+  'junk',
+  'reports',
+  'notifications',
+  'company-users',
+  'company-settings',
+  'company-audit',
+  'chat',
+  'profile',
+  'smarty-ai',
+  'admin-dashboard',
+  'admin-companies',
+  'admin-users',
+  'admin-roles',
+  'admin-features',
+  'admin-call-config',
+  'admin-audit',
+];
 
 export const App: React.FC = () => {
   const { isAuthenticated, isSuperAdmin, tenant, user } = useAuth();
+
+  // Resolve initial route from browser URL path or sessionStorage
   const [currentRoute, setCurrentRoute] = useState<string>(() => {
-    return sessionStorage.getItem('nexus_current_route') || 'dashboard';
+    const path = window.location.pathname.replace(/^\/+/, '').split('/')[0];
+    if (path && SIDEBAR_ROUTES.includes(path)) {
+      return path;
+    }
+    const hash = window.location.hash.replace(/^#\/?/, '').split('/')[0];
+    if (hash && SIDEBAR_ROUTES.includes(hash)) {
+      return hash;
+    }
+    const saved = sessionStorage.getItem('nexus_current_route');
+    if (saved && SIDEBAR_ROUTES.includes(saved)) {
+      return saved;
+    }
+    return 'dashboard';
   });
 
   const roleCode = user?.role?.code;
@@ -79,14 +133,7 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // Seed initial mock data on clean install / empty session
-  useEffect(() => {
-    if (storageService.getUsers().length === 0) {
-      storageService.loadMockDataFromSeparateFolder();
-    }
-  }, []);
-
-  // Set default route for IRM user
+  // Set default route for IRM user if not on an active route
   useEffect(() => {
     if (user?.role?.code === 'irm') {
       const savedRoute = sessionStorage.getItem('nexus_current_route');
@@ -96,6 +143,39 @@ export const App: React.FC = () => {
       }
     }
   }, [user?.role?.code]);
+
+  // Handle route change and synchronize browser URL bar & history
+  const navigate = (route: string) => {
+    const validRoute = SIDEBAR_ROUTES.includes(route) ? route : 'dashboard';
+    setCurrentRoute(validRoute);
+    sessionStorage.setItem('nexus_current_route', validRoute);
+    const targetUrl = validRoute === 'dashboard' ? '/' : `/${validRoute}`;
+    if (window.location.pathname !== targetUrl) {
+      window.history.pushState({ route: validRoute }, '', targetUrl);
+    }
+  };
+
+  // Support browser Back and Forward navigation buttons
+  useEffect(() => {
+    const handlePopState = () => {
+      const path = window.location.pathname.replace(/^\/+/, '').split('/')[0] || 'dashboard';
+      if (SIDEBAR_ROUTES.includes(path)) {
+        setCurrentRoute(path);
+        sessionStorage.setItem('nexus_current_route', path);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  // Keep browser address bar in sync on initial mount and route changes
+  useEffect(() => {
+    const currentPath = window.location.pathname.replace(/^\/+/, '').split('/')[0];
+    const targetPath = currentRoute === 'dashboard' ? '' : currentRoute;
+    if (currentPath !== targetPath) {
+      window.history.replaceState({ route: currentRoute }, '', targetPath ? `/${targetPath}` : '/');
+    }
+  }, [currentRoute]);
 
   // Quick Create Modal State
   const [quickCreateType, setQuickCreateType] = useState<
@@ -109,6 +189,8 @@ export const App: React.FC = () => {
   const [quickSource, setQuickSource] = useState('Website Inbound');
   const [quickAssetClass, setQuickAssetClass] = useState('AIF');
   const [quickInvestmentCapacity, setQuickInvestmentCapacity] = useState('');
+  const [quickBudgetRange, setQuickBudgetRange] = useState('₹45L – ₹65L');
+  const [quickPreferredLocation, setQuickPreferredLocation] = useState('Devanahalli North');
   const [quickNotes, setQuickNotes] = useState('');
 
   // Consultation-specific state
@@ -130,12 +212,6 @@ export const App: React.FC = () => {
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [newCustomerName, setNewCustomerName] = useState('');
 
-  // Handle route change
-  const navigate = (route: string) => {
-    setCurrentRoute(route);
-    sessionStorage.setItem('nexus_current_route', route);
-  };
-
   const handleOpenQuickCreate = (type: 'lead' | 'followup' | 'deal' | 'visit' | 'consultation') => {
     setQuickCreateType(type);
     setQuickName('');
@@ -145,6 +221,8 @@ export const App: React.FC = () => {
     setQuickSource('Website Inbound');
     setQuickAssetClass('AIF');
     setQuickInvestmentCapacity('₹1 Cr – ₹5 Cr');
+    setQuickBudgetRange('₹45L – ₹65L');
+    setQuickPreferredLocation('Devanahalli North');
     setQuickNotes('');
     setConsInvestorId('');
     setConsInvestorName('');
@@ -170,11 +248,11 @@ export const App: React.FC = () => {
     if (quickCreateType === 'lead') {
       storageService.saveLead({
         id: `lead-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
+        companyId: tenant?.id || (tenant?.slug === 'jamin' ? 't-jamin-02' : 't-ghl-01'),
         name: quickName,
         phone: quickPhone,
         email: quickEmail,
-        location: quickLocation,
+        location: quickLocation || (tenant?.slug === 'jamin' ? 'Bengaluru, Devanahalli' : 'Bengaluru'),
         source: quickSource,
         status: 'New',
         priority: 'Medium',
@@ -182,11 +260,16 @@ export const App: React.FC = () => {
         assignedAgentName: user?.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer'),
         createdAt: new Date().toISOString().split('T')[0],
         notes: quickNotes,
-        customFields: {
-          assetClass: quickAssetClass,
-          preferredAssetClass: quickAssetClass,
-          investmentCapacity: quickInvestmentCapacity,
-        },
+        customFields: tenant?.slug === 'jamin'
+          ? {
+              budgetRange: quickBudgetRange,
+              preferredLocation: quickPreferredLocation,
+            }
+          : {
+              assetClass: quickAssetClass,
+              preferredAssetClass: quickAssetClass,
+              investmentCapacity: quickInvestmentCapacity,
+            },
       });
 
     } else if (quickCreateType === 'followup') {
@@ -374,35 +457,35 @@ export const App: React.FC = () => {
       ) : currentRoute === 'call-settings' ? (
         <CallSettingsPage />
       ) : currentRoute === 'projects' ? (
-        <ProtectedRoute permission={PERMISSIONS.PROPERTIES_VIEW}>
+        <ProtectedRoute feature={FEATURES.PROPERTIES} permission={PERMISSIONS.PROPERTIES_VIEW}>
           <ProjectsPage onNavigate={navigate} />
         </ProtectedRoute>
       ) : currentRoute === 'plots' ? (
-        <ProtectedRoute permission={PERMISSIONS.PROPERTIES_VIEW}>
+        <ProtectedRoute feature={FEATURES.PROPERTIES} permission={PERMISSIONS.PROPERTIES_VIEW}>
           <PlotsPage />
         </ProtectedRoute>
       ) : currentRoute === 'site-visits' ? (
-        <ProtectedRoute permission={PERMISSIONS.SITE_VISITS_VIEW}>
+        <ProtectedRoute feature={FEATURES.SITE_VISITS} permission={PERMISSIONS.SITE_VISITS_VIEW}>
           <SiteVisitsPage />
         </ProtectedRoute>
       ) : currentRoute === 'bookings' ? (
-        <ProtectedRoute permission={PERMISSIONS.BOOKINGS_VIEW}>
+        <ProtectedRoute feature={FEATURES.BOOKINGS} permission={PERMISSIONS.BOOKINGS_VIEW}>
           <BookingsPage />
         </ProtectedRoute>
       ) : currentRoute === 'kyc' ? (
-        <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
+        <ProtectedRoute feature={FEATURES.INVESTORS} permission={PERMISSIONS.INVESTORS_VIEW}>
           <KYCPage />
         </ProtectedRoute>
       ) : currentRoute === 'investors' ? (
-        <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
+        <ProtectedRoute feature={FEATURES.INVESTORS} permission={PERMISSIONS.INVESTORS_VIEW}>
           <InvestorsPage />
         </ProtectedRoute>
       ) : currentRoute === 'consultations' ? (
-        <ProtectedRoute permission={PERMISSIONS.CONSULTATIONS_VIEW}>
+        <ProtectedRoute feature={FEATURES.CONSULTATIONS} permission={PERMISSIONS.CONSULTATIONS_VIEW}>
           <ConsultationsPage />
         </ProtectedRoute>
       ) : currentRoute === 'opportunities' ? (
-        <ProtectedRoute permission={PERMISSIONS.OPPORTUNITIES_VIEW}>
+        <ProtectedRoute feature={FEATURES.INVESTMENT_OPPORTUNITIES} permission={PERMISSIONS.OPPORTUNITIES_VIEW}>
           <OpportunitiesPage />
         </ProtectedRoute>
       ) : currentRoute === 'not-interested' ? (
@@ -420,21 +503,21 @@ export const App: React.FC = () => {
       ) : currentRoute === 'profile' ? (
         <ProfilePage />
       ) : currentRoute === 'reports' ? (
-        <ProtectedRoute permission={PERMISSIONS.REPORTS_VIEW}>
+        <ProtectedRoute feature={FEATURES.REPORTS} permission={PERMISSIONS.REPORTS_VIEW}>
           <ReportsPage />
         </ProtectedRoute>
       ) : currentRoute === 'notifications' ? (
         <NotificationsPage onNavigate={navigate} />
       ) : currentRoute === 'company-users' ? (
-        <ProtectedRoute permission={PERMISSIONS.USERS_VIEW}>
+        <ProtectedRoute feature={FEATURES.USERS} permission={PERMISSIONS.USERS_VIEW}>
           <CompanyUsersPage />
         </ProtectedRoute>
       ) : currentRoute === 'company-settings' ? (
-        <ProtectedRoute permission={PERMISSIONS.SETTINGS_VIEW}>
+        <ProtectedRoute feature={FEATURES.COMPANY_SETTINGS} permission={PERMISSIONS.SETTINGS_VIEW}>
           <CompanySettingsPage />
         </ProtectedRoute>
       ) : currentRoute === 'company-audit' ? (
-        <ProtectedRoute permission={PERMISSIONS.AUDIT_VIEW}>
+        <ProtectedRoute feature={FEATURES.AUDIT_LOGS} permission={PERMISSIONS.AUDIT_VIEW}>
           <CompanyAuditPage />
         </ProtectedRoute>
       ) : (
@@ -504,7 +587,7 @@ export const App: React.FC = () => {
                     className="form-input"
                     value={quickLocation}
                     onChange={e => setQuickLocation(e.target.value)}
-                    placeholder="e.g. Bengaluru, Indiranagar"
+                    placeholder={tenant?.slug === 'jamin' ? "e.g. Bengaluru, Devanahalli" : "e.g. Bengaluru, Indiranagar"}
                   />
                 </div>
                 <div className="form-group">
@@ -525,44 +608,80 @@ export const App: React.FC = () => {
                 </div>
               </div>
 
-              {/* GHL India Ventures Asset Terms */}
+              {/* Tenant-Specific Custom Schema Terms */}
               <div className="lead-custom-schema-box">
-                <div className="lead-custom-schema-title">GHL India Ventures Asset Terms</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  {user?.role?.code !== 'sales_executive' && (
+                <div className="lead-custom-schema-title">
+                  {tenant?.slug === 'jamin'
+                    ? `${tenant?.name || 'Jamin Bazaar'} Property Preferences`
+                    : 'GHL India Ventures Asset Terms'}
+                </div>
+
+                {tenant?.slug === 'jamin' ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div className="form-group">
-                      <label className="form-label">Asset Class</label>
+                      <label className="form-label">Plot Budget Range</label>
                       <select
                         className="form-select"
-                        value={quickAssetClass}
-                        onChange={e => setQuickAssetClass(e.target.value)}
+                        value={quickBudgetRange}
+                        onChange={e => setQuickBudgetRange(e.target.value)}
                       >
-                        <option value="AIF">AIF</option>
-                        <option value="CO-AIF">CO-AIF</option>
+                        <option value="₹25L – ₹45L">₹25L – ₹45L</option>
+                        <option value="₹45L – ₹65L">₹45L – ₹65L</option>
+                        <option value="₹65L – ₹90L">₹65L – ₹90L</option>
+                        <option value="₹90L+">₹90L+</option>
                       </select>
                     </div>
-                  )}
-                  <div className="form-group">
-                    <label className="form-label">Investment Capacity</label>
-                    <select
-                      className="form-select"
-                      value={quickInvestmentCapacity}
-                      onChange={e => setQuickInvestmentCapacity(e.target.value)}
-                    >
-                      <option value="" disabled>Select a range</option>
-                      {[
-                        'Contact for Co-Invest Details',
-                        '₹1 Cr – ₹5 Cr',
-                        '₹5 Cr – ₹10 Cr',
-                        '₹10 Cr – ₹25 Cr',
-                        '₹25 Cr+',
-                        'Not sure yet — help me decide'
-                      ].map(o => (
-                        <option key={o} value={o}>{o}</option>
-                      ))}
-                    </select>
+                    <div className="form-group">
+                      <label className="form-label">Preferred Micro-Market</label>
+                      <select
+                        className="form-select"
+                        value={quickPreferredLocation}
+                        onChange={e => setQuickPreferredLocation(e.target.value)}
+                      >
+                        <option value="Devanahalli North">Devanahalli North (Airport)</option>
+                        <option value="Sarjapur East">Sarjapur East</option>
+                        <option value="Mysore Highway Corridor">Mysore Highway Corridor</option>
+                        <option value="Kanakapura Road">Kanakapura Road</option>
+                      </select>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    {user?.role?.code !== 'sales_executive' && (
+                      <div className="form-group">
+                        <label className="form-label">Asset Class</label>
+                        <select
+                          className="form-select"
+                          value={quickAssetClass}
+                          onChange={e => setQuickAssetClass(e.target.value)}
+                        >
+                          <option value="AIF">AIF</option>
+                          <option value="CO-AIF">CO-AIF</option>
+                        </select>
+                      </div>
+                    )}
+                    <div className="form-group">
+                      <label className="form-label">Investment Capacity</label>
+                      <select
+                        className="form-select"
+                        value={quickInvestmentCapacity}
+                        onChange={e => setQuickInvestmentCapacity(e.target.value)}
+                      >
+                        <option value="" disabled>Select a range</option>
+                        {[
+                          'Contact for Co-Invest Details',
+                          '₹1 Cr – ₹5 Cr',
+                          '₹5 Cr – ₹10 Cr',
+                          '₹10 Cr – ₹25 Cr',
+                          '₹25 Cr+',
+                          'Not sure yet — help me decide'
+                        ].map(o => (
+                          <option key={o} value={o}>{o}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Notes & Requirements */}
@@ -573,7 +692,7 @@ export const App: React.FC = () => {
                   rows={3}
                   value={quickNotes}
                   onChange={e => setQuickNotes(e.target.value)}
-                  placeholder="Client background, key objections, time horizon..."
+                  placeholder={tenant?.slug === 'jamin' ? "Interested plot dimensions, site visit availability, token readiness..." : "Client background, key objections, time horizon..."}
                 />
               </div>
             </>
