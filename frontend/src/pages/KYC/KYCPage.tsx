@@ -262,6 +262,7 @@ const GhlIrmKycView: React.FC = () => {
   // KYC Link Feature State
   const [sendLinkDeal, setSendLinkDeal] = useState<Deal | null>(null);
   const [reviewDeal, setReviewDeal] = useState<Deal | null>(null);
+  const [dbKycs, setDbKycs] = useState<Record<string, any>>({});
 
   // View state: 'table' | 'flow' | 'profile'
   const [viewMode, setViewMode] = useState<'table' | 'flow' | 'profile'>('table');
@@ -287,6 +288,19 @@ const GhlIrmKycView: React.FC = () => {
     setDeals(allDeals.filter(d => d.stage === 'qualified_investor'));
     setLeads(storageService.getLeads(tenant?.id) || []);
     setCustomers(storageService.getCustomers(tenant?.id) || []);
+
+    fetch('/api/irm/kyc/all')
+      .then(res => res.ok ? res.json() : null)
+      .then(json => {
+        if (json?.success && Array.isArray(json.data)) {
+          const map: Record<string, any> = {};
+          json.data.forEach((k: any) => {
+            if (k.email) map[k.email.toLowerCase()] = k;
+          });
+          setDbKycs(map);
+        }
+      })
+      .catch(() => {});
   };
 
   const getResolvedLocation = (deal: Deal) => {
@@ -367,6 +381,20 @@ const GhlIrmKycView: React.FC = () => {
   };
 
   const getDynamicKycStatus = (deal: Deal): 'completed' | 'continue' | 'pending' => {
+    const emailKey = (deal.email || '').toLowerCase();
+    const dbKyc = dbKycs[emailKey];
+    if (dbKyc) {
+      if (dbKyc.status === 'Verified' || dbKyc.status === '2') {
+        return 'completed';
+      }
+      if (dbKyc.status === 'PendingReview' || dbKyc.status === '1') {
+        return 'completed';
+      }
+      if (dbKyc.panNumber || dbKyc.aadhaarNumber) {
+        return 'continue';
+      }
+    }
+
     const status = localStorage.getItem(`nexus_kyc_status_${deal.id}`);
     if (status === 'Completed' || status === 'Submitted for Review' || status === 'SEBI KYC Validated') {
       return 'completed';
@@ -498,12 +526,29 @@ const GhlIrmKycView: React.FC = () => {
       return Boolean(cDigits && fDigits && cDigits === fDigits);
     });
 
+    const emailKey = (deal.email || '').toLowerCase();
+    const dbKyc = dbKycs[emailKey];
+
     const merged: Partial<KYCFormData> = {
-      investorName: saved?.investorName || deal.customerName || matchingLead?.name || matchingCustomer?.name || '',
-      phone: saved?.phone || deal.phone || matchingLead?.phone || matchingCustomer?.phone || '',
-      email: saved?.email || deal.email || matchingLead?.email || matchingCustomer?.email || '',
-      city: saved?.city || deal.location || matchingLead?.location || matchingCustomer?.location || '',
-      panNumber: saved?.panNumber || (deal as any).pan || matchingLead?.customFields?.pan || matchingCustomer?.customFields?.pan || '',
+      investorName: dbKyc?.investorName || saved?.investorName || deal.customerName || matchingLead?.name || matchingCustomer?.name || '',
+      phone: dbKyc?.phone || saved?.phone || deal.phone || matchingLead?.phone || matchingCustomer?.phone || '',
+      email: dbKyc?.email || saved?.email || deal.email || matchingLead?.email || matchingCustomer?.email || '',
+      gender: dbKyc?.gender || saved?.gender || 'Male',
+      investorType: dbKyc?.investorType || saved?.investorType || deal.investorType || 'Individual',
+      residentType: dbKyc?.residentType || saved?.residentType || 'Resident Indian',
+      occupation: dbKyc?.occupation || saved?.occupation || '',
+      city: dbKyc?.city || saved?.city || deal.location || matchingLead?.location || matchingCustomer?.location || '',
+      state: dbKyc?.state || saved?.state || '',
+      pincode: dbKyc?.pincode || saved?.pincode || '',
+      address: dbKyc?.addressLine1 || saved?.address || '',
+      panNumber: dbKyc?.panNumber || saved?.panNumber || (deal as any).pan || matchingLead?.customFields?.pan || matchingCustomer?.customFields?.pan || '',
+      aadhaarNumber: dbKyc?.aadhaarNumber || saved?.aadhaarNumber || '',
+      bankName: dbKyc?.bankName || saved?.bankName || '',
+      accountNumber: dbKyc?.accountNumber || saved?.accountNumber || '',
+      ifscCode: dbKyc?.ifscCode || saved?.ifscCode || '',
+      accountType: dbKyc?.accountType || saved?.accountType || 'Savings Account',
+      dematAccountNumber: dbKyc?.dematAccountNumber || saved?.dematAccountNumber || '',
+      dematDpId: dbKyc?.dpId || saved?.dematDpId || '',
       ...saved,
     };
 
