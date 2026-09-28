@@ -5,7 +5,7 @@ import './AuthLayout.css';
 
 export const AuthLayout: React.FC = () => {
   const { login, switchPersona, loginError } = useAuth();
-  const [email, setEmail] = useState('vikram@ghlindiatrust.com');
+  const [email, setEmail] = useState('vishnu@ghlindiaventures.com');
   const [password, setPassword] = useState('Password@123');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -44,7 +44,7 @@ export const AuthLayout: React.FC = () => {
               <Building2 size={14} color="#ef4444" />
               <div>
                 <div className="auth-preset-title">GHL India Admin</div>
-                <div className="auth-preset-subtitle">Wealth / Investors</div>
+                <div className="auth-preset-subtitle">Vishnu</div>
               </div>
             </button>
 
@@ -56,7 +56,7 @@ export const AuthLayout: React.FC = () => {
               <Building2 size={14} color="#e10600" />
               <div>
                 <div className="auth-preset-title">Jamin Bazaar Admin</div>
-                <div className="auth-preset-subtitle">Plots / Operations</div>
+                <div className="auth-preset-subtitle">Mani</div>
               </div>
             </button>
 
@@ -68,7 +68,7 @@ export const AuthLayout: React.FC = () => {
               <UserCheck size={14} color="#ef4444" />
               <div>
                 <div className="auth-preset-title">GHL Sales Agent</div>
-                <div className="auth-preset-subtitle">Ananya Iyer</div>
+                <div className="auth-preset-subtitle">Naveen</div>
               </div>
             </button>
 
@@ -80,7 +80,7 @@ export const AuthLayout: React.FC = () => {
               <TrendingUp size={14} color="#ef4444" />
               <div>
                 <div className="auth-preset-title">GHL IRM</div>
-                <div className="auth-preset-subtitle">Rohan Varma</div>
+                <div className="auth-preset-subtitle">Dhinakaran</div>
               </div>
             </button>
 
@@ -92,7 +92,7 @@ export const AuthLayout: React.FC = () => {
               <Shield size={14} color="#8b5cf6" />
               <div>
                 <div className="auth-preset-title">Super Admin</div>
-                <div className="auth-preset-subtitle">Operator Console</div>
+                <div className="auth-preset-subtitle">Yanosh</div>
               </div>
             </button>
           </div>

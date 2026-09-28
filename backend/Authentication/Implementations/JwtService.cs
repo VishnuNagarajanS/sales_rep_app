@@ -31,12 +31,14 @@ public class JwtService : IJwtService
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(ClaimTypes.Name, user.Name),
             new(ClaimTypes.Email, user.Email),
-            new(ClaimTypes.Role, user.Role.Code)
+            new(ClaimTypes.Role, user.Role.Code),
+            new("userId", user.Id.ToString())
         };
 
         if (user.CompanyId.HasValue)
         {
             claims.Add(new Claim("company_id", user.CompanyId.Value.ToString()));
+            claims.Add(new Claim("companyId", user.CompanyId.Value.ToString()));
         }
 
         if (!string.IsNullOrEmpty(user.Company?.Slug))

@@ -2,10 +2,41 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, Tenant, TenantSlug, RoleCode } from '../types';
 import { DEFAULT_TENANTS } from '../constants/defaultTenants';
 import { SYSTEM_ROLES } from '../constants/roles';
-import { FEATURES } from '../constants/features';
-import { storageService } from '../services/storageService';
-
 import { apiClient } from '../services/apiClient';
+import { FEATURES } from '../constants/features';
+
+const getStoredTenants = (): Tenant[] => {
+  try {
+    const raw = localStorage.getItem('nexus_tenants');
+    return raw ? JSON.parse(raw) : [DEFAULT_TENANTS.ghl, DEFAULT_TENANTS.jamin];
+  } catch {
+    return [DEFAULT_TENANTS.ghl, DEFAULT_TENANTS.jamin];
+  }
+};
+
+const getStoredUsers = (tenantSlug?: string): User[] => {
+  try {
+    const raw = localStorage.getItem('nexus_users');
+    const users: User[] = raw ? JSON.parse(raw) : [];
+    return tenantSlug ? users.filter((u: User) => u.companySlug === tenantSlug) : users;
+  } catch {
+    return [];
+  }
+};
+
+const saveStoredUser = (targetUser: User) => {
+  try {
+    const raw = localStorage.getItem('nexus_users');
+    const users: User[] = raw ? JSON.parse(raw) : [];
+    const idx = users.findIndex(u => u.id === targetUser.id);
+    if (idx >= 0) {
+      users[idx] = targetUser;
+    } else {
+      users.push(targetUser);
+    }
+    localStorage.setItem('nexus_users', JSON.stringify(users));
+  } catch {}
+};
 
 interface AuthContextType {
   user: User | null;
@@ -45,6 +76,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const [tenant, setTenant] = useState<Tenant | null>(() => {
+    // If the restored user is a Super Admin, tenant is null unless active in support mode
+    const savedUser = sessionStorage.getItem('nexus_current_user');
+    if (savedUser) {
+      try {
+        const parsedUser = JSON.parse(savedUser);
+        if (parsedUser?.role?.code === 'super_admin') {
+          const supportModeTenant = sessionStorage.getItem('nexus_support_mode_tenant');
+          if (supportModeTenant) {
+            return JSON.parse(supportModeTenant);
+          }
+          return null;
+        }
+      } catch { }
+    }
     const saved = sessionStorage.getItem('nexus_current_tenant');
     if (saved) {
       try { return JSON.parse(saved); } catch { }
@@ -76,8 +121,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isSuperAdmin = user?.role.code === 'super_admin';
 
   // Derive enabled features from live tenant object
-  const enabledFeatures = isSuperAdmin
-    ? Object.values(FEATURES)
+  const enabledFeatures: string[] = isSuperAdmin
+    ? (Object.values(FEATURES) as string[])
     : tenant?.enabledFeatures || [];
 
   // Derive permissions from live user role merged with SYSTEM_ROLES definition
@@ -89,8 +134,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (roleCode === 'super_admin') {
       const superUser: User = {
         id: 'usr-super-01',
-        name: 'Alex Rivera (Super Admin)',
-        email: 'alex@nexusplatform.io',
+        name: 'Yanosh',
+        email: 'yanosh@ghlindiaventures.com',
         phone: '+91 98800 11000',
         role: SYSTEM_ROLES.super_admin,
         status: 'Active',
@@ -102,7 +147,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const slug = tenantSlug || 'ghl';
-    const allTenants = storageService.getTenants();
+    const allTenants = getStoredTenants();
     const targetTenant =
       allTenants.find(t => t.slug === slug || t.id === slug) ||
       DEFAULT_TENANTS[slug] ||
@@ -110,7 +155,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setTenant(targetTenant);
 
     // Check if a real user exists for this tenant and role in storage
-    const tenantUsers = storageService.getUsers(targetTenant.slug);
+    const tenantUsers = getStoredUsers(targetTenant.slug);
     const existingUser = tenantUsers.find(u => u.role.code === roleCode);
     if (existingUser) {
       if (SYSTEM_ROLES[roleCode]) {
@@ -127,14 +172,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       name:
         roleCode === 'company_admin'
           ? slug === 'ghl'
-            ? 'Vikram Malhotra'
+            ? 'Vishnu'
             : slug === 'jamin'
-              ? 'Kavita Rao'
+              ? 'Mani'
               : `${targetTenant.name} Admin`
           : roleCode === 'irm'
-            ? 'Rohan Varma'
+            ? 'Dhinakaran'
             : slug === 'ghl'
-              ? 'Ananya Iyer'
+              ? 'Naveen'
               : slug === 'jamin'
                 ? 'Pooja Hegde'
                 : `${targetTenant.name} Agent`,
@@ -148,7 +193,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       lastLogin: 'Just now',
     };
 
-    storageService.saveUser(targetUser);
+    saveStoredUser(targetUser);
     setUser(targetUser);
   };
 
@@ -193,7 +238,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     // Fallback: fast-login demo mode without password
-    const allTenants = storageService.getTenants();
+    const allTenants = getStoredTenants();
     const targetTenant =
       allTenants.find(t => t.slug === tenantSlug || t.id === tenantSlug) ||
       DEFAULT_TENANTS[tenantSlug] ||
@@ -213,7 +258,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       lastLogin: 'Just now',
     };
 
-    storageService.saveUser(authenticatedUser);
+    saveStoredUser(authenticatedUser);
     setUser(authenticatedUser);
     return true;
   };

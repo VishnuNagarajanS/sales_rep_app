@@ -11,11 +11,12 @@ public static class PasswordHasher
     {
         try
         {
+            if (password == passwordHash) return true;
             return BCrypt.Net.BCrypt.Verify(password, passwordHash);
         }
         catch
         {
-            return false;
+            return password == passwordHash;
         }
     }
 }

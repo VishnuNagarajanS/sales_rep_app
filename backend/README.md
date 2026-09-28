@@ -162,10 +162,11 @@ The database has been seeded with standard roles, tenants, and demo users. All d
 ### 4.3 Demo User Accounts
 | ID | Role | Tenant | Email | Password |
 |---|---|---|---|---|
-| `1` | Super Admin | *Platform-wide* | `alex@nexusplatform.io` | `Password@123` |
-| `2` | Company Admin | GHL India (`1`) | `vikram@ghlindiatrust.com` | `Password@123` |
-| `3` | Sales Executive | GHL India (`1`) | `ananya@ghlindiatrust.com` | `Password@123` |
-| `4` | Company Admin | Jamin Bazaar (`2`) | `kavita@jaminbazaar.com` | `Password@123` |
+| `1` | Super Admin | *Platform-wide* | `yanosh@ghlindiaventures.com` | `Password@123` |
+| `2` | Company Admin | GHL India (`1`) | `vishnu@ghlindiaventures.com` | `Password@123` |
+| `3` | Sales Executive | GHL India (`1`) | `naveen@ghlindiaventures.com` | `Password@123` |
+| `4` | Company Admin | Jamin Bazaar (`2`) | `mani@ghlindiaventures.com` | `Password@123` |
+| `5` | GHL IRM | GHL India (`1`) | `dhinakaran@ghlindiaventures.com` | `Password@123` |
 
 ---
 
@@ -180,7 +181,7 @@ The database has been seeded with standard roles, tenants, and demo users. All d
 ### 5.1 Request Body
 ```json
 {
-  "email": "vikram@ghlindiatrust.com",
+  "email": "vishnu@ghlindiaventures.com",
   "password": "Password@123"
 }
 ```
@@ -194,8 +195,8 @@ The database has been seeded with standard roles, tenants, and demo users. All d
     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
     "user": {
       "id": "2",
-      "name": "Vikram Malhotra",
-      "email": "vikram@ghlindiatrust.com",
+      "name": "Vishnu",
+      "email": "vishnu@ghlindiaventures.com",
       "phone": "+91 98450 11223",
       "role": {
         "id": "2",
@@ -328,4 +329,4 @@ Prevents account enumeration by returning the exact same generic error message r
    npm run dev
    ```
 4. Access the app: **`http://localhost:5173`**
-   - Log in using `vikram@ghlindiatrust.com` / `Password@123`.
+   - Log in using `vishnu@ghlindiaventures.com` / `Password@123`.

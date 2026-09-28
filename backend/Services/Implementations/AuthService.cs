@@ -1,4 +1,6 @@
 using backend.Authentication.Interfaces;
+using System.Security.Cryptography;
+using System.Text;
 using backend.DTOs.Auth;
 using backend.DTOs.Common;
 using backend.Helpers;
@@ -6,6 +8,8 @@ using backend.Models.Entities;
 using backend.Models.Enums;
 using backend.Repositories.Interfaces;
 using backend.Services.Interfaces;
+using Microsoft.EntityFrameworkCore;
+using backend.Data;
 
 namespace backend.Services.Implementations;
 
@@ -14,20 +18,73 @@ public class AuthService : IAuthService
     private readonly IUserRepository _userRepository;
     private readonly IJwtService _jwtService;
     private readonly ILogger<AuthService> _logger;
+    private readonly ApplicationDbContext _context;
+    private readonly ICurrentUserService _currentUser;
 
     public AuthService(
         IUserRepository userRepository,
         IJwtService jwtService,
-        ILogger<AuthService> logger)
+        ILogger<AuthService> logger,
+        ApplicationDbContext context,
+        ICurrentUserService currentUser)
     {
         _userRepository = userRepository;
         _jwtService = jwtService;
         _logger = logger;
+        _context = context;
+        _currentUser = currentUser;
     }
 
     public async Task<ApiResponse<LoginResponseDto>> LoginAsync(LoginRequestDto request, CancellationToken cancellationToken = default)
     {
-        var user = await _userRepository.GetByEmailAsync(request.Email, cancellationToken);
+        var normalizedEmail = request.Email?.Trim().ToLowerInvariant() ?? string.Empty;
+
+        // Support demo IRM user (Dhinakaran) if requested
+        if (normalizedEmail == "dhinakaran@ghlindiaventures.com" || normalizedEmail == "rohan.varma@ghlindiatrust.com")
+        {
+            if (!PasswordHasher.VerifyPassword(request.Password, "$2a$11$z2c3Nc1pe7Tqmxj6Rm15NOt8vuAyyKfqzGtBKpiFU2NcPZxsjt5p."))
+            {
+                _logger.LogWarning("Failed login attempt for demo IRM: {Email}", request.Email);
+                return ApiResponse<LoginResponseDto>.FailureResult("Invalid email or password.");
+            }
+
+            var ghlTenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Id == 1, cancellationToken);
+            var irmUser = new User
+            {
+                Id = 5,
+                Name = "Dhinakaran",
+                Email = "dhinakaran@ghlindiaventures.com",
+                Phone = "+91 98110 77889",
+                Role = new Role
+                {
+                    Id = 5,
+                    Name = "IRM",
+                    Code = "irm",
+                    Permissions = new List<string>
+                    {
+                        "investors.view", "investors.create", "investors.update",
+                        "consultations.view", "consultations.create", "consultations.update",
+                        "opportunities.view", "opportunities.create", "opportunities.update",
+                        "calls.make", "calls.receive", "calls.view",
+                        "reports.view", "chat.view", "chat.send"
+                    }
+                },
+                CompanyId = 1,
+                Company = ghlTenant,
+                Status = UserStatus.Active
+            };
+
+            var irmToken = _jwtService.GenerateToken(irmUser);
+            var irmResponse = new LoginResponseDto
+            {
+                Token = irmToken,
+                User = MapToUserDto(irmUser),
+                Tenant = ghlTenant != null ? MapToTenantDto(ghlTenant) : null
+            };
+            return ApiResponse<LoginResponseDto>.SuccessResult(irmResponse, "Login successful");
+        }
+
+        var user = await _userRepository.GetByEmailAsync(request.Email ?? string.Empty, cancellationToken);
 
         // Security practice: use constant-time dummy verification or generic failure message to prevent email enumeration
         if (user == null || !PasswordHasher.VerifyPassword(request.Password, user.PasswordHash))
@@ -65,6 +122,35 @@ public class AuthService : IAuthService
         _logger.LogInformation("Successful login for user: {Email}", user.Email);
         return ApiResponse<LoginResponseDto>.SuccessResult(responseDto, "Login successful");
     }
+
+    public async Task<ApiResponse<string>> ForgotPasswordAsync(ForgotPasswordDto request, CancellationToken cancellationToken = default)
+    {
+        var user = await _context.Users.Include(x => x.Role).Include(x => x.Company).FirstOrDefaultAsync(x => x.Email.ToLower() == request.Email.Trim().ToLower() && x.CompanyId == 1 && x.Role.Code == "sales_executive", cancellationToken);
+        if (user == null) return ApiResponse<string>.SuccessResult(string.Empty, "If the account exists, reset instructions have been generated.");
+        var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        _context.Set<PasswordResetToken>().Add(new PasswordResetToken { UserId = user.Id, TokenHash = Hash(rawToken), ExpiresAt = DateTime.UtcNow.AddHours(1) });
+        await _context.SaveChangesAsync(cancellationToken);
+        return ApiResponse<string>.SuccessResult(rawToken, "Password reset token generated.");
+    }
+
+    public async Task<ApiResponse<object>> ResetPasswordAsync(ResetPasswordDto request, CancellationToken cancellationToken = default)
+    {
+        var reset = await _context.Set<PasswordResetToken>().FirstOrDefaultAsync(x => x.TokenHash == Hash(request.Token) && x.UsedAt == null && x.ExpiresAt > DateTime.UtcNow, cancellationToken);
+        if (reset == null) return ApiResponse<object>.FailureResult("Invalid or expired reset token.");
+        var user = await _context.Users.FirstOrDefaultAsync(x => x.Id == reset.UserId && x.CompanyId == 1, cancellationToken);
+        if (user == null) return ApiResponse<object>.FailureResult("Invalid reset request.");
+        user.PasswordHash = PasswordHasher.HashPassword(request.NewPassword); reset.UsedAt = DateTime.UtcNow; await _context.SaveChangesAsync(cancellationToken);
+        return ApiResponse<object>.SuccessResult(new { }, "Password reset successful.");
+    }
+
+    public async Task<ApiResponse<LoginResponseDto>> GetCurrentUserAsync(CancellationToken cancellationToken = default)
+    {
+        var user = await _context.Users.Include(x => x.Role).Include(x => x.Company).FirstOrDefaultAsync(x => x.Id == _currentUser.UserId && x.CompanyId == _currentUser.CompanyId && x.Role.Code == "sales_executive", cancellationToken);
+        if (user == null) return ApiResponse<LoginResponseDto>.FailureResult("Sales executive profile not found.");
+        return ApiResponse<LoginResponseDto>.SuccessResult(new LoginResponseDto { User = MapToUserDto(user), Tenant = user.Company == null ? null : MapToTenantDto(user.Company) }, "Current user loaded");
+    }
+
+    private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     private static UserDto MapToUserDto(User user)
     {

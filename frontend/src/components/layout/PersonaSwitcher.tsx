@@ -1,8 +1,18 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Shield, Building2, UserCheck, RefreshCw, ChevronDown, TrendingUp } from 'lucide-react';
-import { storageService } from '../../services/storageService';
+import { Tenant } from '../../types';
+import { DEFAULT_TENANTS } from '../../constants/defaultTenants';
 import './PersonaSwitcher.css';
+
+const getStoredTenants = (): Tenant[] => {
+  try {
+    const raw = localStorage.getItem('nexus_tenants');
+    return raw ? JSON.parse(raw) : [DEFAULT_TENANTS.ghl, DEFAULT_TENANTS.jamin];
+  } catch {
+    return [DEFAULT_TENANTS.ghl, DEFAULT_TENANTS.jamin];
+  }
+};
 
 export const PersonaSwitcher: React.FC = () => {
   const { user, tenant, isSuperAdmin, switchPersona } = useAuth();
@@ -58,11 +68,12 @@ export const PersonaSwitcher: React.FC = () => {
     },
   ];
 
-  const customTenants = storageService.getTenants().filter(t => t.slug !== 'ghl' && t.slug !== 'jamin');
+  const customTenants = getStoredTenants().filter(t => t.slug !== 'ghl' && t.slug !== 'jamin');
 
   const handleResetData = () => {
     if (confirm('Reset demo data to initial defaults?')) {
-      storageService.resetData();
+      localStorage.clear();
+      sessionStorage.clear();
       window.location.reload();
     }
   };

@@ -227,8 +227,8 @@ export function ensureDemoConversations(companyId: string, tenantSlug?: string):
   if (isGhl) {
     const admin: ChatMember = {
       id: 'usr-ghl-admin',
-      name: 'Vikram Malhotra',
-      email: 'vikram.malhotra@ghl.com',
+      name: 'Vishnu',
+      email: 'vishnu@ghlindiaventures.com',
       roleCode: 'company_admin',
       roleName: 'Company Admin',
       companyId,
@@ -236,8 +236,8 @@ export function ensureDemoConversations(companyId: string, tenantSlug?: string):
     };
     const exec: ChatMember = {
       id: 'usr-ghl-exec',
-      name: 'Ananya Iyer',
-      email: 'ananya.iyer@ghl.com',
+      name: 'Naveen',
+      email: 'naveen@ghlindiaventures.com',
       roleCode: 'sales_executive',
       roleName: 'Sales Executive',
       companyId,
@@ -257,7 +257,7 @@ export function ensureDemoConversations(companyId: string, tenantSlug?: string):
       updatedAt: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
       lastMessage: {
         content: 'Please prioritize the HNW investor consultations today.',
-        senderName: 'Vikram Malhotra',
+        senderName: 'Vishnu',
         isDeleted: false,
       },
     };
@@ -313,7 +313,7 @@ export function ensureDemoConversations(companyId: string, tenantSlug?: string):
       updatedAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
       lastMessage: {
         content: 'All documents for Dr. Rajesh Nambiar are uploaded and verified.',
-        senderName: 'Ananya Iyer',
+        senderName: 'Naveen',
         isDeleted: false,
       },
     };
@@ -368,7 +368,7 @@ export function ensureDemoConversations(companyId: string, tenantSlug?: string):
         conversationId: dmId,
         senderId: admin.id,
         senderName: admin.name,
-        content: `[CALL:{"type":"call","meetingId":"meet-demo-ghl","callMode":"video","status":"ended","duration":"12m 45s","hostId":"usr-ghl-admin","hostName":"Vikram Malhotra","startedAt":"${new Date(Date.now() - 1000 * 60 * 20).toISOString()}"}]`,
+        content: `[CALL:{"type":"call","meetingId":"meet-demo-ghl","callMode":"video","status":"ended","duration":"12m 45s","hostId":"usr-ghl-admin","hostName":"Vishnu","startedAt":"${new Date(Date.now() - 1000 * 60 * 20).toISOString()}"}]`,
         isDeleted: false,
         isEdited: false,
         createdAt: new Date(Date.now() - 1000 * 60 * 20).toISOString(),
@@ -384,8 +384,8 @@ export function ensureDemoConversations(companyId: string, tenantSlug?: string):
   } else if (isJamin) {
     const admin: ChatMember = {
       id: 'usr-jamin-admin',
-      name: 'Kavita Rao',
-      email: 'kavita.rao@jaminbazaar.com',
+      name: 'Mani',
+      email: 'mani@ghlindiaventures.com',
       roleCode: 'company_admin',
       roleName: 'Company Admin',
       companyId,

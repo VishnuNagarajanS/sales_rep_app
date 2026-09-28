@@ -14,6 +14,31 @@ public class ApplicationDbContext : DbContext
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<Lead> Leads => Set<Lead>();
+    public DbSet<Customer> Customers => Set<Customer>();
+    public DbSet<Followup> Followups => Set<Followup>();
+    public DbSet<Consultation> Consultations => Set<Consultation>();
+    public DbSet<CallRecord> CallRecords => Set<CallRecord>();
+    public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+    public DbSet<ExecutiveProfile> ExecutiveProfiles => Set<ExecutiveProfile>();
+
+    // ── GHL India Ventures specific tables ──────────────────────────────────
+    /// <summary>GHL pipeline deals (Sales Exec + IRM Kanban board).</summary>
+    public DbSet<GhlDeal> GhlDeals => Set<GhlDeal>();
+
+    /// <summary>Activity log entries for each GHL deal (notes, calls, stage changes).</summary>
+    public DbSet<GhlDealActivity> GhlDealActivities => Set<GhlDealActivity>();
+
+    /// <summary>HNW investor profiles managed by GHL India Ventures.</summary>
+    public DbSet<GhlInvestor> GhlInvestors => Set<GhlInvestor>();
+
+    /// <summary>Investment opportunity pipeline linked to GHL investors.</summary>
+    public DbSet<GhlInvestmentOpportunity> GhlInvestmentOpportunities => Set<GhlInvestmentOpportunity>();
+
+    // ── Platform-wide audit trail ────────────────────────────────────────────
+    /// <summary>Immutable audit log of every create/update/delete action across all tenants.</summary>
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -130,7 +155,7 @@ public class ApplicationDbContext : DbContext
                 },
                 Timezone = "Asia/Kolkata (IST)",
                 Currency = "₹ INR",
-                BusinessHours = "09:30 AM - 07:00 PM IST",
+                BusinessHours = "10:00 AM - 06:30 PM IST",
                 IsActive = true,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
@@ -149,7 +174,7 @@ public class ApplicationDbContext : DbContext
                 },
                 Timezone = "Asia/Kolkata (IST)",
                 Currency = "₹ INR",
-                BusinessHours = "09:00 AM - 06:30 PM IST",
+                BusinessHours = "10:00 AM - 06:30 PM IST",
                 IsActive = true,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             }
@@ -163,8 +188,8 @@ public class ApplicationDbContext : DbContext
             new User
             {
                 Id = 1,
-                Name = "Alex Rivera (Super Admin)",
-                Email = "alex@nexusplatform.io",
+                Name = "Yanosh",
+                Email = "yanosh@ghlindiaventures.com",
                 PasswordHash = passwordHash,
                 Phone = "+91 98800 11000",
                 RoleId = superAdminRoleId,
@@ -172,12 +197,12 @@ public class ApplicationDbContext : DbContext
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
-            // GHL Company Admin (Vikram)
+            // GHL Company Admin (Vishnu)
             new User
             {
                 Id = 2,
-                Name = "Vikram Malhotra",
-                Email = "vikram@ghlindiatrust.com",
+                Name = "Vishnu",
+                Email = "vishnu@ghlindiaventures.com",
                 PasswordHash = passwordHash,
                 Phone = "+91 98450 11223",
                 RoleId = companyAdminRoleId,
@@ -185,12 +210,12 @@ public class ApplicationDbContext : DbContext
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
-            // GHL Sales Executive (Ananya)
+            // GHL Sales Executive (Naveen)
             new User
             {
                 Id = 3,
-                Name = "Ananya Iyer",
-                Email = "ananya@ghlindiatrust.com",
+                Name = "Naveen",
+                Email = "naveen@ghlindiaventures.com",
                 PasswordHash = passwordHash,
                 Phone = "+91 98450 22334",
                 RoleId = salesExecutiveRoleId,
@@ -198,12 +223,12 @@ public class ApplicationDbContext : DbContext
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
-            // Jamin Company Admin (Kavita)
+            // Jamin Company Admin (Mani)
             new User
             {
                 Id = 4,
-                Name = "Kavita Rao",
-                Email = "kavita@jaminbazaar.com",
+                Name = "Mani",
+                Email = "mani@ghlindiaventures.com",
                 PasswordHash = passwordHash,
                 Phone = "+91 98450 33445",
                 RoleId = companyAdminRoleId,

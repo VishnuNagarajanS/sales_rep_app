@@ -15,10 +15,37 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import {
+  getLeads,
+  getDeals,
+  getCalls,
+  getFollowups,
+  getConsultations,
+  getInvestors,
+  getOpportunities,
+} from '../../services/ghlApiService';
+import {
+  Lead,
+  Deal,
+  CallRecord,
+  Followup,
+  Consultation,
+  Investor,
+  InvestmentOpportunity,
+  Plot,
+} from '../../types';
 import { StatusChip } from '../../components/common/StatusChip';
 import { FEATURES } from '../../constants/features';
 import './DashboardPage.css';
+
+const getStoredPlots = (): Plot[] => {
+  try {
+    const raw = localStorage.getItem('nexus_plots');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
 
 interface DashboardPageProps {
   onNavigate: (route: string) => void;
@@ -29,27 +56,43 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
   const { user, tenant, enabledFeatures } = useAuth();
   const { initiateCall } = useCall();
 
-  const [leads, setLeads] = useState(storageService.getLeads(tenant?.id));
-  const [deals, setDeals] = useState(storageService.getDeals(tenant?.id));
-  const [calls, setCalls] = useState(storageService.getCalls(tenant?.id));
-  const [followups, setFollowups] = useState(storageService.getFollowups(tenant?.id));
-  const [plots, setPlots] = useState(storageService.getPlots());
-  const [consultations, setConsultations] = useState(storageService.getConsultations(tenant?.id));
-  const [investors, setInvestors] = useState(storageService.getInvestors(tenant?.id));
-  const [opportunities, setOpportunities] = useState(storageService.getOpportunities(tenant?.id));
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [deals, setDeals] = useState<Deal[]>([]);
+  const [calls, setCalls] = useState<CallRecord[]>([]);
+  const [followups, setFollowups] = useState<Followup[]>([]);
+  const [plots, setPlots] = useState<Plot[]>(() => getStoredPlots());
+  const [consultations, setConsultations] = useState<Consultation[]>([]);
+  const [investors, setInvestors] = useState<Investor[]>([]);
+  const [opportunities, setOpportunities] = useState<InvestmentOpportunity[]>([]);
+
+  const loadData = async () => {
+    try {
+      const [l, d, c, f, con, inv, opp] = await Promise.all([
+        getLeads(tenant?.id),
+        getDeals(tenant?.id),
+        getCalls(tenant?.id),
+        getFollowups(tenant?.id),
+        getConsultations(tenant?.id),
+        getInvestors(tenant?.id),
+        getOpportunities(tenant?.id),
+      ]);
+      setLeads(l);
+      setDeals(d);
+      setCalls(c);
+      setFollowups(f);
+      setConsultations(con);
+      setInvestors(inv);
+      setOpportunities(opp);
+    } catch (err) {
+      console.error('Failed to load dashboard data', err);
+    }
+    setPlots(getStoredPlots());
+  };
 
   // Sync with storage updates
   useEffect(() => {
-    const handleUpdate = () => {
-      setLeads(storageService.getLeads(tenant?.id));
-      setDeals(storageService.getDeals(tenant?.id));
-      setCalls(storageService.getCalls(tenant?.id));
-      setFollowups(storageService.getFollowups(tenant?.id));
-      setPlots(storageService.getPlots());
-      setConsultations(storageService.getConsultations(tenant?.id));
-      setInvestors(storageService.getInvestors(tenant?.id));
-      setOpportunities(storageService.getOpportunities(tenant?.id));
-    };
+    loadData();
+    const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id]);
@@ -212,15 +255,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
     bannerSubtitle: isIrm
       ? "Here's your high-net-worth investor portfolio, active opportunities, and advisory schedule."
       : isExec
-      ? "Here's your personal pipeline, assigned leads, and today's action items."
-      : 'Here is your daily pipeline, incoming inquiries, and pending action items for today.',
+        ? "Here's your personal pipeline, assigned leads, and today's action items."
+        : 'Here is your daily pipeline, incoming inquiries, and pending action items for today.',
     recentLeads: isExec ? 'My Recent Leads' : 'Recent Inbound Leads',
     recentInvestors: 'My Recent Investors',
     followupsTable: isIrm
       ? 'Upcoming Investor Consultations'
       : isExec
-      ? 'My Follow-ups & Reminders'
-      : 'Scheduled Reminders & Follow-ups',
+        ? 'My Follow-ups & Reminders'
+        : 'Scheduled Reminders & Follow-ups',
   };
 
   return (
@@ -441,11 +484,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                   </div>
                 </div>
                 <div className="dashboard-kpi-value">
-                  {plots.filter(p => p.status === 'Available').length}{' '}
+                  {plots.filter((p: Plot) => p.status === 'Available').length}{' '}
                   <span className="dashboard-kpi-plots-total">/ {plots.length}</span>
                 </div>
                 <div className="dashboard-kpi-plots-stat">
-                  {plots.filter(p => p.status === 'Hold').length} currently on Hold
+                  {plots.filter((p: Plot) => p.status === 'Hold').length} currently on Hold
                 </div>
               </div>
             )}

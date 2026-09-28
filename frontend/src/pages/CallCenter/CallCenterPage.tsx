@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { PhoneCall, Phone, Delete } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import { getCalls, getFollowups, getLeads } from '../../services/ghlApiService';
 import { AgentAvailabilityToggle } from '../../components/calling/CallCenterComponents';
 import { EmptyState } from '../../components/common/EmptyState';
-import { Followup } from '../../types';
+import { CallRecord, Followup, Lead } from '../../types';
 import './CallCenterPage.css';
 // ── Calendar-day comparison helper (same pattern as elsewhere in the app) ──────
 const isSameCalendarDay = (dateStr: string, ref: Date): boolean => {
@@ -44,16 +44,28 @@ export const CallCenterPage: React.FC = () => {
   const [contactName, setContactName] = useState('');
 
   // ── Real data ────────────────────────────────────────────────────────────────
-  const [calls, setCalls] = useState(storageService.getCalls(tenant?.id));
-  const [followups, setFollowups] = useState(storageService.getFollowups(tenant?.id));
-  const [leads, setLeads] = useState(storageService.getLeads(tenant?.id));
+  const [calls, setCalls] = useState<CallRecord[]>([]);
+  const [followups, setFollowups] = useState<Followup[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+
+  const loadData = async () => {
+    try {
+      const [c, f, l] = await Promise.all([
+        getCalls(tenant?.id),
+        getFollowups(tenant?.id),
+        getLeads(tenant?.id),
+      ]);
+      setCalls(c);
+      setFollowups(f);
+      setLeads(l);
+    } catch (err) {
+      console.error('Failed to load call center data', err);
+    }
+  };
 
   useEffect(() => {
-    const handleUpdate = () => {
-      setCalls(storageService.getCalls(tenant?.id));
-      setFollowups(storageService.getFollowups(tenant?.id));
-      setLeads(storageService.getLeads(tenant?.id));
-    };
+    loadData();
+    const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id]);
