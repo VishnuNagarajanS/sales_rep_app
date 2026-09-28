@@ -4,6 +4,7 @@ using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.Leads;
 using backend.Models.Entities;
+using backend.Models.Enums;
 using backend.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
@@ -339,10 +340,10 @@ public class LeadService : ILeadService
             .Where(f => f.CompanyId == lead.CompanyId &&
                         f.ContactId == leadIdStr &&
                         f.ContactType == "lead" &&
-                        f.Status == "Pending")
+                        f.Status == FollowupStatus.Pending)
             .ToListAsync(ct);
 
-        if (staleFollowups.Count > 0)
+        if (staleFollowups.Any())
         {
             _context.Followups.RemoveRange(staleFollowups);
         }
@@ -359,7 +360,7 @@ public class LeadService : ILeadService
             ContactPhone = lead.Phone,
             ScheduledAt = tomorrow,
             Priority = "High",
-            Status = "Pending",
+            Status = FollowupStatus.Pending,
             Notes = "Re-engaged lead follow-up reminder.",
             CreatedAt = DateTime.UtcNow
         };

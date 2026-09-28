@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Shield, Building2, UserCheck, ArrowRight, Lock, Mail, AlertCircle, TrendingUp } from 'lucide-react';
+import { isMockMode } from '../config/environment';
 import './AuthLayout.css';
 
 export const AuthLayout: React.FC = () => {
@@ -14,6 +15,15 @@ export const AuthLayout: React.FC = () => {
     setIsLoading(true);
     await login(email, password);
     setIsLoading(false);
+  };
+
+  const handlePresetClick = (roleCode: any, tenantSlug?: any, presetEmail?: string) => {
+    if (isMockMode()) {
+      switchPersona(roleCode, tenantSlug);
+    } else if (presetEmail) {
+      setEmail(presetEmail);
+      setPassword('Password@123');
+    }
   };
 
   return (
@@ -39,7 +49,7 @@ export const AuthLayout: React.FC = () => {
             <button
               type="button"
               className="btn btn-secondary btn-sm auth-preset-btn"
-              onClick={() => switchPersona('company_admin', 'ghl')}
+              onClick={() => handlePresetClick('company_admin', 'ghl', 'vishnu@ghlindiaventures.com')}
             >
               <Building2 size={14} color="#ef4444" />
               <div>
@@ -51,7 +61,7 @@ export const AuthLayout: React.FC = () => {
             <button
               type="button"
               className="btn btn-secondary btn-sm auth-preset-btn"
-              onClick={() => switchPersona('company_admin', 'jamin')}
+              onClick={() => handlePresetClick('company_admin', 'jamin', 'mani@ghlindiaventures.com')}
             >
               <Building2 size={14} color="#e10600" />
               <div>
@@ -63,7 +73,7 @@ export const AuthLayout: React.FC = () => {
             <button
               type="button"
               className="btn btn-secondary btn-sm auth-preset-btn"
-              onClick={() => switchPersona('sales_executive', 'ghl')}
+              onClick={() => handlePresetClick('sales_executive', 'ghl', 'naveen@ghlindiaventures.com')}
             >
               <UserCheck size={14} color="#ef4444" />
               <div>
@@ -75,7 +85,7 @@ export const AuthLayout: React.FC = () => {
             <button
               type="button"
               className="btn btn-secondary btn-sm auth-preset-btn"
-              onClick={() => switchPersona('irm', 'ghl')}
+              onClick={() => handlePresetClick('irm', 'ghl', 'dhinakaran@ghlindiaventures.com')}
             >
               <TrendingUp size={14} color="#ef4444" />
               <div>
@@ -87,7 +97,7 @@ export const AuthLayout: React.FC = () => {
             <button
               type="button"
               className="btn btn-secondary btn-sm auth-preset-btn"
-              onClick={() => switchPersona('super_admin')}
+              onClick={() => handlePresetClick('super_admin', undefined, 'yanosh@ghlindiaventures.com')}
             >
               <Shield size={14} color="#8b5cf6" />
               <div>

@@ -2,6 +2,7 @@ using backend.Authentication.Interfaces;
 using backend.Data;
 using backend.DTOs.Reports;
 using backend.Models.Entities;
+using backend.Models.Enums;
 using backend.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
@@ -17,9 +18,9 @@ public sealed class ExecutiveReportService(ApplicationDbContext context, ICurren
         var rows = await calls.ToListAsync(cancellationToken); 
         var total = rows.Count; 
         var followups = await context.Set<Followup>().AsNoTracking().Where(x => x.CompanyId == currentUser.CompanyId && x.AssignedAgentId == currentUser.UserId).ToListAsync(cancellationToken); 
-        var completed = followups.Where(x => x.Status == "Completed"); 
+        var completed = followups.Where(x => x.Status == FollowupStatus.Completed); 
         var onTime = completed.Count(x => x.CompletedAt.HasValue && x.CompletedAt <= x.ScheduledAt); 
-        var overdue = followups.Count(x => x.Status == "Pending" && x.ScheduledAt < DateTime.UtcNow);
+        var overdue = followups.Count(x => x.Status == FollowupStatus.Pending && x.ScheduledAt < DateTime.UtcNow);
         return new ExecutiveReportDto { 
             TotalCalls = total, 
             InboundCalls = rows.Count(x => x.Direction == "inbound"), 

@@ -5,6 +5,8 @@ import Papa from 'papaparse';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { getInvestors, saveInvestor as apiSaveInvestor, deleteInvestor as apiDeleteInvestor, getDeals, getCalls, getConsultations, getOpportunities, getFollowups } from '../../services/ghlApiService';
+import { storageService } from '../../services/storageService';
+import { isMockMode } from '../../config/environment';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
@@ -85,20 +87,38 @@ export const InvestorsPage: React.FC = () => {
 
   // ── Data loading ──────────────────────────────────────────────────────────
   const loadData = async () => {
-    const [invs, dls, cls, cons, opps, fus] = await Promise.all([
-      getInvestors(tenant?.id),
-      getDeals(tenant?.id),
-      getCalls(tenant?.id),
-      getConsultations(tenant?.id),
-      getOpportunities(tenant?.id),
-      getFollowups(tenant?.id),
-    ]);
-    setInvestors(invs);
-    setDeals(dls);
-    setAllCalls(cls);
-    setAllConsultations(cons);
-    setAllOpportunities(opps);
-    setAllFollowups(fus);
+    if (isMockMode()) {
+      setInvestors(storageService.getInvestors(tenant?.id));
+      setDeals(storageService.getDeals(tenant?.id));
+      setAllCalls(storageService.getCalls(tenant?.id));
+      setAllConsultations(storageService.getConsultations(tenant?.id));
+      setAllOpportunities(storageService.getOpportunities(tenant?.id));
+      setAllFollowups(storageService.getFollowups(tenant?.id));
+      return;
+    }
+    try {
+      const [invs, dls, cls, cons, opps, fus] = await Promise.all([
+        getInvestors(tenant?.id),
+        getDeals(tenant?.id),
+        getCalls(tenant?.id),
+        getConsultations(tenant?.id),
+        getOpportunities(tenant?.id),
+        getFollowups(tenant?.id),
+      ]);
+      setInvestors(invs || []);
+      setDeals(dls || []);
+      setAllCalls(cls || []);
+      setAllConsultations(cons || []);
+      setAllOpportunities(opps || []);
+      setAllFollowups(fus || []);
+    } catch {
+      setInvestors(storageService.getInvestors(tenant?.id));
+      setDeals(storageService.getDeals(tenant?.id));
+      setAllCalls(storageService.getCalls(tenant?.id));
+      setAllConsultations(storageService.getConsultations(tenant?.id));
+      setAllOpportunities(storageService.getOpportunities(tenant?.id));
+      setAllFollowups(storageService.getFollowups(tenant?.id));
+    }
   };
 
   useEffect(() => {
@@ -272,7 +292,10 @@ export const InvestorsPage: React.FC = () => {
       ...(form.riskTolerance ? { riskTolerance: form.riskTolerance as Investor['riskTolerance'] } : {}),
     };
 
-    apiSaveInvestor(investor).catch(console.error);
+    storageService.saveInvestor?.(investor);
+    if (!isMockMode()) {
+      apiSaveInvestor(investor).catch(console.error);
+    }
     closeModal();
     setSelectedInvestor(investor);
   };

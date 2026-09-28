@@ -3,6 +3,7 @@ using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.Followups;
 using backend.Models.Entities;
+using backend.Models.Enums;
 using backend.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
@@ -80,7 +81,10 @@ public class FollowupService : IFollowupService
         // Status filter
         if (!string.IsNullOrWhiteSpace(filter.Status) && !filter.Status.Equals("all", StringComparison.OrdinalIgnoreCase))
         {
-            query = query.Where(f => f.Status == filter.Status);
+            if (Enum.TryParse<FollowupStatus>(filter.Status, true, out var stFilter))
+            {
+                query = query.Where(f => f.Status == stFilter);
+            }
         }
 
         // Scope filter ('all', 'due', 'overdue')
@@ -93,11 +97,11 @@ public class FollowupService : IFollowupService
             var scope = filter.Scope.Trim().ToLower();
             if (scope == "due")
             {
-                query = query.Where(f => f.ScheduledAt >= todayStart && f.ScheduledAt < tomorrowStart && f.Status == "Pending");
+                query = query.Where(f => f.ScheduledAt >= todayStart && f.ScheduledAt < tomorrowStart && f.Status == FollowupStatus.Pending);
             }
             else if (scope == "overdue")
             {
-                query = query.Where(f => f.ScheduledAt < now && f.Status == "Pending");
+                query = query.Where(f => f.ScheduledAt < now && f.Status == FollowupStatus.Pending);
             }
         }
 
@@ -107,7 +111,7 @@ public class FollowupService : IFollowupService
         var pageSize = Math.Clamp(filter.PageSize, 1, 100);
 
         var entities = await query
-            .OrderBy(f => f.Status == "Pending" ? 0 : 1)
+            .OrderBy(f => f.Status == FollowupStatus.Pending ? 0 : 1)
             .ThenBy(f => f.ScheduledAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -144,7 +148,7 @@ public class FollowupService : IFollowupService
             ContactPhone = dto.ContactPhone.Trim(),
             ScheduledAt = dto.ScheduledAt,
             Priority = string.IsNullOrWhiteSpace(dto.Priority) ? "Medium" : dto.Priority.Trim(),
-            Status = "Pending",
+            Status = FollowupStatus.Pending,
             Notes = dto.Notes?.Trim() ?? string.Empty,
             CreatedAt = DateTime.UtcNow
         };
@@ -176,7 +180,10 @@ public class FollowupService : IFollowupService
 
         if (dto.ScheduledAt.HasValue) followup.ScheduledAt = dto.ScheduledAt.Value;
         if (!string.IsNullOrWhiteSpace(dto.Priority)) followup.Priority = dto.Priority.Trim();
-        if (!string.IsNullOrWhiteSpace(dto.Status)) followup.Status = dto.Status.Trim();
+        if (!string.IsNullOrWhiteSpace(dto.Status) && Enum.TryParse<FollowupStatus>(dto.Status, true, out var parsedSt))
+        {
+            followup.Status = parsedSt;
+        }
         if (dto.Notes != null) followup.Notes = dto.Notes.Trim();
 
         followup.UpdatedAt = DateTime.UtcNow;
@@ -192,7 +199,7 @@ public class FollowupService : IFollowupService
         if (followup == null)
             return ApiResponse<FollowupResponseDto>.FailureResult("Follow-up not found or access denied.");
 
-        followup.Status = "Completed";
+        followup.Status = FollowupStatus.Completed;
         followup.CompletedAt = DateTime.UtcNow;
         followup.UpdatedAt = DateTime.UtcNow;
 
@@ -227,7 +234,7 @@ public class FollowupService : IFollowupService
             ContactPhone = f.ContactPhone,
             ScheduledAt = f.ScheduledAt,
             Priority = f.Priority,
-            Status = f.Status,
+            Status = f.Status.ToString(),
             Notes = f.Notes,
             CompletedAt = f.CompletedAt,
             CreatedAt = f.CreatedAt,

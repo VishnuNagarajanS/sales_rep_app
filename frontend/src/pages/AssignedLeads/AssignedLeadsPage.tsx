@@ -8,7 +8,9 @@ import {
 import { Lead, CustomFieldDefinition } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
+import { storageService } from '../../services/storageService';
 import { getLeads, saveLead as apiSaveLead } from '../../services/ghlApiService';
+import { isMockMode } from '../../config/environment';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { Drawer } from '../../components/common/Drawer';
@@ -25,7 +27,6 @@ const getCustomFieldDefinitions = (tenantId?: string): CustomFieldDefinition[] =
     return [];
   }
 };
-
 export const AssignedLeadsPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
@@ -126,10 +127,19 @@ export const AssignedLeadsPage: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const allLeads = await getLeads(tenant?.id);
+      let allLeads: Lead[] = [];
+      if (isMockMode()) {
+        allLeads = storageService.getLeads(tenant?.id);
+      } else {
+        try {
+          allLeads = await getLeads(tenant?.id);
+        } catch {
+          allLeads = storageService.getLeads(tenant?.id);
+        }
+      }
 
       // Merge any mock assignments from session storage if present
-      let sessionAssignments: Array<{ leadId: string; agentId: number; agentName: string }> = [];
+      let sessionAssignments: Array<{ leadId: string; agentId: number | string; agentName: string }> = [];
       try {
         const raw = sessionStorage.getItem('ghl_mock_agent_assignments');
         if (raw) sessionAssignments = JSON.parse(raw);
@@ -173,9 +183,9 @@ export const AssignedLeadsPage: React.FC = () => {
     setIsEditDrawerOpen(true);
   };
 
-  // Populate agent options from MOCK_AGENTS, ensuring the current assigned agent is included
+  // Populate agent options from storageService or MOCK_AGENTS, ensuring the current assigned agent is included
   const agentOptions = useMemo<Array<{ id: string | number; name: string }>>(() => {
-    const list: Array<{ id: string | number; name: string }> = [...MOCK_AGENTS];
+    const list: Array<{ id: string | number; name: string }> = storageService.getAgents ? [...storageService.getAgents(tenant?.id)] : [...MOCK_AGENTS];
     if (formData.assignedAgentName && !list.some(a => a.name.toLowerCase() === formData.assignedAgentName?.toLowerCase())) {
       list.unshift({ id: 'current', name: formData.assignedAgentName });
     }
@@ -226,7 +236,20 @@ export const AssignedLeadsPage: React.FC = () => {
       companyId: formData.companyId || tenant?.id || 't-ghl-01',
     };
 
-    apiSaveLead(leadToSave).then(loadData).catch(console.error);
+    if (isMockMode()) {
+      storageService.saveLead(leadToSave);
+      loadData();
+    } else {
+      apiSaveLead(leadToSave)
+        .then(() => {
+          storageService.saveLead(leadToSave);
+          loadData();
+        })
+        .catch(() => {
+          storageService.saveLead(leadToSave);
+          loadData();
+        });
+    }
 
     // Keep session mock assignments in sync if tracked
     try {
@@ -243,7 +266,7 @@ export const AssignedLeadsPage: React.FC = () => {
           sessionStorage.setItem('ghl_mock_agent_assignments', JSON.stringify(assignments));
         }
       }
-    } catch { }
+    } catch {}
 
     setIsEditDrawerOpen(false);
   };
@@ -528,12 +551,15 @@ export const AssignedLeadsPage: React.FC = () => {
 
             {/* Tenant-Specific Dynamic Custom Fields */}
             {(() => {
-              const activeDefs = getCustomFieldDefinitions(tenant?.id)
-                .filter((d: CustomFieldDefinition) => d.active !== false && (d.module === 'leads' || !d.module))
-                .sort((a: CustomFieldDefinition, b: CustomFieldDefinition) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+              const activeDefs = (storageService.getCustomFieldDefinitions
+                ? storageService.getCustomFieldDefinitions(tenant?.id)
+                : getCustomFieldDefinitions(tenant?.id)
+              )
+                .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
+                .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
 
               const rows = activeDefs
-                .map((def: CustomFieldDefinition) => {
+                .map(def => {
                   const key = def.fieldKey || def.id;
                   const val = selectedLead.customFields?.[key];
                   if (val === undefined || val === null || val === '') return null;
@@ -553,7 +579,7 @@ export const AssignedLeadsPage: React.FC = () => {
                     {tenant?.name} Custom Attributes
                   </h4>
                   <div className="lead-detail-grid">
-                    {rows.map((item: any) => (
+                    {rows.map(item => (
                       <div key={item!.id}>
                         <span className="lead-custom-label">
                           {item!.label}:

@@ -19,6 +19,8 @@ import { FilterBar } from '../../components/common/FilterBar';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
+import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
+import { storageService } from '../../services/storageService';
 import './LeadsPage.css';
 
 const CAPACITY_OPTIONS = [
@@ -29,7 +31,6 @@ const CAPACITY_OPTIONS = [
   '₹25 Cr+',
   'Not sure yet — help me decide'
 ];
-
 import { MOCK_AGENTS } from '../../mock_data/mockData';
 export { MOCK_AGENTS };
 
@@ -38,6 +39,7 @@ export const LeadsPage: React.FC = () => {
   const { initiateCall } = useCall();
 
   const [leads, setLeads] = useState<Lead[]>([]);
+  const agentsList = useMemo(() => storageService.getAgents(tenant?.id), [tenant?.id]);
 
   const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk'];
 
@@ -49,7 +51,7 @@ export const LeadsPage: React.FC = () => {
   const isLeadScopedUser = roleCode === 'sales_executive' || roleCode === 'irm';
   const isIrm = roleCode === 'irm';
   const currentTenantId = tenant?.id || tenant?.slug;
-  const tenantLeads = leads.filter(l => isTenantMatch(l.companyId, currentTenantId));
+  const tenantLeads = leads.filter(l => !l.companyId || l.companyId === currentTenantId || l.companyId === tenant?.id || l.companyId === tenant?.slug);
   const scopedLeads = (isLeadScopedUser
     ? tenantLeads.filter(l =>
       (l.assignedAgentId && l.assignedAgentId === user?.id) ||
@@ -157,13 +159,13 @@ export const LeadsPage: React.FC = () => {
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [assignStep, setAssignStep] = useState<'pick-agent' | 'confirm'>('pick-agent');
-  const [assignSelectedAgent, setAssignSelectedAgent] = useState<typeof MOCK_AGENTS[0] | null>(null);
+  const [assignSelectedAgent, setAssignSelectedAgent] = useState<{ id: number | string; name: string } | null>(null);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
-  const [aiDistribution, setAiDistribution] = useState<Record<number, Lead[]>>({});
+  const [aiDistribution, setAiDistribution] = useState<Record<string, Lead[]>>({});
   const [isAiEditMode, setIsAiEditMode] = useState(false);
   const [assignedLeadIds, setAssignedLeadIds] = useState<Set<string>>(new Set());
   const [agentAssignments, setAgentAssignments] = useState<
-    Array<{ leadId: string; leadName: string; agentId: number; agentName: string; assignedAt: string }>
+    Array<{ leadId: string; leadName: string; agentId: number | string; agentName: string; assignedAt: string }>
   >(() => {
     try {
       const saved = sessionStorage.getItem('ghl_mock_agent_assignments');
@@ -329,7 +331,7 @@ export const LeadsPage: React.FC = () => {
   const handleManualAssignConfirm = () => {
     if (!assignSelectedAgent) return;
     const newAssigned = new Set(assignedLeadIds);
-    const newRecords: Array<{ leadId: string; leadName: string; agentId: number; agentName: string; assignedAt: string }> = [];
+    const newRecords: Array<{ leadId: string; leadName: string; agentId: number | string; agentName: string; assignedAt: string }> = [];
     selectedLeadIds.forEach(id => {
       newAssigned.add(id);
       const lead = leads.find(l => l.id === id);
@@ -359,46 +361,47 @@ export const LeadsPage: React.FC = () => {
 
   const handleOpenAiSuggestion = () => {
     const pool = filteredLeads;
-    const dist: Record<number, Lead[]> = {};
-    MOCK_AGENTS.forEach(a => { dist[a.id] = []; });
-    pool.forEach((lead, i) => {
-      const agent = MOCK_AGENTS[i % MOCK_AGENTS.length];
-      dist[agent.id].push(lead);
-    });
+    const dist: Record<string, Lead[]> = {};
+    agentsList.forEach((a: any) => { dist[String(a.id)] = []; });
+    if (agentsList.length > 0) {
+      pool.forEach((lead, i) => {
+        const agent = agentsList[i % agentsList.length];
+        dist[String(agent.id)].push(lead);
+      });
+    }
     setAiDistribution(dist);
     setIsAiEditMode(false);
     setIsAiModalOpen(true);
   };
 
-  const handleAiMoveLead = (leadId: string, fromAgentId: number, direction: 'left' | 'right') => {
-    const agentIds = MOCK_AGENTS.map(a => a.id);
-    const fromIdx = agentIds.indexOf(fromAgentId);
+  const handleAiMoveLead = (leadId: string, fromAgentId: number | string, direction: 'left' | 'right') => {
+    const agentIds = agentsList.map((a: any) => String(a.id));
+    const fromIdx = agentIds.indexOf(String(fromAgentId));
     const toIdx = direction === 'left' ? fromIdx - 1 : fromIdx + 1;
     if (toIdx < 0 || toIdx >= agentIds.length) return;
     const toAgentId = agentIds[toIdx];
     setAiDistribution(prev => {
-      const fromLeads = [...(prev[fromAgentId] || [])].filter(l => l.id !== leadId);
-      const movedLead = (prev[fromAgentId] || []).find(l => l.id === leadId);
+      const fromLeads = [...(prev[String(fromAgentId)] || [])].filter(l => l.id !== leadId);
+      const movedLead = (prev[String(fromAgentId)] || []).find(l => l.id === leadId);
       if (!movedLead) return prev;
       const toLeads = [...(prev[toAgentId] || []), movedLead];
-      return { ...prev, [fromAgentId]: fromLeads, [toAgentId]: toLeads };
+      return { ...prev, [String(fromAgentId)]: fromLeads, [toAgentId]: toLeads };
     });
   };
 
   const handleAiConfirm = () => {
     const newAssigned = new Set(assignedLeadIds);
-    const newRecords: Array<{ leadId: string; leadName: string; agentId: number; agentName: string; assignedAt: string }> = [];
+    const newRecords: Array<{ leadId: string; leadName: string; agentId: number | string; agentName: string; assignedAt: string }> = [];
     let count = 0;
     Object.entries(aiDistribution).forEach(([agentIdStr, agentLeads]) => {
-      const agentId = Number(agentIdStr);
-      const agent = MOCK_AGENTS.find(a => a.id === agentId);
+      const agent = agentsList.find((a: any) => String(a.id) === agentIdStr);
       agentLeads.forEach(l => {
         newAssigned.add(l.id);
         count++;
         newRecords.push({
           leadId: l.id,
           leadName: l.name,
-          agentId,
+          agentId: agent ? agent.id : agentIdStr,
           agentName: agent?.name || 'Agent',
           assignedAt: new Date().toISOString(),
         });
@@ -973,117 +976,180 @@ export const LeadsPage: React.FC = () => {
           </>
         }
       >
-        {selectedLead && (
-          <>
-            {/* Quick Info Banner */}
-            <div className="lead-quick-banner">
-              <div className="lead-assigned-note">
-                Assigned to <strong>{selectedLead.assignedAgentName}</strong>
-              </div>
-            </div>
+        {selectedLead && (() => {
+            const isGhlIrm = isIrm && (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01');
 
-            {/* Core Details */}
-            <div className="card lead-detail-card">
-              <h4 className="lead-detail-title">
-                Contact & Profile Details
-              </h4>
-              <div className="lead-detail-grid">
-                <div>
-                  <span className="lead-detail-label">Email:</span>
-                  <div className="lead-detail-value">{selectedLead.email || '—'}</div>
-                </div>
-                <div>
-                  <span className="lead-detail-label">Location:</span>
-                  <div className="lead-detail-value">{selectedLead.location || '—'}</div>
-                </div>
-                <div>
-                  <span className="lead-detail-label">Lead Source:</span>
-                  <div className="lead-detail-value">{selectedLead.source}</div>
-                </div>
-                <div>
-                  <span className="lead-detail-label">Follow-up:</span>
-                  <div className="lead-detail-value lead-followup-text has-date">
-                    {selectedLead.nextFollowupDate || 'Not scheduled'}
+            /** ── Investment Capacity value ── */
+            const investmentCapacity =
+              selectedLead.customFields?.investmentCapacity ||
+              selectedLead.customFields?.capacityRange ||
+              selectedLead.customFields?.investmentRange ||
+              (selectedLead as any).investmentRange ||
+              null;
+
+            /** ── User-facing message ── */
+            const userMessage =
+              (selectedLead as any).message ||
+              (selectedLead as any).userMessage ||
+              selectedLead.customFields?.message ||
+              selectedLead.customFields?.userMessage ||
+              selectedLead.notes ||
+              null;
+
+
+
+
+            return (
+              <>
+                {/* ── Quick Info Banner (Assigned Agent) ── */}
+                <div className="lead-quick-banner">
+                  <div className="lead-assigned-note">
+                    Assigned to <strong>{selectedLead.assignedAgentName}</strong>
                   </div>
                 </div>
-              </div>
-            </div>
 
-            {/* Tenant-Specific Dynamic Custom Fields */}
-            {(() => {
-              const getStoredCustomFieldDefinitions = (tId?: string): any[] => {
-                try {
-                  const raw = localStorage.getItem('nexus_custom_fields');
-                  const all = raw ? JSON.parse(raw) : [];
-                  return tId ? all.filter((d: any) => !d.tenantId || d.tenantId === tId) : all;
-                } catch {
-                  return [];
-                }
-              };
-              const activeDefs = getStoredCustomFieldDefinitions(tenant?.id)
-                .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
-                .filter(d => !(isExec && (d.fieldKey === 'assetClass' || d.fieldKey === 'preferredAssetClass')))
-                .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
-
-              const rows = activeDefs
-                .map(def => {
-                  const key = def.fieldKey || def.id;
-                  const val = selectedLead.customFields?.[key];
-                  if (val === undefined || val === null || val === '') return null;
-                  return {
-                    id: def.id,
-                    label: def.label || key.replace(/([A-Z])/g, ' $1'),
-                    value: String(val),
-                  };
-                })
-                .filter(Boolean);
-
-              if (rows.length === 0) return null;
-
-              return (
-                <div className="card lead-custom-card">
-                  <h4 className="lead-custom-title">
-                    {tenant?.name} Custom Attributes
-                  </h4>
+                {/* ── Contact & Profile Details ── */}
+                <div className="card lead-detail-card">
+                  <h4 className="lead-detail-title">Contact &amp; Profile Details</h4>
                   <div className="lead-detail-grid">
-                    {rows.map(item => (
-                      <div key={item!.id}>
-                        <span className="lead-custom-label">
-                          {item!.label}:
-                        </span>
-                        <div className="lead-custom-value">{item!.value}</div>
+                    <div>
+                      <span className="lead-detail-label">Email:</span>
+                      <div className="lead-detail-value">{selectedLead.email || '—'}</div>
+                    </div>
+                    <div>
+                      <span className="lead-detail-label">Location:</span>
+                      <div className="lead-detail-value">{selectedLead.location || '—'}</div>
+                    </div>
+                    <div>
+                      <span className="lead-detail-label">Lead Source:</span>
+                      <div className="lead-detail-value">{selectedLead.source}</div>
+                    </div>
+                    <div>
+                      <span className="lead-detail-label">Follow-up:</span>
+                      <div className="lead-detail-value lead-followup-text has-date">
+                        {selectedLead.nextFollowupDate || 'Not scheduled'}
                       </div>
-                    ))}
+                    </div>
                   </div>
                 </div>
-              );
-            })()}
 
-            {/* Message from User */}
-            <div className="card lead-custom-card">
-              <h4 className="lead-custom-title">
-                Message from User
-              </h4>
-              <div className="lead-user-message-box">
-                {(selectedLead as any).message ||
-                  (selectedLead as any).userMessage ||
-                  selectedLead.customFields?.message ||
-                  selectedLead.customFields?.userMessage ||
-                  selectedLead.notes ? (
-                  <div className="lead-user-message-text">
-                    {(selectedLead as any).message ||
-                      (selectedLead as any).userMessage ||
-                      selectedLead.customFields?.message ||
-                      selectedLead.customFields?.userMessage ||
-                      selectedLead.notes}
+                {/* ── GHL IRM: Investment Capacity (replaces Preferred Asset Class + Investment Horizon unless confirmed by IRM) ── */}
+                {isGhlIrm ? (
+                  <div className="card lead-custom-card">
+                    <h4 className="lead-custom-title">Investment Details</h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      <div>
+                        <span className="lead-detail-label">Investment Capacity:</span>
+                        <div
+                          className="lead-detail-value"
+                          style={{
+                            marginTop: 4,
+                            fontSize: 16,
+                            fontWeight: 700,
+                            color: '#10b981',
+                            letterSpacing: '0.01em',
+                          }}
+                        >
+                          {investmentCapacity || '—'}
+                        </div>
+                      </div>
+
+                      {/* Only show Preferred Asset Class & Horizon if set & confirmed by IRM */}
+                      {Boolean(
+                        selectedLead.customFields?.irmPreferencesConfirmed ||
+                        (() => {
+                          try {
+                            const raw = localStorage.getItem(`nexus_irm_pref_${selectedLead.id}`) ||
+                              localStorage.getItem(`nexus_irm_pref_${(selectedLead.phone || '').replace(/\D/g, '').slice(-10)}`);
+                            if (raw) return JSON.parse(raw)?.confirmed === true;
+                          } catch {}
+                          return false;
+                        })()
+                      ) && (() => {
+                        const localData = (() => {
+                          try {
+                            const raw = localStorage.getItem(`nexus_irm_pref_${selectedLead.id}`) ||
+                              localStorage.getItem(`nexus_irm_pref_${(selectedLead.phone || '').replace(/\D/g, '').slice(-10)}`);
+                            if (raw) return JSON.parse(raw);
+                          } catch {}
+                          return null;
+                        })();
+                        const assetClass = selectedLead.customFields?.preferredAssetClass || localData?.preferredAssetClass || '—';
+                        const horizon = selectedLead.customFields?.horizon || selectedLead.customFields?.investmentHorizon || localData?.horizon || '—';
+
+                        return (
+                          <div className="lead-detail-grid" style={{ marginTop: 4, paddingTop: 10, borderTop: '1px solid var(--border-base)' }}>
+                            <div>
+                              <span className="lead-detail-label">Preferred Asset Class:</span>
+                              <div className="lead-detail-value">{assetClass}</div>
+                            </div>
+                            <div>
+                              <span className="lead-detail-label">Investment Horizon:</span>
+                              <div className="lead-detail-value">{horizon}</div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
                   </div>
                 ) : (
-                  <div className="lead-user-message-empty">No message available</div>
+                  /* Non-IRM tenants: show the generic custom attributes exactly as before */
+                  (() => {
+                    const activeDefs = storageService
+                      .getCustomFieldDefinitions(tenant?.id)
+                      .filter((d: any) => d.active !== false && (d.module === 'leads' || !d.module))
+                      .filter((d: any) => !(isExec && (d.fieldKey === 'assetClass' || d.fieldKey === 'preferredAssetClass')))
+                      .sort((a: any, b: any) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+                    const rows = activeDefs
+                      .map((def: any) => {
+                        const key = def.fieldKey || def.id;
+                        const val = selectedLead.customFields?.[key];
+                        if (val === undefined || val === null || val === '') return null;
+                        return { id: def.id, label: def.label || key.replace(/([A-Z])/g, ' $1'), value: String(val) };
+                      })
+                      .filter(Boolean);
+                    if (rows.length === 0) return null;
+                    return (
+                      <div className="card lead-custom-card">
+                        <h4 className="lead-custom-title">{tenant?.name} Custom Attributes</h4>
+                        <div className="lead-detail-grid">
+                          {rows.map((item: any) => (
+                            <div key={item!.id}>
+                              <span className="lead-custom-label">{item!.label}:</span>
+                              <div className="lead-custom-value">{item!.value}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()
                 )}
-              </div>
-            </div>
-          </>
-        )}
+
+                {/* ── Message from User ── */}
+                <div className="card lead-custom-card">
+                  <h4 className="lead-custom-title">Message from User</h4>
+                  <div className="lead-user-message-box">
+                    {userMessage ? (
+                      <div className="lead-user-message-text">{userMessage}</div>
+                    ) : (
+                      <div className="lead-user-message-empty">No message available</div>
+                    )}
+                  </div>
+                </div>
+
+                <LeadDetailDrawerContent
+                  contactName={selectedLead.name}
+                  contactPhone={selectedLead.phone}
+                  contactId={selectedLead.id}
+                  contactType="lead"
+                  tenantId={tenant?.id}
+                  tenantName={tenant?.name}
+                  onCall={() => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id)}
+                  sectionsOnly={['callRecordings']}
+                />
+              </>
+            );
+          })()}
       </Drawer>
 
       {/* Create / Edit Drawer */}
@@ -1520,7 +1586,7 @@ export const LeadsPage: React.FC = () => {
               <>
                 <p className="assign-modal-sub">Select an agent to assign the {selectedLeadIds.size} selected lead{selectedLeadIds.size !== 1 ? 's' : ''} to:</p>
                 <div className="assign-agent-list">
-                  {MOCK_AGENTS.map(agent => (
+                  {agentsList.map((agent: any) => (
                     <label key={agent.id} className={`assign-agent-row${assignSelectedAgent?.id === agent.id ? ' selected' : ''}`}>
                       <input
                         type="radio"
@@ -1573,7 +1639,7 @@ export const LeadsPage: React.FC = () => {
               <div>
                 <h3 className="assign-modal-title">✦ AI Suggestion — Round Robin</h3>
                 <p className="assign-modal-sub" style={{ margin: '2px 0 0' }}>
-                  {Object.values(aiDistribution).flat().length} leads distributed across {MOCK_AGENTS.length} agents
+                  {Object.values(aiDistribution).flat().length} leads distributed across {agentsList.length} agents
                 </p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1588,8 +1654,8 @@ export const LeadsPage: React.FC = () => {
             </div>
 
             <div className="ai-dist-grid">
-              {MOCK_AGENTS.map((agent, agentIdx) => {
-                const agentLeads = aiDistribution[agent.id] || [];
+              {agentsList.map((agent: any, agentIdx: number) => {
+                const agentLeads = aiDistribution[String(agent.id)] || [];
                 return (
                   <div key={agent.id} className="ai-dist-col">
                     <div className="ai-dist-col-header">
@@ -1615,7 +1681,7 @@ export const LeadsPage: React.FC = () => {
                                 >◀</button>
                                 <button
                                   className="ai-move-btn"
-                                  disabled={agentIdx === MOCK_AGENTS.length - 1}
+                                  disabled={agentIdx === agentsList.length - 1}
                                   onClick={() => handleAiMoveLead(lead.id, agent.id, 'right')}
                                   title="Move right"
                                 >▶</button>

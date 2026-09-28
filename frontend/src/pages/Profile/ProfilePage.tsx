@@ -42,6 +42,7 @@ import { Drawer } from '../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
 import { StatusChip } from '../../components/common/StatusChip';
 import { CallRecord, Lead, Followup, Consultation } from '../../types';
+import { storageService } from '../../services/storageService';
 import './ProfilePage.css';
 
 // ── User persistence helper ──────────────────────────────────────────────────
@@ -230,6 +231,10 @@ export const ProfilePage: React.FC = () => {
   useEffect(() => {
     let isMounted = true;
     const loadLiveData = async () => {
+      try {
+        storageService.cleanupDuplicateLeads(tenant?.id);
+      } catch {}
+
       if (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') {
         try {
           const [calls, leads, followups, consultations] = await Promise.all([
@@ -239,27 +244,26 @@ export const ProfilePage: React.FC = () => {
             apiGetConsultations(tenant?.id),
           ]);
           if (isMounted) {
-            setAllCalls(calls || []);
-            setAllLeads(leads || []);
-            setAllFollowups(followups || []);
-            setAllConsultations(consultations || []);
+            setAllCalls(calls && calls.length > 0 ? calls : storageService.getCalls(tenant?.id) || []);
+            setAllLeads(leads && leads.length > 0 ? leads : storageService.getLeads(tenant?.id) || []);
+            setAllFollowups(followups && followups.length > 0 ? followups : storageService.getFollowups(tenant?.id) || []);
+            setAllConsultations(consultations && consultations.length > 0 ? consultations : storageService.getConsultations(tenant?.id) || []);
           }
         } catch {
-          // Keep current state on error
+          if (isMounted) {
+            setAllCalls(storageService.getCalls(tenant?.id) || []);
+            setAllLeads(storageService.getLeads(tenant?.id) || []);
+            setAllFollowups(storageService.getFollowups(tenant?.id) || []);
+            setAllConsultations(storageService.getConsultations(tenant?.id) || []);
+          }
         }
       } else {
-        try {
-          const calls = JSON.parse(localStorage.getItem('nexus_calls') || '[]');
-          const leads = JSON.parse(localStorage.getItem('nexus_leads') || '[]');
-          const followups = JSON.parse(localStorage.getItem('nexus_followups') || '[]');
-          const consultations = JSON.parse(localStorage.getItem('nexus_consultations') || '[]');
-          if (isMounted) {
-            setAllCalls(calls || []);
-            setAllLeads(leads || []);
-            setAllFollowups(followups || []);
-            setAllConsultations(consultations || []);
-          }
-        } catch {}
+        if (isMounted) {
+          setAllCalls(storageService.getCalls(tenant?.id) || []);
+          setAllLeads(storageService.getLeads(tenant?.id) || []);
+          setAllFollowups(storageService.getFollowups(tenant?.id) || []);
+          setAllConsultations(storageService.getConsultations(tenant?.id) || []);
+        }
       }
     };
     loadLiveData();

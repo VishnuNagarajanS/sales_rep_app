@@ -1,4 +1,5 @@
 using backend.Models.Entities;
+using backend.Models.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -32,8 +33,9 @@ public class FollowupConfiguration : IEntityTypeConfiguration<Followup>
             .HasDefaultValue("Medium");
 
         builder.Property(f => f.Status)
+            .HasConversion<string>()
             .HasMaxLength(50)
-            .HasDefaultValue("Pending");
+            .HasDefaultValue(FollowupStatus.Pending);
 
         builder.Property(f => f.CreatedAt)
             .HasDefaultValueSql("NOW()");
@@ -48,5 +50,10 @@ public class FollowupConfiguration : IEntityTypeConfiguration<Followup>
             .WithMany()
             .HasForeignKey(f => f.AssignedAgentId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(f => f.Investor)
+            .WithMany(i => i.Followups)
+            .HasForeignKey(f => f.InvestorId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }

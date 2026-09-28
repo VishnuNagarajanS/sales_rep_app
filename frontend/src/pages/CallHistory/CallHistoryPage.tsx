@@ -4,7 +4,9 @@ import Papa from 'papaparse';
 import { CallRecord, User, Consultation } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
+import { storageService } from '../../services/storageService';
 import { getCalls, getConsultations } from '../../services/ghlApiService';
+import { isMockMode } from '../../config/environment';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
@@ -29,6 +31,11 @@ export const CallHistoryPage: React.FC = () => {
   const [dateTo, setDateTo] = useState<string>('');
 
   const loadData = async () => {
+    if (isMockMode()) {
+      setCalls(storageService.getCalls(tenant?.id));
+      setUsers(storageService.getUsers(tenant?.slug));
+      return;
+    }
     try {
       const [callsData, consultationsData] = await Promise.all([
         getCalls(tenant?.id),
@@ -38,12 +45,15 @@ export const CallHistoryPage: React.FC = () => {
       setConsultations(consultationsData || []);
     } catch (err) {
       console.error('Failed to load call history', err);
+      setCalls(storageService.getCalls(tenant?.id));
     }
     try {
       const rawUsers = localStorage.getItem('nexus_users');
-      const allUsers: User[] = rawUsers ? JSON.parse(rawUsers) : [];
+      const allUsers: User[] = rawUsers ? JSON.parse(rawUsers) : storageService.getUsers(tenant?.slug);
       setUsers(tenant?.slug ? allUsers.filter(u => !u.companySlug || u.companySlug === tenant.slug) : allUsers);
-    } catch {}
+    } catch {
+      setUsers(storageService.getUsers(tenant?.slug));
+    }
   };
 
   useEffect(() => {

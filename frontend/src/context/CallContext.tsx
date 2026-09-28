@@ -9,6 +9,7 @@ import {
   getLeads as apiGetLeads,
   getCustomers as apiGetCustomers,
 } from '../services/ghlApiService';
+import { storageService } from '../services/storageService';
 import { useAuth } from './AuthContext';
 
 export type AgentAvailability = 'Available' | 'Busy' | 'Offline';
@@ -284,11 +285,12 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Locate matched lead if any
       const leadId = lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : null;
+      const allLeads = leads.length > 0 ? leads : (tenant ? storageService.getLeads(tenant.id) : []);
       const normalize = (p: string) => (p || '').replace(/\D/g, '').slice(-10);
       const callPhoneDigits = normalize(lastCallRecord.contactPhone);
       const matchedLead = leadId
-        ? leads.find(l => l.id === leadId)
-        : leads.find(l =>
+        ? allLeads.find((l: Lead) => l.id === leadId)
+        : allLeads.find((l: Lead) =>
             (callPhoneDigits && normalize(l.phone) === callPhoneDigits) ||
             (l.name && l.name.toLowerCase() === lastCallRecord.contactName.toLowerCase())
           );

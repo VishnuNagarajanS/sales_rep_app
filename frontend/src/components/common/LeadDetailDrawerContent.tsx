@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { CallDisposition, Consultation, Lead, CallRecord, Followup, CustomFieldDefinition } from '../../types';
 import { getLeads, getCalls, getFollowups } from '../../services/ghlApiService';
+import { storageService } from '../../services/storageService';
 import { useAuth } from '../../context/AuthContext';
 import { StatusChip } from './StatusChip';
 
@@ -128,8 +129,16 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
     return true;
   });
 
-  const agentCalls = selectedCalls.filter(c => !(c.notes || '').startsWith('Connected to IRM:'));
-  const irmCalls = selectedCalls.filter(c => (c.notes || '').startsWith('Connected to IRM:'));
+  const isIrmCall = (c: any) =>
+    (c.notes || '').startsWith('Connected to IRM:') ||
+    (c.agentId || '').toLowerCase().includes('irm') ||
+    (c.agentName || '').toLowerCase().includes('irm') ||
+    ['Rohan Varma', 'Arun Kumar', 'Ananya Mehta', 'Rohan Mehta', 'Priya Nair', 'Karthik Sundaram'].some(n =>
+      (c.agentName || '').toLowerCase().includes(n.toLowerCase())
+    );
+
+  const agentCalls = selectedCalls.filter(c => !isIrmCall(c));
+  const irmCalls = selectedCalls.filter(c => isIrmCall(c));
   const tabCalls = callTab === 'agent' ? agentCalls : irmCalls;
 
   // ── Active follow-up count ───────────────────────────────────────────────────
@@ -355,7 +364,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
 
               {/* Custom Fields */}
               {(() => {
-                const activeDefs = getStoredCustomFieldDefinitions(tenantId)
+                const activeDefs = (storageService?.getCustomFieldDefinitions ? storageService.getCustomFieldDefinitions(tenantId) : getStoredCustomFieldDefinitions(tenantId))
                   .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
                   .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
 

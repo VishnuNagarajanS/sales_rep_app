@@ -69,6 +69,7 @@ import { Drawer } from '../common/Drawer';
 import { DocumentUploader } from '../common/DocumentUploader';
 import { DocumentList } from '../common/DocumentList';
 import { EmptyState } from '../common/EmptyState';
+import { storageService } from '../../services/storageService';
 import './CallCenterComponents.css';
 
 // --- Agent Availability Toggle ---
@@ -262,29 +263,22 @@ export const InCallBar: React.FC = () => {
   const isIrm = user?.role?.code === 'irm';
 
   // Look up the full lead record to find who previously handled this contact
-  const getStoredLeads = (): Lead[] => {
-    try {
-      return JSON.parse(localStorage.getItem('nexus_leads') || '[]');
-    } catch {
-      return [];
-    }
-  };
   const matchedLead = activeCall?.matchedRecord?.type === 'lead'
-    ? getStoredLeads().find((l: Lead) => l.id === activeCall.matchedRecord?.id)
-    : (activeCall?.contactPhone ? getStoredLeads().find((l: Lead) => l.phone.replace(/\D/g, '').slice(-10) === activeCall.contactPhone.replace(/\D/g, '').slice(-10)) : undefined);
+    ? storageService.getLeads(tenant?.id).find((l: Lead) => l.id === activeCall.matchedRecord?.id)
+    : (activeCall?.contactPhone ? storageService.findLeadByPhone(activeCall.contactPhone, tenant?.id) : undefined);
   const previousAgentName = matchedLead?.assignedAgentName;
 
   const connectOptions = isIrm
     ? (() => {
-      const base = MOCK_AGENTS.map(a => ({ name: a.name, status: 'Available' as const }));
-      if (!previousAgentName) return base;
-      // Move the previously-assigned agent to the top of the list as the default
-      const rest = base.filter(a => a.name !== previousAgentName);
-      return [{ name: previousAgentName, status: 'Available' as const, isPrevious: true }, ...rest];
-    })()
-    : MOCK_IRMS;
+        const base = storageService.getAgents(tenant?.id).map((a: { id: string | number; name: string }) => ({ name: a.name, status: 'Available' as const }));
+        if (!previousAgentName) return base;
+        // Move the previously-assigned agent to the top of the list as the default
+        const rest = base.filter((a: { name: string }) => a.name !== previousAgentName);
+        return [{ name: previousAgentName, status: 'Available' as const, isPrevious: true }, ...rest];
+      })()
+    : storageService.getIrms(tenant?.id);
 
-  const filteredConnectOptions = connectOptions.filter(o =>
+  const filteredConnectOptions = connectOptions.filter((o: any) =>
     o.name.toLowerCase().includes(irmSearchQuery.toLowerCase())
   );
 
@@ -335,14 +329,8 @@ export const InCallBar: React.FC = () => {
 
     if (tenant.slug === 'ghl' || tenant.id === 't-ghl-01') {
       saveConsultation(consult).catch(console.error);
-    } else {
-      try {
-        const consultations = JSON.parse(localStorage.getItem('nexus_consultations') || '[]');
-        consultations.unshift(consult);
-        localStorage.setItem('nexus_consultations', JSON.stringify(consultations));
-        window.dispatchEvent(new Event('nexus_storage_updated'));
-      } catch { }
     }
+    storageService.saveConsultation(consult);
 
     endCall(true);
 
@@ -772,7 +760,7 @@ export const InCallBar: React.FC = () => {
                   </div>
                 )}
 
-                {filteredConnectOptions.map(o => (
+                {filteredConnectOptions.map((o: any) => (
                   <div
                     key={o.name}
                     onClick={() => {
@@ -1089,20 +1077,25 @@ export const DispositionModal: React.FC = () => {
     const d = new Date();
     d.setDate(d.getDate() + 1);
     const freshTomorrow = d.toISOString().slice(0, 10);
-    setDisposition('Interested');
+    const isFollowup = !!lastCallRecord.sourceFollowupId;
+    const isIrmLead = user?.role?.code === 'irm' && lastCallRecord.matchedRecord?.type === 'lead';
+    const defaultDispo: CallDisposition = isIrmLead && !isFollowup ? 'Follow-up Required' : 'Interested';
+    setDisposition(defaultDispo);
     setNotes('');
     setReason('');
-    setScheduleFollowup(false);
+    setScheduleFollowup(defaultDispo === 'Follow-up Required');
     setFollowupDate(freshTomorrow);
     setFollowupTime(getCallPreferences().defaultFollowupTime);
     setFollowupPriority('High');
-  }, [lastCallRecord?.id]);
+  }, [lastCallRecord?.id, lastCallRecord?.matchedRecord?.type, lastCallRecord?.sourceFollowupId, user?.role?.code]);
 
   if (!showDispositionModal || !lastCallRecord) return null;
 
   const isGhlSalesExec = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') && user?.role?.code === 'sales_executive';
   // This call was launched from the Follow-ups page (a previously scheduled follow-up task).
   const isFollowupCall = !!lastCallRecord.sourceFollowupId;
+  const isIrm = user?.role?.code === 'irm';
+  const isIrmLeadCall = isIrm && lastCallRecord.matchedRecord?.type === 'lead';
 
   const allDispositions: CallDisposition[] = [
     'Interested',
@@ -1119,11 +1112,19 @@ export const DispositionModal: React.FC = () => {
   // is expected to have reached the contact.
   const FOLLOWUP_CALL_OUTCOMES: CallDisposition[] = ['Interested', 'Follow-up Required', 'Not Interested'];
 
+  // For IRM follow-up calls, outcomes are restricted to Interested and Follow-up Required only.
+  const IRM_FOLLOWUP_CALL_OUTCOMES: CallDisposition[] = ['Interested', 'Follow-up Required'];
+
+  // For IRM calls against Lead records, restrict to Follow-up Required and Converted
+  const IRM_LEAD_OUTCOMES: CallDisposition[] = ['Follow-up Required', 'Converted'];
+
   const dispositions: CallDisposition[] = isFollowupCall
-    ? FOLLOWUP_CALL_OUTCOMES
-    : isGhlSalesExec
-      ? allDispositions.filter(d => d !== 'Converted')
-      : allDispositions;
+    ? (isIrm ? IRM_FOLLOWUP_CALL_OUTCOMES : FOLLOWUP_CALL_OUTCOMES)
+    : isIrmLeadCall
+      ? IRM_LEAD_OUTCOMES
+      : isGhlSalesExec
+        ? allDispositions.filter(d => d !== 'Converted')
+        : allDispositions;
 
   const handleSave = () => {
     // Combine date + time into a proper ISO string so scheduledAt is parseable

@@ -1,3 +1,18 @@
+export interface ApiResponse<T = any> {
+  success: boolean;
+  message?: string;
+  data: T;
+  errors?: string[];
+}
+
+export interface PagedResult<T = any> {
+  items: T[];
+  totalCount: number;
+  pageNumber: number;
+  pageSize: number;
+  totalPages: number;
+}
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 class ApiClient {
@@ -29,8 +44,21 @@ class ApiClient {
     return res.json();
   }
 
-  async get<T>(endpoint: string): Promise<T> {
-    const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+  async get<T>(endpoint: string, params?: Record<string, any>): Promise<T> {
+    let url = `${API_BASE_URL}${endpoint}`;
+    if (params) {
+      const query = new URLSearchParams();
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') {
+          query.append(k, String(v));
+        }
+      });
+      const qs = query.toString();
+      if (qs) {
+        url += (url.includes('?') ? '&' : '?') + qs;
+      }
+    }
+    const res = await fetch(url, {
       method: 'GET',
       headers: this.getHeaders(),
     });

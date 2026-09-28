@@ -16,6 +16,7 @@ import { PersonaSwitcher } from './PersonaSwitcher';
 import { FEATURES } from '../../constants/features';
 import { getLeads, getCustomers, getDeals, getInvestors } from '../../services/ghlApiService';
 import { Lead, Customer, Deal, Investor, NotificationItem } from '../../types';
+import { storageService } from '../../services/storageService';
 import './TopBar.css';
 
 const getStoredNotifications = (tenantId?: string, userId?: string, roleCode?: string): NotificationItem[] => {
@@ -81,7 +82,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
   // Notifications state
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState(() =>
-    getStoredNotifications(tenant?.id, user?.id, user?.role?.code)
+    storageService.getNotifications(tenant?.id, user?.id, user?.role?.code)
   );
 
   // Quick New state
@@ -134,7 +135,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
   // Sync notifications with tenant and user scoping
   useEffect(() => {
     const handleUpdate = () => {
-      setNotifications(getStoredNotifications(tenant?.id, user?.id, user?.role?.code));
+      setNotifications(storageService.getNotifications(tenant?.id, user?.id, user?.role?.code));
     };
     handleUpdate();
     window.addEventListener('nexus_storage_updated', handleUpdate);
@@ -466,7 +467,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
                   <button
                     className="btn btn-ghost btn-sm"
                     style={{ fontSize: 11, padding: 0, color: 'var(--primary-600)' }}
-                    onClick={() => markAllStoredNotificationsRead(tenant?.id, user?.id)}
+                    onClick={() => storageService.markAllNotificationsRead(tenant?.id, user?.id)}
                   >
                     Mark all read
                   </button>
@@ -483,7 +484,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
                         key={n.id}
                         className={`btn-ghost topbar-notif-item ${!n.read ? 'unread' : ''}`}
                         onClick={() => {
-                          markStoredNotificationRead(n.id);
+                          storageService.markNotificationRead(n.id);
                           if (n.link) onNavigate(n.link.replace('/', ''));
                           setIsNotifOpen(false);
                         }}

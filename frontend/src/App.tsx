@@ -3,6 +3,7 @@ import { useAuth } from './context/AuthContext';
 import { AuthLayout } from './layouts/AuthLayout';
 import { SalesLayout } from './layouts/SalesLayout';
 import { AdminLayout } from './layouts/AdminLayout';
+import { isMockMode } from './config/environment';
 
 // Sales Core Pages
 import { DashboardPage } from './pages/Dashboard/DashboardPage';
@@ -59,6 +60,7 @@ import { PlatformSystemPage } from './pages/Admin/System/PlatformSystemPage';
 import { ProtectedRoute } from './components/common/Guards';
 import { Modal } from './components/common/Modal';
 import { Investor, Customer } from './types';
+import { storageService } from './services/storageService';
 import {
   saveLead as apiSaveLead,
   saveFollowup as apiSaveFollowup,
@@ -81,6 +83,28 @@ export const App: React.FC = () => {
   const isGhlAdmin =
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
+  // In mock mode only, run idempotent mock bootstrap if not yet initialized
+  useEffect(() => {
+    if (isMockMode()) {
+      import('./mock/runtime/mockBootstrap').then(({ runMockBootstrap }) => {
+        runMockBootstrap();
+      });
+    }
+  }, []);
+
+  // Set default route for IRM user
+  useEffect(() => {
+    if (user?.role?.code === 'irm') {
+      const savedRoute = sessionStorage.getItem('nexus_current_route');
+      if (!savedRoute) {
+        setCurrentRoute('dashboard');
+        sessionStorage.setItem('nexus_current_route', 'dashboard');
+      }
+    } else if (user?.role?.code === 'sales_executive' && currentRoute === 'kyc') {
+      setCurrentRoute('dashboard');
+      sessionStorage.setItem('nexus_current_route', 'dashboard');
+    }
+  }, [user?.role?.code, currentRoute]);
 
   // Quick Create Modal State
   const [quickCreateType, setQuickCreateType] = useState<
@@ -382,9 +406,13 @@ export const App: React.FC = () => {
           <BookingsPage />
         </ProtectedRoute>
       ) : currentRoute === 'kyc' ? (
-        <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
-          <KYCPage />
-        </ProtectedRoute>
+        user?.role?.code === 'sales_executive' ? (
+          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+        ) : (
+          <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
+            <KYCPage />
+          </ProtectedRoute>
+        )
       ) : currentRoute === 'investors' ? (
         <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
           <InvestorsPage />
@@ -690,6 +718,7 @@ export const App: React.FC = () => {
             <>
               {/* ── Deal: existing vs. new customer picker ── */}
               {quickCreateType === 'deal' && (() => {
+                const tenantCustomers = storageService.getCustomers(tenant?.id);
                 const hasCustomers = tenantCustomers.length > 0;
                 return (
                   <div className="form-group">
@@ -723,7 +752,7 @@ export const App: React.FC = () => {
                         onChange={e => setSelectedCustomerId(e.target.value)}
                         required
                       >
-                        {tenantCustomers.map(c => (
+                        {tenantCustomers.map((c: Customer) => (
                           <option key={c.id} value={c.id}>
                             {c.name}{c.phone ? ` · ${c.phone}` : ''}
                           </option>

@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { getFollowups } from '../../services/ghlApiService';
+import { storageService } from '../../services/storageService';
 import { FEATURES } from '../../constants/features';
 import { PERMISSIONS } from '../../constants/permissions';
 import './Sidebar.css';

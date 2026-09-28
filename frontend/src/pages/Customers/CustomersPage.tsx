@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Building2,
   Phone,
@@ -17,6 +17,8 @@ import {
 import { Customer, CallRecord, Followup, Deal, Lead, IrmProfile, CustomFieldDefinition } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
+import { storageService } from '../../services/storageService';
+import { isMockMode } from '../../config/environment';
 import {
   getCustomers,
   saveCustomer as apiSaveCustomer,
@@ -43,7 +45,6 @@ const getCustomFieldDefinitions = (tenantId?: string): CustomFieldDefinition[] =
     return [];
   }
 };
-
 interface AutoRecommendation {
   customerId: string;
   customerName: string;
@@ -60,6 +61,7 @@ export const CustomersPage: React.FC = () => {
   const { initiateCall } = useCall();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const irms = useMemo(() => storageService.getIrms(tenant?.id), [tenant?.id]);
 
   // Role-based scoping: Sales Executives see only their own customers.
   // Managers / Admins / Super Admins see the full company customer list (no filter).
@@ -201,6 +203,53 @@ export const CustomersPage: React.FC = () => {
     setIsAutoPreviewModalOpen(false);
   };
 
+  const formatCurrency = (val: number) => {
+    if (val >= 10000000) return `₹${(val / 10000000).toFixed(2)} Cr`;
+    if (val >= 100000) return `₹${(val / 100000).toFixed(1)} L`;
+    return `₹${val.toLocaleString('en-IN')}`;
+  };
+
+  // Build leads lookup map by last 10 digits of phone once per render
+  const leadsByPhone = useMemo(() => {
+    const map = new Map<string, Lead>();
+    (leads || []).forEach(l => {
+      const digits = (l.phone || '').replace(/\D/g, '').slice(-10);
+      if (digits && !map.has(digits)) {
+        map.set(digits, l);
+      }
+    });
+    return map;
+  }, [leads]);
+
+  const getInvestmentRange = (c: Customer): string => {
+    const checkVal = (v: unknown): string => {
+      if (typeof v === 'string' && v.trim()) {
+        return v.trim();
+      }
+      return '';
+    };
+
+    // 1. c.customFields?.investmentCapacity
+    const c1 = checkVal(c.customFields?.investmentCapacity);
+    if (c1) return c1;
+
+    // 2. c.customFields?.budgetRange
+    const c2 = checkVal(c.customFields?.budgetRange);
+    if (c2) return c2;
+
+    // 3. matching lead from the map (by the last 10 digits of c.phone)
+    const digits = (c.phone || '').replace(/\D/g, '').slice(-10);
+    const lead = digits ? leadsByPhone.get(digits) : undefined;
+    if (lead) {
+      const l1 = checkVal(lead.customFields?.investmentCapacity);
+      if (l1) return l1;
+      const l2 = checkVal(lead.customFields?.budgetRange);
+      if (l2) return l2;
+    }
+
+    return '';
+  };
+
   const getCustomerCapacityTier = (c: Customer): { tier: 'Premium' | 'Very High' | 'High' | 'Medium' | 'Normal'; label: string } => {
     const raw = getInvestmentRange(c);
     const totalVal = typeof c.totalValue === 'number' ? c.totalValue : 0;
@@ -222,7 +271,7 @@ export const CustomersPage: React.FC = () => {
 
   const runAutoAssignmentAlgorithm = (custs: Customer[]): AutoRecommendation[] => {
     const liveCountMap: Record<string, number> = {};
-    MOCK_IRMS.forEach((irm: IrmProfile) => {
+    irms.forEach((irm: IrmProfile) => {
       liveCountMap[irm.id] = customers.filter(c => c.assignedIrmName === irm.name || c.assignedIrmId === irm.id).length;
     });
 
@@ -237,8 +286,8 @@ export const CustomersPage: React.FC = () => {
 
     sortedCusts.forEach(c => {
       const { tier, label } = getCustomerCapacityTier(c);
-      const availableIrms = MOCK_IRMS.filter((i: IrmProfile) => i.status === 'Available');
-      const pool = availableIrms.length > 0 ? availableIrms : MOCK_IRMS;
+      const availableIrms = irms.filter((i: IrmProfile) => i.status === 'Available');
+      const pool = availableIrms.length > 0 ? availableIrms : irms;
 
       let chosenIrm: IrmProfile;
       let reason: string;
@@ -295,7 +344,7 @@ export const CustomersPage: React.FC = () => {
       const selectedCusts = scopedCustomers.filter(c => selectedCustomerIds.has(c.id) && isCustomerEligibleForIrm(c));
       if (selectedCusts.length === 0) return;
 
-      setSelectedIrmId(MOCK_IRMS[0]?.id || '');
+      setSelectedIrmId(irms[0]?.id || MOCK_IRMS[0]?.id || '');
       setIsManualModalOpen(true);
     } else {
       if (eligibleUnassignedCustomers.length === 0) return;
@@ -306,14 +355,15 @@ export const CustomersPage: React.FC = () => {
   };
 
   const handleConfirmManualAssignment = async () => {
-    const selectedIrm = MOCK_IRMS.find((i: IrmProfile) => i.id === selectedIrmId);
+    const selectedIrm = irms.find((i: IrmProfile) => i.id === selectedIrmId) || MOCK_IRMS.find((i: IrmProfile) => i.id === selectedIrmId);
     if (!selectedIrm) return;
 
     let assignedCount = 0;
+    const allLatest = (storageService.getCustomers ? storageService.getCustomers(tenant?.id) : customers) || customers;
     const toUpdate: Customer[] = [];
 
     selectedCustomerIds.forEach(cid => {
-      const cust = customers.find(c => c.id === cid);
+      const cust = allLatest.find((c: Customer) => c.id === cid) || customers.find((c: Customer) => c.id === cid);
       if (cust && isCustomerEligibleForIrm(cust)) {
         const updated: Customer = {
           ...cust,
@@ -323,12 +373,15 @@ export const CustomersPage: React.FC = () => {
           notes: `${cust.notes ? cust.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Assigned to IRM: ${selectedIrm.name} by ${user?.name || 'Sales Executive'}`,
         };
         toUpdate.push(updated);
+        storageService.saveCustomer?.(updated);
         assignedCount++;
       }
     });
 
-    for (const u of toUpdate) {
-      await apiSaveCustomer(u).catch(console.error);
+    if (!isMockMode()) {
+      for (const u of toUpdate) {
+        await apiSaveCustomer(u).catch(console.error);
+      }
     }
 
     setIsManualModalOpen(false);
@@ -340,10 +393,11 @@ export const CustomersPage: React.FC = () => {
 
   const handleConfirmAutoAssignment = async () => {
     let assignedCount = 0;
+    const allLatest = (storageService.getCustomers ? storageService.getCustomers(tenant?.id) : customers) || customers;
     const toUpdate: Customer[] = [];
 
     autoRecommendations.forEach(rec => {
-      const cust = customers.find(c => c.id === rec.customerId);
+      const cust = allLatest.find((c: Customer) => c.id === rec.customerId) || customers.find((c: Customer) => c.id === rec.customerId);
       if (cust && isCustomerEligibleForIrm(cust)) {
         const updated: Customer = {
           ...cust,
@@ -353,12 +407,15 @@ export const CustomersPage: React.FC = () => {
           notes: `${cust.notes ? cust.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Auto-assigned to IRM: ${rec.recommendedIrmName} (${rec.matchReason})`,
         };
         toUpdate.push(updated);
+        storageService.saveCustomer?.(updated);
         assignedCount++;
       }
     });
 
-    for (const u of toUpdate) {
-      await apiSaveCustomer(u).catch(console.error);
+    if (!isMockMode()) {
+      for (const u of toUpdate) {
+        await apiSaveCustomer(u).catch(console.error);
+      }
     }
 
     setIsAutoPreviewModalOpen(false);
@@ -370,7 +427,7 @@ export const CustomersPage: React.FC = () => {
   };
 
   const handleUpdateSingleRecommendation = (customerId: string, newIrmId: string) => {
-    const newIrm = MOCK_IRMS.find((i: IrmProfile) => i.id === newIrmId);
+    const newIrm = irms.find((i: IrmProfile) => i.id === newIrmId) || MOCK_IRMS.find((i: IrmProfile) => i.id === newIrmId);
     if (!newIrm) return;
     setAutoRecommendations(prev =>
       prev.map(rec => {
@@ -445,50 +502,6 @@ export const CustomersPage: React.FC = () => {
       .catch(console.error);
     setIsAddModalOpen(false);
     resetAddForm();
-  };
-
-  const formatCurrency = (val: number) => {
-    if (val >= 10000000) return `₹${(val / 10000000).toFixed(2)} Cr`;
-    if (val >= 100000) return `₹${(val / 100000).toFixed(1)} L`;
-    return `₹${val.toLocaleString('en-IN')}`;
-  };
-
-  // Build leads lookup map by last 10 digits of phone once per render
-  const leadsByPhone = new Map<string, Lead>();
-  (leads || []).forEach(l => {
-    const digits = (l.phone || '').replace(/\D/g, '').slice(-10);
-    if (digits && !leadsByPhone.has(digits)) {
-      leadsByPhone.set(digits, l);
-    }
-  });
-
-  const getInvestmentRange = (c: Customer): string => {
-    const checkVal = (v: unknown): string => {
-      if (typeof v === 'string' && v.trim()) {
-        return v.trim();
-      }
-      return '';
-    };
-
-    // 1. c.customFields?.investmentCapacity
-    const c1 = checkVal(c.customFields?.investmentCapacity);
-    if (c1) return c1;
-
-    // 2. c.customFields?.budgetRange
-    const c2 = checkVal(c.customFields?.budgetRange);
-    if (c2) return c2;
-
-    // 3. matching lead from the map (by the last 10 digits of c.phone)
-    const digits = (c.phone || '').replace(/\D/g, '').slice(-10);
-    const lead = digits ? leadsByPhone.get(digits) : undefined;
-    if (lead) {
-      const l1 = checkVal(lead.customFields?.investmentCapacity);
-      if (l1) return l1;
-      const l2 = checkVal(lead.customFields?.budgetRange);
-      if (l2) return l2;
-    }
-
-    return '';
   };
 
   const getCustomerValueDisplay = (c: Customer): string => {
@@ -1182,7 +1195,7 @@ export const CustomersPage: React.FC = () => {
           }
         >
           <div className="irm-selection-list">
-            {MOCK_IRMS.map((irm: IrmProfile) => {
+            {irms.map((irm: IrmProfile) => {
               const currentCount = customers.filter(c => c.assignedIrmName === irm.name || c.assignedIrmId === irm.id).length;
               const workload = currentCount <= 2 ? 'Low' : currentCount <= 5 ? 'Medium' : 'High';
               const isSelected = selectedIrmId === irm.id;
@@ -1300,7 +1313,7 @@ export const CustomersPage: React.FC = () => {
                           onChange={e => handleUpdateSingleRecommendation(rec.customerId, e.target.value)}
                           autoFocus
                         >
-                          {MOCK_IRMS.map((irm: IrmProfile) => (
+                          {irms.map((irm: IrmProfile) => (
                             <option key={irm.id} value={irm.id}>
                               {irm.name} ({irm.experienceLevel}, {irm.status})
                             </option>

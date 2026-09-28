@@ -17,7 +17,8 @@ import {
   FileText,
   MessageCircle,
 } from 'lucide-react';
-import { Deal, DealActivity } from '../../types';
+import { Deal, DealActivity, Lead, Followup } from '../../types';
+import { storageService } from '../../services/storageService';
 import { useAuth } from '../../context/AuthContext';
 import { useCan } from '../../components/common/Guards';
 import { getDeals, saveDeal as apiSaveDeal, addDealActivity as apiAddDealActivity, getDealActivities as apiGetDealActivities } from '../../services/ghlApiService';
@@ -52,7 +53,12 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   }
 
   const canUpdateDeals = useCan('deals.update');
+  const isIrm = roleCode === 'irm';
+  const isGhlIrm = isIrm && tenant?.slug === 'ghl';
+
   const [deals, setDeals] = useState<Deal[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [followups, setFollowups] = useState<Followup[]>([]);
   const [selectedDealForLoss, setSelectedDealForLoss] = useState<Deal | null>(null);
   const [lossReason, setLossReason] = useState('Competitor Pricing');
   const [agentFilter, setAgentFilter] = useState('All');
@@ -73,16 +79,98 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     )
     : deals;
 
+  const scopedLeads = isGhlIrm
+    ? leads.filter(
+        l =>
+          (l.assignedAgentId && l.assignedAgentId === user?.id) ||
+          (l.assignedAgentName && l.assignedAgentName === user?.name)
+      )
+    : [];
+
+  const scopedFollowups = isGhlIrm
+    ? followups.filter(
+        f =>
+          (f.assignedAgentId && f.assignedAgentId === user?.id) ||
+          (f.assignedAgentName && f.assignedAgentName === user?.name)
+      )
+    : [];
+
+  const leadToPipelineCard = (lead: Lead): Deal => ({
+    id: lead.id,
+    companyId: lead.companyId || tenant?.id || '',
+    title: lead.name,
+    customerId: lead.id,
+    customerName: lead.name,
+    phone: lead.phone,
+    email: lead.email,
+    assignedAgentId: lead.assignedAgentId,
+    assignedAgentName: lead.assignedAgentName,
+    stage: 'leads',
+    stageEnteredAt: lead.createdAt,
+    createdAt: lead.createdAt,
+    expectedCloseDate: '',
+    notes: lead.notes || '',
+    value: 0,
+    priority: lead.priority === 'Urgent' ? 'High' : (lead.priority as 'High' | 'Medium' | 'Low'),
+    location: lead.location,
+    investmentRange:
+      lead.customFields?.investmentCapacity ||
+      lead.customFields?.capacityRange ||
+      lead.customFields?.investmentRange ||
+      (lead as any).investmentRange ||
+      undefined,
+    investorType: lead.customFields?.investorType || undefined,
+  });
+
+  const followupToPipelineCard = (followup: Followup): Deal => ({
+    id: followup.id,
+    companyId: followup.companyId || tenant?.id || '',
+    title: followup.contactName,
+    customerId: followup.contactId,
+    customerName: followup.contactName,
+    phone: followup.contactPhone,
+    email: (followup as any).email || undefined,
+    assignedAgentId: followup.assignedAgentId,
+    assignedAgentName: followup.assignedAgentName,
+    stage: 'followup',
+    stageEnteredAt: followup.scheduledAt,
+    createdAt: followup.scheduledAt || (followup as any).createdAt || '',
+    expectedCloseDate: '',
+    notes: followup.notes || '',
+    value: 0,
+    priority: (followup.priority as 'High' | 'Medium' | 'Low') || 'Medium',
+    investmentRange:
+      (followup as any).investmentCapacity ||
+      (followup as any).investmentRange ||
+      undefined,
+  });
+
   // Agent filter options — derived from the already-scoped pool so execs never see this.
-  const agentOptions = Array.from(new Set(scopedDeals.map(d => d.assignedAgentName)))
+  const agentOptions = Array.from(
+    new Set([
+      ...scopedDeals.map(d => d.assignedAgentName),
+      ...scopedLeads.map(l => l.assignedAgentName),
+      ...scopedFollowups.map(f => f.assignedAgentName),
+    ])
+  )
     .filter(Boolean)
     .map(name => ({ value: name, label: name }));
 
   const [dealActivities, setDealActivities] = useState<DealActivity[]>([]);
 
   const loadData = async () => {
-    const latestDeals = await getDeals(tenant?.id);
+    let latestDeals: Deal[] = [];
+    try {
+      latestDeals = await getDeals(tenant?.id);
+      if (!latestDeals || latestDeals.length === 0) {
+        latestDeals = storageService.getDeals(tenant?.id) || [];
+      }
+    } catch {
+      latestDeals = storageService.getDeals(tenant?.id) || [];
+    }
     setDeals(latestDeals);
+    setLeads(storageService.getLeads(tenant?.id) || []);
+    setFollowups(storageService.getFollowups(tenant?.id) || []);
     setIrmDetailDeal(prev => {
       if (!prev) return null;
       return latestDeals.find(d => d.id === prev.id) || prev;
@@ -111,8 +199,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   }, [tenant?.id]);
 
   // Stages derived dynamically from current tenant slug!
-  const isIrm = roleCode === 'irm';
-
   const stages = tenant?.slug === 'jamin'
     ? PIPELINE_STAGES.jamin
     : tenant?.slug === 'ghl'
@@ -133,6 +219,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
         stage: stages[newIndex].id,
         stageEnteredAt: new Date().toISOString(),
       };
+      storageService.saveDeal(updatedDeal);
       apiSaveDeal(updatedDeal).catch(console.error);
     }
   };
@@ -149,6 +236,9 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       stage: targetStageId,
       stageEnteredAt: new Date().toISOString(),
     };
+    storageService.saveDeal(updatedDeal);
+    await apiSaveDeal(updatedDeal).catch(console.error);
+
     const moveActivity: DealActivity = {
       id: `act-${Date.now()}`,
       dealId: irmDetailDeal.id,
@@ -156,13 +246,14 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       type: 'stage_change',
       fromStage: irmDetailDeal.stage,
       toStage: targetStageId,
-      text: `Stage changed from "${fromStageName}" to "${toStageName}".`,
+      text: `${fromStageName} → ${toStageName}`,
       loggedByName: user?.name || 'IRM User',
       loggedByRole: 'IRM',
       timestamp: new Date().toISOString(),
     };
-    await apiSaveDeal(updatedDeal).catch(console.error);
+    storageService.addDealActivity(moveActivity);
     await apiAddDealActivity(moveActivity).catch(console.error);
+
     setIrmDetailDeal(updatedDeal);
     setDealActivities(prev => [moveActivity, ...prev]);
     loadData();
@@ -182,13 +273,18 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       timestamp: new Date().toISOString(),
     };
 
+    storageService.addDealActivity(newActivity);
     apiAddDealActivity(newActivity).catch(console.error);
     setActivityText('');
+    setDealActivities(prev => [newActivity, ...prev]);
     loadData();
   };
 
   const handleMarkWon = (deal: Deal) => {
-    apiSaveDeal({ ...deal, stage: wonStageId, stageEnteredAt: new Date().toISOString() }).catch(console.error);
+    const updated = { ...deal, stage: wonStageId, stageEnteredAt: new Date().toISOString() };
+    storageService.saveDeal(updated);
+    apiSaveDeal(updated).catch(console.error);
+    loadData();
   };
 
   const handleConfirmLost = () => {
@@ -229,7 +325,9 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     });
   };
 
-  const irmDealActivities = dealActivities;
+  const irmDealActivities = dealActivities.length > 0
+    ? dealActivities
+    : (irmDetailDeal ? storageService.getDealActivities(irmDetailDeal.id, tenant?.id) : []);
 
   return (
     <div className="pipeline-page-container">
@@ -270,10 +368,21 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       {/* Kanban Board Horizontal Scrolling Container */}
       <div className="pipeline-board-container">
         {stages.map((stage, sIdx) => {
-          const stageDeals = scopedDeals.filter(d =>
-            d.stage === stage.id &&
-            (agentFilter === 'All' || d.assignedAgentName === agentFilter)
-          );
+          let stageDeals: Deal[];
+          if (isIrm && tenant?.slug === 'ghl' && stage.id === 'leads') {
+            stageDeals = scopedLeads
+              .filter(l => agentFilter === 'All' || l.assignedAgentName === agentFilter)
+              .map(leadToPipelineCard);
+          } else if (isIrm && tenant?.slug === 'ghl' && stage.id === 'followup') {
+            stageDeals = scopedFollowups
+              .filter(f => agentFilter === 'All' || f.assignedAgentName === agentFilter)
+              .map(followupToPipelineCard);
+          } else {
+            stageDeals = scopedDeals.filter(d =>
+              d.stage === stage.id &&
+              (agentFilter === 'All' || d.assignedAgentName === agentFilter)
+            );
+          }
           const stageTotal = stageDeals.reduce((sum, d) => sum + d.value, 0);
 
           return (
@@ -316,7 +425,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                       const currIdx = Math.min(cardIndex[stage.id] || 0, Math.max(0, stageDeals.length - 1));
                       const deal = stageDeals[currIdx];
                       const daysInStage = getDaysInStage(deal);
-                      const lastActivity = null;
 
                       return (
                         <div
@@ -375,8 +483,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                               {daysInStage}d in stage
                             </span>
                           </div>
-
-                          {/* Last Activity Removed */}
 
                           {/* Footer: Investment range + pagination */}
                           <div className="irm-card-footer">
@@ -677,8 +783,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                 })}
               </div>
             </div>
-
-            {/* Log New Activity / Note Removed */}
 
             {/* Activity History & Stage Transitions */}
             <div className="irm-activity-card">

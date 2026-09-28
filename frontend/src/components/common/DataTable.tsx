@@ -44,6 +44,7 @@ interface DataTableProps<T> {
   pageSize?: number;
   bulkActions?: { label: string; onClick: (selectedItems: T[]) => void; danger?: boolean }[];
   filtersNode?: React.ReactNode;
+  hideSearch?: boolean; // when true, don't render the built-in search box
 }
 
 export function DataTable<T>({
@@ -61,6 +62,7 @@ export function DataTable<T>({
   pageSize = 10,
   bulkActions,
   filtersNode,
+  hideSearch = false,
 }: DataTableProps<T>) {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortKey, setSortKey] = useState<string | null>(null);
@@ -195,31 +197,33 @@ export function DataTable<T>({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 260 }}>
-          <div
-            style={{
-              position: 'relative',
-              width: '100%',
-              maxWidth: 360,
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            <Search
-              size={16}
-              style={{ position: 'absolute', left: 12, color: 'var(--text-muted)' }}
-            />
-            <input
-              type="text"
-              className="form-input"
-              style={{ paddingLeft: 36, height: 38 }}
-              placeholder={searchPlaceholder}
-              value={searchQuery}
-              onChange={e => {
-                setSearchQuery(e.target.value);
-                setCurrentPage(1);
+          {!hideSearch && (
+            <div
+              style={{
+                position: 'relative',
+                width: '100%',
+                maxWidth: 360,
+                display: 'flex',
+                alignItems: 'center',
               }}
-            />
-          </div>
+            >
+              <Search
+                size={16}
+                style={{ position: 'absolute', left: 12, color: 'var(--text-muted)' }}
+              />
+              <input
+                type="text"
+                className="form-input"
+                style={{ paddingLeft: 36, height: 38 }}
+                placeholder={searchPlaceholder}
+                value={searchQuery}
+                onChange={e => {
+                  setSearchQuery(e.target.value);
+                  setCurrentPage(1);
+                }}
+              />
+            </div>
+          )}
           {filtersNode && (
             <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
               {filtersNode}
