@@ -124,7 +124,7 @@ export const AuthLayout: React.FC = () => {
             <div className="auth-password-header">
               <label className="form-label auth-form-label">Password</label>
               <a href="#forgot" className="auth-forgot-link">
-                Forgot?
+                Forgot Password?
               </a>
             </div>
             <div className="auth-input-wrapper">
@@ -151,7 +151,7 @@ export const AuthLayout: React.FC = () => {
             className="btn btn-primary auth-submit-btn"
             disabled={isLoading}
           >
-            {isLoading ? 'Signing in...' : 'Sign In to Organization'} <ArrowRight size={16} />
+            {isLoading ? 'Signing in...' : 'Sign in'} <ArrowRight size={16} />
           </button>
         </form>
       </div>
