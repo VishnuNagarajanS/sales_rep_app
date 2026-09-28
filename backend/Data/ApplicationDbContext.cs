@@ -64,8 +64,8 @@ public class ApplicationDbContext : DbContext
         // 1. Roles (Integer IDs 1, 2, 3, 4)
         var superAdminRoleId = 1;
         var companyAdminRoleId = 2;
-        var salesManagerRoleId = 3;
-        var salesExecutiveRoleId = 4;
+        var salesExecutiveRoleId = 3;
+        var irmRoleId = 4;
 
         modelBuilder.Entity<Role>().HasData(
             new Role
@@ -109,25 +109,6 @@ public class ApplicationDbContext : DbContext
             },
             new Role
             {
-                Id = salesManagerRoleId,
-                Name = "Sales Manager",
-                Code = "sales_manager",
-                Permissions = new List<string>
-                {
-                    "leads.view", "leads.create", "leads.update", "leads.assign", "leads.export", "leads.convert",
-                    "customers.view", "customers.create", "customers.update",
-                    "deals.view", "deals.create", "deals.update",
-                    "calls.make", "calls.receive", "calls.view", "calls.recordings.play",
-                    "followups.view", "followups.create", "followups.update",
-                    "properties.view", "properties.update", "site_visits.view", "site_visits.create", "bookings.view", "bookings.create",
-                    "investors.view", "investors.create", "consultations.view", "consultations.create", "opportunities.view", "opportunities.create",
-                    "reports.view", "reports.export",
-                    "users.view"
-                },
-                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-            },
-            new Role
-            {
                 Id = salesExecutiveRoleId,
                 Name = "Sales Executive",
                 Code = "sales_executive",
@@ -140,6 +121,22 @@ public class ApplicationDbContext : DbContext
                     "followups.view", "followups.create", "followups.update",
                     "properties.view", "site_visits.view", "site_visits.create", "bookings.view", "bookings.create",
                     "investors.view", "investors.create", "consultations.view", "consultations.create", "opportunities.view", "opportunities.create",
+                    "reports.view"
+                },
+                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            },
+            new Role
+            {
+                Id = irmRoleId,
+                Name = "IRM",
+                Code = "irm",
+                Permissions = new List<string>
+                {
+                    "leads.view", "followups.view", "deals.view",
+                    "investors.view", "investors.create",
+                    "consultations.view", "consultations.create",
+                    "opportunities.view", "opportunities.create",
+                    "calls.make", "calls.receive", "calls.view",
                     "reports.view"
                 },
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
@@ -188,11 +185,11 @@ public class ApplicationDbContext : DbContext
             }
         );
 
-        // 3. Demo Users (Integer IDs 1, 2, 3, 4 - Password: Password@123)
+        // 3. Demo Users (Integer IDs 1 to 6 - Password: Password@123)
         var passwordHash = "$2a$11$z2c3Nc1pe7Tqmxj6Rm15NOt8vuAyyKfqzGtBKpiFU2NcPZxsjt5p.";
 
         modelBuilder.Entity<User>().HasData(
-            // Super Admin
+            // 1. Super Admin (Yanosh - Global Platform Console)
             new User
             {
                 Id = 1,
@@ -205,7 +202,7 @@ public class ApplicationDbContext : DbContext
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
-            // GHL Company Admin (Vishnu)
+            // 2. GHL Company Admin (Vishnu)
             new User
             {
                 Id = 2,
@@ -218,7 +215,7 @@ public class ApplicationDbContext : DbContext
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
-            // GHL Sales Executive (Naveen)
+            // 3. GHL Sales Executive (Naveen)
             new User
             {
                 Id = 3,
@@ -231,7 +228,7 @@ public class ApplicationDbContext : DbContext
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
-            // Jamin Company Admin (Mani)
+            // 4. Jamin Company Admin (Mani)
             new User
             {
                 Id = 4,
@@ -240,6 +237,32 @@ public class ApplicationDbContext : DbContext
                 PasswordHash = passwordHash,
                 Phone = "+91 98450 33445",
                 RoleId = companyAdminRoleId,
+                CompanyId = 2,
+                Status = UserStatus.Active,
+                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            },
+            // 5. GHL IRM (Dhinakaran)
+            new User
+            {
+                Id = 5,
+                Name = "Dhinakaran",
+                Email = "dhinakaran@ghlindiaventures.com",
+                PasswordHash = passwordHash,
+                Phone = "+91 98110 77889",
+                RoleId = irmRoleId,
+                CompanyId = 1,
+                Status = UserStatus.Active,
+                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            },
+            // 6. Jamin Sales Executive (Rajesh Sharma)
+            new User
+            {
+                Id = 6,
+                Name = "Rajesh Sharma",
+                Email = "rajesh@jaminbazaar.com",
+                PasswordHash = passwordHash,
+                Phone = "+91 98450 44556",
+                RoleId = salesExecutiveRoleId,
                 CompanyId = 2,
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
@@ -262,8 +285,8 @@ public class ApplicationDbContext : DbContext
                 InvestmentMandate = "Growth focused Category II AIF with commercial allocation",
                 CommittedAum = "₹5.0 Cr",
                 ReferralSource = "Wealth Partner Direct",
-                AssignedIrmId = 2,
-                AssignedIrmName = "Vikram Malhotra",
+                AssignedIrmId = 5,
+                AssignedIrmName = "Dhinakaran",
                 Notes = "Senior HNI investor with portfolio in Bangalore",
                 CreatedAt = new DateTime(2026, 1, 15, 0, 0, 0, DateTimeKind.Utc)
             },
@@ -279,8 +302,8 @@ public class ApplicationDbContext : DbContext
                 PreferredAssetClass = "Commercial AIF",
                 RiskTolerance = "Aggressive",
                 InvestmentMandate = "High-yield commercial development tranches",
-                AssignedIrmId = 2,
-                AssignedIrmName = "Vikram Malhotra",
+                AssignedIrmId = 5,
+                AssignedIrmName = "Dhinakaran",
                 Notes = "Family office lead referred via CFO network",
                 CreatedAt = new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc)
             }
@@ -292,7 +315,7 @@ public class ApplicationDbContext : DbContext
             {
                 Id = 1,
                 CompanyId = 1,
-                CreatedByIrmId = 2,
+                CreatedByIrmId = 5,
                 Title = "Prime Bengaluru Commercial Yield Fund II",
                 AssetClass = "Commercial AIF",
                 Description = "Grade-A office park pre-leased to Fortune 500 GCCs with 8.5% entry cap rate",
@@ -314,8 +337,8 @@ public class ApplicationDbContext : DbContext
                 Id = 1,
                 CompanyId = 1,
                 InvestorId = 1,
-                AssignedIrmId = 2,
-                AssignedIrmName = "Vikram Malhotra",
+                AssignedIrmId = 5,
+                AssignedIrmName = "Dhinakaran",
                 InvestorName = "Rajesh Singhania",
                 InvestorPhone = "+91 98200 44556",
                 InvestorEmail = "rajesh.singhania@apexcapital.in",
@@ -332,8 +355,8 @@ public class ApplicationDbContext : DbContext
                 Id = 2,
                 CompanyId = 1,
                 InvestorId = 2,
-                AssignedIrmId = 2,
-                AssignedIrmName = "Vikram Malhotra",
+                AssignedIrmId = 5,
+                AssignedIrmName = "Dhinakaran",
                 InvestorName = "Meera Nambiar",
                 InvestorPhone = "+91 98450 99881",
                 InvestorEmail = "meera.nambiar@nambiarholdings.com",

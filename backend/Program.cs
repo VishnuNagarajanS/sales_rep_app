@@ -77,8 +77,13 @@ var app = builder.Build();
 // Ensure database and seed data are initialized
 using (var scope = app.Services.CreateScope())
 {
-    var db = scope.ServiceProvider.GetRequiredService<backend.Data.ApplicationDbContext>();
-    db.Database.EnsureCreated();
+    var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+    var useInMemory = config.GetValue<bool>("UseInMemoryDatabase", false);
+    if (useInMemory)
+    {
+        var db = scope.ServiceProvider.GetRequiredService<backend.Data.ApplicationDbContext>();
+        db.Database.EnsureCreated();
+    }
 }
 
 // Global Exception Handling Middleware

@@ -62,32 +62,77 @@ export const PlatformUsersPage: React.FC = () => {
   const [generatedTempPassword, setGeneratedTempPassword] = useState('');
   const [hasCopiedPassword, setHasCopiedPassword] = useState(false);
 
+  const [isLoading, setIsLoading] = useState(false);
+
   // Success Feedback
   const [feedbackMsg, setFeedbackMsg] = useState('');
 
-  const loadData = () => {
-    setTenants(superAdminService.getTenants());
-    setRoles(superAdminService.getRoles());
-    applyFilters();
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      const [tList, rMap, uList] = await Promise.all([
+        superAdminService.fetchTenantsFromApi(),
+        superAdminService.fetchRolesFromApi(),
+        superAdminService.fetchUsersFromApi({
+          companyId: selectedCompanyFilter,
+          roleCode: selectedRoleFilter,
+          status: selectedStatusFilter,
+          search: searchQuery,
+        }),
+      ]);
+      setTenants(tList);
+      setRoles(rMap);
+      setUsers(uList);
+    } catch {
+      setTenants(superAdminService.getTenants());
+      setRoles(superAdminService.getRoles());
+      setUsers(
+        superAdminService.getUsers({
+          companyId: selectedCompanyFilter,
+          roleCode: selectedRoleFilter,
+          status: selectedStatusFilter,
+          search: searchQuery,
+        })
+      );
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const applyFilters = () => {
-    const list = superAdminService.getUsers({
-      companyId: selectedCompanyFilter,
-      roleCode: selectedRoleFilter,
-      status: selectedStatusFilter,
-      search: searchQuery,
-    });
-    setUsers(list);
+  const applyFilters = async () => {
+    setIsLoading(true);
+    try {
+      const list = await superAdminService.fetchUsersFromApi({
+        companyId: selectedCompanyFilter,
+        roleCode: selectedRoleFilter,
+        status: selectedStatusFilter,
+        search: searchQuery,
+      });
+      setUsers(list);
+    } catch {
+      setUsers(
+        superAdminService.getUsers({
+          companyId: selectedCompanyFilter,
+          roleCode: selectedRoleFilter,
+          status: selectedStatusFilter,
+          search: searchQuery,
+        })
+      );
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
     loadData();
-    window.addEventListener('nexus_admin_updated', loadData);
-    window.addEventListener('nexus_storage_updated', loadData);
+    const handleUpdate = () => {
+      applyFilters();
+    };
+    window.addEventListener('nexus_admin_updated', handleUpdate);
+    window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => {
-      window.removeEventListener('nexus_admin_updated', loadData);
-      window.removeEventListener('nexus_storage_updated', loadData);
+      window.removeEventListener('nexus_admin_updated', handleUpdate);
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
     };
   }, []);
 
@@ -101,14 +146,14 @@ export const PlatformUsersPage: React.FC = () => {
   };
 
   // Handle Provisioning
-  const handleProvisionUser = () => {
+  const handleProvisionUser = async () => {
     if (!newName || !newEmail) return;
 
     const isPlatform = provisionUserType === 'platform_admin';
     const targetRole = isPlatform ? roles.super_admin : roles.company_admin;
     const targetCompany = isPlatform ? undefined : newCompanyId || tenants[0]?.id;
 
-    superAdminService.createUser({
+    await superAdminService.createUserApi({
       name: newName,
       email: newEmail,
       phone: newPhone,
@@ -123,7 +168,8 @@ export const PlatformUsersPage: React.FC = () => {
     // Reset
     setNewName('');
     setNewEmail('');
-    showFeedback(`User account "${newName}" provisioned successfully.`);
+    showFeedback(`User account "${newName}" provisioned successfully in database.`);
+    await applyFilters();
   };
 
   // Handle Editing
@@ -138,14 +184,14 @@ export const PlatformUsersPage: React.FC = () => {
     setIsEditDrawerOpen(true);
   };
 
-  const handleSaveEditUser = () => {
+  const handleSaveEditUser = async () => {
     if (!editingUser) return;
 
     const isGlobal = editCompanyId === 'global';
     const targetRole = roles[editRoleCode] || editingUser.role;
     const tenantObj = isGlobal ? undefined : tenants.find(t => t.id === editCompanyId);
 
-    superAdminService.updateUser(editingUser.id, {
+    await superAdminService.updateUserApi(editingUser.id, {
       name: editName,
       email: editEmail,
       phone: editPhone,
@@ -157,13 +203,14 @@ export const PlatformUsersPage: React.FC = () => {
     });
 
     setIsEditDrawerOpen(false);
-    showFeedback(`User profile for "${editName}" updated.`);
+    showFeedback(`User profile for "${editName}" updated in database.`);
+    await applyFilters();
   };
 
   // Handle Password Reset
-  const openResetModal = (u: User) => {
+  const openResetModal = async (u: User) => {
     setResettingUser(u);
-    const result = superAdminService.resetUserPassword(u.id);
+    const result = await superAdminService.resetUserPasswordApi(u.id);
     setGeneratedTempPassword(result.tempPassword || 'Nexus#2026!');
     setHasCopiedPassword(false);
     setIsResetModalOpen(true);
@@ -176,23 +223,26 @@ export const PlatformUsersPage: React.FC = () => {
   };
 
   // Handle Toggle Status
-  const handleToggleStatus = (u: User) => {
+  const handleToggleStatus = async (u: User) => {
     const nextStatus = u.status === 'Active' ? 'Disabled' : 'Active';
-    superAdminService.toggleUserStatus(u.id, nextStatus);
+    await superAdminService.toggleUserStatusApi(u.id, nextStatus);
     showFeedback(`User status for ${u.name} set to ${nextStatus}.`);
+    await applyFilters();
   };
 
   // Handle Delete
-  const handleDeleteUser = (u: User) => {
+  const handleDeleteUser = async (u: User) => {
     if (u.email === 'yanosh@ghlindiaventures.com') {
       alert('The root platform Super Admin cannot be deleted.');
       return;
     }
     if (confirm(`Are you sure you want to permanently delete user "${u.name}" (${u.email})?`)) {
-      superAdminService.deleteUser(u.id);
-      showFeedback(`User account "${u.name}" removed.`);
+      await superAdminService.deleteUserApi(u.id);
+      showFeedback(`User account "${u.name}" removed from database.`);
+      await applyFilters();
     }
   };
+
 
   return (
     <div className="platform-users-page-container">
@@ -208,16 +258,26 @@ export const PlatformUsersPage: React.FC = () => {
           </p>
         </div>
 
-        <button
-          className="btn btn-primary btn-sm btn-provision-user"
-          onClick={() => {
-            setProvisionUserType('tenant_user');
-            setNewCompanyId(tenants[0]?.id || '');
-            setIsProvisionModalOpen(true);
-          }}
-        >
-          <UserPlus size={14} /> Provision User Account
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => loadData()}
+            disabled={isLoading}
+            title="Reload users directly from development database"
+          >
+            <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} /> Refresh Directory
+          </button>
+          <button
+            className="btn btn-primary btn-sm btn-provision-user"
+            onClick={() => {
+              setProvisionUserType('tenant_user');
+              setNewCompanyId(tenants[0]?.id || '');
+              setIsProvisionModalOpen(true);
+            }}
+          >
+            <UserPlus size={14} /> Provision User Account
+          </button>
+        </div>
       </div>
 
       {feedbackMsg && (
@@ -297,10 +357,25 @@ export const PlatformUsersPage: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {users.map(u => {
-                const isSuperAdminUser = u.role.code === 'super_admin';
-                return (
-                  <tr key={u.id} className="user-table-row">
+              {isLoading && users.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: '40px 16px', color: '#94a3b8' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                      <RefreshCw size={16} className="animate-spin" /> Loading cross-tenant directory from database...
+                    </div>
+                  </td>
+                </tr>
+              ) : users.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: '40px 16px', color: '#94a3b8' }}>
+                    No users found matching current filters.
+                  </td>
+                </tr>
+              ) : (
+                users.map(u => {
+                  const isSuperAdminUser = u.role.code === 'super_admin';
+                  return (
+                    <tr key={u.id} className="user-table-row">
                     <td>
                       <div className="user-identity-cell">
                         <div
@@ -386,7 +461,8 @@ export const PlatformUsersPage: React.FC = () => {
                     </td>
                   </tr>
                 );
-              })}
+              })
+            )}
             </tbody>
           </table>
         </div>
