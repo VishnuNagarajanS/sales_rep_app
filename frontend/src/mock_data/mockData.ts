@@ -158,8 +158,8 @@ export const ROLES: Record<string, Role> = {
 export const USERS: User[] = [
   {
     id: 'usr-super-01',
-    name: 'Alex Rivera (Super Admin)',
-    email: 'alex@nexusplatform.io',
+    name: 'Yanosh',
+    email: 'yanosh@ghlindiaventures.com',
     phone: '+91 98800 11000',
     role: ROLES.super_admin,
     status: 'Active',
@@ -167,8 +167,8 @@ export const USERS: User[] = [
   },
   {
     id: 'usr-ghl-admin',
-    name: 'Vikram Malhotra',
-    email: 'vikram@ghlindiatrust.com',
+    name: 'Vishnu',
+    email: 'vishnu@ghlindiaventures.com',
     phone: '+91 98450 22334',
     role: ROLES.company_admin,
     companyId: 't-ghl-01',
@@ -179,8 +179,8 @@ export const USERS: User[] = [
   },
   {
     id: 'usr-ghl-exec',
-    name: 'Ananya Iyer',
-    email: 'ananya@ghlindiatrust.com',
+    name: 'Naveen',
+    email: 'naveen@ghlindiaventures.com',
     phone: '+91 97420 55667',
     role: ROLES.sales_executive,
     companyId: 't-ghl-01',
@@ -191,8 +191,8 @@ export const USERS: User[] = [
   },
   {
     id: 'usr-ghl-irm',
-    name: 'Rohan Varma',
-    email: 'rohan.varma@ghlindiatrust.com',
+    name: 'Dhinakaran',
+    email: 'dhinakaran@ghlindiaventures.com',
     phone: '+91 98110 77889',
     role: ROLES.irm,
     companyId: 't-ghl-01',
@@ -254,8 +254,8 @@ export const USERS: User[] = [
   },
   {
     id: 'usr-jamin-admin',
-    name: 'Kavita Rao',
-    email: 'kavita@jaminbazaar.com',
+    name: 'Mani',
+    email: 'mani@ghlindiaventures.com',
     phone: '+91 98860 33445',
     role: ROLES.company_admin,
     companyId: 't-jamin-02',
@@ -1121,8 +1121,8 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
   {
     id: 'aud-02',
     timestamp: 'Today, 11:20 AM',
-    actorName: 'Ananya Iyer',
-    actorEmail: 'ananya@ghlindiatrust.com',
+    actorName: 'Naveen',
+    actorEmail: 'naveen@ghlindiaventures.com',
     action: 'CALL_DISPOSITION_LOGGED',
     entityType: 'CallRecord',
     entityId: 'call-01',
@@ -1133,8 +1133,8 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
   {
     id: 'aud-03',
     timestamp: 'Yesterday, 04:35 PM',
-    actorName: 'Kavita Rao',
-    actorEmail: 'kavita@jaminbazaar.com',
+    actorName: 'Mani',
+    actorEmail: 'mani@ghlindiaventures.com',
     action: 'BOOKING_CONFIRMED',
     entityType: 'Booking',
     entityId: 'bkg-01',
@@ -1145,8 +1145,8 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
   {
     id: 'aud-04',
     timestamp: 'Yesterday, 02:15 PM',
-    actorName: 'Alex Rivera',
-    actorEmail: 'alex@nexusplatform.io',
+    actorName: 'Yanosh',
+    actorEmail: 'yanosh@ghlindiaventures.com',
     action: 'TENANT_FEATURE_UPDATED',
     entityType: 'Tenant',
     entityId: 't-ghl-01',

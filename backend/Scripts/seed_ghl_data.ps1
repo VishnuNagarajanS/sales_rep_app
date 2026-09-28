@@ -1,14 +1,14 @@
 $ErrorActionPreference = "Stop"
 
-# Log in as GHL Company Admin (Vikram Malhotra)
-$login = Invoke-RestMethod -Uri "http://localhost:5106/api/auth/login" -Method Post -ContentType "application/json" -Body '{"email":"vikram@ghlindiatrust.com","password":"Password@123"}'
+# Log in as GHL Company Admin (Vishnu)
+$login = Invoke-RestMethod -Uri "http://localhost:5106/api/auth/login" -Method Post -ContentType "application/json" -Body '{"email":"vishnu@ghlindiaventures.com","password":"Password@123"}'
 $token = $login.data.token
 $headers = @{
     "Authorization" = "Bearer $token"
     "Content-Type" = "application/json"
 }
 
-Write-Host "Logged in successfully as Vikram Malhotra. Token acquired."
+Write-Host "Logged in successfully as Vishnu. Token acquired."
 
 # 1. Seed Investors
 $investors = @(

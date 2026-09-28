@@ -58,7 +58,7 @@ function get(path, token) {
 }
 
 async function testCrud() {
-  const loginRes = await post('/api/auth/login', { email: 'vikram@ghlindiatrust.com', password: 'Password@123' });
+  const loginRes = await post('/api/auth/login', { email: 'vishnu@ghlindiaventures.com', password: 'Password@123' });
   const token = loginRes.data?.data?.token;
 
   console.log('1. Testing POST /api/ghl/investors...');

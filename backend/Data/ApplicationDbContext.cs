@@ -188,8 +188,8 @@ public class ApplicationDbContext : DbContext
             new User
             {
                 Id = 1,
-                Name = "Alex Rivera (Super Admin)",
-                Email = "alex@nexusplatform.io",
+                Name = "Yanosh",
+                Email = "yanosh@ghlindiaventures.com",
                 PasswordHash = passwordHash,
                 Phone = "+91 98800 11000",
                 RoleId = superAdminRoleId,
@@ -197,12 +197,12 @@ public class ApplicationDbContext : DbContext
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
-            // GHL Company Admin (Vikram)
+            // GHL Company Admin (Vishnu)
             new User
             {
                 Id = 2,
-                Name = "Vikram Malhotra",
-                Email = "vikram@ghlindiatrust.com",
+                Name = "Vishnu",
+                Email = "vishnu@ghlindiaventures.com",
                 PasswordHash = passwordHash,
                 Phone = "+91 98450 11223",
                 RoleId = companyAdminRoleId,
@@ -210,12 +210,12 @@ public class ApplicationDbContext : DbContext
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
-            // GHL Sales Executive (Ananya)
+            // GHL Sales Executive (Naveen)
             new User
             {
                 Id = 3,
-                Name = "Ananya Iyer",
-                Email = "ananya@ghlindiatrust.com",
+                Name = "Naveen",
+                Email = "naveen@ghlindiaventures.com",
                 PasswordHash = passwordHash,
                 Phone = "+91 98450 22334",
                 RoleId = salesExecutiveRoleId,
@@ -223,12 +223,12 @@ public class ApplicationDbContext : DbContext
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
-            // Jamin Company Admin (Kavita)
+            // Jamin Company Admin (Mani)
             new User
             {
                 Id = 4,
-                Name = "Kavita Rao",
-                Email = "kavita@jaminbazaar.com",
+                Name = "Mani",
+                Email = "mani@ghlindiaventures.com",
                 PasswordHash = passwordHash,
                 Phone = "+91 98450 33445",
                 RoleId = companyAdminRoleId,

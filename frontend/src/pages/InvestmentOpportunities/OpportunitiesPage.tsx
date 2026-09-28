@@ -469,7 +469,7 @@ export const OpportunitiesPage: React.FC = () => {
       header: 'Assigned IRM',
       render: deal => (
         <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-          {deal.assignedAgentName || 'Ananya Iyer'}
+          {deal.assignedAgentName || 'Naveen'}
         </span>
       ),
     },

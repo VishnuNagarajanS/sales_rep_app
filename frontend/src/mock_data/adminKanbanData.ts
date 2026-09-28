@@ -115,13 +115,13 @@ export const IRM_STAGES: KanbanStageDef[] = [
 ];
 
 export const SALES_EXECUTIVE_USERS = [
-  { id: 'usr-ghl-exec', name: 'Ananya Iyer', role: 'Sales Executive' },
+  { id: 'usr-ghl-exec', name: 'Naveen', role: 'Sales Executive' },
   { id: 'usr-ghl-exec-02', name: 'Priya Sharma', role: 'Sales Executive' },
   { id: 'usr-ghl-exec-03', name: 'Rahul Verma', role: 'Sales Executive' },
 ];
 
 export const IRM_USERS = [
-  { id: 'usr-ghl-irm', name: 'Rohan Varma', role: 'IRM' },
+  { id: 'usr-ghl-irm', name: 'Dhinakaran', role: 'IRM' },
   { id: 'usr-ghl-irm-02', name: 'Meera Nair', role: 'IRM' },
   { id: 'usr-ghl-irm-03', name: 'Sameer Joshi', role: 'IRM' },
 ];
@@ -611,7 +611,7 @@ export const adminKanbanService = {
     }
   },
 
-  updateCardStage(cardId: string, newStageId: string, actorName = 'Vikram Malhotra', actorRole = 'Company Admin'): AdminKanbanCard | null {
+  updateCardStage(cardId: string, newStageId: string, actorName = 'Vishnu', actorRole = 'Company Admin'): AdminKanbanCard | null {
     const cards = this.getCards();
     const card = cards.find(c => c.id === cardId);
     if (!card) return null;

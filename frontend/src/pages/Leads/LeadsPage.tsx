@@ -422,7 +422,7 @@ export const LeadsPage: React.FC = () => {
       return;
     }
     const defaultAgentId = user.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec');
-    const defaultAgentName = user.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer');
+    const defaultAgentName = user.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Naveen');
 
     const targetCompany = tenant?.id || (tenant?.slug === 'jamin' ? 't-jamin-02' : 't-ghl-01');
 

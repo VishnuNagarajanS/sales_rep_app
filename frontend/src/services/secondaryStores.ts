@@ -189,8 +189,8 @@ export const notificationStore = {
 let usersMemory: User[] = [
   {
     id: 'usr-ananya',
-    name: 'Ananya Sharma',
-    email: 'ananya@ghlindiatrust.com',
+    name: 'Naveen',
+    email: 'naveen@ghlindiaventures.com',
     phone: '+91 98765 43210',
     companyId: 't-ghl-01',
     companySlug: 'ghl',
@@ -201,8 +201,8 @@ let usersMemory: User[] = [
   },
   {
     id: 'usr-vikram',
-    name: 'Vikram Mehta',
-    email: 'vikram@ghlindiatrust.com',
+    name: 'Vishnu',
+    email: 'vishnu@ghlindiaventures.com',
     phone: '+91 98765 43211',
     companyId: 't-ghl-01',
     companySlug: 'ghl',
@@ -213,8 +213,8 @@ let usersMemory: User[] = [
   },
   {
     id: 'usr-kavita',
-    name: 'Kavita Iyer',
-    email: 'kavita@jaminbazaar.com',
+    name: 'Mani',
+    email: 'mani@ghlindiaventures.com',
     phone: '+91 98765 43212',
     companyId: 't-jamin-02',
     companySlug: 'jamin',
@@ -225,8 +225,8 @@ let usersMemory: User[] = [
   },
   {
     id: 'usr-alex',
-    name: 'Alex Rivera',
-    email: 'alex@nexusplatform.io',
+    name: 'Yanosh',
+    email: 'yanosh@ghlindiaventures.com',
     phone: '+91 98765 43213',
     role: { id: 'r-super-admin', name: 'Platform Admin', code: 'super_admin', permissions: [] },
     status: 'Active',

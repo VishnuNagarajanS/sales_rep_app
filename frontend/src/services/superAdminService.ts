@@ -188,7 +188,7 @@ const SEED_ANNOUNCEMENTS: BroadcastAnnouncement[] = [
     targetAudience: 'all',
     isActive: true,
     createdAt: '2026-09-26T08:00:00Z',
-    createdBy: 'Alex Rivera (Super Admin)',
+    createdBy: 'Yanosh',
     expiresAt: '2026-09-27T06:00:00Z',
   },
 ];
@@ -438,8 +438,8 @@ class SuperAdminService {
         users = [
           {
             id: 'usr-super-01',
-            name: 'Alex Rivera (Super Admin)',
-            email: 'alex@nexusplatform.io',
+            name: 'Yanosh',
+            email: 'yanosh@ghlindiaventures.com',
             phone: '+91 98800 11000',
             role: SYSTEM_ROLES.super_admin,
             status: 'Active',
@@ -448,8 +448,8 @@ class SuperAdminService {
           },
           {
             id: 'usr-ghl-admin-01',
-            name: 'Vikram Malhotra',
-            email: 'vikram@ghlindiatrust.com',
+            name: 'Vishnu',
+            email: 'vishnu@ghlindiaventures.com',
             phone: '+91 98450 11223',
             role: SYSTEM_ROLES.company_admin,
             companyId: '1',
@@ -462,8 +462,8 @@ class SuperAdminService {
           },
           {
             id: 'usr-ghl-exec-01',
-            name: 'Ananya Iyer',
-            email: 'ananya@ghlindiatrust.com',
+            name: 'Naveen',
+            email: 'naveen@ghlindiaventures.com',
             phone: '+91 98450 22334',
             role: SYSTEM_ROLES.sales_executive,
             companyId: '1',
@@ -476,8 +476,8 @@ class SuperAdminService {
           },
           {
             id: 'usr-ghl-irm-01',
-            name: 'Rohan Varma',
-            email: 'rohan.varma@ghlindiatrust.com',
+            name: 'Dhinakaran',
+            email: 'dhinakaran@ghlindiaventures.com',
             phone: '+91 98110 77889',
             role: SYSTEM_ROLES.irm,
             companyId: '1',
@@ -490,8 +490,8 @@ class SuperAdminService {
           },
           {
             id: 'usr-jamin-admin-01',
-            name: 'Kavita Rao',
-            email: 'kavita@jaminbazaar.com',
+            name: 'Mani',
+            email: 'mani@ghlindiaventures.com',
             phone: '+91 98450 33445',
             role: SYSTEM_ROLES.company_admin,
             companyId: '2',
@@ -707,7 +707,7 @@ class SuperAdminService {
     if (!target) return false;
 
     // Prevent deleting primary super admin
-    if (target.email === 'alex@nexusplatform.io') return false;
+    if (target.email === 'yanosh@ghlindiaventures.com') return false;
 
     const filtered = users.filter(u => u.id !== id);
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(filtered));
@@ -1112,8 +1112,8 @@ class SuperAdminService {
       const newLog: AuditLog = {
         id: `aud-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         timestamp: new Date().toISOString(),
-        actorName: log.actorName || 'Alex Rivera (Super Admin)',
-        actorEmail: log.actorEmail || 'alex@nexusplatform.io',
+        actorName: log.actorName || 'Yanosh',
+        actorEmail: log.actorEmail || 'yanosh@ghlindiaventures.com',
         action: log.action || 'PLATFORM_OPERATION',
         entityType: log.entityType || 'Platform',
         entityId: log.entityId || '0',
@@ -1202,7 +1202,7 @@ class SuperAdminService {
       targetTenantId: ann.targetTenantId,
       isActive: true,
       createdAt: new Date().toISOString(),
-      createdBy: 'Alex Rivera (Super Admin)',
+      createdBy: 'Yanosh',
       expiresAt: ann.expiresAt,
       ...ann,
     };

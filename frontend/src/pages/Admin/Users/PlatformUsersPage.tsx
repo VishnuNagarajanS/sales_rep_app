@@ -184,7 +184,7 @@ export const PlatformUsersPage: React.FC = () => {
 
   // Handle Delete
   const handleDeleteUser = (u: User) => {
-    if (u.email === 'alex@nexusplatform.io') {
+    if (u.email === 'yanosh@ghlindiaventures.com') {
       alert('The root platform Super Admin cannot be deleted.');
       return;
     }

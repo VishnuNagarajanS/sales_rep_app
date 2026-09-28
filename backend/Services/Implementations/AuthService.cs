@@ -39,8 +39,8 @@ public class AuthService : IAuthService
     {
         var normalizedEmail = request.Email?.Trim().ToLowerInvariant() ?? string.Empty;
 
-        // Support demo IRM user (Rohan Varma) if requested
-        if (normalizedEmail == "rohan.varma@ghlindiatrust.com")
+        // Support demo IRM user (Dhinakaran) if requested
+        if (normalizedEmail == "dhinakaran@ghlindiaventures.com" || normalizedEmail == "rohan.varma@ghlindiatrust.com")
         {
             if (!PasswordHasher.VerifyPassword(request.Password, "$2a$11$z2c3Nc1pe7Tqmxj6Rm15NOt8vuAyyKfqzGtBKpiFU2NcPZxsjt5p."))
             {
@@ -52,8 +52,8 @@ public class AuthService : IAuthService
             var irmUser = new User
             {
                 Id = 5,
-                Name = "Rohan Varma",
-                Email = "rohan.varma@ghlindiatrust.com",
+                Name = "Dhinakaran",
+                Email = "dhinakaran@ghlindiaventures.com",
                 Phone = "+91 98110 77889",
                 Role = new Role
                 {

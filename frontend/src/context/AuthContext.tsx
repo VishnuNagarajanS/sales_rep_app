@@ -134,8 +134,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (roleCode === 'super_admin') {
       const superUser: User = {
         id: 'usr-super-01',
-        name: 'Alex Rivera (Super Admin)',
-        email: 'alex@nexusplatform.io',
+        name: 'Yanosh',
+        email: 'yanosh@ghlindiaventures.com',
         phone: '+91 98800 11000',
         role: SYSTEM_ROLES.super_admin,
         status: 'Active',
@@ -172,14 +172,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       name:
         roleCode === 'company_admin'
           ? slug === 'ghl'
-            ? 'Vikram Malhotra'
+            ? 'Vishnu'
             : slug === 'jamin'
-              ? 'Kavita Rao'
+              ? 'Mani'
               : `${targetTenant.name} Admin`
           : roleCode === 'irm'
-            ? 'Rohan Varma'
+            ? 'Dhinakaran'
             : slug === 'ghl'
-              ? 'Ananya Iyer'
+              ? 'Naveen'
               : slug === 'jamin'
                 ? 'Pooja Hegde'
                 : `${targetTenant.name} Agent`,
