@@ -1,0 +1,300 @@
+/* CallCenterPage styles */
+
+.call-center-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.call-center-page .page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.call-center-page .page-title {
+  font-size: 24px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.call-center-page .page-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.call-center-page .card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--shadow-card);
+  transition: border-color var(--transition-fast);
+}
+
+.call-center-page .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.call-center-page .btn-primary {
+  background: var(--gradient-primary);
+  color: #ffffff;
+  box-shadow: 0 2px 4px rgba(220, 38, 38, 0.2);
+}
+
+.call-center-page .btn-secondary {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-color: var(--border-base);
+}
+
+.call-center-page .btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.call-center-page .btn-sm {
+  padding: 5px 10px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+}
+
+.call-center-page .btn-icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: var(--radius-md);
+}
+
+.call-center-page .form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.call-center-page .form-input {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+/* Header & Actions */
+.call-center-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Telemetry Bar */
+.call-center-telemetry-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.call-center-telemetry-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.call-center-telemetry-val {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin-top: 6px;
+}
+
+.call-center-telemetry-val-green {
+  color: #10b981;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.call-center-telemetry-val-primary {
+  color: var(--primary-600);
+}
+
+.call-center-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+}
+
+.call-center-telemetry-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.call-center-telemetry-sub-green {
+  font-size: 11px;
+  color: #059669;
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+/* Cockpit Layout */
+.call-center-cockpit-layout {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+/* Softphone */
+.call-center-softphone-card {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.call-center-softphone-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.call-center-softphone-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.call-center-sip-badge {
+  font-size: 11px;
+  color: #10b981;
+  font-weight: 600;
+}
+
+.call-center-dial-input {
+  height: 42px;
+  font-size: 16px;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: 0.05em;
+}
+
+.call-center-contact-input {
+  font-size: 12px;
+}
+
+.call-center-keypad-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.call-center-keypad-btn {
+  height: 48px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.call-center-softphone-footer {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.call-center-backspace-btn {
+  width: 48px;
+  height: 48px;
+}
+
+.call-center-call-btn {
+  flex: 1;
+  height: 48px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  font-size: 15px;
+  color: #ffffff;
+}
+
+/* Callback Queue */
+.call-center-queue-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.call-center-queue-card {
+  padding: 20px;
+}
+
+.call-center-queue-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.call-center-queue-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.call-center-queue-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.call-center-simulate-btn {
+  color: var(--primary-600);
+}
+
+.call-center-prospects-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.call-center-prospect-item {
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  background-color: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.call-center-prospect-name {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.call-center-prospect-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.call-center-dial-item-btn {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+}

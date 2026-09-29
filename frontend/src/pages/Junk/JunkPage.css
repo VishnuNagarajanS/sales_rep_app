@@ -1,0 +1,35 @@
+﻿/* JunkPage.css */
+.junk-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.junk-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.junk-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 4px 0 0;
+}
+
+.junk-contact-name {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.junk-contact-phone {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}

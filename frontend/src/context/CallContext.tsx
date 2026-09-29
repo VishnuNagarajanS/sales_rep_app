@@ -1,5 +1,14 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { CallDisposition, CallRecord, Lead, Customer, Deal } from '../types';
+import {
+  logCall as apiLogCall,
+  saveLead as apiSaveLead,
+  saveCustomer as apiSaveCustomer,
+  saveFollowup as apiSaveFollowup,
+  saveDeal as apiSaveDeal,
+  getLeads as apiGetLeads,
+  getCustomers as apiGetCustomers,
+} from '../services/ghlApiService';
 import { storageService } from '../services/storageService';
 import { useAuth } from './AuthContext';
 
@@ -62,14 +71,33 @@ interface CallContextType {
 
 const CallContext = createContext<CallContextType | undefined>(undefined);
 
+function getCallPreferences() {
+  try {
+    const raw = localStorage.getItem('nexus_call_prefs') || localStorage.getItem('nexus_call_preferences');
+    return raw
+      ? JSON.parse(raw)
+      : { soundEnabled: true, desktopNotifEnabled: false, autoBusyEnabled: true, defaultFollowupTime: '11:00' };
+  } catch {
+    return { soundEnabled: true, desktopNotifEnabled: false, autoBusyEnabled: true, defaultFollowupTime: '11:00' };
+  }
+}
+
 export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, tenant } = useAuth();
   const [availability, setAvailability] = useState<AgentAvailability>('Available');
   const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
   const [lastCallRecord, setLastCallRecord] = useState<ActiveCall | null>(null);
   const [showDispositionModal, setShowDispositionModal] = useState(false);
+  const [leads, setLeads] = useState<Lead[]>([]);
 
   const timerRef = useRef<any>(null);
+
+  // Sync leads for incoming call lookup
+  useEffect(() => {
+    if (tenant?.id) {
+      apiGetLeads(tenant.id).then(setLeads).catch(console.error);
+    }
+  }, [tenant?.id]);
 
   // Timer for connected calls
   useEffect(() => {
@@ -108,7 +136,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sourceFollowupId,
     };
     setActiveCall(newCall);
-    const prefs = storageService.getCallPreferences();
+    const prefs = getCallPreferences();
     if (prefs.autoBusyEnabled && availability === 'Available') {
       setAvailability('Busy');
     }
@@ -119,8 +147,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    // Check if phone matches any existing lead or customer
-    const leads = storageService.getLeads(tenant?.id);
+    // Check if phone matches any existing lead
     const matchedLead = leads.find(l => l.phone.includes(phone.slice(-5)) || l.name.toLowerCase().includes(name.toLowerCase()));
 
     const newCall: ActiveCall = {
@@ -141,7 +168,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       meetingLink: null,
     };
     setActiveCall(newCall);
-    const prefs = storageService.getCallPreferences();
+    const prefs = getCallPreferences();
     // Play ringtone via Web Audio API if sound is enabled
     if (prefs.soundEnabled) {
       try {
@@ -230,7 +257,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const saveDisposition = (
+  const saveDisposition = async (
     disposition: CallDisposition,
     notes: string,
     scheduleFollowup?: { scheduledAt: string; priority: 'Low' | 'Medium' | 'High'; notes: string },
@@ -254,31 +281,23 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         reason: reason || undefined,
       };
 
-      storageService.addCall(callRecord);
-
-      storageService.addAuditLog({
-        id: `aud-${Date.now()}`,
-        timestamp: 'Just now',
-        actorName: user.name,
-        actorEmail: user.email,
-        action: 'CALL_DISPOSITION_SAVED',
-        entityType: 'CallRecord',
-        entityId: callRecord.id,
-        companyId: tenant.id,
-        companyName: tenant.name,
-        details: `Saved disposition "${disposition}" for call with ${lastCallRecord.contactName} (${lastCallRecord.duration}s).`,
-      });
+      apiLogCall(callRecord).catch(console.error);
 
       // Locate matched lead if any
       const leadId = lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : null;
-      const allLeads = storageService.getLeads(tenant.id);
+      const allLeads = leads.length > 0 ? leads : (tenant ? storageService.getLeads(tenant.id) : []);
+      const normalize = (p: string) => (p || '').replace(/\D/g, '').slice(-10);
+      const callPhoneDigits = normalize(lastCallRecord.contactPhone);
       const matchedLead = leadId
-        ? allLeads.find(l => l.id === leadId)
-        : allLeads.find(l => l.phone === lastCallRecord.contactPhone || (l.name && l.name.toLowerCase() === lastCallRecord.contactName.toLowerCase()));
+        ? allLeads.find((l: Lead) => l.id === leadId)
+        : allLeads.find((l: Lead) =>
+            (callPhoneDigits && normalize(l.phone) === callPhoneDigits) ||
+            (l.name && l.name.toLowerCase() === lastCallRecord.contactName.toLowerCase())
+          );
 
       // 1. Interested -> Move to Customer 360, remove from active Leads
       if (disposition === 'Interested') {
-        const existingCustomers = storageService.getCustomers(tenant.id);
+        const existingCustomers = await apiGetCustomers(tenant.id).catch(() => []);
         let cust = existingCustomers.find(c =>
           (matchedLead && c.phone === matchedLead.phone) ||
           c.phone === lastCallRecord.contactPhone ||
@@ -318,12 +337,40 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             cust.customFields = { ...cust.customFields, ...matchedLead.customFields };
           }
         }
-        storageService.saveCustomer(cust);
+        apiSaveCustomer(cust).catch(console.error);
 
         if (matchedLead) {
-          matchedLead.status = 'Converted';
-          matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Interested - Moved to Customer 360${notes ? `: ${notes}` : ''}`;
+          matchedLead.status = 'Interested';
+          matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Interested - Handed over to IRM${notes ? `: ${notes}` : ''}`;
+          if (!matchedLead.customFields) matchedLead.customFields = {};
+          matchedLead.customFields.qualifiedByAgentName = user.name;
+          matchedLead.customFields.qualifiedAt = new Date().toISOString();
+          matchedLead.customFields.transferredToIrm = 'true';
+          apiSaveLead(matchedLead).catch(console.error);
           storageService.saveLead(matchedLead);
+        } else if (lastCallRecord.contactPhone || lastCallRecord.contactName) {
+          const newInterestedLead: Lead = {
+            id: `lead-${Date.now()}`,
+            companyId: tenant.id,
+            name: lastCallRecord.contactName || 'Interested Prospect',
+            phone: lastCallRecord.contactPhone,
+            email: '',
+            location: '',
+            source: 'Phone Call',
+            status: 'Interested',
+            priority: 'High',
+            assignedAgentId: user.id,
+            assignedAgentName: user.name,
+            createdAt: new Date().toISOString().split('T')[0],
+            notes: notes ? `[Call Disposition - Interested]: ${notes}` : 'Interested prospect qualified via call',
+            customFields: {
+              qualifiedByAgentName: user.name,
+              qualifiedAt: new Date().toISOString(),
+              transferredToIrm: 'true',
+            },
+          };
+          apiSaveLead(newInterestedLead).catch(console.error);
+          storageService.saveLead(newInterestedLead);
         }
       }
 
@@ -333,7 +380,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const followupPriority = scheduleFollowup?.priority || 'High';
         const followupNotes = scheduleFollowup?.notes || (notes ? `Follow-up required: ${notes}` : `Follow-up required from call with ${lastCallRecord.contactName}`);
 
-        storageService.saveFollowup({
+        apiSaveFollowup({
           id: `flw-${Date.now()}`,
           companyId: tenant.id,
           contactId: matchedLead?.id || lastCallRecord.matchedRecord?.id || `contact-${Date.now()}`,
@@ -346,7 +393,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           notes: followupNotes,
           assignedAgentId: matchedLead?.assignedAgentId || user.id,
           assignedAgentName: matchedLead?.assignedAgentName || user.name,
-        });
+        }).catch(console.error);
 
         if (matchedLead) {
           matchedLead.status = 'Follow-up Required';
@@ -354,7 +401,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (notes) {
             matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Follow-up Required: ${notes}`;
           }
-          storageService.saveLead(matchedLead);
+          apiSaveLead(matchedLead).catch(console.error);
         }
       }
 
@@ -368,7 +415,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (notes) {
             matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Call Back: ${notes}`;
           }
-          storageService.saveLead(matchedLead);
+          apiSaveLead(matchedLead).catch(console.error);
         } else {
           const newLead: Lead = {
             id: `lead-${Date.now()}`,
@@ -386,11 +433,11 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: notes || '',
             customFields: {},
           };
-          storageService.saveLead(newLead);
+          apiSaveLead(newLead).catch(console.error);
         }
 
         if (scheduleFollowup) {
-          storageService.saveFollowup({
+          apiSaveFollowup({
             id: `flw-${Date.now()}`,
             companyId: tenant.id,
             contactId: matchedLead?.id || lastCallRecord.matchedRecord?.id || 'contact-new',
@@ -403,7 +450,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: scheduleFollowup.notes || (notes ? `Callback reminder: ${notes}` : `Callback reminder for ${lastCallRecord.contactName}`),
             assignedAgentId: user.id,
             assignedAgentName: user.name,
-          });
+          }).catch(console.error);
         }
       }
 
@@ -413,7 +460,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (matchedLead) {
           matchedLead.status = 'Not Interested';
           matchedLead.customFields = { ...matchedLead.customFields, dispositionReason: reasonText };
-          storageService.saveLead(matchedLead);
+          apiSaveLead(matchedLead).catch(console.error);
         } else {
           const newLead: Lead = {
             id: `lead-${Date.now()}`,
@@ -431,7 +478,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: '',
             customFields: { dispositionReason: reasonText },
           };
-          storageService.saveLead(newLead);
+          apiSaveLead(newLead).catch(console.error);
         }
       }
 
@@ -441,7 +488,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (matchedLead) {
           matchedLead.status = 'Junk';
           matchedLead.customFields = { ...matchedLead.customFields, dispositionReason: reasonText };
-          storageService.saveLead(matchedLead);
+          apiSaveLead(matchedLead).catch(console.error);
         } else {
           const newLead: Lead = {
             id: `lead-${Date.now()}`,
@@ -459,7 +506,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: '',
             customFields: { dispositionReason: reasonText },
           };
-          storageService.saveLead(newLead);
+          apiSaveLead(newLead).catch(console.error);
         }
       }
 
@@ -470,7 +517,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (notes) {
             matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] No Response: ${notes}`;
           }
-          storageService.saveLead(matchedLead);
+          apiSaveLead(matchedLead).catch(console.error);
         } else {
           const newLead: Lead = {
             id: `lead-${Date.now()}`,
@@ -488,14 +535,14 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: notes || '',
             customFields: {},
           };
-          storageService.saveLead(newLead);
+          apiSaveLead(newLead).catch(console.error);
         }
       }
 
       // 7. Converted -> Existing conversion behavior
       else if (disposition === 'Converted') {
         if (matchedLead) {
-          const existingCustomers = storageService.getCustomers(tenant.id);
+          const existingCustomers = await apiGetCustomers(tenant.id).catch(() => []);
           let cust = existingCustomers.find(c => c.phone === matchedLead.phone || (matchedLead.email && c.email === matchedLead.email));
           if (!cust) {
             cust = {
@@ -515,7 +562,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
               notes: `Converted from lead. Original notes: ${matchedLead.notes || ''}`,
               customFields: matchedLead.customFields,
             };
-            storageService.saveCustomer(cust);
+            apiSaveCustomer(cust).catch(console.error);
           }
 
           const newDeal: Deal = {
@@ -532,13 +579,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: `Deal initiated upon converting lead ${matchedLead.name}. ${notes ? `Call notes: ${notes}` : ''}`,
             createdAt: new Date().toISOString().split('T')[0],
           };
-          storageService.saveDeal(newDeal);
+          apiSaveDeal(newDeal).catch(console.error);
 
           matchedLead.status = 'Converted';
           if (notes) {
             matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Converted: ${notes}`;
           }
-          storageService.saveLead(matchedLead);
+          apiSaveLead(matchedLead).catch(console.error);
         }
       }
     }

@@ -1,0 +1,89 @@
+/* ==========================================================================
+   Timeline Component Styles
+   ========================================================================== */
+
+.timeline-container {
+  position: relative;
+  padding-left: 28px;
+}
+
+.timeline-empty {
+  padding: 24px 0;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.timeline-vertical-line {
+  position: absolute;
+  left: 11px;
+  top: 8px;
+  bottom: 12px;
+  width: 2px;
+  background-color: var(--border-base);
+}
+
+.timeline-event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.timeline-event-item {
+  position: relative;
+}
+
+.timeline-icon-dot {
+  position: absolute;
+  left: -28px;
+  top: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-xs);
+}
+
+.timeline-event-card {
+  background-color: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+}
+
+.timeline-event-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.timeline-event-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.timeline-event-time {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.timeline-event-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 4px 0;
+}
+
+.timeline-event-actor {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.timeline-event-actor-name {
+  font-weight: 500;
+}

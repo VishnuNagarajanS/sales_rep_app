@@ -16,7 +16,10 @@ public static class ServiceExtensions
 {
     public static IServiceCollection AddApplicationServices(this IServiceCollection services, IConfiguration configuration)
     {
+        services.Configure<SmtpSettings>(configuration.GetSection(SmtpSettings.SectionName));
+
         // 1. Database Context
+        services.AddMemoryCache();
         var connectionString = configuration.GetConnectionString("DefaultConnection")
                                ?? throw new InvalidOperationException("DefaultConnection connection string is not configured.");
 
@@ -28,10 +31,34 @@ public static class ServiceExtensions
 
         // 3. Repositories
         services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<IConsultationRepository, ConsultationRepository>();
+        services.AddScoped<IFollowupRepository, FollowupRepository>();
+        services.AddScoped<IInvestorCallRepository, InvestorCallRepository>();
+        services.AddScoped<IInvestorRepository, InvestorRepository>();
+        services.AddScoped<IIrmPipelineRepository, IrmPipelineRepository>();
+        services.AddScoped<IKycRepository, KycRepository>();
+        services.AddScoped<IOpportunityRepository, OpportunityRepository>();
 
         // 4. Services
         services.AddScoped<IJwtService, JwtService>();
+        services.AddHttpContextAccessor();
+        services.AddScoped<ICurrentUserService, CurrentUserService>();
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IAdminUserService, AdminUserService>();
+        services.AddScoped<ILeadService, LeadService>();
+        services.AddScoped<backend.Services.Email.IEmailService, backend.Services.Email.SmtpEmailService>();
+        services.AddScoped<backend.Services.Interfaces.IEmailService, backend.Services.Implementations.EmailService>();
+        services.AddScoped<IOtpService, OtpService>();
+        services.AddScoped<IInvestorService, InvestorService>();
+        services.AddScoped<IIrmDashboardService, IrmDashboardService>();
+        services.AddScoped<IConsultationService, ConsultationService>();
+        services.AddScoped<ICustomerService, CustomerService>();
+        services.AddScoped<IFollowupService, FollowupService>();
+        services.AddScoped<IInvestorCallService, InvestorCallService>();
+        services.AddScoped<IIrmFollowupService, IrmFollowupService>();
+        services.AddScoped<IIrmPipelineService, IrmPipelineService>();
+        services.AddScoped<IKycService, KycService>();
+        services.AddScoped<IOpportunityService, OpportunityService>();
 
         services.AddDev1Services();
 

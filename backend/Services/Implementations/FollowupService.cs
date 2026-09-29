@@ -1,142 +1,244 @@
+using backend.Authentication.Interfaces;
 using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.Followups;
 using backend.Models.Entities;
+using backend.Models.Enums;
 using backend.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
 namespace backend.Services.Implementations;
 
-public sealed class FollowupService(ApplicationDbContext context, ICurrentUserService currentUser) : IFollowupService
+public class FollowupService : IFollowupService
 {
-    public async Task<IReadOnlyList<FollowupDto>> GetAsync(CancellationToken cancellationToken) =>
-        await context.Followups.AsNoTracking()
-            .Where(x => x.CompanyId == currentUser.CompanyId && x.UserId == currentUser.UserId)
-            .OrderBy(x => x.ScheduledAt)
-            .Select(x => Map(x))
-            .ToListAsync(cancellationToken);
+    private readonly ApplicationDbContext _context;
+    private readonly ICurrentUserService _currentUser;
 
-    public async Task<FollowupDto> CreateAsync(UpsertFollowupDto request, CancellationToken cancellationToken)
+    public FollowupService(ApplicationDbContext context, ICurrentUserService currentUser)
     {
-        var followup = new Followup
+        _context = context;
+        _currentUser = currentUser;
+    }
+
+    private IQueryable<Followup> GetScopedFollowupsQuery()
+    {
+        var role = _currentUser.Role;
+        var agentId = _currentUser.UserId;
+        var companyId = _currentUser.CompanyId;
+
+        var query = _context.Followups.AsNoTracking().Include(f => f.AssignedAgent).AsQueryable();
+
+        if (role == "super_admin")
         {
-            CompanyId = currentUser.CompanyId,
-            UserId = currentUser.UserId,
-            LeadId = request.LeadId,
-            ScheduledAt = request.ScheduledAt.ToUniversalTime(),
-            Status = request.Status.Trim(),
-            Notes = request.Notes
-        };
-        context.Followups.Add(followup);
-        await context.SaveChangesAsync(cancellationToken);
-        return Map(followup);
+            if (companyId.HasValue)
+                query = query.Where(f => f.CompanyId == companyId.Value);
+            return query;
+        }
+
+        if (companyId.HasValue)
+        {
+            query = query.Where(f => f.CompanyId == companyId.Value);
+        }
+
+        if (role == "sales_executive" && agentId.HasValue)
+        {
+            query = query.Where(f => f.AssignedAgentId == agentId.Value);
+        }
+
+        return query;
     }
 
-    public async Task<FollowupDto?> UpdateAsync(int id, UpsertFollowupDto request, CancellationToken cancellationToken)
+    private async Task<Followup?> FindScopedFollowupAsync(int id, CancellationToken ct)
     {
-        var followup = await context.Followups.FirstOrDefaultAsync(x => x.Id == id && x.CompanyId == currentUser.CompanyId && x.UserId == currentUser.UserId, cancellationToken);
-        if (followup == null) return null;
-        followup.LeadId = request.LeadId;
-        followup.ScheduledAt = request.ScheduledAt.ToUniversalTime();
-        followup.Status = request.Status.Trim();
-        followup.Notes = request.Notes;
-        followup.CompletedAt = followup.Status == "Completed" ? DateTime.UtcNow : null;
-        await context.SaveChangesAsync(cancellationToken);
-        return Map(followup);
+        var role = _currentUser.Role;
+        var agentId = _currentUser.UserId;
+        var companyId = _currentUser.CompanyId;
+
+        var query = _context.Followups.Include(f => f.AssignedAgent).Where(f => f.Id == id);
+
+        if (role == "super_admin")
+        {
+            return await query.FirstOrDefaultAsync(ct);
+        }
+
+        if (companyId.HasValue)
+        {
+            query = query.Where(f => f.CompanyId == companyId.Value);
+        }
+
+        if (role == "sales_executive" && agentId.HasValue)
+        {
+            query = query.Where(f => f.AssignedAgentId == agentId.Value);
+        }
+
+        return await query.FirstOrDefaultAsync(ct);
     }
 
-    public async Task<ApiResponse<PagedResult<FollowupResponseDto>>> GetFollowupsAsync(FollowupFilterDto filter, CancellationToken ct)
+    public async Task<ApiResponse<PagedResult<FollowupResponseDto>>> GetFollowupsAsync(FollowupFilterDto filter, CancellationToken ct = default)
     {
+        var query = GetScopedFollowupsQuery();
+
+        // Status filter
+        if (!string.IsNullOrWhiteSpace(filter.Status) && !filter.Status.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            if (Enum.TryParse<FollowupStatus>(filter.Status, true, out var stFilter))
+            {
+                query = query.Where(f => f.Status == stFilter);
+            }
+        }
+
+        // Scope filter ('all', 'due', 'overdue')
+        var now = DateTime.UtcNow;
+        var todayStart = now.Date;
+        var tomorrowStart = todayStart.AddDays(1);
+
+        if (!string.IsNullOrWhiteSpace(filter.Scope))
+        {
+            var scope = filter.Scope.Trim().ToLower();
+            if (scope == "due")
+            {
+                query = query.Where(f => f.ScheduledAt >= todayStart && f.ScheduledAt < tomorrowStart && f.Status == FollowupStatus.Pending);
+            }
+            else if (scope == "overdue")
+            {
+                query = query.Where(f => f.ScheduledAt < now && f.Status == FollowupStatus.Pending);
+            }
+        }
+
+        var totalCount = await query.CountAsync(ct);
+
         var page = Math.Max(1, filter.Page);
         var pageSize = Math.Clamp(filter.PageSize, 1, 100);
-        var query = context.Followups.AsNoTracking().Where(x => x.CompanyId == currentUser.CompanyId && x.UserId == currentUser.UserId);
-        if (!string.IsNullOrWhiteSpace(filter.Status)) query = query.Where(x => x.Status == filter.Status);
-        if (filter.Scope == "overdue") query = query.Where(x => x.ScheduledAt < DateTime.UtcNow);
-        var total = await query.CountAsync(ct);
-        var items = await query.OrderByDescending(x => x.ScheduledAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => MapResponse(x)).ToListAsync(ct);
-        return ApiResponse<PagedResult<FollowupResponseDto>>.SuccessResult(PagedResult<FollowupResponseDto>.Create(items, total, page, pageSize), "Follow-ups retrieved successfully.");
+
+        var entities = await query
+            .OrderBy(f => f.Status == FollowupStatus.Pending ? 0 : 1)
+            .ThenBy(f => f.ScheduledAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(ct);
+
+        var items = entities.Select(MapToDto).ToList();
+
+        return ApiResponse<PagedResult<FollowupResponseDto>>.SuccessResult(
+            PagedResult<FollowupResponseDto>.Create(items, totalCount, page, pageSize),
+            "Follow-ups retrieved successfully.");
     }
 
-    public async Task<ApiResponse<FollowupResponseDto>> GetFollowupByIdAsync(int id, CancellationToken ct)
+    public async Task<ApiResponse<FollowupResponseDto>> GetFollowupByIdAsync(int id, CancellationToken ct = default)
     {
-        var followup = await context.Followups.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id && x.CompanyId == currentUser.CompanyId && x.UserId == currentUser.UserId, ct);
-        return followup == null ? ApiResponse<FollowupResponseDto>.FailureResult("Follow-up not found.") : ApiResponse<FollowupResponseDto>.SuccessResult(MapResponse(followup));
+        var followup = await FindScopedFollowupAsync(id, ct);
+        if (followup == null)
+            return ApiResponse<FollowupResponseDto>.FailureResult("Follow-up not found or access denied.");
+
+        return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(followup));
     }
 
-    public async Task<ApiResponse<FollowupResponseDto>> CreateFollowupAsync(CreateFollowupDto dto, CancellationToken ct)
+    public async Task<ApiResponse<FollowupResponseDto>> CreateFollowupAsync(CreateFollowupDto dto, CancellationToken ct = default)
     {
+        var agentId = _currentUser.UserId ?? 1;
+        var companyId = _currentUser.CompanyId ?? 1;
+
         var followup = new Followup
         {
-            CompanyId = currentUser.CompanyId,
-            UserId = currentUser.UserId,
-            LeadId = dto.LeadId,
-            ScheduledAt = dto.ScheduledAt.ToUniversalTime(),
-            Status = dto.Status.Trim(),
-            Notes = dto.Notes
+            CompanyId = companyId,
+            AssignedAgentId = agentId,
+            ContactId = dto.ContactId.Trim(),
+            ContactType = string.IsNullOrWhiteSpace(dto.ContactType) ? "lead" : dto.ContactType.Trim().ToLower(),
+            ContactName = dto.ContactName.Trim(),
+            ContactPhone = dto.ContactPhone.Trim(),
+            ScheduledAt = dto.ScheduledAt,
+            Priority = string.IsNullOrWhiteSpace(dto.Priority) ? "Medium" : dto.Priority.Trim(),
+            Status = FollowupStatus.Pending,
+            Notes = dto.Notes?.Trim() ?? string.Empty,
+            CreatedAt = DateTime.UtcNow
         };
-        context.Followups.Add(followup);
-        await context.SaveChangesAsync(ct);
-        return ApiResponse<FollowupResponseDto>.SuccessResult(MapResponse(followup), "Follow-up created successfully.");
+
+        _context.Followups.Add(followup);
+
+        // If this is for a Lead, update Lead's NextFollowupDate
+        if (followup.ContactType == "lead" && int.TryParse(followup.ContactId, out var leadId))
+        {
+            var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == leadId && l.CompanyId == companyId, ct);
+            if (lead != null)
+            {
+                lead.NextFollowupDate = followup.ScheduledAt;
+            }
+        }
+
+        await _context.SaveChangesAsync(ct);
+
+        await _context.Entry(followup).Reference(f => f.AssignedAgent).LoadAsync(ct);
+
+        return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(followup), "Follow-up scheduled successfully.");
     }
 
-    public async Task<ApiResponse<FollowupResponseDto>> UpdateFollowupAsync(int id, UpdateFollowupDto dto, CancellationToken ct)
+    public async Task<ApiResponse<FollowupResponseDto>> UpdateFollowupAsync(int id, UpdateFollowupDto dto, CancellationToken ct = default)
     {
-        var followup = await context.Followups.FirstOrDefaultAsync(x => x.Id == id && x.CompanyId == currentUser.CompanyId && x.UserId == currentUser.UserId, ct);
-        if (followup == null) return ApiResponse<FollowupResponseDto>.FailureResult("Follow-up not found.");
-        followup.LeadId = dto.LeadId;
-        followup.ScheduledAt = dto.ScheduledAt.ToUniversalTime();
-        followup.Status = dto.Status.Trim();
-        followup.Notes = dto.Notes;
-        followup.CompletedAt = followup.Status == "Completed" ? DateTime.UtcNow : null;
-        await context.SaveChangesAsync(ct);
-        return ApiResponse<FollowupResponseDto>.SuccessResult(MapResponse(followup), "Follow-up updated successfully.");
+        var followup = await FindScopedFollowupAsync(id, ct);
+        if (followup == null)
+            return ApiResponse<FollowupResponseDto>.FailureResult("Follow-up not found or access denied.");
+
+        if (dto.ScheduledAt.HasValue) followup.ScheduledAt = dto.ScheduledAt.Value;
+        if (!string.IsNullOrWhiteSpace(dto.Priority)) followup.Priority = dto.Priority.Trim();
+        if (!string.IsNullOrWhiteSpace(dto.Status) && Enum.TryParse<FollowupStatus>(dto.Status, true, out var parsedSt))
+        {
+            followup.Status = parsedSt;
+        }
+        if (dto.Notes != null) followup.Notes = dto.Notes.Trim();
+
+        followup.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(ct);
+
+        return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(followup), "Follow-up updated successfully.");
     }
 
-    public async Task<ApiResponse<FollowupResponseDto>> CompleteFollowupAsync(int id, CancellationToken ct)
+    public async Task<ApiResponse<FollowupResponseDto>> CompleteFollowupAsync(int id, CancellationToken ct = default)
     {
-        var followup = await context.Followups.FirstOrDefaultAsync(x => x.Id == id && x.CompanyId == currentUser.CompanyId && x.UserId == currentUser.UserId, ct);
-        if (followup == null) return ApiResponse<FollowupResponseDto>.FailureResult("Follow-up not found.");
-        followup.Status = "Completed";
+        var followup = await FindScopedFollowupAsync(id, ct);
+        if (followup == null)
+            return ApiResponse<FollowupResponseDto>.FailureResult("Follow-up not found or access denied.");
+
+        followup.Status = FollowupStatus.Completed;
         followup.CompletedAt = DateTime.UtcNow;
-        await context.SaveChangesAsync(ct);
-        return ApiResponse<FollowupResponseDto>.SuccessResult(MapResponse(followup), "Follow-up completed successfully.");
+        followup.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(ct);
+
+        return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(followup), "Follow-up completed successfully.");
     }
 
-    public async Task<ApiResponse<bool>> DeleteFollowupAsync(int id, CancellationToken ct)
+    public async Task<ApiResponse<bool>> DeleteFollowupAsync(int id, CancellationToken ct = default)
     {
-        var followup = await context.Followups.FirstOrDefaultAsync(x => x.Id == id && x.CompanyId == currentUser.CompanyId && x.UserId == currentUser.UserId, ct);
-        if (followup == null) return ApiResponse<bool>.FailureResult("Follow-up not found.");
-        context.Followups.Remove(followup);
-        await context.SaveChangesAsync(ct);
+        var followup = await FindScopedFollowupAsync(id, ct);
+        if (followup == null)
+            return ApiResponse<bool>.FailureResult("Follow-up not found or access denied.");
+
+        _context.Followups.Remove(followup);
+        await _context.SaveChangesAsync(ct);
+
         return ApiResponse<bool>.SuccessResult(true, "Follow-up deleted successfully.");
     }
 
-    public async Task<bool> DeleteAsync(int id, CancellationToken cancellationToken)
+    private static FollowupResponseDto MapToDto(Followup f)
     {
-        var followup = await context.Followups.FirstOrDefaultAsync(x => x.Id == id && x.CompanyId == currentUser.CompanyId && x.UserId == currentUser.UserId, cancellationToken);
-        if (followup == null) return false;
-        context.Followups.Remove(followup);
-        await context.SaveChangesAsync(cancellationToken);
-        return true;
+        return new FollowupResponseDto
+        {
+            Id = f.Id,
+            CompanyId = f.CompanyId,
+            AssignedAgentId = f.AssignedAgentId,
+            AssignedAgentName = f.AssignedAgent?.Name,
+            ContactId = f.ContactId,
+            ContactType = f.ContactType,
+            ContactName = f.ContactName,
+            ContactPhone = f.ContactPhone,
+            ScheduledAt = f.ScheduledAt,
+            Priority = f.Priority,
+            Status = f.Status.ToString(),
+            Notes = f.Notes,
+            CompletedAt = f.CompletedAt,
+            CreatedAt = f.CreatedAt,
+            UpdatedAt = f.UpdatedAt
+        };
     }
-
-    private static FollowupDto Map(Followup x) => new()
-    {
-        Id = x.Id, CompanyId = x.CompanyId, UserId = x.UserId, LeadId = x.LeadId,
-        ScheduledAt = x.ScheduledAt, Status = x.Status, Notes = x.Notes,
-        CompletedAt = x.CompletedAt, CreatedAt = x.CreatedAt
-    };
-
-    private static FollowupResponseDto MapResponse(Followup x) => new()
-    {
-        Id = x.Id,
-        CompanyId = x.CompanyId,
-        UserId = x.UserId,
-        LeadId = x.LeadId,
-        ScheduledAt = x.ScheduledAt,
-        Status = x.Status,
-        Notes = x.Notes,
-        CompletedAt = x.CompletedAt,
-        CreatedAt = x.CreatedAt
-    };
 }

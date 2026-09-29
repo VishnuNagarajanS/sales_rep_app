@@ -1,3 +1,4 @@
+using backend.Authentication.Interfaces;
 using backend.Data;
 using backend.DTOs.Notifications;
 using backend.Models.Entities;

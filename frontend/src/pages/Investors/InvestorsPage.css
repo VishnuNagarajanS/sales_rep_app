@@ -1,0 +1,80 @@
+/* ==========================================================================
+   InvestorsPage Styles
+   ========================================================================== */
+
+.investors-page-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.investor-name-cell {
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.investor-meta-cell {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.investor-capacity-badge {
+  font-weight: 800;
+  color: #0284c7;
+}
+
+.investor-drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.investor-quick-card {
+  background-color: var(--bg-surface-hover);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  border: 1px solid var(--border-base);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.investor-partner-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.investor-call-btn-blue {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+}
+
+.investor-info-card {
+  padding: 18px;
+}
+
+.investor-info-title {
+  font-size: 13px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.investor-details-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  font-size: 13px;
+}
+
+.investor-ticket-val {
+  font-weight: 800;
+  color: #0284c7;
+  font-size: 16px;
+}
+
+.investor-notes-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}

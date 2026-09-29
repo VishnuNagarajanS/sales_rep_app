@@ -1,0 +1,74 @@
+/* ==========================================================================
+   BookingsPage Styles
+   ========================================================================== */
+
+.bookings-page-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.booking-plot-number {
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.booking-project-name {
+  font-size: 11px;
+  color: #059669;
+  font-weight: 600;
+}
+
+.booking-customer-name {
+  font-weight: 700;
+}
+
+.booking-customer-phone {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.booking-token-amount {
+  font-weight: 800;
+  color: #059669;
+}
+
+.booking-total-amount {
+  font-weight: 700;
+}
+
+.booking-drawer-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.booking-drawer-card {
+  padding: 18px;
+}
+
+.booking-drawer-section-title {
+  font-size: 13px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.booking-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.booking-form-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.booking-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}

@@ -1,0 +1,51 @@
+/* ==========================================================================
+   App Component Styles
+   ========================================================================== */
+
+.app-quickcreate-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.app-segmented-toggle {
+  display: flex;
+  background-color: var(--bg-surface-hover);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+
+.app-segmented-btn {
+  font-size: 12px;
+  padding: 4px 14px;
+}
+
+.app-segmented-btn.disabled {
+  opacity: 0.4;
+}
+
+.app-no-customers-msg {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.app-new-customer-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.app-schedule-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.app-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}

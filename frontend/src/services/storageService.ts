@@ -2,6 +2,7 @@ import {
   Lead,
   Customer,
   Deal,
+  DealActivity,
   CallRecord,
   Followup,
   PropertyProject,
@@ -32,7 +33,14 @@ import {
   INITIAL_INVESTORS,
   INITIAL_CONSULTATIONS,
   INITIAL_OPPORTUNITIES,
+  INITIAL_NOTIFICATIONS,
+  INITIAL_DEAL_ACTIVITIES,
+  INITIAL_CALLS,
+  INITIAL_CUSTOMERS,
+  MOCK_AGENTS,
+  MOCK_IRMS,
 } from '../mock_data/mockData';
+import { ensureInitialAdminFollowups } from '../mock_data/adminFollowupsData';
 
 export type PopupPosition = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
 
@@ -256,10 +264,26 @@ class StorageService {
     this.set('deals', deals);
   }
 
-  // Calls (Defaults to empty [] - real-time data only)
+  // Deal Activities
+  getDealActivities(dealId: string, companyId?: string): DealActivity[] {
+    const activities = this.get<DealActivity[]>('deal_activities', INITIAL_DEAL_ACTIVITIES);
+    return activities.filter(a => a.dealId === dealId && (!companyId || a.companyId === companyId));
+  }
+
+  addDealActivity(activity: DealActivity): void {
+    const activities = this.get<DealActivity[]>('deal_activities', INITIAL_DEAL_ACTIVITIES);
+    activities.unshift(activity);
+    this.set('deal_activities', activities);
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  }
+
+  // Calls (Seeds from INITIAL_CALLS; real calls are prepended via addCall)
   getCalls(companyId?: string): CallRecord[] {
-    const calls = this.get<CallRecord[]>('calls', []);
-    return companyId ? calls.filter(c => c.companyId === companyId) : calls;
+    const stored = this.get<CallRecord[]>('calls', []);
+    // Merge: keep stored calls first, then append any INITIAL_CALLS not already present
+    const storedIds = new Set(stored.map(c => c.id));
+    const merged = [...stored, ...INITIAL_CALLS.filter(c => !storedIds.has(c.id))];
+    return companyId ? merged.filter(c => c.companyId === companyId) : merged;
   }
 
   addCall(call: CallRecord): void {
@@ -270,8 +294,16 @@ class StorageService {
 
   // Follow-ups (Defaults to empty [] - real-time data only)
   getFollowups(companyId?: string): Followup[] {
-    const followups = this.get<Followup[]>('followups', []) || [];
-    return companyId ? followups.filter(f => f.companyId === companyId) : followups;
+    const raw = this.get<Followup[]>('followups', []) || [];
+    const { list, modified } = ensureInitialAdminFollowups(raw);
+    if (modified) {
+      try {
+        localStorage.setItem('nexus_followups', JSON.stringify(list));
+      } catch (e) {
+        console.error('Failed to seed admin followups', e);
+      }
+    }
+    return companyId ? list.filter(f => f.companyId === companyId) : list;
   }
 
   cleanupGhlPendingFollowups(companyId?: string): void {
@@ -569,23 +601,130 @@ class StorageService {
     this.set('audit_logs', logs);
   }
 
-  // Notifications (Defaults to empty [] - real-time data only)
-  getNotifications(): NotificationItem[] {
-    return this.get<NotificationItem[]>('notifications', []);
+  // Notifications (Multi-tenant scoped with strict cross-tenant isolation)
+  getNotifications(companyId?: string, userId?: string, userRoleCode?: string): NotificationItem[] {
+    let raw = this.get<NotificationItem[]>('notifications', []);
+
+    // Seed defaults if empty
+    if (raw.length === 0) {
+      raw = INITIAL_NOTIFICATIONS;
+      try {
+        localStorage.setItem('nexus_notifications', JSON.stringify(raw));
+      } catch (e) {
+        console.error('Failed to seed initial notifications', e);
+      }
+    }
+
+    // Auto-migrate any legacy items lacking tenant information (default to GHL)
+    let migrated = false;
+    const cleanList = raw.map(n => {
+      if (!n.companyId && !n.companySlug) {
+        migrated = true;
+        return {
+          ...n,
+          companyId: 't-ghl-01',
+          companySlug: 'ghl',
+          targetUserId: n.targetUserId || 'all',
+          priority: n.priority || 'normal',
+        };
+      }
+      return n;
+    });
+
+    if (migrated) {
+      try {
+        localStorage.setItem('nexus_notifications', JSON.stringify(cleanList));
+      } catch (e) {
+        console.error('Failed to update migrated notifications', e);
+      }
+    }
+
+    // 1. Strict Tenant Filtering
+    if (!companyId) return cleanList;
+
+    const targetCompanyId = companyId.toLowerCase();
+    const isGhlTarget = targetCompanyId === 't-ghl-01' || targetCompanyId === 'ghl';
+    const isJaminTarget = targetCompanyId === 't-jamin-02' || targetCompanyId === 'jamin';
+
+    const tenantScoped = cleanList.filter(n => {
+      const nCompId = (n.companyId || '').toLowerCase();
+      const nSlug = (n.companySlug || '').toLowerCase();
+
+      if (isGhlTarget) {
+        return nCompId === 't-ghl-01' || nSlug === 'ghl';
+      }
+      if (isJaminTarget) {
+        return nCompId === 't-jamin-02' || nSlug === 'jamin';
+      }
+      return nCompId === targetCompanyId || nSlug === targetCompanyId;
+    });
+
+    // 2. User / Role Targeting within the Tenant
+    if (!userId) return tenantScoped;
+
+    return tenantScoped.filter(n => {
+      // Broadcast to all users in tenant
+      if (!n.targetUserId || n.targetUserId === 'all') {
+        // If targeted to a specific role, verify role match or admin
+        if (n.targetRole && n.targetRole !== 'all') {
+          return (
+            userRoleCode === n.targetRole ||
+            userRoleCode === 'company_admin' ||
+            (userRoleCode as string) === 'admin' ||
+            userRoleCode === 'super_admin'
+          );
+        }
+        return true;
+      }
+      // Targeted directly to this user
+      if (n.targetUserId === userId) return true;
+      // Sender admin can view what they sent
+      if (n.createdById === userId) return true;
+
+      return false;
+    });
+  }
+
+  createNotification(notification: NotificationItem): void {
+    const raw = this.get<NotificationItem[]>('notifications', []);
+    const updated = [notification, ...raw];
+    this.set('notifications', updated);
   }
 
   markNotificationRead(id: string): void {
-    const notifs = this.getNotifications();
-    const found = notifs.find(n => n.id === id);
+    const raw = this.get<NotificationItem[]>('notifications', []);
+    const found = raw.find(n => n.id === id);
     if (found) {
       found.read = true;
-      this.set('notifications', notifs);
+      this.set('notifications', raw);
     }
   }
 
-  markAllNotificationsRead(): void {
-    const notifs = this.getNotifications().map(n => ({ ...n, read: true }));
-    this.set('notifications', notifs);
+  markAllNotificationsRead(companyId?: string, userId?: string): void {
+    const raw = this.get<NotificationItem[]>('notifications', []);
+    const targetCompanyId = (companyId || '').toLowerCase();
+    const isGhlTarget = targetCompanyId === 't-ghl-01' || targetCompanyId === 'ghl';
+    const isJaminTarget = targetCompanyId === 't-jamin-02' || targetCompanyId === 'jamin';
+
+    const updated = raw.map(n => {
+      if (companyId) {
+        const nCompId = (n.companyId || '').toLowerCase();
+        const nSlug = (n.companySlug || '').toLowerCase();
+        let companyMatches = false;
+        if (isGhlTarget) companyMatches = nCompId === 't-ghl-01' || nSlug === 'ghl';
+        else if (isJaminTarget) companyMatches = nCompId === 't-jamin-02' || nSlug === 'jamin';
+        else companyMatches = nCompId === targetCompanyId || nSlug === targetCompanyId;
+
+        if (!companyMatches) return n;
+      }
+
+      if (userId && n.targetUserId && n.targetUserId !== 'all' && n.targetUserId !== userId) {
+        return n;
+      }
+
+      return { ...n, read: true };
+    });
+    this.set('notifications', updated);
   }
 
   // Documents — metadata-only (no file bytes stored)
@@ -798,7 +937,31 @@ class StorageService {
     this.set('users', mock.USERS);
     this.set('tenants', Object.values(mock.TENANTS));
     this.set('custom_field_definitions', mock.INITIAL_CUSTOM_FIELD_DEFINITIONS);
+    this.set('deal_activities', mock.INITIAL_DEAL_ACTIVITIES);
     window.dispatchEvent(new Event('nexus_storage_updated'));
+  }
+
+  // Proxy methods for remaining mock data usage
+  getMockAgents() {
+    return MOCK_AGENTS;
+  }
+
+  getMockIrms() {
+    return MOCK_IRMS;
+  }
+
+  // Used by InCallBar, CustomersPage, FollowupsPage, AdminKanbanBoard.
+  // (Were missing after the app merge -> TypeError -> white screen)
+  getAgents(_companyId?: string) {
+    return MOCK_AGENTS;
+  }
+
+  getIrms(_companyId?: string) {
+    return MOCK_IRMS;
+  }
+
+  getInitialCustomers() {
+    return INITIAL_CUSTOMERS;
   }
 
   // Incoming Call Popup Position
@@ -833,6 +996,18 @@ class StorageService {
   }
 
   // Call Preferences (sound, desktop notifs, auto-busy, default followup time)
+  getAdminCallSettings(): { allowSalesDecline: boolean; allowIrmDecline: boolean } {
+    return this.get('admin_call_settings', {
+      allowSalesDecline: true,
+      allowIrmDecline: true,
+    });
+  }
+
+  setAdminCallSettings(settings: Partial<{ allowSalesDecline: boolean; allowIrmDecline: boolean }>): void {
+    const existing = this.getAdminCallSettings();
+    this.set('admin_call_settings', { ...existing, ...settings });
+  }
+
   getCallPreferences(): {
     soundEnabled: boolean;
     desktopNotifEnabled: boolean;

@@ -1,0 +1,78 @@
+/* ==========================================================================
+   Document List Component Styles
+   ========================================================================== */
+
+.document-list-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.document-list-count {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.document-item-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+  background-color: var(--bg-surface);
+  transition: background-color var(--transition-fast);
+}
+
+.document-item-row:hover {
+  background-color: var(--bg-surface-hover);
+}
+
+.document-item-icon {
+  flex-shrink: 0;
+}
+
+.document-item-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.document-item-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-item-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.document-item-category {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background-color: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+  font-weight: 600;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.document-item-delete-btn {
+  flex-shrink: 0;
+  color: var(--danger);
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-md);
+}

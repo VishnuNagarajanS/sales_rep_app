@@ -1,0 +1,99 @@
+/* ==========================================================================
+   Document Uploader Component Styles
+   ========================================================================== */
+
+.document-uploader-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.document-uploader-category-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.document-uploader-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.document-uploader-select {
+  height: 30px;
+  font-size: 12px;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 10px;
+  padding-right: 24px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+}
+
+.document-dropzone {
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 24px 16px;
+  text-align: center;
+  background-color: var(--bg-surface-hover);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.document-dropzone.dragging {
+  border-color: var(--primary-500);
+  background-color: var(--primary-50);
+}
+
+.document-dropzone-icon {
+  margin: 0 auto 10px;
+}
+
+.document-dropzone-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.document-dropzone-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.document-dropzone-btn {
+  margin-top: 10px;
+  pointer-events: none;
+}
+
+.document-disclaimer {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.document-toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 500;
+  animation: slideDown 0.2s ease;
+}
+
+.document-toast.success {
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  background-color: rgba(16, 185, 129, 0.08);
+  color: #047857;
+}
+
+.document-toast.error {
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background-color: rgba(239, 68, 68, 0.08);
+  color: #b91c1c;
+}

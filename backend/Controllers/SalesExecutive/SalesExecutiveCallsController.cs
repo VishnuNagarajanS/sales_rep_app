@@ -43,19 +43,19 @@ public class SalesExecutiveCallsController : ControllerBase
         CancellationToken ct = default)
     {
         var role = _currentUser.Role;
-        var agentId = _currentUser.UserId > 0 ? _currentUser.UserId : 0;
-        var companyId = _currentUser.CompanyId > 0 ? _currentUser.CompanyId : 0;
+        var agentId = _currentUser.UserId;
+        var companyId = _currentUser.CompanyId;
 
         var query = _context.CallRecords.AsNoTracking().Include(c => c.Agent).AsQueryable();
 
-        if (role != "super_admin" && companyId > 0)
+        if (role != "super_admin" && companyId.HasValue)
         {
-            query = query.Where(c => c.CompanyId == companyId);
+            query = query.Where(c => c.CompanyId == companyId.Value);
         }
 
-        if (role == "sales_executive" && agentId > 0)
+        if (role == "sales_executive" && agentId.HasValue)
         {
-            query = query.Where(c => c.AgentId == agentId);
+            query = query.Where(c => c.AgentId == agentId.Value);
         }
 
         if (!string.IsNullOrWhiteSpace(search))
@@ -101,7 +101,7 @@ public class SalesExecutiveCallsController : ControllerBase
         pageSize = Math.Clamp(pageSize, 1, 100);
 
         var items = await query
-            .OrderByDescending(c => c.StartedAt)
+            .OrderByDescending(c => c.Timestamp)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(c => new CallRecordResponseDto
@@ -113,12 +113,12 @@ public class SalesExecutiveCallsController : ControllerBase
                 ContactName = c.ContactName,
                 ContactPhone = c.ContactPhone,
                 Direction = c.Direction,
-                Duration = c.DurationSeconds,
+                Duration = c.Duration,
                 Disposition = c.Disposition,
                 Notes = c.Notes,
                 LeadId = c.LeadId,
                 CustomerId = c.CustomerId,
-                Timestamp = c.StartedAt,
+                Timestamp = c.Timestamp,
                 CreatedAt = c.CreatedAt
             })
             .ToListAsync(ct);
@@ -133,8 +133,8 @@ public class SalesExecutiveCallsController : ControllerBase
         [FromBody] LogCallDto dto,
         CancellationToken ct = default)
     {
-        var agentId = _currentUser.UserId > 0 ? _currentUser.UserId : 1;
-        var companyId = _currentUser.CompanyId > 0 ? _currentUser.CompanyId : 1;
+        var agentId = _currentUser.UserId ?? 1;
+        var companyId = _currentUser.CompanyId ?? 1;
 
         var call = new CallRecord
         {
@@ -143,12 +143,12 @@ public class SalesExecutiveCallsController : ControllerBase
             ContactName = dto.ContactName.Trim(),
             ContactPhone = dto.ContactPhone.Trim(),
             Direction = string.IsNullOrWhiteSpace(dto.Direction) ? "outbound" : dto.Direction.Trim().ToLower(),
-            DurationSeconds = dto.Duration,
+            Duration = dto.Duration,
             Disposition = dto.Disposition.Trim(),
             Notes = dto.Notes?.Trim() ?? string.Empty,
             LeadId = dto.LeadId,
             CustomerId = dto.CustomerId,
-            StartedAt = DateTime.UtcNow,
+            Timestamp = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow
         };
 
@@ -166,12 +166,12 @@ public class SalesExecutiveCallsController : ControllerBase
             ContactName = call.ContactName,
             ContactPhone = call.ContactPhone,
             Direction = call.Direction,
-            Duration = call.DurationSeconds,
+            Duration = call.Duration,
             Disposition = call.Disposition,
             Notes = call.Notes,
             LeadId = call.LeadId,
             CustomerId = call.CustomerId,
-            Timestamp = call.StartedAt,
+            Timestamp = call.Timestamp,
             CreatedAt = call.CreatedAt
         };
 

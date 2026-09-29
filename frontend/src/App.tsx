@@ -3,6 +3,7 @@ import { useAuth } from './context/AuthContext';
 import { AuthLayout } from './layouts/AuthLayout';
 import { SalesLayout } from './layouts/SalesLayout';
 import { AdminLayout } from './layouts/AdminLayout';
+import { isMockMode } from './config/environment';
 
 // Sales Core Pages
 import { DashboardPage } from './pages/Dashboard/DashboardPage';
@@ -38,6 +39,8 @@ import { BookingsPage } from './pages/Bookings/BookingsPage';
 import { InvestorsPage } from './pages/Investors/InvestorsPage';
 import { ConsultationsPage } from './pages/Consultations/ConsultationsPage';
 import { OpportunitiesPage } from './pages/InvestmentOpportunities/OpportunitiesPage';
+import { AssignedLeadsPage } from './pages/AssignedLeads/AssignedLeadsPage';
+import { KYCPage } from './pages/KYC/KYCPage';
 
 // Company Admin
 import { CompanyUsersPage } from './pages/Company/CompanyUsersPage';
@@ -56,6 +59,16 @@ import { PlatformAuditPage } from './pages/Admin/Audit/PlatformAuditPage';
 import { ProtectedRoute } from './components/common/Guards';
 import { Modal } from './components/common/Modal';
 import { storageService } from './services/storageService';
+import { Investor, Customer } from './types';
+import {
+  saveLead as apiSaveLead,
+  saveFollowup as apiSaveFollowup,
+  saveConsultation as apiSaveConsultation,
+  saveDeal as apiSaveDeal,
+  saveCustomer as apiSaveCustomer,
+  getInvestors as apiGetInvestors,
+  getCustomers as apiGetCustomers,
+} from './services/ghlApiService';
 import { PERMISSIONS } from './constants/permissions';
 import './App.css';
 
@@ -65,17 +78,16 @@ export const App: React.FC = () => {
     return sessionStorage.getItem('nexus_current_route') || 'dashboard';
   });
 
-  // Seed initial mock data on clean install / empty session
+  const roleCode = user?.role?.code;
+  const isGhlAdmin =
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
+    (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
+  // In mock mode only, run idempotent mock bootstrap if not yet initialized
   useEffect(() => {
-    if (storageService.getUsers().length === 0) {
-      storageService.loadMockDataFromSeparateFolder();
-    }
-  }, []);
-
-  // Seed initial mock data on clean install / empty session
-  useEffect(() => {
-    if (storageService.getUsers().length === 0) {
-      storageService.loadMockDataFromSeparateFolder();
+    if (isMockMode()) {
+      import('./mock/runtime/mockBootstrap').then(({ runMockBootstrap }) => {
+        runMockBootstrap();
+      });
     }
   }, []);
 
@@ -87,8 +99,11 @@ export const App: React.FC = () => {
         setCurrentRoute('dashboard');
         sessionStorage.setItem('nexus_current_route', 'dashboard');
       }
+    } else if (user?.role?.code === 'sales_executive' && currentRoute === 'kyc') {
+      setCurrentRoute('dashboard');
+      sessionStorage.setItem('nexus_current_route', 'dashboard');
     }
-  }, [user?.role?.code]);
+  }, [user?.role?.code, currentRoute]);
 
   // Quick Create Modal State
   const [quickCreateType, setQuickCreateType] = useState<
@@ -101,7 +116,7 @@ export const App: React.FC = () => {
   const [quickLocation, setQuickLocation] = useState('');
   const [quickSource, setQuickSource] = useState('Website Inbound');
   const [quickAssetClass, setQuickAssetClass] = useState('AIF');
-  const [quickInvestmentCapacity, setQuickInvestmentCapacity] = useState('₹1 Cr – ₹5 Cr');
+  const [quickInvestmentCapacity, setQuickInvestmentCapacity] = useState('');
   const [quickNotes, setQuickNotes] = useState('');
 
   // Consultation-specific state
@@ -332,6 +347,14 @@ export const App: React.FC = () => {
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
           <LeadsPage />
         </ProtectedRoute>
+      ) : currentRoute === 'assigned-leads' ? (
+        <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
+          {isGhlAdmin ? (
+            <AssignedLeadsPage />
+          ) : (
+            <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+          )}
+        </ProtectedRoute>
       ) : currentRoute === 'customers' ? (
         <ProtectedRoute permission={PERMISSIONS.CUSTOMERS_VIEW}>
           <CustomersPage />
@@ -374,6 +397,14 @@ export const App: React.FC = () => {
         <ProtectedRoute permission={PERMISSIONS.BOOKINGS_VIEW}>
           <BookingsPage />
         </ProtectedRoute>
+      ) : currentRoute === 'kyc' ? (
+        user?.role?.code === 'sales_executive' ? (
+          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+        ) : (
+          <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
+            <KYCPage />
+          </ProtectedRoute>
+        )
       ) : currentRoute === 'investors' ? (
         <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
           <InvestorsPage />
@@ -510,21 +541,19 @@ export const App: React.FC = () => {
               <div className="lead-custom-schema-box">
                 <div className="lead-custom-schema-title">GHL India Ventures Asset Terms</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div className="form-group">
-                    <label className="form-label">Asset Class</label>
-                    <select
-                      className="form-select"
-                      value={quickAssetClass}
-                      onChange={e => {
-                        const ac = e.target.value;
-                        setQuickAssetClass(ac);
-                        setQuickInvestmentCapacity(ac === 'CO-AIF' ? '₹10 Lakh to ₹1 Cr' : '₹1 Cr – ₹5 Cr');
-                      }}
-                    >
-                      <option value="AIF">AIF</option>
-                      <option value="CO-AIF">CO-AIF</option>
-                    </select>
-                  </div>
+                  {user?.role?.code !== 'sales_executive' && (
+                    <div className="form-group">
+                      <label className="form-label">Asset Class</label>
+                      <select
+                        className="form-select"
+                        value={quickAssetClass}
+                        onChange={e => setQuickAssetClass(e.target.value)}
+                      >
+                        <option value="AIF">AIF</option>
+                        <option value="CO-AIF">CO-AIF</option>
+                      </select>
+                    </div>
+                  )}
                   <div className="form-group">
                     <label className="form-label">Investment Capacity</label>
                     <select
@@ -532,12 +561,17 @@ export const App: React.FC = () => {
                       value={quickInvestmentCapacity}
                       onChange={e => setQuickInvestmentCapacity(e.target.value)}
                     >
-                      {quickAssetClass === 'CO-AIF'
-                        ? [<option key="co" value="₹10 Lakh to ₹1 Cr">₹10 Lakh to ₹1 Cr</option>]
-                        : ['₹1 Cr – ₹5 Cr', '₹5 Cr – ₹10 Cr', '₹10 Cr – ₹25 Cr', '₹25 Cr+'].map(o => (
-                            <option key={o} value={o}>{o}</option>
-                          ))
-                      }
+                      <option value="" disabled>Select a range</option>
+                      {[
+                        'Contact for Co-Invest Details',
+                        '₹1 Cr – ₹5 Cr',
+                        '₹5 Cr – ₹10 Cr',
+                        '₹10 Cr – ₹25 Cr',
+                        '₹25 Cr+',
+                        'Not sure yet — help me decide'
+                      ].map(o => (
+                        <option key={o} value={o}>{o}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -675,121 +709,121 @@ export const App: React.FC = () => {
             </>
           ) : (
             <>
-            {/* ── Deal: existing vs. new customer picker ── */}
-            {quickCreateType === 'deal' && (() => {
-            const tenantCustomers = storageService.getCustomers(tenant?.id);
-            const hasCustomers = tenantCustomers.length > 0;
-            return (
-              <div className="form-group">
-                <label className="form-label">Link to Customer</label>
+              {/* ── Deal: existing vs. new customer picker ── */}
+              {quickCreateType === 'deal' && (() => {
+                const tenantCustomers = storageService.getCustomers(tenant?.id);
+                const hasCustomers = tenantCustomers.length > 0;
+                return (
+                  <div className="form-group">
+                    <label className="form-label">Link to Customer</label>
 
-                {/* Segmented toggle — same style as Reports page period toggle */}
-                <div className="app-segmented-toggle">
-                  {(['existing', 'new'] as const).map(mode => (
-                    <button
-                      key={mode}
-                      type="button"
-                      className={`btn btn-sm app-segmented-btn ${dealCustomerMode === mode ? 'btn-primary' : 'btn-ghost'} ${mode === 'existing' && !hasCustomers ? 'disabled' : ''}`}
-                      disabled={mode === 'existing' && !hasCustomers}
-                      onClick={() => setDealCustomerMode(mode)}
-                    >
-                      {mode === 'existing' ? 'Existing customer' : 'New customer'}
-                    </button>
-                  ))}
+                    {/* Segmented toggle — same style as Reports page period toggle */}
+                    <div className="app-segmented-toggle">
+                      {(['existing', 'new'] as const).map(mode => (
+                        <button
+                          key={mode}
+                          type="button"
+                          className={`btn btn-sm app-segmented-btn ${dealCustomerMode === mode ? 'btn-primary' : 'btn-ghost'} ${mode === 'existing' && !hasCustomers ? 'disabled' : ''}`}
+                          disabled={mode === 'existing' && !hasCustomers}
+                          onClick={() => setDealCustomerMode(mode)}
+                        >
+                          {mode === 'existing' ? 'Existing customer' : 'New customer'}
+                        </button>
+                      ))}
+                    </div>
+
+                    {!hasCustomers && (
+                      <p className="app-no-customers-msg">
+                        No customers in this workspace yet — deal will create a new customer record.
+                      </p>
+                    )}
+
+                    {dealCustomerMode === 'existing' && hasCustomers ? (
+                      <select
+                        className="form-select"
+                        value={selectedCustomerId}
+                        onChange={e => setSelectedCustomerId(e.target.value)}
+                        required
+                      >
+                        {tenantCustomers.map((c: Customer) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}{c.phone ? ` · ${c.phone}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div>
+                        <label className="form-label app-new-customer-label">
+                          New Customer Name * — a new Customer record will be created
+                        </label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          required
+                          placeholder="Customer full name"
+                          value={newCustomerName}
+                          onChange={e => setNewCustomerName(e.target.value)}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* ── Phone (non-lead, non-deal-existing) ── */}
+              {!(quickCreateType === 'deal' && dealCustomerMode === 'existing') && (
+                <div className="form-group">
+                  <label className="form-label">Phone Number</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={quickPhone}
+                    onChange={e => setQuickPhone(e.target.value)}
+                  />
                 </div>
+              )}
 
-                {!hasCustomers && (
-                  <p className="app-no-customers-msg">
-                    No customers in this workspace yet — deal will create a new customer record.
-                  </p>
-                )}
-
-                {dealCustomerMode === 'existing' && hasCustomers ? (
-                  <select
-                    className="form-select"
-                    value={selectedCustomerId}
-                    onChange={e => setSelectedCustomerId(e.target.value)}
-                    required
-                  >
-                    {tenantCustomers.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}{c.phone ? ` · ${c.phone}` : ''}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div>
-                    <label className="form-label app-new-customer-label">
-                      New Customer Name * — a new Customer record will be created
-                    </label>
+              {/* ── Scheduled Date + Time (followup, visit) ── */}
+              {(quickCreateType === 'followup' || quickCreateType === 'visit') && (
+                <div className="app-schedule-grid">
+                  <div className="form-group">
+                    <label className="form-label">Scheduled Date *</label>
                     <input
-                      type="text"
+                      type="date"
                       className="form-input"
                       required
-                      placeholder="Customer full name"
-                      value={newCustomerName}
-                      onChange={e => setNewCustomerName(e.target.value)}
+                      value={scheduledDate}
+                      onChange={e => setScheduledDate(e.target.value)}
                     />
                   </div>
-                )}
-              </div>
-            );
-          })()}
+                  <div className="form-group">
+                    <label className="form-label">Scheduled Time *</label>
+                    <input
+                      type="time"
+                      className="form-input"
+                      required
+                      value={scheduledTime}
+                      onChange={e => setScheduledTime(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
 
-          {/* ── Phone (non-lead, non-deal-existing) ── */}
-          {!(quickCreateType === 'deal' && dealCustomerMode === 'existing') && (
-            <div className="form-group">
-              <label className="form-label">Phone Number</label>
-              <input
-                type="text"
-                className="form-input"
-                value={quickPhone}
-                onChange={e => setQuickPhone(e.target.value)}
-              />
-            </div>
-          )}
-
-          {/* ── Scheduled Date + Time (followup, visit) ── */}
-          {(quickCreateType === 'followup' || quickCreateType === 'visit') && (
-            <div className="app-schedule-grid">
+              {/* ── Notes/Agenda (non-lead types) ── */}
               <div className="form-group">
-                <label className="form-label">Scheduled Date *</label>
-                <input
-                  type="date"
-                  className="form-input"
-                  required
-                  value={scheduledDate}
-                  onChange={e => setScheduledDate(e.target.value)}
+                <label className="form-label">Quick Notes</label>
+                <textarea
+                  className="form-textarea"
+                  rows={2}
+                  value={quickNotes}
+                  onChange={e => setQuickNotes(e.target.value)}
+                  placeholder={
+                    quickCreateType === 'visit'
+                      ? 'Special requirements, preferred plots...'
+                      : 'Brief requirement summary...'
+                  }
                 />
               </div>
-              <div className="form-group">
-                <label className="form-label">Scheduled Time *</label>
-                <input
-                  type="time"
-                  className="form-input"
-                  required
-                  value={scheduledTime}
-                  onChange={e => setScheduledTime(e.target.value)}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* ── Notes/Agenda (non-lead types) ── */}
-          <div className="form-group">
-            <label className="form-label">Quick Notes</label>
-            <textarea
-              className="form-textarea"
-              rows={2}
-              value={quickNotes}
-              onChange={e => setQuickNotes(e.target.value)}
-              placeholder={
-                quickCreateType === 'visit'
-                    ? 'Special requirements, preferred plots...'
-                    : 'Brief requirement summary...'
-              }
-            />
-          </div>
             </>
           )}
 

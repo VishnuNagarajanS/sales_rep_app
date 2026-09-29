@@ -9,7 +9,7 @@ namespace backend.Controllers.SalesExecutive;
 
 [ApiController]
 [Route("api/sales-executive/leads")]
-[Authorize(Roles = "sales_executive,company_admin,sales_manager,super_admin,irm")]
+//[Authorize]
 public class SalesExecutiveLeadsController : ControllerBase
 {
     private readonly ILeadService _leadService;
@@ -66,6 +66,7 @@ public class SalesExecutiveLeadsController : ControllerBase
         [FromBody] CreateLeadDto dto,
         CancellationToken ct)
     {
+        Console.WriteLine("CREATE LEAD CALLED with Name: " + dto.Name);
         var validation = await _createValidator.ValidateAsync(dto, ct);
         if (!validation.IsValid)
         {
@@ -167,14 +168,12 @@ public class SalesExecutiveLeadsController : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
-    public async Task<ActionResult<ApiResponse<bool>>> DeleteLead(
-        [FromRoute] int id,
-        CancellationToken ct)
+    public async Task<ActionResult<ApiResponse<object>>> DeleteLead([FromRoute] int id, CancellationToken ct)
     {
-        var deleted = await _leadService.DeleteAsync(id, ct);
-        if (!deleted)
-            return NotFound(ApiResponse<bool>.FailureResult("Lead not found."));
-
-        return Ok(ApiResponse<bool>.SuccessResult(true, "Lead deleted successfully."));
+        var result = await _leadService.DeleteLeadAsync(id, ct);
+        if (!result.Success) return BadRequest(result);
+        return Ok(result);
     }
 }
+
+

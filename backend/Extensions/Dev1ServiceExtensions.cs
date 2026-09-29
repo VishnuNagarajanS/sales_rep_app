@@ -8,7 +8,6 @@ public static class Dev1ServiceExtensions
     public static IServiceCollection AddDev1Services(this IServiceCollection services)
     {
         services.AddHttpContextAccessor();
-        services.AddScoped<ICurrentUserService, CurrentUserService>();
         services.AddScoped<ICallService, CallService>();
         services.AddScoped<IExecutiveDashboardService, ExecutiveDashboardService>();
         services.AddScoped<IExecutiveProfileService, ExecutiveProfileService>();

@@ -1,0 +1,219 @@
+/* CompanyUsersPage styles */
+
+.company-users-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.company-users-page .page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.company-users-page .page-title {
+  font-size: 24px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.company-users-page .page-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+
+
+
+.company-users-page .form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.company-users-page .form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.company-users-page .form-input,
+.company-users-page .form-select {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  outline: none;
+  transition: all var(--transition-fast);
+  width: 100%;
+}
+
+.company-user-name {
+  font-weight: 700;
+}
+
+.company-user-email {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.company-user-role {
+  font-weight: 600;
+  color: var(--primary-600);
+}
+
+.company-user-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.company-user-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+/* GHL Admin Filter Bar */
+.company-users-filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+}
+
+.company-users-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.company-users-filter-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.company-users-filter-select {
+  width: auto;
+  min-width: 170px;
+  height: 36px;
+  padding: 6px 12px;
+}
+
+/* Credential Box for Password Reset / Instant Creation */
+.company-temp-password-box {
+  background: var(--bg-surface-hover);
+  border: 1px dashed var(--border-base);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+
+  /* ── Roles summary styles ── */
+  .company-users-role-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .company-users-role-summary-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+  }
+
+  .company-users-role-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+  }
+
+  .company-users-role-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 18px 20px;
+    cursor: pointer;
+    user-select: none;
+    transition: transform var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-fast);
+  }
+
+  .company-users-role-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--primary-400);
+    box-shadow: var(--shadow-md);
+  }
+
+  .company-users-role-card.is-expanded {
+    border-color: var(--primary-600);
+    background: var(--bg-surface);
+    box-shadow: 0 0 0 2px var(--primary-100), var(--shadow-md);
+  }
+
+  .company-users-role-card-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--primary-600);
+    border-bottom: 1px solid var(--border-base);
+    padding-bottom: 8px;
+  }
+
+  .company-users-role-card-stat {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 10px;
+  }
+
+  .company-temp-password-text {
+    font-family: var(--font-mono, monospace);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--primary-600);
+    letter-spacing: 0.5px;
+  }
+
+  .company-user-form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  @media (max-width: 640px) {
+    .company-user-form-row {
+      grid-template-columns: 1fr;
+    }
+  }
+}
+
+.company-users-role-card-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.company-users-role-card-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.company-users-role-detail {
+  margin-top: 16px;
+}

@@ -8,7 +8,11 @@ import {
 import { Consultation, Investor } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import {
+  getConsultations,
+  saveConsultation as apiSaveConsultation,
+  getInvestors,
+} from '../../services/ghlApiService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { Modal } from '../../components/common/Modal';
@@ -36,6 +40,7 @@ interface ConsultationForm {
   status: Consultation['status'];
   agenda: string;
   outcomeNotes: string;
+  referredByAgentName: string;
 }
 
 const BLANK_FORM: ConsultationForm = {
@@ -48,6 +53,7 @@ const BLANK_FORM: ConsultationForm = {
   status: 'Scheduled',
   agenda: '',
   outcomeNotes: '',
+  referredByAgentName: '',
 };
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -65,6 +71,7 @@ export const ConsultationsPage: React.FC = () => {
 
   // ── Filters ───────────────────────────────────────────────────────────────
   const [consultantFilter, setConsultantFilter] = useState('All');
+  const [agentFilter, setAgentFilter] = useState('All');
 
   // ── Create / Edit / Reschedule Modal ──────────────────────────────────────
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -74,9 +81,17 @@ export const ConsultationsPage: React.FC = () => {
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof ConsultationForm, string>>>({});
 
   // ── Data loading ──────────────────────────────────────────────────────────
-  const loadData = () => {
-    setConsultations(storageService.getConsultations(tenant?.id));
-    setInvestors(storageService.getInvestors(tenant?.id));
+  const loadData = async () => {
+    try {
+      const [consList, invList] = await Promise.all([
+        getConsultations(tenant?.id),
+        getInvestors(tenant?.id),
+      ]);
+      setConsultations(consList);
+      setInvestors(invList);
+    } catch (err) {
+      console.error('Failed to load consultations data', err);
+    }
   };
 
   useEffect(() => {
@@ -157,12 +172,19 @@ export const ConsultationsPage: React.FC = () => {
   const consultantOptions = Array.from(
     new Set(latestByInvestor.map(c => c.consultantName)),
   )
-    .filter(Boolean)
+    .filter((name): name is string => Boolean(name))
+    .map(name => ({ value: name, label: name }));
+
+  const agentOptions = Array.from(
+    new Set(latestByInvestor.map(c => c.referredByAgentName)),
+  )
+    .filter((name): name is string => Boolean(name))
     .map(name => ({ value: name, label: name }));
 
   // ── Filtered list (operates on deduplicated latestByInvestor) ─────────────
   const filteredConsultations = latestByInvestor.filter(c => {
     if (consultantFilter !== 'All' && c.consultantName !== consultantFilter) return false;
+    if (agentFilter !== 'All' && c.referredByAgentName !== agentFilter) return false;
     return true;
   });
 
@@ -176,6 +198,7 @@ export const ConsultationsPage: React.FC = () => {
       agenda: 'Commercial REIT yield analysis & pass-through taxation discussion.',
       consultantId: user?.id ?? '',
       consultantName: user?.name ?? 'Advisor',
+      referredByAgentName: user?.role?.code === 'sales_executive' ? (user?.name ?? '') : '',
     });
     setFormErrors({});
     setIsModalOpen(true);
@@ -194,6 +217,7 @@ export const ConsultationsPage: React.FC = () => {
       status: 'Rescheduled',
       agenda: c.agenda || '',
       outcomeNotes: c.outcomeNotes || '',
+      referredByAgentName: c.referredByAgentName || '',
     });
     setFormErrors({});
     setIsModalOpen(true);
@@ -236,30 +260,37 @@ export const ConsultationsPage: React.FC = () => {
       status: form.status,
       agenda: form.agenda.trim(),
       outcomeNotes: form.outcomeNotes.trim() || undefined,
+      referredByAgentName: form.referredByAgentName.trim() || undefined,
     };
 
-    storageService.saveConsultation(cons);
+    apiSaveConsultation(cons).then(loadData).catch(console.error);
 
-    storageService.addAuditLog({
-      id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
-      actorName: user?.name || 'Advisor',
-      actorEmail: user?.email || 'advisor@ghl.com',
-      action: isEdit
-        ? isRescheduleMode
-          ? 'CONSULTATION_RESCHEDULED'
-          : 'CONSULTATION_UPDATED'
-        : 'CONSULTATION_SCHEDULED',
-      entityType: 'Consultation',
-      entityId: cons.id,
-      companyId: tenant?.id,
-      companyName: tenant?.name,
-      details: isEdit
-        ? isRescheduleMode
-          ? `Rescheduled consultation with ${cons.investorName} to ${cons.scheduledAt}.`
-          : `Updated consultation with ${cons.investorName} (Status: ${cons.status}).`
-        : `Scheduled wealth advisory consultation with ${cons.investorName}.`,
-    });
+    try {
+      const raw = localStorage.getItem('nexus_audit_logs');
+      const logs = raw ? JSON.parse(raw) : [];
+      logs.unshift({
+        id: `aud-${Date.now()}`,
+        timestamp: 'Just now',
+        actorName: user?.name || 'Advisor',
+        actorEmail: user?.email || 'advisor@ghl.com',
+        action: isEdit
+          ? isRescheduleMode
+            ? 'CONSULTATION_RESCHEDULED'
+            : 'CONSULTATION_UPDATED'
+          : 'CONSULTATION_SCHEDULED',
+        entityType: 'Consultation',
+        entityId: cons.id,
+        companyId: tenant?.id,
+        companyName: tenant?.name,
+        details: isEdit
+          ? isRescheduleMode
+            ? `Rescheduled consultation with ${cons.investorName} to ${cons.scheduledAt}.`
+            : `Updated consultation with ${cons.investorName} (Status: ${cons.status}).`
+          : `Scheduled wealth advisory consultation with ${cons.investorName}.`,
+      });
+      localStorage.setItem('nexus_audit_logs', JSON.stringify(logs));
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+    } catch {}
 
     closeModal();
   };
@@ -270,7 +301,7 @@ export const ConsultationsPage: React.FC = () => {
       key: 'scheduledAt',
       header: 'Session Slot',
       sortable: true,
-      width: '18%',
+      width: '16%',
       render: c => (
         <div>
           <div className="consultation-slot-title">{c.scheduledAt}</div>
@@ -280,7 +311,7 @@ export const ConsultationsPage: React.FC = () => {
     },
     {
       key: 'investorName',
-      header: 'Investor Profile',
+      header: 'Customer Profile',
       sortable: true,
       width: '18%',
       render: c => (
@@ -291,9 +322,19 @@ export const ConsultationsPage: React.FC = () => {
       ),
     },
     {
+      key: 'referredByAgentName',
+      header: 'Referred By (Sales Agent)',
+      width: '18%',
+      render: c => (
+        <span className="consultation-advisor-name">
+          {c.referredByAgentName || '—'}
+        </span>
+      ),
+    },
+    {
       key: 'agenda',
       header: 'Reason for Consultation',
-      width: '38%',
+      width: '26%',
       render: c => (
         <div>
           <span className="consultation-agenda-text">{c.agenda}</span>
@@ -377,9 +418,17 @@ export const ConsultationsPage: React.FC = () => {
                 onChange: setConsultantFilter,
                 options: consultantOptions,
               },
+              {
+                key: 'agent',
+                label: 'Sales Agent',
+                value: agentFilter,
+                onChange: setAgentFilter,
+                options: agentOptions,
+              },
             ]}
             onClearAll={() => {
               setConsultantFilter('All');
+              setAgentFilter('All');
             }}
           />
         }
@@ -538,6 +587,18 @@ export const ConsultationsPage: React.FC = () => {
                 ))}
               </select>
             </div>
+          </div>
+
+          {/* Referred By */}
+          <div className="form-group">
+            <label className="form-label">Referred By (Sales Agent)</label>
+            <input
+              id="consultation-form-referredby"
+              className="form-input"
+              placeholder="e.g. Suresh Kumar"
+              value={form.referredByAgentName || ''}
+              onChange={e => setField('referredByAgentName', e.target.value)}
+            />
           </div>
 
           {/* Discussion Agenda */}

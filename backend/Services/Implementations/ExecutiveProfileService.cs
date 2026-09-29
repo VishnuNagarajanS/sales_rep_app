@@ -1,3 +1,4 @@
+using backend.Authentication.Interfaces;
 using backend.Data;
 using backend.DTOs.Profile;
 using backend.Models.Entities;

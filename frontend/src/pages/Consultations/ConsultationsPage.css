@@ -1,0 +1,56 @@
+/* ==========================================================================
+   ConsultationsPage Styles
+   ========================================================================== */
+
+.consultations-page-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.consultation-slot-title {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.consultation-slot-id {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.consultation-client-name {
+  font-weight: 600;
+}
+
+.consultation-client-phone {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.consultation-agenda-text {
+  font-size: 12px;
+}
+
+.consultation-advisor-name {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.consultation-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.consultation-form-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.consultation-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
