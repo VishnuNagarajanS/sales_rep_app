@@ -33,15 +33,40 @@ export interface Tenant {
   transcriptionEnabled?: boolean;
   createdAt?: string;
   updatedAt?: string;
+  organizationId?: string;
+  organizationSlug?: string;
+  parentTenantId?: string;
+  parentId?: string;
+  isOrganization?: boolean;
+  companies?: Array<string | Tenant | { id: string; name?: string; slug?: string }>;
 }
 
-export type RoleCode = 'super_admin' | 'company_admin' | 'sales_executive' | 'irm';
+export type RoleCode = 'super_admin' | 'company_admin' | 'sales_executive' | 'irm' | string;
 
 export interface Role {
   id: string;
   name: string;
   code: RoleCode;
   permissions: string[];
+  description?: string;
+  isSystemRole?: boolean;
+  isActive?: boolean;
+  usersCount?: number;
+  permissionsCount?: number;
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface PermissionItem {
+  key: string;
+  label: string;
+  description?: string;
+}
+
+export interface PermissionGroup {
+  group: string;
+  items: PermissionItem[];
 }
 
 export interface User {
@@ -53,6 +78,9 @@ export interface User {
   companyId?: string;
   companySlug?: TenantSlug;
   companyName?: string;
+  organizationId?: string;
+  organizationSlug?: string;
+  organizationName?: string;
   status: 'Active' | 'Invited' | 'Disabled';
   lastLogin?: string;
   avatar?: string;

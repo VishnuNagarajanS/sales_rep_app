@@ -46,6 +46,35 @@ public class JwtService : IJwtService
             claims.Add(new Claim("company_slug", user.Company.Slug));
         }
 
+        if (user.Role != null)
+        {
+            if (user.Role.Permissions != null && user.Role.Permissions.Count > 0)
+            {
+                foreach (var permission in user.Role.Permissions)
+                {
+                    claims.Add(new Claim("permission", permission));
+                }
+
+                // If it's a custom role, grant matching role capability claims so existing controller Authorize attributes allow access
+                if (!user.Role.IsSystemRole)
+                {
+                    var perms = user.Role.Permissions;
+                    if (perms.Any(p => p.StartsWith("leads.") || p.StartsWith("calls.") || p.StartsWith("consultations.") || p.StartsWith("reports.") || p.StartsWith("customers.")))
+                    {
+                        claims.Add(new Claim(ClaimTypes.Role, "sales_executive"));
+                    }
+                    if (perms.Any(p => p.StartsWith("users.") || p.StartsWith("companies.") || p.StartsWith("audit.")))
+                    {
+                        claims.Add(new Claim(ClaimTypes.Role, "company_admin"));
+                    }
+                    if (perms.Any(p => p.StartsWith("investors.") || p.StartsWith("opportunities.") || p.StartsWith("kyc.") || p.StartsWith("deals.")))
+                    {
+                        claims.Add(new Claim(ClaimTypes.Role, "irm"));
+                    }
+                }
+            }
+        }
+
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),

@@ -73,6 +73,9 @@ public class ApplicationDbContext : DbContext
                 Id = superAdminRoleId,
                 Name = "Super Admin",
                 Code = "super_admin",
+                Description = "Platform operator with unrestricted access across all tenants.",
+                IsSystemRole = true,
+                IsActive = true,
                 Permissions = new List<string>
                 {
                     "leads.view", "leads.create", "leads.update", "leads.delete", "leads.assign", "leads.export", "leads.import", "leads.convert",
@@ -93,6 +96,9 @@ public class ApplicationDbContext : DbContext
                 Id = companyAdminRoleId,
                 Name = "Company Admin",
                 Code = "company_admin",
+                Description = "Tenant root administrator managing team users and company setup.",
+                IsSystemRole = true,
+                IsActive = true,
                 Permissions = new List<string>
                 {
                     "leads.view", "leads.create", "leads.update", "leads.delete", "leads.assign", "leads.export", "leads.import", "leads.convert",
@@ -112,6 +118,9 @@ public class ApplicationDbContext : DbContext
                 Id = salesExecutiveRoleId,
                 Name = "Sales Executive",
                 Code = "sales_executive",
+                Description = "Frontline sales representative executing dialer outreach.",
+                IsSystemRole = true,
+                IsActive = true,
                 Permissions = new List<string>
                 {
                     "leads.view", "leads.create", "leads.update", "leads.convert",
@@ -130,6 +139,9 @@ public class ApplicationDbContext : DbContext
                 Id = irmRoleId,
                 Name = "IRM",
                 Code = "irm",
+                Description = "Institutional Relationship Manager for HNW wealth & CRE.",
+                IsSystemRole = true,
+                IsActive = true,
                 Permissions = new List<string>
                 {
                     "leads.view", "followups.view", "deals.view",

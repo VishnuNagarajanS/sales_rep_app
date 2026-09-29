@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Building2,
   Plus,
@@ -28,6 +28,7 @@ import {
 import { useAuth } from '../../../context/AuthContext';
 import { Tenant, User, SubscriptionPackage } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
+import { storageService } from '../../../services/storageService';
 import { FEATURES } from '../../../constants/features';
 import { SYSTEM_ROLES } from '../../../constants/roles';
 import { Modal } from '../../../components/common/Modal';
@@ -95,10 +96,159 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
   const [newUserPhone, setNewUserPhone] = useState('+91 98450 ');
   const [newUserRole, setNewUserRole] = useState<'company_admin'>('company_admin');
 
-  const loadData = () => {
+  // ── Assigned Reps & Tenant Isolation ──────────────────────────────────────
+  const activeTenantKeyRef = useRef<string | null>(null);
+
+  const getTenantKey = (tenant: Tenant): string => {
+    return String(tenant.id || tenant.slug || tenant.name || '');
+  };
+
+  const isGhlTenant = (tenant?: Tenant | null): boolean => {
+    if (!tenant) return false;
+    const slug = (tenant.slug || '').toLowerCase().trim();
+    const id = String(tenant.id || '').toLowerCase().trim();
+    const name = (tenant.name || '').toLowerCase().trim();
+    return slug === 'ghl' || id === '1' || id === 't-ghl-01' || name.includes('ghl');
+  };
+
+  const isJaminTenant = (tenant?: Tenant | null): boolean => {
+    if (!tenant) return false;
+    const slug = (tenant.slug || '').toLowerCase().trim();
+    const id = String(tenant.id || '').toLowerCase().trim();
+    const name = (tenant.name || '').toLowerCase().trim();
+    return slug === 'jamin' || id === '2' || id === 't-jamin-02' || name.includes('jamin');
+  };
+
+  const isGhlUser = (u: User): boolean => {
+    if (!u || u.role?.code === 'super_admin') return false;
+    const cId = String(u.companyId || '').trim();
+    const cSlug = String(u.companySlug || '').toLowerCase().trim();
+    const cName = (u.companyName || '').toLowerCase().trim();
+
+    // Strictly isolate: never include Jamin users in GHL
+    if (cId === '2' || cId === 't-jamin-02' || cSlug === 'jamin' || cName.includes('jamin')) {
+      return false;
+    }
+
+    return cId === '1' || cId === 't-ghl-01' || cSlug === 'ghl' || cName.includes('ghl');
+  };
+
+  const isJaminUser = (u: User): boolean => {
+    if (!u || u.role?.code === 'super_admin') return false;
+    const cId = String(u.companyId || '').trim();
+    const cSlug = String(u.companySlug || '').toLowerCase().trim();
+    const cName = (u.companyName || '').toLowerCase().trim();
+
+    // Strictly isolate: never include GHL users in Jamin
+    if (cId === '1' || cId === 't-ghl-01' || cSlug === 'ghl' || cName.includes('ghl')) {
+      return false;
+    }
+
+    return cId === '2' || cId === 't-jamin-02' || cSlug === 'jamin' || cName.includes('jamin');
+  };
+
+  const filterUsersForTenant = (users: User[], tenant: Tenant): User[] => {
+    if (!users || !Array.isArray(users)) return [];
+
+    if (isGhlTenant(tenant)) {
+      return users.filter(isGhlUser);
+    }
+
+    if (isJaminTenant(tenant)) {
+      return users.filter(isJaminUser);
+    }
+
+    const tenantIdStr = String(tenant.id || '').trim();
+    const tenantSlugStr = String(tenant.slug || '').toLowerCase().trim();
+
+    return users.filter(u => {
+      if (!u || u.role?.code === 'super_admin') return false;
+      if (isGhlUser(u) || isJaminUser(u)) return false;
+      const userCompanyIdStr = String(u.companyId || '').trim();
+      const userSlugStr = String(u.companySlug || '').toLowerCase().trim();
+      return (
+        (userCompanyIdStr !== '' && userCompanyIdStr === tenantIdStr) ||
+        (userSlugStr !== '' && userSlugStr === tenantSlugStr)
+      );
+    });
+  };
+
+  const getCachedAssignedReps = (tenant: Tenant): User[] => {
+    const adminUsers = superAdminService.getUsers();
+    let storageUsers: User[] = [];
+    try {
+      storageUsers = storageService.getUsers(tenant.slug);
+    } catch {
+      // safe fallback
+    }
+
+    const map = new Map<string, User>();
+    [...adminUsers, ...storageUsers].forEach(u => {
+      if (u && u.id) {
+        map.set(String(u.id), u);
+      }
+    });
+
+    return filterUsersForTenant(Array.from(map.values()), tenant);
+  };
+
+  const loadTenantAssignedReps = async (tenant: Tenant) => {
+    const key = getTenantKey(tenant);
+    const targetCompanyFilter = isGhlTenant(tenant)
+      ? '1'
+      : isJaminTenant(tenant)
+        ? '2'
+        : String(tenant.id || tenant.slug);
+
+    try {
+      const apiUsers = await superAdminService.fetchUsersFromApi({ companyId: targetCompanyFilter });
+      if (activeTenantKeyRef.current === key) {
+        const isolated = filterUsersForTenant(apiUsers, tenant);
+        if (isolated.length > 0) {
+          setDrawerUsers(isolated);
+        } else {
+          setDrawerUsers(getCachedAssignedReps(tenant));
+        }
+      }
+    } catch {
+      if (activeTenantKeyRef.current === key) {
+        setDrawerUsers(getCachedAssignedReps(tenant));
+      }
+    }
+  };
+
+  const lastLoadedTenantKeyRef = useRef<string | null>(null);
+
+  const openTenantDrawer = (tenant: Tenant) => {
+    const key = getTenantKey(tenant);
+    activeTenantKeyRef.current = key;
+    lastLoadedTenantKeyRef.current = key;
+    setSelectedTenant(tenant);
+    setDrawerTenantEdit({ ...tenant });
+
+    // Instantly set tenant-isolated reps so previous tenant's users vanish immediately
+    const initialReps = getCachedAssignedReps(tenant);
+    setDrawerUsers(initialReps);
+
+    setDrawerTab('profile');
+    setIsDetailDrawerOpen(true);
+    setSaveSuccessMsg('');
+
+    // Fetch tenant-specific users from existing data source
+    loadTenantAssignedReps(tenant);
+  };
+
+  const loadData = async () => {
     const allTenants = superAdminService.getTenants();
     setTenants(allTenants);
     setPackages(superAdminService.getPackages());
+
+    try {
+      await superAdminService.fetchUsersFromApi();
+      setTenants([...superAdminService.getTenants()]);
+    } catch {
+      // Fallback to local
+    }
 
     if (selectedTenantId) {
       const match = allTenants.find(t => t.id === selectedTenantId || t.slug === selectedTenantId);
@@ -108,15 +258,32 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
     }
   };
 
+  const handleStorageUpdate = () => {
+    setTenants(superAdminService.getTenants());
+    setPackages(superAdminService.getPackages());
+  };
+
   useEffect(() => {
     loadData();
-    window.addEventListener('nexus_admin_updated', loadData);
-    window.addEventListener('nexus_storage_updated', loadData);
+    window.addEventListener('nexus_admin_updated', handleStorageUpdate);
+    window.addEventListener('nexus_storage_updated', handleStorageUpdate);
     return () => {
-      window.removeEventListener('nexus_admin_updated', loadData);
-      window.removeEventListener('nexus_storage_updated', loadData);
+      window.removeEventListener('nexus_admin_updated', handleStorageUpdate);
+      window.removeEventListener('nexus_storage_updated', handleStorageUpdate);
     };
   }, []);
+
+  useEffect(() => {
+    if (selectedTenant && isDetailDrawerOpen) {
+      const key = getTenantKey(selectedTenant);
+      if (lastLoadedTenantKeyRef.current !== key) {
+        lastLoadedTenantKeyRef.current = key;
+        activeTenantKeyRef.current = key;
+        setDrawerUsers(getCachedAssignedReps(selectedTenant));
+        loadTenantAssignedReps(selectedTenant);
+      }
+    }
+  }, [selectedTenant, isDetailDrawerOpen]);
 
   const handleViewAsCompany = (t: Tenant) => {
     sessionStorage.setItem('nexus_support_mode_active', 'true');
@@ -124,14 +291,6 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
     switchPersona('company_admin', t.slug);
   };
 
-  const openTenantDrawer = (tenant: Tenant) => {
-    setSelectedTenant(tenant);
-    setDrawerTenantEdit({ ...tenant });
-    setDrawerUsers(superAdminService.getUsers({ companyId: tenant.id }));
-    setDrawerTab('profile');
-    setIsDetailDrawerOpen(true);
-    setSaveSuccessMsg('');
-  };
 
   const handleSaveDrawerTenant = () => {
     if (!drawerTenantEdit) return;
@@ -175,7 +334,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       status: 'Active',
       designation: 'Company Administrator',
     });
-    setDrawerUsers(superAdminService.getUsers({ companyId: selectedTenant.id }));
+    setDrawerUsers(getCachedAssignedReps(selectedTenant));
     setIsAddUserModalOpen(false);
     setNewUserName('');
     setNewUserEmail('');
@@ -382,7 +541,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       {viewMode === 'grid' && (
         <div className="companies-cards-grid">
           {filteredTenants.map(t => {
-            const stats = superAdminService.getTenantStats(t.id);
+            const stats = superAdminService.getTenantStats(t);
             const isSuspended = t.status === 'Suspended';
             return (
               <div key={t.id} className={`card company-tenant-card ${isSuspended ? 'card-suspended' : ''}`}>
@@ -477,7 +636,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
             </thead>
             <tbody>
               {filteredTenants.map(t => {
-                const stats = superAdminService.getTenantStats(t.id);
+                const stats = superAdminService.getTenantStats(t);
                 return (
                   <tr key={t.id}>
                     <td>
@@ -972,7 +1131,12 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       {isDetailDrawerOpen && selectedTenant && drawerTenantEdit && (
         <Drawer
           isOpen={isDetailDrawerOpen}
-          onClose={() => setIsDetailDrawerOpen(false)}
+          onClose={() => {
+            setIsDetailDrawerOpen(false);
+            activeTenantKeyRef.current = null;
+            lastLoadedTenantKeyRef.current = null;
+            setDrawerUsers([]);
+          }}
           title={`Configure: ${selectedTenant.name}`}
           size="lg"
         >

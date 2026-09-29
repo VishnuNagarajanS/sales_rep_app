@@ -45,7 +45,7 @@ const markAllStoredNotificationsRead = (tenantId?: string, userId?: string) => {
     });
     localStorage.setItem('nexus_notifications', JSON.stringify(all));
     window.dispatchEvent(new Event('nexus_storage_updated'));
-  } catch {}
+  } catch { }
 };
 
 const markStoredNotificationRead = (id: string) => {
@@ -56,7 +56,7 @@ const markStoredNotificationRead = (id: string) => {
     if (item) item.read = true;
     localStorage.setItem('nexus_notifications', JSON.stringify(all));
     window.dispatchEvent(new Event('nexus_storage_updated'));
-  } catch {}
+  } catch { }
 };
 
 interface TopBarProps {
@@ -121,7 +121,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
           setSearchCustomers(JSON.parse(localStorage.getItem('nexus_customers') || '[]'));
           setSearchDeals(JSON.parse(localStorage.getItem('nexus_deals') || '[]'));
           setSearchInvestors(JSON.parse(localStorage.getItem('nexus_investors') || '[]'));
-        } catch {}
+        } catch { }
       }
     };
     fetchSearchData();
@@ -175,18 +175,18 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
     const scopedLeads = isIrm
       ? []
       : isExec
-      ? leads.filter(l => l.assignedAgentId === user?.id || l.assignedAgentName === user?.name)
-      : leads;
+        ? leads.filter(l => l.assignedAgentId === user?.id || l.assignedAgentName === user?.name)
+        : leads;
     const scopedCustomers = isIrm
       ? []
       : isExec
-      ? customers.filter(c => c.assignedAgentId === user?.id || c.assignedAgentName === user?.name)
-      : customers;
+        ? customers.filter(c => c.assignedAgentId === user?.id || c.assignedAgentName === user?.name)
+        : customers;
     const scopedDeals = isIrm
       ? []
       : isExec
-      ? deals.filter(d => d.assignedAgentId === user?.id || d.assignedAgentName === user?.name)
-      : deals;
+        ? deals.filter(d => d.assignedAgentId === user?.id || d.assignedAgentName === user?.name)
+        : deals;
     const scopedInvestors = (isExec || isIrm)
       ? investors.filter(i => i.assignedAgentId === user?.id || i.assignedAgentName === user?.name)
       : investors;
@@ -209,20 +209,6 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
       </svg>
       {/* Left: Global Search Input */}
       <div className="topbar-search-container" ref={searchRef}>
-        <div className="topbar-search-input-wrapper">
-          <Search size={16} className="topbar-search-icon" />
-          <input
-            type="text"
-            className="form-input topbar-search-input"
-            placeholder="Search leads, customers, deals, plots... (Press /)"
-            value={searchQuery}
-            onFocus={() => setIsSearchOpen(true)}
-            onChange={e => {
-              setSearchQuery(e.target.value);
-              setIsSearchOpen(true);
-            }}
-          />
-        </div>
 
         {/* Global Search Results Dropdown */}
         {isSearchOpen && searchResults && (

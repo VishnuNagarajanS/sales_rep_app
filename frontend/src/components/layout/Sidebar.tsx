@@ -126,7 +126,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
         { id: 'admin-dashboard', label: 'Platform Console', icon: <LayoutDashboard size={18} /> },
         { id: 'admin-companies', label: 'Companies (Tenants)', icon: <Building2 size={18} /> },
         { id: 'admin-users', label: 'Cross-Tenant Users', icon: <Users size={18} /> },
-        { id: 'admin-roles', label: 'Roles & Matrix', icon: <Shield size={18} /> },
+        { id: 'admin-roles', label: 'Role Management', icon: <Shield size={18} /> },
         { id: 'admin-features', label: 'Feature Packages', icon: <Sparkles size={18} /> },
         { id: 'admin-call-config', label: 'Call Configuration', icon: <PhoneCall size={18} /> },
         { id: 'admin-audit', label: 'Platform Audit Logs', icon: <FileCheck size={18} /> },
@@ -441,17 +441,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden' }}>
             <div
               style={{
-                width: 38,
-                height: 38,
-                minWidth: 38,
-                borderRadius: 10,
-                background: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)',
+                width: 45,
+                height: 45,
+                borderRadius: 16,
+                background: 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)',
                 color: '#ffffff',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontWeight: 900,
-                fontSize: 13,
+                fontSize: 20,
               }}
             >
               ⚡

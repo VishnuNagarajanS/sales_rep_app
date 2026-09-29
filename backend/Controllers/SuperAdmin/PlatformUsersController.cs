@@ -49,6 +49,22 @@ public class PlatformUsersController : ControllerBase
             {
                 query = query.Where(u => u.CompanyId == cid);
             }
+            else
+            {
+                var s = companyId.Trim().ToLower();
+                if (s == "ghl" || s == "t-ghl-01")
+                {
+                    query = query.Where(u => u.CompanyId == 1 || (u.Company != null && u.Company.Slug.ToLower() == "ghl"));
+                }
+                else if (s == "jamin" || s == "t-jamin-02")
+                {
+                    query = query.Where(u => u.CompanyId == 2 || (u.Company != null && u.Company.Slug.ToLower() == "jamin"));
+                }
+                else
+                {
+                    query = query.Where(u => u.Company != null && (u.Company.Slug.ToLower() == s || u.Company.Name.ToLower() == s));
+                }
+            }
         }
 
         // 2. Role filter
@@ -316,22 +332,6 @@ public class PlatformUsersController : ControllerBase
         await _context.SaveChangesAsync();
 
         return Ok(ApiResponse<object>.SuccessResult(new { tempPassword }, "Temporary password generated successfully."));
-    }
-
-    [HttpGet("~/api/super-admin/roles")]
-    [HttpGet("~/api/platform/roles")]
-    public async Task<ActionResult<ApiResponse<List<PlatformRoleDto>>>> GetAllRoles()
-    {
-        var roles = await _context.Roles.AsNoTracking().OrderBy(r => r.Id).ToListAsync();
-        var result = roles.Select(r => new PlatformRoleDto
-        {
-            Id = r.Id.ToString(),
-            Name = r.Name,
-            Code = r.Code,
-            Permissions = r.Permissions ?? new List<string>()
-        }).ToList();
-
-        return Ok(ApiResponse<List<PlatformRoleDto>>.SuccessResult(result));
     }
 
     [HttpGet("~/api/super-admin/tenants")]

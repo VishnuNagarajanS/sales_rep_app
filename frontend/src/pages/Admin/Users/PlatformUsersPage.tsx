@@ -122,7 +122,9 @@ export const PlatformUsersPage: React.FC = () => {
     if (!newName || !newEmail) return;
 
     const isPlatform = provisionUserType === 'platform_admin';
-    const targetRole = isPlatform ? roles.super_admin : roles.company_admin;
+    const targetRole = isPlatform
+      ? (roles.super_admin || { id: '1', name: 'Super Admin', code: 'super_admin', permissions: [] })
+      : (roles[newRoleCode] || roles.company_admin || { id: '2', name: 'Company Admin', code: 'company_admin', permissions: [] });
     const targetCompany = isPlatform ? undefined : newCompanyId || tenants[0]?.id;
 
     await superAdminService.createUserApi({
@@ -343,10 +345,11 @@ export const PlatformUsersPage: React.FC = () => {
             onChange={e => setSelectedRoleFilter(e.target.value)}
           >
             <option value="all">All Roles</option>
-            <option value="super_admin">Super Admin</option>
-            <option value="company_admin">Company Admin</option>
-            <option value="sales_executive">Sales Executive</option>
-            <option value="irm">IRM</option>
+            {Object.values(roles).map(r => (
+              <option key={r.code} value={r.code}>
+                {r.name}
+              </option>
+            ))}
           </select>
 
           {/* Status Filter */}
@@ -583,13 +586,19 @@ export const PlatformUsersPage: React.FC = () => {
                     <label className="form-label required">Role Scope</label>
                     <select
                       className="form-control"
-                      value="company_admin"
-                      disabled
+                      value={newRoleCode}
+                      onChange={e => setNewRoleCode(e.target.value)}
                     >
-                      <option value="company_admin">Company Admin (Tenant Root)</option>
+                      {Object.values(roles)
+                        .filter(r => r.code !== 'super_admin')
+                        .map(r => (
+                          <option key={r.code} value={r.code}>
+                            {r.name} {r.isSystemRole ? '(System)' : '(Custom)'}
+                          </option>
+                        ))}
                     </select>
                     <span style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', display: 'block' }}>
-                      Super Admin creates Company Admins. Company Admins manage their own Sales Executives and IRMs.
+                      Assign organization root administrator or custom operational role.
                     </span>
                   </div>
 
@@ -703,21 +712,13 @@ export const PlatformUsersPage: React.FC = () => {
                 className="form-control"
                 value={editRoleCode}
                 onChange={e => setEditRoleCode(e.target.value)}
-                disabled={editRoleCode === 'sales_executive' || editRoleCode === 'irm'}
               >
-                <option value="company_admin">Company Admin (Tenant Root)</option>
-                <option value="super_admin">Super Admin (Platform Root)</option>
-                {(editRoleCode === 'sales_executive' || editRoleCode === 'irm') && (
-                  <option value={editRoleCode} disabled>
-                    {editRoleCode === 'irm' ? 'IRM (Managed by Company Admin)' : 'Sales Executive (Managed by Company Admin)'}
+                {Object.values(roles).map(r => (
+                  <option key={r.code} value={r.code}>
+                    {r.name} {r.isSystemRole ? '(System Role)' : '(Custom Role)'}
                   </option>
-                )}
+                ))}
               </select>
-              {(editRoleCode === 'sales_executive' || editRoleCode === 'irm') && (
-                <span style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', display: 'block' }}>
-                  Company-level operational roles are managed directly by the Company Admin.
-                </span>
-              )}
             </div>
 
             <div className="drawer-actions-row">

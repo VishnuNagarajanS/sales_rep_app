@@ -2,6 +2,8 @@ import {
   Tenant,
   User,
   Role,
+  PermissionGroup,
+  PermissionItem,
   AuditLog,
   SubscriptionPackage,
   TenantDidMapping,
@@ -432,12 +434,274 @@ class SuperAdminService {
     return true;
   }
 
-  getTenantStats(tenantId: string) {
-    const users = this.getUsers({ companyId: tenantId });
-    const dids = this.getDidMappings().filter(d => d.tenantId === tenantId);
+  /**
+   * Calculates real-time telemetry stats for an organization or company tenant.
+   * - usersCount: represents real Active Reps (active users with sales_executive/irm or other rep roles,
+   *   strictly excluding admins and inactive accounts).
+   * - For an Organization: aggregates active reps across all of its child companies/tenants.
+   * - For a Company (or specific companyId): isolates only active reps assigned to that specific company.
+   * - Guarantees strict organization and company isolation.
+   */
+  getTenantStats(target: string | Tenant, specificCompanyId?: string): {
+    usersCount: number;
+    activeUsersCount: number;
+    didsCount: number;
+  } {
+    // 1. Resolve target tenant entity
+    let tenant: Tenant | undefined;
+    if (typeof target === 'object' && target !== null) {
+      tenant = target as Tenant;
+    } else if (typeof target === 'string') {
+      const targetStr = target.trim().toLowerCase();
+      tenant = this.getTenants().find(t =>
+        String(t.id).trim().toLowerCase() === targetStr ||
+        (t.slug && t.slug.toLowerCase().trim() === targetStr) ||
+        (t.name && t.name.toLowerCase().trim() === targetStr)
+      );
+      if (!tenant) {
+        tenant = { id: target, slug: target, name: target, enabledFeatures: [], brandColor: '#8b5cf6', tagline: '', timezone: '', currency: '', businessHours: '' };
+      }
+    }
+
+    const tenantIdStr = tenant ? String(tenant.id || '').trim().toLowerCase() : '';
+    const tenantSlugStr = tenant?.slug ? tenant.slug.toLowerCase().trim() : '';
+    const tenantNameStr = tenant?.name ? tenant.name.toLowerCase().trim() : '';
+
+    // 2. Fetch all users from application storage/cache
+    const allUsers = this.getUsers();
+
+    // 3. Helper: check if a user is Active
+    const isActive = (u: User): boolean => {
+      if (!u) return false;
+      const st = (u.status || '').toString().toLowerCase().trim();
+      return st === 'active';
+    };
+
+    // 4. Helper: check if a user qualifies as an operational Rep
+    const isRep = (u: User): boolean => {
+      if (!u || !u.role) return false;
+      const roleCode = (u.role.code || '').toLowerCase().trim();
+
+      // Strictly exclude Super Admin, Company Admin, and general Admins
+      if (
+        roleCode === 'super_admin' ||
+        roleCode === 'company_admin' ||
+        roleCode === 'admin' ||
+        roleCode === 'platform_admin'
+      ) {
+        return false;
+      }
+
+      // Operational rep roles: Sales Executive, IRM, or other supported rep designations
+      return (
+        roleCode === 'sales_executive' ||
+        roleCode === 'irm' ||
+        roleCode === 'sales_rep' ||
+        roleCode === 'agent' ||
+        roleCode.includes('rep') ||
+        roleCode.includes('executive')
+      );
+    };
+
+    // 5. Tenant identity helpers for strict isolation
+    const isGhlTarget =
+      tenantSlugStr === 'ghl' ||
+      tenantIdStr === '1' ||
+      tenantIdStr === 't-ghl-01' ||
+      tenantNameStr.includes('ghl');
+
+    const isJaminTarget =
+      tenantSlugStr === 'jamin' ||
+      tenantIdStr === '2' ||
+      tenantIdStr === 't-jamin-02' ||
+      tenantNameStr.includes('jamin');
+
+    const isGhlUser = (u: User): boolean => {
+      if (!u) return false;
+      const cId = String(u.companyId || '').trim().toLowerCase();
+      const cSlug = String(u.companySlug || '').toLowerCase().trim();
+      const cName = (u.companyName || '').toLowerCase().trim();
+
+      if (cId === '2' || cId === 't-jamin-02' || cSlug === 'jamin' || cName.includes('jamin')) {
+        return false;
+      }
+      return cId === '1' || cId === 't-ghl-01' || cSlug === 'ghl' || cName.includes('ghl');
+    };
+
+    const isJaminUser = (u: User): boolean => {
+      if (!u) return false;
+      const cId = String(u.companyId || '').trim().toLowerCase();
+      const cSlug = String(u.companySlug || '').toLowerCase().trim();
+      const cName = (u.companyName || '').toLowerCase().trim();
+
+      if (cId === '1' || cId === 't-ghl-01' || cSlug === 'ghl' || cName.includes('ghl')) {
+        return false;
+      }
+      return cId === '2' || cId === 't-jamin-02' || cSlug === 'jamin' || cName.includes('jamin');
+    };
+
+    // 6. Collect child companies if target is an organization
+    const allTenants = this.getTenants();
+    const rawCompanies = (tenant as any)?.companies;
+    const childCompanies: Array<{ id: string; slug?: string; name?: string }> = [];
+
+    if (Array.isArray(rawCompanies)) {
+      rawCompanies.forEach((c: any) => {
+        if (typeof c === 'string') {
+          childCompanies.push({ id: c, slug: c });
+        } else if (c && typeof c === 'object') {
+          childCompanies.push({
+            id: String(c.id || c.slug || ''),
+            slug: c.slug,
+            name: c.name,
+          });
+        }
+      });
+    }
+
+    // Look for tenants in allTenants that have this tenant as parent
+    allTenants.forEach(t => {
+      const parentId = String(
+        t.organizationId ||
+        (t as any).parentTenantId ||
+        (t as any).parentId ||
+        ''
+      ).trim().toLowerCase();
+      const parentSlug = ((t as any).organizationSlug || '').toLowerCase().trim();
+
+      if (
+        (tenantIdStr && parentId === tenantIdStr) ||
+        (tenantSlugStr && parentSlug === tenantSlugStr)
+      ) {
+        if (!childCompanies.some(c => c.id === String(t.id))) {
+          childCompanies.push({ id: String(t.id), slug: t.slug, name: t.name });
+        }
+      }
+    });
+
+    const isOrganizationWithChildren = childCompanies.length > 0 || (tenant as any)?.isOrganization === true;
+
+    // Helper: does user match a specific company?
+    const userMatchesCompany = (u: User, compIdOrSlug: string): boolean => {
+      if (!u || !compIdOrSlug) return false;
+      const targetStr = compIdOrSlug.trim().toLowerCase();
+      const uCompId = String(u.companyId || '').trim().toLowerCase();
+      const uCompSlug = String(u.companySlug || '').toLowerCase().trim();
+      const uCompName = (u.companyName || '').toLowerCase().trim();
+
+      // Check GHL / Jamin isolation
+      if (targetStr === '1' || targetStr === 't-ghl-01' || targetStr === 'ghl') {
+        return isGhlUser(u);
+      }
+      if (targetStr === '2' || targetStr === 't-jamin-02' || targetStr === 'jamin') {
+        return isJaminUser(u);
+      }
+
+      return (
+        (uCompId !== '' && uCompId === targetStr) ||
+        (uCompSlug !== '' && uCompSlug === targetStr) ||
+        (uCompName !== '' && uCompName === targetStr)
+      );
+    };
+
+    // 7. Filter active reps based on organization vs company level
+    let activeReps: User[] = [];
+
+    if (specificCompanyId) {
+      // COMPANY-LEVEL COUNT (Specific company requested)
+      activeReps = allUsers.filter(u => {
+        if (!isActive(u) || !isRep(u)) return false;
+
+        // Ensure user belongs to the specified company
+        if (!userMatchesCompany(u, specificCompanyId)) return false;
+
+        // Organization isolation: if parent org is known, user must not belong to a different org
+        if (tenantIdStr) {
+          const userOrgId = String(u.organizationId || '').trim().toLowerCase();
+          if (userOrgId && userOrgId !== tenantIdStr && (!tenantSlugStr || userOrgId !== tenantSlugStr)) {
+            return false;
+          }
+        }
+        return true;
+      });
+    } else if (isOrganizationWithChildren) {
+      // ORGANIZATION-LEVEL COUNT (Total active reps across all child companies of this organization)
+      activeReps = allUsers.filter(u => {
+        if (!isActive(u) || !isRep(u)) return false;
+
+        // User belongs to this organization directly...
+        const userOrgId = String(u.organizationId || '').trim().toLowerCase();
+        const userOrgSlug = ((u as any).organizationSlug || '').toLowerCase().trim();
+        const directOrgMatch =
+          (tenantIdStr && userOrgId === tenantIdStr) ||
+          (tenantSlugStr && userOrgSlug === tenantSlugStr) ||
+          (tenantIdStr && String(u.companyId || '').trim().toLowerCase() === tenantIdStr) ||
+          (tenantSlugStr && (u.companySlug || '').toLowerCase().trim() === tenantSlugStr);
+
+        // ...or belongs to one of its child companies
+        const childCompMatch = childCompanies.some(c =>
+          userMatchesCompany(u, c.id) || (c.slug && userMatchesCompany(u, c.slug)) || (c.name && userMatchesCompany(u, c.name))
+        );
+
+        if (!directOrgMatch && !childCompMatch) {
+          return false;
+        }
+
+        // Strict organization isolation: reject if assigned to a different explicit organization
+        if (userOrgId && tenantIdStr && userOrgId !== tenantIdStr && (!tenantSlugStr || userOrgId !== tenantSlugStr)) {
+          return false;
+        }
+
+        return true;
+      });
+    } else {
+      // COMPANY-LEVEL / STANDALONE TENANT COUNT
+      activeReps = allUsers.filter(u => {
+        if (!isActive(u) || !isRep(u)) return false;
+
+        if (isGhlTarget) {
+          return isGhlUser(u);
+        }
+        if (isJaminTarget) {
+          return isJaminUser(u);
+        }
+
+        // General standalone company match
+        const uCompId = String(u.companyId || '').trim().toLowerCase();
+        const uCompSlug = (u.companySlug || '').toLowerCase().trim();
+        const uCompName = (u.companyName || '').toLowerCase().trim();
+
+        const matchesThis =
+          (tenantIdStr && uCompId === tenantIdStr) ||
+          (tenantSlugStr && uCompSlug === tenantSlugStr) ||
+          (tenantNameStr && uCompName === tenantNameStr);
+
+        if (!matchesThis) return false;
+
+        // Never combine users from unrelated organizations
+        const userOrgId = String(u.organizationId || '').trim().toLowerCase();
+        const tenantParentOrg = String(tenant?.organizationId || (tenant as any)?.parentTenantId || '').trim().toLowerCase();
+        if (userOrgId && tenantParentOrg && userOrgId !== tenantParentOrg) {
+          return false;
+        }
+
+        return true;
+      });
+    }
+
+    // 8. DIDs count (preserve existing functionality)
+    const dids = this.getDidMappings().filter(
+      d =>
+        d.tenantId === String(tenant?.id || '') ||
+        d.tenantId === tenant?.slug ||
+        (specificCompanyId && (d.tenantId === specificCompanyId || (d as any).companyId === specificCompanyId))
+    );
+
+    const count = activeReps.length;
+
     return {
-      usersCount: users.length,
-      activeUsersCount: users.filter(u => u.status === 'Active').length,
+      usersCount: count,
+      activeUsersCount: count,
       didsCount: dids.length,
     };
   }
@@ -448,8 +712,9 @@ class SuperAdminService {
     try {
       const res = await apiClient.get<ApiResponse<User[]>>('/super-admin/users', filters);
       if (res && res.data) {
-        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(res.data));
-        notifyAdminStorageUpdated();
+        if (!filters || Object.keys(filters).length === 0) {
+          localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(res.data));
+        }
         return res.data;
       }
     } catch (err) {
@@ -473,6 +738,7 @@ class SuperAdminService {
       });
       if (res && res.data) {
         await this.fetchUsersFromApi();
+        notifyAdminStorageUpdated();
         return res.data;
       }
     } catch (err) {
@@ -494,6 +760,7 @@ class SuperAdminService {
       });
       if (res && res.data) {
         await this.fetchUsersFromApi();
+        notifyAdminStorageUpdated();
         return res.data;
       }
     } catch (err) {
@@ -511,6 +778,7 @@ class SuperAdminService {
       const res = await apiClient.delete<ApiResponse<boolean>>(`/super-admin/users/${id}`);
       if (res && res.data) {
         await this.fetchUsersFromApi();
+        notifyAdminStorageUpdated();
         return true;
       }
     } catch (err) {
@@ -622,10 +890,11 @@ class SuperAdminService {
         ];
         localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
       } else {
-        // Sanitize: ensure all users have a valid role from SYSTEM_ROLES
+        // Sanitize: ensure all users have a valid role from dynamic roles or SYSTEM_ROLES
+        const availableRoles = this.getRoles();
         let modified = false;
         users.forEach(u => {
-          if (!u.role || !SYSTEM_ROLES[u.role.code]) {
+          if (!u.role || (!availableRoles[u.role.code] && !SYSTEM_ROLES[u.role.code])) {
             u.role = SYSTEM_ROLES.sales_executive;
             modified = true;
           }
@@ -639,8 +908,23 @@ class SuperAdminService {
 
       return users.filter(u => {
         if (filters.companyId && filters.companyId !== 'all') {
-          if (filters.companyId === 'global' && u.companyId) return false;
-          if (filters.companyId !== 'global' && u.companyId !== filters.companyId) return false;
+          if (filters.companyId === 'global') {
+            if (u.companyId) return false;
+          } else {
+            const isGhlTarget = filters.companyId === '1' || filters.companyId === 't-ghl-01' || filters.companyId.toLowerCase() === 'ghl';
+            const isJaminTarget = filters.companyId === '2' || filters.companyId === 't-jamin-02' || filters.companyId.toLowerCase() === 'jamin';
+
+            const isGhlUser = u.companyId === '1' || u.companyId === 't-ghl-01' || u.companySlug === 'ghl' || (u.companyName && u.companyName.toLowerCase().includes('ghl'));
+            const isJaminUser = u.companyId === '2' || u.companyId === 't-jamin-02' || u.companySlug === 'jamin' || (u.companyName && u.companyName.toLowerCase().includes('jamin'));
+
+            if (isGhlTarget) {
+              if (!isGhlUser || isJaminUser) return false;
+            } else if (isJaminTarget) {
+              if (!isJaminUser || isGhlUser) return false;
+            } else {
+              if (u.companyId !== filters.companyId && u.companySlug !== filters.companyId) return false;
+            }
+          }
         }
         if (filters.roleCode && filters.roleCode !== 'all' && u.role.code !== filters.roleCode) return false;
         if (filters.status && filters.status !== 'all' && u.status !== filters.status) return false;
@@ -835,17 +1119,31 @@ class SuperAdminService {
 
   async fetchRolesFromApi(): Promise<Record<string, Role>> {
     try {
-      const res = await apiClient.get<ApiResponse<Array<{ id: string; name: string; code: string; permissions: string[] }>>>('/super-admin/roles');
+      const res = await apiClient.get<ApiResponse<Role[]>>('/super-admin/roles');
       if (res && res.data && res.data.length > 0) {
         const rolesMap: Record<string, Role> = {};
         res.data.forEach(r => {
           rolesMap[r.code] = {
             id: r.id,
             name: r.name,
-            code: r.code as any,
+            code: r.code,
             permissions: r.permissions || [],
+            description: r.description,
+            isSystemRole: r.isSystemRole ?? ['super_admin', 'company_admin', 'sales_executive', 'irm'].includes(r.code),
+            isActive: r.isActive ?? true,
+            usersCount: r.usersCount ?? 0,
+            permissionsCount: r.permissionsCount ?? (r.permissions ? r.permissions.length : 0),
+            createdBy: r.createdBy,
+            createdAt: r.createdAt,
+            updatedAt: r.updatedAt,
           };
         });
+        // Ensure all system roles are present in the map
+        for (const key of Object.keys(SYSTEM_ROLES)) {
+          if (!rolesMap[key]) {
+            rolesMap[key] = SYSTEM_ROLES[key];
+          }
+        }
         localStorage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(rolesMap));
         return rolesMap;
       }
@@ -863,20 +1161,294 @@ class SuperAdminService {
         return SYSTEM_ROLES;
       }
       const parsed = JSON.parse(raw);
-      // Ensure only known system roles are returned
-      const validRoles: Record<string, Role> = {};
+      // Ensure all system roles exist, but PRESERVE all custom roles
+      const allRoles: Record<string, Role> = { ...parsed };
       for (const key of Object.keys(SYSTEM_ROLES)) {
-        if (parsed[key]) {
-          validRoles[key] = parsed[key];
-        } else {
-          validRoles[key] = SYSTEM_ROLES[key];
+        if (!allRoles[key]) {
+          allRoles[key] = SYSTEM_ROLES[key];
         }
       }
-      localStorage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(validRoles));
-      return validRoles;
+      localStorage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(allRoles));
+      return allRoles;
     } catch {
       return SYSTEM_ROLES;
     }
+  }
+
+  getRolesList(): Role[] {
+    const roles = this.getRoles();
+    const users = this.getUsers();
+    return Object.values(roles).map(r => {
+      const userCount = r.usersCount !== undefined 
+        ? r.usersCount 
+        : users.filter(u => u.role?.code === r.code || u.role?.id === r.id).length;
+      return {
+        ...r,
+        usersCount: userCount,
+        permissionsCount: r.permissions?.length || 0,
+        isSystemRole: r.isSystemRole ?? ['super_admin', 'company_admin', 'sales_executive', 'irm'].includes(r.code),
+        isActive: r.isActive ?? true,
+      };
+    });
+  }
+
+  async getAvailablePermissionsApi(): Promise<PermissionGroup[]> {
+    try {
+      const res = await apiClient.get<ApiResponse<PermissionGroup[]>>('/super-admin/permissions');
+      if (res && res.data && res.data.length > 0) {
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Could not fetch permissions from API, using default groups:', err);
+    }
+    return this.getDefaultPermissionGroups();
+  }
+
+  getDefaultPermissionGroups(): PermissionGroup[] {
+    return [
+      {
+        group: 'LEADS',
+        items: [
+          { key: 'leads.view', label: 'View Leads', description: 'Browse and inspect inbound and converted lead profiles' },
+          { key: 'leads.create', label: 'Create Leads', description: 'Manually register prospective contact records' },
+          { key: 'leads.edit', label: 'Edit Leads', description: 'Modify contact information, intent tags, and custom fields' },
+          { key: 'leads.delete', label: 'Delete Leads', description: 'Permanently remove or archive lead records' },
+          { key: 'leads.assign', label: 'Assign Leads', description: 'Re-route or delegate leads to individual sales reps' },
+          { key: 'leads.convert', label: 'Convert Leads', description: 'Execute conversion workflow from Lead to Customer' },
+          { key: 'leads.export', label: 'Export Leads', description: 'Download CSV/Excel data sheets of lead registries' },
+        ],
+      },
+      {
+        group: 'CALLING',
+        items: [
+          { key: 'calls.view', label: 'View Calls', description: 'Inspect real-time telephony logs and call metadata' },
+          { key: 'calls.make', label: 'Make Calls', description: 'Initiate outbound calls via WebRTC / SIP dialer' },
+          { key: 'calls.manage', label: 'Manage Calls', description: 'Transfer, bridge, whisper or barge ongoing calls' },
+          { key: 'calls.record', label: 'Call Recordings', description: 'Access and replay recorded call audio sessions' },
+        ],
+      },
+      {
+        group: 'REPORTS',
+        items: [
+          { key: 'reports.view', label: 'View Reports', description: 'Access conversion, revenue, and disposition analytics' },
+          { key: 'reports.export', label: 'Export Reports', description: 'Generate and download executive PDF / XLSX reports' },
+          { key: 'analytics.view', label: 'View Analytics', description: 'Inspect real-time SLA and KPI performance metrics' },
+        ],
+      },
+      {
+        group: 'USERS',
+        items: [
+          { key: 'users.view', label: 'View Users', description: 'Browse organization directory and team profiles' },
+          { key: 'users.create', label: 'Create Users', description: 'Provision new employee accounts and assign roles' },
+          { key: 'users.edit', label: 'Edit Users', description: 'Modify staff profile credentials and company assignments' },
+          { key: 'users.disable', label: 'Disable Users', description: 'Deactivate or suspend user login credentials' },
+        ],
+      },
+      {
+        group: 'COMPANIES',
+        items: [
+          { key: 'companies.view', label: 'View Companies', description: 'Inspect tenant accounts and subscription profiles' },
+          { key: 'companies.create', label: 'Create Companies', description: 'Provision new tenant companies and workspaces' },
+          { key: 'companies.edit', label: 'Edit Companies', description: 'Update tenant branding, DIDs, and configuration' },
+        ],
+      },
+      {
+        group: 'DASHBOARD',
+        items: [
+          { key: 'dashboard.view', label: 'View Dashboard', description: 'Access executive command dashboard and live telemetry' },
+          { key: 'activity.live_feed', label: 'Live Activity Feed', description: 'Monitor incoming calls, bookings, and rep presence' },
+        ],
+      },
+      {
+        group: 'GOVERNANCE & RBAC',
+        items: [
+          { key: 'roles.view', label: 'View Roles', description: 'Inspect system and custom RBAC permissions' },
+          { key: 'roles.manage', label: 'Manage Roles', description: 'Create, update, and configure custom role permissions' },
+          { key: 'audit.view', label: 'View Audit Logs', description: 'Inspect immutable administrative security logs' },
+        ],
+      },
+    ];
+  }
+
+  async createRoleApi(data: {
+    name: string;
+    code: string;
+    description?: string;
+    isActive?: boolean;
+    permissions: string[];
+  }): Promise<Role> {
+    const cleanCode = data.code.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+    const payload = {
+      name: data.name.trim(),
+      code: cleanCode,
+      description: data.description?.trim() || '',
+      isActive: data.isActive ?? true,
+      permissions: data.permissions,
+    };
+
+    let createdRole: Role;
+    try {
+      const res = await apiClient.post<ApiResponse<Role>>('/super-admin/roles', payload);
+      if (res && res.data) {
+        createdRole = res.data;
+      } else {
+        throw new Error('No role returned from server');
+      }
+    } catch (err: any) {
+      console.warn('API call failed, creating role locally:', err);
+      createdRole = {
+        id: `role-${Date.now()}`,
+        name: payload.name,
+        code: cleanCode.toLowerCase(),
+        description: payload.description,
+        isSystemRole: false,
+        isActive: payload.isActive,
+        permissions: payload.permissions,
+        permissionsCount: payload.permissions.length,
+        usersCount: 0,
+        createdAt: new Date().toISOString(),
+      };
+    }
+
+    const roles = this.getRoles();
+    roles[createdRole.code] = createdRole;
+    localStorage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(roles));
+
+    this.addAuditLog({
+      action: 'CREATE_ROLE',
+      entityType: 'Role',
+      entityId: createdRole.code,
+      details: `Super Admin created custom role "${createdRole.name}" (${createdRole.code}) with ${createdRole.permissions.length} permissions.`,
+      module: 'Roles',
+      status: 'success',
+      afterValue: createdRole,
+    });
+
+    notifyAdminStorageUpdated();
+    return createdRole;
+  }
+
+  async updateRoleApi(
+    id: string,
+    data: {
+      name?: string;
+      description?: string;
+      isActive?: boolean;
+      permissions?: string[];
+    }
+  ): Promise<Role> {
+    let updatedRole: Role | null = null;
+    try {
+      const res = await apiClient.put<ApiResponse<Role>>(`/super-admin/roles/${id}`, data);
+      if (res && res.data) {
+        updatedRole = res.data;
+      }
+    } catch (err) {
+      console.warn('API update failed, updating locally:', err);
+    }
+
+    const roles = this.getRoles();
+    const existingKey = Object.keys(roles).find(k => roles[k].id === id || roles[k].code === id);
+    if (existingKey) {
+      const before = { ...roles[existingKey] };
+      roles[existingKey] = {
+        ...roles[existingKey],
+        ...(data.name ? { name: data.name } : {}),
+        ...(data.description !== undefined ? { description: data.description } : {}),
+        ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
+        ...(data.permissions ? { permissions: data.permissions } : {}),
+        ...(updatedRole || {}),
+        updatedAt: new Date().toISOString(),
+      };
+      if (!updatedRole) {
+        updatedRole = roles[existingKey];
+      }
+      localStorage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(roles));
+
+      this.addAuditLog({
+        action: 'UPDATE_ROLE',
+        entityType: 'Role',
+        entityId: id,
+        details: `Super Admin updated role "${roles[existingKey].name}" (${roles[existingKey].code}).`,
+        module: 'Roles',
+        status: 'success',
+        beforeValue: before,
+        afterValue: roles[existingKey],
+      });
+      notifyAdminStorageUpdated();
+    }
+
+    if (!updatedRole) {
+      throw new Error(`Role ${id} not found`);
+    }
+    return updatedRole;
+  }
+
+  async toggleRoleStatusApi(id: string, isActive: boolean): Promise<boolean> {
+    try {
+      await apiClient.patch(`/super-admin/roles/${id}/status`, { isActive });
+    } catch (err) {
+      console.warn('API status toggle failed, updating locally:', err);
+    }
+
+    const roles = this.getRoles();
+    const existingKey = Object.keys(roles).find(k => roles[k].id === id || roles[k].code === id);
+    if (existingKey) {
+      roles[existingKey].isActive = isActive;
+      roles[existingKey].updatedAt = new Date().toISOString();
+      localStorage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(roles));
+
+      this.addAuditLog({
+        action: isActive ? 'ACTIVATE_ROLE' : 'DEACTIVATE_ROLE',
+        entityType: 'Role',
+        entityId: id,
+        details: `Super Admin ${isActive ? 'activated' : 'deactivated'} role "${roles[existingKey].name}".`,
+        module: 'Roles',
+        status: 'success',
+      });
+      notifyAdminStorageUpdated();
+      return true;
+    }
+    return false;
+  }
+
+  async deleteRoleApi(id: string): Promise<boolean> {
+    const roles = this.getRoles();
+    const existingKey = Object.keys(roles).find(k => roles[k].id === id || roles[k].code === id);
+    if (!existingKey) return false;
+
+    const targetRole = roles[existingKey];
+    if (targetRole.isSystemRole || ['super_admin', 'company_admin', 'sales_executive', 'irm'].includes(targetRole.code)) {
+      throw new Error('System roles cannot be deleted.');
+    }
+
+    const users = this.getUsers();
+    const assignedUsers = users.filter(u => u.role?.code === targetRole.code || u.role?.id === targetRole.id);
+    if (assignedUsers.length > 0) {
+      throw new Error(`Cannot delete role "${targetRole.name}". ${assignedUsers.length} user(s) are currently assigned to this role. Please reassign them first.`);
+    }
+
+    try {
+      await apiClient.delete(`/super-admin/roles/${id}`);
+    } catch (err: any) {
+      console.warn('API delete failed, proceeding locally:', err);
+    }
+
+    delete roles[existingKey];
+    localStorage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(roles));
+
+    this.addAuditLog({
+      action: 'DELETE_ROLE',
+      entityType: 'Role',
+      entityId: id,
+      details: `Super Admin removed custom role "${targetRole.name}" (${targetRole.code}).`,
+      module: 'Roles',
+      status: 'success',
+      beforeValue: targetRole,
+    });
+
+    notifyAdminStorageUpdated();
+    return true;
   }
 
   updateRolePermissions(roleCode: string, permissions: string[]): boolean {
@@ -885,6 +1457,7 @@ class SuperAdminService {
 
     const before = [...roles[roleCode].permissions];
     roles[roleCode].permissions = permissions;
+    roles[roleCode].updatedAt = new Date().toISOString();
     localStorage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(roles));
 
     this.addAuditLog({
@@ -909,8 +1482,13 @@ class SuperAdminService {
     const newRole: Role = {
       id: `role-${Date.now().toString().slice(-4)}`,
       name,
-      code: cleanCode as any,
+      code: cleanCode,
       permissions,
+      isSystemRole: false,
+      isActive: true,
+      usersCount: 0,
+      permissionsCount: permissions.length,
+      createdAt: new Date().toISOString(),
     };
 
     roles[cleanCode] = newRole;
