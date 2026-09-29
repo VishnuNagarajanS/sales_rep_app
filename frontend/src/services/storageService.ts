@@ -950,6 +950,16 @@ class StorageService {
     return MOCK_IRMS;
   }
 
+  // Used by InCallBar, CustomersPage, FollowupsPage, AdminKanbanBoard.
+  // (Were missing after the app merge -> TypeError -> white screen)
+  getAgents(_companyId?: string) {
+    return MOCK_AGENTS;
+  }
+
+  getIrms(_companyId?: string) {
+    return MOCK_IRMS;
+  }
+
   getInitialCustomers() {
     return INITIAL_CUSTOMERS;
   }

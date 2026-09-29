@@ -166,7 +166,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
   // ── Derived metrics ──────────────────────────────────────────────────────
   const totalPipelineValue = scopedDeals.reduce((sum, d) => sum + (d.value || 0), 0);
   const overdueFollowups = scopedFollowups.filter(
-    f => f.status === 'Pending' && f.scheduledAt.toLowerCase().includes('yesterday')
+    f => f.status === 'Pending' && f.scheduledAt?.toLowerCase()?.includes('yesterday')
   );
   const pendingFollowups = scopedFollowups.filter(f => f.status === 'Pending');
 

@@ -145,12 +145,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isSuperAdmin = user?.role?.code === 'super_admin';
 
   // Derive enabled features from live tenant object
+  // Fall back to ALL features if enabledFeatures is empty (e.g., existing DB row before seed patch ran)
+  const rawFeatures = tenant?.enabledFeatures || [];
   const enabledFeatures: string[] = isSuperAdmin
     ? (Object.values(FEATURES) as string[])
-    : tenant?.enabledFeatures || [];
+    : rawFeatures.length > 0
+      ? rawFeatures
+      : (Object.values(FEATURES) as string[]);
 
   // Derive permissions directly from live user role
-  const permissions = user?.role?.permissions || [];
+  // Fall back to SYSTEM_ROLES permissions if the role has no permissions set (e.g., real DB role)
+  const rawPermissions = user?.role?.permissions || [];
+  const systemRolePerms = user?.role?.code && SYSTEM_ROLES[user.role.code]?.permissions || [];
+  const permissions = rawPermissions.length > 0 ? rawPermissions : systemRolePerms;
 
   const switchPersona = async (roleCode: RoleCode, tenantSlug?: TenantSlug) => {
     // In dev mode, persona switching is strictly disabled

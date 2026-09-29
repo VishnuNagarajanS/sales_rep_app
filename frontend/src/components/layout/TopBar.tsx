@@ -64,15 +64,15 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
     const q = searchQuery.toLowerCase();
 
     const leads = storageService.getLeads(tenant?.id).filter(l =>
-      l.name.toLowerCase().includes(q) || l.phone.includes(q) || l.email.toLowerCase().includes(q)
+      l.name?.toLowerCase().includes(q) || l.phone?.includes(q) || l.email?.toLowerCase().includes(q)
     );
 
     const customers = storageService.getCustomers(tenant?.id).filter(c =>
-      c.name.toLowerCase().includes(q) || c.phone.includes(q) || c.email.toLowerCase().includes(q)
+      c.name?.toLowerCase().includes(q) || c.phone?.includes(q) || c.email?.toLowerCase().includes(q)
     );
 
     const deals = storageService.getDeals(tenant?.id).filter(d =>
-      d.title.toLowerCase().includes(q) || d.customerName.toLowerCase().includes(q)
+      d.title?.toLowerCase().includes(q) || d.customerName?.toLowerCase().includes(q)
     );
 
     const plots = enabledFeatures.includes(FEATURES.PROPERTIES)
