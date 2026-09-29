@@ -228,6 +228,7 @@ public class FollowupService : IFollowupService
             CompanyId = f.CompanyId,
             AssignedAgentId = f.AssignedAgentId,
             AssignedAgentName = f.AssignedAgent?.Name,
+            AssignedAgentRole = f.AssignedAgent?.Role?.Name ?? f.AssignedToRole,
             ContactId = f.ContactId,
             ContactType = f.ContactType,
             ContactName = f.ContactName,

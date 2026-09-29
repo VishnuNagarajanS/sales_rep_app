@@ -79,7 +79,16 @@ async function fetchAll<T>(path: string, params: Record<string, string> = {}): P
   const qs = new URLSearchParams({ pageSize: '200', ...params }).toString();
   const res: ApiResponse<PagedResult<T>> = await apiClient.get(`${path}?${qs}`);
   if (!res.success || !res.data) return [];
-  return res.data.items;
+  const items = res.data.items;
+  const seen = new Set();
+  const deduped = items.filter((item: any) => {
+    const id = item.id;
+    if (id === undefined || id === null) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+  return deduped;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -517,6 +526,7 @@ function mapFollowup(f: Record<string, any>): Followup {
     notes: f.notes ?? '',
     assignedAgentId: sid(f.assignedAgentId),
     assignedAgentName: f.assignedAgentName ?? '',
+    assignedRole: f.assignedRole ?? f.assignedToRole ?? f.assignedAgentRole ?? '',
     completedAt: f.completedAt,
   };
 }

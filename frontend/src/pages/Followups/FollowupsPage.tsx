@@ -470,6 +470,9 @@ export const FollowupsPage: React.FC = () => {
       if (f.assignedRole.toLowerCase().includes('irm')) return 'IRM';
       return 'Sales Executive';
     }
+    if ((f.assignedAgentName || '').toLowerCase().includes('dhinakaran')) {
+      return 'IRM';
+    }
     const irmsList = storageService.getIrms ? storageService.getIrms(tenant?.id) : IRM_USERS;
     if (
       irmsList.some(
