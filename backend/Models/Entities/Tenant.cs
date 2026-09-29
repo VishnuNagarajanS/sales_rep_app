@@ -12,6 +12,14 @@ public class Tenant
     public string Timezone { get; set; } = "Asia/Kolkata (IST)";
     public string Currency { get; set; } = "₹ INR";
     public string BusinessHours { get; set; } = "09:30 AM - 07:00 PM IST";
+    public string? LegalName { get; set; }
+    public string? Industry { get; set; }
+    public string Status { get; set; } = "Active"; // Active | Inactive | Suspended
+    public string? SubscriptionPlan { get; set; }
+    public int LeadSla { get; set; } = 15;
+    public bool CallEnabled { get; set; } = true;
+    public bool RecordingEnabled { get; set; } = true;
+    public bool TranscriptionEnabled { get; set; } = true;
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }

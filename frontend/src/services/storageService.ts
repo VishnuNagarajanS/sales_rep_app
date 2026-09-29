@@ -1040,3 +1040,16 @@ class StorageService {
 }
 
 export const storageService = new StorageService();
+
+export function registerMockStorageAdapter(adapter: any): void {
+  // Configures mock storage adapter when in mock mode
+  if (typeof window !== 'undefined' && adapter) {
+    (window as any).__nexus_mock_storage_adapter = adapter;
+  }
+}
+
+export function registerMockBootstrapRunner(runner: () => void): void {
+  if (typeof window !== 'undefined' && runner) {
+    (window as any).__nexus_mock_bootstrap_runner = runner;
+  }
+}

@@ -21,6 +21,7 @@ import {
 import { useAuth } from '../../../context/AuthContext';
 import { Tenant, User, AuditLog, PlatformMetrics } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
+import { isMockMode } from '../../../config/environment';
 import './PlatformDashboardPage.css';
 
 interface PlatformDashboardPageProps {
@@ -35,7 +36,27 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
   const [metrics, setMetrics] = useState<PlatformMetrics>(() => superAdminService.getPlatformMetrics());
   const [diagnostics, setDiagnostics] = useState(() => superAdminService.getSystemDiagnostics());
 
-  const loadData = () => {
+  const loadData = async () => {
+    if (!isMockMode()) {
+      try {
+        const [apiMetrics, apiTenants, apiUsers, apiDiagnostics, apiLogs] = await Promise.all([
+          superAdminService.fetchPlatformMetricsFromApi(),
+          superAdminService.fetchTenantsFromApi(),
+          superAdminService.fetchUsersFromApi(),
+          superAdminService.fetchSystemDiagnosticsFromApi(),
+          superAdminService.fetchAuditLogsFromApi(),
+        ]);
+        setMetrics(apiMetrics);
+        setTenants(apiTenants);
+        setUsers(apiUsers);
+        setDiagnostics(apiDiagnostics);
+        setAuditLogs(apiLogs);
+        return;
+      } catch (err) {
+        console.warn('Could not load dashboard data from API:', err);
+      }
+    }
+
     setTenants(superAdminService.getTenants());
     setUsers(superAdminService.getUsers());
     setAuditLogs(superAdminService.getAuditLogs());
@@ -46,10 +67,8 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
   useEffect(() => {
     loadData();
     window.addEventListener('nexus_admin_updated', loadData);
-    window.addEventListener('nexus_storage_updated', loadData);
     return () => {
       window.removeEventListener('nexus_admin_updated', loadData);
-      window.removeEventListener('nexus_storage_updated', loadData);
     };
   }, []);
 

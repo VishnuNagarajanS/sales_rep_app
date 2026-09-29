@@ -10,9 +10,11 @@ import { isMockMode } from '../config/environment';
 const getStoredTenants = (): Tenant[] => {
   try {
     const raw = localStorage.getItem('nexus_tenants');
-    return raw ? JSON.parse(raw) : [DEFAULT_TENANTS.ghl, DEFAULT_TENANTS.jamin];
-  } catch {
+    if (raw) return JSON.parse(raw);
+    if (!isMockMode()) return [];
     return [DEFAULT_TENANTS.ghl, DEFAULT_TENANTS.jamin];
+  } catch {
+    return isMockMode() ? [DEFAULT_TENANTS.ghl, DEFAULT_TENANTS.jamin] : [];
   }
 };
 

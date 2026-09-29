@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { TenantDidMapping, PlatformCarrierSettings, Tenant } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
+import { isMockMode } from '../../../config/environment';
 import { Modal } from '../../../components/common/Modal';
 import './PlatformCallConfigPage.css';
 
@@ -55,7 +56,22 @@ export const PlatformCallConfigPage: React.FC = () => {
   // Success Feedback
   const [successMsg, setSuccessMsg] = useState('');
 
-  const loadData = () => {
+  const loadData = async () => {
+    if (!isMockMode()) {
+      try {
+        const [didsList, tenantsList, carrier] = await Promise.all([
+          superAdminService.fetchDidsFromApi(),
+          superAdminService.fetchTenantsFromApi(),
+          superAdminService.fetchCarrierSettingsFromApi(),
+        ]);
+        setDids(didsList);
+        setTenants(tenantsList);
+        setCarrierSettings(carrier);
+        return;
+      } catch (err) {
+        console.warn('Could not load call config from API:', err);
+      }
+    }
     setDids(superAdminService.getDidMappings());
     setTenants(superAdminService.getTenants());
     setCarrierSettings(superAdminService.getCarrierSettings());
@@ -96,13 +112,13 @@ export const PlatformCallConfigPage: React.FC = () => {
     setIsDidModalOpen(true);
   };
 
-  const handleSaveDid = () => {
+  const handleSaveDid = async () => {
     if (!didPhone.trim()) return;
 
     const tenantObj = tenants.find(t => t.id === didTenantId);
 
     if (editingDidId) {
-      superAdminService.updateDidMapping(editingDidId, {
+      await superAdminService.updateDidApi(editingDidId, {
         phoneNumber: didPhone,
         tenantId: didTenantId,
         tenantName: tenantObj ? tenantObj.name : 'Unassigned Pool',
@@ -116,7 +132,7 @@ export const PlatformCallConfigPage: React.FC = () => {
       });
       showSuccess(`DID hotline ${didPhone} configuration updated.`);
     } else {
-      superAdminService.createDidMapping({
+      await superAdminService.createDidApi({
         phoneNumber: didPhone,
         tenantId: didTenantId,
         tenantName: tenantObj ? tenantObj.name : 'Unassigned Pool',
@@ -132,17 +148,19 @@ export const PlatformCallConfigPage: React.FC = () => {
     }
 
     setIsDidModalOpen(false);
+    await loadData();
   };
 
-  const handleDeleteDid = (did: TenantDidMapping) => {
+  const handleDeleteDid = async (did: TenantDidMapping) => {
     if (confirm(`Release virtual DID number "${did.phoneNumber}" back to reserve pool?`)) {
-      superAdminService.deleteDidMapping(did.id);
+      await superAdminService.deleteDidApi(did.id);
       showSuccess(`DID ${did.phoneNumber} released.`);
+      await loadData();
     }
   };
 
-  const handleSaveCarrierSettings = () => {
-    superAdminService.updateCarrierSettings(carrierSettings);
+  const handleSaveCarrierSettings = async () => {
+    await superAdminService.updateCarrierSettingsApi(carrierSettings);
     showSuccess('Platform SIP Trunk carrier settings saved.');
   };
 

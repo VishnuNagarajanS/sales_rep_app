@@ -60,6 +60,13 @@ public static class ServiceExtensions
         services.AddScoped<IKycService, KycService>();
         services.AddScoped<IOpportunityService, OpportunityService>();
 
+        // Super Admin Platform Services
+        services.AddScoped<IPlatformTenantService, PlatformTenantService>();
+        services.AddScoped<IPlatformPackageService, PlatformPackageService>();
+        services.AddScoped<IPlatformCallConfigService, PlatformCallConfigService>();
+        services.AddScoped<IPlatformDashboardService, PlatformDashboardService>();
+        services.AddScoped<IPlatformSystemService, PlatformSystemService>();
+
         services.AddDev1Services();
 
         // 5. Validators

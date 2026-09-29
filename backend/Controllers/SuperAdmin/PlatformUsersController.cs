@@ -317,28 +317,5 @@ public class PlatformUsersController : ControllerBase
 
         return Ok(ApiResponse<object>.SuccessResult(new { tempPassword }, "Temporary password generated successfully."));
     }
-
-    [HttpGet("~/api/super-admin/roles")]
-    [HttpGet("~/api/platform/roles")]
-    public async Task<ActionResult<ApiResponse<List<PlatformRoleDto>>>> GetAllRoles()
-    {
-        var roles = await _context.Roles.AsNoTracking().OrderBy(r => r.Id).ToListAsync();
-        var result = roles.Select(r => new PlatformRoleDto
-        {
-            Id = r.Id.ToString(),
-            Name = r.Name,
-            Code = r.Code,
-            Permissions = r.Permissions ?? new List<string>()
-        }).ToList();
-
-        return Ok(ApiResponse<List<PlatformRoleDto>>.SuccessResult(result));
-    }
-
-    [HttpGet("~/api/super-admin/tenants")]
-    [HttpGet("~/api/platform/tenants")]
-    public async Task<ActionResult<ApiResponse<List<Tenant>>>> GetAllTenants()
-    {
-        var tenants = await _context.Tenants.AsNoTracking().OrderBy(t => t.Id).ToListAsync();
-        return Ok(ApiResponse<List<Tenant>>.SuccessResult(tenants));
-    }
 }
+

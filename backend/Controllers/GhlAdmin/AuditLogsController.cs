@@ -101,4 +101,60 @@ public class AuditLogsController : ControllerBase
             PagedResult<AuditLogResponseDto>.Create(items, total, page, pageSize),
             "Audit logs retrieved."));
     }
+
+    // ── GET /api/audit-logs/export-csv ───────────────────────────────────────
+    [HttpGet("export-csv")]
+    public async Task<IActionResult> ExportAuditLogsCsv(
+        [FromQuery] string? entityType,
+        [FromQuery] string? action,
+        [FromQuery] string? module,
+        [FromQuery] string? search,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        CancellationToken ct = default)
+    {
+        var query = _db.AuditLogs.AsNoTracking().AsQueryable();
+
+        if (_currentUser.Role != "super_admin" && _currentUser.CompanyId.HasValue)
+            query = query.Where(l => l.CompanyId == _currentUser.CompanyId.Value);
+
+        if (!string.IsNullOrWhiteSpace(entityType))
+            query = query.Where(l => l.EntityType == entityType);
+
+        if (!string.IsNullOrWhiteSpace(action))
+            query = query.Where(l => l.Action == action);
+
+        if (!string.IsNullOrWhiteSpace(module))
+            query = query.Where(l => l.Module == module);
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim().ToLower();
+            query = query.Where(l =>
+                l.ActorName.ToLower().Contains(s) ||
+                l.ActorEmail.ToLower().Contains(s) ||
+                l.Details.ToLower().Contains(s));
+        }
+
+        if (from.HasValue)
+            query = query.Where(l => l.Timestamp >= from.Value.ToUniversalTime());
+
+        if (to.HasValue)
+            query = query.Where(l => l.Timestamp <= to.Value.ToUniversalTime());
+
+        var logs = await query.OrderByDescending(l => l.Timestamp).Take(1000).ToListAsync(ct);
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Timestamp,CompanyId,ActorName,ActorEmail,Action,Module,EntityType,EntityId,Details,Status,IpAddress");
+
+        foreach (var l in logs)
+        {
+            sb.AppendLine($"\"{l.Timestamp:O}\",\"{l.CompanyId}\",\"{EscapeCsv(l.ActorName)}\",\"{EscapeCsv(l.ActorEmail)}\",\"{EscapeCsv(l.Action)}\",\"{EscapeCsv(l.Module ?? "")}\",\"{EscapeCsv(l.EntityType)}\",\"{EscapeCsv(l.EntityId)}\",\"{EscapeCsv(l.Details)}\",\"{EscapeCsv(l.Status)}\",\"{EscapeCsv(l.IpAddress ?? "")}\"");
+        }
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(sb.ToString());
+        return File(bytes, "text/csv", $"AuditLogs_{DateTime.UtcNow:yyyyMMdd_HHmmss}.csv");
+    }
+
+    private static string EscapeCsv(string s) => s.Replace("\"", "\"\"");
 }

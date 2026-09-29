@@ -129,10 +129,8 @@ export const PlatformUsersPage: React.FC = () => {
       applyFilters();
     };
     window.addEventListener('nexus_admin_updated', handleUpdate);
-    window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => {
       window.removeEventListener('nexus_admin_updated', handleUpdate);
-      window.removeEventListener('nexus_storage_updated', handleUpdate);
     };
   }, []);
 

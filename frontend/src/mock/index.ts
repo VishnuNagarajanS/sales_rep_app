@@ -44,3 +44,6 @@ export * from './chat/attachmentFixtures';
 export * from './chat/messageFixtures';
 export * from './chat/conversationFixtures';
 export * from './chat/demoConversations';
+
+// Super Admin Fixtures
+export * from './superadmin/superAdminMockData';

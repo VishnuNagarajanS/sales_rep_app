@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { SystemDiagnostics, BroadcastAnnouncement, Tenant } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
+import { isMockMode } from '../../../config/environment';
 import { Modal } from '../../../components/common/Modal';
 import './PlatformSystemPage.css';
 
@@ -43,7 +44,24 @@ export const PlatformSystemPage: React.FC = () => {
   // Success Feedback
   const [successMsg, setSuccessMsg] = useState('');
 
-  const loadData = () => {
+  const loadData = async () => {
+    if (!isMockMode()) {
+      try {
+        const [diag, ann, allTenants, maint] = await Promise.all([
+          superAdminService.fetchSystemDiagnosticsFromApi(),
+          superAdminService.fetchAnnouncementsFromApi(),
+          superAdminService.fetchTenantsFromApi(),
+          superAdminService.fetchMaintenanceModeFromApi(),
+        ]);
+        setDiagnostics(diag);
+        setAnnouncements(ann);
+        setTenants(allTenants);
+        setMaintenance(maint);
+        return;
+      } catch (err) {
+        console.warn('Could not load system data from API:', err);
+      }
+    }
     setDiagnostics(superAdminService.getSystemDiagnostics());
     setAnnouncements(superAdminService.getAnnouncements());
     setTenants(superAdminService.getTenants());
@@ -61,10 +79,10 @@ export const PlatformSystemPage: React.FC = () => {
     setTimeout(() => setSuccessMsg(''), 3000);
   };
 
-  const handleCreateAnnouncement = () => {
+  const handleCreateAnnouncement = async () => {
     if (!annTitle.trim() || !annMessage.trim()) return;
 
-    superAdminService.createAnnouncement({
+    await superAdminService.createAnnouncementApi({
       title: annTitle.trim(),
       message: annMessage.trim(),
       priority: annPriority,
@@ -76,22 +94,27 @@ export const PlatformSystemPage: React.FC = () => {
     setAnnTitle('');
     setAnnMessage('');
     showSuccess('Broadcast announcement published across fleet.');
+    await loadData();
   };
 
-  const handleToggleAnnouncement = (id: string, current: boolean) => {
-    superAdminService.toggleAnnouncement(id, !current);
+  const handleToggleAnnouncement = async (id: string, current: boolean) => {
+    await superAdminService.toggleAnnouncementApi(id, !current);
     showSuccess(`Broadcast announcement ${!current ? 'activated' : 'deactivated'}.`);
+    await loadData();
   };
 
-  const handleDeleteAnnouncement = (id: string) => {
-    superAdminService.deleteAnnouncement(id);
+  const handleDeleteAnnouncement = async (id: string) => {
+    await superAdminService.deleteAnnouncementApi(id);
     showSuccess('Broadcast announcement removed.');
+    await loadData();
   };
 
-  const handleToggleMaintenance = () => {
+  const handleToggleMaintenance = async () => {
     const nextState = !maintenance.enabled;
-    const updated = superAdminService.setMaintenanceMode(nextState);
-    setMaintenance(updated);
+    const updated = await superAdminService.setMaintenanceModeApi(nextState);
+    if (updated) {
+      setMaintenance(updated);
+    }
     showSuccess(`Platform maintenance mode ${nextState ? 'ENABLED' : 'DISABLED'}.`);
   };
 

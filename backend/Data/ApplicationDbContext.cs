@@ -48,6 +48,13 @@ public class ApplicationDbContext : DbContext
     public DbSet<InvestorCall> InvestorCalls => Set<InvestorCall>();
     public DbSet<IrmPipelineCard> IrmPipelineCards => Set<IrmPipelineCard>();
 
+    // ── Super Admin Platform Management Tables ──────────────────────────────
+    public DbSet<SubscriptionPackage> SubscriptionPackages => Set<SubscriptionPackage>();
+    public DbSet<TenantDidMapping> TenantDidMappings => Set<TenantDidMapping>();
+    public DbSet<PlatformCarrierSettings> PlatformCarrierSettings => Set<PlatformCarrierSettings>();
+    public DbSet<BroadcastAnnouncement> BroadcastAnnouncements => Set<BroadcastAnnouncement>();
+    public DbSet<PlatformSetting> PlatformSettings => Set<PlatformSetting>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -181,6 +188,14 @@ public class ApplicationDbContext : DbContext
                 Timezone = "Asia/Kolkata (IST)",
                 Currency = "₹ INR",
                 BusinessHours = "10:00 AM - 06:30 PM IST",
+                LegalName = "GHL India Advisory Trust Private Limited",
+                Industry = "Commercial Real Estate & AIF",
+                Status = "Active",
+                SubscriptionPlan = "Wealth Advisory Enterprise Suite",
+                LeadSla = 15,
+                CallEnabled = true,
+                RecordingEnabled = true,
+                TranscriptionEnabled = true,
                 IsActive = true,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
@@ -200,6 +215,14 @@ public class ApplicationDbContext : DbContext
                 Timezone = "Asia/Kolkata (IST)",
                 Currency = "₹ INR",
                 BusinessHours = "10:00 AM - 06:30 PM IST",
+                LegalName = "Jamin Bazaar Plotted Communities Private Limited",
+                Industry = "Plotted Real Estate & Farmland",
+                Status = "Active",
+                SubscriptionPlan = "Plotted Land Operations Pro",
+                LeadSla = 30,
+                CallEnabled = true,
+                RecordingEnabled = true,
+                TranscriptionEnabled = true,
                 IsActive = true,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             }
@@ -387,6 +410,160 @@ public class ApplicationDbContext : DbContext
                 InvestmentAmount = "₹10 Cr",
                 PreferredAssetClass = "Commercial AIF",
                 CreatedAt = new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc)
+            }
+        );
+
+        // 7. Subscription Packages (IDs 1, 2, 3)
+        modelBuilder.Entity<SubscriptionPackage>().HasData(
+            new SubscriptionPackage
+            {
+                Id = 1,
+                Name = "Starter CRM Tier",
+                Code = "starter_crm",
+                Description = "Essential inbound leads, customer directory, softphone calling, and follow-ups.",
+                Tier = "Starter",
+                PriceMonthly = 14999m,
+                Currency = "₹",
+                MaxUsers = 15,
+                MaxStorageGb = 50,
+                Features = new List<string> { "leads", "customers", "followups", "calls", "reports" },
+                IsActive = true,
+                IsPopular = false,
+                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            },
+            new SubscriptionPackage
+            {
+                Id = 2,
+                Name = "Plotted Land Operations Pro",
+                Code = "jamin_real_estate_pro",
+                Description = "Tailored for plotted development builders with interactive plot layouts, site visit logistics, and token bookings.",
+                Tier = "Growth",
+                PriceMonthly = 39999m,
+                Currency = "₹",
+                MaxUsers = 50,
+                MaxStorageGb = 250,
+                Features = new List<string>
+                {
+                    "leads", "customers", "deals", "followups", "calls", "call-recording",
+                    "call-transcription", "properties", "site-visits", "bookings", "reports"
+                },
+                IsActive = true,
+                IsPopular = true,
+                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            },
+            new SubscriptionPackage
+            {
+                Id = 3,
+                Name = "Wealth Advisory Enterprise Suite",
+                Code = "ghl_wealth_enterprise",
+                Description = "Engineered for institutional capital syndicates, private family offices, and CRE investment opportunities.",
+                Tier = "Enterprise",
+                PriceMonthly = 79999m,
+                Currency = "₹",
+                MaxUsers = 150,
+                MaxStorageGb = 1000,
+                Features = new List<string>
+                {
+                    "leads", "customers", "deals", "followups", "calls", "call-recording",
+                    "call-transcription", "investors", "consultations", "investment-opportunities", "reports"
+                },
+                IsActive = true,
+                IsPopular = false,
+                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            }
+        );
+
+        // 8. Tenant Virtual DIDs (IDs 1, 2, 3)
+        modelBuilder.Entity<TenantDidMapping>().HasData(
+            new TenantDidMapping
+            {
+                Id = 1,
+                PhoneNumber = "+91 80 4700 8001",
+                TenantId = 1,
+                RoutingStrategy = "Skill/Priority",
+                QueueName = "HNW Wealth Advisory Queue",
+                EnableRecording = true,
+                EnableAiWhisper = true,
+                Status = "Online",
+                ChannelsCount = 8,
+                AllocatedAt = new DateTime(2026, 1, 10, 10, 0, 0, DateTimeKind.Utc),
+                Notes = "Primary inbound trunk for HNW wealth consultations"
+            },
+            new TenantDidMapping
+            {
+                Id = 2,
+                PhoneNumber = "+91 80 4700 8002",
+                TenantId = 2,
+                RoutingStrategy = "Round-Robin",
+                QueueName = "Plotted Enclaves Telecallers",
+                EnableRecording = true,
+                EnableAiWhisper = true,
+                Status = "Online",
+                ChannelsCount = 12,
+                AllocatedAt = new DateTime(2026, 1, 15, 14, 30, 0, DateTimeKind.Utc),
+                Notes = "Buyer inquiry hotline for gated community layouts"
+            },
+            new TenantDidMapping
+            {
+                Id = 3,
+                PhoneNumber = "+91 80 4700 8003",
+                TenantId = null,
+                RoutingStrategy = "Round-Robin",
+                QueueName = "Available DID Reserve",
+                EnableRecording = false,
+                EnableAiWhisper = false,
+                Status = "Reserved",
+                ChannelsCount = 4,
+                AllocatedAt = new DateTime(2026, 2, 1, 9, 0, 0, DateTimeKind.Utc),
+                Notes = "Spare DID number for next enterprise onboarding"
+            }
+        );
+
+        // 9. Platform Carrier Settings (ID 1)
+        modelBuilder.Entity<PlatformCarrierSettings>().HasData(
+            new PlatformCarrierSettings
+            {
+                Id = 1,
+                PrimaryCarrier = "Twilio Elastic SIP Trunking (Mumbai AP-South)",
+                SecondaryCarrier = "Exotel Cloud Gateway (Failover Redundant)",
+                SipRealm = "sip.trunk.nexusplatform.io:5060",
+                WebRtcGatewayUrl = "wss://webrtc.nexusplatform.io/gateway",
+                RecordingRetentionDays = 180,
+                MaxConcurrentChannels = 100,
+                EmergencyRoutingEnabled = true,
+                WhisperAiModel = "OpenAI Whisper-Large-v3 (Self-Hosted on GPU cluster)",
+                LastTestedAt = new DateTime(2026, 9, 26, 10, 0, 0, DateTimeKind.Utc),
+                TestStatus = "Success",
+                UpdatedAt = new DateTime(2026, 9, 26, 10, 0, 0, DateTimeKind.Utc)
+            }
+        );
+
+        // 10. Broadcast Announcement (ID 1)
+        modelBuilder.Entity<BroadcastAnnouncement>().HasData(
+            new BroadcastAnnouncement
+            {
+                Id = 1,
+                Title = "Platform Infrastructure Upgrade",
+                Message = "Scheduled zero-downtime database optimization today at 11:30 PM IST. Telephony routing will not be interrupted.",
+                Priority = "info",
+                TargetAudience = "all",
+                TargetTenantId = null,
+                IsActive = true,
+                CreatedAt = new DateTime(2026, 9, 26, 8, 0, 0, DateTimeKind.Utc),
+                CreatedBy = "Yanosh",
+                ExpiresAt = new DateTime(2026, 9, 27, 6, 0, 0, DateTimeKind.Utc)
+            }
+        );
+
+        // 11. Platform Setting (ID 1)
+        modelBuilder.Entity<PlatformSetting>().HasData(
+            new PlatformSetting
+            {
+                Id = 1,
+                MaintenanceModeEnabled = false,
+                MaintenanceMessage = "Platform under scheduled maintenance.",
+                BypassSecret = "nexus-admin-2026",
+                UpdatedAt = new DateTime(2026, 9, 26, 0, 0, 0, DateTimeKind.Utc)
             }
         );
     }

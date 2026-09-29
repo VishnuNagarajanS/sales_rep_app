@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { AuditLog, Tenant } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
+import { isMockMode } from '../../../config/environment';
 import { Modal } from '../../../components/common/Modal';
 import { Drawer } from '../../../components/common/Drawer';
 import './PlatformAuditPage.css';
@@ -37,12 +38,38 @@ export const PlatformAuditPage: React.FC = () => {
   const [inspectedLog, setInspectedLog] = useState<AuditLog | null>(null);
   const [isInspectDrawerOpen, setIsInspectDrawerOpen] = useState(false);
 
-  const loadData = () => {
-    setTenants(superAdminService.getTenants());
-    applyFilters();
+  const loadData = async () => {
+    if (!isMockMode()) {
+      try {
+        const allTenants = await superAdminService.fetchTenantsFromApi();
+        setTenants(allTenants);
+      } catch (err) {
+        console.warn('Could not load tenants in audit page:', err);
+        setTenants(superAdminService.getTenants());
+      }
+    } else {
+      setTenants(superAdminService.getTenants());
+    }
+    await applyFilters();
   };
 
-  const applyFilters = () => {
+  const applyFilters = async () => {
+    if (!isMockMode()) {
+      try {
+        const list = await superAdminService.fetchAuditLogsFromApi({
+          companyId: selectedCompanyFilter === 'all' ? undefined : selectedCompanyFilter,
+          action: selectedActionFilter === 'all' ? undefined : selectedActionFilter,
+          module: selectedModuleFilter === 'all' ? undefined : selectedModuleFilter,
+          search: searchQuery || undefined,
+          from: fromDate ? new Date(fromDate).toISOString() : undefined,
+          to: toDate ? new Date(toDate + 'T23:59:59').toISOString() : undefined,
+        });
+        setLogs(list);
+        return;
+      } catch (err) {
+        console.warn('Could not fetch audit logs from API:', err);
+      }
+    }
     const list = superAdminService.getAuditLogs({
       companyId: selectedCompanyFilter,
       action: selectedActionFilter,
@@ -57,10 +84,8 @@ export const PlatformAuditPage: React.FC = () => {
   useEffect(() => {
     loadData();
     window.addEventListener('nexus_admin_updated', loadData);
-    window.addEventListener('nexus_storage_updated', loadData);
     return () => {
       window.removeEventListener('nexus_admin_updated', loadData);
-      window.removeEventListener('nexus_storage_updated', loadData);
     };
   }, []);
 

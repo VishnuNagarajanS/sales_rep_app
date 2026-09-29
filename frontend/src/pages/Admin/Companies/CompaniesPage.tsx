@@ -30,6 +30,7 @@ import { Tenant, User, SubscriptionPackage } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
 import { FEATURES } from '../../../constants/features';
 import { SYSTEM_ROLES } from '../../../constants/roles';
+import { isMockMode } from '../../../config/environment';
 import { Modal } from '../../../components/common/Modal';
 import { Drawer } from '../../../components/common/Drawer';
 import './CompaniesPage.css';
@@ -95,7 +96,28 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
   const [newUserPhone, setNewUserPhone] = useState('+91 98450 ');
   const [newUserRole, setNewUserRole] = useState<'company_admin'>('company_admin');
 
-  const loadData = () => {
+  const loadData = async () => {
+    if (!isMockMode()) {
+      try {
+        const [allTenants, allPackages] = await Promise.all([
+          superAdminService.fetchTenantsFromApi(),
+          superAdminService.fetchPackagesFromApi(),
+        ]);
+        setTenants(allTenants);
+        setPackages(allPackages);
+
+        if (selectedTenantId) {
+          const match = allTenants.find(t => t.id === selectedTenantId || t.slug === selectedTenantId);
+          if (match) {
+            openTenantDrawer(match);
+          }
+        }
+        return;
+      } catch (err) {
+        console.warn('Could not load tenants/packages from API:', err);
+      }
+    }
+
     const allTenants = superAdminService.getTenants();
     setTenants(allTenants);
     setPackages(superAdminService.getPackages());
@@ -111,10 +133,8 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
   useEffect(() => {
     loadData();
     window.addEventListener('nexus_admin_updated', loadData);
-    window.addEventListener('nexus_storage_updated', loadData);
     return () => {
       window.removeEventListener('nexus_admin_updated', loadData);
-      window.removeEventListener('nexus_storage_updated', loadData);
     };
   }, []);
 
@@ -124,21 +144,29 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
     switchPersona('company_admin', t.slug);
   };
 
-  const openTenantDrawer = (tenant: Tenant) => {
+  const openTenantDrawer = async (tenant: Tenant) => {
     setSelectedTenant(tenant);
     setDrawerTenantEdit({ ...tenant });
-    setDrawerUsers(superAdminService.getUsers({ companyId: tenant.id }));
+    if (!isMockMode()) {
+      const users = await superAdminService.fetchUsersFromApi({ companyId: tenant.id });
+      setDrawerUsers(users);
+    } else {
+      setDrawerUsers(superAdminService.getUsers({ companyId: tenant.id }));
+    }
     setDrawerTab('profile');
     setIsDetailDrawerOpen(true);
     setSaveSuccessMsg('');
   };
 
-  const handleSaveDrawerTenant = () => {
+  const handleSaveDrawerTenant = async () => {
     if (!drawerTenantEdit) return;
-    const updated = superAdminService.updateTenant(drawerTenantEdit);
-    setSelectedTenant(updated);
+    const updated = await superAdminService.updateTenantApi(drawerTenantEdit.id, drawerTenantEdit);
+    if (updated) {
+      setSelectedTenant(updated);
+    }
     setSaveSuccessMsg('Organization profile and entitlements saved successfully.');
     setTimeout(() => setSaveSuccessMsg(''), 3000);
+    await loadData();
   };
 
   const handleToggleFeatureInDrawer = (featureKey: string) => {
@@ -150,21 +178,23 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
     setDrawerTenantEdit({ ...drawerTenantEdit, enabledFeatures: updatedFeatures });
   };
 
-  const handleToggleTenantStatus = (newStatus: 'Active' | 'Inactive' | 'Suspended') => {
+  const handleToggleTenantStatus = async (newStatus: 'Active' | 'Inactive' | 'Suspended') => {
     if (!selectedTenant) return;
-    const updated = superAdminService.toggleTenantStatus(selectedTenant.id, newStatus);
-    if (updated) {
+    const success = await superAdminService.updateTenantStatusApi(selectedTenant.id, newStatus);
+    if (success) {
+      const updated = { ...selectedTenant, status: newStatus };
       setSelectedTenant(updated);
       setDrawerTenantEdit(updated);
       setSaveSuccessMsg(`Organization status changed to ${newStatus}.`);
       setTimeout(() => setSaveSuccessMsg(''), 3000);
+      await loadData();
     }
   };
 
-  const handleAddUserToCompany = () => {
+  const handleAddUserToCompany = async () => {
     if (!selectedTenant || !newUserName || !newUserEmail) return;
-    const roles = superAdminService.getRoles();
-    superAdminService.createUser({
+    const roles = await superAdminService.fetchRolesFromApi();
+    await superAdminService.createUserApi({
       name: newUserName,
       email: newUserEmail,
       phone: newUserPhone,
@@ -175,17 +205,22 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       status: 'Active',
       designation: 'Company Administrator',
     });
-    setDrawerUsers(superAdminService.getUsers({ companyId: selectedTenant.id }));
+    if (!isMockMode()) {
+      const users = await superAdminService.fetchUsersFromApi({ companyId: selectedTenant.id });
+      setDrawerUsers(users);
+    } else {
+      setDrawerUsers(superAdminService.getUsers({ companyId: selectedTenant.id }));
+    }
     setIsAddUserModalOpen(false);
     setNewUserName('');
     setNewUserEmail('');
   };
 
   // Complete Onboarding Wizard
-  const handleDeployOrganization = () => {
+  const handleDeployOrganization = async () => {
     if (!wizardName.trim()) return;
 
-    superAdminService.createTenant(
+    await superAdminService.createTenantApi(
       {
         name: wizardName.trim(),
         legalName: wizardLegalName.trim() || wizardName.trim(),
@@ -220,6 +255,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
     // Reset fields
     setWizardName('');
     setWizardAdminEmail('');
+    await loadData();
   };
 
   // Filtered tenants
@@ -1278,10 +1314,11 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
 
                       <button
                         className="btn btn-danger btn-sm"
-                        onClick={() => {
+                        onClick={async () => {
                           if (confirm(`Are you sure you want to permanently delete organization "${selectedTenant.name}"?`)) {
-                            superAdminService.deleteTenant(selectedTenant.id);
+                            await superAdminService.deleteTenantApi(selectedTenant.id);
                             setIsDetailDrawerOpen(false);
+                            await loadData();
                           }
                         }}
                       >

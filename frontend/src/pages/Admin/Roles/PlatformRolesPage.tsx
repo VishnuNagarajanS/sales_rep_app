@@ -17,6 +17,7 @@ import { PERMISSIONS } from '../../../constants/permissions';
 import { SYSTEM_ROLES } from '../../../constants/roles';
 import { Role } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
+import { isMockMode } from '../../../config/environment';
 import { Modal } from '../../../components/common/Modal';
 import './PlatformRolesPage.css';
 
@@ -39,7 +40,17 @@ export const PlatformRolesPage: React.FC = () => {
   const [newRoleCode, setNewRoleCode] = useState('');
   const [baseTemplateRole, setBaseTemplateRole] = useState('sales_executive');
 
-  const loadRoles = () => {
+  const loadRoles = async () => {
+    if (!isMockMode()) {
+      try {
+        const apiRoles = await superAdminService.fetchRolesFromApi();
+        setRoles(apiRoles);
+        setHasUnsavedChanges(false);
+        return;
+      } catch (err) {
+        console.warn('Could not load roles from API:', err);
+      }
+    }
     setRoles(superAdminService.getRoles());
     setHasUnsavedChanges(false);
   };
@@ -163,30 +174,37 @@ export const PlatformRolesPage: React.FC = () => {
       setHasUnsavedChanges(true);
     };
 
-    const handleSaveAllChanges = () => {
-      Object.entries(roles).forEach(([code, r]) => {
-        superAdminService.updateRolePermissions(code, r.permissions);
-      });
+    const handleSaveAllChanges = async () => {
+      await Promise.all(
+        Object.entries(roles).map(([code, r]) =>
+          superAdminService.updateRolePermissionsApi(code, r.permissions)
+        )
+      );
 
       setHasUnsavedChanges(false);
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 3000);
+      await loadRoles();
     };
 
-    const handleCreateCustomRole = () => {
+    const handleCreateCustomRole = async () => {
       if (!newRoleName.trim() || !newRoleCode.trim()) return;
 
       const basePerms = roles[baseTemplateRole]?.permissions || [];
-      const newRole = superAdminService.createCustomRole(
-        newRoleName.trim(),
-        newRoleCode.trim(),
-        [...basePerms]
-      );
+      const newRole = await superAdminService.createCustomRoleApi({
+        name: newRoleName.trim(),
+        code: newRoleCode.trim(),
+        baseTemplateRole,
+        permissions: [...basePerms],
+      });
 
-      setRoles({ ...roles, [newRole.code]: newRole });
+      if (newRole) {
+        setRoles({ ...roles, [newRole.code]: newRole });
+      }
       setIsAddRoleModalOpen(false);
       setNewRoleName('');
       setNewRoleCode('');
+      await loadRoles();
     };
 
     // Filter permission groups based on search & category

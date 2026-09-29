@@ -17,6 +17,7 @@ import {
 import { SubscriptionPackage, Tenant } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
 import { FEATURES } from '../../../constants/features';
+import { isMockMode } from '../../../config/environment';
 import { Modal } from '../../../components/common/Modal';
 import './PlatformFeaturesPage.css';
 
@@ -42,7 +43,20 @@ export const PlatformFeaturesPage: React.FC = () => {
   // Success Feedback
   const [successMsg, setSuccessMsg] = useState('');
 
-  const loadData = () => {
+  const loadData = async () => {
+    if (!isMockMode()) {
+      try {
+        const [pkgs, allTenants] = await Promise.all([
+          superAdminService.fetchPackagesFromApi(),
+          superAdminService.fetchTenantsFromApi(),
+        ]);
+        setPackages(pkgs);
+        setTenants(allTenants);
+        return;
+      } catch (err) {
+        console.warn('Could not load packages from API:', err);
+      }
+    }
     setPackages(superAdminService.getPackages());
     setTenants(superAdminService.getTenants());
   };
@@ -110,7 +124,7 @@ export const PlatformFeaturesPage: React.FC = () => {
     setIsPackageModalOpen(true);
   };
 
-  const handleSavePackage = () => {
+  const handleSavePackage = async () => {
     if (!pkgName.trim()) return;
 
     if (editingPkgId) {
@@ -131,7 +145,7 @@ export const PlatformFeaturesPage: React.FC = () => {
         showSuccess(`Subscription tier "${pkgName}" updated.`);
       }
     } else {
-      superAdminService.createPackage({
+      await superAdminService.createPackageApi({
         name: pkgName,
         code: pkgCode || pkgName.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
         tier: pkgTier,
@@ -146,12 +160,14 @@ export const PlatformFeaturesPage: React.FC = () => {
     }
 
     setIsPackageModalOpen(false);
+    await loadData();
   };
 
-  const handleDeletePackage = (pkg: SubscriptionPackage) => {
+  const handleDeletePackage = async (pkg: SubscriptionPackage) => {
     if (confirm(`Are you sure you want to delete package "${pkg.name}"?`)) {
-      superAdminService.deletePackage(pkg.id);
+      await superAdminService.deletePackageApi(pkg.id);
       showSuccess(`Package "${pkg.name}" removed.`);
+      await loadData();
     }
   };
 
