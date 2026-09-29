@@ -15,6 +15,7 @@
   padding: 32px 20px;
   overflow-x: hidden;
   box-sizing: border-box;
+  color-scheme: dark;
 }
 
 /* Background Layer with Subtle 6px Blur */
@@ -286,6 +287,7 @@
   -webkit-backdrop-filter: blur(8px);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   box-sizing: border-box;
+  color-scheme: dark;
 }
 
 .auth-input-field::placeholder {
@@ -305,6 +307,93 @@
     0 0 16px rgba(239, 68, 68, 0.2),
     inset 0 1px 2px rgba(0, 0, 0, 0.2) !important;
   outline: none;
+}
+
+/* Maintain Liquid Glass aesthetics for browser autofill & saved credentials (WebKit / Chrome / Edge / Safari) */
+.auth-input-field:-webkit-autofill,
+.auth-input-field:-webkit-autofill:hover,
+.auth-input-field:-webkit-autofill:active {
+  -webkit-text-fill-color: #ffffff !important;
+  color: #ffffff !important;
+  caret-color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.20) !important;
+  border-radius: 12px !important;
+  /* Prevent browser from painting the default opaque white/yellow autofill background */
+  transition: background-color 50000s ease-in-out 0s, color 50000s ease-in-out 0s;
+  /* Mask browser autofill with liquid-glass tinted inset box-shadow */
+  -webkit-box-shadow:
+    0 0 0 1000px rgba(36, 52, 75, 0.78) inset,
+    inset 0 1px 2px rgba(0, 0, 0, 0.2),
+    inset 0 0 10px rgba(255, 255, 255, 0.02) !important;
+  box-shadow:
+    0 0 0 1000px rgba(36, 52, 75, 0.78) inset,
+    inset 0 1px 2px rgba(0, 0, 0, 0.2),
+    inset 0 0 10px rgba(255, 255, 255, 0.02) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+}
+
+.auth-input-field:-webkit-autofill:focus {
+  -webkit-text-fill-color: #ffffff !important;
+  color: #ffffff !important;
+  caret-color: #ffffff !important;
+  border-color: rgba(239, 68, 68, 0.75) !important;
+  border-radius: 12px !important;
+  -webkit-box-shadow:
+    0 0 0 1000px rgba(36, 52, 75, 0.78) inset,
+    0 0 0 3px rgba(239, 68, 68, 0.25),
+    0 0 16px rgba(239, 68, 68, 0.2),
+    inset 0 1px 2px rgba(0, 0, 0, 0.2) !important;
+  box-shadow:
+    0 0 0 1000px rgba(36, 52, 75, 0.78) inset,
+    0 0 0 3px rgba(239, 68, 68, 0.25),
+    0 0 16px rgba(239, 68, 68, 0.2),
+    inset 0 1px 2px rgba(0, 0, 0, 0.2) !important;
+  outline: none !important;
+  transition: background-color 50000s ease-in-out 0s, color 50000s ease-in-out 0s;
+}
+
+/* Standard :autofill */
+.auth-input-field:autofill,
+.auth-input-field:autofill:hover,
+.auth-input-field:autofill:active {
+  -webkit-text-fill-color: #ffffff !important;
+  color: #ffffff !important;
+  caret-color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.20) !important;
+  border-radius: 12px !important;
+  box-shadow:
+    0 0 0 1000px rgba(36, 52, 75, 0.78) inset,
+    inset 0 1px 2px rgba(0, 0, 0, 0.2),
+    inset 0 0 10px rgba(255, 255, 255, 0.02) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  transition: background-color 50000s ease-in-out 0s, color 50000s ease-in-out 0s;
+}
+
+.auth-input-field:autofill:focus {
+  -webkit-text-fill-color: #ffffff !important;
+  color: #ffffff !important;
+  caret-color: #ffffff !important;
+  border-color: rgba(239, 68, 68, 0.75) !important;
+  border-radius: 12px !important;
+  box-shadow:
+    0 0 0 1000px rgba(36, 52, 75, 0.78) inset,
+    0 0 0 3px rgba(239, 68, 68, 0.25),
+    0 0 16px rgba(239, 68, 68, 0.2),
+    inset 0 1px 2px rgba(0, 0, 0, 0.2) !important;
+  outline: none !important;
+  transition: background-color 50000s ease-in-out 0s, color 50000s ease-in-out 0s;
+}
+
+/* Firefox :-moz-autofill */
+.auth-input-field:-moz-autofill,
+.auth-input-field:-moz-autofill:hover,
+.auth-input-field:-moz-autofill:focus {
+  background: rgba(36, 52, 75, 0.78) !important;
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.20) !important;
+  box-shadow: 0 0 0 1000px rgba(36, 52, 75, 0.78) inset !important;
 }
 
 .auth-input-wrapper:focus-within .auth-input-icon {
