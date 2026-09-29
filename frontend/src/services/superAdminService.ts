@@ -14,6 +14,7 @@ import { DEFAULT_TENANTS } from '../constants/defaultTenants';
 import { SYSTEM_ROLES } from '../constants/roles';
 import { FEATURES } from '../constants/features';
 import { apiClient, ApiResponse } from './apiClient';
+import { storageService } from './storageService';
 
 // Storage Keys
 const STORAGE_KEYS = {
@@ -26,6 +27,7 @@ const STORAGE_KEYS = {
   AUDIT_LOGS: 'nexus_audit_logs',
   ANNOUNCEMENTS: 'nexus_admin_announcements',
   MAINTENANCE_MODE: 'nexus_admin_maintenance_mode',
+  METRICS: 'nexus_platform_metrics',
 };
 
 // Dispatch storage update helper
@@ -620,10 +622,10 @@ class SuperAdminService {
         ];
         localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
       } else {
-        // Sanitize: re-map any legacy sales_manager to sales_executive
+        // Sanitize: ensure all users have a valid role from SYSTEM_ROLES
         let modified = false;
         users.forEach(u => {
-          if ((u.role as any)?.code === 'sales_manager') {
+          if (!u.role || !SYSTEM_ROLES[u.role.code]) {
             u.role = SYSTEM_ROLES.sales_executive;
             modified = true;
           }
@@ -861,11 +863,17 @@ class SuperAdminService {
         return SYSTEM_ROLES;
       }
       const parsed = JSON.parse(raw);
-      if (parsed.sales_manager) {
-        delete parsed.sales_manager;
-        localStorage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(parsed));
+      // Ensure only known system roles are returned
+      const validRoles: Record<string, Role> = {};
+      for (const key of Object.keys(SYSTEM_ROLES)) {
+        if (parsed[key]) {
+          validRoles[key] = parsed[key];
+        } else {
+          validRoles[key] = SYSTEM_ROLES[key];
+        }
       }
-      return parsed;
+      localStorage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(validRoles));
+      return validRoles;
     } catch {
       return SYSTEM_ROLES;
     }
@@ -1400,12 +1408,54 @@ class SuperAdminService {
 
   // ── PLATFORM TELEMETRY METRICS ────────────────────────────────────────────
 
+  async fetchPlatformMetricsFromApi(): Promise<PlatformMetrics> {
+    try {
+      const res = await apiClient.get<ApiResponse<PlatformMetrics>>('/super-admin/metrics');
+      if (res && res.data) {
+        localStorage.setItem(STORAGE_KEYS.METRICS, JSON.stringify(res.data));
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Could not fetch platform metrics from API, falling back to local calculation:', err);
+    }
+    return this.getPlatformMetrics();
+  }
+
   getPlatformMetrics(): PlatformMetrics {
+    try {
+      const cached = localStorage.getItem(STORAGE_KEYS.METRICS);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (typeof parsed.totalLeads === 'number') {
+          return parsed;
+        }
+      }
+    } catch {}
+
     const tenants = this.getTenants();
     const users = this.getUsers();
     const activeTenants = tenants.filter(t => t.status === 'Active' || !t.status);
     const onboardingTenants = tenants.filter(t => t.status === 'Inactive');
     const suspendedTenants = tenants.filter(t => t.status === 'Suspended');
+
+    const leads = storageService.getLeads();
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+
+    const currentMonthLeads = leads.filter(l => {
+      const d = new Date(l.createdAt);
+      return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
+    }).length;
+
+    const prevMonthDate = new Date(currentYear, currentMonth - 1, 1);
+    const prevYear = prevMonthDate.getFullYear();
+    const prevMonth = prevMonthDate.getMonth();
+
+    const previousMonthLeads = leads.filter(l => {
+      const d = new Date(l.createdAt);
+      return d.getFullYear() === prevYear && d.getMonth() === prevMonth;
+    }).length;
 
     return {
       totalTenants: tenants.length,
@@ -1416,8 +1466,10 @@ class SuperAdminService {
       activeUsers: users.filter(u => u.status === 'Active').length,
       callsToday: 384,
       callsConnected: 341,
-      totalLeads: 2480,
-      totalPipelineValue: 485000000, // ₹48.5 Cr
+      totalLeads: leads.length,
+      currentMonthLeads,
+      previousMonthLeads,
+      totalPipelineValue: 485000000,
       totalCustomers: 864,
       systemHealthScore: 99.98,
     };

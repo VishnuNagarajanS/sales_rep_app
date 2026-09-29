@@ -73,12 +73,7 @@ export const PlatformUsersPage: React.FC = () => {
       const [tList, rMap, uList] = await Promise.all([
         superAdminService.fetchTenantsFromApi(),
         superAdminService.fetchRolesFromApi(),
-        superAdminService.fetchUsersFromApi({
-          companyId: selectedCompanyFilter,
-          roleCode: selectedRoleFilter,
-          status: selectedStatusFilter,
-          search: searchQuery,
-        }),
+        superAdminService.fetchUsersFromApi(),
       ]);
       setTenants(tList);
       setRoles(rMap);
@@ -86,14 +81,7 @@ export const PlatformUsersPage: React.FC = () => {
     } catch {
       setTenants(superAdminService.getTenants());
       setRoles(superAdminService.getRoles());
-      setUsers(
-        superAdminService.getUsers({
-          companyId: selectedCompanyFilter,
-          roleCode: selectedRoleFilter,
-          status: selectedStatusFilter,
-          search: searchQuery,
-        })
-      );
+      setUsers(superAdminService.getUsers());
     } finally {
       setIsLoading(false);
     }
@@ -102,22 +90,10 @@ export const PlatformUsersPage: React.FC = () => {
   const applyFilters = async () => {
     setIsLoading(true);
     try {
-      const list = await superAdminService.fetchUsersFromApi({
-        companyId: selectedCompanyFilter,
-        roleCode: selectedRoleFilter,
-        status: selectedStatusFilter,
-        search: searchQuery,
-      });
+      const list = await superAdminService.fetchUsersFromApi();
       setUsers(list);
     } catch {
-      setUsers(
-        superAdminService.getUsers({
-          companyId: selectedCompanyFilter,
-          roleCode: selectedRoleFilter,
-          status: selectedStatusFilter,
-          search: searchQuery,
-        })
-      );
+      setUsers(superAdminService.getUsers());
     } finally {
       setIsLoading(false);
     }
@@ -126,7 +102,7 @@ export const PlatformUsersPage: React.FC = () => {
   useEffect(() => {
     loadData();
     const handleUpdate = () => {
-      applyFilters();
+      setUsers(superAdminService.getUsers());
     };
     window.addEventListener('nexus_admin_updated', handleUpdate);
     window.addEventListener('nexus_storage_updated', handleUpdate);
@@ -135,10 +111,6 @@ export const PlatformUsersPage: React.FC = () => {
       window.removeEventListener('nexus_storage_updated', handleUpdate);
     };
   }, []);
-
-  useEffect(() => {
-    applyFilters();
-  }, [searchQuery, selectedCompanyFilter, selectedRoleFilter, selectedStatusFilter]);
 
   const showFeedback = (msg: string) => {
     setFeedbackMsg(msg);
@@ -243,6 +215,55 @@ export const PlatformUsersPage: React.FC = () => {
     }
   };
 
+  // Filter users by dropdown filters (Organization, Role, Status) and search query
+  const filteredUsers = users.filter(u => {
+    // 1. Organization filter
+    if (selectedCompanyFilter !== 'all') {
+      if (selectedCompanyFilter === 'global') {
+        if (u.companyId && u.companyId !== 'global') {
+          return false;
+        }
+      } else {
+        if (!u.companyId || String(u.companyId) !== String(selectedCompanyFilter)) {
+          return false;
+        }
+      }
+    }
+
+    // 2. Role filter
+    if (selectedRoleFilter !== 'all') {
+      const roleCode = typeof u.role === 'object' && u.role ? u.role.code : String(u.role || '');
+      if (!roleCode || roleCode.toLowerCase() !== selectedRoleFilter.toLowerCase()) {
+        return false;
+      }
+    }
+
+    // 3. Status filter
+    if (selectedStatusFilter !== 'all') {
+      if (!u.status || u.status.toLowerCase() !== selectedStatusFilter.toLowerCase()) {
+        return false;
+      }
+    }
+
+    // 4. Search query (Name, Email, Phone, Organization)
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const nameMatch = (u.name || '').toLowerCase().includes(q);
+      const emailMatch = (u.email || '').toLowerCase().includes(q);
+      const phoneMatch = (u.phone || '').toLowerCase().includes(q);
+      const tenantObj = u.companyId ? tenants.find(t => String(t.id) === String(u.companyId)) : undefined;
+      const orgName = u.companyName || tenantObj?.name || 'Platform Console (Global)';
+      const orgMatch =
+        orgName.toLowerCase().includes(q) ||
+        Boolean(tenantObj?.slug && tenantObj.slug.toLowerCase().includes(q)) ||
+        Boolean(u.companySlug && u.companySlug.toLowerCase().includes(q));
+      if (!nameMatch && !emailMatch && !phoneMatch && !orgMatch) {
+        return false;
+      }
+    }
+
+    return true;
+  });
 
   return (
     <div className="platform-users-page-container">
@@ -365,14 +386,14 @@ export const PlatformUsersPage: React.FC = () => {
                     </div>
                   </td>
                 </tr>
-              ) : users.length === 0 ? (
+              ) : filteredUsers.length === 0 ? (
                 <tr>
                   <td colSpan={6} style={{ textAlign: 'center', padding: '40px 16px', color: '#94a3b8' }}>
                     No users found matching current filters.
                   </td>
                 </tr>
               ) : (
-                users.map(u => {
+                filteredUsers.map(u => {
                   const isSuperAdminUser = u.role.code === 'super_admin';
                   return (
                     <tr key={u.id} className="user-table-row">

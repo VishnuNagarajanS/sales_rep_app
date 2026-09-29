@@ -16,7 +16,7 @@ namespace backend.Controllers.GhlAdmin;
 /// </summary>
 [ApiController]
 [Route("api/audit-logs")]
-[Authorize(Roles = "company_admin,sales_manager,super_admin")]
+[Authorize(Roles = "company_admin,super_admin")]
 public class AuditLogsController : ControllerBase
 {
     private readonly ApplicationDbContext _db;

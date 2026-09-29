@@ -12,7 +12,7 @@ namespace backend.Controllers.SalesExecutive;
 
 [ApiController]
 [Route("api/sales-executive/calls")]
-[Authorize(Roles = "sales_executive,company_admin,sales_manager,super_admin,irm")]
+[Authorize(Roles = "sales_executive,company_admin,super_admin,irm")]
 public class SalesExecutiveCallsController : ControllerBase
 {
     private readonly ApplicationDbContext _context;

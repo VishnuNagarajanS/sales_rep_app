@@ -131,7 +131,7 @@ export const PlatformRolesPage: React.FC = () => {
   ];
 
   // List of active roles to display as matrix columns
-  const activeRoleList = Object.values(roles).filter(r => (r.code as string) !== 'sales_manager');
+  const activeRoleList = Object.values(roles);
 
   const hasPermission = (roleCode: string, permKey: string): boolean => {
     return Boolean(roles[roleCode]?.permissions?.includes(permKey));

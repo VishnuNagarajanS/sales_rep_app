@@ -6,7 +6,6 @@ export const MOCK_TENANT_IDS = {
 export const MOCK_ROLE_IDS = {
   SUPER_ADMIN: 'role-super',
   COMPANY_ADMIN: 'role-cadmin',
-  SALES_MANAGER: 'role-mgr',
   SALES_EXECUTIVE: 'role-exec',
   IRM: 'role-irm',
 } as const;

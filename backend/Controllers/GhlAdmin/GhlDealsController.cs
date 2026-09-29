@@ -16,7 +16,7 @@ namespace backend.Controllers.GhlAdmin;
 /// </summary>
 [ApiController]
 [Route("api/ghl/deals")]
-[Authorize(Roles = "sales_executive,company_admin,sales_manager,super_admin,irm")]
+[Authorize(Roles = "sales_executive,company_admin,super_admin,irm")]
 public class GhlDealsController : ControllerBase
 {
     private readonly ApplicationDbContext _db;

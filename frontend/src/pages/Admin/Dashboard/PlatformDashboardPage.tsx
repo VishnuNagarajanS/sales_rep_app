@@ -5,6 +5,7 @@ import {
   PhoneCall,
   Activity,
   ArrowUpRight,
+  ArrowDownRight,
   TrendingUp,
   FileCheck,
   Shield,
@@ -35,12 +36,21 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
   const [metrics, setMetrics] = useState<PlatformMetrics>(() => superAdminService.getPlatformMetrics());
   const [diagnostics, setDiagnostics] = useState(() => superAdminService.getSystemDiagnostics());
 
-  const loadData = () => {
+  const loadData = async () => {
     setTenants(superAdminService.getTenants());
     setUsers(superAdminService.getUsers());
     setAuditLogs(superAdminService.getAuditLogs());
-    setMetrics(superAdminService.getPlatformMetrics());
     setDiagnostics(superAdminService.getSystemDiagnostics());
+    setMetrics(superAdminService.getPlatformMetrics());
+
+    try {
+      const liveMetrics = await superAdminService.fetchPlatformMetricsFromApi();
+      if (liveMetrics) {
+        setMetrics(liveMetrics);
+      }
+    } catch (err) {
+      console.warn('Could not fetch live platform metrics:', err);
+    }
   };
 
   useEffect(() => {
@@ -74,6 +84,26 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
       return dateStr;
     }
   };
+
+  // Dynamic calculation for TOTAL LEADS MANAGED comparison vs last month
+  const currentMonthLeads = metrics.currentMonthLeads ?? 0;
+  const previousMonthLeads = metrics.previousMonthLeads ?? 0;
+
+  let leadGrowthPercentage = 0;
+  let isLeadGrowthPositive = true;
+
+  if (previousMonthLeads > 0) {
+    leadGrowthPercentage = ((currentMonthLeads - previousMonthLeads) / previousMonthLeads) * 100;
+    isLeadGrowthPositive = leadGrowthPercentage >= 0;
+  } else if (currentMonthLeads > 0) {
+    leadGrowthPercentage = 100;
+    isLeadGrowthPositive = true;
+  } else {
+    leadGrowthPercentage = 0;
+    isLeadGrowthPositive = true;
+  }
+
+  const formattedLeadGrowth = `${leadGrowthPercentage > 0 ? '+' : ''}${leadGrowthPercentage.toFixed(1)}%`;
 
   return (
     <div className="platform-dashboard-page">
@@ -159,10 +189,10 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
               <TrendingUp size={18} color="#34d399" />
             </div>
           </div>
-          <div className="platform-telemetry-val">{metrics.totalLeads.toLocaleString()}</div>
+          <div className="platform-telemetry-val">{(metrics.totalLeads ?? 0).toLocaleString()}</div>
           <div className="platform-telemetry-sub">
-            <span className="trend-stat-positive">
-              <ArrowUpRight size={13} /> +18.4%
+            <span className={isLeadGrowthPositive ? 'trend-stat-positive' : 'trend-stat-negative'}>
+              {isLeadGrowthPositive ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />} {formattedLeadGrowth}
             </span>
             <span className="text-muted-xs">vs last month</span>
           </div>

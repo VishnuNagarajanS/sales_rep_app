@@ -792,6 +792,8 @@ export interface PlatformMetrics {
   callsToday: number;
   callsConnected: number;
   totalLeads: number;
+  currentMonthLeads?: number;
+  previousMonthLeads?: number;
   totalPipelineValue: number;
   totalCustomers: number;
   systemHealthScore: number;

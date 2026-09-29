@@ -227,6 +227,15 @@
   font-size: 11px;
 }
 
+.trend-stat-negative {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: #f87171;
+  font-weight: 700;
+  font-size: 11px;
+}
+
 .text-muted-xs {
   font-size: 11px;
   color: #64748b;
