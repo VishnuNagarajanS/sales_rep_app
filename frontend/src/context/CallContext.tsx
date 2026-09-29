@@ -340,9 +340,37 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         apiSaveCustomer(cust).catch(console.error);
 
         if (matchedLead) {
-          matchedLead.status = 'Converted';
-          matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Interested - Moved to Customer 360${notes ? `: ${notes}` : ''}`;
+          matchedLead.status = 'Interested';
+          matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Interested - Handed over to IRM${notes ? `: ${notes}` : ''}`;
+          if (!matchedLead.customFields) matchedLead.customFields = {};
+          matchedLead.customFields.qualifiedByAgentName = user.name;
+          matchedLead.customFields.qualifiedAt = new Date().toISOString();
+          matchedLead.customFields.transferredToIrm = 'true';
           apiSaveLead(matchedLead).catch(console.error);
+          storageService.saveLead(matchedLead);
+        } else if (lastCallRecord.contactPhone || lastCallRecord.contactName) {
+          const newInterestedLead: Lead = {
+            id: `lead-${Date.now()}`,
+            companyId: tenant.id,
+            name: lastCallRecord.contactName || 'Interested Prospect',
+            phone: lastCallRecord.contactPhone,
+            email: '',
+            location: '',
+            source: 'Phone Call',
+            status: 'Interested',
+            priority: 'High',
+            assignedAgentId: user.id,
+            assignedAgentName: user.name,
+            createdAt: new Date().toISOString().split('T')[0],
+            notes: notes ? `[Call Disposition - Interested]: ${notes}` : 'Interested prospect qualified via call',
+            customFields: {
+              qualifiedByAgentName: user.name,
+              qualifiedAt: new Date().toISOString(),
+              transferredToIrm: 'true',
+            },
+          };
+          apiSaveLead(newInterestedLead).catch(console.error);
+          storageService.saveLead(newInterestedLead);
         }
       }
 

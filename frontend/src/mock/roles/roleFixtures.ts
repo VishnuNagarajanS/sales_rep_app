@@ -47,6 +47,7 @@ export const MOCK_ROLES: Record<string, Role> = {
     code: 'irm',
     permissions: [
       PERMISSIONS.LEADS_VIEW,
+      PERMISSIONS.LEADS_CREATE,
       PERMISSIONS.FOLLOWUPS_VIEW,
       PERMISSIONS.DEALS_VIEW,
       PERMISSIONS.INVESTORS_VIEW,

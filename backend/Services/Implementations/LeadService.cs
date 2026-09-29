@@ -182,7 +182,7 @@ public class LeadService : ILeadService
             Email = dto.Email?.Trim() ?? string.Empty,
             Location = dto.Location?.Trim() ?? string.Empty,
             Source = string.IsNullOrWhiteSpace(dto.Source) ? "Website Inbound" : dto.Source.Trim(),
-            Status = "New",
+            Status = string.IsNullOrWhiteSpace(dto.Status) ? "New" : dto.Status.Trim(),
             Priority = string.IsNullOrWhiteSpace(dto.Priority) ? "Medium" : dto.Priority.Trim(),
             Notes = dto.Notes?.Trim() ?? string.Empty,
             CustomFieldsJson = customFields.Count > 0 ? JsonSerializer.Serialize(customFields) : null,
@@ -213,6 +213,7 @@ public class LeadService : ILeadService
         if (dto.Priority != null) lead.Priority = dto.Priority.Trim();
         if (dto.Notes != null) lead.Notes = dto.Notes.Trim();
         if (dto.NextFollowupDate.HasValue) lead.NextFollowupDate = dto.NextFollowupDate.Value;
+        if (dto.AssignedAgentId.HasValue) lead.AssignedAgentId = dto.AssignedAgentId.Value;
 
         // Merge custom fields
         var customFields = DeserializeCustomFields(lead.CustomFieldsJson);

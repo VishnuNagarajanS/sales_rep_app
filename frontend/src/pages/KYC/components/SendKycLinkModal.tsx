@@ -12,6 +12,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Deal } from '../../../types';
+import { storageService } from '../../../services/storageService';
 import { apiClient } from '../../../services/apiClient';
 import { isMockMode } from '../../../config/environment';
 import './KycLinkComponents.css';
@@ -35,6 +36,32 @@ export const SendKycLinkModal: React.FC<SendKycLinkModalProps> = ({
   const [isSending, setIsSending] = useState<boolean>(false);
 
   if (!isOpen || !deal) return null;
+
+  const resolvedPhone = deal.phone || (() => {
+    try {
+      const leads = storageService.getLeads(deal.companyId);
+      const match = leads.find(l => (deal.customerId && l.id === deal.customerId) || (l.name && deal.customerName && l.name.toLowerCase() === deal.customerName.toLowerCase()));
+      if (match?.phone) return match.phone;
+      const customers = storageService.getCustomers(deal.companyId);
+      const cMatch = customers.find(c => (deal.customerId && c.id === deal.customerId) || (c.name && deal.customerName && c.name.toLowerCase() === deal.customerName.toLowerCase()));
+      return cMatch?.phone || '';
+    } catch {
+      return '';
+    }
+  })();
+
+  const resolvedEmail = deal.email || (() => {
+    try {
+      const leads = storageService.getLeads(deal.companyId);
+      const match = leads.find(l => (deal.customerId && l.id === deal.customerId) || (l.name && deal.customerName && l.name.toLowerCase() === deal.customerName.toLowerCase()));
+      if (match?.email) return match.email;
+      const customers = storageService.getCustomers(deal.companyId);
+      const cMatch = customers.find(c => (deal.customerId && c.id === deal.customerId) || (c.name && deal.customerName && c.name.toLowerCase() === deal.customerName.toLowerCase()));
+      return cMatch?.email || '';
+    } catch {
+      return '';
+    }
+  })();
 
   const mockToken = `tok_${(deal.id || 'demo').replace(/[^a-zA-Z0-9]/g, '').slice(-8)}_${deal.customerName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 6)}`;
   const generatedLink = `${window.location.origin}/kyc/${mockToken}`;
@@ -76,8 +103,8 @@ GHL India Ventures | IRM Desk`;
     try {
       const payload = {
         customerName: deal.customerName,
-        phone: deal.phone || '',
-        email: deal.email || '',
+        phone: resolvedPhone || deal.phone || '',
+        email: resolvedEmail || deal.email || '',
         channel: selectedChannel,
         expiry: expiry,
         baseUrl: window.location.origin,
@@ -107,7 +134,7 @@ GHL India Ventures | IRM Desk`;
 
     // ── 1. WhatsApp Web Click-to-Chat ──────────────────────────────────────────
     if (selectedChannel === 'whatsapp') {
-      const cleanPhone = getCleanPhone(deal.phone || '');
+      const cleanPhone = getCleanPhone(resolvedPhone || deal.phone || '');
       const message = buildWhatsAppMessage(finalLink);
       const waUrl = cleanPhone
         ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(message)}`
@@ -121,7 +148,7 @@ GHL India Ventures | IRM Desk`;
 
     // ── 2. SMS App Deep Link ───────────────────────────────────────────────────
     if (selectedChannel === 'sms') {
-      const cleanPhone = getCleanPhone(deal.phone || '');
+      const cleanPhone = getCleanPhone(resolvedPhone || deal.phone || '');
       const smsText = `Hello ${deal.customerName || 'Investor'}, please complete your GHL India KYC verification: ${finalLink}`;
       if (cleanPhone) {
         window.open(`sms:${cleanPhone}?body=${encodeURIComponent(smsText)}`, '_blank');
@@ -133,8 +160,9 @@ GHL India Ventures | IRM Desk`;
 
     // ── 3. Real-Time Email Delivery ────────────────────────────────────────────
     if (selectedChannel === 'email') {
-      if (deal.email) {
-        onShowToast(`KYC Verification email delivered in real time to ${deal.email}!`);
+      const targetEmail = resolvedEmail || deal.email;
+      if (targetEmail) {
+        onShowToast(`KYC Verification email delivered in real time to ${targetEmail}!`);
       } else {
         onShowToast('Please provide an investor email address.');
       }
@@ -182,11 +210,11 @@ GHL India Ventures | IRM Desk`;
             </div>
             <div className="kyc-link-readonly-item">
               <span className="kyc-link-readonly-label">Phone</span>
-              <span className="kyc-link-readonly-val">{deal.phone || '—'}</span>
+              <span className="kyc-link-readonly-val">{resolvedPhone || deal.phone || '—'}</span>
             </div>
             <div className="kyc-link-readonly-item" style={{ gridColumn: '1 / -1' }}>
               <span className="kyc-link-readonly-label">Email Address</span>
-              <span className="kyc-link-readonly-val">{deal.email || '—'}</span>
+              <span className="kyc-link-readonly-val">{resolvedEmail || deal.email || '—'}</span>
             </div>
           </div>
 
@@ -234,7 +262,7 @@ GHL India Ventures | IRM Desk`;
               }}>
                 <MessageSquare size={15} style={{ flexShrink: 0, marginTop: 2 }} />
                 <span>
-                  <strong>WhatsApp Web Click-to-Chat:</strong> Clicking Send will instantly launch WhatsApp Web (or your WhatsApp app) with a pre-filled invitation and secure link ready to send to <strong>{deal.phone || 'the investor'}</strong>.
+                  <strong>WhatsApp Web Click-to-Chat:</strong> Clicking Send will instantly launch WhatsApp Web (or your WhatsApp app) with a pre-filled invitation and secure link ready to send to <strong>{resolvedPhone || deal.phone || 'the investor'}</strong>.
                 </span>
               </div>
             )}
@@ -255,7 +283,7 @@ GHL India Ventures | IRM Desk`;
               }}>
                 <Mail size={15} style={{ flexShrink: 0, marginTop: 2 }} />
                 <span>
-                  <strong>Real-Time Gmail SMTP:</strong> Clicking Send will dispatch a branded HTML KYC verification email to <strong>{deal.email || 'investor email'}</strong>.
+                  <strong>Real-Time Gmail SMTP:</strong> Clicking Send will dispatch a branded HTML KYC verification email to <strong>{resolvedEmail || deal.email || 'investor email'}</strong>.
                 </span>
               </div>
             )}

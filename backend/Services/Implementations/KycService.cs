@@ -56,6 +56,28 @@ public class KycService : IKycService
         var recipientEmail = dto.Email ?? investor?.Email ?? string.Empty;
         var recipientPhone = !string.IsNullOrWhiteSpace(dto.Phone) ? dto.Phone : (investor?.Phone ?? string.Empty);
 
+        if (investor == null && !string.IsNullOrWhiteSpace(recipientEmail))
+        {
+            var allInvestors = await _investorRepo.GetAllAsync(companyId, null, null, null, ct);
+            investor = allInvestors.FirstOrDefault(i => string.Equals(i.Email, recipientEmail, StringComparison.OrdinalIgnoreCase) ||
+                                                       (!string.IsNullOrWhiteSpace(recipientPhone) && i.Phone == recipientPhone));
+        }
+
+        if (investor == null)
+        {
+            investor = new Investor
+            {
+                CompanyId = companyId,
+                Name = investorName,
+                Email = recipientEmail,
+                Phone = recipientPhone,
+                Status = InvestorStatus.Lead,
+                AssignedIrmId = irmId > 0 ? irmId : null,
+                CreatedAt = DateTime.UtcNow
+            };
+            investor = await _investorRepo.CreateAsync(investor, ct);
+        }
+
         var token = Guid.NewGuid().ToString("N");
         var days = dto.Expiry?.ToLower() switch
         {
@@ -82,7 +104,7 @@ public class KycService : IKycService
         {
             existing = new InvestorKyc
             {
-                InvestorId = investor?.Id ?? 0,
+                InvestorId = investor.Id,
                 CompanyId = companyId,
                 IrmId = irmId,
                 InvestorName = investorName,

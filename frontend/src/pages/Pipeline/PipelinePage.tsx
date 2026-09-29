@@ -21,7 +21,17 @@ import { Deal, DealActivity, Lead, Followup } from '../../types';
 import { storageService } from '../../services/storageService';
 import { useAuth } from '../../context/AuthContext';
 import { useCan } from '../../components/common/Guards';
-import { getDeals, saveDeal as apiSaveDeal, addDealActivity as apiAddDealActivity, getDealActivities as apiGetDealActivities } from '../../services/ghlApiService';
+import {
+  getDeals,
+  getLeads,
+  getFollowups,
+  isTenantMatch,
+  saveDeal as apiSaveDeal,
+  addDealActivity as apiAddDealActivity,
+  getDealActivities as apiGetDealActivities,
+  saveFollowup as apiSaveFollowup,
+  saveLead as apiSaveLead,
+} from '../../services/ghlApiService';
 import { PIPELINE_STAGES } from '../../constants/pipelineStages';
 import { Modal } from '../../components/common/Modal';
 import { FilterBar } from '../../components/common/FilterBar';
@@ -77,19 +87,26 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     : deals;
 
   const scopedLeads = isGhlIrm
-    ? leads.filter(
-        l =>
-          (l.assignedAgentId && l.assignedAgentId === user?.id) ||
-          (l.assignedAgentName && l.assignedAgentName === user?.name)
-      )
+    ? leads
+        .filter(l => !l.companyId || isTenantMatch(l.companyId, tenant?.id))
+        .filter(l => l.status === 'Interested')
+        .filter(
+          l =>
+            (l.assignedAgentId && String(l.assignedAgentId) === String(user?.id)) ||
+            (l.assignedAgentName && l.assignedAgentName === user?.name)
+        )
     : [];
 
   const scopedFollowups = isGhlIrm
-    ? followups.filter(
-        f =>
-          (f.assignedAgentId && f.assignedAgentId === user?.id) ||
-          (f.assignedAgentName && f.assignedAgentName === user?.name)
-      )
+    ? followups
+        .filter(f => !f.companyId || isTenantMatch(f.companyId, tenant?.id))
+        .filter(f => f.status === 'Pending')
+        .filter(
+          f =>
+            (f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
+            (f.assignedAgentName && f.assignedAgentName === user?.name) ||
+            !f.assignedAgentId
+        )
     : [];
 
   const leadToPipelineCard = (lead: Lead): Deal => ({
@@ -166,8 +183,19 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       latestDeals = storageService.getDeals(tenant?.id) || [];
     }
     setDeals(latestDeals);
-    setLeads(storageService.getLeads(tenant?.id) || []);
-    setFollowups(storageService.getFollowups(tenant?.id) || []);
+
+    try {
+      const [apiLeads, apiFollowups] = await Promise.all([
+        getLeads(tenant?.id),
+        getFollowups(tenant?.id),
+      ]);
+      setLeads(apiLeads || []);
+      setFollowups(apiFollowups || []);
+    } catch {
+      setLeads(storageService.getLeads(tenant?.id) || []);
+      setFollowups(storageService.getFollowups(tenant?.id) || []);
+    }
+
     setIrmDetailDeal(prev => {
       if (!prev) return null;
       return latestDeals.find(d => d.id === prev.id) || prev;
@@ -250,6 +278,22 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     };
     storageService.addDealActivity(moveActivity);
     await apiAddDealActivity(moveActivity).catch(console.error);
+
+    if (irmDetailDeal.stage === 'followup') {
+      const f = followups.find(item => item.id === irmDetailDeal.id);
+      if (f) {
+        const completedF = { ...f, status: 'Completed' as const, completedAt: new Date().toISOString() };
+        apiSaveFollowup(completedF).catch(console.error);
+        storageService.saveFollowup(completedF);
+      }
+    } else if (irmDetailDeal.stage === 'leads') {
+      const l = leads.find(item => item.id === irmDetailDeal.id);
+      if (l) {
+        const movedL = { ...l, status: 'Follow-up Required' as any };
+        apiSaveLead(movedL).catch(console.error);
+        storageService.saveLead(movedL);
+      }
+    }
 
     setIrmDetailDeal(updatedDeal);
     setDealActivities(prev => [moveActivity, ...prev]);

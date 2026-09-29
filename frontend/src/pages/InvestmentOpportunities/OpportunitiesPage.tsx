@@ -25,6 +25,7 @@ import {
   getDeals,
   saveDeal as apiSaveDeal,
   addDealActivity as apiAddDealActivity,
+  saveInvestor as apiSaveInvestor,
 } from '../../services/ghlApiService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
@@ -388,13 +389,20 @@ export const OpportunitiesPage: React.FC = () => {
   };
 
   const handleAdvanceToConverted = async (deal: Deal) => {
+    // 1. Update deal to 'converted' stage in DB
     const updatedDeal: Deal = {
       ...deal,
       stage: 'converted',
       stageEnteredAt: new Date().toISOString(),
     };
-    storageService.saveDeal(updatedDeal);
+    try {
+      await apiSaveDeal(updatedDeal);
+    } catch (err) {
+      console.warn('[OpportunitiesPage] API saveDeal (convert) failed:', err);
+      storageService.saveDeal(updatedDeal);
+    }
 
+    // 2. Log activity
     const activity: DealActivity = {
       id: `act-${Date.now()}`,
       dealId: deal.id,
@@ -402,20 +410,46 @@ export const OpportunitiesPage: React.FC = () => {
       type: 'stage_change',
       fromStage: 'investment_opportunity',
       toStage: 'converted',
-      text: 'Investment Opportunity → Converted (Mandate Signed & Capital Transferred)',
+      text: `Investment Opportunity → Investor 360 (Investment Amount: ₹${(deal.value || 0).toLocaleString('en-IN')})`,
       loggedByName: user?.name || 'IRM User',
       loggedByRole: 'IRM',
       timestamp: new Date().toISOString(),
     };
-    storageService.addDealActivity(activity);
+    try {
+      await apiAddDealActivity(activity);
+    } catch (err) {
+      console.warn('[OpportunitiesPage] API addDealActivity failed:', err);
+      storageService.addDealActivity(activity);
+    }
 
-    if (!isMockMode()) {
-      await apiSaveDeal(updatedDeal).catch(console.error);
-      await apiAddDealActivity(activity).catch(console.error);
+    // 3. Create Investor record in DB (moves to Investors 360)
+    const newInvestor: Investor = {
+      id: `inv-${Date.now()}`,
+      companyId: tenant?.id || '',
+      name: deal.customerName,
+      phone: deal.phone || '',
+      email: deal.email || '',
+      status: 'Active Investor',
+      investmentCapacity: deal.investmentRange || '',
+      preferredAssetClass: deal.preferredAssetClass || deal.investorType || 'AIF',
+      assignedAgentId: deal.assignedAgentId || user?.id || '',
+      assignedAgentName: deal.assignedAgentName || user?.name || '',
+      referralSource: 'IRM Pipeline',
+      notes: `Converted from Investment Opportunity. Investment Amount: ₹${(deal.value || 0).toLocaleString('en-IN')}`,
+      committedAUM: String(deal.value || 0),
+      investmentMandate: deal.investorType || 'AIF',
+      riskTolerance: 'Moderate',
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      await apiSaveInvestor(newInvestor);
+    } catch (err) {
+      console.warn('[OpportunitiesPage] API saveInvestor failed, saving locally:', err);
+      storageService.saveInvestor(newInvestor);
     }
 
     loadData();
-    showToast(`Deal "${deal.customerName}" converted successfully!`);
+    showToast(`✓ ${deal.customerName} is now an Investor! Moved to Investors 360.`);
   };
 
   const getDealDaysInStage = (deal: Deal) => {
@@ -455,7 +489,7 @@ export const OpportunitiesPage: React.FC = () => {
     loadData();
   };
 
-  const handleConfirmAmount = () => {
+  const handleConfirmAmount = async () => {
     if (!detailDeal) return;
     const numericAmount = parseFloat(amountInput) || 0;
     const updatedDeal: Deal = {
@@ -463,12 +497,20 @@ export const OpportunitiesPage: React.FC = () => {
       value: numericAmount,
       investmentAmountConfirmed: true,
     };
-    storageService.saveDeal(updatedDeal);
+
+    // Save investment amount to DB
+    try {
+      await apiSaveDeal(updatedDeal);
+    } catch (err) {
+      console.warn('[OpportunitiesPage] API saveDeal (amount confirm) failed:', err);
+      storageService.saveDeal(updatedDeal);
+    }
+
     setDetailDeal(updatedDeal);
     setIsEditingAmount(false);
     setShowConfirmDialog(false);
     loadData();
-    showToast(`Investment amount confirmed for "${detailDeal.customerName}"`);
+    showToast(`✓ Investment amount ₹${numericAmount.toLocaleString('en-IN')} confirmed for "${detailDeal.customerName}"`);
   };
 
   const getDealKycStatus = (deal: Deal): 'Pending' | 'Partially Completed' | 'Completed' => {

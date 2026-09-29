@@ -62,6 +62,7 @@ public class AuthService : IAuthService
                     Code = "irm",
                     Permissions = new List<string>
                     {
+                        "leads.view", "leads.create",
                         "investors.view", "investors.create", "investors.update",
                         "consultations.view", "consultations.create", "consultations.update",
                         "opportunities.view", "opportunities.create", "opportunities.update",
@@ -145,8 +146,8 @@ public class AuthService : IAuthService
 
     public async Task<ApiResponse<LoginResponseDto>> GetCurrentUserAsync(CancellationToken cancellationToken = default)
     {
-        var user = await _context.Users.Include(x => x.Role).Include(x => x.Company).FirstOrDefaultAsync(x => x.Id == _currentUser.UserId && x.CompanyId == _currentUser.CompanyId && x.Role.Code == "sales_executive", cancellationToken);
-        if (user == null) return ApiResponse<LoginResponseDto>.FailureResult("Sales executive profile not found.");
+        var user = await _context.Users.Include(x => x.Role).Include(x => x.Company).FirstOrDefaultAsync(x => x.Id == _currentUser.UserId, cancellationToken);
+        if (user == null) return ApiResponse<LoginResponseDto>.FailureResult("User profile not found.");
         return ApiResponse<LoginResponseDto>.SuccessResult(new LoginResponseDto { User = MapToUserDto(user), Tenant = user.Company == null ? null : MapToTenantDto(user.Company) }, "Current user loaded");
     }
 

@@ -19,6 +19,7 @@
  */
 
 import { apiClient } from './apiClient';
+import { storageService } from './storageService';
 import type {
   Deal,
   DealActivity,
@@ -406,52 +407,85 @@ function mapLead(l: Record<string, any>): Lead {
 }
 
 export async function getLeads(companyId?: string): Promise<Lead[]> {
-  const raw = await fetchAll<any>('/sales-executive/leads');
-  return raw.map(mapLead);
+  try {
+    const raw = await fetchAll<any>('/sales-executive/leads');
+    if (raw && raw.length > 0) {
+      const apiLeads = raw.map(mapLead);
+      const localLeads = storageService.getLeads(companyId);
+      const apiIds = new Set(apiLeads.map(l => l.id));
+      const unsynced = localLeads.filter((l: Lead) => !apiIds.has(l.id));
+      return [...apiLeads, ...unsynced];
+    }
+  } catch (err) {
+    console.warn('[ghlApiService] Failed to fetch leads from API, falling back to local storage:', err);
+  }
+  return storageService.getLeads(companyId);
 }
 
 export async function saveLead(lead: Lead): Promise<Lead> {
   const isNew = !lead.id || lead.id.startsWith('lead-') || lead.id.startsWith('l-');
   const customFields = lead.customFields ?? {};
 
-  if (isNew) {
-    const payload = {
-      name: lead.name,
-      phone: lead.phone,
-      email: lead.email,
-      location: lead.location,
-      source: lead.source,
-      priority: lead.priority,
-      notes: lead.notes,
-      investmentCapacity: customFields['Investment Capacity'] ?? customFields['investmentCapacity'],
-      assetClass: customFields['Asset Class'] ?? customFields['assetClass'],
-      preferredAssetClass: customFields['Preferred Asset Class'] ?? customFields['preferredAssetClass'],
-      horizon: customFields['Horizon'] ?? customFields['horizon'],
-    };
-    const res: ApiResponse<any> = await apiClient.post('/sales-executive/leads', payload);
-    if (!res.success || !res.data) throw new Error(res.message);
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-    return mapLead(res.data);
-  } else {
-    const payload = {
-      name: lead.name,
-      phone: lead.phone,
-      email: lead.email,
-      location: lead.location,
-      source: lead.source,
-      status: lead.status,
-      priority: lead.priority,
-      notes: lead.notes,
-      nextFollowupDate: lead.nextFollowupDate,
-    };
-    const res: ApiResponse<any> = await apiClient.put(
-      `/sales-executive/leads/${nid(lead.id)}`,
-      payload
-    );
-    if (!res.success || !res.data) throw new Error(res.message);
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-    return mapLead(res.data);
+  try {
+    if (isNew) {
+      const payload: Record<string, any> = {
+        name: lead.name,
+        phone: lead.phone,
+        email: lead.email,
+        location: lead.location,
+        source: lead.source,
+        status: lead.status || 'New',
+        priority: lead.priority,
+        notes: lead.notes,
+        companyId: nid(lead.companyId) || 1,
+        investmentCapacity: customFields['Investment Capacity'] ?? customFields['investmentCapacity'],
+        assetClass: customFields['Asset Class'] ?? customFields['assetClass'],
+        preferredAssetClass: customFields['Preferred Asset Class'] ?? customFields['preferredAssetClass'],
+        horizon: customFields['Horizon'] ?? customFields['horizon'],
+      };
+      const res: ApiResponse<any> = await apiClient.post('/sales-executive/leads', payload);
+      if (res && res.success && res.data) {
+        const saved = mapLead(res.data);
+        storageService.saveLead(saved);
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+        return saved;
+      }
+    } else {
+      const payload: Record<string, any> = {
+        name: lead.name,
+        phone: lead.phone,
+        email: lead.email,
+        location: lead.location,
+        source: lead.source,
+        status: lead.status,
+        priority: lead.priority,
+        notes: lead.notes,
+        nextFollowupDate: lead.nextFollowupDate,
+        assignedAgentId: nid(lead.assignedAgentId) || undefined,
+        investmentCapacity: customFields['Investment Capacity'] ?? customFields['investmentCapacity'],
+        assetClass: customFields['Asset Class'] ?? customFields['assetClass'],
+        preferredAssetClass: customFields['Preferred Asset Class'] ?? customFields['preferredAssetClass'],
+        horizon: customFields['Horizon'] ?? customFields['horizon'],
+      };
+      const res: ApiResponse<any> = await apiClient.put(
+        `/sales-executive/leads/${nid(lead.id)}`,
+        payload
+      );
+      if (res && res.success && res.data) {
+        const saved = mapLead(res.data);
+        storageService.saveLead(saved);
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+        return saved;
+      }
+    }
+  } catch (err) {
+    console.warn('[ghlApiService] API lead save failed, persisting locally:', err);
   }
+
+  // Fallback / mirror to storageService
+  storageService.saveLead(lead);
+  window.dispatchEvent(new Event('nexus_storage_updated'));
+  return lead;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -483,40 +517,54 @@ export async function getFollowups(companyId?: string): Promise<Followup[]> {
 
 export async function saveFollowup(followup: Followup): Promise<Followup> {
   const isNew =
-    !followup.id || followup.id.startsWith('fu-') || followup.id.startsWith('f-');
+    !followup.id || followup.id.startsWith('flw-') || followup.id.startsWith('fu-') || followup.id.startsWith('f-');
 
-  if (isNew) {
-    const payload = {
-      contactId: followup.contactId,
-      contactType: followup.contactType,
-      contactName: followup.contactName,
-      contactPhone: followup.contactPhone,
-      scheduledAt: followup.scheduledAt,
-      priority: followup.priority,
-      notes: followup.notes,
-    };
-    const res: ApiResponse<any> = await apiClient.post(
-      '/sales-executive/followups',
-      payload
-    );
-    if (!res.success || !res.data) throw new Error(res.message);
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-    return mapFollowup(res.data);
-  } else {
-    const payload = {
-      scheduledAt: followup.scheduledAt,
-      priority: followup.priority,
-      notes: followup.notes,
-      status: followup.status,
-    };
-    const res: ApiResponse<any> = await apiClient.put(
-      `/sales-executive/followups/${nid(followup.id)}`,
-      payload
-    );
-    if (!res.success || !res.data) throw new Error(res.message);
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-    return mapFollowup(res.data);
+  try {
+    if (isNew) {
+      const payload = {
+        contactId: followup.contactId,
+        contactType: followup.contactType || 'lead',
+        contactName: followup.contactName,
+        contactPhone: followup.contactPhone,
+        scheduledAt: followup.scheduledAt,
+        priority: followup.priority,
+        notes: followup.notes,
+      };
+      const res: ApiResponse<any> = await apiClient.post(
+        '/sales-executive/followups',
+        payload
+      );
+      if (res && res.success && res.data) {
+        const saved = mapFollowup(res.data);
+        storageService.saveFollowup(saved);
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+        return saved;
+      }
+    } else {
+      const payload = {
+        scheduledAt: followup.scheduledAt,
+        priority: followup.priority,
+        notes: followup.notes,
+        status: followup.status,
+      };
+      const res: ApiResponse<any> = await apiClient.put(
+        `/sales-executive/followups/${nid(followup.id)}`,
+        payload
+      );
+      if (res && res.success && res.data) {
+        const saved = mapFollowup(res.data);
+        storageService.saveFollowup(saved);
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+        return saved;
+      }
+    }
+  } catch (err) {
+    console.warn('[ghlApiService] API saveFollowup failed, saving locally:', err);
   }
+
+  storageService.saveFollowup(followup);
+  window.dispatchEvent(new Event('nexus_storage_updated'));
+  return followup;
 }
 
 export async function completeFollowup(followupId: string): Promise<void> {

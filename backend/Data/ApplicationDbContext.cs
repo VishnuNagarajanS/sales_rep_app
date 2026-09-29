@@ -61,11 +61,12 @@ public class ApplicationDbContext : DbContext
 
     private static void SeedData(ModelBuilder modelBuilder)
     {
-        // 1. Roles (Integer IDs 1, 2, 3, 4)
+        // 1. Roles (Integer IDs 1, 2, 3, 4, 5)
         var superAdminRoleId = 1;
         var companyAdminRoleId = 2;
-        var salesExecutiveRoleId = 3;
-        var irmRoleId = 4;
+        var salesManagerRoleId = 3;
+        var salesExecutiveRoleId = 4;
+        var irmRoleId = 5;
 
         modelBuilder.Entity<Role>().HasData(
             new Role
@@ -109,6 +110,24 @@ public class ApplicationDbContext : DbContext
             },
             new Role
             {
+                Id = salesManagerRoleId,
+                Name = "Sales Manager",
+                Code = "sales_manager",
+                Permissions = new List<string>
+                {
+                    "leads.view", "leads.create", "leads.update", "leads.assign", "leads.export", "leads.convert",
+                    "customers.view", "customers.create", "customers.update",
+                    "deals.view", "deals.create", "deals.update",
+                    "calls.make", "calls.receive", "calls.view", "calls.recordings.play",
+                    "followups.view", "followups.create", "followups.update",
+                    "properties.view", "properties.update", "site_visits.view", "site_visits.create", "bookings.view", "bookings.create",
+                    "investors.view", "investors.create", "consultations.view", "consultations.create", "opportunities.view", "opportunities.create",
+                    "reports.view", "reports.export", "users.view"
+                },
+                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            },
+            new Role
+            {
                 Id = salesExecutiveRoleId,
                 Name = "Sales Executive",
                 Code = "sales_executive",
@@ -132,7 +151,7 @@ public class ApplicationDbContext : DbContext
                 Code = "irm",
                 Permissions = new List<string>
                 {
-                    "leads.view", "followups.view", "followups.create", "followups.update",
+                    "leads.view", "leads.create", "followups.view", "followups.create", "followups.update",
                     "deals.view", "deals.create", "deals.update",
                     "investors.view", "investors.create", "investors.update",
                     "consultations.view", "consultations.create", "consultations.update",

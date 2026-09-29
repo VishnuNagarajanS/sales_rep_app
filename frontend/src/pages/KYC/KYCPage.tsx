@@ -291,12 +291,31 @@ const GhlIrmKycView: React.FC = () => {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [sameAsPermanent, setSameAsPermanent] = useState(false);
 
+  const enrichDealWithContact = (d: Deal, leadsList: Lead[], customersList: Customer[]): Deal => {
+    if (d.phone && d.email) return d;
+    const matchLead = leadsList.find(
+      l => (d.customerId && l.id === d.customerId) || (l.name && d.customerName && l.name.toLowerCase() === d.customerName.toLowerCase())
+    );
+    const matchCust = customersList.find(
+      c => (d.customerId && c.id === d.customerId) || (c.name && d.customerName && c.name.toLowerCase() === d.customerName.toLowerCase())
+    );
+    return {
+      ...d,
+      phone: d.phone || matchLead?.phone || matchCust?.phone || '',
+      email: d.email || matchLead?.email || matchCust?.email || '',
+      location: d.location || matchLead?.location || matchCust?.location || '',
+    };
+  };
+
   const loadData = async () => {
     if (isMockMode()) {
       const allDeals = storageService.getDeals(tenant?.id) || [];
-      setDeals(allDeals.filter(d => d.stage === 'qualified_investor'));
-      setLeads(storageService.getLeads(tenant?.id) || []);
-      setCustomers(storageService.getCustomers(tenant?.id) || []);
+      const localLeads = storageService.getLeads(tenant?.id) || [];
+      const localCustomers = storageService.getCustomers(tenant?.id) || [];
+      const enriched = allDeals.map(d => enrichDealWithContact(d, localLeads, localCustomers));
+      setDeals(enriched.filter(d => d.stage === 'qualified_investor'));
+      setLeads(localLeads);
+      setCustomers(localCustomers);
     } else {
       try {
         const [allDeals, apiLeads, apiCustomers] = await Promise.all([
@@ -304,14 +323,20 @@ const GhlIrmKycView: React.FC = () => {
           getLeads(tenant?.id),
           getCustomers(tenant?.id),
         ]);
-        setDeals((allDeals || []).filter(d => d.stage === 'qualified_investor'));
-        setLeads(apiLeads || []);
-        setCustomers(apiCustomers || []);
+        const leadsList = apiLeads || [];
+        const customersList = apiCustomers || [];
+        const enriched = (allDeals || []).map(d => enrichDealWithContact(d, leadsList, customersList));
+        setDeals(enriched.filter(d => d.stage === 'qualified_investor'));
+        setLeads(leadsList);
+        setCustomers(customersList);
       } catch {
         const allDeals = storageService.getDeals(tenant?.id) || [];
-        setDeals(allDeals.filter(d => d.stage === 'qualified_investor'));
-        setLeads(storageService.getLeads(tenant?.id) || []);
-        setCustomers(storageService.getCustomers(tenant?.id) || []);
+        const localLeads = storageService.getLeads(tenant?.id) || [];
+        const localCustomers = storageService.getCustomers(tenant?.id) || [];
+        const enriched = allDeals.map(d => enrichDealWithContact(d, localLeads, localCustomers));
+        setDeals(enriched.filter(d => d.stage === 'qualified_investor'));
+        setLeads(localLeads);
+        setCustomers(localCustomers);
       }
     }
 
@@ -326,7 +351,7 @@ const GhlIrmKycView: React.FC = () => {
           setDbKycs(map);
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   };
 
   const getResolvedLocation = (deal: Deal) => {
@@ -725,14 +750,21 @@ const GhlIrmKycView: React.FC = () => {
     showToast(`${editingSection === 'personal' ? 'Personal Details' : 'Address & Identity'} updated successfully!`);
   };
 
-  // Advance deal to opportunity
-  const handleAdvanceStage = (deal: Deal) => {
+  // Advance deal to opportunity — saves to DB
+  const handleAdvanceStage = async (deal: Deal) => {
     const updatedDeal: Deal = {
       ...deal,
       stage: 'investment_opportunity',
       stageEnteredAt: new Date().toISOString(),
     };
-    storageService.saveDeal(updatedDeal);
+
+    // Save updated deal stage to DB
+    try {
+      await apiSaveDeal(updatedDeal);
+    } catch (err) {
+      console.warn('[KYCPage] API saveDeal (advance stage) failed, saving locally:', err);
+      storageService.saveDeal(updatedDeal);
+    }
 
     const activity: DealActivity = {
       id: `act-${Date.now()}`,
@@ -741,19 +773,26 @@ const GhlIrmKycView: React.FC = () => {
       type: 'stage_change',
       fromStage: 'qualified_investor',
       toStage: 'investment_opportunity',
-      text: 'Qualified Investor → Investment Opportunity (KYC Verified)',
+      text: 'KYC Completed → Moved to Investment Opportunities by IRM',
       loggedByName: user?.name || 'IRM User',
       loggedByRole: 'IRM',
       timestamp: new Date().toISOString(),
     };
-    storageService.addDealActivity(activity);
+
+    // Save activity to DB
+    try {
+      await apiAddDealActivity(activity);
+    } catch (err) {
+      console.warn('[KYCPage] API addDealActivity failed:', err);
+      storageService.addDealActivity(activity);
+    }
 
     if (selectedDealForDetail?.id === deal.id) {
       setSelectedDealForDetail(null);
     }
 
     loadData();
-    showToast(`Investor "${deal.customerName}" advanced to Investment Opportunity!`);
+    showToast(`✓ ${deal.customerName} moved to Investment Opportunities!`);
   };
 
   // IFSC Lookup Logic
@@ -1310,7 +1349,8 @@ const GhlIrmKycView: React.FC = () => {
             }}
             onClick={(e) => {
               e.stopPropagation();
-              setSendLinkDeal(deal);
+              const enriched = enrichDealWithContact(deal, leads, customers);
+              setSendLinkDeal(enriched);
             }}
           >
             <Send size={12} />
@@ -1324,17 +1364,21 @@ const GhlIrmKycView: React.FC = () => {
       header: 'Actions',
       width: '80px',
       align: 'center',
-      render: deal => (
-        <KycRowActionsMenu
-          deal={deal}
-          onOpenReview={d => setReviewDeal(d)}
-          onShowToast={msg => showToast(msg)}
-          onViewProfile={d => handleOpenCustomerProfile(d)}
-          onEditKyc={d => startKycFlow(d)}
-          onCallInvestor={d => initiateCall(d.customerName, d.phone || '', 'customer', d.id)}
-          onAdvanceStage={d => handleAdvanceStage(d)}
-        />
-      ),
+      render: deal => {
+        const kycStatus = getDynamicKycStatus(deal);
+        return (
+          <KycRowActionsMenu
+            deal={deal}
+            onOpenReview={d => setReviewDeal(d)}
+            onShowToast={msg => showToast(msg)}
+            onViewProfile={d => handleOpenCustomerProfile(d)}
+            onEditKyc={d => startKycFlow(d)}
+            onCallInvestor={d => initiateCall(d.customerName, d.phone || '', 'customer', d.id)}
+            // Only show "Advance to Opportunity" after KYC is fully completed
+            onAdvanceStage={kycStatus === 'completed' ? d => handleAdvanceStage(d) : undefined}
+          />
+        );
+      },
     },
   ];
 

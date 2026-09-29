@@ -21,6 +21,9 @@ import {
   saveFollowup as apiSaveFollowup,
   getCalls,
   getLeads,
+  saveDeal as apiSaveDeal,
+  saveLead as apiSaveLead,
+  isTenantMatch,
 } from '../../services/ghlApiService';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
@@ -320,7 +323,7 @@ export const FollowupsPage: React.FC = () => {
     showToast('✓ Preferences confirmed by IRM and updated across modules!');
   };
 
-  const handleMoveToKyc = () => {
+  const handleMoveToKyc = async () => {
     if (!drawerFollowup) return;
 
     const leads = storageService.getLeads(tenant?.id) || [];
@@ -357,7 +360,7 @@ export const FollowupsPage: React.FC = () => {
       (drawerFollowup as any)?.investmentCapacity ||
       '₹10 Lakh to ₹1 Cr';
 
-    // 1. Create or update deal in stage 'qualified_investor'
+    // 1. Create or update deal in stage 'qualified_investor' — save to DB first, fallback to localStorage
     const allDeals = storageService.getDeals(tenant?.id) || [];
     const existingDeal = allDeals.find(d =>
       (d.customerId && d.customerId === resolvedContactId) ||
@@ -385,28 +388,51 @@ export const FollowupsPage: React.FC = () => {
       preferredAssetClass: prefAssetClass || 'CO-AIF',
       investmentRange: investmentCapacity,
     };
-    storageService.saveDeal(kycDeal);
 
-    // 2. Mark the follow-up task as completed so it does not show in the followup page
-    storageService.saveFollowup({
-      ...drawerFollowup,
-      status: 'Completed',
-      notes: `${drawerFollowup.notes ? drawerFollowup.notes + ' | ' : ''}Ready for KYC: Moved to KYC Module by IRM`,
-    });
+    // Save deal to DB (API) — this persists stage='qualified_investor' in Neon
+    try {
+      await apiSaveDeal(kycDeal);
+    } catch (err) {
+      console.warn('[FollowupsPage] API saveDeal failed, saving locally:', err);
+      storageService.saveDeal(kycDeal);
+    }
 
-    // 3. If matching lead exists, update lead status to Qualified
+    // 2. Mark the follow-up task as completed in DB so it does not show in the followup page
+    try {
+      await apiSaveFollowup({
+        ...drawerFollowup,
+        status: 'Completed',
+        notes: `${drawerFollowup.notes ? drawerFollowup.notes + ' | ' : ''}Ready for KYC: Moved to KYC Module by IRM`,
+      });
+    } catch (err) {
+      console.warn('[FollowupsPage] API saveFollowup (complete) failed:', err);
+      storageService.saveFollowup({
+        ...drawerFollowup,
+        status: 'Completed',
+        notes: `${drawerFollowup.notes ? drawerFollowup.notes + ' | ' : ''}Ready for KYC: Moved to KYC Module by IRM`,
+      });
+    }
+
+    // 3. If matching lead exists, update lead status to 'Ready for KYC' in DB
     if (matchingLead) {
-      storageService.saveLead({
+      const updatedLead = {
         ...matchingLead,
-        status: 'Qualified',
+        status: 'Qualified' as Lead['status'],
         customFields: {
           ...(matchingLead.customFields || {}),
           preferredAssetClass: prefAssetClass,
           horizon: prefHorizon,
           investmentHorizon: prefHorizon,
           irmPreferencesConfirmed: true,
+          movedToKycAt: new Date().toISOString(),
         },
-      });
+      };
+      try {
+        await apiSaveLead(updatedLead);
+      } catch (err) {
+        console.warn('[FollowupsPage] API saveLead (qualified) failed:', err);
+        storageService.saveLead(updatedLead);
+      }
     }
 
     // 4. Audit Log
@@ -555,6 +581,35 @@ export const FollowupsPage: React.FC = () => {
         (f.assignedAgentId && f.assignedAgentId === user?.id) ||
         (f.assignedAgentName && f.assignedAgentName === user?.name)
     );
+  } else if (isIrm) {
+    // IRM Follow-up Required: show ALL pending followups for this tenant
+    // Matches linked lead 'Follow-up Required' status, direct assignment, or tenant match
+    const leadMap = new Map<string, Lead>();
+    allLeads.forEach(l => leadMap.set(l.id, l));
+    scopedFollowups = followups.filter(f => {
+      if (f.status !== 'Pending') return false;
+      if (f.companyId && tenant?.id && !isTenantMatch(f.companyId, tenant.id)) return false;
+      // Directly assigned to IRM agent
+      if ((f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
+          (f.assignedAgentName && f.assignedAgentName === user?.name)) {
+        return true;
+      }
+      // Linked lead has Follow-up Required status
+      if (f.contactId) {
+        const linked = leadMap.get(f.contactId);
+        if (linked && linked.status === 'Follow-up Required') return true;
+      }
+      // Phone match fallback
+      const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+      if (fPhone) {
+        const matched = allLeads.find(l => {
+          const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+          return lPhone === fPhone && l.status === 'Follow-up Required';
+        });
+        if (matched) return true;
+      }
+      return true;
+    });
   } else {
     scopedFollowups = followups;
   }

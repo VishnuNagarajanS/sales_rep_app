@@ -85,9 +85,18 @@ export const InvestorsPage: React.FC = () => {
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof InvestorForm, string>>>({});
 
   // ── Data loading ──────────────────────────────────────────────────────────
-  const loadData = () => {
-    setInvestors(storageService.getInvestors(tenant?.id));
-    setDeals(storageService.getDeals(tenant?.id));
+  const loadData = async () => {
+    try {
+      const [apiInvestors, apiDeals] = await Promise.all([
+        getInvestors(tenant?.id),
+        getDeals(tenant?.id),
+      ]);
+      setInvestors(apiInvestors || []);
+      setDeals(apiDeals || []);
+    } catch {
+      setInvestors(storageService.getInvestors(tenant?.id));
+      setDeals(storageService.getDeals(tenant?.id));
+    }
     setAllCalls(storageService.getCalls(tenant?.id));
     setAllConsultations(storageService.getConsultations(tenant?.id));
     setAllOpportunities(storageService.getOpportunities(tenant?.id));
