@@ -156,6 +156,8 @@ public class GhlDealsController : ControllerBase
         if (dto.PreferredAssetClass != null) deal.PreferredAssetClass = dto.PreferredAssetClass;
         if (dto.Priority != null) deal.Priority = dto.Priority.Trim();
         if (dto.StageEnteredAt.HasValue) deal.StageEnteredAt = dto.StageEnteredAt.Value;
+        if (dto.InvestmentAmountConfirmed.HasValue) deal.InvestmentAmountConfirmed = dto.InvestmentAmountConfirmed.Value;
+        if (dto.KycStatus != null) deal.KycStatus = dto.KycStatus.Trim();
 
         deal.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
@@ -277,5 +279,7 @@ public class GhlDealsController : ControllerBase
         StageEnteredAt = d.StageEnteredAt,
         CreatedAt = d.CreatedAt,
         UpdatedAt = d.UpdatedAt,
+        InvestmentAmountConfirmed = d.InvestmentAmountConfirmed,
+        KycStatus = d.KycStatus,
     };
 }

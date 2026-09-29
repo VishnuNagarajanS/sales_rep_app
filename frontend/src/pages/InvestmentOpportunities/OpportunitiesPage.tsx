@@ -498,7 +498,7 @@ export const OpportunitiesPage: React.FC = () => {
       investmentAmountConfirmed: true,
     };
 
-    // Save investment amount to DB
+    // Save investment amount confirmed to DB
     try {
       await apiSaveDeal(updatedDeal);
     } catch (err) {
@@ -514,17 +514,20 @@ export const OpportunitiesPage: React.FC = () => {
   };
 
   const getDealKycStatus = (deal: Deal): 'Pending' | 'Partially Completed' | 'Completed' => {
+    // 1. Prefer DB-sourced status (persists across refresh)
+    if (deal.kycStatus === 'Completed') return 'Completed';
+    if (deal.kycStatus === 'Partially Completed') return 'Partially Completed';
+    if (deal.kycStatus === 'Pending') return 'Pending';
+
+    // 2. Fallback: check localStorage (set when customer submits KYC form)
     const rawStatus = localStorage.getItem(`nexus_kyc_status_${deal.id}`);
     if (rawStatus === 'Completed' || rawStatus === 'Submitted for Review' || rawStatus === 'SEBI KYC Validated') {
       return 'Completed';
     }
-    if (rawStatus === 'Partially Completed') {
-      return 'Partially Completed';
-    }
-    if (rawStatus === 'Pending') {
-      return 'Pending';
-    }
+    if (rawStatus === 'Partially Completed') return 'Partially Completed';
+    if (rawStatus === 'Pending') return 'Pending';
 
+    // 3. Fallback: check localStorage KYC form data completeness
     const savedDataStr = localStorage.getItem(`nexus_kyc_data_${deal.id}`);
     if (savedDataStr) {
       try {
@@ -552,9 +555,8 @@ export const OpportunitiesPage: React.FC = () => {
       } catch { }
     }
 
-    if ((deal as any).kycValidated === true) {
-      return 'Completed';
-    }
+    // 4. Fallback: kycValidated flag on deal object
+    if ((deal as any).kycValidated === true) return 'Completed';
 
     return 'Pending';
   };

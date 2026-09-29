@@ -110,6 +110,8 @@ function mapDeal(d: Record<string, any>): Deal {
     phone: d.phone,
     email: d.email,
     location: d.location,
+    investmentAmountConfirmed: Boolean(d.investmentAmountConfirmed),
+    kycStatus: d.kycStatus,
   };
 }
 
@@ -152,6 +154,8 @@ export async function saveDeal(deal: Deal): Promise<Deal> {
       preferredAssetClass: deal.preferredAssetClass,
       priority: deal.priority,
       stageEnteredAt: deal.stageEnteredAt,
+      investmentAmountConfirmed: deal.investmentAmountConfirmed ?? false,
+      kycStatus: (deal as any).kycStatus,
     };
     const res: ApiResponse<any> = await apiClient.put(`/ghl/deals/${nid(deal.id)}`, payload);
     if (!res.success || !res.data) throw new Error(res.message);
@@ -413,8 +417,15 @@ export async function getLeads(companyId?: string): Promise<Lead[]> {
       const apiLeads = raw.map(mapLead);
       const localLeads = storageService.getLeads(companyId);
       const apiIds = new Set(apiLeads.map(l => l.id));
-      const unsynced = localLeads.filter((l: Lead) => !apiIds.has(l.id));
-      return [...apiLeads, ...unsynced];
+      // Only keep local leads that are newly created local drafts (not yet uploaded)
+      // and exclude any leads marked as Junk or deleted
+      const unsyncedDrafts = localLeads.filter(
+        (l: Lead) => !apiIds.has(l.id) && (l.id.startsWith('lead-') || l.id.startsWith('l-')) && l.status !== 'Junk'
+      );
+      const merged = [...apiLeads, ...unsyncedDrafts];
+      // Keep local storage aligned with backend leads
+      storageService.saveLeads(merged);
+      return merged;
     }
   } catch (err) {
     console.warn('[ghlApiService] Failed to fetch leads from API, falling back to local storage:', err);

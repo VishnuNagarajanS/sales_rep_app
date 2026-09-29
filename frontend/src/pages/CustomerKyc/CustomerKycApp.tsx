@@ -60,13 +60,11 @@ export const CustomerKycApp: React.FC = () => {
 
   // Screen 4: Wizard fields state (populated by investor during onboarding)
   const [formData, setFormData] = useState(() => {
-    const path = typeof window !== 'undefined' ? window.location.pathname.toLowerCase() : '';
-    const isDhina = path.includes('dhina');
     return {
       // Step 1: Basic Details (prefilled from invitation or blank)
-      investorName: isDhina ? 'dhina' : '',
-      phone: isDhina ? '+91 9360394814' : '',
-      email: isDhina ? 'antigravity01gemini@gmail.com' : '',
+      investorName: '',
+      phone: '',
+      email: '',
       gender: 'Male',
       investorType: 'Individual / HNI',
       residentType: 'Resident Indian',
@@ -157,9 +155,9 @@ export const CustomerKycApp: React.FC = () => {
     let emailToSend = (customEmail || formData.email || '').trim();
 
     if (!emailToSend) {
-      if (activeToken.toLowerCase().includes('dhina') || (typeof window !== 'undefined' && window.location.pathname.toLowerCase().includes('dhina'))) {
-        emailToSend = 'antigravity01gemini@gmail.com';
-      }
+      setOtpError('Please enter your email address to receive the verification code.');
+      setOtpSending(false);
+      return;
     }
 
     try {
@@ -203,8 +201,10 @@ export const CustomerKycApp: React.FC = () => {
 
     const activeToken = token || extractTokenFromUrl();
     let emailToVerify = formData.email?.trim() || '';
-    if (!emailToVerify && (activeToken.toLowerCase().includes('dhina') || (typeof window !== 'undefined' && window.location.pathname.toLowerCase().includes('dhina')))) {
-      emailToVerify = 'antigravity01gemini@gmail.com';
+    if (!emailToVerify) {
+      setOtpError('Email address is required for verification.');
+      setOtpVerifying(false);
+      return;
     }
 
     try {

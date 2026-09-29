@@ -432,10 +432,15 @@ const GhlIrmKycView: React.FC = () => {
   };
 
   const getDynamicKycStatus = (deal: Deal): 'completed' | 'continue' | 'pending' => {
+    // 1. Check persistent DB status first
+    if (deal.kycStatus === 'Completed') return 'completed';
+    if (deal.kycStatus === 'Partially Completed') return 'continue';
+    if (deal.kycStatus === 'Pending') return 'pending';
+
     const emailKey = (deal.email || '').toLowerCase();
     const dbKyc = dbKycs[emailKey];
     if (dbKyc) {
-      if (dbKyc.status === 'Verified' || dbKyc.status === '2') {
+      if (dbKyc.status === 'Verified' || dbKyc.status === '2' || dbKyc.status === 'Approved') {
         return 'completed';
       }
       if (dbKyc.status === 'PendingReview' || dbKyc.status === '1') {

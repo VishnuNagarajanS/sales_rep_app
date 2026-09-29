@@ -181,6 +181,7 @@ export interface Deal {
   investmentRange?: string; // e.g. "₹15 Cr – ₹25 Cr", display string shown in green
   investorType?: 'AIF' | 'Co-AIF';
   investmentAmountConfirmed?: boolean;
+  kycStatus?: string;
 }
 
 export interface DealActivity {

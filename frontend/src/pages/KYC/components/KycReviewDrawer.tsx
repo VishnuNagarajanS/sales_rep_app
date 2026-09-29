@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { Deal } from '../../../types';
 import { getKycReviewData } from '../../../services/kycService';
+import { saveDeal } from '../../../services/ghlApiService';
 import './KycLinkComponents.css';
 
 interface KycReviewDrawerProps {
@@ -197,20 +198,42 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
     providerVerifications: [],
   });
 
+  const getAuthHeader = (): Record<string, string> => {
+    const token = sessionStorage.getItem('nexus_auth_token') || localStorage.getItem('nexus_auth_token');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   const handleApprove = async () => {
     if (liveKyc?.id) {
       try {
-        await fetch(`/api/irm/kyc/${liveKyc.id}/review`, {
+        const res = await fetch(`/api/irm/kyc/${liveKyc.id}/review`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
           body: JSON.stringify({ action: 'Approved', remarks: 'KYC verified and approved by IRM' }),
         });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          console.error('Approval API error:', res.status, err);
+          onShowToast(`Error approving KYC: ${err.message || res.statusText}`);
+          return;
+        }
       } catch (err) {
         console.error('Approval API error:', err);
+        onShowToast('Network error while approving KYC.');
+        return;
       }
     }
-    onShowToast(`KYC Approved for ${deal.customerName}! Verified in Database.`);
-    localStorage.setItem(`nexus_kyc_status_${deal.id}`, 'Completed');
+
+    if (deal?.id) {
+      try {
+        await saveDeal({ ...deal, kycStatus: 'Completed' });
+      } catch (err) {
+        console.warn('Could not update deal kycStatus in DB:', err);
+      }
+      localStorage.setItem(`nexus_kyc_status_${deal.id}`, 'Completed');
+    }
+
+    onShowToast(`KYC Approved for ${deal?.customerName || 'Investor'}! Verified in Database.`);
     window.dispatchEvent(new CustomEvent('nexus_storage_updated'));
     onClose();
   };
@@ -218,17 +241,32 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
   const handleSendCorrection = async () => {
     if (liveKyc?.id) {
       try {
-        await fetch(`/api/irm/kyc/${liveKyc.id}/review`, {
+        const res = await fetch(`/api/irm/kyc/${liveKyc.id}/review`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
           body: JSON.stringify({ action: 'ReuploadRequested', remarks: correctionNote }),
         });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          console.error('Correction API error:', res.status, err);
+        }
       } catch (err) {
         console.error('Correction API error:', err);
       }
     }
-    onShowToast(`Correction request sent to ${deal.customerName}`);
+
+    if (deal?.id) {
+      try {
+        await saveDeal({ ...deal, kycStatus: 'Partially Completed' });
+      } catch (err) {
+        console.warn('Could not update deal kycStatus in DB:', err);
+      }
+      localStorage.setItem(`nexus_kyc_status_${deal.id}`, 'Partially Completed');
+    }
+
+    onShowToast(`Correction request sent to ${deal?.customerName || 'Investor'}`);
     setShowCorrectionModal(false);
+    window.dispatchEvent(new CustomEvent('nexus_storage_updated'));
     onClose();
   };
 

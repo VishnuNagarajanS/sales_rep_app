@@ -570,9 +570,17 @@ export const LeadsPage: React.FC = () => {
     setIsEditDrawerOpen(false);
   };
 
-  const handleDeleteLead = (lead: Lead) => {
+  const handleDeleteLead = async (lead: Lead) => {
     if (confirm(`Delete lead ${lead.name}?`)) {
-      apiSaveLead({ ...lead, status: 'Junk' }).catch(console.error); // soft-delete via status
+      try {
+        await apiSaveLead({ ...lead, status: 'Junk' });
+      } catch (err) {
+        console.error('Failed to update lead status:', err);
+      }
+      storageService.deleteLead(lead.id);
+      setLeads(prev => prev.filter(l => l.id !== lead.id));
+      window.dispatchEvent(new CustomEvent('nexus_storage_updated'));
+      showToast(`Lead ${lead.name} deleted`);
     }
   };
 

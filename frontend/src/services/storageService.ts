@@ -290,6 +290,16 @@ class StorageService {
     this.setDev('leads', leads);
   }
 
+  saveLeads(leads: Lead[]): void {
+    if (isMockMode()) {
+      mockStorageAdapter.saveLeads(leads);
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+      return;
+    }
+    this.setDev('leads', leads);
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  }
+
   deleteLead(id: string): void {
     if (isMockMode()) {
       const leads = mockStorageAdapter.getLeads().filter(l => l.id !== id);
@@ -299,6 +309,7 @@ class StorageService {
     }
     const leads = this.getLeads().filter(l => l.id !== id);
     this.setDev('leads', leads);
+    window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 
   cleanupDuplicateLeads(companyId?: string): { removedCount: number } {
