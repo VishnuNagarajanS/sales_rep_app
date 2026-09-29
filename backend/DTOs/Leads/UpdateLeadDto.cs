@@ -18,6 +18,7 @@ public class UpdateLeadDto
     public string? DispositionReason { get; set; }
 
     public DateTime? NextFollowupDate { get; set; }
+    public int? AssignedAgentId { get; set; }
 
     public Dictionary<string, string>? AdditionalCustomFields { get; set; }
 }

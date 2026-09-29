@@ -4,6 +4,7 @@ using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.Leads;
 using backend.Models.Entities;
+using backend.Models.Enums;
 using backend.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
@@ -181,7 +182,7 @@ public class LeadService : ILeadService
             Email = dto.Email?.Trim() ?? string.Empty,
             Location = dto.Location?.Trim() ?? string.Empty,
             Source = string.IsNullOrWhiteSpace(dto.Source) ? "Website Inbound" : dto.Source.Trim(),
-            Status = "New",
+            Status = string.IsNullOrWhiteSpace(dto.Status) ? "New" : dto.Status.Trim(),
             Priority = string.IsNullOrWhiteSpace(dto.Priority) ? "Medium" : dto.Priority.Trim(),
             Notes = dto.Notes?.Trim() ?? string.Empty,
             CustomFieldsJson = customFields.Count > 0 ? JsonSerializer.Serialize(customFields) : null,
@@ -212,6 +213,7 @@ public class LeadService : ILeadService
         if (dto.Priority != null) lead.Priority = dto.Priority.Trim();
         if (dto.Notes != null) lead.Notes = dto.Notes.Trim();
         if (dto.NextFollowupDate.HasValue) lead.NextFollowupDate = dto.NextFollowupDate.Value;
+        if (dto.AssignedAgentId.HasValue) lead.AssignedAgentId = dto.AssignedAgentId.Value;
 
         // Merge custom fields
         var customFields = DeserializeCustomFields(lead.CustomFieldsJson);
@@ -339,10 +341,10 @@ public class LeadService : ILeadService
             .Where(f => f.CompanyId == lead.CompanyId &&
                         f.ContactId == leadIdStr &&
                         f.ContactType == "lead" &&
-                        f.Status == "Pending")
+                        f.Status == FollowupStatus.Pending)
             .ToListAsync(ct);
 
-        if (staleFollowups.Count > 0)
+        if (staleFollowups.Any())
         {
             _context.Followups.RemoveRange(staleFollowups);
         }
@@ -359,7 +361,7 @@ public class LeadService : ILeadService
             ContactPhone = lead.Phone,
             ScheduledAt = tomorrow,
             Priority = "High",
-            Status = "Pending",
+            Status = FollowupStatus.Pending,
             Notes = "Re-engaged lead follow-up reminder.",
             CreatedAt = DateTime.UtcNow
         };

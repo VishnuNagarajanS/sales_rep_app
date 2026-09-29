@@ -1,4 +1,5 @@
 using backend.Models.Entities;
+using backend.Models.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -12,9 +13,6 @@ public class ConsultationConfiguration : IEntityTypeConfiguration<Consultation>
 
         builder.HasKey(c => c.Id);
 
-        builder.Property(c => c.InvestorId)
-            .HasMaxLength(100);
-
         builder.Property(c => c.InvestorName)
             .HasMaxLength(150)
             .IsRequired();
@@ -24,8 +22,9 @@ public class ConsultationConfiguration : IEntityTypeConfiguration<Consultation>
             .IsRequired();
 
         builder.Property(c => c.Status)
+            .HasConversion<string>()
             .HasMaxLength(50)
-            .HasDefaultValue("Scheduled");
+            .HasDefaultValue(ConsultationStatus.Scheduled);
 
         builder.Property(c => c.CreatedAt)
             .HasDefaultValueSql("NOW()");
@@ -40,5 +39,10 @@ public class ConsultationConfiguration : IEntityTypeConfiguration<Consultation>
             .WithMany()
             .HasForeignKey(c => c.ConsultantId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(c => c.Investor)
+            .WithMany(i => i.Consultations)
+            .HasForeignKey(c => c.InvestorId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

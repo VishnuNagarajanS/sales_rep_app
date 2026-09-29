@@ -40,6 +40,14 @@ public class ApplicationDbContext : DbContext
     /// <summary>Immutable audit log of every create/update/delete action across all tenants.</summary>
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
+    // IRM Entities
+    public DbSet<Investor> Investors => Set<Investor>();
+    public DbSet<InvestorKyc> InvestorKycs => Set<InvestorKyc>();
+    public DbSet<InvestmentOpportunity> InvestmentOpportunities => Set<InvestmentOpportunity>();
+    public DbSet<OpportunityPitch> OpportunityPitches => Set<OpportunityPitch>();
+    public DbSet<InvestorCall> InvestorCalls => Set<InvestorCall>();
+    public DbSet<IrmPipelineCard> IrmPipelineCards => Set<IrmPipelineCard>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -53,11 +61,12 @@ public class ApplicationDbContext : DbContext
 
     private static void SeedData(ModelBuilder modelBuilder)
     {
-        // 1. Roles (Integer IDs 1, 2, 3, 4)
+        // 1. Roles (Integer IDs 1, 2, 3, 4, 5)
         var superAdminRoleId = 1;
         var companyAdminRoleId = 2;
         var salesManagerRoleId = 3;
         var salesExecutiveRoleId = 4;
+        var irmRoleId = 5;
 
         modelBuilder.Entity<Role>().HasData(
             new Role
@@ -113,8 +122,7 @@ public class ApplicationDbContext : DbContext
                     "followups.view", "followups.create", "followups.update",
                     "properties.view", "properties.update", "site_visits.view", "site_visits.create", "bookings.view", "bookings.create",
                     "investors.view", "investors.create", "consultations.view", "consultations.create", "opportunities.view", "opportunities.create",
-                    "reports.view", "reports.export",
-                    "users.view"
+                    "reports.view", "reports.export", "users.view"
                 },
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
@@ -133,6 +141,23 @@ public class ApplicationDbContext : DbContext
                     "properties.view", "site_visits.view", "site_visits.create", "bookings.view", "bookings.create",
                     "investors.view", "investors.create", "consultations.view", "consultations.create", "opportunities.view", "opportunities.create",
                     "reports.view"
+                },
+                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            },
+            new Role
+            {
+                Id = irmRoleId,
+                Name = "IRM",
+                Code = "irm",
+                Permissions = new List<string>
+                {
+                    "leads.view", "leads.create", "followups.view", "followups.create", "followups.update",
+                    "deals.view", "deals.create", "deals.update",
+                    "investors.view", "investors.create", "investors.update",
+                    "consultations.view", "consultations.create", "consultations.update",
+                    "opportunities.view", "opportunities.create", "opportunities.update",
+                    "calls.make", "calls.receive", "calls.view",
+                    "reports.view", "chat.view", "chat.send"
                 },
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             }
@@ -180,11 +205,11 @@ public class ApplicationDbContext : DbContext
             }
         );
 
-        // 3. Demo Users (Integer IDs 1, 2, 3, 4 - Password: Password@123)
+        // 3. Demo Users (Integer IDs 1 to 6 - Password: Password@123)
         var passwordHash = "$2a$11$z2c3Nc1pe7Tqmxj6Rm15NOt8vuAyyKfqzGtBKpiFU2NcPZxsjt5p.";
 
         modelBuilder.Entity<User>().HasData(
-            // Super Admin
+            // 1. Super Admin (Yanosh - Global Platform Console)
             new User
             {
                 Id = 1,
@@ -197,7 +222,7 @@ public class ApplicationDbContext : DbContext
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
-            // GHL Company Admin (Vishnu)
+            // 2. GHL Company Admin (Vishnu)
             new User
             {
                 Id = 2,
@@ -210,7 +235,7 @@ public class ApplicationDbContext : DbContext
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
-            // GHL Sales Executive (Naveen)
+            // 3. GHL Sales Executive (Naveen)
             new User
             {
                 Id = 3,
@@ -223,7 +248,7 @@ public class ApplicationDbContext : DbContext
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
-            // Jamin Company Admin (Mani)
+            // 4. Jamin Company Admin (Mani)
             new User
             {
                 Id = 4,
@@ -235,6 +260,133 @@ public class ApplicationDbContext : DbContext
                 CompanyId = 2,
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            },
+            // 5. GHL IRM (Dhinakaran)
+            new User
+            {
+                Id = 5,
+                Name = "Dhinakaran",
+                Email = "dhinakaran@ghlindiaventures.com",
+                PasswordHash = passwordHash,
+                Phone = "+91 98110 77889",
+                RoleId = irmRoleId,
+                CompanyId = 1,
+                Status = UserStatus.Active,
+                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            },
+            // 6. Jamin Sales Executive (Rajesh Sharma)
+            new User
+            {
+                Id = 6,
+                Name = "Rajesh Sharma",
+                Email = "rajesh@jaminbazaar.com",
+                PasswordHash = passwordHash,
+                Phone = "+91 98450 44556",
+                RoleId = salesExecutiveRoleId,
+                CompanyId = 2,
+                Status = UserStatus.Active,
+                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            }
+        );
+
+        // 4. Sample Investors (GHL Company 1)
+        modelBuilder.Entity<Investor>().HasData(
+            new Investor
+            {
+                Id = 1,
+                CompanyId = 1,
+                Name = "Rajesh Singhania",
+                Phone = "+91 98200 44556",
+                Email = "rajesh.singhania@apexcapital.in",
+                Status = InvestorStatus.ActiveInvestor,
+                InvestmentCapacity = "₹5 Cr – ₹10 Cr",
+                PreferredAssetClass = "AIF",
+                RiskTolerance = "Moderate",
+                InvestmentMandate = "Growth focused Category II AIF with commercial allocation",
+                CommittedAum = "₹5.0 Cr",
+                ReferralSource = "Wealth Partner Direct",
+                AssignedIrmId = 5,
+                AssignedIrmName = "Dhinakaran",
+                Notes = "Senior HNI investor with portfolio in Bangalore",
+                CreatedAt = new DateTime(2026, 1, 15, 0, 0, 0, DateTimeKind.Utc)
+            },
+            new Investor
+            {
+                Id = 2,
+                CompanyId = 1,
+                Name = "Meera Nambiar",
+                Phone = "+91 98450 99881",
+                Email = "meera.nambiar@nambiarholdings.com",
+                Status = InvestorStatus.Lead,
+                InvestmentCapacity = "₹10 Cr – ₹25 Cr",
+                PreferredAssetClass = "Commercial AIF",
+                RiskTolerance = "Aggressive",
+                InvestmentMandate = "High-yield commercial development tranches",
+                AssignedIrmId = 5,
+                AssignedIrmName = "Dhinakaran",
+                Notes = "Family office lead referred via CFO network",
+                CreatedAt = new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc)
+            }
+        );
+
+        // 5. Sample Investment Opportunity
+        modelBuilder.Entity<InvestmentOpportunity>().HasData(
+            new InvestmentOpportunity
+            {
+                Id = 1,
+                CompanyId = 1,
+                CreatedByIrmId = 5,
+                Title = "Prime Bengaluru Commercial Yield Fund II",
+                AssetClass = "Commercial AIF",
+                Description = "Grade-A office park pre-leased to Fortune 500 GCCs with 8.5% entry cap rate",
+                TargetIrr = 16.5m,
+                MinTicketSize = 10000000m,
+                Tenure = "5 Years",
+                RiskLevel = "Moderate",
+                TotalTargetCorpus = 1000000000m,
+                CommittedAmount = 50000000m,
+                IsActive = true,
+                CreatedAt = new DateTime(2026, 1, 10, 0, 0, 0, DateTimeKind.Utc)
+            }
+        );
+
+        // 6. Sample IRM Pipeline Cards
+        modelBuilder.Entity<IrmPipelineCard>().HasData(
+            new IrmPipelineCard
+            {
+                Id = 1,
+                CompanyId = 1,
+                InvestorId = 1,
+                AssignedIrmId = 5,
+                AssignedIrmName = "Dhinakaran",
+                InvestorName = "Rajesh Singhania",
+                InvestorPhone = "+91 98200 44556",
+                InvestorEmail = "rajesh.singhania@apexcapital.in",
+                StageId = "qualified_investor",
+                StageEnteredAt = new DateTime(2026, 2, 10, 0, 0, 0, DateTimeKind.Utc),
+                Priority = "High",
+                Value = 50000000m,
+                InvestmentAmount = "₹5 Cr",
+                PreferredAssetClass = "AIF",
+                CreatedAt = new DateTime(2026, 1, 15, 0, 0, 0, DateTimeKind.Utc)
+            },
+            new IrmPipelineCard
+            {
+                Id = 2,
+                CompanyId = 1,
+                InvestorId = 2,
+                AssignedIrmId = 5,
+                AssignedIrmName = "Dhinakaran",
+                InvestorName = "Meera Nambiar",
+                InvestorPhone = "+91 98450 99881",
+                InvestorEmail = "meera.nambiar@nambiarholdings.com",
+                StageId = "leads",
+                StageEnteredAt = new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc),
+                Priority = "High",
+                Value = 100000000m,
+                InvestmentAmount = "₹10 Cr",
+                PreferredAssetClass = "Commercial AIF",
+                CreatedAt = new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc)
             }
         );
     }

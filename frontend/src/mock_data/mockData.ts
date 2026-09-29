@@ -676,8 +676,6 @@ export const INITIAL_CALLS: CallRecord[] = [
   {
     id: 'call-01',
     companyId: 't-ghl-01',
-    leadId: 'lead-ghl-01',
-    contactId: 'lead-ghl-01',
     contactName: 'Dr. Rajesh Nambiar',
     contactPhone: '+91 98451 12233',
     direction: 'outbound',
@@ -693,8 +691,6 @@ export const INITIAL_CALLS: CallRecord[] = [
   {
     id: 'call-02',
     companyId: 't-jamin-02',
-    leadId: 'lead-jam-02',
-    contactId: 'lead-jam-02',
     contactName: 'Deepak Kulkarni',
     contactPhone: '+91 97312 88990',
     direction: 'inbound',
@@ -710,8 +706,6 @@ export const INITIAL_CALLS: CallRecord[] = [
   {
     id: 'call-03',
     companyId: 't-jamin-02',
-    customerId: 'cust-jam-01',
-    contactId: 'cust-jam-01',
     contactName: 'Siddharth Rao',
     contactPhone: '+91 99001 77665',
     direction: 'outbound',
@@ -722,94 +716,7 @@ export const INITIAL_CALLS: CallRecord[] = [
     timestamp: 'Yesterday, 04:30 PM',
     notes: 'Token confirmation call. Siddharth transferred ₹5,00,000 via RTGS.',
   },
-  // ── GHL IRM Lead calls ── Agent call + IRM call per lead ──────────────
-  // lead-ghl-01  Dr. Rajesh Nambiar  (call-01 covers Agent; this covers IRM)
-  {
-    id: 'call-ghl-01-irm',
-    companyId: 't-ghl-01',
-    leadId: 'lead-ghl-01',
-    contactId: 'lead-ghl-01',
-    contactName: 'Dr. Rajesh Nambiar',
-    contactPhone: '+91 98451 12233',
-    direction: 'outbound',
-    duration: 621, // 10m 21s
-    agentId: 'usr-ghl-irm',
-    agentName: 'Rohan Varma',
-    disposition: 'Interested',
-    timestamp: 'Today, 2:45 PM',
-    recordingUrl: 'https://cdn.nexusplatform.io/recordings/call-ghl-01-irm.mp3',
-    transcription: 'IRM introduced AIF Category II structured debt product (14% IRR, 3-yr lock-in). Dr. Nambiar confirmed ₹3 Cr allocation intent. KYC initiation scheduled for Thursday.',
-    notes: 'Sent term sheet and fund factsheet via email.',
-  },
-  // lead-ghl-02  Sunita & Arvind Mehta
-  {
-    id: 'call-ghl-02-agent',
-    companyId: 't-ghl-01',
-    leadId: 'lead-ghl-02',
-    contactId: 'lead-ghl-02',
-    contactName: 'Sunita & Arvind Mehta',
-    contactPhone: '+91 99882 33445',
-    direction: 'outbound',
-    duration: 253, // 4m 13s
-    agentId: 'usr-ghl-exec',
-    agentName: 'Ananya Iyer',
-    disposition: 'Follow-up Required',
-    timestamp: 'Yesterday, 3:10 PM',
-    recordingUrl: 'https://cdn.nexusplatform.io/recordings/call-ghl-02-agent.mp3',
-    transcription: 'Discussed NRI fractional ownership model for warehouse logistics parks. Arvind asked about repatriation of yield income under FEMA. Follow-up with FEMA advisory note.',
-    notes: 'Needs clarification on FEMA repatriation rules before committing.',
-  },
-  {
-    id: 'call-ghl-02-irm',
-    companyId: 't-ghl-01',
-    leadId: 'lead-ghl-02',
-    contactId: 'lead-ghl-02',
-    contactName: 'Sunita & Arvind Mehta',
-    contactPhone: '+91 99882 33445',
-    direction: 'inbound',
-    duration: 478, // 7m 58s
-    agentId: 'usr-ghl-irm',
-    agentName: 'Rohan Varma',
-    disposition: 'Interested',
-    timestamp: 'Today, 10:00 AM',
-    recordingUrl: 'https://cdn.nexusplatform.io/recordings/call-ghl-02-irm.mp3',
-    transcription: 'Arvind confirmed ₹1.5 Cr budget. IRM walked through Industrial Logistics Park allocation, FEMA compliance structure, and yield distribution timeline (quarterly). Sunita preferred shorter 3-yr horizon.',
-    notes: 'IRM to prepare customised allocation plan. KYC initiation in progress.',
-  },
-  // lead-ghl-03  Karthik Somayaji
-  {
-    id: 'call-ghl-03-agent',
-    companyId: 't-ghl-01',
-    leadId: 'lead-ghl-03',
-    contactId: 'lead-ghl-03',
-    contactName: 'Karthik Somayaji',
-    contactPhone: '+91 94480 77889',
-    direction: 'inbound',
-    duration: 187, // 3m 7s
-    agentId: 'usr-ghl-exec-02',
-    agentName: 'Priya Sharma',
-    disposition: 'Interested',
-    timestamp: '2 days ago, 05:15 PM',
-    notes: 'Karthik reached out after reading article on tax-optimised commercial yield funds. Requested product brochure.',
-  },
-  {
-    id: 'call-ghl-03-irm',
-    companyId: 't-ghl-01',
-    leadId: 'lead-ghl-03',
-    contactId: 'lead-ghl-03',
-    contactName: 'Karthik Somayaji',
-    contactPhone: '+91 94480 77889',
-    direction: 'outbound',
-    duration: 312, // 5m 12s
-    agentId: 'usr-ghl-irm',
-    agentName: 'Rohan Varma',
-    disposition: 'Follow-up Required',
-    timestamp: 'Yesterday, 11:30 AM',
-    transcription: 'IRM explained Commercial Yield Fund structure — 10.5% net IRR post-tax, Section 10(23FBB) exempt. Karthik expressed interest but mentioned need to liquidate FDs first (matures next month).',
-    notes: 'Follow up in 30 days once FD matures. WhatsApp brochure sent.',
-  },
 ];
-
 
 export const INITIAL_FOLLOWUPS: Followup[] = [
   {
@@ -1083,7 +990,6 @@ export const INITIAL_CONSULTATIONS: Consultation[] = [
     status: 'Scheduled',
     agenda: 'Review lease deed covenants and tax pass-through structure for Pre-Leased IT Park Suite.',
     outcomeNotes: 'Financial models and tenant credit rating sheets prepared.',
-    referredByAgentName: 'Suresh Kumar',
   },
   {
     id: 'cns-02',
@@ -1097,7 +1003,6 @@ export const INITIAL_CONSULTATIONS: Consultation[] = [
     status: 'Completed',
     agenda: 'Introductory advisory on fractional commercial real estate yields vs residential rental yields.',
     outcomeNotes: 'Client expressed clear interest in Grade-A commercial asset. Next step: Term sheet.',
-    referredByAgentName: 'Ananya Iyer',
   },
   {
     id: 'cns-03',
@@ -1111,7 +1016,6 @@ export const INITIAL_CONSULTATIONS: Consultation[] = [
     status: 'Scheduled',
     agenda: 'Whitefield Grade-A IT Park tranche allocation and yields discussion.',
     outcomeNotes: 'Term sheet shared; awaiting confirmation on ₹15 Cr ticket.',
-    referredByAgentName: 'Priya Rajan',
   },
   {
     id: 'cns-04',
@@ -1125,7 +1029,6 @@ export const INITIAL_CONSULTATIONS: Consultation[] = [
     status: 'Scheduled',
     agenda: 'Review lease deed covenants and tax structure for Pre-Leased Logistics Hub.',
     outcomeNotes: 'Preparing comparison matrix for 9% gross yield.',
-    referredByAgentName: 'Suresh Kumar',
   },
 ];
 

@@ -1,3 +1,5 @@
+using backend.Models.Enums;
+
 namespace backend.Models.Entities;
 
 public class Consultation
@@ -7,17 +9,23 @@ public class Consultation
     public int CompanyId { get; set; }
     public Tenant? Company { get; set; }
 
+    // The IRM conducting the consultation
     public int ConsultantId { get; set; }
     public User? Consultant { get; set; }
+    public string ConsultantName { get; set; } = string.Empty;
 
-    public string InvestorId { get; set; } = string.Empty;
+    public int InvestorId { get; set; }
+    public Investor? Investor { get; set; }
+
     public string InvestorName { get; set; } = string.Empty;
     public string InvestorPhone { get; set; } = string.Empty;
 
     public DateTime ScheduledAt { get; set; }
-    public string Status { get; set; } = "Scheduled"; // Scheduled, Completed, Rescheduled, Cancelled, No-show
+    public ConsultationStatus Status { get; set; } = ConsultationStatus.Scheduled;
+
     public string Agenda { get; set; } = string.Empty;
-    public string OutcomeNotes { get; set; } = string.Empty;
+    public string? OutcomeNotes { get; set; }
+    public string? ReferredByAgentName { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }

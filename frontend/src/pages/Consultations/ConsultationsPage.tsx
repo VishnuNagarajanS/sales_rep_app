@@ -181,7 +181,6 @@ export const ConsultationsPage: React.FC = () => {
     .filter((name): name is string => Boolean(name))
     .map(name => ({ value: name, label: name }));
 
-
   // ── Filtered list (operates on deduplicated latestByInvestor) ─────────────
   const filteredConsultations = latestByInvestor.filter(c => {
     if (consultantFilter !== 'All' && c.consultantName !== consultantFilter) return false;

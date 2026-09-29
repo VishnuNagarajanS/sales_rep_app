@@ -137,295 +137,295 @@ export const PlatformRolesPage: React.FC = () => {
     return Boolean(roles[roleCode]?.permissions?.includes(permKey));
   };
 
-  const handleTogglePermission = (roleCode: string, permKey: string) => {
-    if (roleCode === 'super_admin') {
-      // Super admin always retains all permissions
-      return;
-    }
+    const handleTogglePermission = (roleCode: string, permKey: string) => {
+      if (roleCode === 'super_admin') {
+        // Super admin always retains all permissions
+        return;
+      }
 
-    const targetRole = roles[roleCode];
-    if (!targetRole) return;
+      const targetRole = roles[roleCode];
+      if (!targetRole) return;
 
-    const currentPerms = targetRole.permissions || [];
-    const newPerms = currentPerms.includes(permKey)
-      ? currentPerms.filter(p => p !== permKey)
-      : [...currentPerms, permKey];
+      const currentPerms = targetRole.permissions || [];
+      const newPerms = currentPerms.includes(permKey)
+        ? currentPerms.filter(p => p !== permKey)
+        : [...currentPerms, permKey];
 
-    const updatedRoles = {
-      ...roles,
-      [roleCode]: {
-        ...targetRole,
-        permissions: newPerms,
-      },
+      const updatedRoles = {
+        ...roles,
+        [roleCode]: {
+          ...targetRole,
+          permissions: newPerms,
+        },
+      };
+
+      setRoles(updatedRoles);
+      setHasUnsavedChanges(true);
     };
 
-    setRoles(updatedRoles);
-    setHasUnsavedChanges(true);
-  };
+    const handleSaveAllChanges = () => {
+      Object.entries(roles).forEach(([code, r]) => {
+        superAdminService.updateRolePermissions(code, r.permissions);
+      });
 
-  const handleSaveAllChanges = () => {
-    Object.entries(roles).forEach(([code, r]) => {
-      superAdminService.updateRolePermissions(code, r.permissions);
-    });
+      setHasUnsavedChanges(false);
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 3000);
+    };
 
-    setHasUnsavedChanges(false);
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 3000);
-  };
+    const handleCreateCustomRole = () => {
+      if (!newRoleName.trim() || !newRoleCode.trim()) return;
 
-  const handleCreateCustomRole = () => {
-    if (!newRoleName.trim() || !newRoleCode.trim()) return;
-
-    const basePerms = roles[baseTemplateRole]?.permissions || [];
-    const newRole = superAdminService.createCustomRole(
-      newRoleName.trim(),
-      newRoleCode.trim(),
-      [...basePerms]
-    );
-
-    setRoles({ ...roles, [newRole.code]: newRole });
-    setIsAddRoleModalOpen(false);
-    setNewRoleName('');
-    setNewRoleCode('');
-  };
-
-  // Filter permission groups based on search & category
-  const filteredGroups = permissionGroups
-    .filter(g => {
-      if (selectedGroupFilter !== 'all' && g.group !== selectedGroupFilter) return false;
-      return true;
-    })
-    .map(g => {
-      if (!searchQuery) return g;
-      const q = searchQuery.toLowerCase();
-      const filteredItems = g.items.filter(
-        i =>
-          i.key.toLowerCase().includes(q) ||
-          i.label.toLowerCase().includes(q) ||
-          i.description.toLowerCase().includes(q)
+      const basePerms = roles[baseTemplateRole]?.permissions || [];
+      const newRole = superAdminService.createCustomRole(
+        newRoleName.trim(),
+        newRoleCode.trim(),
+        [...basePerms]
       );
-      return { ...g, items: filteredItems };
-    })
-    .filter(g => g.items.length > 0);
 
-  return (
-    <div className="platform-roles-page-container">
-      {/* Header */}
-      <div className="roles-page-header">
-        <div>
-          <div className="header-breadcrumbs">
-            <span>PLATFORM CONSOLE</span> &gt; <span className="current">ROLES & RBAC</span>
-          </div>
-          <h1 className="page-main-title">Master Role-Permission Matrix</h1>
-          <p className="page-main-desc">
-            Define canonical RBAC privilege grids, fine-grained action switches, and tenant role policies.
-          </p>
-        </div>
+      setRoles({ ...roles, [newRole.code]: newRole });
+      setIsAddRoleModalOpen(false);
+      setNewRoleName('');
+      setNewRoleCode('');
+    };
 
-        <div className="roles-header-actions">
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => setIsAddRoleModalOpen(true)}
-          >
-            <Plus size={14} /> Add Custom Role
-          </button>
+    // Filter permission groups based on search & category
+    const filteredGroups = permissionGroups
+      .filter(g => {
+        if (selectedGroupFilter !== 'all' && g.group !== selectedGroupFilter) return false;
+        return true;
+      })
+      .map(g => {
+        if (!searchQuery) return g;
+        const q = searchQuery.toLowerCase();
+        const filteredItems = g.items.filter(
+          i =>
+            i.key.toLowerCase().includes(q) ||
+            i.label.toLowerCase().includes(q) ||
+            i.description.toLowerCase().includes(q)
+        );
+        return { ...g, items: filteredItems };
+      })
+      .filter(g => g.items.length > 0);
 
-          <button
-            className={`btn btn-primary btn-sm btn-save-matrix ${hasUnsavedChanges ? 'dirty-pulse' : ''}`}
-            onClick={handleSaveAllChanges}
-          >
-            <Save size={14} />
-            {hasUnsavedChanges ? 'Save Matrix Changes *' : 'Matrix Saved'}
-          </button>
-        </div>
-      </div>
-
-      {savedSuccess && (
-        <div className="roles-success-banner animate-fade-in">
-          <CheckCircle2 size={16} /> Role permission definitions committed across all active tenant nodes.
-        </div>
-      )}
-
-      {/* Role Summary Cards */}
-      <div className="roles-summary-cards-grid">
-        {activeRoleList.map(r => (
-          <div key={r.code} className="card role-summary-card">
-            <div className="role-summary-header">
-              <span className={`role-badge ${r.code}`}>{r.name}</span>
-              <span className="role-perms-count">{r.permissions.length} Privileges</span>
+    return (
+      <div className="platform-roles-page-container">
+        {/* Header */}
+        <div className="roles-page-header">
+          <div>
+            <div className="header-breadcrumbs">
+              <span>PLATFORM CONSOLE</span> &gt; <span className="current">ROLES & RBAC</span>
             </div>
-            <div className="role-code-tag">
-              Code: <code>{r.code}</code>
-            </div>
-            <p className="role-desc-text">
-              {r.code === 'super_admin'
-                ? 'Platform operator with unrestricted access across all tenants.'
-                : r.code === 'company_admin'
-                ? 'Tenant root administrator managing team users and company setup.'
-                : r.code === 'irm'
-                ? 'Institutional Relationship Manager for HNW wealth & CRE.'
-                : 'Frontline sales representative executing dialer outreach.'}
+            <h1 className="page-main-title">Master Role-Permission Matrix</h1>
+            <p className="page-main-desc">
+              Define canonical RBAC privilege grids, fine-grained action switches, and tenant role policies.
             </p>
           </div>
-        ))}
-      </div>
 
-      {/* Filter and Search Bar */}
-      <div className="card roles-filter-card">
-        <div className="roles-search-box">
-          <Search size={16} className="search-icon" />
-          <input
-            type="text"
-            className="roles-search-input"
-            placeholder="Search permissions by key, action, or description..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-          />
+          <div className="roles-header-actions">
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setIsAddRoleModalOpen(true)}
+            >
+              <Plus size={14} /> Add Custom Role
+            </button>
+
+            <button
+              className={`btn btn-primary btn-sm btn-save-matrix ${hasUnsavedChanges ? 'dirty-pulse' : ''}`}
+              onClick={handleSaveAllChanges}
+            >
+              <Save size={14} />
+              {hasUnsavedChanges ? 'Save Matrix Changes *' : 'Matrix Saved'}
+            </button>
+          </div>
         </div>
 
-        <select
-          className="roles-group-select"
-          value={selectedGroupFilter}
-          onChange={e => setSelectedGroupFilter(e.target.value)}
-        >
-          <option value="all">All Functional Groups ({permissionGroups.length})</option>
-          {permissionGroups.map(g => (
-            <option key={g.group} value={g.group}>
-              {g.group}
-            </option>
+        {savedSuccess && (
+          <div className="roles-success-banner animate-fade-in">
+            <CheckCircle2 size={16} /> Role permission definitions committed across all active tenant nodes.
+          </div>
+        )}
+
+        {/* Role Summary Cards */}
+        <div className="roles-summary-cards-grid">
+          {activeRoleList.map(r => (
+            <div key={r.code} className="card role-summary-card">
+              <div className="role-summary-header">
+                <span className={`role-badge ${r.code}`}>{r.name}</span>
+                <span className="role-perms-count">{r.permissions.length} Privileges</span>
+              </div>
+              <div className="role-code-tag">
+                Code: <code>{r.code}</code>
+              </div>
+              <p className="role-desc-text">
+                {r.code === 'super_admin'
+                  ? 'Platform operator with unrestricted access across all tenants.'
+                  : r.code === 'company_admin'
+                    ? 'Tenant root administrator managing team users and company setup.'
+                    : r.code === 'irm'
+                      ? 'Institutional Relationship Manager for HNW wealth & CRE.'
+                      : 'Frontline sales representative executing dialer outreach.'}
+              </p>
+            </div>
           ))}
-        </select>
-      </div>
-
-      {/* Interactive Permission Matrix Table */}
-      <div className="card matrix-table-card">
-        <div className="table-responsive">
-          <table className="interactive-matrix-table">
-            <thead>
-              <tr className="matrix-thead-tr">
-                <th className="matrix-th-perm">Functional Privilege & Description</th>
-                {activeRoleList.map(r => (
-                  <th key={r.code} className="matrix-th-role">
-                    <div className="th-role-name">{r.name}</div>
-                    <div className="th-role-code">{r.code}</div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filteredGroups.map(group => (
-                <React.Fragment key={group.group}>
-                  <tr className="matrix-group-row">
-                    <td colSpan={activeRoleList.length + 1} className="matrix-group-td">
-                      ● {group.group.toUpperCase()}
-                    </td>
-                  </tr>
-
-                  {group.items.map(item => (
-                    <tr key={item.key} className="matrix-item-row">
-                      <td className="matrix-item-name-col">
-                        <div className="perm-label">{item.label}</div>
-                        <div className="perm-desc">{item.description}</div>
-                        <code className="perm-key">{item.key}</code>
-                      </td>
-
-                      {activeRoleList.map(r => {
-                        const isGranted = hasPermission(r.code, item.key);
-                        const isSuperAdmin = r.code === 'super_admin';
-
-                        return (
-                          <td key={r.code} className="matrix-checkbox-cell">
-                            <label className={`matrix-toggle-label ${isSuperAdmin ? 'locked' : ''}`}>
-                              <input
-                                type="checkbox"
-                                checked={isGranted}
-                                disabled={isSuperAdmin}
-                                onChange={() => handleTogglePermission(r.code, item.key)}
-                              />
-                              <span className={`toggle-check-box ${isGranted ? 'checked' : ''}`}>
-                                {isGranted && <Check size={12} />}
-                              </span>
-                            </label>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </React.Fragment>
-              ))}
-            </tbody>
-          </table>
         </div>
-      </div>
 
-      {/* Create Custom Role Modal */}
-      {isAddRoleModalOpen && (
-        <Modal
-          isOpen={isAddRoleModalOpen}
-          onClose={() => setIsAddRoleModalOpen(false)}
-          title="⚡ Define Custom Platform Role"
-          size="md"
-        >
-          <div className="add-role-modal-content">
-            <p className="modal-desc">
-              Create a specialized role template with cloned default permissions.
-            </p>
-
-            <div className="form-group">
-              <label className="form-label required">Role Display Name</label>
-              <input
-                type="text"
-                className="form-control"
-                placeholder="e.g. Senior Wealth Partner"
-                value={newRoleName}
-                onChange={e => {
-                  setNewRoleName(e.target.value);
-                  if (!newRoleCode) {
-                    setNewRoleCode(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'));
-                  }
-                }}
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label required">Unique Role Code</label>
-              <input
-                type="text"
-                className="form-control font-mono"
-                placeholder="senior_wealth_partner"
-                value={newRoleCode}
-                onChange={e => setNewRoleCode(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'))}
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Clone Base Permissions From</label>
-              <select
-                className="form-control"
-                value={baseTemplateRole}
-                onChange={e => setBaseTemplateRole(e.target.value)}
-              >
-                <option value="sales_executive">Sales Executive (Field Rep)</option>
-                <option value="company_admin">Company Admin (Tenant Root)</option>
-                <option value="irm">IRM (Wealth Management)</option>
-              </select>
-            </div>
-
-            <div className="modal-actions-footer">
-              <button className="btn btn-ghost" onClick={() => setIsAddRoleModalOpen(false)}>
-                Cancel
-              </button>
-              <button
-                className="btn btn-primary"
-                disabled={!newRoleName.trim() || !newRoleCode.trim()}
-                onClick={handleCreateCustomRole}
-              >
-                Create Role Template
-              </button>
-            </div>
+        {/* Filter and Search Bar */}
+        <div className="card roles-filter-card">
+          <div className="roles-search-box">
+            <Search size={16} className="search-icon" />
+            <input
+              type="text"
+              className="roles-search-input"
+              placeholder="Search permissions by key, action, or description..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+            />
           </div>
-        </Modal>
-      )}
+
+          <select
+            className="roles-group-select"
+            value={selectedGroupFilter}
+            onChange={e => setSelectedGroupFilter(e.target.value)}
+          >
+            <option value="all">All Functional Groups ({permissionGroups.length})</option>
+            {permissionGroups.map(g => (
+              <option key={g.group} value={g.group}>
+                {g.group}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Interactive Permission Matrix Table */}
+        <div className="card matrix-table-card">
+          <div className="table-responsive">
+            <table className="interactive-matrix-table">
+              <thead>
+                <tr className="matrix-thead-tr">
+                  <th className="matrix-th-perm">Functional Privilege & Description</th>
+                  {activeRoleList.map(r => (
+                    <th key={r.code} className="matrix-th-role">
+                      <div className="th-role-name">{r.name}</div>
+                      <div className="th-role-code">{r.code}</div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredGroups.map(group => (
+                  <React.Fragment key={group.group}>
+                    <tr className="matrix-group-row">
+                      <td colSpan={activeRoleList.length + 1} className="matrix-group-td">
+                        ● {group.group.toUpperCase()}
+                      </td>
+                    </tr>
+
+                    {group.items.map(item => (
+                      <tr key={item.key} className="matrix-item-row">
+                        <td className="matrix-item-name-col">
+                          <div className="perm-label">{item.label}</div>
+                          <div className="perm-desc">{item.description}</div>
+                          <code className="perm-key">{item.key}</code>
+                        </td>
+
+                        {activeRoleList.map(r => {
+                          const isGranted = hasPermission(r.code, item.key);
+                          const isSuperAdmin = r.code === 'super_admin';
+
+                          return (
+                            <td key={r.code} className="matrix-checkbox-cell">
+                              <label className={`matrix-toggle-label ${isSuperAdmin ? 'locked' : ''}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={isGranted}
+                                  disabled={isSuperAdmin}
+                                  onChange={() => handleTogglePermission(r.code, item.key)}
+                                />
+                                <span className={`toggle-check-box ${isGranted ? 'checked' : ''}`}>
+                                  {isGranted && <Check size={12} />}
+                                </span>
+                              </label>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Create Custom Role Modal */}
+        {isAddRoleModalOpen && (
+          <Modal
+            isOpen={isAddRoleModalOpen}
+            onClose={() => setIsAddRoleModalOpen(false)}
+            title="⚡ Define Custom Platform Role"
+            size="md"
+          >
+            <div className="add-role-modal-content">
+              <p className="modal-desc">
+                Create a specialized role template with cloned default permissions.
+              </p>
+
+              <div className="form-group">
+                <label className="form-label required">Role Display Name</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. Senior Wealth Partner"
+                  value={newRoleName}
+                  onChange={e => {
+                    setNewRoleName(e.target.value);
+                    if (!newRoleCode) {
+                      setNewRoleCode(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'));
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label required">Unique Role Code</label>
+                <input
+                  type="text"
+                  className="form-control font-mono"
+                  placeholder="senior_wealth_partner"
+                  value={newRoleCode}
+                  onChange={e => setNewRoleCode(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'))}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Clone Base Permissions From</label>
+                <select
+                  className="form-control"
+                  value={baseTemplateRole}
+                  onChange={e => setBaseTemplateRole(e.target.value)}
+                >
+                  <option value="sales_executive">Sales Executive (Field Rep)</option>
+                  <option value="company_admin">Company Admin (Tenant Root)</option>
+                  <option value="irm">IRM (Wealth Management)</option>
+                </select>
+              </div>
+
+              <div className="modal-actions-footer">
+                <button className="btn btn-ghost" onClick={() => setIsAddRoleModalOpen(false)}>
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary"
+                  disabled={!newRoleName.trim() || !newRoleCode.trim()}
+                  onClick={handleCreateCustomRole}
+                >
+                  Create Role Template
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
     </div>
   );
 };

@@ -32,6 +32,14 @@ import { Deal, DealActivity, DocumentItem, Lead, Customer } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
+import {
+  getDeals,
+  saveDeal as apiSaveDeal,
+  addDealActivity as apiAddDealActivity,
+  getLeads,
+  getCustomers,
+} from '../../services/ghlApiService';
+import { isMockMode } from '../../config/environment';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { Modal } from '../../components/common/Modal';
@@ -262,6 +270,7 @@ const GhlIrmKycView: React.FC = () => {
   // KYC Link Feature State
   const [sendLinkDeal, setSendLinkDeal] = useState<Deal | null>(null);
   const [reviewDeal, setReviewDeal] = useState<Deal | null>(null);
+  const [dbKycs, setDbKycs] = useState<Record<string, any>>({});
 
   // View state: 'table' | 'flow' | 'profile'
   const [viewMode, setViewMode] = useState<'table' | 'flow' | 'profile'>('table');
@@ -282,11 +291,67 @@ const GhlIrmKycView: React.FC = () => {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [sameAsPermanent, setSameAsPermanent] = useState(false);
 
-  const loadData = () => {
-    const allDeals = storageService.getDeals(tenant?.id) || [];
-    setDeals(allDeals.filter(d => d.stage === 'qualified_investor'));
-    setLeads(storageService.getLeads(tenant?.id) || []);
-    setCustomers(storageService.getCustomers(tenant?.id) || []);
+  const enrichDealWithContact = (d: Deal, leadsList: Lead[], customersList: Customer[]): Deal => {
+    if (d.phone && d.email) return d;
+    const matchLead = leadsList.find(
+      l => (d.customerId && l.id === d.customerId) || (l.name && d.customerName && l.name.toLowerCase() === d.customerName.toLowerCase())
+    );
+    const matchCust = customersList.find(
+      c => (d.customerId && c.id === d.customerId) || (c.name && d.customerName && c.name.toLowerCase() === d.customerName.toLowerCase())
+    );
+    return {
+      ...d,
+      phone: d.phone || matchLead?.phone || matchCust?.phone || '',
+      email: d.email || matchLead?.email || matchCust?.email || '',
+      location: d.location || matchLead?.location || matchCust?.location || '',
+    };
+  };
+
+  const loadData = async () => {
+    if (isMockMode()) {
+      const allDeals = storageService.getDeals(tenant?.id) || [];
+      const localLeads = storageService.getLeads(tenant?.id) || [];
+      const localCustomers = storageService.getCustomers(tenant?.id) || [];
+      const enriched = allDeals.map(d => enrichDealWithContact(d, localLeads, localCustomers));
+      setDeals(enriched.filter(d => d.stage === 'qualified_investor'));
+      setLeads(localLeads);
+      setCustomers(localCustomers);
+    } else {
+      try {
+        const [allDeals, apiLeads, apiCustomers] = await Promise.all([
+          getDeals(tenant?.id),
+          getLeads(tenant?.id),
+          getCustomers(tenant?.id),
+        ]);
+        const leadsList = apiLeads || [];
+        const customersList = apiCustomers || [];
+        const enriched = (allDeals || []).map(d => enrichDealWithContact(d, leadsList, customersList));
+        setDeals(enriched.filter(d => d.stage === 'qualified_investor'));
+        setLeads(leadsList);
+        setCustomers(customersList);
+      } catch {
+        const allDeals = storageService.getDeals(tenant?.id) || [];
+        const localLeads = storageService.getLeads(tenant?.id) || [];
+        const localCustomers = storageService.getCustomers(tenant?.id) || [];
+        const enriched = allDeals.map(d => enrichDealWithContact(d, localLeads, localCustomers));
+        setDeals(enriched.filter(d => d.stage === 'qualified_investor'));
+        setLeads(localLeads);
+        setCustomers(localCustomers);
+      }
+    }
+
+    fetch('/api/irm/kyc/all')
+      .then(res => (res.ok ? res.json() : null))
+      .then(json => {
+        if (json?.success && Array.isArray(json.data)) {
+          const map: Record<string, any> = {};
+          json.data.forEach((k: any) => {
+            if (k.email) map[k.email.toLowerCase()] = k;
+          });
+          setDbKycs(map);
+        }
+      })
+      .catch(() => { });
   };
 
   const getResolvedLocation = (deal: Deal) => {
@@ -367,6 +432,20 @@ const GhlIrmKycView: React.FC = () => {
   };
 
   const getDynamicKycStatus = (deal: Deal): 'completed' | 'continue' | 'pending' => {
+    const emailKey = (deal.email || '').toLowerCase();
+    const dbKyc = dbKycs[emailKey];
+    if (dbKyc) {
+      if (dbKyc.status === 'Verified' || dbKyc.status === '2') {
+        return 'completed';
+      }
+      if (dbKyc.status === 'PendingReview' || dbKyc.status === '1') {
+        return 'completed';
+      }
+      if (dbKyc.panNumber || dbKyc.aadhaarNumber) {
+        return 'continue';
+      }
+    }
+
     const status = localStorage.getItem(`nexus_kyc_status_${deal.id}`);
     if (status === 'Completed' || status === 'Submitted for Review' || status === 'SEBI KYC Validated') {
       return 'completed';
@@ -498,12 +577,29 @@ const GhlIrmKycView: React.FC = () => {
       return Boolean(cDigits && fDigits && cDigits === fDigits);
     });
 
+    const emailKey = (deal.email || '').toLowerCase();
+    const dbKyc = dbKycs[emailKey];
+
     const merged: Partial<KYCFormData> = {
-      investorName: saved?.investorName || deal.customerName || matchingLead?.name || matchingCustomer?.name || '',
-      phone: saved?.phone || deal.phone || matchingLead?.phone || matchingCustomer?.phone || '',
-      email: saved?.email || deal.email || matchingLead?.email || matchingCustomer?.email || '',
-      city: saved?.city || deal.location || matchingLead?.location || matchingCustomer?.location || '',
-      panNumber: saved?.panNumber || (deal as any).pan || matchingLead?.customFields?.pan || matchingCustomer?.customFields?.pan || '',
+      investorName: dbKyc?.investorName || saved?.investorName || deal.customerName || matchingLead?.name || matchingCustomer?.name || '',
+      phone: dbKyc?.phone || saved?.phone || deal.phone || matchingLead?.phone || matchingCustomer?.phone || '',
+      email: dbKyc?.email || saved?.email || deal.email || matchingLead?.email || matchingCustomer?.email || '',
+      gender: dbKyc?.gender || saved?.gender || 'Male',
+      investorType: dbKyc?.investorType || saved?.investorType || deal.investorType || 'Individual',
+      residentType: dbKyc?.residentType || saved?.residentType || 'Resident Indian',
+      occupation: dbKyc?.occupation || saved?.occupation || '',
+      city: dbKyc?.city || saved?.city || deal.location || matchingLead?.location || matchingCustomer?.location || '',
+      state: dbKyc?.state || saved?.state || '',
+      pincode: dbKyc?.pincode || saved?.pincode || '',
+      address: dbKyc?.addressLine1 || saved?.address || '',
+      panNumber: dbKyc?.panNumber || saved?.panNumber || (deal as any).pan || matchingLead?.customFields?.pan || matchingCustomer?.customFields?.pan || '',
+      aadhaarNumber: dbKyc?.aadhaarNumber || saved?.aadhaarNumber || '',
+      bankName: dbKyc?.bankName || saved?.bankName || '',
+      accountNumber: dbKyc?.accountNumber || saved?.accountNumber || '',
+      ifscCode: dbKyc?.ifscCode || saved?.ifscCode || '',
+      accountType: dbKyc?.accountType || saved?.accountType || 'Savings Account',
+      dematAccountNumber: dbKyc?.dematAccountNumber || saved?.dematAccountNumber || '',
+      dematDpId: dbKyc?.dpId || saved?.dematDpId || '',
       ...saved,
     };
 
@@ -583,6 +679,7 @@ const GhlIrmKycView: React.FC = () => {
       });
     }
   };
+  void handleOpenSectionEdit;
 
   const handleSaveSectionEdit = () => {
     if (!selectedCustomerDeal) return;
@@ -653,14 +750,21 @@ const GhlIrmKycView: React.FC = () => {
     showToast(`${editingSection === 'personal' ? 'Personal Details' : 'Address & Identity'} updated successfully!`);
   };
 
-  // Advance deal to opportunity
-  const handleAdvanceStage = (deal: Deal) => {
+  // Advance deal to opportunity — saves to DB
+  const handleAdvanceStage = async (deal: Deal) => {
     const updatedDeal: Deal = {
       ...deal,
       stage: 'investment_opportunity',
       stageEnteredAt: new Date().toISOString(),
     };
-    storageService.saveDeal(updatedDeal);
+
+    // Save updated deal stage to DB
+    try {
+      await apiSaveDeal(updatedDeal);
+    } catch (err) {
+      console.warn('[KYCPage] API saveDeal (advance stage) failed, saving locally:', err);
+      storageService.saveDeal(updatedDeal);
+    }
 
     const activity: DealActivity = {
       id: `act-${Date.now()}`,
@@ -669,19 +773,26 @@ const GhlIrmKycView: React.FC = () => {
       type: 'stage_change',
       fromStage: 'qualified_investor',
       toStage: 'investment_opportunity',
-      text: 'Qualified Investor → Investment Opportunity (KYC Verified)',
+      text: 'KYC Completed → Moved to Investment Opportunities by IRM',
       loggedByName: user?.name || 'IRM User',
       loggedByRole: 'IRM',
       timestamp: new Date().toISOString(),
     };
-    storageService.addDealActivity(activity);
+
+    // Save activity to DB
+    try {
+      await apiAddDealActivity(activity);
+    } catch (err) {
+      console.warn('[KYCPage] API addDealActivity failed:', err);
+      storageService.addDealActivity(activity);
+    }
 
     if (selectedDealForDetail?.id === deal.id) {
       setSelectedDealForDetail(null);
     }
 
     loadData();
-    showToast(`Investor "${deal.customerName}" advanced to Investment Opportunity!`);
+    showToast(`✓ ${deal.customerName} moved to Investment Opportunities!`);
   };
 
   // IFSC Lookup Logic
@@ -1238,7 +1349,8 @@ const GhlIrmKycView: React.FC = () => {
             }}
             onClick={(e) => {
               e.stopPropagation();
-              setSendLinkDeal(deal);
+              const enriched = enrichDealWithContact(deal, leads, customers);
+              setSendLinkDeal(enriched);
             }}
           >
             <Send size={12} />
@@ -1250,19 +1362,23 @@ const GhlIrmKycView: React.FC = () => {
     {
       key: 'actions',
       header: 'Actions',
-      width: '65px',
+      width: '80px',
       align: 'center',
-      render: deal => (
-        <KycRowActionsMenu
-          deal={deal}
-          onOpenReview={d => setReviewDeal(d)}
-          onShowToast={msg => showToast(msg)}
-          onViewProfile={d => handleOpenCustomerProfile(d)}
-          onEditKyc={d => startKycFlow(d)}
-          onCallInvestor={d => initiateCall(d.customerName, d.phone || '', 'customer', d.id)}
-          onAdvanceStage={d => handleAdvanceStage(d)}
-        />
-      ),
+      render: deal => {
+        const kycStatus = getDynamicKycStatus(deal);
+        return (
+          <KycRowActionsMenu
+            deal={deal}
+            onOpenReview={d => setReviewDeal(d)}
+            onShowToast={msg => showToast(msg)}
+            onViewProfile={d => handleOpenCustomerProfile(d)}
+            onEditKyc={d => startKycFlow(d)}
+            onCallInvestor={d => initiateCall(d.customerName, d.phone || '', 'customer', d.id)}
+            // Only show "Advance to Opportunity" after KYC is fully completed
+            onAdvanceStage={kycStatus === 'completed' ? d => handleAdvanceStage(d) : undefined}
+          />
+        );
+      },
     },
   ];
 
@@ -1336,13 +1452,6 @@ const GhlIrmKycView: React.FC = () => {
                 <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
                   Your Profile
                 </h1>
-                <button
-                  type="button"
-                  className="btn-edit-profile"
-                  onClick={() => startKycFlow(deal)}
-                >
-                  <FileText size={14} /> Edit Profile
-                </button>
               </div>
             </div>
 
@@ -1454,15 +1563,6 @@ const GhlIrmKycView: React.FC = () => {
                     {renderField('Investment Capacity', getCustomerFilledCapacity(deal))}
                     {renderField('Preferred Asset Class', getIrmPreferredAssetClass(deal))}
                   </div>
-                  <div className="kyc-card-footer-action">
-                    <button
-                      type="button"
-                      className="btn-card-edit"
-                      onClick={() => handleOpenSectionEdit('personal')}
-                    >
-                      <Edit2 size={13} /> Edit
-                    </button>
-                  </div>
                 </div>
 
                 {/* 2. Address & Identity */}
@@ -1480,15 +1580,6 @@ const GhlIrmKycView: React.FC = () => {
                     {renderField('Country', data.country || 'India')}
                     {renderField('Aadhaar Document', data.aadhaarDoc?.name)}
                     {renderField('PAN Document', data.panDoc?.name)}
-                  </div>
-                  <div className="kyc-card-footer-action">
-                    <button
-                      type="button"
-                      className="btn-card-edit"
-                      onClick={() => handleOpenSectionEdit('address')}
-                    >
-                      <Edit2 size={13} /> Edit
-                    </button>
                   </div>
                 </div>
 

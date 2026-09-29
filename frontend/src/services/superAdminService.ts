@@ -13,6 +13,7 @@ import {
 import { DEFAULT_TENANTS } from '../constants/defaultTenants';
 import { SYSTEM_ROLES } from '../constants/roles';
 import { FEATURES } from '../constants/features';
+import { apiClient, ApiResponse } from './apiClient';
 
 // Storage Keys
 const STORAGE_KEYS = {
@@ -199,6 +200,19 @@ const SEED_ANNOUNCEMENTS: BroadcastAnnouncement[] = [
 
 class SuperAdminService {
   // ── TENANTS / COMPANIES ───────────────────────────────────────────────────
+
+  async fetchTenantsFromApi(): Promise<Tenant[]> {
+    try {
+      const res = await apiClient.get<ApiResponse<Tenant[]>>('/super-admin/tenants');
+      if (res && res.data && res.data.length > 0) {
+        localStorage.setItem(STORAGE_KEYS.TENANTS, JSON.stringify(res.data));
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Could not fetch tenants from API, falling back to local store:', err);
+    }
+    return this.getTenants();
+  }
 
   getTenants(): Tenant[] {
     try {
@@ -428,16 +442,103 @@ class SuperAdminService {
 
   // ── USERS ─────────────────────────────────────────────────────────────────
 
+  async fetchUsersFromApi(filters?: { companyId?: string; roleCode?: string; status?: string; search?: string }): Promise<User[]> {
+    try {
+      const res = await apiClient.get<ApiResponse<User[]>>('/super-admin/users', filters);
+      if (res && res.data) {
+        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(res.data));
+        notifyAdminStorageUpdated();
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Could not fetch users from /api/super-admin/users, falling back to local cache:', err);
+    }
+    return this.getUsers(filters);
+  }
+
+  async createUserApi(userData: Partial<User>, initialPassword?: string): Promise<User> {
+    try {
+      const res = await apiClient.post<ApiResponse<User>>('/super-admin/users', {
+        name: userData.name,
+        email: userData.email,
+        phone: userData.phone,
+        password: initialPassword,
+        roleCode: userData.role?.code,
+        companyId: userData.companyId,
+        designation: userData.designation,
+        employeeCode: userData.employeeCode,
+        status: userData.status || 'Active',
+      });
+      if (res && res.data) {
+        await this.fetchUsersFromApi();
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Could not create user via API, saving locally:', err);
+    }
+    return this.createUser(userData, initialPassword);
+  }
+
+  async updateUserApi(id: string, updates: Partial<User>): Promise<User | undefined> {
+    try {
+      const res = await apiClient.put<ApiResponse<User>>(`/super-admin/users/${id}`, {
+        name: updates.name,
+        email: updates.email,
+        phone: updates.phone,
+        roleCode: updates.role?.code,
+        companyId: updates.companyId,
+        designation: updates.designation,
+        status: updates.status,
+      });
+      if (res && res.data) {
+        await this.fetchUsersFromApi();
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Could not update user via API, updating locally:', err);
+    }
+    return this.updateUser(id, updates);
+  }
+
+  async toggleUserStatusApi(id: string, status: 'Active' | 'Invited' | 'Disabled'): Promise<User | undefined> {
+    return this.updateUserApi(id, { status });
+  }
+
+  async deleteUserApi(id: string): Promise<boolean> {
+    try {
+      const res = await apiClient.delete<ApiResponse<boolean>>(`/super-admin/users/${id}`);
+      if (res && res.data) {
+        await this.fetchUsersFromApi();
+        return true;
+      }
+    } catch (err) {
+      console.warn('Could not delete user via API, deleting locally:', err);
+    }
+    return this.deleteUser(id);
+  }
+
+  async resetUserPasswordApi(id: string): Promise<{ success: boolean; tempPassword?: string }> {
+    try {
+      const res = await apiClient.post<ApiResponse<{ tempPassword: string }>>(`/super-admin/users/${id}/reset-password`);
+      if (res && res.data) {
+        return { success: true, tempPassword: res.data.tempPassword };
+      }
+    } catch (err) {
+      console.warn('Could not reset password via API, falling back to local generator:', err);
+    }
+    return this.resetUserPassword(id);
+  }
+
   getUsers(filters?: { companyId?: string; roleCode?: string; status?: string; search?: string }): User[] {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.USERS);
       let users: User[] = raw ? JSON.parse(raw) : [];
 
-      // Seed if empty
-      if (users.length === 0) {
+      // Clean up legacy users with outdated IDs or empty list
+      if (users.length === 0 || users.some(u => u.id.startsWith('usr-'))) {
         users = [
           {
-            id: 'usr-super-01',
+            id: '1',
             name: 'Yanosh',
             email: 'yanosh@ghlindiaventures.com',
             phone: '+91 98800 11000',
@@ -447,7 +548,7 @@ class SuperAdminService {
             createdAt: '2026-01-01T00:00:00Z',
           },
           {
-            id: 'usr-ghl-admin-01',
+            id: '2',
             name: 'Vishnu',
             email: 'vishnu@ghlindiaventures.com',
             phone: '+91 98450 11223',
@@ -461,7 +562,7 @@ class SuperAdminService {
             createdAt: '2026-01-01T00:00:00Z',
           },
           {
-            id: 'usr-ghl-exec-01',
+            id: '3',
             name: 'Naveen',
             email: 'naveen@ghlindiaventures.com',
             phone: '+91 98450 22334',
@@ -475,21 +576,7 @@ class SuperAdminService {
             createdAt: '2026-01-02T00:00:00Z',
           },
           {
-            id: 'usr-ghl-irm-01',
-            name: 'Dhinakaran',
-            email: 'dhinakaran@ghlindiaventures.com',
-            phone: '+91 98110 77889',
-            role: SYSTEM_ROLES.irm,
-            companyId: '1',
-            companySlug: 'ghl',
-            companyName: 'GHL India Ventures',
-            status: 'Active',
-            lastLogin: 'Yesterday',
-            designation: 'Institutional Relationship Manager',
-            createdAt: '2026-01-05T00:00:00Z',
-          },
-          {
-            id: 'usr-jamin-admin-01',
+            id: '4',
             name: 'Mani',
             email: 'mani@ghlindiaventures.com',
             phone: '+91 98450 33445',
@@ -503,7 +590,21 @@ class SuperAdminService {
             createdAt: '2026-01-01T00:00:00Z',
           },
           {
-            id: 'usr-jamin-exec-01',
+            id: '5',
+            name: 'Dhinakaran',
+            email: 'dhinakaran@ghlindiaventures.com',
+            phone: '+91 98110 77889',
+            role: SYSTEM_ROLES.irm,
+            companyId: '1',
+            companySlug: 'ghl',
+            companyName: 'GHL India Ventures',
+            status: 'Active',
+            lastLogin: 'Yesterday',
+            designation: 'Institutional Relationship Manager',
+            createdAt: '2026-01-05T00:00:00Z',
+          },
+          {
+            id: '6',
             name: 'Rajesh Sharma',
             email: 'rajesh@jaminbazaar.com',
             phone: '+91 98450 44556',
@@ -729,6 +830,28 @@ class SuperAdminService {
   }
 
   // ── ROLES & PERMISSIONS ───────────────────────────────────────────────────
+
+  async fetchRolesFromApi(): Promise<Record<string, Role>> {
+    try {
+      const res = await apiClient.get<ApiResponse<Array<{ id: string; name: string; code: string; permissions: string[] }>>>('/super-admin/roles');
+      if (res && res.data && res.data.length > 0) {
+        const rolesMap: Record<string, Role> = {};
+        res.data.forEach(r => {
+          rolesMap[r.code] = {
+            id: r.id,
+            name: r.name,
+            code: r.code as any,
+            permissions: r.permissions || [],
+          };
+        });
+        localStorage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(rolesMap));
+        return rolesMap;
+      }
+    } catch (err) {
+      console.warn('Could not fetch roles from API, falling back to local store:', err);
+    }
+    return this.getRoles();
+  }
 
   getRoles(): Record<string, Role> {
     try {

@@ -2,6 +2,7 @@ using backend.Authentication.Interfaces;
 using backend.Data;
 using backend.DTOs.Dashboard;
 using backend.Models.Entities;
+using backend.Models.Enums;
 using backend.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
@@ -40,7 +41,7 @@ public sealed class ExecutiveDashboardService(ApplicationDbContext context, ICur
             .ToListAsync(cancellationToken);
 
         var upcomingFollowups = await followups
-            .Where(x => x.Status == "Pending" && x.ScheduledAt >= today)
+            .Where(x => x.Status == FollowupStatus.Pending && x.ScheduledAt >= today)
             .OrderBy(x => x.ScheduledAt)
             .Take(5)
             .Select(x => new FollowupSummaryDto { Id = x.Id, LeadId = null, ScheduledAt = x.ScheduledAt, Notes = x.Notes })
@@ -57,10 +58,10 @@ public sealed class ExecutiveDashboardService(ApplicationDbContext context, ICur
             PendingFollowups = new DashboardKpiDto
             {
                 Label = "Pending follow-ups",
-                Value = await followups.CountAsync(x => x.Status == "Pending", cancellationToken),
+                Value = await followups.CountAsync(x => x.Status == FollowupStatus.Pending, cancellationToken),
                 WeeklyDelta = 0
             },
-            OverdueFollowups = await followups.CountAsync(x => x.Status == "Pending" && x.ScheduledAt < today, cancellationToken),
+            OverdueFollowups = await followups.CountAsync(x => x.Status == FollowupStatus.Pending && x.ScheduledAt < today, cancellationToken),
             CallsLoggedToday = await todayCalls.CountAsync(cancellationToken),
             ConnectedCallsToday = await todayCalls.CountAsync(x => x.Duration > 0 && x.Disposition != "No Answer", cancellationToken),
             AverageTalkTimeSeconds = avgTalkTime,

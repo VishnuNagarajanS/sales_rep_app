@@ -11,10 +11,20 @@ import {
   CheckCircle,
   Pencil,
 } from 'lucide-react';
-import { Followup, Deal, Lead, Customer } from '../../types';
+import { Followup, CallRecord, Deal, Lead, Customer } from '../../types';
+import { storageService } from '../../services/storageService';
+import { isMockMode } from '../../config/environment';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import {
+  getFollowups,
+  saveFollowup as apiSaveFollowup,
+  getCalls,
+  getLeads,
+  saveDeal as apiSaveDeal,
+  saveLead as apiSaveLead,
+  isTenantMatch,
+} from '../../services/ghlApiService';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { Drawer } from '../../components/common/Drawer';
@@ -24,7 +34,7 @@ import {
   SALES_EXECUTIVE_USERS,
   IRM_USERS,
 } from '../../mock_data/adminFollowupsData';
-import { DateRangePreset } from '../../mock_data/adminKanbanData';
+import { DateRangePreset } from '../../types/kanban';
 import './FollowupsPage.css';
 import '../Leads/LeadsPage.css';
 
@@ -33,6 +43,8 @@ export const FollowupsPage: React.FC = () => {
   const { initiateCall } = useCall();
 
   const [followups, setFollowups] = useState<Followup[]>([]);
+  const [callsList, setCallsList] = useState<CallRecord[]>([]);
+  const [allLeads, setAllLeads] = useState<Lead[]>([]);
   const [activeTab, setActiveTab] = useState<'all' | 'due' | 'overdue'>('all');
   const [rescheduleItem, setRescheduleItem] = useState<Followup | null>(null);
   const [newDate, setNewDate] = useState('');
@@ -83,21 +95,30 @@ export const FollowupsPage: React.FC = () => {
   const [customEndDate, setCustomEndDate] = useState<string>(() => {
     return new Date().toISOString().split('T')[0];
   });
-
   const handleRoleChange = (newRole: FollowupRoleFilter) => {
     setSelectedRole(newRole);
     setSelectedPerson('All');
   };
 
   const personOptions = useMemo(() => {
-    return selectedRole === 'sales_executive' ? SALES_EXECUTIVE_USERS : IRM_USERS;
-  }, [selectedRole]);
-
-  const loadData = () => {
-    if (tenant?.slug === 'ghl') {
-      storageService.cleanupGhlPendingFollowups(tenant?.id);
+    if (selectedRole === 'sales_executive') {
+      return storageService.getAgents ? storageService.getAgents(tenant?.id) : SALES_EXECUTIVE_USERS;
     }
-    setFollowups(storageService.getFollowups(tenant?.id) || []);
+  }, [selectedRole, tenant?.id]);
+
+  const loadData = async () => {
+    try {
+      const [data, calls, leads] = await Promise.all([
+        getFollowups(tenant?.id),
+        getCalls(tenant?.id),
+        getLeads(tenant?.id),
+      ]);
+      setFollowups(data || []);
+      setCallsList(calls || []);
+      setAllLeads(leads || []);
+    } catch (err) {
+      console.error('Failed to load followups data', err);
+    }
   };
 
   useEffect(() => {
@@ -302,7 +323,7 @@ export const FollowupsPage: React.FC = () => {
     showToast('✓ Preferences confirmed by IRM and updated across modules!');
   };
 
-  const handleMoveToKyc = () => {
+  const handleMoveToKyc = async () => {
     if (!drawerFollowup) return;
 
     const leads = storageService.getLeads(tenant?.id) || [];
@@ -339,7 +360,7 @@ export const FollowupsPage: React.FC = () => {
       (drawerFollowup as any)?.investmentCapacity ||
       '₹10 Lakh to ₹1 Cr';
 
-    // 1. Create or update deal in stage 'qualified_investor'
+    // 1. Create or update deal in stage 'qualified_investor' — save to DB first, fallback to localStorage
     const allDeals = storageService.getDeals(tenant?.id) || [];
     const existingDeal = allDeals.find(d =>
       (d.customerId && d.customerId === resolvedContactId) ||
@@ -367,28 +388,51 @@ export const FollowupsPage: React.FC = () => {
       preferredAssetClass: prefAssetClass || 'CO-AIF',
       investmentRange: investmentCapacity,
     };
-    storageService.saveDeal(kycDeal);
 
-    // 2. Mark the follow-up task as completed so it does not show in the followup page
-    storageService.saveFollowup({
-      ...drawerFollowup,
-      status: 'Completed',
-      notes: `${drawerFollowup.notes ? drawerFollowup.notes + ' | ' : ''}Ready for KYC: Moved to KYC Module by IRM`,
-    });
+    // Save deal to DB (API) — this persists stage='qualified_investor' in Neon
+    try {
+      await apiSaveDeal(kycDeal);
+    } catch (err) {
+      console.warn('[FollowupsPage] API saveDeal failed, saving locally:', err);
+      storageService.saveDeal(kycDeal);
+    }
 
-    // 3. If matching lead exists, update lead status to Qualified
+    // 2. Mark the follow-up task as completed in DB so it does not show in the followup page
+    try {
+      await apiSaveFollowup({
+        ...drawerFollowup,
+        status: 'Completed',
+        notes: `${drawerFollowup.notes ? drawerFollowup.notes + ' | ' : ''}Ready for KYC: Moved to KYC Module by IRM`,
+      });
+    } catch (err) {
+      console.warn('[FollowupsPage] API saveFollowup (complete) failed:', err);
+      storageService.saveFollowup({
+        ...drawerFollowup,
+        status: 'Completed',
+        notes: `${drawerFollowup.notes ? drawerFollowup.notes + ' | ' : ''}Ready for KYC: Moved to KYC Module by IRM`,
+      });
+    }
+
+    // 3. If matching lead exists, update lead status to 'Ready for KYC' in DB
     if (matchingLead) {
-      storageService.saveLead({
+      const updatedLead = {
         ...matchingLead,
-        status: 'Qualified',
+        status: 'Qualified' as Lead['status'],
         customFields: {
           ...(matchingLead.customFields || {}),
           preferredAssetClass: prefAssetClass,
           horizon: prefHorizon,
           investmentHorizon: prefHorizon,
           irmPreferencesConfirmed: true,
+          movedToKycAt: new Date().toISOString(),
         },
-      });
+      };
+      try {
+        await apiSaveLead(updatedLead);
+      } catch (err) {
+        console.warn('[FollowupsPage] API saveLead (qualified) failed:', err);
+        storageService.saveLead(updatedLead);
+      }
     }
 
     // 4. Audit Log
@@ -414,11 +458,7 @@ export const FollowupsPage: React.FC = () => {
 
   const handleSaveReschedule = () => {
     if (rescheduleItem && newDate) {
-      storageService.saveFollowup({
-        ...rescheduleItem,
-        scheduledAt: newDate,
-        status: 'Pending',
-      });
+      apiSaveFollowup({ ...rescheduleItem, scheduledAt: newDate, status: 'Pending' }).catch(console.error);
       setRescheduleItem(null);
       setNewDate('');
     }
@@ -430,9 +470,10 @@ export const FollowupsPage: React.FC = () => {
       if (f.assignedRole.toLowerCase().includes('irm')) return 'IRM';
       return 'Sales Executive';
     }
+    const irmsList = storageService.getIrms ? storageService.getIrms(tenant?.id) : IRM_USERS;
     if (
-      IRM_USERS.some(
-        u =>
+      irmsList.some(
+        (u: any) =>
           u.name.toLowerCase() === (f.assignedAgentName || '').toLowerCase() ||
           u.id === f.assignedAgentId
       )
@@ -540,6 +581,35 @@ export const FollowupsPage: React.FC = () => {
         (f.assignedAgentId && f.assignedAgentId === user?.id) ||
         (f.assignedAgentName && f.assignedAgentName === user?.name)
     );
+  } else if (isIrm) {
+    // IRM Follow-up Required: show ALL pending followups for this tenant
+    // Matches linked lead 'Follow-up Required' status, direct assignment, or tenant match
+    const leadMap = new Map<string, Lead>();
+    allLeads.forEach(l => leadMap.set(l.id, l));
+    scopedFollowups = followups.filter(f => {
+      if (f.status !== 'Pending') return false;
+      if (f.companyId && tenant?.id && !isTenantMatch(f.companyId, tenant.id)) return false;
+      // Directly assigned to IRM agent
+      if ((f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
+          (f.assignedAgentName && f.assignedAgentName === user?.name)) {
+        return true;
+      }
+      // Linked lead has Follow-up Required status
+      if (f.contactId) {
+        const linked = leadMap.get(f.contactId);
+        if (linked && linked.status === 'Follow-up Required') return true;
+      }
+      // Phone match fallback
+      const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+      if (fPhone) {
+        const matched = allLeads.find(l => {
+          const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+          return lPhone === fPhone && l.status === 'Follow-up Required';
+        });
+        if (matched) return true;
+      }
+      return true;
+    });
   } else {
     scopedFollowups = followups;
   }
@@ -576,15 +646,13 @@ export const FollowupsPage: React.FC = () => {
     }
   }
 
-  const callsList = storageService.getCalls(tenant?.id) || [];
-
   const getCallCountForFollowup = (f: Followup): number => {
     const fPhoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-    return callsList.filter(c => {
+    return callsList.filter((c: CallRecord) => {
       if (
         f.contactId &&
         f.contactId !== 'contact-new' &&
-        (c.leadId === f.contactId || c.contactId === f.contactId)
+        (c.leadId === f.contactId || (c as any).contactId === f.contactId)
       ) {
         return true;
       }
@@ -596,16 +664,15 @@ export const FollowupsPage: React.FC = () => {
   // ── GHL cross-reference safety filter ─────────────────────────────────────
   if (isGhlSalesExec || isGhlAdmin) {
     try {
-      const allLeads = storageService.getLeads(tenant?.id) || [];
       const niJunkLeadIds = new Set<string>(
         allLeads
-          .filter(l => l.status === 'Not Interested' || l.status === 'Junk')
-          .map(l => l.id)
+          .filter((l: Lead) => l.status === 'Not Interested' || l.status === 'Junk')
+          .map((l: Lead) => l.id)
       );
       const niJunkPhones = new Set<string>(
         allLeads
-          .filter(l => l.status === 'Not Interested' || l.status === 'Junk')
-          .map(l => (l.phone || '').replace(/\D/g, '').slice(-10))
+          .filter((l: Lead) => l.status === 'Not Interested' || l.status === 'Junk')
+          .map((l: Lead) => (l.phone || '').replace(/\D/g, '').slice(-10))
           .filter(Boolean)
       );
 
@@ -685,7 +752,7 @@ export const FollowupsPage: React.FC = () => {
                 <option value="All">
                   {selectedRole === 'sales_executive' ? 'All Sales Executives' : 'All IRMs'}
                 </option>
-                {personOptions.map(p => (
+                {(personOptions || []).map((p: any) => (
                   <option key={p.id} value={p.name}>
                     {p.name}
                   </option>
@@ -943,36 +1010,42 @@ export const FollowupsPage: React.FC = () => {
           onClose={() => setDrawerFollowup(null)}
           title={drawerFollowup?.contactName || 'Contact Profile'}
           subtitle={
-            drawerFollowup?.contactPhone
+            isAdmin
+              ? `Phone: ${drawerFollowup?.contactPhone || '—'} • Assigned to: ${
+                  drawerFollowup?.assignedAgentName || 'Unassigned'
+                } (${drawerFollowupRole})`
+              : drawerFollowup?.contactPhone
               ? `Phone: ${drawerFollowup.contactPhone} • ${tenant?.name || 'GHL India'}`
               : (tenant?.name || '')
           }
           width={720}
           footer={
             drawerFollowup && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 10 }}>
-                {/* Red marked area on the left: Ready for KYC button */}
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{
-                    backgroundColor: '#7c3aed',
-                    borderColor: '#7c3aed',
-                    color: '#ffffff',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    fontWeight: 600,
-                    padding: '8px 16px',
-                  }}
-                  onClick={handleMoveToKyc}
-                  title="Move customer to KYC module and mark follow-up completed"
-                >
-                  <ShieldCheck size={16} /> Ready for KYC
-                </button>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: isExec ? 'flex-end' : 'space-between', width: '100%', gap: 10 }}>
+                {/* Ready for KYC button (Hidden for Sales Executive, available for IRM / Admins) */}
+                {!isExec && (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{
+                      backgroundColor: '#7c3aed',
+                      borderColor: '#7c3aed',
+                      color: '#ffffff',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontWeight: 600,
+                      padding: '8px 16px',
+                    }}
+                    onClick={handleMoveToKyc}
+                    title="Move customer to KYC module and mark follow-up completed"
+                  >
+                    <ShieldCheck size={16} /> Ready for KYC
+                  </button>
+                )}
 
                 {/* Right side buttons */}
-                <div style={{ display: 'flex', gap: 10 }}>
+                <div style={{ display: 'flex', gap: 10, marginLeft: isExec ? 'auto' : undefined }}>
                   <button
                     className="btn btn-secondary"
                     onClick={() => {
@@ -1262,122 +1335,124 @@ export const FollowupsPage: React.FC = () => {
                 </div>
 
                 {/* ── GHL India Ventures Custom Attributes (with Set by IRM Checkbox) ── */}
-                <div className="card lead-custom-card">
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                    <h4 className="lead-custom-title" style={{ margin: 0 }}>
-                      {tenant?.name || 'GHL India Ventures'} Custom Attributes
-                    </h4>
-                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', fontWeight: 600, color: 'var(--text-primary)' }}>
-                      <input
-                        type="checkbox"
-                        checked={isPrefConfirmed || isEditingPref}
-                        onChange={e => handleTogglePrefCheckbox(e.target.checked, matchingLead, matchingCustomer)}
-                        style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--primary-600)' }}
-                      />
-                      <span>Set by IRM</span>
-                    </label>
-                  </div>
+                {!isExec && (
+                  <div className="card lead-custom-card">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                      <h4 className="lead-custom-title" style={{ margin: 0 }}>
+                        {tenant?.name || 'GHL India Ventures'} Custom Attributes
+                      </h4>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', fontWeight: 600, color: 'var(--text-primary)' }}>
+                        <input
+                          type="checkbox"
+                          checked={isPrefConfirmed || isEditingPref}
+                          onChange={e => handleTogglePrefCheckbox(e.target.checked, matchingLead, matchingCustomer)}
+                          style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--primary-600)' }}
+                        />
+                        <span>Set by IRM</span>
+                      </label>
+                    </div>
 
-                  {isEditingPref ? (
-                    <div>
-                      <div className="lead-detail-grid" style={{ gap: 14 }}>
-                        <div>
-                          <label className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
-                            Preferred Asset Class:
-                          </label>
-                          <select
-                            className="form-select"
-                            value={prefAssetClass}
-                            onChange={e => setPrefAssetClass(e.target.value)}
-                            style={{ width: '100%', fontSize: 13, height: 36 }}
-                          >
-                            <option value="CO-AIF">CO-AIF</option>
-                            <option value="AIF">AIF</option>
-                          </select>
+                    {isEditingPref ? (
+                      <div>
+                        <div className="lead-detail-grid" style={{ gap: 14 }}>
+                          <div>
+                            <label className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                              Preferred Asset Class:
+                            </label>
+                            <select
+                              className="form-select"
+                              value={prefAssetClass}
+                              onChange={e => setPrefAssetClass(e.target.value)}
+                              style={{ width: '100%', fontSize: 13, height: 36 }}
+                            >
+                              <option value="CO-AIF">CO-AIF</option>
+                              <option value="AIF">AIF</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                              Investment Horizon:
+                            </label>
+                            <select
+                              className="form-select"
+                              value={prefHorizon}
+                              onChange={e => setPrefHorizon(e.target.value)}
+                              style={{ width: '100%', fontSize: 13, height: 36 }}
+                            >
+                              <option value="1-2 Years">1-2 Years</option>
+                              <option value="3-5 Years">3-5 Years</option>
+                              <option value="5-7 Years">5-7 Years</option>
+                              <option value="7-10 Years">7-10 Years</option>
+                              <option value="10+ Years">10+ Years</option>
+                            </select>
+                          </div>
                         </div>
-                        <div>
-                          <label className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
-                            Investment Horizon:
-                          </label>
-                          <select
-                            className="form-select"
-                            value={prefHorizon}
-                            onChange={e => setPrefHorizon(e.target.value)}
-                            style={{ width: '100%', fontSize: 13, height: 36 }}
+
+                        <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                          {isPrefConfirmed && (
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => setIsEditingPref(false)}
+                            >
+                              Cancel
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                            onClick={() => handleSavePreferences(matchingLead, matchingCustomer)}
                           >
-                            <option value="1-2 Years">1-2 Years</option>
-                            <option value="3-5 Years">3-5 Years</option>
-                            <option value="5-7 Years">5-7 Years</option>
-                            <option value="7-10 Years">7-10 Years</option>
-                            <option value="10+ Years">10+ Years</option>
-                          </select>
+                            <CheckCircle size={14} /> Confirm Preferences
+                          </button>
                         </div>
                       </div>
-
-                      <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                        {isPrefConfirmed && (
+                    ) : isPrefConfirmed ? (
+                      <div>
+                        <div className="lead-detail-grid">
+                          <div>
+                            <span className="lead-custom-label">Preferred Asset Class:</span>
+                            <div className="lead-custom-value">{prefAssetClass}</div>
+                          </div>
+                          <div>
+                            <span className="lead-custom-label">Investment Horizon:</span>
+                            <div className="lead-custom-value">{prefHorizon}</div>
+                          </div>
+                        </div>
+                        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
+                            <CheckCircle size={13} /> Confirmed by IRM — Visible in other modules
+                          </div>
                           <button
                             type="button"
                             className="btn btn-secondary btn-sm"
-                            onClick={() => setIsEditingPref(false)}
+                            style={{ fontSize: 11, padding: '3px 8px', height: 'auto' }}
+                            onClick={() => setIsEditingPref(true)}
                           >
-                            Cancel
+                            Edit
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-sm"
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                          onClick={() => handleSavePreferences(matchingLead, matchingCustomer)}
-                        >
-                          <CheckCircle size={14} /> Confirm Preferences
-                        </button>
-                      </div>
-                    </div>
-                  ) : isPrefConfirmed ? (
-                    <div>
-                      <div className="lead-detail-grid">
-                        <div>
-                          <span className="lead-custom-label">Preferred Asset Class:</span>
-                          <div className="lead-custom-value">{prefAssetClass}</div>
-                        </div>
-                        <div>
-                          <span className="lead-custom-label">Investment Horizon:</span>
-                          <div className="lead-custom-value">{prefHorizon}</div>
                         </div>
                       </div>
-                      <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
-                          <CheckCircle size={13} /> Confirmed by IRM — Visible in other modules
-                        </div>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          style={{ fontSize: 11, padding: '3px 8px', height: 'auto' }}
-                          onClick={() => setIsEditingPref(true)}
-                        >
-                          Edit
-                        </button>
+                    ) : (
+                      <div style={{ padding: '12px 14px', background: 'var(--bg-surface)', borderRadius: 6, fontSize: 12, color: 'var(--text-muted)' }}>
+                        Preferred Asset Class and Investment Horizon have not been set by IRM yet. Check <strong>"Set by IRM"</strong> above to configure and confirm them.
                       </div>
-                    </div>
-                  ) : (
-                    <div style={{ padding: '12px 14px', background: 'var(--bg-surface)', borderRadius: 6, fontSize: 12, color: 'var(--text-muted)' }}>
-                      Preferred Asset Class and Investment Horizon have not been set by IRM yet. Check <strong>"Set by IRM"</strong> above to configure and confirm them.
-                    </div>
-                  )}
+                    )}
 
-                  {/* Any other custom attributes from intake */}
-                  {customFieldRows.length > 0 && (
-                    <div className="lead-detail-grid" style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-base)' }}>
-                      {customFieldRows.map(item => (
-                        <div key={item!.id}>
-                          <span className="lead-custom-label">{item!.label}:</span>
-                          <div className="lead-custom-value">{item!.value}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                    {/* Any other custom attributes from intake */}
+                    {customFieldRows.length > 0 && (
+                      <div className="lead-detail-grid" style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-base)' }}>
+                        {customFieldRows.map(item => (
+                          <div key={item!.id}>
+                            <span className="lead-custom-label">{item!.label}:</span>
+                            <div className="lead-custom-value">{item!.value}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* ── Message from User ── */}
                 <div className="card lead-custom-card">

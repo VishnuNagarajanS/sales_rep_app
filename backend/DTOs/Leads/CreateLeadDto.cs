@@ -8,6 +8,7 @@ public class CreateLeadDto
     public string? Email { get; set; }
     public string? Location { get; set; }
     public string? Source { get; set; } = "Website Inbound";
+    public string? Status { get; set; } = "New";
     public string? Priority { get; set; } = "Medium";
     public string? Notes { get; set; }
 

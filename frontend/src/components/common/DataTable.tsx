@@ -44,6 +44,7 @@ interface DataTableProps<T> {
   pageSize?: number;
   bulkActions?: { label: string; onClick: (selectedItems: T[]) => void; danger?: boolean }[];
   filtersNode?: React.ReactNode;
+  hideSearch?: boolean; // when true, don't render the built-in search box
 }
 
 export function DataTable<T>({
@@ -61,6 +62,7 @@ export function DataTable<T>({
   pageSize = 10,
   bulkActions,
   filtersNode,
+  hideSearch = false,
 }: DataTableProps<T>) {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortKey, setSortKey] = useState<string | null>(null);
@@ -195,31 +197,33 @@ export function DataTable<T>({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 260 }}>
-          <div
-            style={{
-              position: 'relative',
-              width: '100%',
-              maxWidth: 360,
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            <Search
-              size={16}
-              style={{ position: 'absolute', left: 12, color: 'var(--text-muted)' }}
-            />
-            <input
-              type="text"
-              className="form-input"
-              style={{ paddingLeft: 36, height: 38 }}
-              placeholder={searchPlaceholder}
-              value={searchQuery}
-              onChange={e => {
-                setSearchQuery(e.target.value);
-                setCurrentPage(1);
+          {!hideSearch && (
+            <div
+              style={{
+                position: 'relative',
+                width: '100%',
+                maxWidth: 360,
+                display: 'flex',
+                alignItems: 'center',
               }}
-            />
-          </div>
+            >
+              <Search
+                size={16}
+                style={{ position: 'absolute', left: 12, color: 'var(--text-muted)' }}
+              />
+              <input
+                type="text"
+                className="form-input"
+                style={{ paddingLeft: 36, height: 38 }}
+                placeholder={searchPlaceholder}
+                value={searchQuery}
+                onChange={e => {
+                  setSearchQuery(e.target.value);
+                  setCurrentPage(1);
+                }}
+              />
+            </div>
+          )}
           {filtersNode && (
             <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
               {filtersNode}
@@ -268,17 +272,18 @@ export function DataTable<T>({
           onAction={onEmptyAction}
         />
       ) : (
-        <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1, minHeight: 0 }}>
+        <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1, minHeight: 0, backgroundColor: 'var(--bg-surface)' }}>
           <table
             style={{
               width: '100%',
+              minWidth: '100%',
               borderCollapse: 'collapse',
               textAlign: 'left',
               fontSize: 13,
               tableLayout: 'fixed',
             }}
           >
-            <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 10, backgroundColor: 'var(--bg-surface-hover)' }}>
               <tr
                 style={{
                   borderBottom: '1px solid var(--border-base)',
@@ -314,53 +319,60 @@ export function DataTable<T>({
                     />
                   </th>
                 )}
-                {columns.map(col => (
-                  <th
-                    key={col.key}
-                    style={{
-                      padding: '12px 16px',
-                      width: col.width,
-                      textAlign: col.align || 'left',
-                      cursor: col.sortable ? 'pointer' : 'default',
-                      userSelect: 'none',
-                      position: 'sticky',
-                      top: 0,
-                      background: 'var(--bg-surface-hover)',
-                      boxShadow: 'inset 0 -1px 0 var(--border-base)',
-                      zIndex: 10,
-                    }}
-                    onClick={() => col.sortable && handleSort(col.key)}
-                  >
-                    <div
+                {columns.map(col => {
+                  const isActionsCol =
+                    (!rowActions || rowActions.length === 0) &&
+                    (col.key === 'actions' || col.key === 'action');
+
+                  return (
+                    <th
+                      key={col.key}
                       style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        justifyContent:
-                          col.align === 'right'
-                            ? 'flex-end'
-                            : col.align === 'center'
-                              ? 'center'
-                              : 'flex-start',
+                        padding: '12px 16px',
+                        width: col.width,
+                        textAlign: col.align || 'left',
+                        cursor: col.sortable ? 'pointer' : 'default',
+                        userSelect: 'none',
+                        position: 'sticky',
+                        top: 0,
+                        right: isActionsCol ? 0 : undefined,
+                        background: 'var(--bg-surface-hover)',
+                        boxShadow: 'inset 0 -1px 0 var(--border-base)',
+                        zIndex: isActionsCol ? 12 : 10,
                       }}
+                      onClick={() => col.sortable && handleSort(col.key)}
                     >
-                      {col.header}
-                      {col.sortable && (
-                        <span style={{ color: 'var(--text-muted)' }}>
-                          {sortKey === col.key ? (
-                            sortOrder === 'asc' ? (
-                              <ChevronUp size={14} color="var(--primary-600)" />
+                      <div
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          justifyContent:
+                            col.align === 'right'
+                              ? 'flex-end'
+                              : col.align === 'center'
+                                ? 'center'
+                                : 'flex-start',
+                        }}
+                      >
+                        {col.header}
+                        {col.sortable && (
+                          <span style={{ color: 'var(--text-muted)' }}>
+                            {sortKey === col.key ? (
+                              sortOrder === 'asc' ? (
+                                <ChevronUp size={14} color="var(--primary-600)" />
+                              ) : (
+                                <ChevronDown size={14} color="var(--primary-600)" />
+                              )
                             ) : (
-                              <ChevronDown size={14} color="var(--primary-600)" />
-                            )
-                          ) : (
-                            <ChevronDown size={14} style={{ opacity: 0.4 }} />
-                          )}
-                        </span>
-                      )}
-                    </div>
-                  </th>
-                ))}
+                              <ChevronDown size={14} style={{ opacity: 0.4 }} />
+                            )}
+                          </span>
+                        )}
+                      </div>
+                    </th>
+                  );
+                })}
                 {rowActions && rowActions.length > 0 && (
                   <th
                     style={{
@@ -399,10 +411,18 @@ export function DataTable<T>({
                       transition: 'background-color var(--transition-fast)',
                     }}
                     onMouseEnter={e => {
-                      if (!isSelected) e.currentTarget.style.backgroundColor = 'var(--bg-surface-hover)';
+                      if (!isSelected) {
+                        e.currentTarget.style.backgroundColor = 'var(--bg-surface-hover)';
+                        const stickyCell = e.currentTarget.querySelector('td[data-sticky-action="true"]');
+                        if (stickyCell) (stickyCell as HTMLElement).style.background = 'var(--bg-surface-hover)';
+                      }
                     }}
                     onMouseLeave={e => {
-                      if (!isSelected) e.currentTarget.style.backgroundColor = 'var(--bg-surface)';
+                      if (!isSelected) {
+                        e.currentTarget.style.backgroundColor = 'var(--bg-surface)';
+                        const stickyCell = e.currentTarget.querySelector('td[data-sticky-action="true"]');
+                        if (stickyCell) (stickyCell as HTMLElement).style.background = 'var(--bg-surface)';
+                      }
                     }}
                   >
                     {bulkActions && (
@@ -418,21 +438,34 @@ export function DataTable<T>({
                         />
                       </td>
                     )}
-                    {columns.map(col => (
-                      <td
-                        key={col.key}
-                        style={{
-                          padding: '14px 16px',
-                          textAlign: col.align || 'left',
-                          verticalAlign: 'middle',
-                          color: 'var(--text-primary)',
-                          wordBreak: 'break-word',
-                          whiteSpace: 'normal',
-                        }}
-                      >
-                        {col.render ? col.render(item) : (item as any)[col.key]}
-                      </td>
-                    ))}
+                    {columns.map(col => {
+                      const isActionsCol =
+                        (!rowActions || rowActions.length === 0) &&
+                        (col.key === 'actions' || col.key === 'action');
+
+                      return (
+                        <td
+                          key={col.key}
+                          data-sticky-action={isActionsCol ? 'true' : undefined}
+                          style={{
+                            padding: '14px 16px',
+                            textAlign: col.align || 'left',
+                            verticalAlign: 'middle',
+                            color: 'var(--text-primary)',
+                            wordBreak: 'break-word',
+                            whiteSpace: 'normal',
+                            position: isActionsCol ? 'sticky' : undefined,
+                            right: isActionsCol ? 0 : undefined,
+                            background: isActionsCol
+                              ? (isSelected ? 'rgba(59, 130, 246, 0.04)' : 'var(--bg-surface)')
+                              : undefined,
+                            zIndex: isActionsCol ? 1 : undefined,
+                          }}
+                        >
+                          {col.render ? col.render(item) : (item as any)[col.key]}
+                        </td>
+                      );
+                    })}
                     {rowActions && rowActions.length > 0 && (
                       <td
                         style={{

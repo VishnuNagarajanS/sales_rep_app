@@ -158,7 +158,7 @@ public class CustomerService : ICustomerService
                 ContactPhone = f.ContactPhone,
                 ScheduledAt = f.ScheduledAt,
                 Priority = f.Priority,
-                Status = f.Status,
+                Status = f.Status.ToString(),
                 Notes = f.Notes,
                 CompletedAt = f.CompletedAt,
                 CreatedAt = f.CreatedAt,

@@ -37,6 +37,11 @@ public static class ServiceExtensions
         services.AddScoped<IAdminUserService, AdminUserService>();
         services.AddScoped<ILeadService, LeadService>();
         services.AddScoped<backend.Services.Email.IEmailService, backend.Services.Email.SmtpEmailService>();
+        services.AddScoped<IOtpService, OtpService>();
+        services.AddScoped<IInvestorService, InvestorService>();
+        services.AddScoped<IIrmDashboardService, IrmDashboardService>();
+
+        services.AddDev1Services();
 
         // 5. Validators
         services.AddValidatorsFromAssemblyContaining<LoginRequestValidator>();
