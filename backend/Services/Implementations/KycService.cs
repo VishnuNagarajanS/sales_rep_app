@@ -226,6 +226,11 @@ public class KycService : IKycService
         {
             kyc.Status = KycStatus.PendingReview;
             kyc.SubmittedAt = DateTime.UtcNow;
+            kyc.VerifiedBy = null;
+            kyc.VerifiedAt = null;
+            kyc.Remarks = null;
+            kyc.ReviewRemarks = null;
+            kyc.FlaggedSectionsJson = null;
         }
 
         if (kyc.Id == 0)
@@ -335,6 +340,10 @@ public class KycService : IKycService
         SignatureUrl = k.SignatureUrl,
         ReviewRemarks = k.ReviewRemarks,
         ReviewedAt = k.ReviewedAt,
+        VerifiedBy = k.VerifiedBy,
+        VerifiedAt = k.VerifiedAt,
+        Remarks = k.Remarks,
+        FlaggedSections = k.FlaggedSectionsJson,
         KycLinkSent = k.KycLinkSent,
         CreatedAt = k.CreatedAt,
         UpdatedAt = k.UpdatedAt

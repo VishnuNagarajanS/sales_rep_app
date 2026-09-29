@@ -69,4 +69,12 @@ public class GhlDeal
 
     /// <summary>KYC pipeline status: Pending | Partially Completed | Completed.</summary>
     public string? KycStatus { get; set; }
+
+    /// <summary>Linked InvestorKyc record ID</summary>
+    public int? KycId { get; set; }
+
+    public string? VerifiedBy { get; set; }
+    public DateTime? VerifiedAt { get; set; }
+    public string? Remarks { get; set; }
+    public string? FlaggedSections { get; set; }
 }

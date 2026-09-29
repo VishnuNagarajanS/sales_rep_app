@@ -134,7 +134,7 @@ export const AssignedLeadsPage: React.FC = () => {
         try {
           allLeads = await getLeads(tenant?.id);
         } catch {
-          allLeads = storageService.getLeads(tenant?.id);
+          allLeads = [];
         }
       }
 
@@ -171,9 +171,18 @@ export const AssignedLeadsPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
+    let timeoutId: any;
+    const handleUpdate = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        loadData();
+      }, 300);
+    };
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+    return () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
+    };
   }, [tenant?.id]);
 
   const handleOpenEdit = (lead: Lead) => {

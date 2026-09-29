@@ -1,4 +1,5 @@
 using System.Text.Json;
+using backend.Helpers;
 using backend.Authentication.Interfaces;
 using backend.Data;
 using backend.DTOs.Common;
@@ -168,9 +169,18 @@ public class LeadService : ILeadService
 
         // Build Custom Fields Dictionary for GHL
         var customFields = dto.AdditionalCustomFields ?? new Dictionary<string, string>();
-        if (!string.IsNullOrWhiteSpace(dto.InvestmentCapacity)) customFields["investmentCapacity"] = dto.InvestmentCapacity;
-        if (!string.IsNullOrWhiteSpace(dto.AssetClass)) customFields["assetClass"] = dto.AssetClass;
-        if (!string.IsNullOrWhiteSpace(dto.PreferredAssetClass)) customFields["preferredAssetClass"] = dto.PreferredAssetClass;
+        
+        var cap = OptionalFieldNormalizer.Normalize(dto.InvestmentCapacity);
+        if (cap != null) customFields["investmentCapacity"] = cap;
+
+        var rawAsset = dto.AssetClass ?? dto.PreferredAssetClass;
+        var rawPref = dto.PreferredAssetClass ?? dto.AssetClass;
+        var normAsset = OptionalFieldNormalizer.Normalize(rawAsset);
+        var normPref = OptionalFieldNormalizer.Normalize(rawPref);
+        
+        if (normAsset != null) customFields["assetClass"] = normAsset;
+        if (normPref != null) customFields["preferredAssetClass"] = normPref;
+
         if (!string.IsNullOrWhiteSpace(dto.Horizon)) customFields["horizon"] = dto.Horizon;
 
         var lead = new Lead
@@ -217,9 +227,25 @@ public class LeadService : ILeadService
 
         // Merge custom fields
         var customFields = DeserializeCustomFields(lead.CustomFieldsJson);
-        if (dto.InvestmentCapacity != null) customFields["investmentCapacity"] = dto.InvestmentCapacity;
-        if (dto.AssetClass != null) customFields["assetClass"] = dto.AssetClass;
-        if (dto.PreferredAssetClass != null) customFields["preferredAssetClass"] = dto.PreferredAssetClass;
+        
+        if (dto.InvestmentCapacity != null)
+        {
+            var cap = OptionalFieldNormalizer.Normalize(dto.InvestmentCapacity);
+            if (cap == null) customFields.Remove("investmentCapacity");
+            else customFields["investmentCapacity"] = cap;
+        }
+        
+        if (dto.AssetClass != null || dto.PreferredAssetClass != null)
+        {
+            var rawAsset = dto.AssetClass ?? dto.PreferredAssetClass;
+            var rawPref = dto.PreferredAssetClass ?? dto.AssetClass;
+            var normAsset = OptionalFieldNormalizer.Normalize(rawAsset);
+            var normPref = OptionalFieldNormalizer.Normalize(rawPref);
+            
+            if (normAsset == null) customFields.Remove("assetClass"); else customFields["assetClass"] = normAsset;
+            if (normPref == null) customFields.Remove("preferredAssetClass"); else customFields["preferredAssetClass"] = normPref;
+        }
+        
         if (dto.Horizon != null) customFields["horizon"] = dto.Horizon;
         if (dto.DispositionReason != null) customFields["dispositionReason"] = dto.DispositionReason;
         if (dto.AdditionalCustomFields != null)

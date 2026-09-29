@@ -1,4 +1,5 @@
 using backend.Authentication.Interfaces;
+using backend.Helpers;
 using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.GhlInvestors;
@@ -121,8 +122,8 @@ public class GhlInvestorsController : ControllerBase
             Phone = dto.Phone.Trim(),
             Email = dto.Email?.Trim() ?? string.Empty,
             Status = string.IsNullOrWhiteSpace(dto.Status) ? "Lead" : dto.Status.Trim(),
-            InvestmentCapacity = dto.InvestmentCapacity.Trim(),
-            PreferredAssetClass = dto.PreferredAssetClass.Trim(),
+            InvestmentCapacity = OptionalFieldNormalizer.Normalize(dto.InvestmentCapacity) ?? string.Empty,
+            PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass) ?? string.Empty,
             ReferralSource = dto.ReferralSource?.Trim(),
             CommittedAUM = dto.CommittedAUM?.Trim(),
             InvestmentMandate = dto.InvestmentMandate?.Trim(),
@@ -155,8 +156,8 @@ public class GhlInvestorsController : ControllerBase
         if (dto.Phone != null) investor.Phone = dto.Phone.Trim();
         if (dto.Email != null) investor.Email = dto.Email.Trim();
         if (dto.Status != null) investor.Status = dto.Status.Trim();
-        if (dto.InvestmentCapacity != null) investor.InvestmentCapacity = dto.InvestmentCapacity.Trim();
-        if (dto.PreferredAssetClass != null) investor.PreferredAssetClass = dto.PreferredAssetClass.Trim();
+        if (dto.InvestmentCapacity != null) investor.InvestmentCapacity = OptionalFieldNormalizer.Normalize(dto.InvestmentCapacity) ?? string.Empty;
+        if (dto.PreferredAssetClass != null) investor.PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass) ?? string.Empty;
         if (dto.ReferralSource != null) investor.ReferralSource = dto.ReferralSource.Trim();
         if (dto.CommittedAUM != null) investor.CommittedAUM = dto.CommittedAUM.Trim();
         if (dto.InvestmentMandate != null) investor.InvestmentMandate = dto.InvestmentMandate.Trim();

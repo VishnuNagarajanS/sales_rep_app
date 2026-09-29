@@ -25,9 +25,13 @@ import {
   Send,
 } from 'lucide-react';
 import { SendKycLinkModal } from './components/SendKycLinkModal';
-import { KycStatusBadge, getMockCustomerKycStatus } from './components/KycStatusBadge';
+import { KycStatusBadge } from './components/KycStatusBadge';
+import { KycStatusDropdown } from './components/KycStatusDropdown';
+import { getCustomerKycStatus, normalizeLegacyKycStatus, KycChecklist } from '../../services/kycService';
 import { KycRowActionsMenu } from './components/KycRowActionsMenu';
 import { KycReviewDrawer } from './components/KycReviewDrawer';
+import { KycVerifyModal } from './components/KycVerifyModal';
+import { PERMISSIONS } from '../../constants/permissions';
 import { Deal, DealActivity, DocumentItem, Lead, Customer } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
@@ -38,6 +42,7 @@ import {
   addDealActivity as apiAddDealActivity,
   getLeads,
   getCustomers,
+  persistDeal,
 } from '../../services/ghlApiService';
 import { isMockMode } from '../../config/environment';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
@@ -250,6 +255,8 @@ const KYCUploadCard: React.FC<KYCUploadProps> = ({
       )}
 
       {error && <div className="kyc-field-error">{error}</div>}
+      
+
     </div>
   );
 };
@@ -258,9 +265,12 @@ const KYCUploadCard: React.FC<KYCUploadProps> = ({
 // GHL INDIA VENTURES -> IRM KYC EXPERIENCE
 // ==============================================================================
 const GhlIrmKycView: React.FC = () => {
-  const { tenant, user } = useAuth();
+  const { tenant, user, permissions = [] } = useAuth();
   const { initiateCall } = useCall();
 
+  const reqId = useRef(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -278,6 +288,7 @@ const GhlIrmKycView: React.FC = () => {
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
   const [selectedCustomerDeal, setSelectedCustomerDeal] = useState<Deal | null>(null);
   const [profileKycData, setProfileKycData] = useState<Partial<KYCFormData> | null>(null);
+  const [verifyModalDeal, setVerifyModalDeal] = useState<Deal | null>(null);
 
   // Quick Section Edit State (Personal Details / Address & Identity)
   const [editingSection, setEditingSection] = useState<'personal' | 'address' | null>(null);
@@ -308,7 +319,9 @@ const GhlIrmKycView: React.FC = () => {
   };
 
   const loadData = async () => {
+    const my = ++reqId.current;
     if (isMockMode()) {
+      setIsLoading(true);
       const allDeals = storageService.getDeals(tenant?.id) || [];
       const localLeads = storageService.getLeads(tenant?.id) || [];
       const localCustomers = storageService.getCustomers(tenant?.id) || [];
@@ -316,33 +329,36 @@ const GhlIrmKycView: React.FC = () => {
       setDeals(enriched.filter(d => d.stage === 'qualified_investor'));
       setLeads(localLeads);
       setCustomers(localCustomers);
+      setIsLoading(false);
+      setLoadError(false);
     } else {
+      setIsLoading(true);
+      setLoadError(false);
       try {
         const [allDeals, apiLeads, apiCustomers] = await Promise.all([
           getDeals(tenant?.id),
           getLeads(tenant?.id),
           getCustomers(tenant?.id),
         ]);
+        if (my !== reqId.current) return;
         const leadsList = apiLeads || [];
         const customersList = apiCustomers || [];
         const enriched = (allDeals || []).map(d => enrichDealWithContact(d, leadsList, customersList));
         setDeals(enriched.filter(d => d.stage === 'qualified_investor'));
         setLeads(leadsList);
         setCustomers(customersList);
+        setIsLoading(false);
       } catch {
-        const allDeals = storageService.getDeals(tenant?.id) || [];
-        const localLeads = storageService.getLeads(tenant?.id) || [];
-        const localCustomers = storageService.getCustomers(tenant?.id) || [];
-        const enriched = allDeals.map(d => enrichDealWithContact(d, localLeads, localCustomers));
-        setDeals(enriched.filter(d => d.stage === 'qualified_investor'));
-        setLeads(localLeads);
-        setCustomers(localCustomers);
+        if (my !== reqId.current) return;
+        setLoadError(true);
+        setIsLoading(false);
       }
     }
 
     fetch('/api/irm/kyc/all')
       .then(res => (res.ok ? res.json() : null))
       .then(json => {
+        if (my !== reqId.current) return;
         if (json?.success && Array.isArray(json.data)) {
           const map: Record<string, any> = {};
           json.data.forEach((k: any) => {
@@ -351,7 +367,9 @@ const GhlIrmKycView: React.FC = () => {
           setDbKycs(map);
         }
       })
-      .catch(() => { });
+      .catch(() => { 
+        if (my !== reqId.current) return;
+      });
   };
 
   const getResolvedLocation = (deal: Deal) => {
@@ -432,70 +450,26 @@ const GhlIrmKycView: React.FC = () => {
   };
 
   const getDynamicKycStatus = (deal: Deal): 'completed' | 'continue' | 'pending' => {
-    // 1. Check persistent DB status first
-    if (deal.kycStatus === 'Completed') return 'completed';
-    if (deal.kycStatus === 'Partially Completed') return 'continue';
-    if (deal.kycStatus === 'Pending') return 'pending';
-
-    const emailKey = (deal.email || '').toLowerCase();
-    const dbKyc = dbKycs[emailKey];
-    if (dbKyc) {
-      if (dbKyc.status === 'Verified' || dbKyc.status === '2' || dbKyc.status === 'Approved') {
-        return 'completed';
-      }
-      if (dbKyc.status === 'PendingReview' || dbKyc.status === '1') {
-        return 'completed';
-      }
-      if (dbKyc.panNumber || dbKyc.aadhaarNumber) {
-        return 'continue';
-      }
-    }
-
-    const status = localStorage.getItem(`nexus_kyc_status_${deal.id}`);
-    if (status === 'Completed' || status === 'Submitted for Review' || status === 'SEBI KYC Validated') {
-      return 'completed';
-    }
-    if (status === 'Partially Completed') {
-      return 'continue';
-    }
-
-    const savedDataStr = localStorage.getItem(`nexus_kyc_data_${deal.id}`);
-    if (savedDataStr) {
-      try {
-        const data = JSON.parse(savedDataStr);
-        const isAllFilled =
-          Boolean(data.investorName?.trim()) &&
-          Boolean(data.panNumber?.trim()) &&
-          Boolean(data.bankAccountNumber?.trim()) &&
-          Boolean(data.bankIfsc?.trim()) &&
-          (Boolean(data.dematDoc) || data.hasNoDemat) &&
-          Boolean(data.nominees && data.nominees.length > 0 && data.nominees[0]?.name?.trim());
-
-        if (isAllFilled) return 'completed';
-
-        const isPartiallyFilled =
-          Boolean(data.panNumber?.trim()) ||
-          Boolean(data.aadhaarNumber?.trim()) ||
-          Boolean(data.bankAccountNumber?.trim()) ||
-          Boolean(data.aadhaarDoc) ||
-          Boolean(data.panDoc);
-
-        if (isPartiallyFilled) return 'continue';
-      } catch { }
-    }
-
-    if ((deal as any).kycValidated === true) {
-      return 'completed';
-    }
-
+    // Only manual IRM action setting deal.kycStatus === 'Verified' (or legacy Completed with recorded verifiedBy) counts as completed
+    const normalized = normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy);
+    if (normalized === 'Verified') return 'completed';
     return 'pending';
   };
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
+    let timeoutId: any;
+    const handleUpdate = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        loadData();
+      }, 300);
+    };
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+    return () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
+    };
   }, [tenant?.id]);
 
   const showToast = (msg: string) => {
@@ -728,7 +702,7 @@ const GhlIrmKycView: React.FC = () => {
     }
 
     if (dealChanged) {
-      storageService.saveDeal(updatedDeal);
+      persistDeal(updatedDeal).catch(e => showToast("Error saving deal:"));
       setSelectedCustomerDeal(updatedDeal);
       loadData();
     }
@@ -756,6 +730,87 @@ const GhlIrmKycView: React.FC = () => {
   };
 
   // Advance deal to opportunity — saves to DB
+  
+  const handleStatusChange = async (
+    deal: Deal,
+    newStatus: 'Pending' | 'Wrong' | 'Verified',
+    comment?: string,
+    flaggedSections?: string[],
+    checklist?: KycChecklist
+  ) => {
+    const newCustStatus =
+      newStatus === 'Verified' ? 'Verified' : newStatus === 'Wrong' ? 'Needs Correction' : 'Submitted';
+    const verifiedBy = newStatus === 'Verified' ? (user?.email || 'irm@ghl.com') : undefined;
+    const verifiedAt = newStatus === 'Verified' ? new Date().toISOString() : undefined;
+
+    // Resolve KYC record ID from the deal's own kycId / kycRecordId or matching dbKycs
+    const emailKey = (deal.email || '').toLowerCase();
+    const resolvedKycId =
+      (deal as any).kycId ||
+      (deal as any).kycRecordId ||
+      dbKycs[emailKey]?.id ||
+      deal.customerId ||
+      deal.id;
+
+    if (isMockMode()) {
+      try {
+        const raw = localStorage.getItem('nexus_mock_kyc_records');
+        const records = raw ? JSON.parse(raw) : {};
+        records[deal.id] = {
+          status: newCustStatus,
+          kycStatus: newStatus,
+          verifiedBy,
+          verifiedAt,
+          remarks: comment,
+          flaggedSections,
+        };
+        localStorage.setItem('nexus_mock_kyc_records', JSON.stringify(records));
+      } catch (e) {
+        console.error('Failed to update mock KYC record:', e);
+      }
+    } else {
+      const token =
+        sessionStorage.getItem('nexus_auth_token') ||
+        localStorage.getItem('nexus_auth_token') ||
+        localStorage.getItem('token') ||
+        '';
+
+      const res = await fetch(`/api/irm/kyc/${resolvedKycId}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          status: newStatus,
+          comment,
+          flaggedSections,
+          checklist,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || `Server returned ${res.status}: Failed to update KYC status`);
+      }
+    }
+
+    const updatedDeal: Deal = {
+      ...deal,
+      kycStatus: newStatus,
+      verifiedBy,
+      verifiedAt,
+      remarks: comment,
+      flaggedSections,
+      customerKycStatus: newCustStatus,
+    };
+
+    setDeals(prev => prev.map(d => (d.id === deal.id ? updatedDeal : d)));
+    await persistDeal(updatedDeal);
+    showToast(`KYC Status updated to ${newStatus}`);
+    loadData();
+  };
+
   const handleAdvanceStage = async (deal: Deal) => {
     const updatedDeal: Deal = {
       ...deal,
@@ -765,10 +820,10 @@ const GhlIrmKycView: React.FC = () => {
 
     // Save updated deal stage to DB
     try {
-      await apiSaveDeal(updatedDeal);
+      await persistDeal(updatedDeal);
     } catch (err) {
-      console.warn('[KYCPage] API saveDeal (advance stage) failed, saving locally:', err);
-      storageService.saveDeal(updatedDeal);
+      console.warn('[KYCPage] API saveDeal (advance stage) failed:', err);
+      showToast("Error updating deal stage");
     }
 
     const activity: DealActivity = {
@@ -1101,7 +1156,7 @@ const GhlIrmKycView: React.FC = () => {
         ...selectedDeal,
         notes: selectedDeal.notes ? `${selectedDeal.notes} | KYC Submitted` : 'KYC Submitted for Review',
       };
-      storageService.saveDeal(updatedDeal);
+      persistDeal(updatedDeal).catch(e => showToast("Error saving deal:"));
     }
 
     loadData();
@@ -1253,66 +1308,20 @@ const GhlIrmKycView: React.FC = () => {
     {
       key: 'kycStatus',
       header: 'KYC Status',
-      width: '140px',
+      width: '160px',
       render: deal => {
-        const status = getDynamicKycStatus(deal);
-        if (status === 'completed') {
-          return (
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '4px 10px',
-                borderRadius: 12,
-                fontSize: 11,
-                fontWeight: 700,
-                background: 'rgba(16, 185, 129, 0.15)',
-                color: '#10b981',
-                border: '1px solid rgba(16, 185, 129, 0.3)',
-              }}
-            >
-              <CheckCircle size={12} /> Completed
-            </span>
-          );
-        }
-        if (status === 'continue') {
-          return (
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '4px 10px',
-                borderRadius: 12,
-                fontSize: 11,
-                fontWeight: 700,
-                background: 'rgba(245, 158, 11, 0.15)',
-                color: '#f59e0b',
-                border: '1px solid rgba(245, 158, 11, 0.3)',
-              }}
-            >
-              <Clock size={12} /> Partially Completed
-            </span>
-          );
-        }
+        const custStatus =
+          (deal as any).customerKycStatus ||
+          getCustomerKycStatus(deal.id, (deal as any).customerKycStatus);
         return (
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '4px 10px',
-              borderRadius: 12,
-              fontSize: 11,
-              fontWeight: 700,
-              background: 'rgba(148, 163, 184, 0.12)',
-              color: '#94a3b8',
-              border: '1px solid rgba(148, 163, 184, 0.25)',
-            }}
-          >
-            <AlertCircle size={12} /> Pending
-          </span>
+          <KycStatusDropdown
+            deal={deal}
+            customerKycStatus={custStatus}
+            onChange={(status, comment, flaggedSections, checklist) =>
+              handleStatusChange(deal, status, comment, flaggedSections, checklist)
+            }
+            onShowToast={(msg) => showToast(msg)}
+          />
         );
       },
     },
@@ -1322,7 +1331,7 @@ const GhlIrmKycView: React.FC = () => {
       width: '140px',
       render: deal => {
         // TODO(logic): Connect to live backend customer KYC link status
-        const custStatus = getMockCustomerKycStatus(deal.id, getDynamicKycStatus(deal));
+        const custStatus = getCustomerKycStatus(deal.id, (deal as any).customerKycStatus);
         return <KycStatusBadge status={custStatus} />;
       },
     },
@@ -1380,7 +1389,7 @@ const GhlIrmKycView: React.FC = () => {
             onEditKyc={d => startKycFlow(d)}
             onCallInvestor={d => initiateCall(d.customerName, d.phone || '', 'customer', d.id)}
             // Only show "Advance to Opportunity" after KYC is fully completed
-            onAdvanceStage={kycStatus === 'completed' ? d => handleAdvanceStage(d) : undefined}
+            onAdvanceStage={normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Verified' ? d => handleAdvanceStage(d) : undefined}
           />
         );
       },
@@ -1490,34 +1499,34 @@ const GhlIrmKycView: React.FC = () => {
                 <div className="kyc-profile-sidebar-name">{deal.customerName}</div>
                 <div className="kyc-profile-sidebar-email">{data.email || deal.email || '—'}</div>
 
-                {/* Status Pill */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 12 }}>
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      padding: '4px 14px',
-                      borderRadius: 16,
-                      fontSize: 11.5,
-                      fontWeight: 700,
-                      background: isCompleted ? 'rgba(16, 185, 129, 0.15)' : '#FEF3C7',
-                      color: isCompleted ? '#10b981' : '#B45309',
-                      border: isCompleted ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid #FDE68A',
-                      cursor: 'pointer',
-                    }}
-                    onClick={() => startKycFlow(deal)}
-                  >
-                    <span style={{ fontSize: 9 }}>●</span>
-                    {isCompleted ? 'KYC completed' : isContinue ? 'KYC in progress' : 'KYC pending'}
-                  </span>
-                  <span
-                    style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 5, cursor: 'pointer' }}
-                    onClick={() => startKycFlow(deal)}
-                  >
-                    Tap to complete your KYC
-                  </span>
-                </div>
+                {/* Status Pill — display only, based on normalized kycStatus */}
+                {(() => {
+                  const normalizedStatus = normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy);
+                  const pillStyle: React.CSSProperties = normalizedStatus === 'Verified'
+                    ? { background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }
+                    : normalizedStatus === 'Wrong'
+                      ? { background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.25)' }
+                      : { background: '#FEF3C7', color: '#B45309', border: '1px solid #FDE68A' };
+                  const pillLabel = normalizedStatus === 'Verified'
+                    ? 'KYC verified'
+                    : normalizedStatus === 'Wrong'
+                      ? 'KYC wrong'
+                      : 'KYC pending';
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 12 }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 14px', borderRadius: 16, fontSize: 11.5, fontWeight: 700, ...pillStyle }}>
+                        <span style={{ fontSize: 9 }}>●</span>
+                        {pillLabel}
+                      </span>
+                      {normalizedStatus === 'Verified' && (deal.verifiedBy || deal.verifiedAt) && (
+                        <span style={{ fontSize: 11, color: '#059669', marginTop: 5, fontWeight: 600, textAlign: 'center' }}>
+                          Verified by {deal.verifiedBy ? deal.verifiedBy.split('@')[0] : 'IRM'}
+                          {deal.verifiedAt ? ' on ' + new Date(deal.verifiedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Meta Details Table */}
                 <div className="kyc-profile-meta-table">
@@ -1539,14 +1548,40 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Complete KYC Action Button */}
-                <button
-                  type="button"
-                  className="btn-complete-kyc"
-                  onClick={() => startKycFlow(deal)}
-                >
-                  <FileText size={14} /> {isCompleted ? 'Edit KYC' : isContinue ? 'Continue KYC' : 'Complete KYC'}
-                </button>
+                {/* Verify KYC Button */}
+                {(() => {
+                  const normalizedStatus = normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy);
+                  const custStatus = deal.customerKycStatus || '';
+                  const customerSubmitted =
+                    custStatus === 'Submitted' ||
+                    custStatus === 'Under Verification' ||
+                    custStatus === 'Verified';
+                  const canVerify = permissions.includes(PERMISSIONS.KYC_VERIFY);
+                  const isBtnDisabled = !canVerify || !customerSubmitted;
+                  const tooltipText = !canVerify
+                    ? 'You do not have permission to verify KYC'
+                    : !customerSubmitted
+                      ? 'Customer has not submitted KYC yet'
+                      : undefined;
+                  return (
+                    <button
+                      type="button"
+                      className="btn-complete-kyc"
+                      disabled={isBtnDisabled}
+                      title={tooltipText}
+                      style={{
+                        backgroundColor: normalizedStatus === 'Verified' ? '#059669' : '#2563eb',
+                        borderColor: normalizedStatus === 'Verified' ? '#059669' : '#2563eb',
+                        cursor: isBtnDisabled ? 'not-allowed' : 'pointer',
+                        opacity: isBtnDisabled ? 0.6 : 1,
+                      }}
+                      onClick={() => setVerifyModalDeal(deal)}
+                    >
+                      <ShieldCheck size={14} />
+                      {normalizedStatus === 'Verified' ? 'Re-verify KYC' : 'Verify KYC'}
+                    </button>
+                  );
+                })()}
               </div>
 
               {/* Right Stacked Cards */}
@@ -1641,17 +1676,44 @@ const GhlIrmKycView: React.FC = () => {
                 SEBI compliance checked, ticket size verified, KYC validated investors ready for investment opportunities.
               </p>
             </div>
-            <button
-              type="button"
-              className="btn btn-primary"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-              onClick={() => startKycFlow()}
-            >
-              <Plus size={16} /> Start KYC Verification
-            </button>
+
           </div>
 
+          {/* Inline Error Banner */}
+          {loadError && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 16px',
+              marginBottom: 16,
+              borderRadius: 8,
+              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.25)',
+              color: '#ef4444',
+              fontSize: 13,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <AlertCircle size={16} />
+                <span>Failed to load KYC data from server. Please check your connection or try again.</span>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => loadData()}
+                style={{ borderColor: '#ef4444', color: '#ef4444' }}
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
           {/* Data Table */}
+          {isLoading && filteredDeals.length === 0 ? (
+            <div style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)' }}>
+              <p>Loading Qualified Investors...</p>
+            </div>
+          ) : (
           <DataTable
             data={filteredDeals}
             columns={columns}
@@ -1668,6 +1730,7 @@ const GhlIrmKycView: React.FC = () => {
             emptyTitle="No Qualified Investors"
             emptyDescription="No investors currently in the Qualified Investor / KYC stage."
           />
+          )}
         </>
       ) : (
         /* ── 5-STEP KYC FLOW CONTAINER ── */
@@ -2272,7 +2335,7 @@ const GhlIrmKycView: React.FC = () => {
                   </label>
                   {formData.hasNoDemat && (
                     <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
-                      ℹ️ <em>You have elected to skip the Demat step. Physical investment certificate & holding statement will be issued instead. You may proceed directly to Nominee Details.</em>
+                      ℹï¸ <em>You have elected to skip the Demat step. Physical investment certificate & holding statement will be issued instead. You may proceed directly to Nominee Details.</em>
                     </div>
                   )}
                 </div>
@@ -2860,12 +2923,20 @@ const GhlIrmKycView: React.FC = () => {
       />
 
       {/* Review Customer KYC Drawer */}
-      <KycReviewDrawer
-        isOpen={!!reviewDeal}
-        onClose={() => setReviewDeal(null)}
-        deal={reviewDeal}
-        onShowToast={showToast}
-      />
+      <KycReviewDrawer isOpen={!!reviewDeal} onClose={() => setReviewDeal(null)} deal={reviewDeal} onShowToast={showToast} onChangeKycStatus={handleStatusChange} />
+      {/* KycVerifyModal — opened from profile card Verify KYC button */}
+      {verifyModalDeal && profileKycData && (
+        <KycVerifyModal
+          isOpen={verifyModalDeal !== null}
+          onClose={() => setVerifyModalDeal(null)}
+          deal={verifyModalDeal}
+          profileKycData={profileKycData as Record<string, any>}
+          onSaveVerification={async (status, comment, flaggedSections, checklist) => {
+            await handleStatusChange(verifyModalDeal, status, comment, flaggedSections, checklist);
+          }}
+          onShowToast={showToast}
+        />
+      )}
     </div>
   );
 };
@@ -2889,9 +2960,18 @@ const OriginalKYCView: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
+    let timeoutId: any;
+    const handleUpdate = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        loadData();
+      }, 300);
+    };
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+    return () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
+    };
   }, [tenant?.id]);
 
   const showToast = (msg: string) => {
@@ -2921,7 +3001,7 @@ const OriginalKYCView: React.FC = () => {
       stage: 'investment_opportunity',
       stageEnteredAt: new Date().toISOString(),
     };
-    storageService.saveDeal(updatedDeal);
+    persistDeal(updatedDeal).catch(e => showToast("Error saving deal:"));
 
     const activity: DealActivity = {
       id: `act-${Date.now()}`,
@@ -3253,6 +3333,8 @@ const OriginalKYCView: React.FC = () => {
           </div>
         </Modal>
       )}
+      
+
     </div>
   );
 };

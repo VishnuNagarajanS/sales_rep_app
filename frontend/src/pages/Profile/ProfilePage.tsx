@@ -244,18 +244,13 @@ export const ProfilePage: React.FC = () => {
             apiGetConsultations(tenant?.id),
           ]);
           if (isMounted) {
-            setAllCalls(calls && calls.length > 0 ? calls : storageService.getCalls(tenant?.id) || []);
-            setAllLeads(leads && leads.length > 0 ? leads : storageService.getLeads(tenant?.id) || []);
-            setAllFollowups(followups && followups.length > 0 ? followups : storageService.getFollowups(tenant?.id) || []);
-            setAllConsultations(consultations && consultations.length > 0 ? consultations : storageService.getConsultations(tenant?.id) || []);
+            setAllCalls(calls || []);
+            setAllLeads(leads || []);
+            setAllFollowups(followups || []);
+            setAllConsultations(consultations || []);
           }
         } catch {
-          if (isMounted) {
-            setAllCalls(storageService.getCalls(tenant?.id) || []);
-            setAllLeads(storageService.getLeads(tenant?.id) || []);
-            setAllFollowups(storageService.getFollowups(tenant?.id) || []);
-            setAllConsultations(storageService.getConsultations(tenant?.id) || []);
-          }
+          // Stop falling back to stale storageService in non-mock mode
         }
       } else {
         if (isMounted) {
@@ -267,10 +262,18 @@ export const ProfilePage: React.FC = () => {
       }
     };
     loadLiveData();
-    window.addEventListener('nexus_storage_updated', loadLiveData);
+    let timeoutId: any;
+    const handleDebouncedUpdate = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        loadLiveData();
+      }, 300);
+    };
+    window.addEventListener('nexus_storage_updated', handleDebouncedUpdate);
     return () => {
       isMounted = false;
-      window.removeEventListener('nexus_storage_updated', loadLiveData);
+      clearTimeout(timeoutId);
+      window.removeEventListener('nexus_storage_updated', handleDebouncedUpdate);
     };
   }, [tenant?.id, tenant?.slug]);
 

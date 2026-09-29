@@ -26,6 +26,7 @@ import {
   saveDeal as apiSaveDeal,
   addDealActivity as apiAddDealActivity,
   saveInvestor as apiSaveInvestor,
+  persistDeal,
 } from '../../services/ghlApiService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
@@ -145,23 +146,24 @@ export const OpportunitiesPage: React.FC = () => {
         return fresh || prev;
       });
     } catch {
-      setOpps(storageService.getOpportunities(tenant?.id));
-      setInvestors(storageService.getInvestors(tenant?.id));
-      const latestDeals = storageService.getDeals(tenant?.id);
-      setDeals(latestDeals);
-      setDetailDeal(prev => {
-        if (!prev) return null;
-        const fresh = latestDeals.find(d => d.id === prev.id);
-        return fresh || prev;
-      });
+      // Stop trusting stale cache in non-mock mode
     }
   };
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
+    let timeoutId: any;
+    const handleUpdate = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        loadData();
+      }, 300);
+    };
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+    return () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
+    };
   }, [tenant?.id]);
 
   // ── Role-based scoping ────────────────────────────────────────────────────
@@ -365,7 +367,13 @@ export const OpportunitiesPage: React.FC = () => {
       ...deal,
       investorType: type,
     };
-    storageService.saveDeal(updatedDeal);
+    try {
+      await persistDeal(updatedDeal);
+    } catch (e) {
+      console.error("Error saving deal:", e);
+      showToast("Failed to update investor structure");
+      return;
+    }
 
     const activity: DealActivity = {
       id: `act-${Date.now()}`,
@@ -380,7 +388,6 @@ export const OpportunitiesPage: React.FC = () => {
     storageService.addDealActivity(activity);
 
     if (!isMockMode()) {
-      await apiSaveDeal(updatedDeal).catch(console.error);
       await apiAddDealActivity(activity).catch(console.error);
     }
 
@@ -396,10 +403,11 @@ export const OpportunitiesPage: React.FC = () => {
       stageEnteredAt: new Date().toISOString(),
     };
     try {
-      await apiSaveDeal(updatedDeal);
+      await persistDeal(updatedDeal);
     } catch (err) {
       console.warn('[OpportunitiesPage] API saveDeal (convert) failed:', err);
-      storageService.saveDeal(updatedDeal);
+      showToast('Failed to update deal stage');
+      return;
     }
 
     // 2. Log activity
@@ -476,13 +484,18 @@ export const OpportunitiesPage: React.FC = () => {
     setShowConfirmDialog(false);
   };
 
-  const handleEditAmount = () => {
+  const handleEditAmount = async () => {
     if (!detailDeal) return;
     const updatedDeal: Deal = {
       ...detailDeal,
       investmentAmountConfirmed: false,
     };
-    storageService.saveDeal(updatedDeal);
+    try {
+      await persistDeal(updatedDeal);
+    } catch (e) {
+      console.error("Error saving deal:", e);
+      showToast('Failed to update deal');
+    }
     setDetailDeal(updatedDeal);
     setIsEditingAmount(true);
     setAmountInput(detailDeal.value ? String(detailDeal.value) : '');
@@ -500,10 +513,11 @@ export const OpportunitiesPage: React.FC = () => {
 
     // Save investment amount confirmed to DB
     try {
-      await apiSaveDeal(updatedDeal);
+      await persistDeal(updatedDeal);
     } catch (err) {
       console.warn('[OpportunitiesPage] API saveDeal (amount confirm) failed:', err);
-      storageService.saveDeal(updatedDeal);
+      showToast('Failed to save investment amount');
+      return;
     }
 
     setDetailDeal(updatedDeal);

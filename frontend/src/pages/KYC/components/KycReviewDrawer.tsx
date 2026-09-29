@@ -19,7 +19,8 @@ import {
   Send,
 } from 'lucide-react';
 import { Deal } from '../../../types';
-import { getKycReviewData } from '../../../services/kycService';
+import { KycStatusDropdown } from './KycStatusDropdown';
+import { getCustomerKycStatus, getKycReviewData, normalizeLegacyKycStatus } from '../../../services/kycService';
 import { saveDeal } from '../../../services/ghlApiService';
 import './KycLinkComponents.css';
 
@@ -27,6 +28,7 @@ interface KycReviewDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   deal: Deal | null;
+  onChangeKycStatus?: (deal: Deal, newStatus: 'Pending' | 'Wrong' | 'Verified', comment?: string, flaggedSections?: string[], checklist?: any) => Promise<void>;
   onShowToast: (msg: string) => void;
 }
 
@@ -35,6 +37,7 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
   onClose,
   deal,
   onShowToast,
+  onChangeKycStatus,
 }) => {
   const [showCorrectionModal, setShowCorrectionModal] = useState<boolean>(false);
   const [correctionNote, setCorrectionNote] = useState<string>(
@@ -311,6 +314,28 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
 
         {/* Drawer Body */}
         <div className="kyc-link-drawer-body">
+          {normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Verified' && (
+            <div
+              style={{
+                padding: '10px 16px',
+                borderRadius: 8,
+                background: 'rgba(16, 185, 129, 0.12)',
+                border: '1px solid rgba(16, 185, 129, 0.35)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                fontSize: 12,
+                color: '#047857',
+                marginBottom: 16,
+              }}
+            >
+              <ShieldCheck size={18} color="#10b981" />
+              <span>
+                <strong>Manually Verified by {deal.verifiedBy || 'IRM'}</strong>
+                {deal.verifiedAt && ` on ${new Date(deal.verifiedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`}
+              </span>
+            </div>
+          )}
           {/* Provider Verification Live Checks */}
           <div className="kyc-link-section-card" style={{ borderColor: 'rgba(16, 185, 129, 0.3)' }}>
             <div className="kyc-link-section-header">
@@ -611,23 +636,20 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
         </div>
 
         {/* Footer Buttons */}
-        <div className="kyc-link-drawer-footer">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => setShowCorrectionModal(true)}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-          >
-            <AlertTriangle size={14} color="#f59e0b" /> Request Correction
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, backgroundColor: '#10b981', borderColor: '#10b981' }}
-            onClick={handleApprove}
-          >
-            <CheckCircle size={15} /> Approve KYC
-          </button>
+                <div className="kyc-link-drawer-footer">
+          {onChangeKycStatus && deal && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Update Status:</span>
+              <KycStatusDropdown 
+                deal={deal} 
+                customerKycStatus={getCustomerKycStatus(deal.id, (deal as any).customerKycStatus)} 
+                onChange={async (status, comment, flaggedSections, checklist) => {
+                  if (onChangeKycStatus) await onChangeKycStatus(deal, status, comment, flaggedSections, checklist);
+                  onClose();
+                }} 
+              />
+            </div>
+          )}
         </div>
 
         {/* Sub-modal for Request Correction */}

@@ -51,6 +51,10 @@ public class KycDto
     // Review
     public string? ReviewRemarks { get; set; }
     public DateTime? ReviewedAt { get; set; }
+    public string? VerifiedBy { get; set; }
+    public DateTime? VerifiedAt { get; set; }
+    public string? Remarks { get; set; }
+    public string? FlaggedSections { get; set; }
     public bool KycLinkSent { get; set; }
 
     public DateTime CreatedAt { get; set; }

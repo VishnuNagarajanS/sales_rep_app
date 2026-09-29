@@ -20,6 +20,7 @@
 
 import { apiClient } from './apiClient';
 import { storageService } from './storageService';
+import { isMockMode } from '../config/environment';
 import type {
   Deal,
   DealActivity,
@@ -170,6 +171,15 @@ export async function saveDeal(deal: Deal): Promise<Deal> {
     if (!res.success || !res.data) throw new Error(res.message);
     window.dispatchEvent(new Event('nexus_storage_updated'));
     return mapDeal(res.data);
+  }
+}
+
+export async function persistDeal(deal: Deal): Promise<Deal> {
+  if (isMockMode()) {
+    storageService.saveDeal(deal);
+    return deal;
+  } else {
+    return await saveDeal(deal);
   }
 }
 
@@ -420,26 +430,11 @@ function mapLead(l: Record<string, any>): Lead {
 }
 
 export async function getLeads(companyId?: string): Promise<Lead[]> {
-  try {
-    const raw = await fetchAll<any>('/sales-executive/leads');
-    if (raw && raw.length > 0) {
-      const apiLeads = raw.map(mapLead);
-      const localLeads = storageService.getLeads(companyId);
-      const apiIds = new Set(apiLeads.map(l => l.id));
-      // Only keep local leads that are newly created local drafts (not yet uploaded)
-      // and exclude any leads marked as Junk or deleted
-      const unsyncedDrafts = localLeads.filter(
-        (l: Lead) => !apiIds.has(l.id) && (l.id.startsWith('lead-') || l.id.startsWith('l-')) && l.status !== 'Junk'
-      );
-      const merged = [...apiLeads, ...unsyncedDrafts];
-      // Keep local storage aligned with backend leads
-      storageService.saveLeads(merged);
-      return merged;
-    }
-  } catch (err) {
-    console.warn('[ghlApiService] Failed to fetch leads from API, falling back to local storage:', err);
+  if (isMockMode()) {
+    return storageService.getLeads(companyId);
   }
-  return storageService.getLeads(companyId);
+  const raw = await fetchAll<any>('/sales-executive/leads');
+  return raw.map(mapLead);
 }
 
 export async function saveLead(lead: Lead): Promise<Lead> {

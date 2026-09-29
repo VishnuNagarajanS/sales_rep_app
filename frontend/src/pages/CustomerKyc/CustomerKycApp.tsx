@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ShieldCheck,
   Lock,
@@ -15,8 +15,10 @@ import {
   Mail,
   FileText,
   RotateCw,
+  XCircle,
 } from 'lucide-react';
 import './CustomerKycApp.css';
+import { kycValidators } from '../../utils/kycValidators';
 
 type ScreenId =
   | 'loading'
@@ -108,6 +110,81 @@ export const CustomerKycApp: React.FC = () => {
   // Screen 7: Liveness mock state
   const [livenessState, setLivenessState] = useState<'idle' | 'capturing' | 'captured'>('idle');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // Per-field error messages keyed by field name
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  // Whether each wizard step has been validated (for tab indicators)
+  const [stepValidated, setStepValidated] = useState<Record<number, boolean>>({});
+
+  // Ref for the wizard card (scroll-to-error)
+  const wizardCardRef = useRef<HTMLDivElement>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // ── Validation helpers ────────────────────────────────────────────────────
+
+  const E = (msg: string) => msg; // identity, just for readability
+
+  const validateStep = useCallback((step: WizardStep, data: typeof formData): Record<string, string> => {
+    const errs: Record<string, string> = {};
+
+    if (step === 1) {
+      if (!kycValidators.requiredText(data.investorName, 3))
+        errs.investorName = E('Full name must be at least 3 characters.');
+      if (!kycValidators.phone(data.phone))
+        errs.phone = E('Enter a valid 10-digit Indian mobile number.');
+      if (!kycValidators.email(data.email))
+        errs.email = E('Enter a valid email address.');
+      if (!kycValidators.requiredText(data.occupation, 2))
+        errs.occupation = E('Occupation / source of wealth is required.');
+    }
+
+    if (step === 2) {
+      if (!kycValidators.pan(data.panNumber))
+        errs.panNumber = E('Enter a valid PAN (e.g. ABCDE1234F).');
+      if (!kycValidators.requiredText(data.nameAsPerPan, 3))
+        errs.nameAsPerPan = E('Name as per PAN must be at least 3 characters.');
+      if (!kycValidators.aadhaar(data.aadhaarNumber.replace(/\s/g, '')))
+        errs.aadhaarNumber = E('Enter a valid 12-digit Aadhaar number (cannot start with 0 or 1).');
+      if (!kycValidators.dob(data.dob))
+        errs.dob = E('Date of birth is required and the investor must be at least 18 years old.');
+      if (!kycValidators.requiredText(data.address, 10))
+        errs.address = E('Enter your complete permanent address (at least 10 characters).');
+      if (!kycValidators.pincode(data.pincode))
+        errs.pincode = E('Enter a valid 6-digit PIN code (cannot start with 0).');
+    }
+
+    if (step === 3) {
+      if (!kycValidators.requiredText(data.bankName, 2))
+        errs.bankName = E('Bank name is required.');
+      if (!kycValidators.bankAccount(data.accountNumber))
+        errs.accountNumber = E('Enter a valid bank account number (9–18 digits).');
+      if (!kycValidators.ifsc(data.ifscCode))
+        errs.ifscCode = E('Enter a valid IFSC code (e.g. HDFC0001234).');
+    }
+
+    if (step === 4) {
+      if (!data.hasNoDemat) {
+        if (!kycValidators.dematBoid(data.dematAccountNumber))
+          errs.dematAccountNumber = E('Demat beneficiary ID must be exactly 16 digits.');
+      }
+    }
+
+    if (step === 5) {
+      if (!kycValidators.requiredText(data.nomineeName, 2))
+        errs.nomineeName = E('Nominee full name is required.');
+      if (!kycValidators.nomineeDob(data.nomineeDob))
+        errs.nomineeDob = E('Nominee date of birth is required.');
+      if (data.nomineeAllocation !== 100)
+        errs.nomineeAllocation = E('Allocation must be exactly 100%.');
+    }
+
+    return errs;
+  }, []);
+
+  const isStepValid = useCallback((step: WizardStep, data: typeof formData): boolean => {
+    return Object.keys(validateStep(step, data)).length === 0;
+  }, [validateStep]);
 
   // Helper to calculate progress percentage for the header
   const getProgressPercentage = (): number => {
@@ -237,6 +314,7 @@ export const CustomerKycApp: React.FC = () => {
 
   const handleSubmitDossier = async () => {
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
       const activeToken = token || extractTokenFromUrl();
       const payload = {
@@ -276,17 +354,18 @@ export const CustomerKycApp: React.FC = () => {
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        alert(err.message || 'Submission failed. Please check your network and try again.');
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok || !json.success) {
+        // Stay on liveness screen and surface the error
+        setSubmitError(json.message || 'Submission failed. Please check your details and try again.');
         return;
       }
 
       setCurrentScreen('submitted');
     } catch (err: any) {
       console.error('Failed to submit KYC:', err);
-      // Still show submitted screen if offline/fallback
-      setCurrentScreen('submitted');
+      setSubmitError('Network error — please check your connection and try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -423,7 +502,35 @@ export const CustomerKycApp: React.FC = () => {
 
   const handleInputChange = (field: string, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+    // Clear per-field error when the user edits the field
+    setFormErrors(prev => { const n = { ...prev }; delete n[field]; return n; });
   };
+
+  /** Validate current wizard step; if errors found, display them and scroll. Returns true if clean. */
+  const validateAndAdvance = () => {
+    const errs = validateStep(wizardStep, formData);
+    if (Object.keys(errs).length > 0) {
+      setFormErrors(errs);
+      // Scroll the first errored field into view
+      setTimeout(() => {
+        const firstErrorEl = wizardCardRef.current?.querySelector('.ckyc-field-error');
+        if (firstErrorEl) (firstErrorEl as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 50);
+      return false;
+    }
+    setFormErrors({});
+    setStepValidated(prev => ({ ...prev, [wizardStep]: true }));
+    return true;
+  };
+
+  /** Inline error message component */
+  const FieldError = ({ field }: { field: string }) =>
+    formErrors[field] ? (
+      <div className="ckyc-field-error" style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--ckyc-error)', fontSize: 12, fontWeight: 500, marginTop: 4 }}>
+        <XCircle size={13} style={{ flexShrink: 0 }} />
+        <span>{formErrors[field]}</span>
+      </div>
+    ) : null;
 
   return (
     <div className="ckyc-root">
@@ -702,20 +809,30 @@ export const CustomerKycApp: React.FC = () => {
                 { step: 3, label: 'Bank' },
                 { step: 4, label: 'Demat' },
                 { step: 5, label: 'Nominee' },
-              ].map(s => (
-                <div
-                  key={s.step}
-                  className={`ckyc-step-node ${
-                    wizardStep === s.step ? 'active' : wizardStep > s.step ? 'completed' : ''
-                  }`}
-                  onClick={() => setWizardStep(s.step as WizardStep)}
-                >
-                  <div className="ckyc-step-circle">
-                    {wizardStep > s.step ? <Check size={14} /> : s.step}
+              ].map(s => {
+                const isActive = wizardStep === s.step;
+                const isPast = wizardStep > s.step;
+                const hasError = isPast && !isStepValid(s.step as WizardStep, formData) && stepValidated[s.step];
+                return (
+                  <div
+                    key={s.step}
+                    className={`ckyc-step-node ${
+                      isActive ? 'active' : isPast ? (hasError ? 'error' : 'completed') : ''
+                    }`}
+                    onClick={() => setWizardStep(s.step as WizardStep)}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <div className="ckyc-step-circle">
+                      {isPast
+                        ? hasError
+                          ? <XCircle size={14} />
+                          : <Check size={14} />
+                        : s.step}
+                    </div>
+                    <span className="ckyc-step-title">{s.label}</span>
                   </div>
-                  <span className="ckyc-step-title">{s.label}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Step 1: Basic Details */}
@@ -731,10 +848,11 @@ export const CustomerKycApp: React.FC = () => {
                   <input
                     id="w-name"
                     type="text"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.investorName ? ' ckyc-input-error' : ''}`}
                     value={formData.investorName}
                     onChange={e => handleInputChange('investorName', e.target.value)}
                   />
+                  <FieldError field="investorName" />
                 </div>
 
                 <div className="ckyc-form-group">
@@ -742,10 +860,12 @@ export const CustomerKycApp: React.FC = () => {
                   <input
                     id="w-phone"
                     type="text"
-                    className="ckyc-input"
+                    placeholder="10-digit mobile number"
+                    className={`ckyc-input${formErrors.phone ? ' ckyc-input-error' : ''}`}
                     value={formData.phone}
                     onChange={e => handleInputChange('phone', e.target.value)}
                   />
+                  <FieldError field="phone" />
                 </div>
 
                 <div className="ckyc-form-group">
@@ -753,10 +873,11 @@ export const CustomerKycApp: React.FC = () => {
                   <input
                     id="w-email"
                     type="email"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.email ? ' ckyc-input-error' : ''}`}
                     value={formData.email}
                     onChange={e => handleInputChange('email', e.target.value)}
                   />
+                  <FieldError field="email" />
                 </div>
 
                 <div className="ckyc-form-group">
@@ -774,19 +895,20 @@ export const CustomerKycApp: React.FC = () => {
                 </div>
 
                 <div className="ckyc-form-group">
-                  <label className="ckyc-form-label" htmlFor="w-occ">Occupation / Source of Wealth</label>
+                  <label className="ckyc-form-label" htmlFor="w-occ">Occupation / Source of Wealth *</label>
                   <input
                     id="w-occ"
                     type="text"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.occupation ? ' ckyc-input-error' : ''}`}
                     value={formData.occupation}
                     onChange={e => handleInputChange('occupation', e.target.value)}
                   />
+                  <FieldError field="occupation" />
                 </div>
               </div>
             )}
 
-            {/* Step 2: Identity Details (Includes Sample Validation Error UI) */}
+            {/* Step 2: Identity Details */}
             {wizardStep === 2 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 <div className="ckyc-card-title-group">
@@ -801,10 +923,11 @@ export const CustomerKycApp: React.FC = () => {
                     type="text"
                     maxLength={10}
                     placeholder="e.g. ABCDE1234F"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.panNumber ? ' ckyc-input-error' : ''}`}
                     value={formData.panNumber}
                     onChange={e => handleInputChange('panNumber', e.target.value.toUpperCase())}
                   />
+                  <FieldError field="panNumber" />
                 </div>
 
                 <div className="ckyc-form-group">
@@ -813,10 +936,11 @@ export const CustomerKycApp: React.FC = () => {
                     id="w-pan-name"
                     type="text"
                     placeholder="Full name as printed on PAN card"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.nameAsPerPan ? ' ckyc-input-error' : ''}`}
                     value={formData.nameAsPerPan}
                     onChange={e => handleInputChange('nameAsPerPan', e.target.value)}
                   />
+                  <FieldError field="nameAsPerPan" />
                 </div>
 
                 <div className="ckyc-form-group">
@@ -828,33 +952,36 @@ export const CustomerKycApp: React.FC = () => {
                     type="text"
                     maxLength={14}
                     placeholder="12-digit Aadhaar UID"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.aadhaarNumber ? ' ckyc-input-error' : ''}`}
                     value={formData.aadhaarNumber}
                     onChange={e => handleInputChange('aadhaarNumber', e.target.value)}
                   />
+                  <FieldError field="aadhaarNumber" />
                 </div>
 
                 <div className="ckyc-form-group">
-                  <label className="ckyc-form-label" htmlFor="w-dob">Date of Birth *</label>
+                  <label className="ckyc-form-label" htmlFor="w-dob">Date of Birth * (must be 18+)</label>
                   <input
                     id="w-dob"
                     type="date"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.dob ? ' ckyc-input-error' : ''}`}
                     value={formData.dob}
                     onChange={e => handleInputChange('dob', e.target.value)}
                   />
+                  <FieldError field="dob" />
                 </div>
 
                 <div className="ckyc-form-group">
                   <label className="ckyc-form-label" htmlFor="w-addr">Permanent Address *</label>
                   <textarea
                     id="w-addr"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.address ? ' ckyc-input-error' : ''}`}
                     placeholder="Door / Flat No., Building, Street, Locality, City, State"
                     style={{ minHeight: 70, resize: 'vertical' }}
                     value={formData.address}
                     onChange={e => handleInputChange('address', e.target.value)}
                   />
+                  <FieldError field="address" />
                 </div>
 
                 <div className="ckyc-form-group">
@@ -864,10 +991,11 @@ export const CustomerKycApp: React.FC = () => {
                     type="text"
                     maxLength={6}
                     placeholder="e.g. 560103"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.pincode ? ' ckyc-input-error' : ''}`}
                     value={formData.pincode}
                     onChange={e => handleInputChange('pincode', e.target.value)}
                   />
+                  <FieldError field="pincode" />
                 </div>
               </div>
             )}
@@ -886,10 +1014,11 @@ export const CustomerKycApp: React.FC = () => {
                     id="w-bank-name"
                     type="text"
                     placeholder="e.g. HDFC Bank, ICICI Bank, SBI"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.bankName ? ' ckyc-input-error' : ''}`}
                     value={formData.bankName}
                     onChange={e => handleInputChange('bankName', e.target.value)}
                   />
+                  <FieldError field="bankName" />
                 </div>
 
                 <div className="ckyc-form-group">
@@ -897,11 +1026,12 @@ export const CustomerKycApp: React.FC = () => {
                   <input
                     id="w-acc-no"
                     type="text"
-                    placeholder="Enter savings or current account number"
-                    className="ckyc-input"
+                    placeholder="9–18 digit account number"
+                    className={`ckyc-input${formErrors.accountNumber ? ' ckyc-input-error' : ''}`}
                     value={formData.accountNumber}
                     onChange={e => handleInputChange('accountNumber', e.target.value)}
                   />
+                  <FieldError field="accountNumber" />
                 </div>
 
                 <div className="ckyc-form-group">
@@ -911,10 +1041,11 @@ export const CustomerKycApp: React.FC = () => {
                     type="text"
                     maxLength={11}
                     placeholder="e.g. HDFC0000240"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.ifscCode ? ' ckyc-input-error' : ''}`}
                     value={formData.ifscCode}
                     onChange={e => handleInputChange('ifscCode', e.target.value.toUpperCase())}
                   />
+                  <FieldError field="ifscCode" />
                 </div>
 
                 <div className="ckyc-form-group">
@@ -976,10 +1107,11 @@ export const CustomerKycApp: React.FC = () => {
                         type="text"
                         maxLength={16}
                         placeholder="16-digit Demat Account Number / BO ID"
-                        className="ckyc-input"
+                        className={`ckyc-input${formErrors.dematAccountNumber ? ' ckyc-input-error' : ''}`}
                         value={formData.dematAccountNumber}
                         onChange={e => handleInputChange('dematAccountNumber', e.target.value)}
                       />
+                      <FieldError field="dematAccountNumber" />
                     </div>
                   </>
                 )}
@@ -1000,10 +1132,11 @@ export const CustomerKycApp: React.FC = () => {
                     id="w-nom-name"
                     type="text"
                     placeholder="Nominee full legal name"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.nomineeName ? ' ckyc-input-error' : ''}`}
                     value={formData.nomineeName}
                     onChange={e => handleInputChange('nomineeName', e.target.value)}
                   />
+                  <FieldError field="nomineeName" />
                 </div>
 
                 <div className="ckyc-form-group">
@@ -1025,25 +1158,29 @@ export const CustomerKycApp: React.FC = () => {
                 </div>
 
                 <div className="ckyc-form-group">
-                  <label className="ckyc-form-label" htmlFor="w-nom-dob">Date of Birth / Age *</label>
+                  <label className="ckyc-form-label" htmlFor="w-nom-dob">Date of Birth *</label>
                   <input
                     id="w-nom-dob"
                     type="date"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.nomineeDob ? ' ckyc-input-error' : ''}`}
                     value={formData.nomineeDob}
                     onChange={e => handleInputChange('nomineeDob', e.target.value)}
                   />
+                  <FieldError field="nomineeDob" />
                 </div>
 
                 <div className="ckyc-form-group">
-                  <label className="ckyc-form-label" htmlFor="w-nom-share">Allocation Percentage (%)</label>
+                  <label className="ckyc-form-label" htmlFor="w-nom-share">Allocation Percentage (%) *</label>
                   <input
                     id="w-nom-share"
                     type="number"
-                    className="ckyc-input"
+                    min={1}
+                    max={100}
+                    className={`ckyc-input${formErrors.nomineeAllocation ? ' ckyc-input-error' : ''}`}
                     value={formData.nomineeAllocation}
                     onChange={e => handleInputChange('nomineeAllocation', Number(e.target.value))}
                   />
+                  <FieldError field="nomineeAllocation" />
                 </div>
               </div>
             )}
@@ -1055,7 +1192,10 @@ export const CustomerKycApp: React.FC = () => {
                   type="button"
                   className="ckyc-btn-secondary"
                   style={{ flex: 1 }}
-                  onClick={() => setWizardStep((wizardStep - 1) as WizardStep)}
+                  onClick={() => {
+                    setFormErrors({});
+                    setWizardStep((wizardStep - 1) as WizardStep);
+                  }}
                 >
                   <ArrowLeft size={16} /> Back
                 </button>
@@ -1065,6 +1205,7 @@ export const CustomerKycApp: React.FC = () => {
                 className="ckyc-btn-primary"
                 style={{ flex: 2 }}
                 onClick={() => {
+                  if (!validateAndAdvance()) return;
                   if (wizardStep < 5) {
                     setWizardStep((wizardStep + 1) as WizardStep);
                   } else {
@@ -1316,6 +1457,12 @@ export const CustomerKycApp: React.FC = () => {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {submitError && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 10, backgroundColor: 'var(--ckyc-error-bg)', border: '1px solid rgba(239, 68, 68, 0.25)', color: 'var(--ckyc-error)', fontSize: 13, fontWeight: 500 }}>
+                  <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                  <span>{submitError}</span>
+                </div>
+              )}
               {livenessState !== 'captured' ? (
                 <button
                   type="button"
@@ -1330,7 +1477,7 @@ export const CustomerKycApp: React.FC = () => {
                     type="button"
                     className="ckyc-btn-secondary"
                     style={{ flex: 1 }}
-                    onClick={() => setLivenessState('idle')}
+                    onClick={() => { setLivenessState('idle'); setSubmitError(null); }}
                   >
                     <RotateCw size={15} /> Retake
                   </button>

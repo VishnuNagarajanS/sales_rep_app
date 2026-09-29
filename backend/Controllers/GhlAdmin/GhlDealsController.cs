@@ -1,4 +1,5 @@
 using backend.Authentication.Interfaces;
+using backend.Helpers;
 using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.GhlDeals;
@@ -118,8 +119,8 @@ public class GhlDealsController : ControllerBase
             ExpectedCloseDate = dto.ExpectedCloseDate.Trim(),
             Notes = dto.Notes.Trim(),
             InvestorType = dto.InvestorType,
-            InvestmentRange = dto.InvestmentRange,
-            PreferredAssetClass = dto.PreferredAssetClass,
+            InvestmentRange = OptionalFieldNormalizer.Normalize(dto.InvestmentRange),
+            PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass),
             Priority = string.IsNullOrWhiteSpace(dto.Priority) ? "Medium" : dto.Priority.Trim(),
             StageEnteredAt = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow,
@@ -152,8 +153,8 @@ public class GhlDealsController : ControllerBase
         if (dto.Notes != null) deal.Notes = dto.Notes.Trim();
         if (dto.LostReason != null) deal.LostReason = dto.LostReason.Trim();
         if (dto.InvestorType != null) deal.InvestorType = dto.InvestorType;
-        if (dto.InvestmentRange != null) deal.InvestmentRange = dto.InvestmentRange;
-        if (dto.PreferredAssetClass != null) deal.PreferredAssetClass = dto.PreferredAssetClass;
+        if (dto.InvestmentRange != null) deal.InvestmentRange = OptionalFieldNormalizer.Normalize(dto.InvestmentRange);
+        if (dto.PreferredAssetClass != null) deal.PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass);
         if (dto.Priority != null) deal.Priority = dto.Priority.Trim();
         if (dto.StageEnteredAt.HasValue) deal.StageEnteredAt = dto.StageEnteredAt.Value;
         if (dto.InvestmentAmountConfirmed.HasValue) deal.InvestmentAmountConfirmed = dto.InvestmentAmountConfirmed.Value;
@@ -281,5 +282,10 @@ public class GhlDealsController : ControllerBase
         UpdatedAt = d.UpdatedAt,
         InvestmentAmountConfirmed = d.InvestmentAmountConfirmed,
         KycStatus = d.KycStatus,
+        KycId = d.KycId,
+        VerifiedBy = d.VerifiedBy,
+        VerifiedAt = d.VerifiedAt,
+        Remarks = d.Remarks,
+        FlaggedSections = d.FlaggedSections,
     };
 }

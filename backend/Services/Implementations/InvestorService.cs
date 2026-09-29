@@ -1,4 +1,5 @@
 using backend.DTOs.Common;
+using backend.Helpers;
 using backend.DTOs.Irm;
 using backend.Models.Entities;
 using backend.Models.Enums;
@@ -111,8 +112,8 @@ public class InvestorService : IInvestorService
         if (!string.IsNullOrWhiteSpace(dto.Name)) investor.Name = dto.Name;
         if (!string.IsNullOrWhiteSpace(dto.Phone)) investor.Phone = dto.Phone;
         if (!string.IsNullOrWhiteSpace(dto.Email)) investor.Email = dto.Email;
-        if (!string.IsNullOrWhiteSpace(dto.InvestmentCapacity)) investor.InvestmentCapacity = dto.InvestmentCapacity;
-        if (!string.IsNullOrWhiteSpace(dto.PreferredAssetClass)) investor.PreferredAssetClass = dto.PreferredAssetClass;
+        if (dto.InvestmentCapacity != null) investor.InvestmentCapacity = OptionalFieldNormalizer.Normalize(dto.InvestmentCapacity) ?? string.Empty;
+        if (dto.PreferredAssetClass != null) investor.PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass) ?? string.Empty;
         if (dto.RiskTolerance != null) investor.RiskTolerance = dto.RiskTolerance;
         if (dto.InvestmentMandate != null) investor.InvestmentMandate = dto.InvestmentMandate;
         if (dto.CommittedAum != null) investor.CommittedAum = dto.CommittedAum;

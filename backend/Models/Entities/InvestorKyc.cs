@@ -56,11 +56,22 @@ public class InvestorKyc
     public string? PhotoUrl { get; set; }
     public string? SignatureUrl { get; set; }
 
-    // Review
+    // Review & Verification
     public string? ReviewRemarks { get; set; }
     public int? ReviewedByIrmId { get; set; }
     public DateTime? ReviewedAt { get; set; }
     public DateTime? SubmittedAt { get; set; }
+
+    public string? VerifiedBy { get; set; }
+    public DateTime? VerifiedAt { get; set; }
+    public string? Remarks { get; set; }
+    public string? FlaggedSectionsJson { get; set; }
+
+    /// <summary>
+    /// JSON blob storing per-section IRM review drafts: { aadhaar: { status, reason }, pan: { ... }, bank: { ... } }
+    /// Written by PATCH /api/irm/kyc/{id}/verification. Informational only; does not alter KycStatus.
+    /// </summary>
+    public string? SectionVerificationsJson { get; set; }
 
     // Public KYC link (for customer self-fill)
     public string? KycLinkToken { get; set; }

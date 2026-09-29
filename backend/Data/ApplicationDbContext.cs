@@ -85,7 +85,8 @@ public class ApplicationDbContext : DbContext
                     "investors.view", "investors.create", "consultations.view", "consultations.create", "opportunities.view", "opportunities.create",
                     "reports.view", "reports.export",
                     "users.view", "users.manage", "roles.view", "roles.manage", "settings.view", "settings.update", "audit.view",
-                    "platform.companies.manage", "platform.packages.manage", "platform.call_config.manage"
+                    "platform.companies.manage", "platform.packages.manage", "platform.call_config.manage",
+                    "kyc.verify"
                 },
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
@@ -104,7 +105,8 @@ public class ApplicationDbContext : DbContext
                     "properties.view", "properties.update", "site_visits.view", "site_visits.create", "bookings.view", "bookings.create",
                     "investors.view", "investors.create", "consultations.view", "consultations.create", "opportunities.view", "opportunities.create",
                     "reports.view", "reports.export",
-                    "users.view", "users.manage", "roles.view", "settings.view", "settings.update", "audit.view"
+                    "users.view", "users.manage", "roles.view", "settings.view", "settings.update", "audit.view",
+                    "kyc.verify"
                 },
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
@@ -157,7 +159,8 @@ public class ApplicationDbContext : DbContext
                     "consultations.view", "consultations.create", "consultations.update",
                     "opportunities.view", "opportunities.create", "opportunities.update",
                     "calls.make", "calls.receive", "calls.view",
-                    "reports.view", "chat.view", "chat.send"
+                    "reports.view", "chat.view", "chat.send",
+                    "kyc.verify"
                 },
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             }

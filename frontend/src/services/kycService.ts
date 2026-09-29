@@ -75,6 +75,7 @@ export type CustomerKycStatus =
   | 'Submitted'
   | 'Under Verification'
   | 'Needs Correction'
+  | 'Wrong'
   | 'Pending';
 
 export interface MockKycProvider {
@@ -101,4 +102,78 @@ export function getCustomerKycStatus(dealId: string, currentStatus?: string): Cu
   }
   if (currentStatus === 'completed') return 'Verified';
   return (currentStatus as CustomerKycStatus) || 'Pending';
+}
+
+/**
+ * Customer-side status lifecycle guard.
+ * Valid forward transitions (customer journey only, one step at a time):
+ *   Pending -> Link Sent -> In Progress -> Submitted
+ * IRM-only statuses (Verified, Wrong, Needs Correction, Under Verification)
+ * are never valid as a customer-initiated target.
+ * Step-skipping (e.g. Pending → In Progress) is also blocked.
+ */
+export function canTransition(currentStatus: CustomerKycStatus, newStatus: CustomerKycStatus): boolean {
+  if (currentStatus === newStatus) return false;
+
+  // IRM-only target statuses — customer cannot self-assign these
+  const irmOnly: CustomerKycStatus[] = ['Verified', 'Wrong', 'Needs Correction', 'Under Verification'];
+  if (irmOnly.includes(newStatus)) return false;
+
+  const order: CustomerKycStatus[] = ['Pending', 'Link Sent', 'In Progress', 'Submitted'];
+  const from = order.indexOf(currentStatus);
+  const to = order.indexOf(newStatus);
+
+  // Both must be in the customer lifecycle, and only one step forward is allowed
+  if (from === -1 || to === -1) return false;
+  return to === from + 1;
+}
+
+/**
+ * Legacy normalizer:
+ * 'Pending' and 'Partially Completed' -> Pending;
+ * 'Completed' -> Verified only if verifiedBy is recorded, else Pending;
+ * anything else -> Pending. Only deal.kycStatus === 'Verified' set via the IRM action counts as completed.
+ */
+export function normalizeLegacyKycStatus(kycStatus?: string | null, verifiedBy?: string | null): 'Pending' | 'Wrong' | 'Verified' {
+  if (!kycStatus) return 'Pending';
+  if (kycStatus === 'Verified') return 'Verified';
+  if (kycStatus === 'Wrong') return 'Wrong';
+  if (kycStatus === 'Completed') {
+    return verifiedBy && verifiedBy.trim().length > 0 ? 'Verified' : 'Pending';
+  }
+  // 'Pending', 'Partially Completed', or anything else -> 'Pending'
+  return 'Pending';
+}
+
+export interface KycChecklist {
+  identity: boolean;
+  bank: boolean;
+  documents: boolean;
+  nominee: boolean;
+  demat: boolean;
+}
+
+export async function patchKycStatus(
+  kycId: number | string,
+  payload: {
+    status: 'Pending' | 'Wrong' | 'Verified';
+    comment?: string;
+    flaggedSections?: string[];
+    checklist?: KycChecklist;
+  }
+): Promise<any> {
+  const token = localStorage.getItem('token') || '';
+  const response = await fetch(`/api/irm/kyc/${kycId}/status`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data?.message || 'Failed to update KYC status');
+  }
+  return data;
 }

@@ -28,8 +28,7 @@ const CAPACITY_OPTIONS = [
   '₹1 Cr – ₹5 Cr',
   '₹5 Cr – ₹10 Cr',
   '₹10 Cr – ₹25 Cr',
-  '₹25 Cr+',
-  'Not sure yet — help me decide'
+  '₹25 Cr+'
 ];
 import { MOCK_AGENTS } from '../../mock_data/mockData';
 export { MOCK_AGENTS };
@@ -65,14 +64,19 @@ export const LeadsPage: React.FC = () => {
     }
 
     if (isIrm) {
-      // IRM My Leads: ONLY shows leads with status 'Interested' (transferred from Sales Exec)
-      // Leads that become 'Follow-up Required' move OUT to the Follow-ups page
-      const raw = tenantLeads.filter(l => l.status === 'Interested');
-      // Deduplicate by ID to prevent double-entries
+      // IRM My Leads: ONLY shows leads with status 'Interested' assigned to this IRM agent
+      const raw = tenantLeads.filter(l => 
+        l.status === 'Interested' && 
+        ((l.assignedAgentId && String(l.assignedAgentId) === String(user?.id)) ||
+         (l.assignedAgentName && l.assignedAgentName === user?.name))
+      );
+      // Deduplicate by phone to prevent double-entries from different IDs
       const seen = new Set<string>();
       return raw.filter(l => {
-        if (seen.has(l.id)) return false;
-        seen.add(l.id);
+        const phone = (l.phone || '').replace(/\D/g, '').slice(-10);
+        const key = phone || l.id;
+        if (seen.has(key)) return false;
+        seen.add(key);
         return true;
       });
     }
@@ -204,7 +208,7 @@ export const LeadsPage: React.FC = () => {
   const currentAssetClass =
     formData.customFields?.assetClass ||
     formData.customFields?.preferredAssetClass ||
-    'AIF';
+    '';
 
   const handleAssetClassChange = (newAssetClass: string) => {
     setFormData(prev => ({
@@ -302,9 +306,6 @@ export const LeadsPage: React.FC = () => {
     }
     if (filterRange === 'Contact for Co-Invest Details') {
       return nCap.includes('co-invest') || nCap.includes('contact');
-    }
-    if (filterRange === 'Not sure yet — help me decide') {
-      return nCap.includes('not sure') || nCap.includes('help');
     }
 
     return false;
@@ -482,7 +483,7 @@ export const LeadsPage: React.FC = () => {
       notes: '',
       customFields: tenant?.slug === 'jamin'
         ? { budgetRange: '₹45L - ₹65L', preferredLocation: 'Devanahalli North', readyToRegister: 'Immediate' }
-        : { investmentCapacity: '', assetClass: 'AIF', preferredAssetClass: 'AIF', horizon: '3-5 Years' },
+        : { investmentCapacity: '', assetClass: '', preferredAssetClass: '', horizon: '3-5 Years' },
     });
     setIsEditDrawerOpen(true);
   };
@@ -1351,6 +1352,7 @@ export const LeadsPage: React.FC = () => {
                       value={currentAssetClass}
                       onChange={e => handleAssetClassChange(e.target.value)}
                     >
+                      <option value="">--</option>
                       <option value="AIF">AIF</option>
                       <option value="CO-AIF">CO-AIF</option>
                     </select>

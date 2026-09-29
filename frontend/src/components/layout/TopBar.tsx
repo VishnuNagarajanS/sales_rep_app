@@ -125,10 +125,18 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
       }
     };
     fetchSearchData();
-    window.addEventListener('nexus_storage_updated', fetchSearchData);
+    let timeoutId: any;
+    const handleDebouncedUpdate = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        fetchSearchData();
+      }, 300);
+    };
+    window.addEventListener('nexus_storage_updated', handleDebouncedUpdate);
     return () => {
       mounted = false;
-      window.removeEventListener('nexus_storage_updated', fetchSearchData);
+      clearTimeout(timeoutId);
+      window.removeEventListener('nexus_storage_updated', handleDebouncedUpdate);
     };
   }, [tenant?.id, tenant?.slug]);
 

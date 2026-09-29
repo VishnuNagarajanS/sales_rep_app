@@ -19,7 +19,8 @@ export type CustomerKycStatus =
   | 'Under Verification'
   | 'Verified'
   | 'Rejected'
-  | 'Needs Correction';
+  | 'Needs Correction'
+  | 'Wrong';
 
 interface KycStatusBadgeProps {
   status: CustomerKycStatus;
@@ -70,10 +71,11 @@ export const KycStatusBadge: React.FC<KycStatusBadgeProps> = ({ status }) => {
         </span>
       );
     case 'Rejected':
+    case 'Wrong':
       return (
         <span className="kyc-link-badge kyc-link-badge-rejected">
           <XCircle size={11} />
-          Rejected
+          {status}
         </span>
       );
     case 'Needs Correction':
