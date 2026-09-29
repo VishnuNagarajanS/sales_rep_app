@@ -37,8 +37,8 @@ const mapDtoToUser = (dto: AdminUserDto): User => {
     name: dto.name,
     email: dto.email,
     phone: dto.phone || '',
-    role: {
-      code: roleCode,
+    role: { id: (dto.roleId || 0).toString(), permissions: [],
+      code: roleCode as any,
       name: dto.roleName || 'Unknown Role'
     },
     status: statusStr,

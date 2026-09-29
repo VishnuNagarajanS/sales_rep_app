@@ -2,7 +2,7 @@ import { Lead } from '../../types';
 export const INITIAL_LEADS: Lead[] = [
   // GHL Leads
   {
-    id: 'lead-ghl-01',
+    assignedAgentId: '', assignedAgentName: '', id: 'lead-ghl-01',
     companyId: 't-ghl-01',
     name: 'Dr. Rajesh Nambiar',
     phone: '+91 98451 12233',
@@ -11,8 +11,8 @@ export const INITIAL_LEADS: Lead[] = [
     source: 'Referral - HNW Club',
     status: 'Qualified',
     priority: 'Urgent',
-    assignedAgentId: 'usr-ghl-exec',
-    assignedAgentName: 'Ananya Iyer',
+    
+    
     nextFollowupDate: 'Today, 04:30 PM',
     createdAt: '2026-03-08',
     notes: 'Interested in commercial Grade-A pre-leased office asset. Liquid capital ready.',
@@ -23,7 +23,7 @@ export const INITIAL_LEADS: Lead[] = [
     },
   },
   {
-    id: 'lead-ghl-02',
+    assignedAgentId: '', assignedAgentName: '', id: 'lead-ghl-02',
     companyId: 't-ghl-01',
     name: 'Sunita & Arvind Mehta',
     phone: '+91 99882 33445',
@@ -32,8 +32,8 @@ export const INITIAL_LEADS: Lead[] = [
     source: 'LinkedIn Executive Campaign',
     status: 'Proposal',
     priority: 'High',
-    assignedAgentId: 'usr-ghl-exec',
-    assignedAgentName: 'Ananya Iyer',
+    
+    
     nextFollowupDate: 'Tomorrow, 11:00 AM',
     createdAt: '2026-03-07',
     notes: 'NRI returning from Singapore. Evaluating fractional warehouse logistics yield.',
@@ -44,7 +44,7 @@ export const INITIAL_LEADS: Lead[] = [
     },
   },
   {
-    id: 'lead-ghl-03',
+    assignedAgentId: '', assignedAgentName: '', id: 'lead-ghl-03',
     companyId: 't-ghl-01',
     name: 'Karthik Somayaji',
     phone: '+91 94480 77889',
@@ -53,8 +53,8 @@ export const INITIAL_LEADS: Lead[] = [
     source: 'Website Inbound',
     status: 'New',
     priority: 'Medium',
-    assignedAgentId: 'usr-ghl-admin',
-    assignedAgentName: 'Vikram Malhotra',
+    
+    
     nextFollowupDate: 'Tomorrow, 02:00 PM',
     createdAt: '2026-03-09',
     notes: 'Inquired through web form regarding tax-optimized commercial yield funds.',
@@ -67,7 +67,7 @@ export const INITIAL_LEADS: Lead[] = [
 
   // Jamin Leads
   {
-    id: 'lead-jam-01',
+    assignedAgentId: '', assignedAgentName: '', id: 'lead-jam-01',
     companyId: 't-jamin-02',
     name: 'Manjunath Swamy',
     phone: '+91 98801 44556',
@@ -76,8 +76,8 @@ export const INITIAL_LEADS: Lead[] = [
     source: 'Facebook Ad - Greenfield Meadows',
     status: 'Contacted',
     priority: 'High',
-    assignedAgentId: 'usr-jamin-exec',
-    assignedAgentName: 'Pooja Hegde',
+    
+    
     nextFollowupDate: 'Today, 05:00 PM',
     createdAt: '2026-03-09',
     notes: 'Looking for 2400 sqft corner plot facing East for villa construction in next 2 years.',
@@ -88,7 +88,7 @@ export const INITIAL_LEADS: Lead[] = [
     },
   },
   {
-    id: 'lead-jam-02',
+    assignedAgentId: '', assignedAgentName: '', id: 'lead-jam-02',
     companyId: 't-jamin-02',
     name: 'Deepak & Sneha Kulkarni',
     phone: '+91 97312 88990',
@@ -97,8 +97,8 @@ export const INITIAL_LEADS: Lead[] = [
     source: 'Google Search - Villa Plots',
     status: 'Qualified',
     priority: 'Urgent',
-    assignedAgentId: 'usr-jamin-exec',
-    assignedAgentName: 'Pooja Hegde',
+    
+    
     nextFollowupDate: 'Saturday, 10:30 AM',
     createdAt: '2026-03-06',
     notes: 'Wants to schedule weekend site visit for Greenfield Meadows Plots #14 and #15.',
@@ -109,7 +109,7 @@ export const INITIAL_LEADS: Lead[] = [
     },
   },
   {
-    id: 'lead-jam-03',
+    assignedAgentId: '', assignedAgentName: '', id: 'lead-jam-03',
     companyId: 't-jamin-02',
     name: 'Brigadier H.S. Rathore (Retd)',
     phone: '+91 94140 11223',
@@ -118,8 +118,8 @@ export const INITIAL_LEADS: Lead[] = [
     source: 'Walk-in Site Office',
     status: 'Negotiation',
     priority: 'High',
-    assignedAgentId: 'usr-jamin-admin',
-    assignedAgentName: 'Kavita Rao',
+    
+    
     nextFollowupDate: 'Today, 03:00 PM',
     createdAt: '2026-03-04',
     notes: 'Selected Plot #08. Discussing 5% senior citizen concession and payment schedule.',

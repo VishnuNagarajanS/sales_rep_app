@@ -461,7 +461,7 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         priority: lead.priority,
         notes: lead.notes,
         nextFollowupDate: lead.nextFollowupDate,
-        assignedAgentId: nid(lead.assignedAgentId) || undefined,
+        assignedAgentId: nid(lead.assignedAgentId?.toString()) || undefined,
         investmentCapacity: customFields['Investment Capacity'] ?? customFields['investmentCapacity'],
         assetClass: customFields['Asset Class'] ?? customFields['assetClass'],
         preferredAssetClass: customFields['Preferred Asset Class'] ?? customFields['preferredAssetClass'],

@@ -371,7 +371,15 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     : (irmDetailDeal ? storageService.getDealActivities(irmDetailDeal.id, tenant?.id) : []);
 
   if (isGhlAdmin) {
-    return <AdminKanbanBoard onOpenQuickCreate={onOpenQuickCreate} />;
+    return (
+      <AdminKanbanBoard 
+        onOpenQuickCreate={onOpenQuickCreate} 
+        apiLeads={leads} 
+        apiFollowups={followups} 
+        apiDeals={deals}
+        onDataChange={loadData}
+      />
+    );
   }
 
   return (

@@ -28,7 +28,7 @@ import {
   JAMIN_DM_MESSAGES,
 } from '../chat/demoConversations';
 import { mockStorageAdapter } from './mockStorageAdapter';
-import { registerMockStorageAdapter, registerMockBootstrapRunner } from '../../services/storageService';
+
 import { mockKycProvider } from '../data/kycFixtures';
 import { registerMockKycProvider } from '../../services/kycService';
 import { registerMockAuthProvider } from '../../context/AuthContext';
@@ -36,7 +36,7 @@ import { getDemoChatData } from '../chat/demoConversations';
 import { registerDemoChatLoader } from '../../services/chatStorage';
 
 // Wire up all mock adapters immediately when mock module is loaded in mock mode
-registerMockStorageAdapter(mockStorageAdapter);
+
 registerMockKycProvider(mockKycProvider);
 registerMockAuthProvider({
   getRoles: () => MOCK_ROLES,
@@ -103,7 +103,7 @@ export function runMockBootstrap(force = false): void {
   }
 }
 
-registerMockBootstrapRunner(runMockBootstrap);
+// registerMockBootstrapRunner(runMockBootstrap);
 
 /**
  * Resets all mock data back to factory defaults.

@@ -15,6 +15,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<User> Users => Set<User>();
     public DbSet<Lead> Leads => Set<Lead>();
+    public DbSet<LeadAssignmentHistory> LeadAssignmentHistories => Set<LeadAssignmentHistory>();
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<Followup> Followups => Set<Followup>();
     public DbSet<Consultation> Consultations => Set<Consultation>();

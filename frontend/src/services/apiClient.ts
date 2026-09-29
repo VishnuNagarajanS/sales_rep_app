@@ -13,9 +13,15 @@ export interface PagedResult<T = any> {
   totalPages: number;
 }
 
+import { isMockMode as envIsMockMode } from '../config/environment';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 class ApiClient {
+  isMockMode(): boolean {
+    return envIsMockMode();
+  }
+
   private getHeaders(): HeadersInit {
     const token = sessionStorage.getItem('nexus_auth_token') || localStorage.getItem('nexus_auth_token');
     return {

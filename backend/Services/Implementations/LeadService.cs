@@ -95,6 +95,14 @@ public class LeadService : ILeadService
     {
         var query = GetScopedLeadsQuery(filter);
 
+        if (_currentUser.Role == "company_admin" || _currentUser.Role == "super_admin")
+        {
+            if (string.Equals(filter.Assignment, "unassigned", StringComparison.OrdinalIgnoreCase))
+                query = query.Where(l => l.AssignedAgentId == null);
+            else if (string.Equals(filter.Assignment, "assigned", StringComparison.OrdinalIgnoreCase))
+                query = query.Where(l => l.AssignedAgentId != null);
+        }
+
         if (string.Equals(filter.Status, "all", StringComparison.OrdinalIgnoreCase))
         {
             // All leads
@@ -163,7 +171,14 @@ public class LeadService : ILeadService
 
     public async Task<ApiResponse<LeadResponseDto>> CreateLeadAsync(CreateLeadDto dto, CancellationToken ct = default)
     {
-        var agentId = _currentUser.UserId ?? 1;
+        int? agentId = null;
+        DateTime? assignedAt = null;
+        if (_currentUser.Role == "sales_executive")
+        {
+            agentId = _currentUser.UserId;
+            assignedAt = DateTime.UtcNow;
+        }
+
         var companyId = dto.CompanyId ?? _currentUser.CompanyId ?? 1;
 
         // Build Custom Fields Dictionary for GHL
@@ -177,6 +192,7 @@ public class LeadService : ILeadService
         {
             CompanyId = companyId,
             AssignedAgentId = agentId,
+            AssignedAt = assignedAt,
             Name = dto.Name.Trim(),
             Phone = dto.Phone.Trim(),
             Email = dto.Email?.Trim() ?? string.Empty,
@@ -213,7 +229,8 @@ public class LeadService : ILeadService
         if (dto.Priority != null) lead.Priority = dto.Priority.Trim();
         if (dto.Notes != null) lead.Notes = dto.Notes.Trim();
         if (dto.NextFollowupDate.HasValue) lead.NextFollowupDate = dto.NextFollowupDate.Value;
-        if (dto.AssignedAgentId.HasValue) lead.AssignedAgentId = dto.AssignedAgentId.Value;
+        if (dto.AssignedAgentId.HasValue && (_currentUser.Role == "company_admin" || _currentUser.Role == "super_admin")) 
+            lead.AssignedAgentId = dto.AssignedAgentId.Value;
 
         // Merge custom fields
         var customFields = DeserializeCustomFields(lead.CustomFieldsJson);
@@ -254,7 +271,7 @@ public class LeadService : ILeadService
             customer = new Customer
             {
                 CompanyId = companyId,
-                AssignedAgentId = agentId,
+                AssignedAgentId = agentId ?? _currentUser.UserId ?? 1,
                 Name = lead.Name,
                 Phone = lead.Phone,
                 Email = lead.Email,
@@ -354,7 +371,7 @@ public class LeadService : ILeadService
         var freshFollowup = new Followup
         {
             CompanyId = lead.CompanyId,
-            AssignedAgentId = lead.AssignedAgentId,
+            AssignedAgentId = lead.AssignedAgentId ?? _currentUser.UserId ?? 1,
             ContactId = lead.Id.ToString(),
             ContactType = "lead",
             ContactName = lead.Name,
@@ -381,6 +398,7 @@ public class LeadService : ILeadService
             CompanyId = lead.CompanyId,
             AssignedAgentId = lead.AssignedAgentId,
             AssignedAgentName = lead.AssignedAgent?.Name,
+            AssignedAt = lead.AssignedAt,
             Name = lead.Name,
             Phone = lead.Phone,
             Email = lead.Email,
@@ -417,7 +435,7 @@ public class LeadService : ILeadService
         _context.Leads.Remove(lead);
         await _context.SaveChangesAsync(ct);
 
-        return ApiResponse<object>.SuccessResult(null, "Lead deleted successfully.");
+        return ApiResponse<object>.SuccessResult(new object(), "Lead deleted successfully.");
     }
 }
 

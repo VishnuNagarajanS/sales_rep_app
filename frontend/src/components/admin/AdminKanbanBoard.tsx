@@ -27,12 +27,27 @@ import { storageService } from '../../services/storageService';
 import { ActivityLogDrawer } from './ActivityLogDrawer';
 import { useAuth } from '../../context/AuthContext';
 import './AdminKanbanBoard.css';
+import {
+  saveLead as apiSaveLead,
+  saveFollowup as apiSaveFollowup,
+  saveDeal as apiSaveDeal
+} from '../../services/ghlApiService';
 
 interface AdminKanbanBoardProps {
   onOpenQuickCreate?: (type: 'lead' | 'followup' | 'deal' | 'visit' | 'consultation') => void;
+  apiLeads?: any[];
+  apiFollowups?: any[];
+  apiDeals?: any[];
+  onDataChange?: () => void;
 }
 
-export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({ onOpenQuickCreate }) => {
+export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({ 
+  onOpenQuickCreate,
+  apiLeads = [],
+  apiFollowups = [],
+  apiDeals = [],
+  onDataChange
+}) => {
   const { tenant, user } = useAuth();
 
   // ── Global Filter States ────────────────────────────────────────────────
@@ -52,17 +67,85 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({ onOpenQuickC
   const [cards, setCards] = useState<AdminKanbanCard[]>([]);
   const [selectedCard, setSelectedCard] = useState<AdminKanbanCard | null>(null);
 
-  // Load cards from storage
+  // Load cards by converting API data
   const loadCards = () => {
-    setCards(adminKanbanService.getCards());
+    const generatedCards: AdminKanbanCard[] = [];
+
+    // Map Leads (Sales Executive Role)
+    apiLeads.forEach(lead => {
+      let stageId = 'leads'; // New/Contacted/etc
+      if (lead.status === 'Interested') stageId = 'interested';
+      if (lead.status === 'Not Interested' || lead.status === 'Junk' || lead.status === 'Lost') stageId = 'not-interested';
+      if (lead.status === 'Follow-up Required') stageId = 'follow-ups';
+      
+      generatedCards.push({
+        id: lead.id,
+        role: 'sales_executive',
+        stageId,
+        title: lead.name,
+        phone: lead.phone,
+        email: lead.email,
+        assignedPersonId: lead.assignedAgentId,
+        assignedPersonName: lead.assignedAgentName || 'Unassigned',
+        stageEnteredAt: lead.createdAt,
+        createdAt: lead.createdAt,
+        lastActivityDate: lead.updatedAt || lead.createdAt,
+        lastActionSnippet: lead.notes || '',
+        priority: lead.priority === 'Urgent' ? 'High' : (lead.priority || 'Medium'),
+        location: lead.location,
+        activityLogs: []
+      });
+    });
+
+    // Map Follow-ups (Sales Executive Role)
+    apiFollowups.forEach(f => {
+      generatedCards.push({
+        id: f.id,
+        role: 'sales_executive',
+        stageId: 'follow-ups',
+        title: f.contactName,
+        phone: f.contactPhone,
+        email: f.email || '',
+        assignedPersonId: f.assignedAgentId,
+        assignedPersonName: f.assignedAgentName || 'Unassigned',
+        stageEnteredAt: f.scheduledAt,
+        createdAt: f.createdAt || f.scheduledAt,
+        lastActivityDate: f.updatedAt || f.scheduledAt,
+        lastActionSnippet: f.notes || '',
+        priority: f.priority || 'Medium',
+        activityLogs: []
+      });
+    });
+
+    // Map Deals/Consultations
+    apiDeals.forEach(d => {
+      const isIrm = d.stage && d.stage.startsWith('irm-');
+      generatedCards.push({
+        id: d.id,
+        role: isIrm ? 'irm' : 'sales_executive',
+        stageId: d.stage || 'consultations',
+        title: d.title || d.customerName,
+        phone: d.phone,
+        email: d.email || '',
+        assignedPersonId: d.assignedAgentId,
+        assignedPersonName: d.assignedAgentName || 'Unassigned',
+        stageEnteredAt: d.stageEnteredAt || d.createdAt,
+        createdAt: d.createdAt,
+        lastActivityDate: d.updatedAt || d.createdAt,
+        lastActionSnippet: d.notes || '',
+        priority: d.priority || 'Medium',
+        value: d.value,
+        investmentAmount: d.investmentRange,
+        activityLogs: []
+      });
+    });
+
+    setCards(generatedCards);
   };
 
   useEffect(() => {
     loadCards();
-    const handleUpdate = () => loadCards();
-    window.addEventListener('nexus_admin_kanban_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_admin_kanban_updated', handleUpdate);
-  }, []);
+  }, [apiLeads, apiFollowups, apiDeals]);
 
   // When role changes, reset person filter to 'All'
   const handleRoleChange = (newRole: KanbanRole) => {
@@ -79,11 +162,15 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({ onOpenQuickC
 
   // Derive person options based on selected role
   const personOptions = useMemo(() => {
-    if (selectedRole === 'sales_executive') {
-      return storageService.getAgents(tenant?.id);
-    }
-    return storageService.getIrms(tenant?.id);
-  }, [selectedRole, tenant?.id]);
+    const roleCards = cards.filter(c => c.role === selectedRole);
+    const uniquePersons = new Map<string, {id: string, name: string}>();
+    roleCards.forEach(c => {
+      if (c.assignedPersonName && c.assignedPersonName !== 'Unassigned') {
+        uniquePersons.set(c.assignedPersonName, { id: c.assignedPersonId || c.assignedPersonName, name: c.assignedPersonName });
+      }
+    });
+    return Array.from(uniquePersons.values());
+  }, [cards, selectedRole]);
 
   // ── Date Filtering Helper ───────────────────────────────────────────────
   const isDateInFilter = (isoDateStr: string): boolean => {
@@ -140,8 +227,7 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({ onOpenQuickC
     });
   }, [cards, selectedRole, selectedPerson, dateRangePreset, customStartDate, customEndDate]);
 
-  // ── Stage Navigation Helpers ────────────────────────────────────────────
-  const handleMoveCard = (card: AdminKanbanCard, direction: 'forward' | 'backward', e: React.MouseEvent) => {
+  const handleMoveCard = async (card: AdminKanbanCard, direction: 'forward' | 'backward', e: React.MouseEvent) => {
     e.stopPropagation();
     const currentIndex = stages.findIndex(s => s.id === card.stageId);
     if (currentIndex === -1) return;
@@ -149,18 +235,34 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({ onOpenQuickC
     const newIndex = direction === 'forward' ? currentIndex + 1 : currentIndex - 1;
     if (newIndex >= 0 && newIndex < stages.length) {
       const newStage = stages[newIndex];
-      const updated = adminKanbanService.updateCardStage(
-        card.id,
-        newStage.id,
-        user?.name || 'Admin',
-        user?.role?.name || 'Company Admin'
-      );
-      if (updated) {
-        setCards(adminKanbanService.getCards());
-        if (selectedCard?.id === card.id) {
-          setSelectedCard(updated);
-        }
+      await performStageUpdate(card, newStage.id);
+    }
+  };
+
+  const performStageUpdate = async (card: AdminKanbanCard, targetStageId: string) => {
+    try {
+      // Find original record
+      if (apiLeads.some(l => l.id === card.id)) {
+        const l = apiLeads.find(x => x.id === card.id)!;
+        let newStatus = l.status;
+        if (targetStageId === 'interested') newStatus = 'Interested';
+        if (targetStageId === 'not-interested') newStatus = 'Not Interested';
+        if (targetStageId === 'follow-ups') newStatus = 'Follow-up Required';
+        if (targetStageId === 'leads') newStatus = 'New';
+        await apiSaveLead({ ...l, status: newStatus });
+      } else if (apiFollowups.some(f => f.id === card.id)) {
+        const f = apiFollowups.find(x => x.id === card.id)!;
+        await apiSaveFollowup({ ...f, status: 'Completed' });
+      } else if (apiDeals.some(d => d.id === card.id)) {
+        const d = apiDeals.find(x => x.id === card.id)!;
+        await apiSaveDeal({ ...d, stage: targetStageId, stageEnteredAt: new Date().toISOString() });
       }
+      
+      if (onDataChange) {
+        onDataChange();
+      }
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -185,22 +287,14 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({ onOpenQuickC
     e.dataTransfer.dropEffect = 'move';
   };
 
-  const handleDrop = (e: React.DragEvent, targetStageId: string) => {
+  const handleDrop = async (e: React.DragEvent, targetStageId: string) => {
     e.preventDefault();
     const cardId = e.dataTransfer.getData('text/plain');
     if (!cardId) return;
-
-    const updated = adminKanbanService.updateCardStage(
-      cardId,
-      targetStageId,
-      user?.name || 'Admin',
-      user?.role?.name || 'Company Admin'
-    );
-    if (updated) {
-      setCards(adminKanbanService.getCards());
-      if (selectedCard?.id === cardId) {
-        setSelectedCard(updated);
-      }
+    
+    const card = cards.find(c => c.id === cardId);
+    if (card) {
+      await performStageUpdate(card, targetStageId);
     }
   };
 

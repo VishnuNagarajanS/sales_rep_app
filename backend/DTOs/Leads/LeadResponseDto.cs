@@ -4,7 +4,7 @@ public class LeadResponseDto
 {
     public int Id { get; set; }
     public int CompanyId { get; set; }
-    public int AssignedAgentId { get; set; }
+    public int? AssignedAgentId { get; set; }
     public string? AssignedAgentName { get; set; }
     public string Name { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
@@ -18,6 +18,7 @@ public class LeadResponseDto
     public Dictionary<string, string> CustomFields { get; set; } = new();
 
     public DateTime? NextFollowupDate { get; set; }
+    public DateTime? AssignedAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
 }

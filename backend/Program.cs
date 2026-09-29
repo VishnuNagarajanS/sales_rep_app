@@ -149,7 +149,8 @@ using (var scope = app.Services.CreateScope())
                     ALTER TABLE followups ALTER COLUMN ""Status"" SET DEFAULT 'Pending';
                     ALTER TABLE followups ALTER COLUMN ""Priority"" DROP NOT NULL;
                     ALTER TABLE followups ALTER COLUMN ""Priority"" SET DEFAULT 'Medium';
-                END $$;
+                    ALTER TABLE ""Leads"" ALTER COLUMN ""AssignedAgentId"" DROP NOT NULL;
+                END ;
             ";
             db.Database.ExecuteSqlRaw(sql);
         }

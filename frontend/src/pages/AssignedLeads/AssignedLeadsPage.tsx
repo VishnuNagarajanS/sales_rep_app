@@ -9,13 +9,18 @@ import { Lead } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
+import { apiClient } from '../../services/apiClient';
+import {
+  AssignableAgent,
+  loadAgentDirectory,
+  isLeadAssigned,
+  persistLeadAssignment,
+} from '../../services/agentDirectory';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
 import './AssignedLeadsPage.css';
-
-const MOCK_AGENTS = storageService.getMockAgents();
 
 export const AssignedLeadsPage: React.FC = () => {
   const { tenant, user } = useAuth();
@@ -32,7 +37,11 @@ export const AssignedLeadsPage: React.FC = () => {
   const [dateTo, setDateTo] = useState<string>('');
 
   // Agent reassignment confirmation state for Edit panel
-  const [pendingAgent, setPendingAgent] = useState<{ id: string | number; name: string } | null>(null);
+  const [pendingAgent, setPendingAgent] = useState<AssignableAgent | null>(null);
+  const [agents, setAgents] = useState<AssignableAgent[]>([]);
+  const [adminIds, setAdminIds] = useState<Set<string>>(
+    new Set(user?.id ? [String(user.id)] : [])
+  );
   const [isReassignConfirmOpen, setIsReassignConfirmOpen] = useState(false);
 
   const roleCode = user?.role?.code;
@@ -115,43 +124,71 @@ export const AssignedLeadsPage: React.FC = () => {
     setDateTo(to);
   };
 
-  const loadData = () => {
-    const allLeads = storageService.getLeads(tenant?.id);
+  const loadData = async () => {
+    if (apiClient.isMockMode()) {
+      const allLeads = storageService.getLeads(tenant?.id);
+      const assigned = allLeads.filter(lead => isLeadAssigned(lead, adminIds));
+      setLeads(assigned);
+      setSelectedLead(prev => {
+        if (!prev) return null;
+        return assigned.find(l => l.id === prev.id) || null;
+      });
+      return;
+    }
 
-    // Merge any mock assignments from session storage if present
-    let sessionAssignments: Array<{ leadId: string; agentId: number; agentName: string }> = [];
     try {
-      const raw = sessionStorage.getItem('ghl_mock_agent_assignments');
-      if (raw) sessionAssignments = JSON.parse(raw);
-    } catch { }
-
-    const assigned = allLeads
-      .map(lead => {
-        const sessionAssigned = sessionAssignments.find(a => a.leadId === lead.id);
-        if (sessionAssigned) {
-          return {
-            ...lead,
-            assignedAgentId: String(sessionAssigned.agentId),
-            assignedAgentName: sessionAssigned.agentName,
-          };
-        }
-        return lead;
-      })
-      .filter(lead => (lead as any).assignmentStatus === 'assigned' || Boolean(lead.assignedAgentId));
-
-    setLeads(assigned);
-    setSelectedLead(prev => {
-      if (!prev) return null;
-      return assigned.find(l => l.id === prev.id) || null;
-    });
+      const res = await apiClient.get<any>('/sales-executive/leads?page=1&pageSize=200&assignment=assigned');
+      if (res.success && res.data && res.data.items) {
+        const apiLeads = res.data.items.map((item: any) => ({
+          ...item,
+          id: String(item.id),
+          assignedAgentId: item.assignedAgentId ? String(item.assignedAgentId) : undefined,
+          customFields: item.customFields || {}
+        }));
+        setLeads(apiLeads);
+        setSelectedLead(prev => {
+          if (!prev) return null;
+          return apiLeads.find((l: any) => l.id === prev.id) || null;
+        });
+      }
+    } catch (err) {
+      console.error('Failed to load leads from API', err);
+    }
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    loadAgentDirectory(tenant?.id, user?.id).then(dir => {
+      if (cancelled) return;
+      setAgents(dir.agents);
+      setAdminIds(dir.adminIds);
+    });
+    return () => { cancelled = true; };
+  }, [tenant?.id, user?.id]);
 
   useEffect(() => {
     loadData();
     const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
-  }, [tenant?.id]);
+    
+    // Polling every 15 seconds while visible
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible' && !apiClient.isMockMode()) {
+        loadData();
+      }
+    }, 15000);
+    
+    const handleFocus = () => {
+      if (!apiClient.isMockMode()) loadData();
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
+      window.removeEventListener('focus', handleFocus);
+      clearInterval(interval);
+    };
+  }, [tenant?.id, adminIds]);
 
   const handleOpenEdit = (lead: Lead) => {
     setFormData({ ...lead });
@@ -161,13 +198,13 @@ export const AssignedLeadsPage: React.FC = () => {
   };
 
   // Populate agent options from MOCK_AGENTS, ensuring the current assigned agent is included
-  const agentOptions = useMemo<Array<{ id: string | number; name: string }>>(() => {
-    const list: Array<{ id: string | number; name: string }> = [...MOCK_AGENTS];
+  const agentOptions = useMemo<AssignableAgent[]>(() => {
+    const list: AssignableAgent[] = [...agents];
     if (formData.assignedAgentName && !list.some(a => a.name.toLowerCase() === formData.assignedAgentName?.toLowerCase())) {
       list.unshift({ id: 'current', name: formData.assignedAgentName });
     }
     return list;
-  }, [formData.assignedAgentName]);
+  }, [formData.assignedAgentName, agents]);
 
   const handleAgentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newName = e.target.value;
@@ -201,7 +238,7 @@ export const AssignedLeadsPage: React.FC = () => {
     setPendingAgent(null);
   };
 
-  const handleSaveLead = (e: React.FormEvent) => {
+  const handleSaveLead = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.phone) return;
 
@@ -213,24 +250,55 @@ export const AssignedLeadsPage: React.FC = () => {
       companyId: formData.companyId || tenant?.id || 't-ghl-01',
     };
 
-    storageService.saveLead(leadToSave);
+    if (apiClient.isMockMode()) {
+      storageService.saveLead(leadToSave);
+    } else {
+      try {
+        const leadId = parseInt(leadToSave.id, 10);
+        await apiClient.put(`/sales-executive/leads/${leadId}`, {
+          name: leadToSave.name,
+          phone: leadToSave.phone,
+          companyId: parseInt(String(leadToSave.companyId), 10) || 1,
+          email: leadToSave.email,
+          location: leadToSave.location,
+          source: leadToSave.source,
+          priority: leadToSave.priority,
+          notes: leadToSave.notes,
+          investmentCapacity: leadToSave.customFields?.investmentCapacity || ''
+        });
+      } catch (err) {
+        console.error('Failed to update lead', err);
+      }
+    }
 
-    // Keep session mock assignments in sync if tracked
-    try {
-      const raw = sessionStorage.getItem('ghl_mock_agent_assignments');
-      if (raw) {
-        const assignments: Array<{ leadId: string; agentId: number | string; agentName: string }> = JSON.parse(raw);
-        const idx = assignments.findIndex(a => a.leadId === leadToSave.id);
-        if (idx >= 0) {
-          assignments[idx] = {
-            ...assignments[idx],
-            agentId: leadToSave.assignedAgentId || '',
-            agentName: leadToSave.assignedAgentName || '',
-          };
-          sessionStorage.setItem('ghl_mock_agent_assignments', JSON.stringify(assignments));
+    // If the agent was changed in the edit panel, persist the reassignment
+    const agentChanged =
+      existingLead && String(existingLead.assignedAgentId || '') !== String(leadToSave.assignedAgentId || '');
+    if (agentChanged) {
+      const newAgent = agentOptions.find(a => a.id === String(leadToSave.assignedAgentId));
+      if (newAgent) {
+        if (apiClient.isMockMode()) {
+          try {
+            await persistLeadAssignment(leadToSave, newAgent);
+          } catch (err: any) {
+            console.error('Reassign failed', err);
+            alert(`Failed to reassign lead: ${err.message || 'Unknown error'}`);
+          }
+        } else {
+          try {
+            const res = await apiClient.post<any>('/ghl/leads/reassign', {
+              leadIds: [parseInt(leadToSave.id, 10)],
+              agentId: newAgent.dbId
+            });
+            const skipped = res?.data?.skipped || [];
+            if (skipped.length > 0) alert(`Reassign skipped: ${skipped[0].reason}`);
+          } catch (err: any) {
+            console.error('Reassign failed', err);
+            alert(`Reassign failed: ${err.message || 'Unknown error'}`);
+          }
         }
       }
-    } catch {}
+    }
 
     setIsEditDrawerOpen(false);
     loadData();

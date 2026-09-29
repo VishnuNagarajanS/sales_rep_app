@@ -28,11 +28,8 @@ public class WebhooksController : ControllerBase
         // Assign to GHL India Ventures (CompanyId = 1) by default if not specified
         int companyId = 1;
 
-        // Optionally, assign to the first available admin or sales rep (or let the system assign via round-robin later)
-        // Here we just pick a sales executive in the company, e.g., userId = 3 (Naveen)
-        var agent = await _context.Users.FirstOrDefaultAsync(u => u.CompanyId == companyId && u.Role.Code == "sales_executive", ct);
-        int assignedAgentId = agent?.Id ?? 2; // Fallback to Company Admin (Vishnu)
-
+        // Website leads must land unassigned
+        
         var newLead = new Lead
         {
             Name = request.FullName,
@@ -44,7 +41,7 @@ public class WebhooksController : ControllerBase
             Priority = "Medium",
             Notes = request.Message,
             CompanyId = companyId,
-            AssignedAgentId = assignedAgentId,
+            AssignedAgentId = null,
             CreatedAt = DateTime.UtcNow,
             CustomFieldsJson = JsonSerializer.Serialize(new
             {
