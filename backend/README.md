@@ -99,6 +99,8 @@ erDiagram
     TENANTS ||--o{ USERS : "has members"
     ROLES ||--o{ USERS : "defines permissions"
 
+    hello
+
     TENANTS {
         int Id PK "Auto-increment (1, 2...)"
         string Name
