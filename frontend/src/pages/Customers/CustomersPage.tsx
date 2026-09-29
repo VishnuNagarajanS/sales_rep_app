@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Building2,
   Phone,
@@ -14,18 +14,37 @@ import {
   Lock,
   Sparkles,
 } from 'lucide-react';
-import { Customer, CallRecord, Followup, Deal, Lead, IrmProfile } from '../../types';
+import { Customer, CallRecord, Followup, Deal, Lead, IrmProfile, CustomFieldDefinition } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
+import { isMockMode } from '../../config/environment';
+import {
+  getCustomers,
+  saveCustomer as apiSaveCustomer,
+  getCalls,
+  getFollowups,
+  saveFollowup as apiSaveFollowup,
+  getDeals,
+  getLeads,
+} from '../../services/ghlApiService';
 import { StatusChip } from '../../components/common/StatusChip';
-import { Timeline, TimelineEvent } from '../../components/common/Timeline';
 import { DocumentUploader } from '../../components/common/DocumentUploader';
 import { DocumentList } from '../../components/common/DocumentList';
 import { Modal } from '../../components/common/Modal';
-import { MOCK_IRMS, INITIAL_CUSTOMERS } from '../../mock_data/mockData';
+import { Timeline, TimelineEvent } from '../../components/common/Timeline';
+import { MOCK_IRMS } from '../../mock_data/mockData';
 import './CustomersPage.css';
 
+const getCustomFieldDefinitions = (tenantId?: string): CustomFieldDefinition[] => {
+  try {
+    const raw = localStorage.getItem('nexus_custom_fields');
+    const all: CustomFieldDefinition[] = raw ? JSON.parse(raw) : [];
+    return tenantId ? all.filter(d => !d.companyId || d.companyId === tenantId) : all;
+  } catch {
+    return [];
+  }
+};
 interface AutoRecommendation {
   customerId: string;
   customerName: string;
@@ -42,6 +61,7 @@ export const CustomersPage: React.FC = () => {
   const { initiateCall } = useCall();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const irms = useMemo(() => storageService.getIrms(tenant?.id), [tenant?.id]);
 
   // Role-based scoping: Sales Executives see only their own customers.
   // Managers / Admins / Super Admins see the full company customer list (no filter).
@@ -99,34 +119,35 @@ export const CustomersPage: React.FC = () => {
   const [calls, setCalls] = useState<CallRecord[]>([]);
   const [followups, setFollowups] = useState<Followup[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
 
-  const loadData = () => {
-    let custs = storageService.getCustomers(tenant?.id);
-    if (custs.length === 0) {
-      INITIAL_CUSTOMERS.filter(c => c.companyId === tenant?.id).forEach(c => storageService.saveCustomer(c));
-      custs = storageService.getCustomers(tenant?.id);
-    } else if (canAssignToIRM) {
-      const hasExecCusts = custs.some(c => (c.assignedAgentId && c.assignedAgentId === user?.id) || (c.assignedAgentName && c.assignedAgentName === user?.name));
-      if (!hasExecCusts) {
-        INITIAL_CUSTOMERS.filter(c => c.companyId === tenant?.id && c.assignedAgentName === 'Ananya Iyer').forEach(c => storageService.saveCustomer(c));
-        custs = storageService.getCustomers(tenant?.id);
+  const loadData = async () => {
+    try {
+      const [custs, cCalls, cFollowups, cDeals, cLeads] = await Promise.all([
+        getCustomers(tenant?.id),
+        getCalls(tenant?.id),
+        getFollowups(tenant?.id),
+        getDeals(tenant?.id),
+        getLeads(tenant?.id),
+      ]);
+      setCustomers(custs);
+      setCalls(cCalls);
+      setFollowups(cFollowups);
+      setDeals(cDeals);
+      setLeads(cLeads);
+
+      const firstVisible = isExec
+        ? custs.filter(c =>
+          (c.assignedAgentId && c.assignedAgentId === user?.id) ||
+          (c.assignedAgentName && c.assignedAgentName === user?.name)
+        )[0]
+        : custs[0];
+      if (firstVisible && !selectedCustomer) {
+        setSelectedCustomer(firstVisible);
       }
+    } catch (err) {
+      console.error('Failed to load customers page data', err);
     }
-    setCustomers(custs);
-    // Auto-select from the scoped list so an exec doesn't land on a customer
-    // that is invisible in their own filtered left-panel list.
-    const firstVisible = isExec
-      ? custs.filter(c =>
-        (c.assignedAgentId && c.assignedAgentId === user?.id) ||
-        (c.assignedAgentName && c.assignedAgentName === user?.name)
-      )[0]
-      : custs[0];
-    if (firstVisible && !selectedCustomer) {
-      setSelectedCustomer(firstVisible);
-    }
-    setCalls(storageService.getCalls(tenant?.id));
-    setFollowups(storageService.getFollowups(tenant?.id));
-    setDeals(storageService.getDeals(tenant?.id));
   };
 
   useEffect(() => {
@@ -182,6 +203,53 @@ export const CustomersPage: React.FC = () => {
     setIsAutoPreviewModalOpen(false);
   };
 
+  const formatCurrency = (val: number) => {
+    if (val >= 10000000) return `₹${(val / 10000000).toFixed(2)} Cr`;
+    if (val >= 100000) return `₹${(val / 100000).toFixed(1)} L`;
+    return `₹${val.toLocaleString('en-IN')}`;
+  };
+
+  // Build leads lookup map by last 10 digits of phone once per render
+  const leadsByPhone = useMemo(() => {
+    const map = new Map<string, Lead>();
+    (leads || []).forEach(l => {
+      const digits = (l.phone || '').replace(/\D/g, '').slice(-10);
+      if (digits && !map.has(digits)) {
+        map.set(digits, l);
+      }
+    });
+    return map;
+  }, [leads]);
+
+  const getInvestmentRange = (c: Customer): string => {
+    const checkVal = (v: unknown): string => {
+      if (typeof v === 'string' && v.trim()) {
+        return v.trim();
+      }
+      return '';
+    };
+
+    // 1. c.customFields?.investmentCapacity
+    const c1 = checkVal(c.customFields?.investmentCapacity);
+    if (c1) return c1;
+
+    // 2. c.customFields?.budgetRange
+    const c2 = checkVal(c.customFields?.budgetRange);
+    if (c2) return c2;
+
+    // 3. matching lead from the map (by the last 10 digits of c.phone)
+    const digits = (c.phone || '').replace(/\D/g, '').slice(-10);
+    const lead = digits ? leadsByPhone.get(digits) : undefined;
+    if (lead) {
+      const l1 = checkVal(lead.customFields?.investmentCapacity);
+      if (l1) return l1;
+      const l2 = checkVal(lead.customFields?.budgetRange);
+      if (l2) return l2;
+    }
+
+    return '';
+  };
+
   const getCustomerCapacityTier = (c: Customer): { tier: 'Premium' | 'Very High' | 'High' | 'Medium' | 'Normal'; label: string } => {
     const raw = getInvestmentRange(c);
     const totalVal = typeof c.totalValue === 'number' ? c.totalValue : 0;
@@ -203,7 +271,7 @@ export const CustomersPage: React.FC = () => {
 
   const runAutoAssignmentAlgorithm = (custs: Customer[]): AutoRecommendation[] => {
     const liveCountMap: Record<string, number> = {};
-    MOCK_IRMS.forEach(irm => {
+    irms.forEach((irm: IrmProfile) => {
       liveCountMap[irm.id] = customers.filter(c => c.assignedIrmName === irm.name || c.assignedIrmId === irm.id).length;
     });
 
@@ -218,38 +286,38 @@ export const CustomersPage: React.FC = () => {
 
     sortedCusts.forEach(c => {
       const { tier, label } = getCustomerCapacityTier(c);
-      const availableIrms = MOCK_IRMS.filter(i => i.status === 'Available');
-      const pool = availableIrms.length > 0 ? availableIrms : MOCK_IRMS;
+      const availableIrms = irms.filter((i: IrmProfile) => i.status === 'Available');
+      const pool = availableIrms.length > 0 ? availableIrms : irms;
 
       let chosenIrm: IrmProfile;
       let reason: string;
 
       if (tier === 'Premium') {
-        const expIrms = pool.filter(i => i.experienceLevel === 'Experienced');
+        const expIrms = pool.filter((i: IrmProfile) => i.experienceLevel === 'Experienced');
         const candidatePool = expIrms.length > 0 ? expIrms : pool;
-        chosenIrm = candidatePool.reduce((min, curr) => liveCountMap[curr.id] < liveCountMap[min.id] ? curr : min, candidatePool[0]);
+        chosenIrm = candidatePool.reduce((min: IrmProfile, curr: IrmProfile) => liveCountMap[curr.id] < liveCountMap[min.id] ? curr : min, candidatePool[0]);
         reason = 'Premium → Experienced (Capacity Match)';
       } else if (tier === 'Very High') {
-        const expIrms = pool.filter(i => i.experienceLevel === 'Experienced');
+        const expIrms = pool.filter((i: IrmProfile) => i.experienceLevel === 'Experienced');
         const candidatePool = expIrms.length > 0 ? expIrms : pool;
-        chosenIrm = candidatePool.reduce((min, curr) => liveCountMap[curr.id] < liveCountMap[min.id] ? curr : min, candidatePool[0]);
+        chosenIrm = candidatePool.reduce((min: IrmProfile, curr: IrmProfile) => liveCountMap[curr.id] < liveCountMap[min.id] ? curr : min, candidatePool[0]);
         reason = 'Very High → Experienced (High Performance)';
       } else if (tier === 'High') {
-        const highIrms = pool.filter(i => i.experienceLevel === 'Experienced' || i.experienceLevel === 'Mid-Level');
+        const highIrms = pool.filter((i: IrmProfile) => i.experienceLevel === 'Experienced' || i.experienceLevel === 'Mid-Level');
         const candidatePool = highIrms.length > 0 ? highIrms : pool;
-        chosenIrm = candidatePool.reduce((min, curr) => liveCountMap[curr.id] < liveCountMap[min.id] ? curr : min, candidatePool[0]);
+        chosenIrm = candidatePool.reduce((min: IrmProfile, curr: IrmProfile) => liveCountMap[curr.id] < liveCountMap[min.id] ? curr : min, candidatePool[0]);
         reason = chosenIrm.experienceLevel === 'Experienced'
           ? 'High-value → Experienced'
           : 'High-value → Mid-Level (Fair Distribution)';
       } else if (tier === 'Medium') {
-        const fresherMid = pool.filter(i => i.experienceLevel === 'Fresher' || i.experienceLevel === 'Mid-Level');
+        const fresherMid = pool.filter((i: IrmProfile) => i.experienceLevel === 'Fresher' || i.experienceLevel === 'Mid-Level');
         const candidatePool = fresherMid.length > 0 ? fresherMid : pool;
-        chosenIrm = candidatePool.reduce((min, curr) => liveCountMap[curr.id] < liveCountMap[min.id] ? curr : min, candidatePool[0]);
+        chosenIrm = candidatePool.reduce((min: IrmProfile, curr: IrmProfile) => liveCountMap[curr.id] < liveCountMap[min.id] ? curr : min, candidatePool[0]);
         reason = chosenIrm.experienceLevel === 'Fresher'
           ? 'Medium-value → Fresher (Balanced Workload)'
           : 'Medium-value → Mid-Level (Fair Distribution)';
       } else {
-        chosenIrm = pool.reduce((min, curr) => liveCountMap[curr.id] < liveCountMap[min.id] ? curr : min, pool[0]);
+        chosenIrm = pool.reduce((min: IrmProfile, curr: IrmProfile) => liveCountMap[curr.id] < liveCountMap[min.id] ? curr : min, pool[0]);
         reason = 'Standard Ticket → Balanced Workload';
       }
 
@@ -276,7 +344,7 @@ export const CustomersPage: React.FC = () => {
       const selectedCusts = scopedCustomers.filter(c => selectedCustomerIds.has(c.id) && isCustomerEligibleForIrm(c));
       if (selectedCusts.length === 0) return;
 
-      setSelectedIrmId(MOCK_IRMS[0]?.id || '');
+      setSelectedIrmId(irms[0]?.id || MOCK_IRMS[0]?.id || '');
       setIsManualModalOpen(true);
     } else {
       if (eligibleUnassignedCustomers.length === 0) return;
@@ -286,15 +354,16 @@ export const CustomersPage: React.FC = () => {
     }
   };
 
-  const handleConfirmManualAssignment = () => {
-    const selectedIrm = MOCK_IRMS.find(i => i.id === selectedIrmId);
+  const handleConfirmManualAssignment = async () => {
+    const selectedIrm = irms.find((i: IrmProfile) => i.id === selectedIrmId) || MOCK_IRMS.find((i: IrmProfile) => i.id === selectedIrmId);
     if (!selectedIrm) return;
 
     let assignedCount = 0;
-    const allLatest = storageService.getCustomers(tenant?.id);
+    const allLatest = (storageService.getCustomers ? storageService.getCustomers(tenant?.id) : customers) || customers;
+    const toUpdate: Customer[] = [];
 
     selectedCustomerIds.forEach(cid => {
-      const cust = allLatest.find(c => c.id === cid);
+      const cust = allLatest.find((c: Customer) => c.id === cid) || customers.find((c: Customer) => c.id === cid);
       if (cust && isCustomerEligibleForIrm(cust)) {
         const updated: Customer = {
           ...cust,
@@ -303,10 +372,17 @@ export const CustomersPage: React.FC = () => {
           assignedIrmAt: new Date().toISOString(),
           notes: `${cust.notes ? cust.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Assigned to IRM: ${selectedIrm.name} by ${user?.name || 'Sales Executive'}`,
         };
-        storageService.saveCustomer(updated);
+        toUpdate.push(updated);
+        storageService.saveCustomer?.(updated);
         assignedCount++;
       }
     });
+
+    if (!isMockMode()) {
+      for (const u of toUpdate) {
+        await apiSaveCustomer(u).catch(console.error);
+      }
+    }
 
     setIsManualModalOpen(false);
     setIsAssignMode(false);
@@ -315,12 +391,13 @@ export const CustomersPage: React.FC = () => {
     showToast(`Successfully assigned ${assignedCount} customer(s) to ${selectedIrm.name}!`);
   };
 
-  const handleConfirmAutoAssignment = () => {
+  const handleConfirmAutoAssignment = async () => {
     let assignedCount = 0;
-    const allLatest = storageService.getCustomers(tenant?.id);
+    const allLatest = (storageService.getCustomers ? storageService.getCustomers(tenant?.id) : customers) || customers;
+    const toUpdate: Customer[] = [];
 
     autoRecommendations.forEach(rec => {
-      const cust = allLatest.find(c => c.id === rec.customerId);
+      const cust = allLatest.find((c: Customer) => c.id === rec.customerId) || customers.find((c: Customer) => c.id === rec.customerId);
       if (cust && isCustomerEligibleForIrm(cust)) {
         const updated: Customer = {
           ...cust,
@@ -329,10 +406,17 @@ export const CustomersPage: React.FC = () => {
           assignedIrmAt: new Date().toISOString(),
           notes: `${cust.notes ? cust.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Auto-assigned to IRM: ${rec.recommendedIrmName} (${rec.matchReason})`,
         };
-        storageService.saveCustomer(updated);
+        toUpdate.push(updated);
+        storageService.saveCustomer?.(updated);
         assignedCount++;
       }
     });
+
+    if (!isMockMode()) {
+      for (const u of toUpdate) {
+        await apiSaveCustomer(u).catch(console.error);
+      }
+    }
 
     setIsAutoPreviewModalOpen(false);
     setIsAssignMode(false);
@@ -343,7 +427,7 @@ export const CustomersPage: React.FC = () => {
   };
 
   const handleUpdateSingleRecommendation = (customerId: string, newIrmId: string) => {
-    const newIrm = MOCK_IRMS.find(i => i.id === newIrmId);
+    const newIrm = irms.find((i: IrmProfile) => i.id === newIrmId) || MOCK_IRMS.find((i: IrmProfile) => i.id === newIrmId);
     if (!newIrm) return;
     setAutoRecommendations(prev =>
       prev.map(rec => {
@@ -410,54 +494,14 @@ export const CustomersPage: React.FC = () => {
       notes: '',
       customFields: newCustomFields,
     };
-    storageService.saveCustomer(newCustomer);
+    apiSaveCustomer(newCustomer)
+      .then(saved => {
+        setSelectedCustomer(saved);
+        loadData();
+      })
+      .catch(console.error);
     setIsAddModalOpen(false);
     resetAddForm();
-    setSelectedCustomer(newCustomer);
-  };
-
-  const formatCurrency = (val: number) => {
-    if (val >= 10000000) return `₹${(val / 10000000).toFixed(2)} Cr`;
-    if (val >= 100000) return `₹${(val / 100000).toFixed(1)} L`;
-    return `₹${val.toLocaleString('en-IN')}`;
-  };
-
-  // Build leads lookup map by last 10 digits of phone once per render
-  const leadsByPhone = new Map<string, Lead>();
-  (storageService.getLeads(tenant?.id) || []).forEach(l => {
-    const digits = (l.phone || '').replace(/\D/g, '').slice(-10);
-    if (digits && !leadsByPhone.has(digits)) {
-      leadsByPhone.set(digits, l);
-    }
-  });
-
-  const getInvestmentRange = (c: Customer): string => {
-    const checkVal = (v: unknown): string => {
-      if (typeof v === 'string' && v.trim()) {
-        return v.trim();
-      }
-      return '';
-    };
-
-    // 1. c.customFields?.investmentCapacity
-    const c1 = checkVal(c.customFields?.investmentCapacity);
-    if (c1) return c1;
-
-    // 2. c.customFields?.budgetRange
-    const c2 = checkVal(c.customFields?.budgetRange);
-    if (c2) return c2;
-
-    // 3. matching lead from the map (by the last 10 digits of c.phone)
-    const digits = (c.phone || '').replace(/\D/g, '').slice(-10);
-    const lead = digits ? leadsByPhone.get(digits) : undefined;
-    if (lead) {
-      const l1 = checkVal(lead.customFields?.investmentCapacity);
-      if (l1) return l1;
-      const l2 = checkVal(lead.customFields?.budgetRange);
-      if (l2) return l2;
-    }
-
-    return '';
   };
 
   const getCustomerValueDisplay = (c: Customer): string => {
@@ -665,27 +709,27 @@ export const CustomersPage: React.FC = () => {
 
               {/* Agent Filter */}
               {!isExec && (
-              <div className="customers-filter-group">
-                <label
-                  htmlFor="filter-customer-agent"
-                  className="customers-filter-tag"
-                >
-                  Agent:
-                </label>
-                <select
-                  id="filter-customer-agent"
-                  className={`form-select customers-filter-select ${agentFilter !== 'All' && agentFilter !== '' ? 'is-filtered' : ''}`}
-                  value={agentFilter}
-                  onChange={e => setAgentFilter(e.target.value)}
-                >
-                  <option value="All">All</option>
-                  {agentOptions.map(opt => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                <div className="customers-filter-group">
+                  <label
+                    htmlFor="filter-customer-agent"
+                    className="customers-filter-tag"
+                  >
+                    Agent:
+                  </label>
+                  <select
+                    id="filter-customer-agent"
+                    className={`form-select customers-filter-select ${agentFilter !== 'All' && agentFilter !== '' ? 'is-filtered' : ''}`}
+                    value={agentFilter}
+                    onChange={e => setAgentFilter(e.target.value)}
+                  >
+                    <option value="All">All</option>
+                    {agentOptions.map(opt => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               )}
             </div>
             <div className="customers-list">
@@ -855,13 +899,12 @@ export const CustomersPage: React.FC = () => {
                   </div>
 
                   {selectedCustomer.customFields && (() => {
-                    const activeDefs = storageService
-                      .getCustomFieldDefinitions(tenant?.id)
-                      .filter(d => d.active !== false && d.module === 'customers')
-                      .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+                    const activeDefs = getCustomFieldDefinitions(tenant?.id)
+                      .filter((d: CustomFieldDefinition) => d.active !== false && d.module === 'customers')
+                      .sort((a: CustomFieldDefinition, b: CustomFieldDefinition) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
 
                     const rows = activeDefs
-                      .map(def => {
+                      .map((def: CustomFieldDefinition) => {
                         const key = def.fieldKey || def.id;
                         const val = selectedCustomer.customFields?.[key];
                         if (val === undefined || val === null || val === '') return null;
@@ -881,7 +924,7 @@ export const CustomersPage: React.FC = () => {
                           Tenant Specific Relationship Attributes
                         </h4>
                         <div className="customer-custom-grid">
-                          {rows.map(item => (
+                          {rows.map((item: any) => (
                             <div key={item!.id}>
                               <span className="customer-custom-label">
                                 {item!.label}:
@@ -962,7 +1005,7 @@ export const CustomersPage: React.FC = () => {
                         <button
                           className="btn btn-secondary btn-sm"
                           onClick={() => {
-                            storageService.saveFollowup({ ...f, status: 'Completed' });
+                            apiSaveFollowup({ ...f, status: 'Completed' }).then(loadData).catch(console.error);
                           }}
                         >
                           Mark Done
@@ -1074,14 +1117,13 @@ export const CustomersPage: React.FC = () => {
           </div>
           {/* Tenant-Specific Custom Fields */}
           {(() => {
-            const customerDefs = storageService
-              .getCustomFieldDefinitions(tenant?.id)
-              .filter(d => d.active !== false && d.module === 'customers')
-              .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+            const customerDefs = getCustomFieldDefinitions(tenant?.id)
+              .filter((d: CustomFieldDefinition) => d.active !== false && d.module === 'customers')
+              .sort((a: CustomFieldDefinition, b: CustomFieldDefinition) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
 
             if (customerDefs.length === 0) return null;
 
-            return customerDefs.map(def => {
+            return customerDefs.map((def: CustomFieldDefinition) => {
               const key = def.fieldKey || def.id;
               const val = newCustomFields[key] ?? def.defaultValue ?? '';
               return (
@@ -1100,7 +1142,7 @@ export const CustomersPage: React.FC = () => {
                       {!def.defaultValue && !def.options.includes(val) && (
                         <option value="">Select {def.label}...</option>
                       )}
-                      {def.options.map(opt => (
+                      {def.options.map((opt: string) => (
                         <option key={opt} value={opt}>
                           {opt}
                         </option>
@@ -1153,7 +1195,7 @@ export const CustomersPage: React.FC = () => {
           }
         >
           <div className="irm-selection-list">
-            {MOCK_IRMS.map(irm => {
+            {irms.map((irm: IrmProfile) => {
               const currentCount = customers.filter(c => c.assignedIrmName === irm.name || c.assignedIrmId === irm.id).length;
               const workload = currentCount <= 2 ? 'Low' : currentCount <= 5 ? 'Medium' : 'High';
               const isSelected = selectedIrmId === irm.id;
@@ -1271,7 +1313,7 @@ export const CustomersPage: React.FC = () => {
                           onChange={e => handleUpdateSingleRecommendation(rec.customerId, e.target.value)}
                           autoFocus
                         >
-                          {MOCK_IRMS.map(irm => (
+                          {irms.map((irm: IrmProfile) => (
                             <option key={irm.id} value={irm.id}>
                               {irm.name} ({irm.experienceLevel}, {irm.status})
                             </option>

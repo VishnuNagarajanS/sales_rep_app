@@ -32,12 +32,34 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import {
+  getCalls as apiGetCalls,
+  getLeads as apiGetLeads,
+  getFollowups as apiGetFollowups,
+  getConsultations as apiGetConsultations,
+} from '../../services/ghlApiService';
 import { Drawer } from '../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
 import { StatusChip } from '../../components/common/StatusChip';
 import { CallRecord, Lead, Followup, Consultation } from '../../types';
+import { storageService } from '../../services/storageService';
 import './ProfilePage.css';
+
+// ── User persistence helper ──────────────────────────────────────────────────
+const saveStoredUser = (updatedUser: any) => {
+  try {
+    const raw = localStorage.getItem('nexus_users');
+    const users: any[] = raw ? JSON.parse(raw) : [];
+    const idx = users.findIndex(u => u.id === updatedUser.id);
+    if (idx >= 0) {
+      users[idx] = updatedUser;
+    } else {
+      users.push(updatedUser);
+    }
+    localStorage.setItem('nexus_users', JSON.stringify(users));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -207,18 +229,50 @@ export const ProfilePage: React.FC = () => {
   const [allConsultations, setAllConsultations] = useState<Consultation[]>([]);
 
   useEffect(() => {
-    const loadLiveData = () => {
-      // Merge any leftover duplicates first so KPIs reflect clean data
-      storageService.cleanupDuplicateLeads(tenant?.id);
-      setAllCalls(storageService.getCalls(tenant?.id) || []);
-      setAllLeads(storageService.getLeads(tenant?.id) || []);
-      setAllFollowups(storageService.getFollowups(tenant?.id) || []);
-      setAllConsultations(storageService.getConsultations(tenant?.id) || []);
+    let isMounted = true;
+    const loadLiveData = async () => {
+      try {
+        storageService.cleanupDuplicateLeads(tenant?.id);
+      } catch {}
+
+      if (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') {
+        try {
+          const [calls, leads, followups, consultations] = await Promise.all([
+            apiGetCalls(tenant?.id),
+            apiGetLeads(tenant?.id),
+            apiGetFollowups(tenant?.id),
+            apiGetConsultations(tenant?.id),
+          ]);
+          if (isMounted) {
+            setAllCalls(calls && calls.length > 0 ? calls : storageService.getCalls(tenant?.id) || []);
+            setAllLeads(leads && leads.length > 0 ? leads : storageService.getLeads(tenant?.id) || []);
+            setAllFollowups(followups && followups.length > 0 ? followups : storageService.getFollowups(tenant?.id) || []);
+            setAllConsultations(consultations && consultations.length > 0 ? consultations : storageService.getConsultations(tenant?.id) || []);
+          }
+        } catch {
+          if (isMounted) {
+            setAllCalls(storageService.getCalls(tenant?.id) || []);
+            setAllLeads(storageService.getLeads(tenant?.id) || []);
+            setAllFollowups(storageService.getFollowups(tenant?.id) || []);
+            setAllConsultations(storageService.getConsultations(tenant?.id) || []);
+          }
+        }
+      } else {
+        if (isMounted) {
+          setAllCalls(storageService.getCalls(tenant?.id) || []);
+          setAllLeads(storageService.getLeads(tenant?.id) || []);
+          setAllFollowups(storageService.getFollowups(tenant?.id) || []);
+          setAllConsultations(storageService.getConsultations(tenant?.id) || []);
+        }
+      }
     };
     loadLiveData();
     window.addEventListener('nexus_storage_updated', loadLiveData);
-    return () => window.removeEventListener('nexus_storage_updated', loadLiveData);
-  }, [tenant?.id]);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('nexus_storage_updated', loadLiveData);
+    };
+  }, [tenant?.id, tenant?.slug]);
 
   const myCalls = useMemo(
     () => allCalls.filter(c => c.agentId === user?.id || c.agentName === user?.name),
@@ -550,7 +604,7 @@ export const ProfilePage: React.FC = () => {
     if (!user) return;
     const updated = { ...user, name: editName, phone: editPhone, designation: editDesignation };
     setUser(updated);
-    storageService.saveUser(updated);
+    saveStoredUser(updated);
     setPersonalSaved(true);
     setTimeout(() => setPersonalSaved(false), 2200);
   };
@@ -564,7 +618,7 @@ export const ProfilePage: React.FC = () => {
       specializations: editSpecializations.split(',').map(s => s.trim()).filter(Boolean),
     };
     setUser(updated);
-    storageService.saveUser(updated);
+    saveStoredUser(updated);
     setSkillsSaved(true);
     setTimeout(() => setSkillsSaved(false), 2200);
   };
@@ -581,7 +635,7 @@ export const ProfilePage: React.FC = () => {
       },
     };
     setUser(updated);
-    storageService.saveUser(updated);
+    saveStoredUser(updated);
     setHoursSaved(true);
     setTimeout(() => setHoursSaved(false), 2200);
   };

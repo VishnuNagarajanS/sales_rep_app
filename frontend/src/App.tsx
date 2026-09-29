@@ -3,6 +3,7 @@ import { useAuth } from './context/AuthContext';
 import { AuthLayout } from './layouts/AuthLayout';
 import { SalesLayout } from './layouts/SalesLayout';
 import { AdminLayout } from './layouts/AdminLayout';
+import { isMockMode } from './config/environment';
 
 // Sales Core Pages
 import { DashboardPage } from './pages/Dashboard/DashboardPage';
@@ -58,6 +59,16 @@ import { PlatformAuditPage } from './pages/Admin/Audit/PlatformAuditPage';
 import { ProtectedRoute } from './components/common/Guards';
 import { Modal } from './components/common/Modal';
 import { storageService } from './services/storageService';
+import { Investor, Customer } from './types';
+import {
+  saveLead as apiSaveLead,
+  saveFollowup as apiSaveFollowup,
+  saveConsultation as apiSaveConsultation,
+  saveDeal as apiSaveDeal,
+  saveCustomer as apiSaveCustomer,
+  getInvestors as apiGetInvestors,
+  getCustomers as apiGetCustomers,
+} from './services/ghlApiService';
 import { PERMISSIONS } from './constants/permissions';
 import './App.css';
 
@@ -71,18 +82,12 @@ export const App: React.FC = () => {
   const isGhlAdmin =
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
-
-  // Seed initial mock data on clean install / empty session
+  // In mock mode only, run idempotent mock bootstrap if not yet initialized
   useEffect(() => {
-    if (storageService.getUsers().length === 0) {
-      storageService.loadMockDataFromSeparateFolder();
-    }
-  }, []);
-
-  // Seed initial mock data on clean install / empty session
-  useEffect(() => {
-    if (storageService.getUsers().length === 0) {
-      storageService.loadMockDataFromSeparateFolder();
+    if (isMockMode()) {
+      import('./mock/runtime/mockBootstrap').then(({ runMockBootstrap }) => {
+        runMockBootstrap();
+      });
     }
   }, []);
 
@@ -94,8 +99,11 @@ export const App: React.FC = () => {
         setCurrentRoute('dashboard');
         sessionStorage.setItem('nexus_current_route', 'dashboard');
       }
+    } else if (user?.role?.code === 'sales_executive' && currentRoute === 'kyc') {
+      setCurrentRoute('dashboard');
+      sessionStorage.setItem('nexus_current_route', 'dashboard');
     }
-  }, [user?.role?.code]);
+  }, [user?.role?.code, currentRoute]);
 
   // Quick Create Modal State
   const [quickCreateType, setQuickCreateType] = useState<
@@ -390,9 +398,13 @@ export const App: React.FC = () => {
           <BookingsPage />
         </ProtectedRoute>
       ) : currentRoute === 'kyc' ? (
-        <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
-          <KYCPage />
-        </ProtectedRoute>
+        user?.role?.code === 'sales_executive' ? (
+          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+        ) : (
+          <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
+            <KYCPage />
+          </ProtectedRoute>
+        )
       ) : currentRoute === 'investors' ? (
         <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
           <InvestorsPage />
@@ -733,7 +745,7 @@ export const App: React.FC = () => {
                         onChange={e => setSelectedCustomerId(e.target.value)}
                         required
                       >
-                        {tenantCustomers.map(c => (
+                        {tenantCustomers.map((c: Customer) => (
                           <option key={c.id} value={c.id}>
                             {c.name}{c.phone ? ` · ${c.phone}` : ''}
                           </option>

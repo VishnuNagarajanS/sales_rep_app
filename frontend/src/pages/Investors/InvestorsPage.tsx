@@ -5,6 +5,7 @@ import Papa from 'papaparse';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
+import { getInvestors, saveInvestor as apiSaveInvestor, deleteInvestor as apiDeleteInvestor, getDeals, getCalls, getConsultations, getOpportunities, getFollowups } from '../../services/ghlApiService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
@@ -84,9 +85,18 @@ export const InvestorsPage: React.FC = () => {
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof InvestorForm, string>>>({});
 
   // ── Data loading ──────────────────────────────────────────────────────────
-  const loadData = () => {
-    setInvestors(storageService.getInvestors(tenant?.id));
-    setDeals(storageService.getDeals(tenant?.id));
+  const loadData = async () => {
+    try {
+      const [apiInvestors, apiDeals] = await Promise.all([
+        getInvestors(tenant?.id),
+        getDeals(tenant?.id),
+      ]);
+      setInvestors(apiInvestors || []);
+      setDeals(apiDeals || []);
+    } catch {
+      setInvestors(storageService.getInvestors(tenant?.id));
+      setDeals(storageService.getDeals(tenant?.id));
+    }
     setAllCalls(storageService.getCalls(tenant?.id));
     setAllConsultations(storageService.getConsultations(tenant?.id));
     setAllOpportunities(storageService.getOpportunities(tenant?.id));
@@ -114,31 +124,31 @@ export const InvestorsPage: React.FC = () => {
 
   const scopedInvestors = isGhlIrm
     ? [
-        ...investors.filter(inv =>
-          convertedCustomerIds.has(inv.id) ||
-          convertedCustomerNames.has(inv.name.toLowerCase())
-        ),
-        ...convertedDeals
-          .filter(d => !investors.some(inv => inv.id === d.customerId || inv.name.toLowerCase() === d.customerName.toLowerCase()))
-          .map((d): Investor => ({
-            id: d.customerId || `inv-${d.id}`,
-            companyId: d.companyId,
-            name: d.customerName,
-            phone: d.phone || '',
-            email: d.email || '',
-            status: 'Active Investor',
-            investmentCapacity: d.investmentRange || (d.value >= 10000000 ? `₹${(d.value / 10000000).toFixed(2)} Cr` : `₹${d.value}`),
-            preferredAssetClass: d.preferredAssetClass || 'Commercial Pre-Leased',
-            assignedAgentId: d.assignedAgentId,
-            assignedAgentName: d.assignedAgentName,
-            referralSource: 'Pipeline Mandate Converted',
-            createdAt: d.createdAt,
-            committedAUM: d.investmentRange || (d.value >= 10000000 ? `₹${(d.value / 10000000).toFixed(2)} Cr` : `₹${d.value}`),
-            notes: d.notes,
-            investmentMandate: '',
-            riskTolerance: undefined,
-          }))
-      ]
+      ...investors.filter(inv =>
+        convertedCustomerIds.has(inv.id) ||
+        convertedCustomerNames.has(inv.name.toLowerCase())
+      ),
+      ...convertedDeals
+        .filter(d => !investors.some(inv => inv.id === d.customerId || inv.name.toLowerCase() === d.customerName.toLowerCase()))
+        .map((d): Investor => ({
+          id: d.customerId || `inv-${d.id}`,
+          companyId: d.companyId,
+          name: d.customerName,
+          phone: d.phone || '',
+          email: d.email || '',
+          status: 'Active Investor',
+          investmentCapacity: d.investmentRange || (d.value >= 10000000 ? `₹${(d.value / 10000000).toFixed(2)} Cr` : `₹${d.value}`),
+          preferredAssetClass: d.preferredAssetClass || 'Commercial Pre-Leased',
+          assignedAgentId: d.assignedAgentId,
+          assignedAgentName: d.assignedAgentName,
+          referralSource: 'Pipeline Mandate Converted',
+          createdAt: d.createdAt,
+          committedAUM: d.investmentRange || (d.value >= 10000000 ? `₹${(d.value / 10000000).toFixed(2)} Cr` : `₹${d.value}`),
+          notes: d.notes,
+          investmentMandate: '',
+          riskTolerance: undefined,
+        }))
+    ]
     : isExec
       ? investors.filter(
         inv =>
@@ -264,7 +274,7 @@ export const InvestorsPage: React.FC = () => {
       ...(form.riskTolerance ? { riskTolerance: form.riskTolerance as Investor['riskTolerance'] } : {}),
     };
 
-    storageService.saveInvestor(investor);
+    apiSaveInvestor(investor).catch(console.error);
     closeModal();
     setSelectedInvestor(investor);
   };
@@ -301,7 +311,7 @@ export const InvestorsPage: React.FC = () => {
   // ── Delete handler ────────────────────────────────────────────────────────
   const handleDeleteInvestor = (inv: Investor) => {
     if (!window.confirm(`Delete investor "${inv.name}"? This cannot be undone.`)) return;
-    storageService.deleteInvestor(inv.id);
+    apiDeleteInvestor(inv.id).catch(console.error);
     if (selectedInvestor?.id === inv.id) setSelectedInvestor(null);
   };
 

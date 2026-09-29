@@ -21,10 +21,9 @@ import {
   KanbanStageDef,
   SALES_EXECUTIVE_STAGES,
   IRM_STAGES,
-  SALES_EXECUTIVE_USERS,
-  IRM_USERS,
   adminKanbanService,
-} from '../../mock_data/adminKanbanData';
+} from '../../services/adminKanbanService';
+import { storageService } from '../../services/storageService';
 import { ActivityLogDrawer } from './ActivityLogDrawer';
 import { useAuth } from '../../context/AuthContext';
 import './AdminKanbanBoard.css';
@@ -80,10 +79,11 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({ onOpenQuickC
 
   // Derive person options based on selected role
   const personOptions = useMemo(() => {
-    return selectedRole === 'sales_executive'
-      ? SALES_EXECUTIVE_USERS
-      : IRM_USERS;
-  }, [selectedRole]);
+    if (selectedRole === 'sales_executive') {
+      return storageService.getAgents(tenant?.id);
+    }
+    return storageService.getIrms(tenant?.id);
+  }, [selectedRole, tenant?.id]);
 
   // ── Date Filtering Helper ───────────────────────────────────────────────
   const isDateInFilter = (isoDateStr: string): boolean => {
@@ -290,9 +290,8 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({ onOpenQuickC
         {/* Right Section: View Indicator Badge & Action */}
         <div className="admin-kanban-meta-group">
           <span
-            className={`pipeline-role-tag ${
-              selectedRole === 'sales_executive' ? 'tag-sales-exec' : 'tag-irm'
-            }`}
+            className={`pipeline-role-tag ${selectedRole === 'sales_executive' ? 'tag-sales-exec' : 'tag-irm'
+              }`}
           >
             {selectedRole === 'sales_executive' ? (
               <>
@@ -394,13 +393,7 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({ onOpenQuickC
                           </span>
                         </div>
 
-                        {/* Last Action Snippet */}
-                        {card.lastActionSnippet && (
-                          <div className="admin-card-snippet-box">
-                            <span className="admin-card-snippet-title">Last Activity</span>
-                            <span>{card.lastActionSnippet}</span>
-                          </div>
-                        )}
+                        {/* Last Action Snippet Removed */}
 
                         {/* Footer & Stage Transition Controls */}
                         <div className="admin-card-footer">

@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { BarChart3, Download, TrendingUp, PhoneCall, Users, Award, MapPin, Building } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { storageService } from '../../services/storageService';
 import { PIPELINE_STAGES } from '../../constants/pipelineStages';
 import { FEATURES } from '../../constants/features';
+import { getLeads, getDeals, getCalls, getConsultations, getOpportunities, getFollowups, getCustomers } from '../../services/ghlApiService';
 import { EmptyState } from '../../components/common/EmptyState';
 import { Lead, Deal, CallRecord, SiteVisit, Booking, Consultation, InvestmentOpportunity, Followup, Customer } from '../../types';
 import './ReportsPage.css';
@@ -23,16 +23,39 @@ export const ReportsPage: React.FC = () => {
   const [followups, setFollowups] = useState<Followup[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
 
-  const loadData = () => {
-    setLeads(storageService.getLeads(tenant?.id) || []);
-    setDeals(storageService.getDeals(tenant?.id) || []);
-    setCalls(storageService.getCalls(tenant?.id) || []);
-    setSiteVisits(storageService.getSiteVisits(tenant?.id) || []);
-    setBookings(storageService.getBookings(tenant?.id) || []);
-    setConsultations(storageService.getConsultations(tenant?.id) || []);
-    setOpportunities(storageService.getOpportunities(tenant?.id) || []);
-    setFollowups(storageService.getFollowups(tenant?.id) || []);
-    setCustomers(storageService.getCustomers(tenant?.id) || []);
+  const loadData = async () => {
+    if (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') {
+      try {
+        const [l, d, c, cs, opp, flw, cust] = await Promise.all([
+          getLeads(tenant?.id),
+          getDeals(tenant?.id),
+          getCalls(tenant?.id),
+          getConsultations(tenant?.id),
+          getOpportunities(tenant?.id),
+          getFollowups(tenant?.id),
+          getCustomers(tenant?.id),
+        ]);
+        setLeads(l || []);
+        setDeals(d || []);
+        setCalls(c || []);
+        setConsultations(cs || []);
+        setOpportunities(opp || []);
+        setFollowups(flw || []);
+        setCustomers(cust || []);
+      } catch {}
+    } else {
+      try {
+        setLeads(JSON.parse(localStorage.getItem('nexus_leads') || '[]'));
+        setDeals(JSON.parse(localStorage.getItem('nexus_deals') || '[]'));
+        setCalls(JSON.parse(localStorage.getItem('nexus_calls') || '[]'));
+        setSiteVisits(JSON.parse(localStorage.getItem('nexus_site_visits') || '[]'));
+        setBookings(JSON.parse(localStorage.getItem('nexus_bookings') || '[]'));
+        setConsultations(JSON.parse(localStorage.getItem('nexus_consultations') || '[]'));
+        setOpportunities(JSON.parse(localStorage.getItem('nexus_opportunities') || '[]'));
+        setFollowups(JSON.parse(localStorage.getItem('nexus_followups') || '[]'));
+        setCustomers(JSON.parse(localStorage.getItem('nexus_customers') || '[]'));
+      } catch {}
+    }
   };
 
   useEffect(() => {
@@ -248,8 +271,17 @@ export const ReportsPage: React.FC = () => {
   const agentMap = new Map<string, AgentPerformance>();
 
   // Include tenant users so configured staff are visible
-  const tenantUsers = storageService.getUsers(tenant?.slug);
-  tenantUsers.forEach(u => {
+  const getStoredUsers = (tenantSlug?: string): any[] => {
+    try {
+      const raw = localStorage.getItem('nexus_users');
+      const users = raw ? JSON.parse(raw) : [];
+      return tenantSlug ? users.filter((u: any) => u.companySlug === tenantSlug) : users;
+    } catch {
+      return [];
+    }
+  };
+  const tenantUsers = getStoredUsers(tenant?.slug);
+  tenantUsers.forEach((u: any) => {
     agentMap.set(u.id, {
       id: u.id,
       name: u.name,
@@ -325,7 +357,7 @@ export const ReportsPage: React.FC = () => {
   });
 
   const leaderboard = Array.from(agentMap.values())
-    .filter(a => a.calls > 0 || a.convertedLeads > 0 || a.revenue > 0 || tenantUsers.some(u => u.id === a.id))
+    .filter(a => a.calls > 0 || a.convertedLeads > 0 || a.revenue > 0 || tenantUsers.some((u: any) => u.id === a.id))
     .sort((a, b) => b.revenue - a.revenue || b.calls - a.calls);
 
   const handleExport = () => {

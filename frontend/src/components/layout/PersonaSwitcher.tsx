@@ -1,12 +1,39 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Shield, Building2, UserCheck, RefreshCw, ChevronDown, TrendingUp } from 'lucide-react';
+import { Tenant } from '../../types';
 import { storageService } from '../../services/storageService';
+import { isMockMode } from '../../config/environment';
 import './PersonaSwitcher.css';
+
+const getStoredTenants = (): Tenant[] => {
+  try {
+    return storageService.getTenants();
+  } catch {
+    return [];
+  }
+};
 
 export const PersonaSwitcher: React.FC = () => {
   const { user, tenant, isSuperAdmin, switchPersona } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
+
+  // In dev/API mode, persona switching is disabled; display current role as static badge
+  if (!isMockMode()) {
+    return (
+      <div className="persona-switcher-container">
+        <div
+          className={`btn btn-secondary btn-sm persona-trigger-btn ${isSuperAdmin ? 'super-admin' : 'tenant-admin'}`}
+          style={{ cursor: 'default' }}
+        >
+          <span className="persona-role-prefix">ROLE:</span>
+          <span className="persona-role-name">
+            {isSuperAdmin ? 'Super Admin' : `${tenant?.name || 'Organization'} (${user?.role?.name || 'User'})`}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   const personas = [
     {
@@ -58,11 +85,12 @@ export const PersonaSwitcher: React.FC = () => {
     },
   ];
 
-  const customTenants = storageService.getTenants().filter(t => t.slug !== 'ghl' && t.slug !== 'jamin');
+  const customTenants = getStoredTenants().filter(t => t.slug !== 'ghl' && t.slug !== 'jamin');
 
   const handleResetData = () => {
     if (confirm('Reset demo data to initial defaults?')) {
-      storageService.resetData();
+      localStorage.clear();
+      sessionStorage.clear();
       window.location.reload();
     }
   };
@@ -75,7 +103,7 @@ export const PersonaSwitcher: React.FC = () => {
       >
         <span className="persona-role-prefix">ROLE:</span>
         <span className="persona-role-name">
-          {isSuperAdmin ? 'Super Admin' : `${tenant?.name} (${user?.role.name})`}
+          {isSuperAdmin ? 'Super Admin' : `${tenant?.name} (${user?.role?.name || ''})`}
         </span>
         <ChevronDown size={14} color="#ffffff" />
       </button>

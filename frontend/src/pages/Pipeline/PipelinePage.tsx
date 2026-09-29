@@ -17,10 +17,21 @@ import {
   FileText,
   MessageCircle,
 } from 'lucide-react';
-import { Deal, DealActivity } from '../../types';
+import { Deal, DealActivity, Lead, Followup } from '../../types';
+import { storageService } from '../../services/storageService';
 import { useAuth } from '../../context/AuthContext';
 import { useCan } from '../../components/common/Guards';
-import { storageService } from '../../services/storageService';
+import {
+  getDeals,
+  getLeads,
+  getFollowups,
+  isTenantMatch,
+  saveDeal as apiSaveDeal,
+  addDealActivity as apiAddDealActivity,
+  getDealActivities as apiGetDealActivities,
+  saveFollowup as apiSaveFollowup,
+  saveLead as apiSaveLead,
+} from '../../services/ghlApiService';
 import { PIPELINE_STAGES } from '../../constants/pipelineStages';
 import { Modal } from '../../components/common/Modal';
 import { FilterBar } from '../../components/common/FilterBar';
@@ -47,12 +58,14 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
 
-  if (isGhlAdmin) {
-    return <AdminKanbanBoard onOpenQuickCreate={onOpenQuickCreate} />;
-  }
 
   const canUpdateDeals = useCan('deals.update');
+  const isIrm = roleCode === 'irm';
+  const isGhlIrm = isIrm && tenant?.slug === 'ghl';
+
   const [deals, setDeals] = useState<Deal[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [followups, setFollowups] = useState<Followup[]>([]);
   const [selectedDealForLoss, setSelectedDealForLoss] = useState<Deal | null>(null);
   const [lossReason, setLossReason] = useState('Competitor Pricing');
   const [agentFilter, setAgentFilter] = useState('All');
@@ -73,19 +86,135 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     )
     : deals;
 
+  const scopedLeads = isGhlIrm
+    ? leads
+        .filter(l => !l.companyId || isTenantMatch(l.companyId, tenant?.id))
+        .filter(l => l.status === 'Interested')
+        .filter(
+          l =>
+            (l.assignedAgentId && String(l.assignedAgentId) === String(user?.id)) ||
+            (l.assignedAgentName && l.assignedAgentName === user?.name)
+        )
+    : [];
+
+  const scopedFollowups = isGhlIrm
+    ? followups
+        .filter(f => !f.companyId || isTenantMatch(f.companyId, tenant?.id))
+        .filter(f => f.status === 'Pending')
+        .filter(
+          f =>
+            (f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
+            (f.assignedAgentName && f.assignedAgentName === user?.name) ||
+            !f.assignedAgentId
+        )
+    : [];
+
+  const leadToPipelineCard = (lead: Lead): Deal => ({
+    id: lead.id,
+    companyId: lead.companyId || tenant?.id || '',
+    title: lead.name,
+    customerId: lead.id,
+    customerName: lead.name,
+    phone: lead.phone,
+    email: lead.email,
+    assignedAgentId: lead.assignedAgentId,
+    assignedAgentName: lead.assignedAgentName,
+    stage: 'leads',
+    stageEnteredAt: lead.createdAt,
+    createdAt: lead.createdAt,
+    expectedCloseDate: '',
+    notes: lead.notes || '',
+    value: 0,
+    priority: lead.priority === 'Urgent' ? 'High' : (lead.priority as 'High' | 'Medium' | 'Low'),
+    location: lead.location,
+    investmentRange:
+      lead.customFields?.investmentCapacity ||
+      lead.customFields?.capacityRange ||
+      lead.customFields?.investmentRange ||
+      (lead as any).investmentRange ||
+      undefined,
+    investorType: lead.customFields?.investorType || undefined,
+  });
+
+  const followupToPipelineCard = (followup: Followup): Deal => ({
+    id: followup.id,
+    companyId: followup.companyId || tenant?.id || '',
+    title: followup.contactName,
+    customerId: followup.contactId,
+    customerName: followup.contactName,
+    phone: followup.contactPhone,
+    email: (followup as any).email || undefined,
+    assignedAgentId: followup.assignedAgentId,
+    assignedAgentName: followup.assignedAgentName,
+    stage: 'followup',
+    stageEnteredAt: followup.scheduledAt,
+    createdAt: followup.scheduledAt || (followup as any).createdAt || '',
+    expectedCloseDate: '',
+    notes: followup.notes || '',
+    value: 0,
+    priority: (followup.priority as 'High' | 'Medium' | 'Low') || 'Medium',
+    investmentRange:
+      (followup as any).investmentCapacity ||
+      (followup as any).investmentRange ||
+      undefined,
+  });
+
   // Agent filter options — derived from the already-scoped pool so execs never see this.
-  const agentOptions = Array.from(new Set(scopedDeals.map(d => d.assignedAgentName)))
+  const agentOptions = Array.from(
+    new Set([
+      ...scopedDeals.map(d => d.assignedAgentName),
+      ...scopedLeads.map(l => l.assignedAgentName),
+      ...scopedFollowups.map(f => f.assignedAgentName),
+    ])
+  )
     .filter(Boolean)
     .map(name => ({ value: name, label: name }));
 
-  const loadData = () => {
-    const latestDeals = storageService.getDeals(tenant?.id);
+  const [dealActivities, setDealActivities] = useState<DealActivity[]>([]);
+
+  const loadData = async () => {
+    let latestDeals: Deal[] = [];
+    try {
+      latestDeals = await getDeals(tenant?.id);
+      if (!latestDeals || latestDeals.length === 0) {
+        latestDeals = storageService.getDeals(tenant?.id) || [];
+      }
+    } catch {
+      latestDeals = storageService.getDeals(tenant?.id) || [];
+    }
     setDeals(latestDeals);
+
+    try {
+      const [apiLeads, apiFollowups] = await Promise.all([
+        getLeads(tenant?.id),
+        getFollowups(tenant?.id),
+      ]);
+      setLeads(apiLeads || []);
+      setFollowups(apiFollowups || []);
+    } catch {
+      setLeads(storageService.getLeads(tenant?.id) || []);
+      setFollowups(storageService.getFollowups(tenant?.id) || []);
+    }
+
     setIrmDetailDeal(prev => {
       if (!prev) return null;
       return latestDeals.find(d => d.id === prev.id) || prev;
     });
   };
+
+  useEffect(() => {
+    if (!irmDetailDeal?.id) {
+      setDealActivities([]);
+      return;
+    }
+    let mounted = true;
+    apiGetDealActivities(irmDetailDeal.id)
+      .then(acts => {
+        if (mounted) setDealActivities(acts || []);
+      })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, [irmDetailDeal?.id, tenant?.id]);
 
   useEffect(() => {
     loadData();
@@ -95,8 +224,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   }, [tenant?.id]);
 
   // Stages derived dynamically from current tenant slug!
-  const isIrm = roleCode === 'irm';
-
   const stages = tenant?.slug === 'jamin'
     ? PIPELINE_STAGES.jamin
     : tenant?.slug === 'ghl'
@@ -118,10 +245,11 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
         stageEnteredAt: new Date().toISOString(),
       };
       storageService.saveDeal(updatedDeal);
+      apiSaveDeal(updatedDeal).catch(console.error);
     }
   };
 
-  const handleIrmMoveStage = (targetStageId: string) => {
+  const handleIrmMoveStage = async (targetStageId: string) => {
     if (!irmDetailDeal || irmDetailDeal.stage === targetStageId) return;
     const currentStage = stages.find(s => s.id === irmDetailDeal.stage);
     const targetStage = stages.find(s => s.id === targetStageId);
@@ -134,8 +262,9 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       stageEnteredAt: new Date().toISOString(),
     };
     storageService.saveDeal(updatedDeal);
+    await apiSaveDeal(updatedDeal).catch(console.error);
 
-    const newActivity: DealActivity = {
+    const moveActivity: DealActivity = {
       id: `act-${Date.now()}`,
       dealId: irmDetailDeal.id,
       companyId: tenant?.id || '',
@@ -147,9 +276,27 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       loggedByRole: 'IRM',
       timestamp: new Date().toISOString(),
     };
-    storageService.addDealActivity(newActivity);
+    storageService.addDealActivity(moveActivity);
+    await apiAddDealActivity(moveActivity).catch(console.error);
+
+    if (irmDetailDeal.stage === 'followup') {
+      const f = followups.find(item => item.id === irmDetailDeal.id);
+      if (f) {
+        const completedF = { ...f, status: 'Completed' as const, completedAt: new Date().toISOString() };
+        apiSaveFollowup(completedF).catch(console.error);
+        storageService.saveFollowup(completedF);
+      }
+    } else if (irmDetailDeal.stage === 'leads') {
+      const l = leads.find(item => item.id === irmDetailDeal.id);
+      if (l) {
+        const movedL = { ...l, status: 'Follow-up Required' as any };
+        apiSaveLead(movedL).catch(console.error);
+        storageService.saveLead(movedL);
+      }
+    }
 
     setIrmDetailDeal(updatedDeal);
+    setDealActivities(prev => [moveActivity, ...prev]);
     loadData();
   };
 
@@ -168,26 +315,22 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     };
 
     storageService.addDealActivity(newActivity);
+    apiAddDealActivity(newActivity).catch(console.error);
     setActivityText('');
+    setDealActivities(prev => [newActivity, ...prev]);
     loadData();
   };
 
   const handleMarkWon = (deal: Deal) => {
-    storageService.saveDeal({
-      ...deal,
-      stage: wonStageId,
-      stageEnteredAt: new Date().toISOString(),
-    });
+    const updated = { ...deal, stage: wonStageId, stageEnteredAt: new Date().toISOString() };
+    storageService.saveDeal(updated);
+    apiSaveDeal(updated).catch(console.error);
+    loadData();
   };
 
   const handleConfirmLost = () => {
     if (selectedDealForLoss) {
-      storageService.saveDeal({
-        ...selectedDealForLoss,
-        stage: 'lost',
-        lostReason: lossReason,
-        stageEnteredAt: new Date().toISOString(),
-      });
+      apiSaveDeal({ ...selectedDealForLoss, stage: 'lost', lostReason: lossReason, stageEnteredAt: new Date().toISOString() }).catch(console.error);
       setSelectedDealForLoss(null);
     }
   };
@@ -223,9 +366,13 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     });
   };
 
-  const irmDealActivities = irmDetailDeal
-    ? storageService.getDealActivities(irmDetailDeal.id, tenant?.id)
-    : [];
+  const irmDealActivities = dealActivities.length > 0
+    ? dealActivities
+    : (irmDetailDeal ? storageService.getDealActivities(irmDetailDeal.id, tenant?.id) : []);
+
+  if (isGhlAdmin) {
+    return <AdminKanbanBoard onOpenQuickCreate={onOpenQuickCreate} />;
+  }
 
   return (
     <div className="pipeline-page-container">
@@ -266,10 +413,21 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       {/* Kanban Board Horizontal Scrolling Container */}
       <div className="pipeline-board-container">
         {stages.map((stage, sIdx) => {
-          const stageDeals = scopedDeals.filter(d =>
-            d.stage === stage.id &&
-            (agentFilter === 'All' || d.assignedAgentName === agentFilter)
-          );
+          let stageDeals: Deal[];
+          if (isIrm && tenant?.slug === 'ghl' && stage.id === 'leads') {
+            stageDeals = scopedLeads
+              .filter(l => agentFilter === 'All' || l.assignedAgentName === agentFilter)
+              .map(leadToPipelineCard);
+          } else if (isIrm && tenant?.slug === 'ghl' && stage.id === 'followup') {
+            stageDeals = scopedFollowups
+              .filter(f => agentFilter === 'All' || f.assignedAgentName === agentFilter)
+              .map(followupToPipelineCard);
+          } else {
+            stageDeals = scopedDeals.filter(d =>
+              d.stage === stage.id &&
+              (agentFilter === 'All' || d.assignedAgentName === agentFilter)
+            );
+          }
           const stageTotal = stageDeals.reduce((sum, d) => sum + d.value, 0);
 
           return (
@@ -312,8 +470,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                       const currIdx = Math.min(cardIndex[stage.id] || 0, Math.max(0, stageDeals.length - 1));
                       const deal = stageDeals[currIdx];
                       const daysInStage = getDaysInStage(deal);
-                      const activities = storageService.getDealActivities(deal.id, tenant?.id);
-                      const lastActivity = activities.length > 0 ? activities[0] : null;
 
                       return (
                         <div
@@ -342,6 +498,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                                   {deal.investorType}
                                 </span>
                               )}
+
                             </div>
                           </div>
 
@@ -370,14 +527,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                             <span className="irm-stage-days-pill">
                               {daysInStage}d in stage
                             </span>
-                          </div>
-
-                          {/* Last Activity */}
-                          <div className="irm-last-activity-box">
-                            <div className="irm-last-activity-label">LAST ACTIVITY</div>
-                            <div className="irm-last-activity-text">
-                              {lastActivity ? lastActivity.text : 'No activity logged yet.'}
-                            </div>
                           </div>
 
                           {/* Footer: Investment range + pagination */}
@@ -604,6 +753,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                     {irmDetailDeal.title}
                   </div>
                 </div>
+
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: 'var(--text-secondary)' }}>
@@ -679,8 +829,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
               </div>
             </div>
 
-
-
             {/* Activity History & Stage Transitions */}
             <div className="irm-activity-card">
               <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 700 }}>
@@ -692,7 +840,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                 </div>
               ) : (
                 <div className="irm-timeline">
-                  {irmDealActivities.map(act => {
+                  {irmDealActivities.map((act: DealActivity) => {
                     const isStageChange = act.type === 'stage_change';
                     return (
                       <div key={act.id} className="irm-timeline-node">

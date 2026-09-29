@@ -20,7 +20,7 @@ import {
   KanbanStageDef,
   ActivityLogItem,
   adminKanbanService,
-} from '../../mock_data/adminKanbanData';
+} from '../../services/adminKanbanService';
 import { useAuth } from '../../context/AuthContext';
 
 interface ActivityLogDrawerProps {
@@ -141,6 +141,10 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
                 )}
               </div>
             </div>
+
+
+
+
           </div>
 
           <div className="activity-summary-grid">
@@ -200,6 +204,10 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
           </div>
         </div>
 
+
+
+
+        {/* Add Note / Activity Form Removed */}
 
 
         {/* Chronological Timeline */}

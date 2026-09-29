@@ -100,8 +100,16 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
     return true;
   });
 
-  const agentCalls = selectedCalls.filter(c => !(c.notes || '').startsWith('Connected to IRM:'));
-  const irmCalls = selectedCalls.filter(c => (c.notes || '').startsWith('Connected to IRM:'));
+  const isIrmCall = (c: any) =>
+    (c.notes || '').startsWith('Connected to IRM:') ||
+    (c.agentId || '').toLowerCase().includes('irm') ||
+    (c.agentName || '').toLowerCase().includes('irm') ||
+    ['Rohan Varma', 'Arun Kumar', 'Ananya Mehta', 'Rohan Mehta', 'Priya Nair', 'Karthik Sundaram'].some(n =>
+      (c.agentName || '').toLowerCase().includes(n.toLowerCase())
+    );
+
+  const agentCalls = selectedCalls.filter(c => !isIrmCall(c));
+  const irmCalls = selectedCalls.filter(c => isIrmCall(c));
   const tabCalls = callTab === 'agent' ? agentCalls : irmCalls;
 
   // ── Active follow-up count ───────────────────────────────────────────────────
@@ -539,6 +547,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                       </span>
                       <span style={{ fontSize: 12, fontWeight: 600 }}>{c.timestamp}</span>
                       <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>• {formatDuration(c.duration)}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>• Agent: <strong>{c.agentName || 'Unknown'}</strong></span>
                     </div>
                     <StatusChip status={c.disposition} size="sm" />
                   </div>

@@ -35,6 +35,10 @@ import {
   INITIAL_OPPORTUNITIES,
   INITIAL_NOTIFICATIONS,
   INITIAL_DEAL_ACTIVITIES,
+  INITIAL_CALLS,
+  INITIAL_CUSTOMERS,
+  MOCK_AGENTS,
+  MOCK_IRMS,
 } from '../mock_data/mockData';
 import { ensureInitialAdminFollowups } from '../mock_data/adminFollowupsData';
 
@@ -273,10 +277,13 @@ class StorageService {
     window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 
-  // Calls (Defaults to empty [] - real-time data only)
+  // Calls (Seeds from INITIAL_CALLS; real calls are prepended via addCall)
   getCalls(companyId?: string): CallRecord[] {
-    const calls = this.get<CallRecord[]>('calls', []);
-    return companyId ? calls.filter(c => c.companyId === companyId) : calls;
+    const stored = this.get<CallRecord[]>('calls', []);
+    // Merge: keep stored calls first, then append any INITIAL_CALLS not already present
+    const storedIds = new Set(stored.map(c => c.id));
+    const merged = [...stored, ...INITIAL_CALLS.filter(c => !storedIds.has(c.id))];
+    return companyId ? merged.filter(c => c.companyId === companyId) : merged;
   }
 
   addCall(call: CallRecord): void {
@@ -934,6 +941,29 @@ class StorageService {
     window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 
+  // Proxy methods for remaining mock data usage
+  getMockAgents() {
+    return MOCK_AGENTS;
+  }
+
+  getMockIrms() {
+    return MOCK_IRMS;
+  }
+
+  // Used by InCallBar, CustomersPage, FollowupsPage, AdminKanbanBoard.
+  // (Were missing after the app merge -> TypeError -> white screen)
+  getAgents(_companyId?: string) {
+    return MOCK_AGENTS;
+  }
+
+  getIrms(_companyId?: string) {
+    return MOCK_IRMS;
+  }
+
+  getInitialCustomers() {
+    return INITIAL_CUSTOMERS;
+  }
+
   // Incoming Call Popup Position
   getPopupPosition(): PopupPosition {
     try {
@@ -966,6 +996,18 @@ class StorageService {
   }
 
   // Call Preferences (sound, desktop notifs, auto-busy, default followup time)
+  getAdminCallSettings(): { allowSalesDecline: boolean; allowIrmDecline: boolean } {
+    return this.get('admin_call_settings', {
+      allowSalesDecline: true,
+      allowIrmDecline: true,
+    });
+  }
+
+  setAdminCallSettings(settings: Partial<{ allowSalesDecline: boolean; allowIrmDecline: boolean }>): void {
+    const existing = this.getAdminCallSettings();
+    this.set('admin_call_settings', { ...existing, ...settings });
+  }
+
   getCallPreferences(): {
     soundEnabled: boolean;
     desktopNotifEnabled: boolean;

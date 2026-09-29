@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Phone, ExternalLink, Trash2, RefreshCw } from 'lucide-react';
-import { Lead } from '../../types';
+import { Lead, CallRecord } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
+import { getLeads, saveLead as apiSaveLead, saveFollowup as apiSaveFollowup, getCalls } from '../../services/ghlApiService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { Drawer } from '../../components/common/Drawer';
 import { Timeline, TimelineEvent } from '../../components/common/Timeline';
@@ -15,6 +15,7 @@ export const JunkPage: React.FC = () => {
   const { initiateCall } = useCall();
 
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [calls, setCalls] = useState<CallRecord[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [reengaging, setReengaging] = useState(false);
@@ -23,18 +24,26 @@ export const JunkPage: React.FC = () => {
   const isExec = roleCode === 'sales_executive';
   const isGhlSalesExec = tenant?.slug === 'ghl' && isExec;
 
-  const loadData = () => {
-    const allLeads = storageService.getLeads(tenant?.id);
-    const junkLeads = allLeads.filter(l => l.status === 'Junk');
+  const loadData = async () => {
+    try {
+      const [allLeads, allCalls] = await Promise.all([
+        getLeads(tenant?.id),
+        getCalls(tenant?.id),
+      ]);
+      const junkLeads = allLeads.filter(l => l.status === 'Junk');
 
-    const scopedLeads = isExec
-      ? junkLeads.filter(l =>
+      const scopedLeads = isExec
+        ? junkLeads.filter(l =>
           (l.assignedAgentId && l.assignedAgentId === user?.id) ||
           (l.assignedAgentName && l.assignedAgentName === user?.name)
         )
-      : junkLeads;
+        : junkLeads;
 
-    setLeads(scopedLeads);
+      setLeads(scopedLeads);
+      setCalls(allCalls);
+    } catch (err) {
+      console.error('Failed to load junk leads', err);
+    }
   };
 
   useEffect(() => {
@@ -50,27 +59,25 @@ export const JunkPage: React.FC = () => {
     setReengaging(true);
     try {
       // Reset lead status to Contacted
-      storageService.saveLead({ ...lead, status: 'Contacted' });
-
-      // Purge any stale Pending followups for this contact, then create a fresh one
-      storageService.purgeFollowupsForContact(tenant.id, lead.id, lead.phone);
+      apiSaveLead({ ...lead, status: 'Contacted' }).catch(console.error);
 
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
-      storageService.saveFollowup({
+      const newFlw = {
         id: `flw-${Date.now()}`,
         companyId: tenant.id,
         contactId: lead.id,
         contactName: lead.name,
         contactPhone: lead.phone,
-        contactType: 'lead',
+        contactType: 'lead' as const,
         scheduledAt: tomorrow.toISOString(),
-        priority: 'High',
-        status: 'Pending',
+        priority: 'High' as const,
+        status: 'Pending' as const,
         notes: `Re-engaged from Junk — follow-up required with ${lead.name}.`,
         assignedAgentId: user.id,
         assignedAgentName: user.name,
-      });
+      };
+      apiSaveFollowup(newFlw).then(loadData).catch(console.error);
 
       setIsDetailDrawerOpen(false);
       setSelectedLead(null);
@@ -166,9 +173,9 @@ export const JunkPage: React.FC = () => {
       actorName: lead.assignedAgentName,
     });
 
-    const calls = storageService.getCalls(tenant?.id).filter(c => c.contactPhone === lead.phone || c.contactName === lead.name);
+    const leadCalls = calls.filter(c => c.contactPhone === lead.phone || c.contactName === lead.name);
 
-    calls.forEach(c => {
+    leadCalls.forEach(c => {
       events.push({
         id: `ev-call-${c.id}`,
         type: 'call',
@@ -184,7 +191,7 @@ export const JunkPage: React.FC = () => {
 
   const timelineEvents = selectedLead && !isGhlSalesExec ? getTimelineEvents(selectedLead) : [];
   const callsCount = selectedLead && !isGhlSalesExec
-    ? storageService.getCalls(tenant?.id).filter(c => c.contactPhone === selectedLead.phone || c.contactName === selectedLead.name).length
+    ? calls.filter(c => c.contactPhone === selectedLead.phone || c.contactName === selectedLead.name).length
     : 0;
 
   return (

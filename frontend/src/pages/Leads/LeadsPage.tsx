@@ -13,12 +13,14 @@ import {
 import { Lead, Customer, Deal } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
+import { apiClient } from '../../services/apiClient';
 import { storageService } from '../../services/storageService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
+import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
 import './LeadsPage.css';
 
 const CAPACITY_OPTIONS = [
@@ -30,7 +32,7 @@ const CAPACITY_OPTIONS = [
   'Not sure yet — help me decide'
 ];
 
-import { MOCK_AGENTS } from '../../mock_data/mockData';
+const MOCK_AGENTS = storageService.getMockAgents();
 export { MOCK_AGENTS };
 
 export const LeadsPage: React.FC = () => {
@@ -447,7 +449,7 @@ export const LeadsPage: React.FC = () => {
     setIsEditDrawerOpen(true);
   };
 
-  const handleSaveLead = (e: React.FormEvent) => {
+  const handleSaveLead = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.phone) return;
 
@@ -502,6 +504,44 @@ export const LeadsPage: React.FC = () => {
       } as Lead;
     }
 
+    try {
+      if (!isUpdated) {
+        // Create in backend
+        const res = await apiClient.post<any>('/sales-executive/leads', {
+          name: leadToSave.name,
+          phone: leadToSave.phone,
+          companyId: typeof targetCompanyId === 'number' ? targetCompanyId : parseInt(targetCompanyId, 10) || 1,
+          email: leadToSave.email,
+          location: leadToSave.location,
+          source: leadToSave.source,
+          priority: leadToSave.priority,
+          notes: leadToSave.notes,
+          investmentCapacity: leadToSave.customFields?.investmentCapacity || ''
+        });
+        if (res.success && res.data) {
+          leadToSave.id = `db-${res.data.id}`;
+        }
+      } else {
+        // Update in backend
+        if (leadToSave.id.toString().startsWith('db-')) {
+          const dbId = leadToSave.id.toString().replace('db-', '');
+          await apiClient.put<any>(`/sales-executive/leads/${dbId}`, {
+            name: leadToSave.name,
+            phone: leadToSave.phone,
+            companyId: typeof targetCompanyId === 'number' ? targetCompanyId : parseInt(targetCompanyId, 10) || 1,
+            email: leadToSave.email,
+            location: leadToSave.location,
+            source: leadToSave.source,
+            priority: leadToSave.priority,
+            notes: leadToSave.notes,
+            investmentCapacity: leadToSave.customFields?.investmentCapacity || ''
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to save to backend DB', err);
+    }
+
     storageService.saveLead(leadToSave);
 
     storageService.addAuditLog({
@@ -520,9 +560,18 @@ export const LeadsPage: React.FC = () => {
     setIsEditDrawerOpen(false);
   };
 
-  const handleDeleteLead = (lead: Lead) => {
+  const handleDeleteLead = async (lead: Lead) => {
     if (confirm(`Delete lead ${lead.name}?`)) {
+      try {
+        if (lead.id.toString().startsWith('db-')) {
+          const dbId = lead.id.toString().replace('db-', '');
+          await apiClient.delete(`/sales-executive/leads/${dbId}`);
+        }
+      } catch (err) {
+        console.error('Failed to delete lead from DB', err);
+      }
       storageService.deleteLead(lead.id);
+      loadData();
     }
   };
 
@@ -1018,109 +1067,180 @@ export const LeadsPage: React.FC = () => {
           </>
         }
       >
-        {selectedLead && (
-          <>
-            {/* Quick Info Banner */}
-            <div className="lead-quick-banner">
-              <div className="lead-assigned-note">
-                Assigned to <strong>{selectedLead.assignedAgentName}</strong>
-              </div>
-            </div>
+        {selectedLead && (() => {
+            const isGhlIrm = isIrm && (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01');
 
-            {/* Core Details */}
-            <div className="card lead-detail-card">
-              <h4 className="lead-detail-title">
-                Contact & Profile Details
-              </h4>
-              <div className="lead-detail-grid">
-                <div>
-                  <span className="lead-detail-label">Email:</span>
-                  <div className="lead-detail-value">{selectedLead.email || '—'}</div>
-                </div>
-                <div>
-                  <span className="lead-detail-label">Location:</span>
-                  <div className="lead-detail-value">{selectedLead.location || '—'}</div>
-                </div>
-                <div>
-                  <span className="lead-detail-label">Lead Source:</span>
-                  <div className="lead-detail-value">{selectedLead.source}</div>
-                </div>
-                <div>
-                  <span className="lead-detail-label">Follow-up:</span>
-                  <div className="lead-detail-value lead-followup-text has-date">
-                    {selectedLead.nextFollowupDate || 'Not scheduled'}
+            /** ── Investment Capacity value ── */
+            const investmentCapacity =
+              selectedLead.customFields?.investmentCapacity ||
+              selectedLead.customFields?.capacityRange ||
+              selectedLead.customFields?.investmentRange ||
+              (selectedLead as any).investmentRange ||
+              null;
+
+            /** ── User-facing message ── */
+            const userMessage =
+              (selectedLead as any).message ||
+              (selectedLead as any).userMessage ||
+              selectedLead.customFields?.message ||
+              selectedLead.customFields?.userMessage ||
+              selectedLead.notes ||
+              null;
+
+
+
+
+            return (
+              <>
+                {/* ── Quick Info Banner (Assigned Agent) ── */}
+                <div className="lead-quick-banner">
+                  <div className="lead-assigned-note">
+                    Assigned to <strong>{selectedLead.assignedAgentName}</strong>
                   </div>
                 </div>
-              </div>
-            </div>
 
-            {/* Tenant-Specific Dynamic Custom Fields */}
-            {(() => {
-              const activeDefs = storageService
-                .getCustomFieldDefinitions(tenant?.id)
-                .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
-                .filter(d => !(isExec && (d.fieldKey === 'assetClass' || d.fieldKey === 'preferredAssetClass')))
-                .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
-
-              const rows = activeDefs
-                .map(def => {
-                  const key = def.fieldKey || def.id;
-                  const val = selectedLead.customFields?.[key];
-                  if (val === undefined || val === null || val === '') return null;
-                  return {
-                    id: def.id,
-                    label: def.label || key.replace(/([A-Z])/g, ' $1'),
-                    value: String(val),
-                  };
-                })
-                .filter(Boolean);
-
-              if (rows.length === 0) return null;
-
-              return (
-                <div className="card lead-custom-card">
-                  <h4 className="lead-custom-title">
-                    {tenant?.name} Custom Attributes
-                  </h4>
+                {/* ── Contact & Profile Details ── */}
+                <div className="card lead-detail-card">
+                  <h4 className="lead-detail-title">Contact &amp; Profile Details</h4>
                   <div className="lead-detail-grid">
-                    {rows.map(item => (
-                      <div key={item!.id}>
-                        <span className="lead-custom-label">
-                          {item!.label}:
-                        </span>
-                        <div className="lead-custom-value">{item!.value}</div>
+                    <div>
+                      <span className="lead-detail-label">Email:</span>
+                      <div className="lead-detail-value">{selectedLead.email || '—'}</div>
+                    </div>
+                    <div>
+                      <span className="lead-detail-label">Location:</span>
+                      <div className="lead-detail-value">{selectedLead.location || '—'}</div>
+                    </div>
+                    <div>
+                      <span className="lead-detail-label">Lead Source:</span>
+                      <div className="lead-detail-value">{selectedLead.source}</div>
+                    </div>
+                    <div>
+                      <span className="lead-detail-label">Follow-up:</span>
+                      <div className="lead-detail-value lead-followup-text has-date">
+                        {selectedLead.nextFollowupDate || 'Not scheduled'}
                       </div>
-                    ))}
+                    </div>
                   </div>
                 </div>
-              );
-            })()}
 
-            {/* Message from User */}
-            <div className="card lead-custom-card">
-              <h4 className="lead-custom-title">
-                Message from User
-              </h4>
-              <div className="lead-user-message-box">
-                {(selectedLead as any).message ||
-                  (selectedLead as any).userMessage ||
-                  selectedLead.customFields?.message ||
-                  selectedLead.customFields?.userMessage ||
-                  selectedLead.notes ? (
-                  <div className="lead-user-message-text">
-                    {(selectedLead as any).message ||
-                      (selectedLead as any).userMessage ||
-                      selectedLead.customFields?.message ||
-                      selectedLead.customFields?.userMessage ||
-                      selectedLead.notes}
+                {/* ── GHL IRM: Investment Capacity (replaces Preferred Asset Class + Investment Horizon unless confirmed by IRM) ── */}
+                {isGhlIrm ? (
+                  <div className="card lead-custom-card">
+                    <h4 className="lead-custom-title">Investment Details</h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      <div>
+                        <span className="lead-detail-label">Investment Capacity:</span>
+                        <div
+                          className="lead-detail-value"
+                          style={{
+                            marginTop: 4,
+                            fontSize: 16,
+                            fontWeight: 700,
+                            color: '#10b981',
+                            letterSpacing: '0.01em',
+                          }}
+                        >
+                          {investmentCapacity || '—'}
+                        </div>
+                      </div>
+
+                      {/* Only show Preferred Asset Class & Horizon if set & confirmed by IRM */}
+                      {Boolean(
+                        selectedLead.customFields?.irmPreferencesConfirmed ||
+                        (() => {
+                          try {
+                            const raw = localStorage.getItem(`nexus_irm_pref_${selectedLead.id}`) ||
+                              localStorage.getItem(`nexus_irm_pref_${(selectedLead.phone || '').replace(/\D/g, '').slice(-10)}`);
+                            if (raw) return JSON.parse(raw)?.confirmed === true;
+                          } catch {}
+                          return false;
+                        })()
+                      ) && (() => {
+                        const localData = (() => {
+                          try {
+                            const raw = localStorage.getItem(`nexus_irm_pref_${selectedLead.id}`) ||
+                              localStorage.getItem(`nexus_irm_pref_${(selectedLead.phone || '').replace(/\D/g, '').slice(-10)}`);
+                            if (raw) return JSON.parse(raw);
+                          } catch {}
+                          return null;
+                        })();
+                        const assetClass = selectedLead.customFields?.preferredAssetClass || localData?.preferredAssetClass || '—';
+                        const horizon = selectedLead.customFields?.horizon || selectedLead.customFields?.investmentHorizon || localData?.horizon || '—';
+
+                        return (
+                          <div className="lead-detail-grid" style={{ marginTop: 4, paddingTop: 10, borderTop: '1px solid var(--border-base)' }}>
+                            <div>
+                              <span className="lead-detail-label">Preferred Asset Class:</span>
+                              <div className="lead-detail-value">{assetClass}</div>
+                            </div>
+                            <div>
+                              <span className="lead-detail-label">Investment Horizon:</span>
+                              <div className="lead-detail-value">{horizon}</div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
                   </div>
                 ) : (
-                  <div className="lead-user-message-empty">No message available</div>
+                  /* Non-IRM tenants: show the generic custom attributes exactly as before */
+                  (() => {
+                    const activeDefs = storageService
+                      .getCustomFieldDefinitions(tenant?.id)
+                      .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
+                      .filter(d => !(isExec && (d.fieldKey === 'assetClass' || d.fieldKey === 'preferredAssetClass')))
+                      .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+                    const rows = activeDefs
+                      .map(def => {
+                        const key = def.fieldKey || def.id;
+                        const val = selectedLead.customFields?.[key];
+                        if (val === undefined || val === null || val === '') return null;
+                        return { id: def.id, label: def.label || key.replace(/([A-Z])/g, ' $1'), value: String(val) };
+                      })
+                      .filter(Boolean);
+                    if (rows.length === 0) return null;
+                    return (
+                      <div className="card lead-custom-card">
+                        <h4 className="lead-custom-title">{tenant?.name} Custom Attributes</h4>
+                        <div className="lead-detail-grid">
+                          {rows.map(item => (
+                            <div key={item!.id}>
+                              <span className="lead-custom-label">{item!.label}:</span>
+                              <div className="lead-custom-value">{item!.value}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()
                 )}
-              </div>
-            </div>
-          </>
-        )}
+
+                {/* ── Message from User ── */}
+                <div className="card lead-custom-card">
+                  <h4 className="lead-custom-title">Message from User</h4>
+                  <div className="lead-user-message-box">
+                    {userMessage ? (
+                      <div className="lead-user-message-text">{userMessage}</div>
+                    ) : (
+                      <div className="lead-user-message-empty">No message available</div>
+                    )}
+                  </div>
+                </div>
+
+                <LeadDetailDrawerContent
+                  contactName={selectedLead.name}
+                  contactPhone={selectedLead.phone}
+                  contactId={selectedLead.id}
+                  contactType="lead"
+                  tenantId={tenant?.id}
+                  tenantName={tenant?.name}
+                  onCall={() => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id)}
+                  sectionsOnly={['callRecordings']}
+                />
+              </>
+            );
+          })()}
       </Drawer>
 
       {/* Create / Edit Drawer */}
@@ -1686,3 +1806,4 @@ export const LeadsPage: React.FC = () => {
     </div>
   );
 };
+
