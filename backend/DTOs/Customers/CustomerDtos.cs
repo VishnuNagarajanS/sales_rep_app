@@ -17,7 +17,6 @@ public sealed class UpdateCustomerDto
     public string Phone { get; set; } = string.Empty;
     public string? Location { get; set; }
     public string Status { get; set; } = "Active";
-    public string KycStatus { get; set; } = "Pending";
     public string? Notes { get; set; }
 }
 
@@ -32,7 +31,6 @@ public sealed class CustomerResponseDto
     public string Phone { get; set; } = string.Empty;
     public string? Location { get; set; }
     public string Status { get; set; } = "Active";
-    public string KycStatus { get; set; } = "Pending";
     public string? Notes { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
@@ -49,9 +47,7 @@ public sealed class Customer360Dto
     public string Phone { get; set; } = string.Empty;
     public string? Location { get; set; }
     public string Status { get; set; } = "Active";
-    public string KycStatus { get; set; } = "Pending";
     public string? Notes { get; set; }
     public DateTime CreatedAt { get; set; }
-    public List<backend.DTOs.Kyc.KycDocumentResponseDto> Documents { get; set; } = new();
-    public backend.DTOs.Kyc.CustomerKycResponseDto? KycDetails { get; set; }
 }
+

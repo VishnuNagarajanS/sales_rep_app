@@ -11,13 +11,11 @@ public sealed class CustomerService : ICustomerService
 {
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
-    private readonly IKycService _kycService;
 
-    public CustomerService(ApplicationDbContext context, ICurrentUserService currentUser, IKycService kycService)
+    public CustomerService(ApplicationDbContext context, ICurrentUserService currentUser)
     {
         _context = context;
         _currentUser = currentUser;
-        _kycService = kycService;
     }
 
     public async Task<ApiResponse<PagedResult<CustomerResponseDto>>> GetCustomersAsync(string? status, string? search, int page, int pageSize, CancellationToken ct)
@@ -69,7 +67,6 @@ public sealed class CustomerService : ICustomerService
                 Phone = c.Phone,
                 Location = c.Location,
                 Status = c.Status,
-                KycStatus = c.KycStatus,
                 Notes = c.Notes,
                 CreatedAt = c.CreatedAt,
                 UpdatedAt = c.UpdatedAt
@@ -98,10 +95,6 @@ public sealed class CustomerService : ICustomerService
         if (role == "sales_executive" && customer.AssignedToUserId != userId)
             return ApiResponse<Customer360Dto>.FailureResult("Access denied. You can only view your assigned customers.");
 
-        // Fetch KYC details & documents
-        var kycResult = await _kycService.GetCustomerKycAsync(id, ct);
-        var docsResult = await _kycService.GetCustomerDocumentsAsync(id, null, ct);
-
         var dto = new Customer360Dto
         {
             Id = customer.Id,
@@ -113,11 +106,8 @@ public sealed class CustomerService : ICustomerService
             Phone = customer.Phone,
             Location = customer.Location,
             Status = customer.Status,
-            KycStatus = customer.KycStatus,
             Notes = customer.Notes,
-            CreatedAt = customer.CreatedAt,
-            Documents = docsResult.Success ? docsResult.Data ?? new() : new(),
-            KycDetails = kycResult.Success ? kycResult.Data : null
+            CreatedAt = customer.CreatedAt
         };
 
         return ApiResponse<Customer360Dto>.SuccessResult(dto);
@@ -137,7 +127,6 @@ public sealed class CustomerService : ICustomerService
             Phone = dto.Phone.Trim(),
             Location = dto.Location?.Trim(),
             Status = string.IsNullOrWhiteSpace(dto.Status) ? "Active" : dto.Status.Trim(),
-            KycStatus = "Pending",
             Notes = dto.Notes,
             CreatedAt = DateTime.UtcNow
         };
@@ -160,7 +149,6 @@ public sealed class CustomerService : ICustomerService
             Phone = customer.Phone,
             Location = customer.Location,
             Status = customer.Status,
-            KycStatus = customer.KycStatus,
             Notes = customer.Notes,
             CreatedAt = customer.CreatedAt
         });
@@ -181,8 +169,6 @@ public sealed class CustomerService : ICustomerService
         customer.Phone = dto.Phone.Trim();
         customer.Location = dto.Location?.Trim();
         customer.Status = dto.Status.Trim();
-        if (!string.IsNullOrWhiteSpace(dto.KycStatus))
-            customer.KycStatus = dto.KycStatus.Trim();
         customer.Notes = dto.Notes;
         customer.UpdatedAt = DateTime.UtcNow;
 
@@ -198,7 +184,6 @@ public sealed class CustomerService : ICustomerService
             Phone = customer.Phone,
             Location = customer.Location,
             Status = customer.Status,
-            KycStatus = customer.KycStatus,
             Notes = customer.Notes,
             CreatedAt = customer.CreatedAt,
             UpdatedAt = customer.UpdatedAt

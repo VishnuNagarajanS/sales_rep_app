@@ -18,7 +18,6 @@ public static class Dev1ServiceExtensions
         services.AddScoped<IFollowupService, FollowupService>();
         services.AddScoped<ICustomerService, CustomerService>();
         services.AddScoped<IConsultationService, ConsultationService>();
-        services.AddScoped<IKycService, KycService>();
         return services;
     }
 }

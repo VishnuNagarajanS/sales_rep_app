@@ -4,6 +4,13 @@ using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// DigitalOcean App Platform & container port binding support (reads $PORT or configuration)
+var port = Environment.GetEnvironmentVariable("PORT") ?? builder.Configuration["PORT"];
+if (!string.IsNullOrEmpty(port))
+{
+    builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+}
+
 // 1. Add Controllers
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
