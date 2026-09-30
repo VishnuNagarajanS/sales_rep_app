@@ -27,23 +27,33 @@ public class IrmKycController : ControllerBase
         _db = db;
     }
 
-    [HttpGet("{investorId:int}")]
+    [HttpGet("{id:int}")]
     [Authorize]
-    public async Task<IActionResult> GetByInvestorId(int investorId, CancellationToken ct)
+    public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
-        var companyId = User.GetCompanyId();
-        var result = await _kycService.GetByInvestorIdAsync(investorId, companyId, ct);
-        if (!result.Success)
-            return NotFound(result);
+        var companyId = User.GetCompanyId(0);
+        if (companyId <= 0)
+            return Unauthorized();
 
-        return Ok(result);
+        var result = await _kycService.GetByIdAsync(id, companyId, ct);
+        if (result.Success)
+            return Ok(result);
+
+        var byInvestor = await _kycService.GetByInvestorIdAsync(id, companyId, ct);
+        if (byInvestor.Success)
+            return Ok(byInvestor);
+
+        return NotFound(result);
     }
 
     [HttpGet("by-email")]
-    [AllowAnonymous]
+    [Authorize]
     public async Task<IActionResult> GetByEmail([FromQuery] string email, CancellationToken ct)
     {
-        var companyId = User.Identity?.IsAuthenticated == true ? User.GetCompanyId() : 1;
+        var companyId = User.GetCompanyId(0);
+        if (companyId <= 0)
+            return Unauthorized();
+
         var result = await _kycService.GetByEmailAsync(email, companyId, ct);
         if (!result.Success)
             return NotFound(result);
@@ -52,19 +62,21 @@ public class IrmKycController : ControllerBase
     }
 
     [HttpGet("all")]
-    [AllowAnonymous]
+    [Authorize]
     public async Task<IActionResult> GetAllKycs([FromQuery] string? status, CancellationToken ct)
     {
-        var companyId = User.Identity?.IsAuthenticated == true ? User.GetCompanyId() : 1;
-        int? effectiveIrmId = null;
+        var companyId = User.GetCompanyId(0);
+        if (companyId <= 0)
+            return Unauthorized();
 
-        if (User.Identity?.IsAuthenticated == true)
+        int? effectiveIrmId = null;
+        var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
+        if (role != "admin" && role != "ghl_admin" && role != "super_admin")
         {
-            var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
-            if (role != "admin" && role != "ghl_admin" && role != "super_admin")
-            {
-                effectiveIrmId = User.GetUserId();
-            }
+            var userId = User.GetUserId();
+            if (userId <= 0)
+                return Unauthorized();
+            effectiveIrmId = userId;
         }
 
         var result = await _kycService.GetAllAsync(companyId, status, effectiveIrmId, ct);
@@ -72,11 +84,17 @@ public class IrmKycController : ControllerBase
     }
 
     [HttpPost("send-link")]
-    [AllowAnonymous]
+    [Authorize]
     public async Task<IActionResult> SendKycLink([FromBody] SendKycLinkDto dto, CancellationToken ct)
     {
-        var companyId = User.Identity?.IsAuthenticated == true ? User.GetCompanyId() : 1;
-        var irmId = User.Identity?.IsAuthenticated == true ? User.GetUserId() : 5;
+        var companyId = User.GetCompanyId(0);
+        if (companyId <= 0)
+            return Unauthorized();
+
+        var irmId = User.GetUserId();
+        if (irmId <= 0)
+            return Unauthorized();
+
         var result = await _kycService.SendKycLinkAsync(companyId, irmId, dto, ct);
         if (!result.Success)
             return BadRequest(result);
@@ -99,7 +117,34 @@ public class IrmKycController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> SubmitKyc([FromBody] SubmitKycDto dto, CancellationToken ct)
     {
-        var companyId = User.Identity?.IsAuthenticated == true ? User.GetCompanyId() : 1;
+        if (string.IsNullOrWhiteSpace(dto.Token))
+            return BadRequest(ApiResponse<KycDto>.ErrorResponse("Token is required"));
+
+        var rawToken = dto.Token.Trim();
+        var subToken = rawToken.StartsWith("tok_") ? rawToken[4..] : rawToken;
+        var tokenPrefix = subToken.Contains('_') ? subToken.Split('_')[0] : subToken;
+
+        var kyc = await _db.InvestorKycs.FirstOrDefaultAsync(k =>
+            k.KycLinkToken == rawToken ||
+            (k.KycLinkToken != null && tokenPrefix.Length >= 8 && k.KycLinkToken.StartsWith(tokenPrefix)), ct);
+
+        if (kyc == null)
+            return BadRequest(ApiResponse<KycDto>.ErrorResponse("Invalid or expired KYC token"));
+
+        if (kyc.KycLinkExpiresAt.HasValue && kyc.KycLinkExpiresAt.Value <= DateTime.UtcNow)
+            return BadRequest(ApiResponse<KycDto>.ErrorResponse("Invalid or expired KYC token"));
+
+        if (kyc.Status == KycStatus.Approved || (kyc.SubmittedAt != null && kyc.Status == KycStatus.PendingReview))
+            return BadRequest(ApiResponse<KycDto>.ErrorResponse("This KYC link has already been used"));
+
+        // Derive companyId from the KYC record found by the token, not a hardcoded 1
+        var companyId = kyc.CompanyId;
+
+        // Ensure submit only touches the record that matches the token
+        dto.InvestorId = kyc.InvestorId;
+        dto.Email = kyc.Email;
+        dto.Token = kyc.KycLinkToken ?? rawToken;
+
         var result = await _kycService.SubmitKycAsync(companyId, dto, ct);
         if (!result.Success)
             return BadRequest(result);
@@ -111,7 +156,10 @@ public class IrmKycController : ControllerBase
     [Authorize]
     public async Task<IActionResult> ReviewKyc(int id, [FromBody] KycReviewDto dto, CancellationToken ct)
     {
-        var companyId = User.GetCompanyId();
+        var companyId = User.GetCompanyId(0);
+        if (companyId <= 0)
+            return Unauthorized();
+
         var result = await _kycService.ReviewKycAsync(id, companyId, dto, ct);
         if (!result.Success)
             return BadRequest(result);
@@ -142,28 +190,30 @@ public class IrmKycController : ControllerBase
     }
 
     [HttpPatch("{id:int}/status")]
-    [AllowAnonymous]
+    [Authorize]
     public async Task<IActionResult> UpdateKycStatus(int id, [FromBody] UpdateKycStatusDto dto, CancellationToken ct)
     {
-        var companyId = User.Identity?.IsAuthenticated == true ? User.GetCompanyId() : 1;
-        var userId = User.Identity?.IsAuthenticated == true ? User.GetUserId() : 5;
+        var companyId = User.GetCompanyId(0);
+        if (companyId <= 0)
+            return Unauthorized();
 
-        // Server-side permission check: user must have kyc.verify if authenticated
-        if (User.Identity?.IsAuthenticated == true)
+        var userId = User.GetUserId();
+        if (userId <= 0)
+            return Unauthorized();
+
+        // Server-side permission check: user must have kyc.verify
+        var hasKycVerifyClaim = User.Claims.Any(c => c.Type == "permission" && c.Value == "kyc.verify");
+        if (!hasKycVerifyClaim)
         {
-            var hasKycVerifyClaim = User.Claims.Any(c => c.Type == "permission" && c.Value == "kyc.verify");
-            if (!hasKycVerifyClaim)
+            var dbUser = await _db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == userId && u.CompanyId == companyId, ct);
+            if (dbUser?.Role?.Permissions == null || !dbUser.Role.Permissions.Contains("kyc.verify"))
             {
-                var dbUser = await _db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == userId && u.CompanyId == companyId, ct);
-                if (dbUser?.Role?.Permissions != null && !dbUser.Role.Permissions.Contains("kyc.verify"))
-                {
-                    return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<bool>.ErrorResponse("Forbidden: User lacks kyc.verify permission."));
-                }
+                return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<bool>.ErrorResponse("Forbidden: User lacks kyc.verify permission."));
             }
         }
 
         // Enforce record lookup
-        var kyc = await _db.InvestorKycs.FirstOrDefaultAsync(k => k.Id == id, ct);
+        var kyc = await _db.InvestorKycs.FirstOrDefaultAsync(k => k.Id == id && k.CompanyId == companyId, ct);
         if (kyc == null)
             return NotFound(ApiResponse<bool>.ErrorResponse("KYC record not found."));
 
@@ -289,8 +339,13 @@ public class IrmKycController : ControllerBase
     public async Task<IActionResult> SaveVerificationDraft(
         int id, [FromBody] SaveVerificationDraftDto dto, CancellationToken ct)
     {
-        var companyId = User.GetCompanyId();
+        var companyId = User.GetCompanyId(0);
+        if (companyId <= 0)
+            return Unauthorized();
+
         var userId    = User.GetUserId();
+        if (userId <= 0)
+            return Unauthorized();
 
         // Permission check — same as status endpoint
         var hasKycVerifyClaim = User.Claims.Any(c => c.Type == "permission" && c.Value == "kyc.verify");

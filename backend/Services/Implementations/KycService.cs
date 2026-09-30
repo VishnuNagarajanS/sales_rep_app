@@ -148,7 +148,11 @@ public class KycService : IKycService
 
             deliveryStatus = emailSent 
                 ? $"Email delivered successfully to {recipientEmail} via Gmail SMTP" 
-                : $"Email dispatch simulated (To send real email, configure Gmail credentials in appsettings.json)";
+                : $"Email could not be sent: {_emailService.LastError ?? "unknown error"}";
+        }
+        else if (string.Equals(dto.Channel, "email", StringComparison.OrdinalIgnoreCase))
+        {
+            deliveryStatus = "Email not sent: no email address was found for this investor.";
         }
         else
         {
@@ -172,14 +176,14 @@ public class KycService : IKycService
         if (!string.IsNullOrWhiteSpace(dto.Token))
         {
             kyc = await _kycRepo.GetByTokenAsync(dto.Token, ct);
+            if (kyc == null)
+                return ApiResponse<KycDto>.ErrorResponse("Invalid or expired KYC token");
         }
-
-        if (kyc == null && dto.InvestorId > 0)
+        else if (dto.InvestorId > 0)
         {
             kyc = await _kycRepo.GetByInvestorIdAsync(dto.InvestorId, companyId, ct);
         }
-
-        if (kyc == null && !string.IsNullOrWhiteSpace(dto.Email))
+        else if (!string.IsNullOrWhiteSpace(dto.Email))
         {
             var all = await _kycRepo.GetAllAsync(companyId, null, ct);
             kyc = all.FirstOrDefault(k => string.Equals(k.Email, dto.Email, StringComparison.OrdinalIgnoreCase));
@@ -187,45 +191,20 @@ public class KycService : IKycService
 
         if (kyc == null)
         {
-            Investor? investor = null;
-            if (dto.InvestorId > 0)
-            {
-                investor = await _investorRepo.GetByIdAsync(dto.InvestorId, companyId, ct);
-            }
+            return ApiResponse<KycDto>.ErrorResponse("KYC record not found");
+        }
 
-            if (investor == null && !string.IsNullOrWhiteSpace(dto.Email))
-            {
-                var allInvestors = await _investorRepo.GetAllAsync(companyId, null, null, null, ct);
-                investor = allInvestors.FirstOrDefault(i => string.Equals(i.Email, dto.Email, StringComparison.OrdinalIgnoreCase) ||
-                                                           (!string.IsNullOrWhiteSpace(dto.Phone) && i.Phone == dto.Phone));
-            }
-
-            if (investor == null)
-            {
-                investor = new Investor
-                {
-                    CompanyId = companyId,
-                    Name = !string.IsNullOrWhiteSpace(dto.InvestorName) ? dto.InvestorName : "Investor",
-                    Email = dto.Email ?? string.Empty,
-                    Phone = dto.Phone ?? string.Empty,
-                    Status = InvestorStatus.Lead,
-                    CreatedAt = DateTime.UtcNow
-                };
-                investor = await _investorRepo.CreateAsync(investor, ct);
-            }
-
-            kyc = new InvestorKyc
-            {
-                InvestorId = investor.Id,
-                CompanyId = companyId,
-                KycLinkToken = !string.IsNullOrWhiteSpace(dto.Token) ? dto.Token : Guid.NewGuid().ToString("N"),
-                CreatedAt = DateTime.UtcNow
-            };
+        if (kyc.Status == KycStatus.Approved || (kyc.SubmittedAt != null && kyc.Status == KycStatus.PendingReview))
+        {
+            return ApiResponse<KycDto>.ErrorResponse("This KYC link has already been used");
         }
 
         kyc.InvestorName = !string.IsNullOrWhiteSpace(dto.InvestorName) ? dto.InvestorName : kyc.InvestorName;
         kyc.Phone = !string.IsNullOrWhiteSpace(dto.Phone) ? dto.Phone : kyc.Phone;
         kyc.Email = !string.IsNullOrWhiteSpace(dto.Email) ? dto.Email : kyc.Email;
+        kyc.FatherName = dto.FatherName ?? kyc.FatherName;
+        kyc.DateOfBirth = dto.DateOfBirth ?? dto.Dob ?? kyc.DateOfBirth;
+        kyc.NameAsPerPan = dto.NameAsPerPan ?? kyc.NameAsPerPan;
         kyc.Gender = dto.Gender ?? kyc.Gender;
         kyc.InvestorType = dto.InvestorType ?? kyc.InvestorType;
         kyc.ResidentType = dto.ResidentType ?? kyc.ResidentType;
@@ -316,6 +295,9 @@ public class KycService : IKycService
         if (kyc == null)
             return ApiResponse<KycDto>.ErrorResponse("Invalid or expired KYC token");
 
+        if (kyc.Status == KycStatus.Approved || (kyc.SubmittedAt != null && kyc.Status == KycStatus.PendingReview))
+            return ApiResponse<KycDto>.ErrorResponse("This KYC link has already been used");
+
         return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc));
     }
 
@@ -332,15 +314,61 @@ public class KycService : IKycService
         return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc));
     }
 
-    public Task<ApiResponse<List<KycDto>>> GetAllAsync(int companyId, string? status, CancellationToken ct = default)
+    public Task<ApiResponse<List<KycListDto>>> GetAllAsync(int companyId, string? status, CancellationToken ct = default)
         => GetAllAsync(companyId, status, null, ct);
 
-    public async Task<ApiResponse<List<KycDto>>> GetAllAsync(int companyId, string? status, int? irmId, CancellationToken ct = default)
+    public async Task<ApiResponse<List<KycListDto>>> GetAllAsync(int companyId, string? status, int? irmId, CancellationToken ct = default)
     {
         var list = await _kycRepo.GetAllAsync(companyId, status, irmId, ct);
-        var dtos = list.Select(MapToDto).ToList();
-        return ApiResponse<List<KycDto>>.SuccessResponse(dtos);
+        var dtos = list.Select(MapToListDto).ToList();
+        return ApiResponse<List<KycListDto>>.SuccessResponse(dtos);
     }
+
+    private static KycListDto MapToListDto(InvestorKyc k) => new()
+    {
+        Id = k.Id,
+        InvestorId = k.InvestorId,
+        CompanyId = k.CompanyId,
+        IrmId = k.IrmId,
+        Status = k.Status.ToString(),
+        InvestorName = k.InvestorName,
+        Phone = k.Phone,
+        Email = k.Email,
+        FatherName = k.FatherName,
+        DateOfBirth = k.DateOfBirth,
+        NameAsPerPan = k.NameAsPerPan,
+        Gender = k.Gender,
+        InvestorType = k.InvestorType,
+        ResidentType = k.ResidentType,
+        Occupation = k.Occupation,
+        PanNumber = k.PanNumber,
+        AadhaarNumber = k.AadhaarNumber,
+        AddressLine1 = k.AddressLine1,
+        AddressLine2 = k.AddressLine2,
+        City = k.City,
+        State = k.State,
+        Pincode = k.Pincode,
+        Country = k.Country,
+        BankName = k.BankName,
+        AccountNumber = k.AccountNumber,
+        IfscCode = k.IfscCode,
+        AccountType = k.AccountType,
+        DematAccountNumber = k.DematAccountNumber,
+        DpId = k.DpId,
+        NomineesJson = k.NomineesJson,
+        HasPanDocument = !string.IsNullOrWhiteSpace(k.PanDocumentUrl),
+        HasAadhaarDocument = !string.IsNullOrWhiteSpace(k.AadhaarDocumentUrl),
+        HasPhoto = !string.IsNullOrWhiteSpace(k.PhotoUrl),
+        ReviewRemarks = k.ReviewRemarks,
+        ReviewedAt = k.ReviewedAt,
+        VerifiedBy = k.VerifiedBy,
+        VerifiedAt = k.VerifiedAt,
+        Remarks = k.Remarks,
+        FlaggedSections = k.FlaggedSectionsJson,
+        KycLinkSent = k.KycLinkSent,
+        CreatedAt = k.CreatedAt,
+        UpdatedAt = k.UpdatedAt
+    };
 
     private static KycDto MapToDto(InvestorKyc k) => new()
     {
@@ -352,6 +380,9 @@ public class KycService : IKycService
         InvestorName = k.InvestorName,
         Phone = k.Phone,
         Email = k.Email,
+        FatherName = k.FatherName,
+        DateOfBirth = k.DateOfBirth,
+        NameAsPerPan = k.NameAsPerPan,
         Gender = k.Gender,
         InvestorType = k.InvestorType,
         ResidentType = k.ResidentType,

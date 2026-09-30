@@ -9,6 +9,8 @@ import {
   User,
   Building,
   Clock,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { Modal } from '../../../components/common/Modal';
 import { Deal } from '../../../types';
@@ -16,6 +18,7 @@ import { KycChecklist } from '../../../services/kycService';
 import { useAuth } from '../../../context/AuthContext';
 import { PERMISSIONS } from '../../../constants/permissions';
 import { isMockMode } from '../../../config/environment';
+import { getAuthHeaders } from '../../../utils/authHeaders';
 import './KycVerifyModal.css';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -75,10 +78,70 @@ function DetailField({ label, value }: { label: string; value?: string | null })
   );
 }
 
+function formatAadhaar(v?: string) {
+  if (!v) return null;
+  const clean = v.replace(/\s/g, '');
+  return clean.replace(/(.{4})/g, '$1 ').trim();
+}
+
+/**
+ * Masked by default (protects the data on screen), but the verifier can press
+ * "Show" to see the full value and compare it with the submitted documents.
+ * The value is hidden again whenever the section is collapsed or the modal closes.
+ */
+function SensitiveField({
+  label,
+  full,
+  masked,
+}: {
+  label: string;
+  full?: string | null;
+  masked?: string | null;
+}) {
+  const [revealed, setRevealed] = useState(false);
+  if (!full) {
+    return <DetailField label={label} value={null} />;
+  }
+  return (
+    <div className="kvm-detail-row">
+      <span className="kvm-detail-label">{label}</span>
+      <span className="kvm-detail-val" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+        {revealed ? full : masked}
+        <button
+          type="button"
+          onClick={() => setRevealed(r => !r)}
+          title={revealed ? 'Hide full value' : 'Show full value to verify'}
+          aria-label={revealed ? `Hide ${label}` : `Show ${label}`}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            border: '1px solid var(--border-color, #e2e8f0)',
+            background: 'transparent',
+            borderRadius: 6,
+            padding: '2px 8px',
+            fontSize: 11,
+            fontWeight: 600,
+            cursor: 'pointer',
+            color: 'var(--text-secondary, #475569)',
+          }}
+        >
+          {revealed ? <EyeOff size={12} /> : <Eye size={12} />}
+          {revealed ? 'Hide' : 'Show'}
+        </button>
+      </span>
+    </div>
+  );
+}
+
 function AadhaarDetails({ data }: { data: Record<string, any> }) {
   return (
     <div className="kvm-detail-block">
-      <DetailField label="Aadhaar Number" value={maskAadhaar(data.aadhaarNumber)} />
+      <SensitiveField
+        label="Aadhaar Number"
+        full={formatAadhaar(data.aadhaarNumber)}
+        masked={maskAadhaar(data.aadhaarNumber)}
+      />
       <DetailField label="Name on Document" value={data.nameAsPerPan || data.investorName} />
       <DetailField label="Date of Birth" value={data.dob} />
       <DetailField label="Permanent Address" value={data.address} />
@@ -104,7 +167,11 @@ function BankDetails({ data }: { data: Record<string, any> }) {
     <div className="kvm-detail-block">
       <DetailField label="Account Holder" value={data.accountHolderName || data.investorName} />
       <DetailField label="Bank Name" value={data.bankName} />
-      <DetailField label="Account Number" value={maskAccount(data.accountNumber)} />
+      <SensitiveField
+        label="Account Number"
+        full={data.accountNumber}
+        masked={maskAccount(data.accountNumber)}
+      />
       <DetailField label="Account Type" value={data.accountType} />
       <DetailField label="IFSC Code" value={data.ifscCode} />
       <DetailField label="Branch" value={data.branchName} />
@@ -237,17 +304,12 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
     if (isMockMode()) return;
     if (typeof resolvedKycId !== 'number' && !/^\d+$/.test(String(resolvedKycId))) return;
 
-    const token =
-      sessionStorage.getItem('nexus_auth_token') ||
-      localStorage.getItem('nexus_auth_token') ||
-      localStorage.getItem('token') || '';
-
     try {
       const res = await fetch('/api/irm/kyc/' + resolvedKycId + '/verification', {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: 'Bearer ' + token } : {}),
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({
           aadhaar: { status: sections.aadhaar.status, reason: sections.aadhaar.reason || null },

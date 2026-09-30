@@ -33,6 +33,8 @@ interface Props {
   ) => Promise<void>;
   onShowToast?: (message: string, type?: 'success' | 'error') => void;
   showAttribution?: boolean;
+  /** Hide the small chevron on the badge (the badge stays clickable). */
+  hideArrow?: boolean;
 }
 
 const SECTION_OPTIONS = [
@@ -49,6 +51,7 @@ export const KycStatusDropdown: React.FC<Props> = ({
   onChange,
   onShowToast,
   showAttribution = true,
+  hideArrow = false,
 }) => {
   const { permissions, user } = useAuth();
   const canVerify =
@@ -226,7 +229,7 @@ export const KycStatusDropdown: React.FC<Props> = ({
           }}
         >
           <Icon size={12} /> {displayStatus}
-          {canVerify && <ChevronDown size={12} style={{ marginLeft: 2, opacity: 0.8 }} />}
+          {canVerify && !hideArrow && <ChevronDown size={12} style={{ marginLeft: 2, opacity: 0.8 }} />}
         </button>
       </div>
 

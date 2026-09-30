@@ -104,13 +104,18 @@ public class GhlDealsController : ControllerBase
     public async Task<ActionResult<ApiResponse<GhlDealResponseDto>>> CreateDeal(
         [FromBody] CreateGhlDealDto dto, CancellationToken ct)
     {
-        var agentId = _currentUser.UserId ?? 1;
-        var companyId = _currentUser.CompanyId ?? 1;
+        var agentId = _currentUser.UserId;
+        if (!agentId.HasValue || agentId.Value <= 0)
+            return Unauthorized(ApiResponse<GhlDealResponseDto>.FailureResult("Unauthorized: User ID is missing."));
+
+        var companyId = _currentUser.CompanyId;
+        if (!companyId.HasValue || companyId.Value <= 0)
+            return Unauthorized(ApiResponse<GhlDealResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
 
         var deal = new GhlDeal
         {
-            CompanyId = companyId,
-            AssignedAgentId = agentId,
+            CompanyId = companyId.Value,
+            AssignedAgentId = agentId.Value,
             Title = dto.Title.Trim(),
             CustomerId = (dto.CustomerId.HasValue && dto.CustomerId.Value > 0) ? dto.CustomerId.Value : null,
             CustomerName = dto.CustomerName.Trim(),
@@ -216,9 +221,13 @@ public class GhlDealsController : ControllerBase
     public async Task<ActionResult<ApiResponse<GhlDealActivityResponseDto>>> LogActivity(
         int id, [FromBody] LogGhlDealActivityDto dto, CancellationToken ct)
     {
+        var companyId = _currentUser.CompanyId;
+        if (!companyId.HasValue || companyId.Value <= 0)
+            return Unauthorized(ApiResponse<GhlDealActivityResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
+
         // Verify deal belongs to this company
         var dealExists = await _db.GhlDeals
-            .AnyAsync(d => d.Id == id && d.CompanyId == _currentUser.CompanyId, ct);
+            .AnyAsync(d => d.Id == id && d.CompanyId == companyId.Value, ct);
 
         if (!dealExists)
             return NotFound(ApiResponse<GhlDealActivityResponseDto>.FailureResult("Deal not found."));
@@ -226,7 +235,7 @@ public class GhlDealsController : ControllerBase
         var activity = new GhlDealActivity
         {
             DealId = id,
-            CompanyId = _currentUser.CompanyId ?? 1,
+            CompanyId = companyId.Value,
             Type = dto.Type.Trim(),
             Text = dto.Text.Trim(),
             FromStage = dto.FromStage,

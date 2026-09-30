@@ -14,6 +14,9 @@ public class KycDto
     public string InvestorName { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
+    public string? FatherName { get; set; }
+    public string? DateOfBirth { get; set; }
+    public string? NameAsPerPan { get; set; }
     public string Gender { get; set; } = string.Empty;
     public string InvestorType { get; set; } = string.Empty;
     public string ResidentType { get; set; } = string.Empty;
@@ -47,6 +50,70 @@ public class KycDto
     public string? DematDocumentUrl { get; set; }
     public string? PhotoUrl { get; set; }
     public string? SignatureUrl { get; set; }
+
+    // Document indicators
+    public bool HasPanDocument => !string.IsNullOrWhiteSpace(PanDocumentUrl);
+    public bool HasAadhaarDocument => !string.IsNullOrWhiteSpace(AadhaarDocumentUrl);
+    public bool HasPhoto => !string.IsNullOrWhiteSpace(PhotoUrl);
+
+    // Review
+    public string? ReviewRemarks { get; set; }
+    public DateTime? ReviewedAt { get; set; }
+    public string? VerifiedBy { get; set; }
+    public DateTime? VerifiedAt { get; set; }
+    public string? Remarks { get; set; }
+    public string? FlaggedSections { get; set; }
+    public bool KycLinkSent { get; set; }
+
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+}
+
+public class KycListDto
+{
+    public int Id { get; set; }
+    public int InvestorId { get; set; }
+    public int CompanyId { get; set; }
+    public int? IrmId { get; set; }
+    public string Status { get; set; } = string.Empty;
+
+    // Step 1
+    public string InvestorName { get; set; } = string.Empty;
+    public string Phone { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string? FatherName { get; set; }
+    public string? DateOfBirth { get; set; }
+    public string? NameAsPerPan { get; set; }
+    public string Gender { get; set; } = string.Empty;
+    public string InvestorType { get; set; } = string.Empty;
+    public string ResidentType { get; set; } = string.Empty;
+    public string? Occupation { get; set; }
+
+    // Step 2
+    public string? PanNumber { get; set; }
+    public string? AadhaarNumber { get; set; }
+    public string? AddressLine1 { get; set; }
+    public string? AddressLine2 { get; set; }
+    public string? City { get; set; }
+    public string? State { get; set; }
+    public string? Pincode { get; set; }
+    public string? Country { get; set; }
+
+    // Step 3
+    public string? BankName { get; set; }
+    public string? AccountNumber { get; set; }
+    public string? IfscCode { get; set; }
+    public string? AccountType { get; set; }
+    public string? DematAccountNumber { get; set; }
+    public string? DpId { get; set; }
+
+    // Step 4 - Nominees as JSON
+    public string? NomineesJson { get; set; }
+
+    // Document booleans (performance: omit heavy base64 strings in list)
+    public bool HasPanDocument { get; set; }
+    public bool HasAadhaarDocument { get; set; }
+    public bool HasPhoto { get; set; }
 
     // Review
     public string? ReviewRemarks { get; set; }
@@ -90,6 +157,10 @@ public class SubmitKycDto
     public string InvestorName { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
+    public string? FatherName { get; set; }
+    public string? DateOfBirth { get; set; }
+    public string? Dob { get; set; }
+    public string? NameAsPerPan { get; set; }
     public string Gender { get; set; } = string.Empty;
     public string InvestorType { get; set; } = string.Empty;
     public string ResidentType { get; set; } = string.Empty;

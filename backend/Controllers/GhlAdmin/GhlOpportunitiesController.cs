@@ -104,21 +104,26 @@ public class GhlOpportunitiesController : ControllerBase
     public async Task<ActionResult<ApiResponse<GhlOpportunityResponseDto>>> CreateOpportunity(
         [FromBody] CreateGhlOpportunityDto dto, CancellationToken ct)
     {
-        var agentId = _currentUser.UserId ?? 1;
-        var companyId = _currentUser.CompanyId ?? 1;
+        var agentId = _currentUser.UserId;
+        if (!agentId.HasValue || agentId.Value <= 0)
+            return Unauthorized(ApiResponse<GhlOpportunityResponseDto>.FailureResult("Unauthorized: User ID is missing."));
+
+        var companyId = _currentUser.CompanyId;
+        if (!companyId.HasValue || companyId.Value <= 0)
+            return Unauthorized(ApiResponse<GhlOpportunityResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
 
         // Verify investor exists
         var investorExists = await _db.GhlInvestors
-            .AnyAsync(i => i.Id == dto.InvestorId && i.CompanyId == companyId, ct);
+            .AnyAsync(i => i.Id == dto.InvestorId && i.CompanyId == companyId.Value, ct);
 
         if (!investorExists)
             return BadRequest(ApiResponse<GhlOpportunityResponseDto>.FailureResult("Investor not found."));
 
         var opp = new GhlInvestmentOpportunity
         {
-            CompanyId = companyId,
+            CompanyId = companyId.Value,
             InvestorId = dto.InvestorId,
-            AssignedAgentId = agentId,
+            AssignedAgentId = agentId.Value,
             Title = dto.Title.Trim(),
             Stage = string.IsNullOrWhiteSpace(dto.Stage) ? "Enquiry" : dto.Stage.Trim(),
             TargetAmount = dto.TargetAmount,

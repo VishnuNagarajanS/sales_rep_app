@@ -22,6 +22,9 @@ public class InvestorKyc
     public string InvestorName { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
+    public string? FatherName { get; set; }
+    public string? DateOfBirth { get; set; }
+    public string? NameAsPerPan { get; set; }
     public string Gender { get; set; } = string.Empty;          // Male | Female | Other
     public string InvestorType { get; set; } = string.Empty;   // Individual | HUF | Corporate | NRI
     public string ResidentType { get; set; } = string.Empty;   // Resident | Non-Resident

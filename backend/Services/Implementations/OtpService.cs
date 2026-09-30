@@ -190,20 +190,7 @@ public class OtpService : IOtpService
 
     private async Task<InvestorKyc?> ResolveKycByTokenAsync(string token, CancellationToken ct)
     {
-        // 1. Direct match
-        var direct = await _kycRepo.GetByTokenAsync(token, ct);
-        if (direct != null) return direct;
-
-        // 2. Slug match (e.g. tok_36d49ac8_ramesh)
-        var allKycs = await _kycRepo.GetAllAsync(1, null, ct);
-        var subToken = token.Replace("tok_", "").Trim();
-        var match = allKycs.FirstOrDefault(k =>
-            k.KycLinkToken == token ||
-            (!string.IsNullOrEmpty(k.KycLinkToken) && subToken.StartsWith(k.KycLinkToken.Substring(0, Math.Min(8, k.KycLinkToken.Length)))) ||
-            (!string.IsNullOrEmpty(k.KycLinkToken) && token.Contains(k.KycLinkToken.Substring(0, Math.Min(8, k.KycLinkToken.Length))))
-        );
-
-        return match;
+        return await _kycRepo.GetByTokenAsync(token, ct);
     }
 
     private static string CleanToken(string? rawToken)

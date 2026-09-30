@@ -3,6 +3,11 @@ namespace backend.Services.Interfaces;
 public interface IEmailService
 {
     /// <summary>
+    /// Human-readable reason for the most recent failed send in this request scope (null if it succeeded).
+    /// </summary>
+    string? LastError { get; }
+
+    /// <summary>
     /// Sends an investor KYC verification link via HTML email.
     /// </summary>
     Task<bool> SendKycVerificationLinkAsync(

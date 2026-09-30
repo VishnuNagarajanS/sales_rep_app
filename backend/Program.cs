@@ -157,6 +157,32 @@ using (var scope = app.Services.CreateScope())
         {
             Console.WriteLine($"[Database Init Warning] {ex.Message}");
         }
+
+        try
+        {
+            var pendingMigrations = db.Database.GetPendingMigrations().ToList();
+            if (pendingMigrations.Any())
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine("================================================================================");
+                Console.WriteLine($"[WARNING] There are {pendingMigrations.Count} pending EF Core migration(s) not yet applied to the database:");
+                foreach (var m in pendingMigrations)
+                {
+                    Console.WriteLine($"  - {m}");
+                }
+                Console.WriteLine("Run 'dotnet ef database update' in backend/ to apply pending migrations.");
+                Console.WriteLine("================================================================================");
+                Console.ResetColor();
+            }
+            else
+            {
+                Console.WriteLine("[Database] All EF Core migrations are up to date.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Database Migration Check Warning] {ex.Message}");
+        }
     }
 
     var helpMeDecide = db.Leads.Count(l => l.CustomFieldsJson != null && l.CustomFieldsJson.Contains("help me decide"));

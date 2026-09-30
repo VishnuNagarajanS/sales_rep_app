@@ -1,4 +1,5 @@
 import { isMockMode } from '../config/environment';
+import { getAuthHeaders } from '../utils/authHeaders';
 
 export interface KycReviewData {
   refId: string;
@@ -164,12 +165,11 @@ export async function patchKycStatus(
     checklist?: KycChecklist;
   }
 ): Promise<any> {
-  const token = localStorage.getItem('token') || '';
   const response = await fetch(`/api/irm/kyc/${kycId}/status`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {})
+      ...getAuthHeaders()
     },
     body: JSON.stringify(payload)
   });

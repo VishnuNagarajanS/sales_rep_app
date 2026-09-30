@@ -22,6 +22,7 @@ import { Deal } from '../../../types';
 import { KycStatusDropdown } from './KycStatusDropdown';
 import { getCustomerKycStatus, getKycReviewData, normalizeLegacyKycStatus } from '../../../services/kycService';
 import { saveDeal } from '../../../services/ghlApiService';
+import { getAuthHeaders } from '../../../utils/authHeaders';
 import './KycLinkComponents.css';
 
 interface KycReviewDrawerProps {
@@ -55,7 +56,23 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
       try {
         const email = deal.email;
         if (email) {
-          const res = await fetch(`/api/irm/kyc/by-email?email=${encodeURIComponent(email)}`);
+          const res = await fetch(`/api/irm/kyc/by-email?email=${encodeURIComponent(email)}`, {
+            headers: getAuthHeaders(),
+          });
+          if (res.ok) {
+            const json = await res.json();
+            if (json.success && json.data) {
+              setLiveKyc(json.data);
+              return;
+            }
+          }
+        }
+
+        const kycId = (deal as any).kycId || (deal as any).kycRecordId || (deal as any).customerId;
+        if (kycId) {
+          const res = await fetch(`/api/irm/kyc/${kycId}`, {
+            headers: getAuthHeaders(),
+          });
           if (res.ok) {
             const json = await res.json();
             if (json.success && json.data) {
@@ -86,6 +103,25 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
 
   const fallbackData = getKycReviewData(deal);
 
+  const liveDocs: Array<{ id: string; name: string; size: string; verified: boolean; url?: string }> = [];
+  if (liveKyc) {
+    if (liveKyc.panDocumentUrl) {
+      liveDocs.push({ id: 'pan-doc', name: 'PAN Card Copy', size: 'Verified Document', verified: true, url: liveKyc.panDocumentUrl });
+    }
+    if (liveKyc.aadhaarDocumentUrl) {
+      liveDocs.push({ id: 'aadhaar-doc', name: 'Aadhaar Card Copy', size: 'Verified Document', verified: true, url: liveKyc.aadhaarDocumentUrl });
+    }
+    if (liveKyc.bankChequeUrl) {
+      liveDocs.push({ id: 'cheque-doc', name: 'Bank Cheque / Proof', size: 'Verified Document', verified: true, url: liveKyc.bankChequeUrl });
+    }
+    if (liveKyc.dematDocumentUrl) {
+      liveDocs.push({ id: 'demat-doc', name: 'Demat Statement Proof', size: 'Verified Document', verified: true, url: liveKyc.dematDocumentUrl });
+    }
+    if (liveKyc.signatureUrl) {
+      liveDocs.push({ id: 'signature-doc', name: 'Investor Signature', size: 'Verified Document', verified: true, url: liveKyc.signatureUrl });
+    }
+  }
+
   const mockReviewData = liveKyc ? {
     refId: `KYC-${liveKyc.id.toString().padStart(6, '0')}`,
     submissionDate: liveKyc.submittedAt 
@@ -104,12 +140,12 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
     },
     identityDetails: {
       panNumber: liveKyc.panNumber || 'Not provided',
-      nameAsPerPan: liveKyc.investorName?.toUpperCase() || deal.customerName.toUpperCase(),
+      nameAsPerPan: liveKyc.nameAsPerPan || liveKyc.investorName?.toUpperCase() || deal.customerName.toUpperCase(),
       aadhaarNumber: liveKyc.aadhaarNumber || 'Not provided',
-      fatherName: 'As per Aadhaar/PAN',
-      dob: 'Verified DOB',
+      fatherName: liveKyc.fatherName || 'As per Aadhaar/PAN',
+      dob: liveKyc.dateOfBirth || liveKyc.dob || 'Verified DOB',
       address: [liveKyc.addressLine1, liveKyc.addressLine2, liveKyc.city, liveKyc.state, liveKyc.pincode].filter(Boolean).join(', ') || 'Not provided',
-      courierAddress: [liveKyc.addressLine1, liveKyc.city, liveKyc.pincode].filter(Boolean).join(', ') || 'Same as permanent',
+      courierAddress: [liveKyc.addressLine2 || liveKyc.addressLine1, liveKyc.city, liveKyc.pincode].filter(Boolean).join(', ') || 'Same as permanent',
     },
     bankDetails: {
       accountHolderName: liveKyc.investorName || deal.customerName,
@@ -127,11 +163,11 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
       dematClientId: liveKyc.dematAccountNumber ? liveKyc.dematAccountNumber.slice(-8) : 'N/A',
     },
     nominees: parsedNominees.length > 0 ? parsedNominees : (fallbackData?.nominees || []),
-    documents: fallbackData?.documents || [
+    documents: liveDocs.length > 0 ? liveDocs : (fallbackData?.documents || [
       { id: 'pan-doc', name: 'PAN_Card.pdf', size: '1.2 MB', verified: true },
       { id: 'aadhaar-doc', name: 'Aadhaar_Card.pdf', size: '2.1 MB', verified: true },
       { id: 'cheque-doc', name: 'Cancelled_Cheque.pdf', size: '890 KB', verified: true },
-    ],
+    ]),
     consent: fallbackData?.consent || {
       acceptedAt: liveKyc.submittedAt ? new Date(liveKyc.submittedAt).toLocaleDateString('en-IN') : 'Completed',
       termsVersion: 'v2.4 (SEBI Qualified)',
@@ -201,17 +237,13 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
     providerVerifications: [],
   });
 
-  const getAuthHeader = (): Record<string, string> => {
-    const token = sessionStorage.getItem('nexus_auth_token') || localStorage.getItem('nexus_auth_token');
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  };
 
   const handleApprove = async () => {
     if (liveKyc?.id) {
       try {
         const res = await fetch(`/api/irm/kyc/${liveKyc.id}/review`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({ action: 'Approved', remarks: 'KYC verified and approved by IRM' }),
         });
         if (!res.ok) {
@@ -246,7 +278,7 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
       try {
         const res = await fetch(`/api/irm/kyc/${liveKyc.id}/review`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({ action: 'ReuploadRequested', remarks: correctionNote }),
         });
         if (!res.ok) {
@@ -273,8 +305,20 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
     onClose();
   };
 
-  const handleViewDoc = (docName: string) => {
-    onShowToast(`Viewing ${docName}`);
+  const handleViewDoc = (doc: { name: string; url?: string } | string) => {
+    const docObj = typeof doc === 'string' ? { name: doc, url: undefined } : doc;
+    if (docObj.url) {
+      const w = window.open('');
+      if (w) {
+        if (docObj.url.startsWith('data:application/pdf')) {
+          w.document.write(`<iframe src="${docObj.url}" style="width:100%;height:100%;border:none;"></iframe>`);
+        } else {
+          w.document.write(`<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0f172a;margin:0;"><img src="${docObj.url}" style="max-width:90%;max-height:90vh;border-radius:8px;" alt="${docObj.name}" /></div>`);
+        }
+      }
+    } else {
+      onShowToast(`Viewing ${docObj.name}`);
+    }
   };
 
   return (
@@ -558,7 +602,7 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
                     type="button"
                     className="btn btn-secondary btn-sm"
                     style={{ fontSize: 11, padding: '4px 10px', height: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5 }}
-                    onClick={() => handleViewDoc(doc.name)}
+                    onClick={() => handleViewDoc(doc)}
                   >
                     <Eye size={12} /> View
                   </button>
@@ -578,8 +622,12 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
               </span>
             </div>
             <div className="kyc-link-liveness-container">
-              <div className="kyc-link-liveness-thumb">
-                <Camera size={26} />
+              <div className="kyc-link-liveness-thumb" style={{ overflow: 'hidden' }}>
+                {liveKyc?.photoUrl ? (
+                  <img src={liveKyc.photoUrl} alt="Liveness Selfie" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  <Camera size={26} />
+                )}
                 <span
                   style={{
                     position: 'absolute',
@@ -633,23 +681,6 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
               </div>
             </div>
           </div>
-        </div>
-
-        {/* Footer Buttons */}
-                <div className="kyc-link-drawer-footer">
-          {onChangeKycStatus && deal && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>Update Status:</span>
-              <KycStatusDropdown 
-                deal={deal} 
-                customerKycStatus={getCustomerKycStatus(deal.id, (deal as any).customerKycStatus)} 
-                onChange={async (status, comment, flaggedSections, checklist) => {
-                  if (onChangeKycStatus) await onChangeKycStatus(deal, status, comment, flaggedSections, checklist);
-                  onClose();
-                }} 
-              />
-            </div>
-          )}
         </div>
 
         {/* Sub-modal for Request Correction */}

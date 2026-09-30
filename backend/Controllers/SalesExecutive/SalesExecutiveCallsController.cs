@@ -133,13 +133,18 @@ public class SalesExecutiveCallsController : ControllerBase
         [FromBody] LogCallDto dto,
         CancellationToken ct = default)
     {
-        var agentId = _currentUser.UserId ?? 1;
-        var companyId = _currentUser.CompanyId ?? 1;
+        var agentId = _currentUser.UserId;
+        if (!agentId.HasValue || agentId.Value <= 0)
+            return Unauthorized(ApiResponse<CallRecordResponseDto>.FailureResult("Unauthorized: User ID is missing."));
+
+        var companyId = _currentUser.CompanyId;
+        if (!companyId.HasValue || companyId.Value <= 0)
+            return Unauthorized(ApiResponse<CallRecordResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
 
         var call = new CallRecord
         {
-            CompanyId = companyId,
-            AgentId = agentId,
+            CompanyId = companyId.Value,
+            AgentId = agentId.Value,
             ContactName = dto.ContactName.Trim(),
             ContactPhone = dto.ContactPhone.Trim(),
             Direction = string.IsNullOrWhiteSpace(dto.Direction) ? "outbound" : dto.Direction.Trim().ToLower(),
@@ -184,6 +189,12 @@ public class SalesExecutiveCallsController : ControllerBase
         CancellationToken ct = default)
     {
         var result = await _callService.ProcessDispositionAsync(request, ct);
+        if (!result.Success)
+        {
+            if (result.Message.StartsWith("Unauthorized"))
+                return Unauthorized(result);
+            return BadRequest(result);
+        }
         return Ok(result);
     }
 }

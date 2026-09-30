@@ -64,12 +64,15 @@ export const LeadsPage: React.FC = () => {
     }
 
     if (isIrm) {
-      // IRM My Leads: shows ALL leads assigned to this IRM (any status) PLUS qualified 'Interested' leads handed over by Sales Execs
-      const raw = tenantLeads.filter(l =>
-        (l.assignedAgentId && String(l.assignedAgentId) === String(user?.id)) ||
-        (l.assignedAgentName && l.assignedAgentName === user?.name) ||
-        l.status === 'Interested'
-      );
+      // IRM My Leads: ONLY leads that are 'Interested' AND assigned to THIS IRM
+      // (e.g. Sales Exec Naveen hands a lead to IRM Dhinakaran -> only Dhinakaran sees it).
+      // Leads of other IRMs, or still owned by a Sales Executive, are never shown.
+      const raw = tenantLeads.filter(l => {
+        if (l.status !== 'Interested') return false;
+        if (l.assignedAgentId) return String(l.assignedAgentId) === String(user?.id);
+        // Legacy rows without an agent id: fall back to the exact name
+        return !!l.assignedAgentName && l.assignedAgentName === user?.name;
+      });
       // Deduplicate by phone to prevent double-entries from different IDs
       const seen = new Set<string>();
       return raw.filter(l => {

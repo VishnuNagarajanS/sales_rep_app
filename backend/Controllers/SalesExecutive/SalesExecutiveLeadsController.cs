@@ -75,7 +75,11 @@ public class SalesExecutiveLeadsController : ControllerBase
 
         var result = await _leadService.CreateLeadAsync(dto, ct);
         if (!result.Success)
+        {
+            if (result.Message.StartsWith("Unauthorized"))
+                return Unauthorized(result);
             return BadRequest(result);
+        }
 
         return CreatedAtAction(nameof(GetLeadById), new { id = result.Data!.Id }, result);
     }

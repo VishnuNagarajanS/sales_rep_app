@@ -15,6 +15,7 @@ import { Deal } from '../../../types';
 import { storageService } from '../../../services/storageService';
 import { apiClient } from '../../../services/apiClient';
 import { isMockMode } from '../../../config/environment';
+import { getAuthHeaders } from '../../../utils/authHeaders';
 import './KycLinkComponents.css';
 
 interface SendKycLinkModalProps {
@@ -104,6 +105,9 @@ GHL India Ventures | IRM Desk`;
     setIsSending(true);
     let finalLink = generatedLink;
     let linkCreated = false;
+    let emailSent = false;
+    let deliveryStatus = '';
+    let failureMessage = '';
 
     try {
       const payload = {
@@ -115,12 +119,11 @@ GHL India Ventures | IRM Desk`;
         baseUrl: window.location.origin,
       };
 
-      const token = sessionStorage.getItem('nexus_auth_token') || localStorage.getItem('nexus_auth_token');
       const res = await fetch('/api/irm/kyc/send-link', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...getAuthHeaders(),
         },
         body: JSON.stringify(payload),
       });
@@ -129,10 +132,20 @@ GHL India Ventures | IRM Desk`;
         const json = await res.json();
         if (json?.success) {
           linkCreated = true;
+          emailSent = !!json.data?.emailSent;
+          deliveryStatus = json.data?.deliveryStatus || '';
           if (json.data?.link) {
             finalLink = json.data.link;
           }
+        } else {
+          failureMessage = json?.message || 'The server did not accept the request.';
         }
+      } else {
+        const err = await res.json().catch(() => ({} as any));
+        failureMessage =
+          res.status === 401
+            ? 'You are not logged in. Please log in again.'
+            : err?.message || `Server error (${res.status}).`;
       }
     } catch (err: any) {
       console.warn('Backend send-link API error:', err);
@@ -140,7 +153,8 @@ GHL India Ventures | IRM Desk`;
 
     setIsSending(false);
 
-    if (linkCreated || isMockMode()) {
+    // For email, only mark the link as "sent" when the email was really delivered
+    if ((linkCreated && (selectedChannel !== 'email' || emailSent)) || isMockMode()) {
       onSent?.(deal);
     }
 
@@ -173,12 +187,18 @@ GHL India Ventures | IRM Desk`;
     // ── 3. Real-Time Email Delivery ────────────────────────────────────────────
     if (selectedChannel === 'email') {
       const targetEmail = resolvedEmail || deal.email;
-      if (targetEmail) {
-        onShowToast(`KYC Verification email delivered in real time to ${targetEmail}!`);
-      } else {
+      if (!targetEmail) {
         onShowToast('Please provide an investor email address.');
+        onClose();
+        return;
       }
-      onClose();
+      if (isMockMode() || (linkCreated && emailSent)) {
+        onShowToast(`KYC Verification email delivered in real time to ${targetEmail}!`);
+        onClose();
+        return;
+      }
+      // Real failure: tell the user why and keep the modal open so they can retry
+      onShowToast(`Email not sent: ${deliveryStatus || failureMessage || 'unknown error'}`);
       return;
     }
 

@@ -75,7 +75,11 @@ public class SalesExecutiveCustomersController : ControllerBase
 
         var result = await _customerService.CreateCustomerAsync(dto, ct);
         if (!result.Success)
+        {
+            if (result.Message.StartsWith("Unauthorized"))
+                return Unauthorized(result);
             return BadRequest(result);
+        }
 
         return CreatedAtAction(nameof(GetCustomer360), new { id = result.Data!.Id }, result);
     }

@@ -91,6 +91,8 @@ export const CustomerKycApp: React.FC = () => {
       fatherName: '',
       dob: '',
       address: '',
+      city: '',
+      state: '',
       pincode: '',
 
       // Step 3: Bank Details (entered by investor)
@@ -567,6 +569,12 @@ export const CustomerKycApp: React.FC = () => {
         investorName: formData.investorName,
         phone: formData.phone,
         email: formData.email,
+        fatherName: formData.fatherName,
+        dob: formData.dob,
+        dateOfBirth: formData.dob,
+        nameAsPerPan: formData.nameAsPerPan,
+        city: formData.city,
+        state: formData.state,
         gender: formData.gender,
         investorType: formData.investorType,
         residentType: formData.residentType,
@@ -663,12 +671,19 @@ export const CustomerKycApp: React.FC = () => {
                 investorName: k.investorName || prev.investorName,
                 phone: k.phone || prev.phone,
                 email: k.email || prev.email,
+                fatherName: k.fatherName || prev.fatherName,
+                dob: k.dateOfBirth || k.dob || prev.dob,
+                nameAsPerPan: k.nameAsPerPan || prev.nameAsPerPan,
+                city: k.city || prev.city,
+                state: k.state || prev.state,
                 gender: k.gender || prev.gender,
                 investorType: k.investorType || prev.investorType,
                 residentType: k.residentType || prev.residentType,
                 occupation: k.occupation || prev.occupation,
                 panNumber: k.panNumber || prev.panNumber,
                 aadhaarNumber: k.aadhaarNumber || prev.aadhaarNumber,
+                address: k.addressLine1 || prev.address,
+                pincode: k.pincode || prev.pincode,
                 bankName: k.bankName || prev.bankName,
                 accountNumber: k.accountNumber || prev.accountNumber,
                 ifscCode: k.ifscCode || prev.ifscCode,
@@ -1220,6 +1235,18 @@ export const CustomerKycApp: React.FC = () => {
                 </div>
 
                 <div className="ckyc-form-group">
+                  <label className="ckyc-form-label" htmlFor="w-father-name">Father's Full Name</label>
+                  <input
+                    id="w-father-name"
+                    type="text"
+                    placeholder="Father's full name"
+                    className="ckyc-input"
+                    value={formData.fatherName}
+                    onChange={e => handleInputChange('fatherName', e.target.value)}
+                  />
+                </div>
+
+                <div className="ckyc-form-group">
                   <label className="ckyc-form-label" htmlFor="w-aadhaar">
                     <span>Aadhaar Number (12 Digits) *</span>
                   </label>
@@ -1252,12 +1279,37 @@ export const CustomerKycApp: React.FC = () => {
                   <textarea
                     id="w-addr"
                     className={`ckyc-input${formErrors.address ? ' ckyc-input-error' : ''}`}
-                    placeholder="Door / Flat No., Building, Street, Locality, City, State"
+                    placeholder="Door / Flat No., Building, Street, Locality"
                     style={{ minHeight: 70, resize: 'vertical' }}
                     value={formData.address}
                     onChange={e => handleInputChange('address', e.target.value)}
                   />
                   <FieldError field="address" />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div className="ckyc-form-group">
+                    <label className="ckyc-form-label" htmlFor="w-city">City</label>
+                    <input
+                      id="w-city"
+                      type="text"
+                      placeholder="e.g. Mumbai"
+                      className="ckyc-input"
+                      value={formData.city}
+                      onChange={e => handleInputChange('city', e.target.value)}
+                    />
+                  </div>
+                  <div className="ckyc-form-group">
+                    <label className="ckyc-form-label" htmlFor="w-state">State</label>
+                    <input
+                      id="w-state"
+                      type="text"
+                      placeholder="e.g. Maharashtra"
+                      className="ckyc-input"
+                      value={formData.state}
+                      onChange={e => handleInputChange('state', e.target.value)}
+                    />
+                  </div>
                 </div>
 
                 <div className="ckyc-form-group">
