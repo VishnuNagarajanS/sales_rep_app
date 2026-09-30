@@ -1988,7 +1988,8 @@ class SuperAdminService {
 
   async fetchPlatformMetricsFromApi(): Promise<PlatformMetrics> {
     try {
-      const res = await apiClient.get<ApiResponse<PlatformMetrics>>('/super-admin/metrics');
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const res = await apiClient.get<ApiResponse<PlatformMetrics>>('/super-admin/metrics', { timeZone: tz });
       if (res && res.data) {
         localStorage.setItem(STORAGE_KEYS.METRICS, JSON.stringify(res.data));
         return res.data;
@@ -1999,12 +2000,41 @@ class SuperAdminService {
     return this.getPlatformMetrics();
   }
 
+  async fetchCallsTodayMetricsFromApi(): Promise<{ callsToday: number; callsConnected: number } | null> {
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const res = await apiClient.get<ApiResponse<{ callsToday: number; callsConnected: number }>>(
+        '/super-admin/metrics/calls-today',
+        { timeZone: tz }
+      );
+      if (res && res.data) {
+        try {
+          const cached = localStorage.getItem(STORAGE_KEYS.METRICS);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            parsed.callsToday = res.data.callsToday;
+            parsed.callsConnected = res.data.callsConnected;
+            localStorage.setItem(STORAGE_KEYS.METRICS, JSON.stringify(parsed));
+          }
+        } catch {}
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Could not fetch calls today metrics from API:', err);
+    }
+    return null;
+  }
+
   getPlatformMetrics(): PlatformMetrics {
     try {
       const cached = localStorage.getItem(STORAGE_KEYS.METRICS);
       if (cached) {
         const parsed = JSON.parse(cached);
         if (typeof parsed.totalLeads === 'number') {
+          if (parsed.callsToday === 384 && parsed.callsConnected === 341) {
+            parsed.callsToday = 0;
+            parsed.callsConnected = 0;
+          }
           return parsed;
         }
       }
@@ -2042,8 +2072,8 @@ class SuperAdminService {
       suspendedTenants: suspendedTenants.length,
       totalUsers: users.length,
       activeUsers: users.filter(u => u.status === 'Active').length,
-      callsToday: 384,
-      callsConnected: 341,
+      callsToday: 0,
+      callsConnected: 0,
       totalLeads: leads.length,
       currentMonthLeads,
       previousMonthLeads,

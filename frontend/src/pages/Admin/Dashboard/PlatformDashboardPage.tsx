@@ -63,6 +63,31 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
     };
   }, []);
 
+  // Scoped periodic polling for real-time SYSTEM CALLS TODAY telemetry
+  useEffect(() => {
+    let isMounted = true;
+    const refreshCallMetrics = async () => {
+      try {
+        const liveCalls = await superAdminService.fetchCallsTodayMetricsFromApi();
+        if (liveCalls && isMounted) {
+          setMetrics(prev => ({
+            ...prev,
+            callsToday: liveCalls.callsToday,
+            callsConnected: liveCalls.callsConnected,
+          }));
+        }
+      } catch (err) {
+        console.warn('Could not refresh real-time call telemetry:', err);
+      }
+    };
+
+    const intervalId = setInterval(refreshCallMetrics, 10000);
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
+  }, []);
+
   const formatCurrency = (val: number) => {
     if (val >= 10000000) {
       return `₹${(val / 10000000).toFixed(1)} Cr`;
@@ -223,7 +248,7 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
           <div className="platform-telemetry-val text-violet">{metrics.callsToday}</div>
           <div className="platform-telemetry-sub">
             <span className="status-badge-inline success">
-              {Math.round((metrics.callsConnected / metrics.callsToday) * 100)}% Connected
+              {metrics.callsToday > 0 ? Math.round((metrics.callsConnected / metrics.callsToday) * 100) : 0}% Connected
             </span>
             <span className="text-muted-xs">Zero carrier drops</span>
           </div>

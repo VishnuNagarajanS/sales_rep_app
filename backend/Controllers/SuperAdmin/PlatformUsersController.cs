@@ -344,7 +344,9 @@ public class PlatformUsersController : ControllerBase
 
     [HttpGet("~/api/super-admin/metrics")]
     [HttpGet("~/api/platform/metrics")]
-    public async Task<ActionResult<ApiResponse<PlatformMetricsDto>>> GetPlatformMetrics(CancellationToken ct = default)
+    public async Task<ActionResult<ApiResponse<PlatformMetricsDto>>> GetPlatformMetrics(
+        [FromQuery] string? timeZone = null,
+        CancellationToken ct = default)
     {
         var now = DateTime.UtcNow;
         var currentMonthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -358,11 +360,7 @@ public class PlatformUsersController : ControllerBase
         var totalUsers = await _context.Users.CountAsync(ct);
         var activeUsers = await _context.Users.CountAsync(u => u.Status == UserStatus.Active, ct);
 
-        var today = now.Date;
-        var callsToday = await _context.CallRecords.CountAsync(c => c.Timestamp >= today, ct);
-        var callsConnected = await _context.CallRecords.CountAsync(c => c.Timestamp >= today && c.Disposition != "Failed" && c.Disposition != "No Answer", ct);
-        if (callsToday == 0) callsToday = 384;
-        if (callsConnected == 0) callsConnected = 341;
+        var (callsToday, callsConnected) = await CalculateCallsTodayAsync(timeZone, ct);
 
         var totalLeads = await _context.Leads.CountAsync(ct);
         var currentMonthLeads = await _context.Leads.CountAsync(l => l.CreatedAt >= currentMonthStart && l.CreatedAt < nextMonthStart, ct);
@@ -392,5 +390,86 @@ public class PlatformUsersController : ControllerBase
         };
 
         return Ok(ApiResponse<PlatformMetricsDto>.SuccessResult(metrics));
+    }
+
+    [HttpGet("~/api/super-admin/metrics/calls-today")]
+    [HttpGet("~/api/platform/metrics/calls-today")]
+    public async Task<ActionResult<ApiResponse<CallsTodayMetricsDto>>> GetCallsTodayMetrics(
+        [FromQuery] string? timeZone = null,
+        CancellationToken ct = default)
+    {
+        var (callsToday, callsConnected) = await CalculateCallsTodayAsync(timeZone, ct);
+
+        var result = new CallsTodayMetricsDto
+        {
+            CallsToday = callsToday,
+            CallsConnected = callsConnected
+        };
+
+        return Ok(ApiResponse<CallsTodayMetricsDto>.SuccessResult(result));
+    }
+
+    private static (DateTime UtcStart, DateTime UtcEnd) GetTodayUtcRange(string? timeZoneId)
+    {
+        TimeZoneInfo tz;
+        if (!string.IsNullOrWhiteSpace(timeZoneId))
+        {
+            var cleanId = timeZoneId.Split('(')[0].Trim();
+            if (!TimeZoneInfo.TryFindSystemTimeZoneById(cleanId, out tz!) &&
+                !TimeZoneInfo.TryFindSystemTimeZoneById(timeZoneId.Trim(), out tz!))
+            {
+                if (cleanId.Equals("Asia/Kolkata", StringComparison.OrdinalIgnoreCase) ||
+                    cleanId.Equals("IST", StringComparison.OrdinalIgnoreCase) ||
+                    cleanId.Equals("Asia/Calcutta", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!TimeZoneInfo.TryFindSystemTimeZoneById("India Standard Time", out tz!))
+                    {
+                        tz = TimeZoneInfo.CreateCustomTimeZone("IST", TimeSpan.FromHours(5.5), "India Standard Time", "India Standard Time");
+                    }
+                }
+                else
+                {
+                    if (!TimeZoneInfo.TryFindSystemTimeZoneById("India Standard Time", out tz!) &&
+                        !TimeZoneInfo.TryFindSystemTimeZoneById("Asia/Kolkata", out tz!))
+                    {
+                        tz = TimeZoneInfo.CreateCustomTimeZone("IST", TimeSpan.FromHours(5.5), "India Standard Time", "India Standard Time");
+                    }
+                }
+            }
+        }
+        else
+        {
+            if (!TimeZoneInfo.TryFindSystemTimeZoneById("Asia/Kolkata", out tz!) &&
+                !TimeZoneInfo.TryFindSystemTimeZoneById("India Standard Time", out tz!))
+            {
+                tz = TimeZoneInfo.CreateCustomTimeZone("IST", TimeSpan.FromHours(5.5), "India Standard Time", "India Standard Time");
+            }
+        }
+
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz);
+        var localTodayStart = localNow.Date;
+        var localTomorrowStart = localTodayStart.AddDays(1);
+
+        var utcStart = TimeZoneInfo.ConvertTimeToUtc(localTodayStart, tz);
+        var utcEnd = TimeZoneInfo.ConvertTimeToUtc(localTomorrowStart, tz);
+
+        return (utcStart, utcEnd);
+    }
+
+    private async Task<(int CallsToday, int CallsConnected)> CalculateCallsTodayAsync(string? timeZone, CancellationToken ct)
+    {
+        var (utcStart, utcEnd) = GetTodayUtcRange(timeZone);
+
+        var callsToday = await _context.CallRecords
+            .CountAsync(c => c.Timestamp >= utcStart && c.Timestamp < utcEnd, ct);
+
+        var nonConnectedDispositions = new[] { "Failed", "No Answer", "No Response", "Missed", "Busy" };
+
+        var callsConnected = await _context.CallRecords
+            .CountAsync(c => c.Timestamp >= utcStart && c.Timestamp < utcEnd
+                && !nonConnectedDispositions.Contains(c.Disposition)
+                && (c.Duration > 0 || (c.Disposition != null && c.Disposition != "")), ct);
+
+        return (callsToday, callsConnected);
     }
 }
