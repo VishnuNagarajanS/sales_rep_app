@@ -120,6 +120,13 @@ public class KycService : IKycService
         }
         else
         {
+            existing.Status = KycStatus.Draft;
+            existing.SubmittedAt = null;
+            existing.VerifiedBy = null;
+            existing.VerifiedAt = null;
+            existing.Remarks = null;
+            existing.ReviewRemarks = null;
+            existing.FlaggedSectionsJson = null;
             existing.KycLinkToken = token;
             existing.KycLinkSent = true;
             existing.KycLinkExpiresAt = expiresAt;

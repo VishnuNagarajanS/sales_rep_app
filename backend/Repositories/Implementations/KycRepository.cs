@@ -40,16 +40,24 @@ public class KycRepository : IKycRepository
     public async Task<InvestorKyc?> GetByTokenAsync(string token, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(token)) return null;
-        var direct = await _db.InvestorKycs.FirstOrDefaultAsync(k => k.KycLinkToken == token && k.KycLinkExpiresAt > DateTime.UtcNow, ct);
+
+        var clean = token.Trim();
+        if (clean.Contains('/')) clean = clean.Split('/').Last();
+        if (clean.Contains('?')) clean = clean.Split('?')[0];
+
+        var now = DateTime.UtcNow.AddMinutes(-10); // 10 min clock-skew tolerance
+
+        var direct = await _db.InvestorKycs.FirstOrDefaultAsync(k =>
+            k.KycLinkToken == clean && (k.KycLinkExpiresAt == null || k.KycLinkExpiresAt > now), ct);
         if (direct != null) return direct;
 
-        var subToken = token.Replace("tok_", "").Trim();
+        var subToken = clean.StartsWith("tok_") ? clean[4..] : clean;
         var tokenPrefix = subToken.Contains('_') ? subToken.Split('_')[0] : subToken;
         if (tokenPrefix.Length >= 8)
         {
             var match = await _db.InvestorKycs.FirstOrDefaultAsync(k => 
                 k.KycLinkToken != null && 
-                k.KycLinkExpiresAt > DateTime.UtcNow &&
+                (k.KycLinkExpiresAt == null || k.KycLinkExpiresAt > now) &&
                 k.KycLinkToken.StartsWith(tokenPrefix), ct);
             if (match != null) return match;
         }

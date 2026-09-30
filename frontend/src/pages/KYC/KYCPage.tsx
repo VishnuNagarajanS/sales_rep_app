@@ -8,6 +8,7 @@ import {
   ArrowRight,
   ArrowLeft,
   CheckCircle,
+  CheckCircle2,
   Eye,
   ShieldCheck,
   User,
@@ -342,27 +343,41 @@ const GhlIrmKycView: React.FC = () => {
   };
 
   const resolveCustomerKycStatus = (deal: Deal): CustomerKycStatus => {
-    // 1. deal.kycStatus === 'Verified' -> 'Verified'
-    if (deal.kycStatus === 'Verified') return 'Verified';
-
-    // 2. deal.kycStatus === 'Wrong' -> 'Needs Correction'
-    if (deal.kycStatus === 'Wrong') return 'Needs Correction';
-
-    // 3. find rec = dbKycs[(deal.email||'').toLowerCase()]; if rec:
-    const rec = dbKycs[(deal.email || '').toLowerCase().trim()];
-    if (rec) {
-      if (rec.status === 'ReuploadRequested') return 'Needs Correction';
-      if (rec.status === 'Rejected') return 'Rejected';
-      if (rec.status && rec.status !== 'Draft') return 'Completed';
-      if (rec.kycLinkSent) return 'Link Sent';
-    }
-
-    // 4. sentDealIds[deal.id] -> 'Link Sent'
+    // 1. If link was sent in this session for this deal, reflect Link Sent immediately
     if (sentDealIds[deal.id]) return 'Link Sent';
 
-    // 5. otherwise the existing (deal as any).customerKycStatus, then getCustomerKycStatus(deal.id, undefined)
+    // 2. IRM explicit statuses
+    if (deal.kycStatus === 'Verified') return 'Verified';
+    if (deal.kycStatus === 'Wrong') return 'Needs Correction';
+
+    // 3. Find record from dbKycs by email, phone digits, customerName, or customerId
+    const dealEmail = (deal.email || '').toLowerCase().trim();
+    const cleanDealPhone = (deal.phone || '').replace(/\D/g, '').slice(-10);
+    const dealCustName = (deal.customerName || '').toLowerCase().trim();
+
+    const rec = (dealEmail ? dbKycs[dealEmail] : null)
+      || (cleanDealPhone ? Object.values(dbKycs).find((k: any) => (k.phone || '').replace(/\D/g, '').slice(-10) === cleanDealPhone) : null)
+      || (dealCustName ? Object.values(dbKycs).find((k: any) => (k.investorName || '').toLowerCase().trim() === dealCustName) : null)
+      || (deal.customerId ? dbKycs[`id_${deal.customerId}`] : null);
+
+    if (rec) {
+      if (rec.status === 'Approved') return 'Verified';
+      if (rec.status === 'ReuploadRequested') return 'Needs Correction';
+      if (rec.status === 'Rejected') return 'Rejected';
+      if (rec.status === 'PendingReview' || rec.submittedAt) return 'Submitted';
+      if (rec.status === 'Draft' || rec.kycLinkSent) return 'Link Sent';
+    }
+
+    // 4. Check deal properties
     const existing = (deal as any).customerKycStatus;
-    if (existing) return existing as CustomerKycStatus;
+    if (existing) {
+      if (existing === 'Completed' || existing === 'PendingReview') return 'Submitted';
+      return existing as CustomerKycStatus;
+    }
+
+    if (!isMockMode()) {
+      return 'Pending';
+    }
 
     return getCustomerKycStatus(deal.id, undefined);
   };
@@ -1530,17 +1545,105 @@ const GhlIrmKycView: React.FC = () => {
     {
       key: 'stageAction',
       header: 'Stage Action',
-      width: '160px',
+      width: '170px',
       render: deal => {
         const status = resolveCustomerKycStatus(deal);
-        if (['Completed', 'Submitted', 'Under Verification', 'Verified'].includes(status)) {
+
+        if (['Completed', 'Submitted', 'Under Verification'].includes(status)) {
           return (
-            <span
-              style={{ color: 'var(--text-muted, #94a3b8)', fontSize: 13, fontWeight: 500 }}
-              title="Customer has completed the KYC form"
-            >
-              —
-            </span>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+              <span
+                style={{
+                  fontSize: 11,
+                  padding: '4px 9px',
+                  fontWeight: 600,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  borderRadius: 6,
+                  color: '#047857',
+                  background: '#ecfdf5',
+                  border: '1px solid #a7f3d0',
+                }}
+                title="Customer has completed and submitted the KYC dossier"
+              >
+                <CheckCircle2 size={13} color="#059669" /> Form Filled
+              </span>
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
+                title="Resend Customer KYC Link"
+                style={{
+                  fontSize: 11,
+                  padding: '4px 8px',
+                  fontWeight: 600,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  borderColor: 'var(--border-color, #e2e8f0)',
+                  color: 'var(--text-secondary, #64748b)',
+                  background: 'transparent',
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const enriched = enrichDealWithContact(deal, leads, customers);
+                  setSendLinkDeal(enriched);
+                }}
+              >
+                <RefreshCw size={11} /> Resend
+              </button>
+            </div>
+          );
+        }
+
+        if (status === 'Verified') {
+          return (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+              <span
+                style={{
+                  fontSize: 11,
+                  padding: '4px 9px',
+                  fontWeight: 600,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  borderRadius: 6,
+                  color: '#15803d',
+                  background: '#f0fdf4',
+                  border: '1px solid #bbf7d0',
+                }}
+                title="KYC has been verified and approved"
+              >
+                <CheckCircle size={13} color="#16a34a" /> Verified
+              </span>
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
+                title="Reissue Customer KYC Link"
+                style={{
+                  fontSize: 11,
+                  padding: '4px 8px',
+                  fontWeight: 600,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  borderColor: 'var(--border-color, #e2e8f0)',
+                  color: 'var(--text-secondary, #64748b)',
+                  background: 'transparent',
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const enriched = enrichDealWithContact(deal, leads, customers);
+                  setSendLinkDeal(enriched);
+                }}
+              >
+                <RefreshCw size={11} /> Resend
+              </button>
+            </div>
           );
         }
 

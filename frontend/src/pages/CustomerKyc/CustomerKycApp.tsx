@@ -938,6 +938,29 @@ export const CustomerKycApp: React.FC = () => {
               </p>
             </div>
 
+            {/* Email input fallback if email not resolved from link */}
+            {(!formData.email || !formData.email.includes('@')) && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 4, marginBottom: 12 }}>
+                <input
+                  type="email"
+                  placeholder="Enter your email to receive verification code"
+                  className="ckyc-input"
+                  style={{ flex: 1 }}
+                  value={formData.email}
+                  onChange={e => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                />
+                <button
+                  type="button"
+                  className="ckyc-btn-primary"
+                  style={{ width: 'auto', whiteSpace: 'nowrap', padding: '0 16px', fontSize: 13 }}
+                  onClick={() => handleSendOtp(formData.email)}
+                  disabled={otpSending || !formData.email || !formData.email.includes('@')}
+                >
+                  {otpSending ? 'Sending...' : 'Send OTP'}
+                </button>
+              </div>
+            )}
+
             {/* Error Message */}
             {otpError && (
               <div
