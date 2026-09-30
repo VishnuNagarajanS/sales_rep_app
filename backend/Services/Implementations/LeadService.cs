@@ -280,7 +280,7 @@ public class LeadService : ILeadService
             customer = new Customer
             {
                 CompanyId = companyId,
-                AssignedAgentId = agentId,
+                AssignedAgentId = agentId ?? 1,
                 Name = lead.Name,
                 Phone = lead.Phone,
                 Email = lead.Email,
@@ -380,7 +380,7 @@ public class LeadService : ILeadService
         var freshFollowup = new Followup
         {
             CompanyId = lead.CompanyId,
-            AssignedAgentId = lead.AssignedAgentId,
+            AssignedAgentId = lead.AssignedAgentId ?? 1,
             ContactId = lead.Id.ToString(),
             ContactType = "lead",
             ContactName = lead.Name,

@@ -94,9 +94,9 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   const scopedLeads = isGhlIrm
     ? leads
         .filter(l => !l.companyId || isTenantMatch(l.companyId, tenant?.id))
-        .filter(l => l.status === 'Interested')
         .filter(
           l =>
+            l.status === 'Interested' ||
             (l.assignedAgentId && String(l.assignedAgentId) === String(user?.id)) ||
             (l.assignedAgentName && l.assignedAgentName === user?.name)
         )

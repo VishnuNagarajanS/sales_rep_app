@@ -64,10 +64,11 @@ export const LeadsPage: React.FC = () => {
     }
 
     if (isIrm) {
-      // IRM My Leads: shows ALL leads assigned to this IRM (any status)
+      // IRM My Leads: shows ALL leads assigned to this IRM (any status) PLUS qualified 'Interested' leads handed over by Sales Execs
       const raw = tenantLeads.filter(l =>
         (l.assignedAgentId && String(l.assignedAgentId) === String(user?.id)) ||
-        (l.assignedAgentName && l.assignedAgentName === user?.name)
+        (l.assignedAgentName && l.assignedAgentName === user?.name) ||
+        l.status === 'Interested'
       );
       // Deduplicate by phone to prevent double-entries from different IDs
       const seen = new Set<string>();

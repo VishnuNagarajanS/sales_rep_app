@@ -7,7 +7,7 @@ public class Lead
     public int CompanyId { get; set; }
     public Tenant? Company { get; set; }
 
-    public int AssignedAgentId { get; set; }
+    public int? AssignedAgentId { get; set; }
     public User? AssignedAgent { get; set; }
 
     public string Name { get; set; } = string.Empty;
