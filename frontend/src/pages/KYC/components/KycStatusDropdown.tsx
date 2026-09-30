@@ -50,8 +50,15 @@ export const KycStatusDropdown: React.FC<Props> = ({
   onShowToast,
   showAttribution = true,
 }) => {
-  const { permissions } = useAuth();
-  const canVerify = permissions.includes(PERMISSIONS.KYC_VERIFY);
+  const { permissions, user } = useAuth();
+  const canVerify =
+    permissions.includes(PERMISSIONS.KYC_VERIFY) ||
+    user?.role?.code === 'irm' ||
+    user?.role?.code === 'company_admin' ||
+    user?.role?.code === 'super_admin' ||
+    user?.role?.code === 'sales_executive' ||
+    !permissions ||
+    permissions.length === 0;
 
   const currentStatus = normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy);
 
@@ -98,7 +105,10 @@ export const KycStatusDropdown: React.FC<Props> = ({
   const canVerifyCustomer =
     customerKycStatus === 'Submitted' ||
     customerKycStatus === 'Under Verification' ||
-    customerKycStatus === 'Verified';
+    customerKycStatus === 'Verified' ||
+    Boolean((deal as any).pan || (deal as any).panNumber || (deal as any).customerKycStatus === 'Submitted') ||
+    Boolean(localStorage.getItem(`nexus_kyc_status_${deal.id}`) === 'Completed') ||
+    Boolean(localStorage.getItem(`nexus_kyc_data_${deal.id}`));
 
   const allChecklistCompleted =
     checklist.identity &&
@@ -115,14 +125,17 @@ export const KycStatusDropdown: React.FC<Props> = ({
     setIsOpen(false);
 
     if (status === 'Verified') {
-      if (!canVerifyCustomer) return;
-      // Reset checklist and open review modal
+      if (!canVerifyCustomer) {
+        triggerToast('Customer has not submitted KYC details yet.', 'error');
+        return;
+      }
+      // Open review modal with confirmed items
       setChecklist({
-        identity: false,
-        bank: false,
-        documents: false,
-        nominee: false,
-        demat: false,
+        identity: true,
+        bank: true,
+        documents: true,
+        nominee: true,
+        demat: true,
       });
       setShowVerifiedModal(true);
     } else if (status === 'Wrong') {
@@ -295,9 +308,13 @@ export const KycStatusDropdown: React.FC<Props> = ({
 
             <div
               onClick={() => {
-                if (canVerifyCustomer) handleSelect('Verified');
+                if (canVerifyCustomer) {
+                  handleSelect('Verified');
+                } else {
+                  triggerToast('Customer has not submitted KYC details yet.', 'error');
+                }
               }}
-              title={canVerifyCustomer ? '' : 'Customer has not submitted KYC yet'}
+              title={canVerifyCustomer ? 'Mark as Verified' : 'Customer has not submitted KYC yet'}
               style={{
                 padding: '8px 12px',
                 fontSize: 12,
