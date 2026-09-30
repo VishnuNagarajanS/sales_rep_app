@@ -332,9 +332,12 @@ public class KycService : IKycService
         return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc));
     }
 
-    public async Task<ApiResponse<List<KycDto>>> GetAllAsync(int companyId, string? status, CancellationToken ct = default)
+    public Task<ApiResponse<List<KycDto>>> GetAllAsync(int companyId, string? status, CancellationToken ct = default)
+        => GetAllAsync(companyId, status, null, ct);
+
+    public async Task<ApiResponse<List<KycDto>>> GetAllAsync(int companyId, string? status, int? irmId, CancellationToken ct = default)
     {
-        var list = await _kycRepo.GetAllAsync(companyId, status, ct);
+        var list = await _kycRepo.GetAllAsync(companyId, status, irmId, ct);
         var dtos = list.Select(MapToDto).ToList();
         return ApiResponse<List<KycDto>>.SuccessResponse(dtos);
     }

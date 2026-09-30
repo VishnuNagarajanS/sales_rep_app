@@ -11,11 +11,23 @@ public class KycRepository : IKycRepository
 
     public KycRepository(ApplicationDbContext db) => _db = db;
 
-    public async Task<List<InvestorKyc>> GetAllAsync(int companyId, string? status, CancellationToken ct = default)
+    public Task<List<InvestorKyc>> GetAllAsync(int companyId, string? status, CancellationToken ct = default)
+        => GetAllAsync(companyId, status, null, ct);
+
+    public async Task<List<InvestorKyc>> GetAllAsync(int companyId, string? status, int? irmId, CancellationToken ct = default)
     {
-        var query = _db.InvestorKycs.Where(k => k.CompanyId == companyId);
+        var query = _db.InvestorKycs
+            .Include(k => k.Investor)
+            .Where(k => k.CompanyId == companyId);
+
+        if (irmId.HasValue && irmId.Value > 0)
+        {
+            query = query.Where(k => k.IrmId == irmId.Value || (k.IrmId == null && k.Investor.AssignedIrmId == irmId.Value));
+        }
+
         if (!string.IsNullOrEmpty(status))
             query = query.Where(k => k.Status.ToString() == status);
+
         return await query.OrderByDescending(k => k.CreatedAt).ToListAsync(ct);
     }
 

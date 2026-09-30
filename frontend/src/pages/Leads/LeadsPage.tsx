@@ -64,11 +64,10 @@ export const LeadsPage: React.FC = () => {
     }
 
     if (isIrm) {
-      // IRM My Leads: ONLY shows leads with status 'Interested' assigned to this IRM agent
-      const raw = tenantLeads.filter(l => 
-        l.status === 'Interested' && 
-        ((l.assignedAgentId && String(l.assignedAgentId) === String(user?.id)) ||
-         (l.assignedAgentName && l.assignedAgentName === user?.name))
+      // IRM My Leads: shows ALL leads assigned to this IRM (any status)
+      const raw = tenantLeads.filter(l =>
+        (l.assignedAgentId && String(l.assignedAgentId) === String(user?.id)) ||
+        (l.assignedAgentName && l.assignedAgentName === user?.name)
       );
       // Deduplicate by phone to prevent double-entries from different IDs
       const seen = new Set<string>();
@@ -80,6 +79,7 @@ export const LeadsPage: React.FC = () => {
         return true;
       });
     }
+
 
     return tenantLeads.filter(l => !MOVED_LEAD_STATUSES.includes(l.status));
   }, [tenantLeads, isExec, isIrm, user?.id, user?.name]);

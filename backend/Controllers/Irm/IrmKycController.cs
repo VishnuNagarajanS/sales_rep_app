@@ -56,7 +56,18 @@ public class IrmKycController : ControllerBase
     public async Task<IActionResult> GetAllKycs([FromQuery] string? status, CancellationToken ct)
     {
         var companyId = User.Identity?.IsAuthenticated == true ? User.GetCompanyId() : 1;
-        var result = await _kycService.GetAllAsync(companyId, status, ct);
+        int? effectiveIrmId = null;
+
+        if (User.Identity?.IsAuthenticated == true)
+        {
+            var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
+            if (role != "admin" && role != "ghl_admin" && role != "super_admin")
+            {
+                effectiveIrmId = User.GetUserId();
+            }
+        }
+
+        var result = await _kycService.GetAllAsync(companyId, status, effectiveIrmId, ct);
         return Ok(result);
     }
 
