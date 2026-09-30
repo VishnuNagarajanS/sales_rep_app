@@ -30,6 +30,8 @@ const mapDtoToUser = (dto: AdminUserDto): User => {
     roleCode = 'company_admin';
   } else if (dto.roleName?.toLowerCase().includes('manager')) {
     roleCode = 'sales_manager';
+  } else if (dto.roleName?.toLowerCase().includes('irm') || dto.roleName?.toLowerCase().includes('institutional')) {
+    roleCode = 'irm';
   }
 
   return {
@@ -60,13 +62,18 @@ export const adminUserService = {
     return mapDtoToUser(res.data);
   },
 
-  createUser: async (userData: any): Promise<User> => {
+    createUser: async (userData: any): Promise<User> => {
+    let roleId = 4;
+    if (userData.role.code === 'company_admin') roleId = 2;
+    else if (userData.role.code === 'sales_manager') roleId = 3;
+    else if (userData.role.code === 'irm') roleId = 5;
+
     const payload = {
       name: userData.name,
       email: userData.email,
       phone: userData.phone || '',
       password: userData.password || 'Password@123',
-      roleId: userData.role.code === 'company_admin' ? 2 : (userData.role.code === 'sales_manager' ? 3 : 4),
+      roleId,
       status: userData.status === 'Active' ? 0 : (userData.status === 'Disabled' ? 2 : 1)
     };
     const res = await apiClient.post<ApiResponse<AdminUserDto>>('/AdminUsers', payload);
@@ -75,13 +82,32 @@ export const adminUserService = {
   },
 
   updateUser: async (id: string, userData: any): Promise<User> => {
+    let roleId = 4;
+    if (userData.role.code === 'company_admin') roleId = 2;
+    else if (userData.role.code === 'sales_manager') roleId = 3;
+    else if (userData.role.code === 'irm') roleId = 5;
+
     const payload = {
       name: userData.name,
       phone: userData.phone || '',
-      roleId: userData.role.code === 'company_admin' ? 2 : (userData.role.code === 'sales_manager' ? 3 : 4),
+      roleId,
       status: userData.status === 'Active' ? 0 : (userData.status === 'Disabled' ? 2 : 1)
     };
     const res = await apiClient.put<ApiResponse<AdminUserDto>>(`/AdminUsers/${id}`, payload);
+    if (!res.success) throw new Error(res.message);
+    return mapDtoToUser(res.data);
+  },
+
+  transferRole: async (id: string, newUserId: number, newRoleCode: string): Promise<User> => {
+    let roleId = 4;
+    if (newRoleCode === 'company_admin') roleId = 2;
+    else if (newRoleCode === 'sales_manager') roleId = 3;
+    else if (newRoleCode === 'irm') roleId = 5;
+
+    const res = await apiClient.post<ApiResponse<AdminUserDto>>(`/AdminUsers/${id}/transfer-role`, {
+      newUserId,
+      newRoleId: roleId
+    });
     if (!res.success) throw new Error(res.message);
     return mapDtoToUser(res.data);
   },

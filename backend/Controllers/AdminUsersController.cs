@@ -79,6 +79,19 @@ public class AdminUsersController : ControllerBase
         return Ok(result);
     }
 
+    [HttpPost("{id}/transfer-role")]
+    [ProducesResponseType(typeof(ApiResponse<AdminUserDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> TransferDataAndUpdateRole(int id, [FromBody] TransferRoleRequestDto request, CancellationToken cancellationToken)
+    {
+        var companyId = GetCompanyId();
+        if (companyId == 0) return Forbid();
+
+        var result = await _adminUserService.TransferDataAndUpdateRoleAsync(companyId, id, request, cancellationToken);
+        if (!result.Success) return BadRequest(result);
+
+        return Ok(result);
+    }
+
     [HttpDelete("{id}")]
     [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
     public async Task<IActionResult> DeleteUser(int id, CancellationToken cancellationToken)

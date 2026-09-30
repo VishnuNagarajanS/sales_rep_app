@@ -166,6 +166,90 @@ public class AdminUserService : IAdminUserService
         return ApiResponse<AdminUserDto>.SuccessResult(dto, "User updated successfully.");
     }
 
+    public async Task<ApiResponse<AdminUserDto>> TransferDataAndUpdateRoleAsync(int companyId, int oldUserId, TransferRoleRequestDto request, CancellationToken cancellationToken = default)
+    {
+        using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            var oldUser = await _context.Users
+                .Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.CompanyId == companyId && u.Id == oldUserId, cancellationToken);
+
+            if (oldUser == null)
+                return ApiResponse<AdminUserDto>.FailureResult("Old user not found.");
+
+            var newUser = await _context.Users
+                .FirstOrDefaultAsync(u => u.CompanyId == companyId && u.Id == request.NewUserId, cancellationToken);
+
+            if (newUser == null)
+                return ApiResponse<AdminUserDto>.FailureResult("New user not found.");
+
+            var newRole = await _context.Roles.FindAsync(new object[] { request.NewRoleId }, cancellationToken);
+            if (newRole == null)
+                return ApiResponse<AdminUserDto>.FailureResult("Invalid New Role ID.");
+
+            // Transfer Leads
+            var leads = await _context.Leads
+                .Where(l => l.CompanyId == companyId && l.AssignedAgentId == oldUserId)
+                .ToListAsync(cancellationToken);
+
+            foreach (var lead in leads)
+            {
+                lead.AssignedAgentId = request.NewUserId;
+                
+                // Add Assignment History
+                _context.LeadAssignmentHistories.Add(new backend.Models.Entities.LeadAssignmentHistory
+                {
+                    LeadId = lead.Id,
+                    FromAgentId = oldUserId,
+                    ToAgentId = request.NewUserId,
+                    AssignedById = oldUserId, // System fallback
+                    Method = "manual",
+                    AssignedAt = DateTime.UtcNow
+                });
+            }
+
+            // Transfer Followups
+            var followups = await _context.Followups
+                .Where(f => f.CompanyId == companyId && f.AssignedAgentId == oldUserId)
+                .ToListAsync(cancellationToken);
+
+            foreach (var f in followups)
+            {
+                f.AssignedAgentId = request.NewUserId;
+            }
+
+            // Update Old User Role
+            oldUser.Role = newRole;
+            oldUser.RoleId = request.NewRoleId;
+            oldUser.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            var dto = new AdminUserDto
+            {
+                Id = oldUser.Id,
+                Name = oldUser.Name,
+                Email = oldUser.Email,
+                Phone = oldUser.Phone,
+                Status = oldUser.Status,
+                CreatedAt = oldUser.CreatedAt,
+                LastLoginAt = oldUser.LastLoginAt,
+                AvatarUrl = oldUser.AvatarUrl,
+                RoleId = oldUser.RoleId,
+                RoleName = oldUser.Role.Name
+            };
+
+            return ApiResponse<AdminUserDto>.SuccessResult(dto, "Transferred active data and updated role successfully.");
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return ApiResponse<AdminUserDto>.FailureResult($"Transfer failed: {ex.Message}");
+        }
+    }
+
     public async Task<ApiResponse<bool>> DeleteUserAsync(int companyId, int userId, CancellationToken cancellationToken = default)
     {
         var user = await _context.Users

@@ -95,6 +95,11 @@ export const CompanyUsersPage: React.FC = () => {
   const [editDesignation, setEditDesignation] = useState('');
   const [editRoleCode, setEditRoleCode] = useState<RoleCode>('sales_executive');
 
+  const [transferModalOpen, setTransferModalOpen] = useState(false);
+  const [transferFromUser, setTransferFromUser] = useState<User | null>(null);
+  const [transferTargetRole, setTransferTargetRole] = useState<any | null>(null);
+  const [selectedTransferUserId, setSelectedTransferUserId] = useState<string>('');
+
   // ── Reset Password Modal State ────────────────────────────────────────────
   const [resettingUser, setResettingUser] = useState<User | null>(null);
   const [tempPassword, setTempPassword] = useState('');
@@ -200,6 +205,14 @@ export const CompanyUsersPage: React.FC = () => {
     const updatedRole = SYSTEM_ROLES[editRoleCode] || editingUser.role;
     const oldRole = editingUser.role;
 
+    // Mandate transfer if role changes from Sales Exec to IRM or vice versa
+    if (oldRole.code !== updatedRole.code && (oldRole.code === 'sales_executive' || oldRole.code === 'irm')) {
+      setTransferFromUser(editingUser);
+      setTransferTargetRole(updatedRole);
+      setTransferModalOpen(true);
+      return;
+    }
+
     const updated: User = {
       ...editingUser,
       name: editName.trim() || editingUser.name,
@@ -233,6 +246,20 @@ export const CompanyUsersPage: React.FC = () => {
 
     showToast('success', `Updated profile for ${updated.name}.`);
     setEditingUser(null);
+  };
+
+  const handleTransferAndSave = async () => {
+    if (!transferFromUser || !selectedTransferUserId || !transferTargetRole) return;
+    try {
+      await adminUserService.transferRole(transferFromUser.id, parseInt(selectedTransferUserId), transferTargetRole.code);
+      showToast('success', `Transferred pipeline and updated role for ${transferFromUser.name}.`);
+      setTransferModalOpen(false);
+      setTransferFromUser(null);
+      setEditingUser(null);
+      loadData();
+    } catch (err) {
+      showToast('error', 'Failed to transfer data and update role.');
+    }
   };
 
   // ── Password Reset Handlers ───────────────────────────────────────────────
@@ -894,6 +921,60 @@ export const CompanyUsersPage: React.FC = () => {
             </p>
           </div>
         )}
+      </Modal>
+
+
+
+      {/* ── Transfer Desk Modal ────────────────────────────────────────────── */}
+      <Modal
+        isOpen={transferModalOpen}
+        onClose={() => setTransferModalOpen(false)}
+        title="Transfer Desk"
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setTransferModalOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleTransferAndSave}
+              disabled={!selectedTransferUserId}
+            >
+              Transfer & Change Role
+            </button>
+          </>
+        }
+      >
+        <div className="company-user-form">
+          <div style={{ backgroundColor: '#fff3cd', color: '#856404', padding: '12px', borderRadius: '8px', marginBottom: '16px' }}>
+            <strong>Action Required:</strong> {transferFromUser?.name} is changing roles from 
+            <strong> {transferFromUser?.role.name}</strong> to <strong>{transferTargetRole?.name}</strong>.
+            You must reassign their active pipeline (Leads and Follow-ups) to another agent before proceeding.
+          </div>
+          
+          <div className="form-group">
+            <label className="form-label">Transfer pipeline to:</label>
+            <select
+              className="form-select"
+              value={selectedTransferUserId}
+              onChange={e => setSelectedTransferUserId(e.target.value)}
+            >
+              <option value="">Select a new agent...</option>
+              {usersList
+                .filter(u => u.role.code === transferFromUser?.role.code && u.id !== transferFromUser?.id && u.status === 'Active')
+                .map(u => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({u.email})
+                  </option>
+                ))}
+            </select>
+          </div>
+        </div>
       </Modal>
     </div>
   );
