@@ -187,10 +187,38 @@ public class KycService : IKycService
 
         if (kyc == null)
         {
+            Investor? investor = null;
+            if (dto.InvestorId > 0)
+            {
+                investor = await _investorRepo.GetByIdAsync(dto.InvestorId, companyId, ct);
+            }
+
+            if (investor == null && !string.IsNullOrWhiteSpace(dto.Email))
+            {
+                var allInvestors = await _investorRepo.GetAllAsync(companyId, null, null, null, ct);
+                investor = allInvestors.FirstOrDefault(i => string.Equals(i.Email, dto.Email, StringComparison.OrdinalIgnoreCase) ||
+                                                           (!string.IsNullOrWhiteSpace(dto.Phone) && i.Phone == dto.Phone));
+            }
+
+            if (investor == null)
+            {
+                investor = new Investor
+                {
+                    CompanyId = companyId,
+                    Name = !string.IsNullOrWhiteSpace(dto.InvestorName) ? dto.InvestorName : "Investor",
+                    Email = dto.Email ?? string.Empty,
+                    Phone = dto.Phone ?? string.Empty,
+                    Status = InvestorStatus.Lead,
+                    CreatedAt = DateTime.UtcNow
+                };
+                investor = await _investorRepo.CreateAsync(investor, ct);
+            }
+
             kyc = new InvestorKyc
             {
-                InvestorId = dto.InvestorId,
+                InvestorId = investor.Id,
                 CompanyId = companyId,
+                KycLinkToken = !string.IsNullOrWhiteSpace(dto.Token) ? dto.Token : Guid.NewGuid().ToString("N"),
                 CreatedAt = DateTime.UtcNow
             };
         }
@@ -220,6 +248,14 @@ public class KycService : IKycService
         kyc.DpId = dto.DpId ?? kyc.DpId;
 
         kyc.NomineesJson = dto.NomineesJson ?? kyc.NomineesJson;
+
+        kyc.PanDocumentUrl = dto.PanDocumentUrl ?? kyc.PanDocumentUrl;
+        kyc.AadhaarDocumentUrl = dto.AadhaarDocumentUrl ?? kyc.AadhaarDocumentUrl;
+        kyc.BankChequeUrl = dto.BankChequeUrl ?? kyc.BankChequeUrl;
+        kyc.DematDocumentUrl = dto.DematDocumentUrl ?? kyc.DematDocumentUrl;
+        kyc.PhotoUrl = dto.PhotoUrl ?? kyc.PhotoUrl;
+        kyc.SignatureUrl = dto.SignatureUrl ?? kyc.SignatureUrl;
+
         kyc.UpdatedAt = DateTime.UtcNow;
 
         if (dto.IsFinalSubmit)

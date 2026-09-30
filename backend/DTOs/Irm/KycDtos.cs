@@ -116,6 +116,14 @@ public class SubmitKycDto
     // Step 4 - Nominees as JSON string (serialized NomineeItem[])
     public string? NomineesJson { get; set; }
 
+    // Step 5 - Documents
+    public string? PanDocumentUrl { get; set; }
+    public string? AadhaarDocumentUrl { get; set; }
+    public string? BankChequeUrl { get; set; }
+    public string? DematDocumentUrl { get; set; }
+    public string? PhotoUrl { get; set; }
+    public string? SignatureUrl { get; set; }
+
     // Whether this is a final submit (true) or a draft save (false)
     public bool IsFinalSubmit { get; set; } = false;
 }

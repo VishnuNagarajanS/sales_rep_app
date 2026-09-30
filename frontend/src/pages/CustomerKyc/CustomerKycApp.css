@@ -576,6 +576,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+  position: relative;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+@keyframes ckyc-scan {
+  0% { top: 5%; }
+  100% { top: 92%; }
 }
 
 .ckyc-tips-list {
