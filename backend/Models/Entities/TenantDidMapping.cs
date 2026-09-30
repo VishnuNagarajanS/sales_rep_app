@@ -1,0 +1,20 @@
+namespace backend.Models.Entities;
+
+public class TenantDidMapping
+{
+    public int Id { get; set; }
+    public int? TenantId { get; set; }
+    public Tenant? Tenant { get; set; }
+
+    public string PhoneNumber { get; set; } = string.Empty;
+    public string RoutingStrategy { get; set; } = "Round-Robin";
+    public string QueueName { get; set; } = "Inbound Sales Queue";
+    public bool EnableRecording { get; set; } = true;
+    public bool EnableAiWhisper { get; set; } = true;
+    public string Status { get; set; } = "Online"; // Online, Offline, Reserved
+    public int ChannelsCount { get; set; } = 8;
+    public string? Notes { get; set; }
+    public DateTime AllocatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? UpdatedAt { get; set; }
+}

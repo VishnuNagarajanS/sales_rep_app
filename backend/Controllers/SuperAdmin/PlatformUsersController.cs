@@ -10,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 namespace backend.Controllers.SuperAdmin;
 
 [ApiController]
-[Authorize(Roles = "super_admin,company_admin")]
+[Authorize(Roles = "super_admin")]
 [Route("api/super-admin/users")]
 [Route("api/platform/users")]
 public class PlatformUsersController : ControllerBase
@@ -334,14 +334,6 @@ public class PlatformUsersController : ControllerBase
         return Ok(ApiResponse<object>.SuccessResult(new { tempPassword }, "Temporary password generated successfully."));
     }
 
-    [HttpGet("~/api/super-admin/tenants")]
-    [HttpGet("~/api/platform/tenants")]
-    public async Task<ActionResult<ApiResponse<List<Tenant>>>> GetAllTenants()
-    {
-        var tenants = await _context.Tenants.AsNoTracking().OrderBy(t => t.Id).ToListAsync();
-        return Ok(ApiResponse<List<Tenant>>.SuccessResult(tenants));
-    }
-
     [HttpGet("~/api/super-admin/metrics")]
     [HttpGet("~/api/platform/metrics")]
     public async Task<ActionResult<ApiResponse<PlatformMetricsDto>>> GetPlatformMetrics(
@@ -354,8 +346,9 @@ public class PlatformUsersController : ControllerBase
         var prevMonthStart = currentMonthStart.AddMonths(-1);
 
         var totalTenants = await _context.Tenants.CountAsync(ct);
-        var activeTenants = await _context.Tenants.CountAsync(t => t.IsActive, ct);
-        var onboardingTenants = await _context.Tenants.CountAsync(t => !t.IsActive, ct);
+        var activeTenants = await _context.Tenants.CountAsync(t => t.IsActive && t.Status != "Suspended", ct);
+        var onboardingTenants = await _context.Tenants.CountAsync(t => !t.IsActive && t.Status != "Suspended", ct);
+        var suspendedTenants = await _context.Tenants.CountAsync(t => t.Status == "Suspended", ct);
 
         var totalUsers = await _context.Users.CountAsync(ct);
         var activeUsers = await _context.Users.CountAsync(u => u.Status == UserStatus.Active, ct);
@@ -367,16 +360,14 @@ public class PlatformUsersController : ControllerBase
         var previousMonthLeads = await _context.Leads.CountAsync(l => l.CreatedAt >= prevMonthStart && l.CreatedAt < currentMonthStart, ct);
 
         var totalCustomers = await _context.Customers.CountAsync(ct);
-
         var dealSum = await _context.GhlDeals.SumAsync(d => (long)d.Value, ct);
-        if (dealSum == 0) dealSum = 485000000;
 
         var metrics = new PlatformMetricsDto
         {
             TotalTenants = totalTenants,
             ActiveTenants = activeTenants,
             OnboardingTenants = onboardingTenants,
-            SuspendedTenants = 0,
+            SuspendedTenants = suspendedTenants,
             TotalUsers = totalUsers,
             ActiveUsers = activeUsers,
             CallsToday = callsToday,
@@ -385,8 +376,8 @@ public class PlatformUsersController : ControllerBase
             CurrentMonthLeads = currentMonthLeads,
             PreviousMonthLeads = previousMonthLeads,
             TotalPipelineValue = dealSum,
-            TotalCustomers = totalCustomers > 0 ? totalCustomers : 864,
-            SystemHealthScore = 99.98
+            TotalCustomers = totalCustomers,
+            SystemHealthScore = 100.0
         };
 
         return Ok(ApiResponse<PlatformMetricsDto>.SuccessResult(metrics));

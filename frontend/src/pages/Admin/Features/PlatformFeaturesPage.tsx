@@ -42,9 +42,19 @@ export const PlatformFeaturesPage: React.FC = () => {
   // Success Feedback
   const [successMsg, setSuccessMsg] = useState('');
 
-  const loadData = () => {
-    setPackages(superAdminService.getPackages());
-    setTenants(superAdminService.getTenants());
+  const loadData = async () => {
+    try {
+      const [allPackages, allTenants] = await Promise.all([
+        superAdminService.fetchPackagesFromApi(),
+        superAdminService.fetchTenantsFromApi(),
+      ]);
+      setPackages(allPackages);
+      setTenants(allTenants);
+    } catch (err) {
+      console.error('Error fetching packages from API:', err);
+      setPackages(superAdminService.getPackages());
+      setTenants(superAdminService.getTenants());
+    }
   };
 
   useEffect(() => {
@@ -110,16 +120,32 @@ export const PlatformFeaturesPage: React.FC = () => {
     setIsPackageModalOpen(true);
   };
 
-  const handleSavePackage = () => {
+  const handleSavePackage = async () => {
     if (!pkgName.trim()) return;
 
-    if (editingPkgId) {
-      const existing = packages.find(p => p.id === editingPkgId);
-      if (existing) {
-        superAdminService.updatePackage({
-          ...existing,
+    try {
+      if (editingPkgId) {
+        const existing = packages.find(p => p.id === editingPkgId);
+        if (existing) {
+          const updated = await superAdminService.updatePackageApi({
+            ...existing,
+            name: pkgName,
+            code: pkgCode || existing.code,
+            tier: pkgTier,
+            priceMonthly: pkgPrice,
+            maxUsers: pkgMaxUsers,
+            maxStorageGb: pkgMaxStorage,
+            description: pkgDesc,
+            features: pkgSelectedFeatures,
+            isPopular: pkgIsPopular,
+          });
+          setPackages(prev => prev.map(p => p.id === updated.id ? updated : p));
+          showSuccess(`Subscription tier "${pkgName}" updated.`);
+        }
+      } else {
+        const created = await superAdminService.createPackageApi({
           name: pkgName,
-          code: pkgCode || existing.code,
+          code: pkgCode || pkgName.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
           tier: pkgTier,
           priceMonthly: pkgPrice,
           maxUsers: pkgMaxUsers,
@@ -128,30 +154,24 @@ export const PlatformFeaturesPage: React.FC = () => {
           features: pkgSelectedFeatures,
           isPopular: pkgIsPopular,
         });
-        showSuccess(`Subscription tier "${pkgName}" updated.`);
+        setPackages(prev => [...prev, created]);
+        showSuccess(`Subscription package "${pkgName}" created.`);
       }
-    } else {
-      superAdminService.createPackage({
-        name: pkgName,
-        code: pkgCode || pkgName.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
-        tier: pkgTier,
-        priceMonthly: pkgPrice,
-        maxUsers: pkgMaxUsers,
-        maxStorageGb: pkgMaxStorage,
-        description: pkgDesc,
-        features: pkgSelectedFeatures,
-        isPopular: pkgIsPopular,
-      });
-      showSuccess(`Subscription package "${pkgName}" created.`);
+      setIsPackageModalOpen(false);
+    } catch (err: any) {
+      alert(err.message || 'Failed to save subscription package');
     }
-
-    setIsPackageModalOpen(false);
   };
 
-  const handleDeletePackage = (pkg: SubscriptionPackage) => {
+  const handleDeletePackage = async (pkg: SubscriptionPackage) => {
     if (confirm(`Are you sure you want to delete package "${pkg.name}"?`)) {
-      superAdminService.deletePackage(pkg.id);
-      showSuccess(`Package "${pkg.name}" removed.`);
+      try {
+        await superAdminService.deletePackageApi(pkg.id);
+        setPackages(prev => prev.filter(p => p.id !== pkg.id));
+        showSuccess(`Package "${pkg.name}" removed.`);
+      } catch (err: any) {
+        alert(err.message || 'Failed to delete package');
+      }
     }
   };
 

@@ -20,7 +20,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
-import { Tenant, User, AuditLog, PlatformMetrics } from '../../../types';
+import { Tenant, User, AuditLog, PlatformMetrics, PlatformCarrierSettings } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
 import './PlatformDashboardPage.css';
 
@@ -35,21 +35,33 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [metrics, setMetrics] = useState<PlatformMetrics>(() => superAdminService.getPlatformMetrics());
   const [diagnostics, setDiagnostics] = useState(() => superAdminService.getSystemDiagnostics());
+  const [carrierSettings, setCarrierSettings] = useState<PlatformCarrierSettings>(() => superAdminService.getCarrierSettings());
 
   const loadData = async () => {
-    setTenants(superAdminService.getTenants());
-    setUsers(superAdminService.getUsers());
-    setAuditLogs(superAdminService.getAuditLogs());
-    setDiagnostics(superAdminService.getSystemDiagnostics());
-    setMetrics(superAdminService.getPlatformMetrics());
-
     try {
-      const liveMetrics = await superAdminService.fetchPlatformMetricsFromApi();
+      const [allTenants, allUsers, liveLogs, liveDiag, liveMetrics, liveCarrier] = await Promise.all([
+        superAdminService.fetchTenantsFromApi(),
+        superAdminService.fetchUsersFromApi(),
+        superAdminService.fetchAuditLogsFromApi(),
+        superAdminService.fetchSystemDiagnosticsFromApi(),
+        superAdminService.fetchPlatformMetricsFromApi(),
+        superAdminService.fetchCarrierSettingsFromApi(),
+      ]);
+      setTenants(allTenants);
+      setUsers(allUsers);
+      setAuditLogs(liveLogs);
+      setDiagnostics(liveDiag);
+      setCarrierSettings(liveCarrier);
       if (liveMetrics) {
         setMetrics(liveMetrics);
       }
     } catch (err) {
       console.warn('Could not fetch live platform metrics:', err);
+      setTenants(superAdminService.getTenants());
+      setUsers(superAdminService.getUsers());
+      setAuditLogs(superAdminService.getAuditLogs());
+      setDiagnostics(superAdminService.getSystemDiagnostics());
+      setMetrics(superAdminService.getPlatformMetrics());
     }
   };
 
@@ -277,7 +289,7 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
           <div className="carrier-bar-indicator online">●</div>
           <div>
             <div className="carrier-bar-title">Primary SIP Trunk</div>
-            <div className="carrier-bar-desc">Twilio Elastic Gateway (Mumbai AP-South)</div>
+            <div className="carrier-bar-desc">{carrierSettings.primaryCarrier || 'Primary Gateway (Configured)'}</div>
           </div>
         </div>
         <div className="carrier-bar-divider" />
@@ -285,7 +297,7 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
           <div className="carrier-bar-indicator online">●</div>
           <div>
             <div className="carrier-bar-title">Failover Redundancy</div>
-            <div className="carrier-bar-desc">Exotel Cloud Trunk (Hot Standby)</div>
+            <div className="carrier-bar-desc">{carrierSettings.secondaryCarrier || 'Redundant Trunk (Hot Standby)'}</div>
           </div>
         </div>
         <div className="carrier-bar-divider" />
@@ -293,7 +305,7 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
           <div className="carrier-bar-indicator online">●</div>
           <div>
             <div className="carrier-bar-title">Speech-to-Text AI</div>
-            <div className="carrier-bar-desc">Whisper-Large-v3 Engine (99.2% Accuracy)</div>
+            <div className="carrier-bar-desc">{carrierSettings.whisperAiModel || 'Whisper AI Engine'}</div>
           </div>
         </div>
         <div className="carrier-bar-divider" />

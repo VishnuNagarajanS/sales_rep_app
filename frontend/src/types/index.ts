@@ -776,6 +776,12 @@ export interface PlatformCarrierSettings {
   maxConcurrentChannels: number;
   emergencyRoutingEnabled: boolean;
   whisperAiModel: string;
+  accountSid?: string;
+  authTokenMasked?: string;
+  authToken?: string;
+  primaryGatewayHost?: string;
+  failoverGatewayHost?: string;
+  status?: string;
   lastTestedAt?: string;
   testStatus?: 'Success' | 'Degraded' | 'Offline';
 }

@@ -43,11 +43,25 @@ export const PlatformSystemPage: React.FC = () => {
   // Success Feedback
   const [successMsg, setSuccessMsg] = useState('');
 
-  const loadData = () => {
-    setDiagnostics(superAdminService.getSystemDiagnostics());
-    setAnnouncements(superAdminService.getAnnouncements());
-    setTenants(superAdminService.getTenants());
-    setMaintenance(superAdminService.getMaintenanceMode());
+  const loadData = async () => {
+    try {
+      const [diag, anns, allTenants, maint] = await Promise.all([
+        superAdminService.fetchSystemDiagnosticsFromApi(),
+        superAdminService.fetchAnnouncementsFromApi(),
+        superAdminService.fetchTenantsFromApi(),
+        superAdminService.fetchMaintenanceModeFromApi(),
+      ]);
+      setDiagnostics(diag);
+      setAnnouncements(anns);
+      setTenants(allTenants);
+      setMaintenance(maint);
+    } catch (err) {
+      console.error('Failed to load system data from API:', err);
+      setDiagnostics(superAdminService.getSystemDiagnostics());
+      setAnnouncements(superAdminService.getAnnouncements());
+      setTenants(superAdminService.getTenants());
+      setMaintenance(superAdminService.getMaintenanceMode());
+    }
   };
 
   useEffect(() => {
@@ -61,38 +75,57 @@ export const PlatformSystemPage: React.FC = () => {
     setTimeout(() => setSuccessMsg(''), 3000);
   };
 
-  const handleCreateAnnouncement = () => {
+  const handleCreateAnnouncement = async () => {
     if (!annTitle.trim() || !annMessage.trim()) return;
 
-    superAdminService.createAnnouncement({
-      title: annTitle.trim(),
-      message: annMessage.trim(),
-      priority: annPriority,
-      targetAudience: annAudience,
-      targetTenantId: annTenantId === 'all' ? undefined : annTenantId,
-    });
+    try {
+      const created = await superAdminService.createAnnouncementApi({
+        title: annTitle.trim(),
+        message: annMessage.trim(),
+        priority: annPriority,
+        targetAudience: annAudience,
+        targetTenantId: annTenantId === 'all' ? undefined : annTenantId,
+      });
 
-    setIsAnnModalOpen(false);
-    setAnnTitle('');
-    setAnnMessage('');
-    showSuccess('Broadcast announcement published across fleet.');
+      setAnnouncements(prev => [created, ...prev]);
+      setIsAnnModalOpen(false);
+      setAnnTitle('');
+      setAnnMessage('');
+      showSuccess('Broadcast announcement published across fleet.');
+    } catch (err: any) {
+      alert(err.message || 'Failed to publish announcement');
+    }
   };
 
-  const handleToggleAnnouncement = (id: string, current: boolean) => {
-    superAdminService.toggleAnnouncement(id, !current);
-    showSuccess(`Broadcast announcement ${!current ? 'activated' : 'deactivated'}.`);
+  const handleToggleAnnouncement = async (id: string, current: boolean) => {
+    try {
+      await superAdminService.toggleAnnouncementApi(id, !current);
+      setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, isActive: !current } : a));
+      showSuccess(`Broadcast announcement ${!current ? 'activated' : 'deactivated'}.`);
+    } catch (err: any) {
+      alert(err.message || 'Failed to toggle announcement');
+    }
   };
 
-  const handleDeleteAnnouncement = (id: string) => {
-    superAdminService.deleteAnnouncement(id);
-    showSuccess('Broadcast announcement removed.');
+  const handleDeleteAnnouncement = async (id: string) => {
+    try {
+      await superAdminService.deleteAnnouncementApi(id);
+      setAnnouncements(prev => prev.filter(a => a.id !== id));
+      showSuccess('Broadcast announcement removed.');
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete announcement');
+    }
   };
 
-  const handleToggleMaintenance = () => {
+  const handleToggleMaintenance = async () => {
     const nextState = !maintenance.enabled;
-    const updated = superAdminService.setMaintenanceMode(nextState);
-    setMaintenance(updated);
-    showSuccess(`Platform maintenance mode ${nextState ? 'ENABLED' : 'DISABLED'}.`);
+    try {
+      const updated = await superAdminService.setMaintenanceModeApi(nextState);
+      setMaintenance(updated);
+      showSuccess(`Platform maintenance mode ${nextState ? 'ENABLED' : 'DISABLED'}.`);
+    } catch (err: any) {
+      alert(err.message || 'Failed to toggle maintenance mode');
+    }
   };
 
   const handleDownloadSnapshot = () => {

@@ -55,10 +55,22 @@ export const PlatformCallConfigPage: React.FC = () => {
   // Success Feedback
   const [successMsg, setSuccessMsg] = useState('');
 
-  const loadData = () => {
-    setDids(superAdminService.getDidMappings());
-    setTenants(superAdminService.getTenants());
-    setCarrierSettings(superAdminService.getCarrierSettings());
+  const loadData = async () => {
+    try {
+      const [allDids, allTenants, carrier] = await Promise.all([
+        superAdminService.fetchDidMappingsFromApi(),
+        superAdminService.fetchTenantsFromApi(),
+        superAdminService.fetchCarrierSettingsFromApi(),
+      ]);
+      setDids(allDids);
+      setTenants(allTenants);
+      setCarrierSettings(carrier);
+    } catch (err) {
+      console.error('Error fetching telephony config from API:', err);
+      setDids(superAdminService.getDidMappings());
+      setTenants(superAdminService.getTenants());
+      setCarrierSettings(superAdminService.getCarrierSettings());
+    }
   };
 
   useEffect(() => {
@@ -96,54 +108,63 @@ export const PlatformCallConfigPage: React.FC = () => {
     setIsDidModalOpen(true);
   };
 
-  const handleSaveDid = () => {
+  const handleSaveDid = async () => {
     if (!didPhone.trim()) return;
 
-    const tenantObj = tenants.find(t => t.id === didTenantId);
-
-    if (editingDidId) {
-      superAdminService.updateDidMapping(editingDidId, {
-        phoneNumber: didPhone,
-        tenantId: didTenantId,
-        tenantName: tenantObj ? tenantObj.name : 'Unassigned Pool',
-        tenantSlug: tenantObj ? tenantObj.slug : '',
-        routingStrategy: didRoutingStrategy,
-        queueName: didQueueName,
-        enableRecording: didEnableRecording,
-        enableAiWhisper: didEnableAiWhisper,
-        channelsCount: didChannels,
-        status: didTenantId ? 'Online' : 'Reserved',
-      });
-      showSuccess(`DID hotline ${didPhone} configuration updated.`);
-    } else {
-      superAdminService.createDidMapping({
-        phoneNumber: didPhone,
-        tenantId: didTenantId,
-        tenantName: tenantObj ? tenantObj.name : 'Unassigned Pool',
-        tenantSlug: tenantObj ? tenantObj.slug : '',
-        routingStrategy: didRoutingStrategy,
-        queueName: didQueueName,
-        enableRecording: didEnableRecording,
-        enableAiWhisper: didEnableAiWhisper,
-        channelsCount: didChannels,
-        status: didTenantId ? 'Online' : 'Reserved',
-      });
-      showSuccess(`Virtual DID hotline ${didPhone} allocated.`);
+    try {
+      if (editingDidId) {
+        const updated = await superAdminService.updateDidMappingApi(editingDidId, {
+          phoneNumber: didPhone,
+          tenantId: didTenantId,
+          routingStrategy: didRoutingStrategy,
+          queueName: didQueueName,
+          enableRecording: didEnableRecording,
+          enableAiWhisper: didEnableAiWhisper,
+          channelsCount: didChannels,
+          status: didTenantId ? 'Online' : 'Reserved',
+        });
+        setDids(prev => prev.map(d => d.id === updated.id ? updated : d));
+        showSuccess(`DID hotline ${didPhone} configuration updated.`);
+      } else {
+        const created = await superAdminService.createDidMappingApi({
+          phoneNumber: didPhone,
+          tenantId: didTenantId,
+          routingStrategy: didRoutingStrategy,
+          queueName: didQueueName,
+          enableRecording: didEnableRecording,
+          enableAiWhisper: didEnableAiWhisper,
+          channelsCount: didChannels,
+          status: didTenantId ? 'Online' : 'Reserved',
+        });
+        setDids(prev => [...prev, created]);
+        showSuccess(`Virtual DID hotline ${didPhone} allocated.`);
+      }
+      setIsDidModalOpen(false);
+    } catch (err: any) {
+      alert(err.message || 'Failed to save virtual DID');
     }
-
-    setIsDidModalOpen(false);
   };
 
-  const handleDeleteDid = (did: TenantDidMapping) => {
+  const handleDeleteDid = async (did: TenantDidMapping) => {
     if (confirm(`Release virtual DID number "${did.phoneNumber}" back to reserve pool?`)) {
-      superAdminService.deleteDidMapping(did.id);
-      showSuccess(`DID ${did.phoneNumber} released.`);
+      try {
+        await superAdminService.deleteDidMappingApi(did.id);
+        setDids(prev => prev.filter(d => d.id !== did.id));
+        showSuccess(`DID ${did.phoneNumber} released.`);
+      } catch (err: any) {
+        alert(err.message || 'Failed to release DID');
+      }
     }
   };
 
-  const handleSaveCarrierSettings = () => {
-    superAdminService.updateCarrierSettings(carrierSettings);
-    showSuccess('Platform SIP Trunk carrier settings saved.');
+  const handleSaveCarrierSettings = async () => {
+    try {
+      const saved = await superAdminService.updateCarrierSettingsApi(carrierSettings);
+      setCarrierSettings(saved);
+      showSuccess('Platform SIP Trunk carrier settings saved to PostgreSQL.');
+    } catch (err: any) {
+      alert(err.message || 'Failed to save carrier settings');
+    }
   };
 
   const handleTestCarrier = async () => {

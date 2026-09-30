@@ -36,22 +36,41 @@ export const PlatformAuditPage: React.FC = () => {
   // Selected Log for Inspection
   const [inspectedLog, setInspectedLog] = useState<AuditLog | null>(null);
   const [isInspectDrawerOpen, setIsInspectDrawerOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const loadData = () => {
-    setTenants(superAdminService.getTenants());
-    applyFilters();
+  const loadData = async () => {
+    try {
+      const allTenants = await superAdminService.fetchTenantsFromApi();
+      setTenants(allTenants);
+    } catch {
+      setTenants(superAdminService.getTenants());
+    }
+    await applyFilters();
   };
 
-  const applyFilters = () => {
-    const list = superAdminService.getAuditLogs({
-      companyId: selectedCompanyFilter,
-      action: selectedActionFilter,
-      module: selectedModuleFilter,
-      search: searchQuery,
-      from: fromDate ? new Date(fromDate).toISOString() : undefined,
-      to: toDate ? new Date(toDate + 'T23:59:59').toISOString() : undefined,
-    });
-    setLogs(list);
+  const applyFilters = async () => {
+    setIsLoading(true);
+    try {
+      const list = await superAdminService.fetchAuditLogsFromApi({
+        companyId: selectedCompanyFilter,
+        action: selectedActionFilter,
+        module: selectedModuleFilter,
+        search: searchQuery,
+        from: fromDate ? new Date(fromDate).toISOString() : undefined,
+        to: toDate ? new Date(toDate + 'T23:59:59').toISOString() : undefined,
+      });
+      setLogs(list);
+    } catch (err) {
+      console.error('Failed to load audit logs from API:', err);
+      setLogs(superAdminService.getAuditLogs({
+        companyId: selectedCompanyFilter,
+        action: selectedActionFilter,
+        module: selectedModuleFilter,
+        search: searchQuery,
+      }));
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {

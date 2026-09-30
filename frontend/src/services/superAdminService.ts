@@ -15,7 +15,7 @@ import {
 import { DEFAULT_TENANTS } from '../constants/defaultTenants';
 import { SYSTEM_ROLES } from '../constants/roles';
 import { FEATURES } from '../constants/features';
-import { apiClient, ApiResponse } from './apiClient';
+import { apiClient, ApiResponse, PagedResult } from './apiClient';
 import { storageService } from './storageService';
 
 // Storage Keys
@@ -208,12 +208,12 @@ class SuperAdminService {
   async fetchTenantsFromApi(): Promise<Tenant[]> {
     try {
       const res = await apiClient.get<ApiResponse<Tenant[]>>('/super-admin/tenants');
-      if (res && res.data && res.data.length > 0) {
+      if (res && res.data) {
         localStorage.setItem(STORAGE_KEYS.TENANTS, JSON.stringify(res.data));
         return res.data;
       }
     } catch (err) {
-      console.warn('Could not fetch tenants from API, falling back to local store:', err);
+      console.warn('Could not fetch tenants from API, falling back to local cache:', err);
     }
     return this.getTenants();
   }
@@ -255,11 +255,112 @@ class SuperAdminService {
     return this.getTenants().find(t => t.id === id || t.slug === id);
   }
 
+  async createTenantApi(
+    tenantData: Partial<Tenant>,
+    adminUserData?: { name: string; email: string; phone?: string; password?: string },
+    didData?: { phoneNumber?: string; routingStrategy?: string; queueName?: string }
+  ): Promise<Tenant> {
+    const cleanSlug = (tenantData.slug || tenantData.name || 'tenant')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+
+    const payload = {
+      name: tenantData.name,
+      legalName: tenantData.legalName || tenantData.name,
+      slug: cleanSlug,
+      industry: tenantData.industry,
+      tagline: tenantData.tagline,
+      brandColor: tenantData.brandColor,
+      timezone: tenantData.timezone,
+      currency: tenantData.currency,
+      businessHours: tenantData.businessHours,
+      subscriptionPlan: tenantData.subscriptionPlan,
+      status: tenantData.status || 'Active',
+      leadSla: tenantData.leadSla,
+      callEnabled: tenantData.callEnabled ?? true,
+      recordingEnabled: tenantData.recordingEnabled ?? true,
+      transcriptionEnabled: tenantData.transcriptionEnabled ?? true,
+      enabledFeatures: tenantData.enabledFeatures,
+      adminUser: adminUserData && adminUserData.email ? {
+        name: adminUserData.name,
+        email: adminUserData.email,
+        phone: adminUserData.phone,
+        password: adminUserData.password,
+      } : undefined,
+      did: didData && didData.phoneNumber ? {
+        phoneNumber: didData.phoneNumber,
+        routingStrategy: didData.routingStrategy,
+        queueName: didData.queueName,
+      } : undefined,
+    };
+
+    const res = await apiClient.post<ApiResponse<Tenant>>('/super-admin/tenants', payload);
+    if (!res || !res.data) {
+      throw new Error(res?.message || 'Failed to create organization');
+    }
+
+    await this.fetchTenantsFromApi();
+    notifyAdminStorageUpdated();
+    return res.data;
+  }
+
+  async updateTenantApi(tenant: Tenant): Promise<Tenant> {
+    const payload = {
+      name: tenant.name,
+      legalName: tenant.legalName,
+      slug: tenant.slug,
+      industry: tenant.industry,
+      tagline: tenant.tagline,
+      brandColor: tenant.brandColor,
+      timezone: tenant.timezone,
+      currency: tenant.currency,
+      businessHours: tenant.businessHours,
+      subscriptionPlan: tenant.subscriptionPlan,
+      status: tenant.status,
+      leadSla: tenant.leadSla,
+      callEnabled: tenant.callEnabled,
+      recordingEnabled: tenant.recordingEnabled,
+      transcriptionEnabled: tenant.transcriptionEnabled,
+      enabledFeatures: tenant.enabledFeatures,
+    };
+
+    const res = await apiClient.put<ApiResponse<Tenant>>(`/super-admin/tenants/${tenant.id}`, payload);
+    if (!res || !res.data) {
+      throw new Error(res?.message || 'Failed to update organization');
+    }
+
+    await this.fetchTenantsFromApi();
+    notifyAdminStorageUpdated();
+    return res.data;
+  }
+
+  async toggleTenantStatusApi(id: string, status: 'Active' | 'Inactive' | 'Suspended'): Promise<Tenant> {
+    const res = await apiClient.patch<ApiResponse<Tenant>>(`/super-admin/tenants/${id}/status`, { status });
+    if (!res || !res.data) {
+      throw new Error(res?.message || 'Failed to update organization status');
+    }
+
+    await this.fetchTenantsFromApi();
+    notifyAdminStorageUpdated();
+    return res.data;
+  }
+
+  async deleteTenantApi(id: string): Promise<boolean> {
+    const res = await apiClient.delete<ApiResponse<boolean>>(`/super-admin/tenants/${id}`);
+    await this.fetchTenantsFromApi();
+    notifyAdminStorageUpdated();
+    return res?.data ?? true;
+  }
+
   createTenant(
     tenantData: Partial<Tenant>,
     adminUserData?: { name: string; email: string; phone?: string; password?: string },
     didData?: { phoneNumber?: string; routingStrategy?: string }
   ): Tenant {
+    this.createTenantApi(tenantData, adminUserData, didData).catch(err => {
+      console.error('Async createTenantApi error:', err);
+    });
+
     const tenants = this.getTenants();
     const cleanSlug = (tenantData.slug || tenantData.name || 'tenant')
       .toLowerCase()
@@ -296,63 +397,17 @@ class SuperAdminService {
 
     tenants.push(newTenant);
     localStorage.setItem(STORAGE_KEYS.TENANTS, JSON.stringify(tenants));
-
-    // Provision the initial Company Admin user if details provided
-    if (adminUserData && adminUserData.email) {
-      const newUser: User = {
-        id: `usr-${cleanSlug}-admin-${Date.now().toString().slice(-4)}`,
-        name: adminUserData.name || 'Primary Admin',
-        email: adminUserData.email.toLowerCase().trim(),
-        phone: adminUserData.phone || '+91 98000 00000',
-        role: SYSTEM_ROLES.company_admin,
-        companyId: newTenant.id,
-        companySlug: newTenant.slug,
-        companyName: newTenant.name,
-        status: 'Active',
-        lastLogin: 'Never (Newly Invited)',
-        createdAt: new Date().toISOString(),
-      };
-      this.createUser(newUser);
-    }
-
-    // Allocate DID if provided
-    if (didData && didData.phoneNumber) {
-      this.createDidMapping({
-        phoneNumber: didData.phoneNumber,
-        tenantId: newTenant.id,
-        tenantName: newTenant.name,
-        tenantSlug: newTenant.slug,
-        routingStrategy: (didData.routingStrategy as any) || 'Round-Robin',
-        queueName: `${newTenant.name} Inbound`,
-        enableRecording: true,
-        enableAiWhisper: true,
-        status: 'Online',
-        channelsCount: 6,
-      });
-    }
-
-    // Record audit event
-    this.addAuditLog({
-      action: 'PROVISION_TENANT',
-      entityType: 'Tenant',
-      entityId: newTenant.id,
-      companyId: newTenant.id,
-      companyName: newTenant.name,
-      details: `Super Admin provisioned new tenant organization: "${newTenant.name}" (${newTenant.industry}) with ${newTenant.enabledFeatures.length} features.`,
-      module: 'Companies',
-      status: 'success',
-      afterValue: newTenant,
-    });
-
     notifyAdminStorageUpdated();
     return newTenant;
   }
 
   updateTenant(tenant: Tenant): Tenant {
+    this.updateTenantApi(tenant).catch(err => {
+      console.error('Async updateTenantApi error:', err);
+    });
+
     const tenants = this.getTenants();
     const idx = tenants.findIndex(t => t.id === tenant.id);
-    const before = idx >= 0 ? tenants[idx] : null;
-
     const updated: Tenant = {
       ...tenant,
       updatedAt: new Date().toISOString(),
@@ -365,71 +420,37 @@ class SuperAdminService {
     }
 
     localStorage.setItem(STORAGE_KEYS.TENANTS, JSON.stringify(tenants));
-
-    this.addAuditLog({
-      action: 'UPDATE_TENANT',
-      entityType: 'Tenant',
-      entityId: tenant.id,
-      companyId: tenant.id,
-      companyName: tenant.name,
-      details: `Super Admin updated organization settings for "${tenant.name}".`,
-      module: 'Companies',
-      status: 'success',
-      beforeValue: before || undefined,
-      afterValue: updated,
-    });
-
     notifyAdminStorageUpdated();
     return updated;
   }
 
   toggleTenantStatus(id: string, status: 'Active' | 'Inactive' | 'Suspended'): Tenant | undefined {
+    this.toggleTenantStatusApi(id, status).catch(err => {
+      console.error('Async toggleTenantStatusApi error:', err);
+    });
+
     const tenants = this.getTenants();
     const tenant = tenants.find(t => t.id === id);
     if (!tenant) return undefined;
 
-    const previousStatus = tenant.status || 'Active';
     tenant.status = status;
     tenant.updatedAt = new Date().toISOString();
-
     localStorage.setItem(STORAGE_KEYS.TENANTS, JSON.stringify(tenants));
-
-    this.addAuditLog({
-      action: 'STATUS_CHANGE',
-      entityType: 'Tenant',
-      entityId: tenant.id,
-      companyId: tenant.id,
-      companyName: tenant.name,
-      details: `Organization status changed from ${previousStatus} to ${status}.`,
-      module: 'Companies',
-      status: 'success',
-      beforeValue: { status: previousStatus },
-      afterValue: { status },
-    });
-
     notifyAdminStorageUpdated();
     return tenant;
   }
 
   deleteTenant(id: string): boolean {
+    this.deleteTenantApi(id).catch(err => {
+      console.error('Async deleteTenantApi error:', err);
+    });
+
     const tenants = this.getTenants();
     const target = tenants.find(t => t.id === id);
     if (!target) return false;
 
     const filtered = tenants.filter(t => t.id !== id);
     localStorage.setItem(STORAGE_KEYS.TENANTS, JSON.stringify(filtered));
-
-    this.addAuditLog({
-      action: 'DELETE_TENANT',
-      entityType: 'Tenant',
-      entityId: id,
-      companyName: target.name,
-      details: `Super Admin deleted tenant organization: "${target.name}".`,
-      module: 'Companies',
-      status: 'success',
-      beforeValue: target,
-    });
-
     notifyAdminStorageUpdated();
     return true;
   }
@@ -1510,6 +1531,19 @@ class SuperAdminService {
 
   // ── PACKAGES & ENTITLEMENTS ───────────────────────────────────────────────
 
+  async fetchPackagesFromApi(): Promise<SubscriptionPackage[]> {
+    try {
+      const res = await apiClient.get<ApiResponse<SubscriptionPackage[]>>('/super-admin/packages');
+      if (res && res.data) {
+        localStorage.setItem(STORAGE_KEYS.PACKAGES, JSON.stringify(res.data));
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Could not fetch packages from API, falling back to local cache:', err);
+    }
+    return this.getPackages();
+  }
+
   getPackages(): SubscriptionPackage[] {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.PACKAGES);
@@ -1527,7 +1561,71 @@ class SuperAdminService {
     return this.getPackages().find(p => p.id === id || p.code === id);
   }
 
+  async createPackageApi(pkgData: Partial<SubscriptionPackage>): Promise<SubscriptionPackage> {
+    const payload = {
+      name: pkgData.name,
+      code: (pkgData.code || pkgData.name || 'custom_plan').toLowerCase().replace(/[^a-z0-9_]/g, '_'),
+      description: pkgData.description || '',
+      tier: pkgData.tier || 'Growth',
+      priceMonthly: pkgData.priceMonthly || 19999,
+      currency: pkgData.currency || '₹',
+      maxUsers: pkgData.maxUsers || 25,
+      maxStorageGb: pkgData.maxStorageGb || 100,
+      features: pkgData.features || [FEATURES.LEADS, FEATURES.CUSTOMERS, FEATURES.CALLS],
+      isPopular: pkgData.isPopular ?? false,
+      isActive: pkgData.isActive ?? true,
+    };
+
+    const res = await apiClient.post<ApiResponse<SubscriptionPackage>>('/super-admin/packages', payload);
+    if (!res || !res.data) {
+      throw new Error(res?.message || 'Failed to create subscription package');
+    }
+
+    await this.fetchPackagesFromApi();
+    notifyAdminStorageUpdated();
+    return res.data;
+  }
+
+  async updatePackageApi(pkg: SubscriptionPackage): Promise<SubscriptionPackage> {
+    const payload = {
+      name: pkg.name,
+      description: pkg.description,
+      tier: pkg.tier,
+      priceMonthly: pkg.priceMonthly,
+      currency: pkg.currency,
+      maxUsers: pkg.maxUsers,
+      maxStorageGb: pkg.maxStorageGb,
+      features: pkg.features,
+      isPopular: pkg.isPopular,
+      isActive: pkg.isActive,
+    };
+
+    const res = await apiClient.put<ApiResponse<SubscriptionPackage>>(`/super-admin/packages/${pkg.id}`, payload);
+    if (!res || !res.data) {
+      throw new Error(res?.message || 'Failed to update subscription package');
+    }
+
+    await this.fetchPackagesFromApi();
+    notifyAdminStorageUpdated();
+    return res.data;
+  }
+
+  async togglePackageStatusApi(id: string, isActive: boolean): Promise<boolean> {
+    const res = await apiClient.patch<ApiResponse<boolean>>(`/super-admin/packages/${id}/status`, { isActive });
+    await this.fetchPackagesFromApi();
+    notifyAdminStorageUpdated();
+    return res?.data ?? true;
+  }
+
+  async deletePackageApi(id: string): Promise<boolean> {
+    const res = await apiClient.delete<ApiResponse<boolean>>(`/super-admin/packages/${id}`);
+    await this.fetchPackagesFromApi();
+    notifyAdminStorageUpdated();
+    return res?.data ?? true;
+  }
+
   createPackage(pkgData: Partial<SubscriptionPackage>): SubscriptionPackage {
+    this.createPackageApi(pkgData).catch(err => console.error('createPackageApi error:', err));
     const packages = this.getPackages();
     const newPkg: SubscriptionPackage = {
       id: `pkg-${Date.now().toString().slice(-6)}`,
@@ -1548,26 +1646,14 @@ class SuperAdminService {
 
     packages.push(newPkg);
     localStorage.setItem(STORAGE_KEYS.PACKAGES, JSON.stringify(packages));
-
-    this.addAuditLog({
-      action: 'CREATE_PACKAGE',
-      entityType: 'SubscriptionPackage',
-      entityId: newPkg.id,
-      details: `Super Admin created subscription package tier: "${newPkg.name}" with ${newPkg.features.length} enabled modules.`,
-      module: 'Features',
-      status: 'success',
-      afterValue: newPkg,
-    });
-
     notifyAdminStorageUpdated();
     return newPkg;
   }
 
   updatePackage(pkg: SubscriptionPackage): SubscriptionPackage {
+    this.updatePackageApi(pkg).catch(err => console.error('updatePackageApi error:', err));
     const packages = this.getPackages();
     const idx = packages.findIndex(p => p.id === pkg.id);
-    const before = idx >= 0 ? packages[idx] : null;
-
     const updated: SubscriptionPackage = {
       ...pkg,
       updatedAt: new Date().toISOString(),
@@ -1580,45 +1666,36 @@ class SuperAdminService {
     }
 
     localStorage.setItem(STORAGE_KEYS.PACKAGES, JSON.stringify(packages));
-
-    this.addAuditLog({
-      action: 'UPDATE_PACKAGE',
-      entityType: 'SubscriptionPackage',
-      entityId: pkg.id,
-      details: `Super Admin updated package tier "${pkg.name}".`,
-      module: 'Features',
-      status: 'success',
-      beforeValue: before || undefined,
-      afterValue: updated,
-    });
-
     notifyAdminStorageUpdated();
     return updated;
   }
 
   deletePackage(id: string): boolean {
+    this.deletePackageApi(id).catch(err => console.error('deletePackageApi error:', err));
     const packages = this.getPackages();
     const target = packages.find(p => p.id === id);
     if (!target) return false;
 
     const filtered = packages.filter(p => p.id !== id);
     localStorage.setItem(STORAGE_KEYS.PACKAGES, JSON.stringify(filtered));
-
-    this.addAuditLog({
-      action: 'DELETE_PACKAGE',
-      entityType: 'SubscriptionPackage',
-      entityId: id,
-      details: `Super Admin removed package tier: "${target.name}".`,
-      module: 'Features',
-      status: 'success',
-      beforeValue: target,
-    });
-
     notifyAdminStorageUpdated();
     return true;
   }
 
   // ── TELEPHONY & DID MAPPINGS ──────────────────────────────────────────────
+
+  async fetchDidMappingsFromApi(): Promise<TenantDidMapping[]> {
+    try {
+      const res = await apiClient.get<ApiResponse<TenantDidMapping[]>>('/super-admin/call-config/dids');
+      if (res && res.data) {
+        localStorage.setItem(STORAGE_KEYS.DIDS, JSON.stringify(res.data));
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Could not fetch DIDs from API, falling back to local cache:', err);
+    }
+    return this.getDidMappings();
+  }
 
   getDidMappings(): TenantDidMapping[] {
     try {
@@ -1633,7 +1710,68 @@ class SuperAdminService {
     }
   }
 
+  async createDidMappingApi(didData: Partial<TenantDidMapping>): Promise<TenantDidMapping> {
+    const payload = {
+      tenantId: didData.tenantId || null,
+      phoneNumber: didData.phoneNumber,
+      routingStrategy: didData.routingStrategy || 'Round-Robin',
+      queueName: didData.queueName || 'General Queue',
+      enableRecording: didData.enableRecording ?? true,
+      enableAiWhisper: didData.enableAiWhisper ?? true,
+      status: didData.status || (didData.tenantId ? 'Online' : 'Reserved'),
+      channelsCount: didData.channelsCount || 8,
+      notes: didData.notes || '',
+    };
+
+    const res = await apiClient.post<ApiResponse<TenantDidMapping>>('/super-admin/call-config/dids', payload);
+    if (!res || !res.data) {
+      throw new Error(res?.message || 'Failed to create DID mapping');
+    }
+
+    await this.fetchDidMappingsFromApi();
+    notifyAdminStorageUpdated();
+    return res.data;
+  }
+
+  async updateDidMappingApi(id: string, updates: Partial<TenantDidMapping>): Promise<TenantDidMapping> {
+    const payload = {
+      tenantId: updates.tenantId !== undefined ? updates.tenantId : undefined,
+      phoneNumber: updates.phoneNumber,
+      routingStrategy: updates.routingStrategy,
+      queueName: updates.queueName,
+      enableRecording: updates.enableRecording,
+      enableAiWhisper: updates.enableAiWhisper,
+      status: updates.status,
+      channelsCount: updates.channelsCount,
+      notes: updates.notes,
+    };
+
+    const res = await apiClient.put<ApiResponse<TenantDidMapping>>(`/super-admin/call-config/dids/${id}`, payload);
+    if (!res || !res.data) {
+      throw new Error(res?.message || 'Failed to update DID mapping');
+    }
+
+    await this.fetchDidMappingsFromApi();
+    notifyAdminStorageUpdated();
+    return res.data;
+  }
+
+  async toggleDidStatusApi(id: string, status: 'Online' | 'Offline' | 'Reserved'): Promise<boolean> {
+    const res = await apiClient.patch<ApiResponse<boolean>>(`/super-admin/call-config/dids/${id}/status`, { status });
+    await this.fetchDidMappingsFromApi();
+    notifyAdminStorageUpdated();
+    return res?.data ?? true;
+  }
+
+  async deleteDidMappingApi(id: string): Promise<boolean> {
+    const res = await apiClient.delete<ApiResponse<boolean>>(`/super-admin/call-config/dids/${id}`);
+    await this.fetchDidMappingsFromApi();
+    notifyAdminStorageUpdated();
+    return res?.data ?? true;
+  }
+
   createDidMapping(didData: Partial<TenantDidMapping>): TenantDidMapping {
+    this.createDidMappingApi(didData).catch(err => console.error('createDidMappingApi error:', err));
     const dids = this.getDidMappings();
     const newDid: TenantDidMapping = {
       id: `did-${Date.now().toString().slice(-4)}`,
@@ -1654,29 +1792,16 @@ class SuperAdminService {
 
     dids.push(newDid);
     localStorage.setItem(STORAGE_KEYS.DIDS, JSON.stringify(dids));
-
-    this.addAuditLog({
-      action: 'ALLOCATE_DID',
-      entityType: 'TenantDidMapping',
-      entityId: newDid.id,
-      companyId: newDid.tenantId || undefined,
-      companyName: newDid.tenantName,
-      details: `Super Admin allocated virtual DID number "${newDid.phoneNumber}" to ${newDid.tenantName || 'Reserve Pool'}.`,
-      module: 'CallConfig',
-      status: 'success',
-      afterValue: newDid,
-    });
-
     notifyAdminStorageUpdated();
     return newDid;
   }
 
   updateDidMapping(id: string, updates: Partial<TenantDidMapping>): TenantDidMapping | undefined {
+    this.updateDidMappingApi(id, updates).catch(err => console.error('updateDidMappingApi error:', err));
     const dids = this.getDidMappings();
     const idx = dids.findIndex(d => d.id === id);
     if (idx === -1) return undefined;
 
-    const before = { ...dids[idx] };
     const updated: TenantDidMapping = {
       ...dids[idx],
       ...updates,
@@ -1684,46 +1809,35 @@ class SuperAdminService {
 
     dids[idx] = updated;
     localStorage.setItem(STORAGE_KEYS.DIDS, JSON.stringify(dids));
-
-    this.addAuditLog({
-      action: 'UPDATE_DID',
-      entityType: 'TenantDidMapping',
-      entityId: id,
-      companyId: updated.tenantId || undefined,
-      companyName: updated.tenantName,
-      details: `Super Admin updated DID configuration for ${updated.phoneNumber}.`,
-      module: 'CallConfig',
-      status: 'success',
-      beforeValue: before,
-      afterValue: updated,
-    });
-
     notifyAdminStorageUpdated();
     return updated;
   }
 
   deleteDidMapping(id: string): boolean {
+    this.deleteDidMappingApi(id).catch(err => console.error('deleteDidMappingApi error:', err));
     const dids = this.getDidMappings();
     const target = dids.find(d => d.id === id);
     if (!target) return false;
 
     const filtered = dids.filter(d => d.id !== id);
     localStorage.setItem(STORAGE_KEYS.DIDS, JSON.stringify(filtered));
-
-    this.addAuditLog({
-      action: 'RELEASE_DID',
-      entityType: 'TenantDidMapping',
-      entityId: id,
-      companyId: target.tenantId || undefined,
-      companyName: target.tenantName,
-      details: `Super Admin released virtual DID number ${target.phoneNumber}.`,
-      module: 'CallConfig',
-      status: 'success',
-      beforeValue: target,
-    });
-
     notifyAdminStorageUpdated();
     return true;
+  }
+
+  // ── CARRIER SETTINGS ──────────────────────────────────────────────────────
+
+  async fetchCarrierSettingsFromApi(): Promise<PlatformCarrierSettings> {
+    try {
+      const res = await apiClient.get<ApiResponse<PlatformCarrierSettings>>('/super-admin/call-config/carrier');
+      if (res && res.data) {
+        localStorage.setItem(STORAGE_KEYS.CARRIER_SETTINGS, JSON.stringify(res.data));
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Could not fetch carrier settings from API, falling back to local cache:', err);
+    }
+    return this.getCarrierSettings();
   }
 
   getCarrierSettings(): PlatformCarrierSettings {
@@ -1739,41 +1853,139 @@ class SuperAdminService {
     }
   }
 
+  async updateCarrierSettingsApi(settings: PlatformCarrierSettings): Promise<PlatformCarrierSettings> {
+    const payload = {
+      primaryCarrier: settings.primaryCarrier,
+      secondaryCarrier: settings.secondaryCarrier,
+      sipRealm: settings.sipRealm,
+      webrtcGatewayUrl: settings.webrtcGatewayUrl,
+      recordingRetentionDays: settings.recordingRetentionDays,
+      maxConcurrentChannels: settings.maxConcurrentChannels,
+      emergencyRoutingEnabled: settings.emergencyRoutingEnabled,
+      whisperAiModel: settings.whisperAiModel,
+      accountSid: settings.accountSid,
+      authToken: settings.authToken,
+      primaryGatewayHost: settings.primaryGatewayHost,
+      failoverGatewayHost: settings.failoverGatewayHost,
+    };
+
+    const res = await apiClient.put<ApiResponse<PlatformCarrierSettings>>('/super-admin/call-config/carrier', payload);
+    if (!res || !res.data) {
+      throw new Error(res?.message || 'Failed to update carrier settings');
+    }
+
+    await this.fetchCarrierSettingsFromApi();
+    notifyAdminStorageUpdated();
+    return res.data;
+  }
+
   updateCarrierSettings(settings: PlatformCarrierSettings): PlatformCarrierSettings {
+    this.updateCarrierSettingsApi(settings).catch(err => console.error('updateCarrierSettingsApi error:', err));
     localStorage.setItem(STORAGE_KEYS.CARRIER_SETTINGS, JSON.stringify(settings));
-
-    this.addAuditLog({
-      action: 'UPDATE_CARRIER_SETTINGS',
-      entityType: 'CarrierSettings',
-      entityId: 'global',
-      details: `Super Admin updated platform carrier trunk and SIP credentials (${settings.primaryCarrier}).`,
-      module: 'CallConfig',
-      status: 'success',
-      afterValue: settings,
-    });
-
     notifyAdminStorageUpdated();
     return settings;
   }
 
-  testCarrierConnection(): Promise<{ success: boolean; latencyMs: number; message: string }> {
-    return new Promise(resolve => {
-      setTimeout(() => {
-        const settings = this.getCarrierSettings();
-        settings.lastTestedAt = new Date().toISOString();
-        settings.testStatus = 'Success';
-        localStorage.setItem(STORAGE_KEYS.CARRIER_SETTINGS, JSON.stringify(settings));
+  async testCarrierConnection(): Promise<{ success: boolean; latencyMs: number; message: string }> {
+    try {
+      const res = await apiClient.post<ApiResponse<{ success: boolean; latencyMs: number; message: string; testedAt: string; status: string }>>(
+        '/super-admin/call-config/carrier/test'
+      );
+      if (res && res.data) {
+        const current = this.getCarrierSettings();
+        current.lastTestedAt = res.data.testedAt || new Date().toISOString();
+        current.testStatus = res.data.status as any || (res.data.success ? 'Success' : 'Offline');
+        localStorage.setItem(STORAGE_KEYS.CARRIER_SETTINGS, JSON.stringify(current));
         notifyAdminStorageUpdated();
-        resolve({
-          success: true,
-          latencyMs: 24,
-          message: 'SIP Gateway handshake verified. Carrier trunk active across Mumbai AP-South with 0.0% packet drop.',
-        });
-      }, 900);
-    });
+        return {
+          success: res.data.success,
+          latencyMs: res.data.latencyMs,
+          message: res.data.message,
+        };
+      }
+    } catch (err: any) {
+      console.warn('Real carrier test failed:', err);
+      return {
+        success: false,
+        latencyMs: 0,
+        message: err.message || 'Carrier test failed to connect to SIP host',
+      };
+    }
+    return {
+      success: false,
+      latencyMs: 0,
+      message: 'Unable to communicate with telephony gateway server.',
+    };
   }
 
   // ── AUDIT LOGS ────────────────────────────────────────────────────────────
+
+  async fetchAuditLogsFromApi(filters?: {
+    companyId?: string;
+    actor?: string;
+    action?: string;
+    module?: string;
+    search?: string;
+    from?: string;
+    to?: string;
+    pageNumber?: number;
+    pageSize?: number;
+  }): Promise<AuditLog[]> {
+    try {
+      const params: Record<string, any> = {
+        pageNumber: filters?.pageNumber || 1,
+        pageSize: filters?.pageSize || 200,
+      };
+
+      if (filters?.companyId && filters.companyId !== 'all') {
+        params.companyId = filters.companyId === 'global' ? '0' : filters.companyId;
+      }
+      if (filters?.action && filters.action !== 'all') {
+        params.action = filters.action;
+      }
+      if (filters?.module && filters.module !== 'all') {
+        params.module = filters.module;
+      }
+      if (filters?.search) {
+        params.search = filters.search;
+      }
+      if (filters?.from) {
+        params.fromDate = filters.from;
+      }
+      if (filters?.to) {
+        params.toDate = filters.to;
+      }
+
+      const res = await apiClient.get<any>('/audit-logs', params);
+      const rawList = res?.data?.items || res?.items || res?.data || (Array.isArray(res) ? res : []);
+      if (Array.isArray(rawList)) {
+        const mapped: AuditLog[] = rawList.map((l: any) => ({
+          id: String(l.id),
+          timestamp: l.createdAt || l.timestamp || new Date().toISOString(),
+          actorName: l.actorName || l.userName || 'System User',
+          actorEmail: l.actorEmail || l.userEmail || '',
+          action: l.action || 'PLATFORM_OPERATION',
+          entityType: l.entityType || 'Platform',
+          entityId: String(l.entityId || ''),
+          companyId: l.companyId ? String(l.companyId) : undefined,
+          companyName: l.companyName || (l.companyId ? `Company #${l.companyId}` : 'PLATFORM CONSOLE'),
+          details: l.details || '',
+          ipAddress: l.ipAddress || '127.0.0.1',
+          userAgent: l.userAgent || 'Nexus Platform Console',
+          module: l.module || 'Platform',
+          status: (l.status as any) || 'success',
+          beforeValue: l.beforeValue ? (typeof l.beforeValue === 'string' ? JSON.parse(l.beforeValue) : l.beforeValue) : undefined,
+          afterValue: l.afterValue ? (typeof l.afterValue === 'string' ? JSON.parse(l.afterValue) : l.afterValue) : undefined,
+        }));
+
+        localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(mapped));
+        return mapped;
+      }
+    } catch (err) {
+      console.warn('Could not fetch audit logs from /api/audit-logs, falling back to local store:', err);
+    }
+    return this.getAuditLogs(filters);
+  }
 
   getAuditLogs(filters?: {
     companyId?: string;
@@ -1838,7 +2050,6 @@ class SuperAdminService {
       };
 
       logs.unshift(newLog);
-      // Keep up to 1000 logs in storage
       if (logs.length > 1000) logs.pop();
       localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(logs));
       return newLog;
@@ -1868,23 +2079,48 @@ class SuperAdminService {
 
   // ── SYSTEM DIAGNOSTICS & ANNOUNCEMENTS ─────────────────────────────────────
 
+  async fetchSystemDiagnosticsFromApi(): Promise<SystemDiagnostics> {
+    try {
+      const res = await apiClient.get<ApiResponse<SystemDiagnostics>>('/super-admin/system/diagnostics');
+      if (res && res.data) {
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Could not fetch diagnostics from API, using cached state:', err);
+    }
+    return this.getSystemDiagnostics();
+  }
+
   getSystemDiagnostics(): SystemDiagnostics {
     return {
       apiStatus: 'Healthy',
-      apiLatencyMs: 18,
-      dbPoolActive: 14,
-      dbPoolMax: 60,
-      dbLatencyMs: 6,
-      memoryUsedMb: 428,
+      apiLatencyMs: 0,
+      dbPoolActive: 0,
+      dbPoolMax: 50,
+      dbLatencyMs: 0,
+      memoryUsedMb: 0,
       memoryLimitMb: 2048,
-      storageUsedGb: 8.4,
+      storageUsedGb: 0,
       storageLimitGb: 250,
-      activeSessions: 38,
-      activeWebSockets: 19,
+      activeSessions: 0,
+      activeWebSockets: 0,
       telephonyDropRate: 0.0,
-      systemUptimePercentage: 99.98,
-      lastBackupAt: new Date(Date.now() - 3600000 * 4).toISOString(),
+      systemUptimePercentage: 100.0,
+      lastBackupAt: new Date().toISOString(),
     };
+  }
+
+  async fetchAnnouncementsFromApi(): Promise<BroadcastAnnouncement[]> {
+    try {
+      const res = await apiClient.get<ApiResponse<BroadcastAnnouncement[]>>('/super-admin/system/announcements');
+      if (res && res.data) {
+        localStorage.setItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(res.data));
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Could not fetch announcements from API, falling back to local cache:', err);
+    }
+    return this.getAnnouncements();
   }
 
   getAnnouncements(): BroadcastAnnouncement[] {
@@ -1900,7 +2136,42 @@ class SuperAdminService {
     }
   }
 
+  async createAnnouncementApi(ann: Partial<BroadcastAnnouncement>): Promise<BroadcastAnnouncement> {
+    const payload = {
+      title: ann.title || 'Platform Notice',
+      message: ann.message || '',
+      priority: ann.priority || 'info',
+      targetAudience: ann.targetAudience || 'all',
+      targetTenantId: ann.targetTenantId,
+      expiresAt: ann.expiresAt,
+    };
+
+    const res = await apiClient.post<ApiResponse<BroadcastAnnouncement>>('/super-admin/system/announcements', payload);
+    if (!res || !res.data) {
+      throw new Error(res?.message || 'Failed to create announcement');
+    }
+
+    await this.fetchAnnouncementsFromApi();
+    notifyAdminStorageUpdated();
+    return res.data;
+  }
+
+  async toggleAnnouncementApi(id: string, isActive: boolean): Promise<boolean> {
+    const res = await apiClient.patch<ApiResponse<boolean>>(`/super-admin/system/announcements/${id}/status`, { isActive });
+    await this.fetchAnnouncementsFromApi();
+    notifyAdminStorageUpdated();
+    return res?.data ?? true;
+  }
+
+  async deleteAnnouncementApi(id: string): Promise<boolean> {
+    const res = await apiClient.delete<ApiResponse<boolean>>(`/super-admin/system/announcements/${id}`);
+    await this.fetchAnnouncementsFromApi();
+    notifyAdminStorageUpdated();
+    return res?.data ?? true;
+  }
+
   createAnnouncement(ann: Partial<BroadcastAnnouncement>): BroadcastAnnouncement {
+    this.createAnnouncementApi(ann).catch(err => console.error('createAnnouncementApi error:', err));
     const list = this.getAnnouncements();
     const newAnn: BroadcastAnnouncement = {
       id: `ann-${Date.now()}`,
@@ -1918,22 +2189,12 @@ class SuperAdminService {
 
     list.unshift(newAnn);
     localStorage.setItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(list));
-
-    this.addAuditLog({
-      action: 'PUBLISH_ANNOUNCEMENT',
-      entityType: 'BroadcastAnnouncement',
-      entityId: newAnn.id,
-      details: `Super Admin published broadcast banner: "${newAnn.title}" [${newAnn.priority.toUpperCase()}].`,
-      module: 'System',
-      status: 'success',
-      afterValue: newAnn,
-    });
-
     notifyAdminStorageUpdated();
     return newAnn;
   }
 
   toggleAnnouncement(id: string, isActive: boolean): boolean {
+    this.toggleAnnouncementApi(id, isActive).catch(err => console.error('toggleAnnouncementApi error:', err));
     const list = this.getAnnouncements();
     const item = list.find(a => a.id === id);
     if (!item) return false;
@@ -1945,11 +2206,27 @@ class SuperAdminService {
   }
 
   deleteAnnouncement(id: string): boolean {
+    this.deleteAnnouncementApi(id).catch(err => console.error('deleteAnnouncementApi error:', err));
     const list = this.getAnnouncements();
     const filtered = list.filter(a => a.id !== id);
     localStorage.setItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(filtered));
     notifyAdminStorageUpdated();
     return true;
+  }
+
+  async fetchMaintenanceModeFromApi(): Promise<{ enabled: boolean; message: string; bypassSecret: string }> {
+    try {
+      const res = await apiClient.get<ApiResponse<{ enabled: boolean; message: string; bypassSecret: string }>>(
+        '/super-admin/system/maintenance'
+      );
+      if (res && res.data) {
+        localStorage.setItem(STORAGE_KEYS.MAINTENANCE_MODE, JSON.stringify(res.data));
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Could not fetch maintenance mode from API, falling back to local cache:', err);
+    }
+    return this.getMaintenanceMode();
   }
 
   getMaintenanceMode(): { enabled: boolean; message: string; bypassSecret: string } {
@@ -1961,7 +2238,27 @@ class SuperAdminService {
     }
   }
 
+  async setMaintenanceModeApi(enabled: boolean, message?: string): Promise<{ enabled: boolean; message: string; bypassSecret: string }> {
+    const payload = {
+      enabled,
+      message: message || 'Platform under scheduled maintenance.',
+    };
+
+    const res = await apiClient.put<ApiResponse<{ enabled: boolean; message: string; bypassSecret: string }>>(
+      '/super-admin/system/maintenance',
+      payload
+    );
+    if (!res || !res.data) {
+      throw new Error(res?.message || 'Failed to update maintenance mode');
+    }
+
+    localStorage.setItem(STORAGE_KEYS.MAINTENANCE_MODE, JSON.stringify(res.data));
+    notifyAdminStorageUpdated();
+    return res.data;
+  }
+
   setMaintenanceMode(enabled: boolean, message?: string) {
+    this.setMaintenanceModeApi(enabled, message).catch(err => console.error('setMaintenanceModeApi error:', err));
     const current = this.getMaintenanceMode();
     const updated = {
       ...current,
@@ -1969,17 +2266,6 @@ class SuperAdminService {
       message: message || current.message,
     };
     localStorage.setItem(STORAGE_KEYS.MAINTENANCE_MODE, JSON.stringify(updated));
-
-    this.addAuditLog({
-      action: 'MAINTENANCE_MODE',
-      entityType: 'System',
-      entityId: 'global',
-      details: `Super Admin ${enabled ? 'ENABLED' : 'DISABLED'} platform maintenance mode.`,
-      module: 'System',
-      status: 'success',
-      afterValue: updated,
-    });
-
     notifyAdminStorageUpdated();
     return updated;
   }
@@ -2077,9 +2363,9 @@ class SuperAdminService {
       totalLeads: leads.length,
       currentMonthLeads,
       previousMonthLeads,
-      totalPipelineValue: 485000000,
-      totalCustomers: 864,
-      systemHealthScore: 99.98,
+      totalPipelineValue: 0,
+      totalCustomers: 0,
+      systemHealthScore: 100,
     };
   }
 

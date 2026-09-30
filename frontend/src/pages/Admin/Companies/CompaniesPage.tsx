@@ -239,22 +239,25 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
   };
 
   const loadData = async () => {
-    const allTenants = superAdminService.getTenants();
-    setTenants(allTenants);
-    setPackages(superAdminService.getPackages());
-
     try {
-      await superAdminService.fetchUsersFromApi();
-      setTenants([...superAdminService.getTenants()]);
-    } catch {
-      // Fallback to local
-    }
+      const [allTenants, allPackages] = await Promise.all([
+        superAdminService.fetchTenantsFromApi(),
+        superAdminService.fetchPackagesFromApi(),
+      ]);
+      setTenants(allTenants);
+      setPackages(allPackages);
 
-    if (selectedTenantId) {
-      const match = allTenants.find(t => t.id === selectedTenantId || t.slug === selectedTenantId);
-      if (match) {
-        openTenantDrawer(match);
+      if (selectedTenantId) {
+        const match = allTenants.find(t => t.id === selectedTenantId || t.slug === selectedTenantId);
+        if (match) {
+          openTenantDrawer(match);
+        }
       }
+    } catch (err) {
+      console.error('Error loading tenants from API:', err);
+      const fallbackTenants = superAdminService.getTenants();
+      setTenants(fallbackTenants);
+      setPackages(superAdminService.getPackages());
     }
   };
 
@@ -291,13 +294,18 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
     switchPersona('company_admin', t.slug);
   };
 
-
-  const handleSaveDrawerTenant = () => {
+  const handleSaveDrawerTenant = async () => {
     if (!drawerTenantEdit) return;
-    const updated = superAdminService.updateTenant(drawerTenantEdit);
-    setSelectedTenant(updated);
-    setSaveSuccessMsg('Organization profile and entitlements saved successfully.');
-    setTimeout(() => setSaveSuccessMsg(''), 3000);
+    try {
+      const updated = await superAdminService.updateTenantApi(drawerTenantEdit);
+      setSelectedTenant(updated);
+      setDrawerTenantEdit(updated);
+      setTenants(prev => prev.map(t => t.id === updated.id ? updated : t));
+      setSaveSuccessMsg('Organization profile and entitlements saved successfully.');
+      setTimeout(() => setSaveSuccessMsg(''), 3000);
+    } catch (err: any) {
+      alert(err.message || 'Failed to update organization settings.');
+    }
   };
 
   const handleToggleFeatureInDrawer = (featureKey: string) => {
@@ -309,76 +317,90 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
     setDrawerTenantEdit({ ...drawerTenantEdit, enabledFeatures: updatedFeatures });
   };
 
-  const handleToggleTenantStatus = (newStatus: 'Active' | 'Inactive' | 'Suspended') => {
+  const handleToggleTenantStatus = async (newStatus: 'Active' | 'Inactive' | 'Suspended') => {
     if (!selectedTenant) return;
-    const updated = superAdminService.toggleTenantStatus(selectedTenant.id, newStatus);
-    if (updated) {
-      setSelectedTenant(updated);
-      setDrawerTenantEdit(updated);
-      setSaveSuccessMsg(`Organization status changed to ${newStatus}.`);
-      setTimeout(() => setSaveSuccessMsg(''), 3000);
+    try {
+      const updated = await superAdminService.toggleTenantStatusApi(selectedTenant.id, newStatus);
+      if (updated) {
+        setSelectedTenant(updated);
+        setDrawerTenantEdit(updated);
+        setTenants(prev => prev.map(t => t.id === updated.id ? updated : t));
+        setSaveSuccessMsg(`Organization status changed to ${newStatus}.`);
+        setTimeout(() => setSaveSuccessMsg(''), 3000);
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to update organization status.');
     }
   };
 
-  const handleAddUserToCompany = () => {
+  const handleAddUserToCompany = async () => {
     if (!selectedTenant || !newUserName || !newUserEmail) return;
     const roles = superAdminService.getRoles();
-    superAdminService.createUser({
-      name: newUserName,
-      email: newUserEmail,
-      phone: newUserPhone,
-      role: roles.company_admin || SYSTEM_ROLES.company_admin,
-      companyId: selectedTenant.id,
-      companySlug: selectedTenant.slug,
-      companyName: selectedTenant.name,
-      status: 'Active',
-      designation: 'Company Administrator',
-    });
-    setDrawerUsers(getCachedAssignedReps(selectedTenant));
-    setIsAddUserModalOpen(false);
-    setNewUserName('');
-    setNewUserEmail('');
+    try {
+      await superAdminService.createUserApi({
+        name: newUserName,
+        email: newUserEmail,
+        phone: newUserPhone,
+        role: roles.company_admin || SYSTEM_ROLES.company_admin,
+        companyId: selectedTenant.id,
+        companySlug: selectedTenant.slug,
+        companyName: selectedTenant.name,
+        status: 'Active',
+        designation: 'Company Administrator',
+      });
+      await loadTenantAssignedReps(selectedTenant);
+      setIsAddUserModalOpen(false);
+      setNewUserName('');
+      setNewUserEmail('');
+    } catch (err: any) {
+      alert(err.message || 'Failed to provision company administrator.');
+    }
   };
 
   // Complete Onboarding Wizard
-  const handleDeployOrganization = () => {
+  const handleDeployOrganization = async () => {
     if (!wizardName.trim()) return;
 
-    superAdminService.createTenant(
-      {
-        name: wizardName.trim(),
-        legalName: wizardLegalName.trim() || wizardName.trim(),
-        slug: wizardSlug.trim().toLowerCase() || wizardName.toLowerCase().replace(/[^a-z0-9]/g, ''),
-        industry: wizardIndustry,
-        tagline: wizardTagline || 'Enterprise Sales Fleet',
-        brandColor: wizardBrandColor,
-        timezone: wizardTimezone,
-        currency: wizardCurrency,
-        businessHours: wizardBusinessHours,
-        subscriptionPlan: wizardPlan,
-        enabledFeatures: wizardSelectedFeatures,
-        status: 'Active',
-      },
-      wizardAdminEmail
-        ? {
-          name: wizardAdminName || 'Primary Administrator',
-          email: wizardAdminEmail,
-          phone: wizardAdminPhone,
-        }
-        : undefined,
-      wizardDidNumber
-        ? {
-          phoneNumber: wizardDidNumber,
-          routingStrategy: wizardRoutingStrategy,
-        }
-        : undefined
-    );
+    try {
+      const newTenant = await superAdminService.createTenantApi(
+        {
+          name: wizardName.trim(),
+          legalName: wizardLegalName.trim() || wizardName.trim(),
+          slug: wizardSlug.trim().toLowerCase() || wizardName.toLowerCase().replace(/[^a-z0-9]/g, ''),
+          industry: wizardIndustry,
+          tagline: wizardTagline || 'Enterprise Sales Fleet',
+          brandColor: wizardBrandColor,
+          timezone: wizardTimezone,
+          currency: wizardCurrency,
+          businessHours: wizardBusinessHours,
+          subscriptionPlan: wizardPlan,
+          enabledFeatures: wizardSelectedFeatures,
+          status: 'Active',
+        },
+        wizardAdminEmail
+          ? {
+            name: wizardAdminName || 'Primary Administrator',
+            email: wizardAdminEmail,
+            phone: wizardAdminPhone,
+          }
+          : undefined,
+        wizardDidNumber
+          ? {
+            phoneNumber: wizardDidNumber,
+            routingStrategy: wizardRoutingStrategy,
+          }
+          : undefined
+      );
 
-    setIsWizardOpen(false);
-    setWizardStep(1);
-    // Reset fields
-    setWizardName('');
-    setWizardAdminEmail('');
+      setTenants(prev => [...prev, newTenant]);
+      setIsWizardOpen(false);
+      setWizardStep(1);
+      // Reset fields
+      setWizardName('');
+      setWizardAdminEmail('');
+    } catch (err: any) {
+      alert(err.message || 'Failed to deploy new organization.');
+    }
   };
 
   // Filtered tenants
@@ -1442,10 +1464,15 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
 
                       <button
                         className="btn btn-danger btn-sm"
-                        onClick={() => {
+                        onClick={async () => {
                           if (confirm(`Are you sure you want to permanently delete organization "${selectedTenant.name}"?`)) {
-                            superAdminService.deleteTenant(selectedTenant.id);
-                            setIsDetailDrawerOpen(false);
+                            try {
+                              await superAdminService.deleteTenantApi(selectedTenant.id);
+                              setTenants(prev => prev.filter(t => t.id !== selectedTenant.id));
+                              setIsDetailDrawerOpen(false);
+                            } catch (err: any) {
+                              alert(err.message || 'Failed to delete organization');
+                            }
                           }
                         }}
                       >
