@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   XCircle,
   AlertTriangle,
+  CheckCircle2,
 } from 'lucide-react';
 import './KycLinkComponents.css';
 
@@ -18,6 +19,7 @@ export type CustomerKycStatus =
   | 'Submitted'
   | 'Under Verification'
   | 'Verified'
+  | 'Completed'
   | 'Rejected'
   | 'Needs Correction'
   | 'Wrong';
@@ -61,6 +63,13 @@ export const KycStatusBadge: React.FC<KycStatusBadgeProps> = ({ status }) => {
         <span className="kyc-link-badge kyc-link-badge-under-verification">
           <ShieldAlert size={11} />
           Under Verification
+        </span>
+      );
+    case 'Completed':
+      return (
+        <span className="kyc-link-badge kyc-link-badge-verified">
+          <CheckCircle2 size={11} />
+          Completed
         </span>
       );
     case 'Verified':

@@ -23,6 +23,7 @@ import {
   Users,
   Edit2,
   Send,
+  RefreshCw,
 } from 'lucide-react';
 import { SendKycLinkModal } from './components/SendKycLinkModal';
 import { KycStatusBadge } from './components/KycStatusBadge';
@@ -281,6 +282,7 @@ const GhlIrmKycView: React.FC = () => {
   const [sendLinkDeal, setSendLinkDeal] = useState<Deal | null>(null);
   const [reviewDeal, setReviewDeal] = useState<Deal | null>(null);
   const [dbKycs, setDbKycs] = useState<Record<string, any>>({});
+  const [sentDealIds, setSentDealIds] = useState<Record<string, boolean>>({});
 
   // View state: 'table' | 'flow' | 'profile'
   const [viewMode, setViewMode] = useState<'table' | 'flow' | 'profile'>('table');
@@ -318,65 +320,47 @@ const GhlIrmKycView: React.FC = () => {
     };
   };
 
-  const resolveCustomerKycStatus = (
-    deal: Deal,
-    kycMap?: Record<string, any>,
-    profileData?: any
-  ): CustomerKycStatus => {
-    if (deal.customerKycStatus && ['Submitted', 'Under Verification', 'Verified', 'Needs Correction', 'Wrong'].includes(deal.customerKycStatus)) {
-      return deal.customerKycStatus as CustomerKycStatus;
-    }
-
-    const emailKey = (deal.email || '').toLowerCase().trim();
-    const phoneDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
-    const currentMap = kycMap || dbKycs;
-    let dbKyc = currentMap ? currentMap[emailKey] : null;
-    if (!dbKyc && currentMap && phoneDigits) {
-      dbKyc = Object.values(currentMap).find((k: any) => {
-        const kDigits = (k.phone || '').replace(/\D/g, '').slice(-10);
-        return Boolean(kDigits && kDigits === phoneDigits);
-      });
-    }
-
-    if (dbKyc) {
-      if (dbKyc.status === 'Approved') return 'Verified';
-      if (dbKyc.status === 'Rejected') return 'Wrong';
-      if (dbKyc.status === 'ReuploadRequested') return 'Needs Correction';
-      if (dbKyc.status === 'PendingReview' || dbKyc.submittedAt) return 'Submitted';
-      if (dbKyc.status === 'Draft') return dbKyc.kycLinkSent ? 'In Progress' : 'Link Sent';
-    }
-
+  const refreshDbKycs = async () => {
     try {
-      const raw = localStorage.getItem('nexus_mock_kyc_records');
-      if (raw) {
-        const records = JSON.parse(raw);
-        if (records[deal.id]?.status) {
-          return records[deal.id].status as CustomerKycStatus;
-        }
+      const res = await fetch('/api/irm/kyc/all');
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json?.success && Array.isArray(json.data)) {
+        const map: Record<string, any> = {};
+        json.data.forEach((k: any) => {
+          if (k.email) map[k.email.toLowerCase()] = k;
+        });
+        setDbKycs(map);
       }
-    } catch {}
+    } catch {
+      // background refresh
+    }
+  };
 
-    if (localStorage.getItem('nexus_kyc_status_' + deal.id) === 'Completed') {
-      return 'Submitted';
+  const resolveCustomerKycStatus = (deal: Deal): CustomerKycStatus => {
+    // 1. deal.kycStatus === 'Verified' -> 'Verified'
+    if (deal.kycStatus === 'Verified') return 'Verified';
+
+    // 2. deal.kycStatus === 'Wrong' -> 'Needs Correction'
+    if (deal.kycStatus === 'Wrong') return 'Needs Correction';
+
+    // 3. find rec = dbKycs[(deal.email||'').toLowerCase()]; if rec:
+    const rec = dbKycs[(deal.email || '').toLowerCase().trim()];
+    if (rec) {
+      if (rec.status === 'ReuploadRequested') return 'Needs Correction';
+      if (rec.status === 'Rejected') return 'Rejected';
+      if (rec.status && rec.status !== 'Draft') return 'Completed';
+      if (rec.kycLinkSent) return 'Link Sent';
     }
 
-    const pan = profileData?.panNumber || (deal as any).pan || (deal as any).panNumber;
-    const aadhaar = profileData?.aadhaarNumber || (deal as any).aadhaar || (deal as any).aadhaarNumber;
-    if (pan && (aadhaar || profileData?.address || profileData?.bankName)) {
-      return 'Submitted';
-    }
+    // 4. sentDealIds[deal.id] -> 'Link Sent'
+    if (sentDealIds[deal.id]) return 'Link Sent';
 
-    try {
-      const saved = localStorage.getItem('nexus_kyc_data_' + deal.id);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.panNumber && (parsed.aadhaarNumber || parsed.address || parsed.bankName)) {
-          return 'Submitted';
-        }
-      }
-    } catch {}
+    // 5. otherwise the existing (deal as any).customerKycStatus, then getCustomerKycStatus(deal.id, undefined)
+    const existing = (deal as any).customerKycStatus;
+    if (existing) return existing as CustomerKycStatus;
 
-    return (deal.customerKycStatus as CustomerKycStatus) || 'Pending';
+    return getCustomerKycStatus(deal.id, undefined);
   };
 
   const loadData = async () => {
@@ -416,7 +400,7 @@ const GhlIrmKycView: React.FC = () => {
       }
     }
 
-        fetch('/api/irm/kyc/all')
+    fetch('/api/irm/kyc/all')
       .then(res => (res.ok ? res.json() : null))
       .then(json => {
         if (my !== reqId.current) return;
@@ -426,38 +410,9 @@ const GhlIrmKycView: React.FC = () => {
             if (k.email) map[k.email.toLowerCase()] = k;
           });
           setDbKycs(map);
-
-          setDeals(prevDeals =>
-            prevDeals.map(deal => {
-              const emailKey = (deal.email || '').toLowerCase().trim();
-              const dbItem = map[emailKey];
-              const resolved = resolveCustomerKycStatus(deal, map);
-              return {
-                ...deal,
-                customerKycStatus: resolved,
-                kycId: dbItem?.id || (deal as any).kycId,
-                ...(dbItem?.status === 'Approved' ? { kycStatus: 'Verified', verifiedBy: dbItem.verifiedBy, verifiedAt: dbItem.verifiedAt } : {}),
-                ...(dbItem?.status === 'Rejected' ? { kycStatus: 'Wrong' } : {}),
-              };
-            })
-          );
-
-          setSelectedCustomerDeal(prev => {
-            if (!prev) return null;
-            const emailKey = (prev.email || '').toLowerCase().trim();
-            const dbItem = map[emailKey];
-            const resolved = resolveCustomerKycStatus(prev, map);
-            return {
-              ...prev,
-              customerKycStatus: resolved,
-              kycId: dbItem?.id || (prev as any).kycId,
-              ...(dbItem?.status === 'Approved' ? { kycStatus: 'Verified', verifiedBy: dbItem.verifiedBy, verifiedAt: dbItem.verifiedAt } : {}),
-              ...(dbItem?.status === 'Rejected' ? { kycStatus: 'Wrong' } : {}),
-            };
-          });
         }
       })
-      .catch(() => { 
+      .catch(() => {
         if (my !== reqId.current) return;
       });
   };
@@ -561,6 +516,33 @@ const GhlIrmKycView: React.FC = () => {
       window.removeEventListener('nexus_storage_updated', handleUpdate);
     };
   }, [tenant?.id]);
+
+  useEffect(() => {
+    if (isMockMode()) return;
+
+    const interval = setInterval(() => {
+      refreshDbKycs();
+    }, 15000);
+
+    const handleFocus = () => {
+      refreshDbKycs();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshDbKycs();
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -1433,7 +1415,7 @@ const GhlIrmKycView: React.FC = () => {
       header: 'KYC Status',
       width: '160px',
       render: deal => {
-        const custStatus = resolveCustomerKycStatus(deal, dbKycs);
+        const custStatus = resolveCustomerKycStatus(deal);
         return (
           <KycStatusDropdown
             deal={deal}
@@ -1451,8 +1433,7 @@ const GhlIrmKycView: React.FC = () => {
       header: 'Customer KYC',
       width: '140px',
       render: deal => {
-        // TODO(logic): Connect to live backend customer KYC link status
-        const custStatus = getCustomerKycStatus(deal.id, (deal as any).customerKycStatus);
+        const custStatus = resolveCustomerKycStatus(deal);
         return <KycStatusBadge status={custStatus} />;
       },
     },
@@ -1460,39 +1441,54 @@ const GhlIrmKycView: React.FC = () => {
       key: 'stageAction',
       header: 'Stage Action',
       width: '160px',
-      render: deal => (
-        <div style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
-          {/* Send KYC Link Button */}
-          <button
-            type="button"
-            className="btn btn-sm btn-secondary"
-            title="Send Customer KYC Link"
-            style={{
-              fontSize: 11,
-              padding: '5px 10px',
-              fontWeight: 600,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              borderRadius: 6,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              flexShrink: 0,
-              borderColor: 'var(--primary-500, #3b82f6)',
-              color: 'var(--primary-600, #2563eb)',
-              background: 'rgba(37, 99, 235, 0.06)',
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              const enriched = enrichDealWithContact(deal, leads, customers);
-              setSendLinkDeal(enriched);
-            }}
-          >
-            <Send size={12} />
-            Send KYC Link
-          </button>
-        </div>
-      ),
+      render: deal => {
+        const status = resolveCustomerKycStatus(deal);
+        if (['Completed', 'Submitted', 'Under Verification', 'Verified'].includes(status)) {
+          return (
+            <span
+              style={{ color: 'var(--text-muted, #94a3b8)', fontSize: 13, fontWeight: 500 }}
+              title="Customer has completed the KYC form"
+            >
+              —
+            </span>
+          );
+        }
+
+        const isResend = ['Link Sent', 'In Progress', 'Needs Correction', 'Rejected'].includes(status);
+
+        return (
+          <div style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+            <button
+              type="button"
+              className="btn btn-sm btn-secondary"
+              title={isResend ? 'Resend Customer KYC Link' : 'Send Customer KYC Link'}
+              style={{
+                fontSize: 11,
+                padding: '5px 10px',
+                fontWeight: 600,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                borderRadius: 6,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+                borderColor: 'var(--primary-500, #3b82f6)',
+                color: 'var(--primary-600, #2563eb)',
+                background: 'rgba(37, 99, 235, 0.06)',
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                const enriched = enrichDealWithContact(deal, leads, customers);
+                setSendLinkDeal(enriched);
+              }}
+            >
+              {isResend ? <RefreshCw size={12} /> : <Send size={12} />}
+              {isResend ? 'Resend Link' : 'Send KYC Link'}
+            </button>
+          </div>
+        );
+      },
     },
     {
       key: 'actions',
@@ -1624,7 +1620,7 @@ const GhlIrmKycView: React.FC = () => {
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 12 }}>
                   <KycStatusDropdown
                     deal={deal}
-                    customerKycStatus={resolveCustomerKycStatus(deal, dbKycs, data)}
+                    customerKycStatus={resolveCustomerKycStatus(deal)}
                     onChange={(status, comment, flaggedSections, checklist) =>
                       handleStatusChange(deal, status, comment, flaggedSections, checklist)
                     }
@@ -1661,12 +1657,12 @@ const GhlIrmKycView: React.FC = () => {
                 {/* Verify KYC Button */}
                 {(() => {
                   const normalizedStatus = normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy);
-                  const custStatus = resolveCustomerKycStatus(deal, dbKycs, data);
+                  const custStatus = resolveCustomerKycStatus(deal);
                   const customerSubmitted =
+                    custStatus === 'Completed' ||
                     custStatus === 'Submitted' ||
                     custStatus === 'Under Verification' ||
-                    custStatus === 'Verified' ||
-                    Boolean(data.panNumber && (data.aadhaarNumber || data.address || data.bankName));
+                    custStatus === 'Verified';
                   const canVerify =
                     permissions.includes(PERMISSIONS.KYC_VERIFY) ||
                     user?.role?.code === 'irm' ||
@@ -3038,6 +3034,11 @@ const GhlIrmKycView: React.FC = () => {
         onClose={() => setSendLinkDeal(null)}
         deal={sendLinkDeal}
         onShowToast={showToast}
+        isResend={!!sendLinkDeal && ['Link Sent', 'In Progress', 'Needs Correction', 'Rejected'].includes(resolveCustomerKycStatus(sendLinkDeal))}
+        onSent={sent => {
+          setSentDealIds(prev => ({ ...prev, [sent.id]: true }));
+          refreshDbKycs();
+        }}
       />
 
       {/* Review Customer KYC Drawer */}

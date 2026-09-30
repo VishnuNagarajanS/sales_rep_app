@@ -22,6 +22,8 @@ interface SendKycLinkModalProps {
   onClose: () => void;
   deal: Deal | null;
   onShowToast: (msg: string) => void;
+  onSent?: (deal: Deal) => void;
+  isResend?: boolean;
 }
 
 export const SendKycLinkModal: React.FC<SendKycLinkModalProps> = ({
@@ -29,6 +31,8 @@ export const SendKycLinkModal: React.FC<SendKycLinkModalProps> = ({
   onClose,
   deal,
   onShowToast,
+  onSent,
+  isResend = false,
 }) => {
   const [selectedChannel, setSelectedChannel] = useState<'whatsapp' | 'sms' | 'email'>('whatsapp');
   const [expiry, setExpiry] = useState<string>('48h');
@@ -99,6 +103,7 @@ GHL India Ventures | IRM Desk`;
   const handleSendLink = async () => {
     setIsSending(true);
     let finalLink = generatedLink;
+    let linkCreated = false;
 
     try {
       const payload = {
@@ -122,8 +127,11 @@ GHL India Ventures | IRM Desk`;
 
       if (res.ok) {
         const json = await res.json();
-        if (json?.success && json.data?.link) {
-          finalLink = json.data.link;
+        if (json?.success) {
+          linkCreated = true;
+          if (json.data?.link) {
+            finalLink = json.data.link;
+          }
         }
       }
     } catch (err: any) {
@@ -131,6 +139,10 @@ GHL India Ventures | IRM Desk`;
     }
 
     setIsSending(false);
+
+    if (linkCreated || isMockMode()) {
+      onSent?.(deal);
+    }
 
     // ── 1. WhatsApp Web Click-to-Chat ──────────────────────────────────────────
     if (selectedChannel === 'whatsapp') {
@@ -188,7 +200,7 @@ GHL India Ventures | IRM Desk`;
         <div className="kyc-link-modal-header">
           <h3 className="kyc-link-modal-title">
             <Send size={18} color="var(--primary-600, #2563eb)" />
-            Send Customer KYC Link
+            {isResend ? 'Resend Customer KYC Link' : 'Send Customer KYC Link'}
           </h3>
           <button
             type="button"

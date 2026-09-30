@@ -103,10 +103,11 @@ export const KycStatusDropdown: React.FC<Props> = ({
   const displayStatus = localStatus || currentStatus;
 
   const canVerifyCustomer =
+    customerKycStatus === 'Completed' ||
     customerKycStatus === 'Submitted' ||
     customerKycStatus === 'Under Verification' ||
     customerKycStatus === 'Verified' ||
-    Boolean((deal as any).pan || (deal as any).panNumber || (deal as any).customerKycStatus === 'Submitted') ||
+    Boolean((deal as any).pan || (deal as any).panNumber || (deal as any).customerKycStatus === 'Submitted' || (deal as any).customerKycStatus === 'Completed') ||
     Boolean(localStorage.getItem(`nexus_kyc_status_${deal.id}`) === 'Completed') ||
     Boolean(localStorage.getItem(`nexus_kyc_data_${deal.id}`));
 

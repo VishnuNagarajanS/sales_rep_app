@@ -70,12 +70,14 @@ export interface KycReviewData {
 
 export type CustomerKycStatus =
   | 'Verified'
+  | 'Completed'
   | 'Link Sent'
   | 'In Progress'
   | 'Submitted'
   | 'Under Verification'
   | 'Needs Correction'
   | 'Wrong'
+  | 'Rejected'
   | 'Pending';
 
 export interface MockKycProvider {
