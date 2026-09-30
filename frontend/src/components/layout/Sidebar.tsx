@@ -58,6 +58,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
   const [isCollapseHovered, setIsCollapseHovered] = useState(false);
 
   const roleCode = user?.role?.code;
+  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.name === 'Jamin Bazaar' || user?.companySlug === 'jamin';
+  const isJaminSalesExec = isJamin && user?.role?.code === 'sales_executive';
+  const isJaminAdmin = isJamin && (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
+
   const isGhlAdmin =
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
@@ -273,6 +277,110 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
     },
   ];
 
+  // Jamin Bazaar Sales Executive Navigation Map (Only 2 roles for Jamin: Admin & Executive)
+  const jaminSalesExecSections: NavSection[] = [
+    {
+      items: [
+        { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
+      ],
+    },
+    {
+      header: 'Sales',
+      items: [
+        { id: 'leads', label: 'Leads', icon: <Users size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
+        { id: 'followups', label: 'Follow-ups', icon: <CalendarCheck size={18} />, feature: FEATURES.FOLLOWUPS, permission: PERMISSIONS.FOLLOWUPS_VIEW },
+        { id: 'site-visits', label: 'Site Visits', icon: <Calendar size={18} />, feature: FEATURES.SITE_VISITS, permission: PERMISSIONS.SITE_VISITS_VIEW },
+        { id: 'customers', label: 'Customers 360', icon: <Building2 size={18} />, feature: FEATURES.CUSTOMERS, permission: PERMISSIONS.CUSTOMERS_VIEW },
+        { id: 'not-interested', label: 'Not - Interested', icon: <XCircle size={18} /> },
+        { id: 'junk', label: 'Junk', icon: <Trash2 size={18} /> },
+      ],
+    },
+    {
+      header: 'Calling',
+      items: [
+        { id: 'call-center', label: 'Call Center', icon: <PhoneCall size={18} />, feature: FEATURES.CALLS, permission: PERMISSIONS.CALLS_MAKE },
+        { id: 'call-history', label: 'Call History', icon: <History size={18} />, feature: FEATURES.CALLS, permission: PERMISSIONS.CALLS_VIEW },
+      ],
+    },
+    {
+      header: 'Analytics',
+      items: [
+        { id: 'reports', label: 'Reports', icon: <BarChart3 size={18} />, feature: FEATURES.REPORTS, permission: PERMISSIONS.REPORTS_VIEW },
+        { id: 'notifications', label: 'Notifications', icon: <Bell size={18} /> },
+      ],
+    },
+    {
+      header: 'Help and Support',
+      items: [
+        { id: 'chat', label: 'Chat', icon: <MessageSquare size={18} />, badge: unreadChatCount > 0 ? unreadChatCount : undefined },
+        { id: 'smarty-ai', label: 'Smarty AI', icon: <Sparkles size={18} /> },
+      ],
+    },
+    {
+      header: 'Settings',
+      items: [
+        { id: 'call-settings', label: 'Call Settings', icon: <PhoneCall size={18} />, feature: FEATURES.CALLS, permission: PERMISSIONS.CALLS_VIEW },
+        { id: 'profile', label: 'Profile', icon: <UserIcon size={18} /> },
+      ],
+    },
+  ];
+
+  // Jamin Bazaar Admin Navigation Map
+  const jaminAdminSections: NavSection[] = [
+    {
+      items: [
+        { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
+      ],
+    },
+    {
+      header: 'Sales',
+      items: [
+        { id: 'leads', label: 'Leads', icon: <Users size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
+        { id: 'followups', label: 'Follow-ups', icon: <CalendarCheck size={18} />, feature: FEATURES.FOLLOWUPS, permission: PERMISSIONS.FOLLOWUPS_VIEW },
+        { id: 'customers', label: 'Customers 360', icon: <Building2 size={18} />, feature: FEATURES.CUSTOMERS, permission: PERMISSIONS.CUSTOMERS_VIEW },
+      ],
+    },
+    {
+      header: 'Operations',
+      items: [
+        { id: 'site-visits', label: 'Site Visits', icon: <Calendar size={18} />, feature: FEATURES.SITE_VISITS, permission: PERMISSIONS.SITE_VISITS_VIEW },
+        { id: 'projects', label: 'Projects', icon: <MapPin size={18} />, feature: FEATURES.PROPERTIES, permission: PERMISSIONS.PROPERTIES_VIEW },
+        { id: 'plots', label: 'Plot Inventory', icon: <Grid size={18} />, feature: FEATURES.PROPERTIES, permission: PERMISSIONS.PROPERTIES_VIEW },
+        { id: 'bookings', label: 'Bookings', icon: <CheckCircle size={18} />, feature: FEATURES.BOOKINGS, permission: PERMISSIONS.BOOKINGS_VIEW },
+      ],
+    },
+    {
+      header: 'Calling',
+      items: [
+        { id: 'call-center', label: 'Call Center', icon: <PhoneCall size={18} />, feature: FEATURES.CALLS, permission: PERMISSIONS.CALLS_MAKE },
+        { id: 'call-history', label: 'Call History', icon: <History size={18} />, feature: FEATURES.CALLS, permission: PERMISSIONS.CALLS_VIEW },
+        { id: 'call-settings', label: 'Call Settings', icon: <PhoneCall size={18} />, feature: FEATURES.CALLS, permission: PERMISSIONS.CALLS_VIEW },
+      ],
+    },
+    {
+      header: 'Analytics',
+      items: [
+        { id: 'reports', label: 'Reports', icon: <BarChart3 size={18} />, feature: FEATURES.REPORTS, permission: PERMISSIONS.REPORTS_VIEW },
+        { id: 'notifications', label: 'Notifications', icon: <Bell size={18} /> },
+      ],
+    },
+    {
+      header: 'Administration',
+      items: [
+        { id: 'company-users', label: 'Users', icon: <Users size={18} />, feature: FEATURES.USERS, permission: PERMISSIONS.USERS_VIEW },
+        { id: 'company-settings', label: 'Company Settings', icon: <Settings size={18} />, feature: FEATURES.COMPANY_SETTINGS, permission: PERMISSIONS.SETTINGS_VIEW },
+        { id: 'company-audit', label: 'Audit Logs', icon: <FileCheck size={18} />, feature: FEATURES.AUDIT_LOGS, permission: PERMISSIONS.AUDIT_VIEW },
+      ],
+    },
+    {
+      header: 'Help and Support',
+      items: [
+        { id: 'chat', label: 'Chat', icon: <MessageSquare size={18} />, badge: unreadChatCount > 0 ? unreadChatCount : undefined },
+        { id: 'smarty-ai', label: 'Smarty AI', icon: <Sparkles size={18} /> },
+      ],
+    },
+  ];
+
   // Helper to filter items based on tenant-enabled features and user permissions
   const filterSection = (section: NavSection): NavItem[] => {
     return section.items.filter(item => {
@@ -289,11 +397,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
 
   const sectionsToRender = isSuperAdmin
     ? superAdminSections
-    : isIrm
-      ? irmSections
-      : isGhlSalesExec
-        ? ghlSalesExecSections
-        : companySections;
+    : isJaminSalesExec
+      ? jaminSalesExecSections
+      : isJaminAdmin
+        ? jaminAdminSections
+        : isIrm
+          ? irmSections
+          : isGhlSalesExec
+            ? ghlSalesExecSections
+            : companySections;
 
   return (
     <aside

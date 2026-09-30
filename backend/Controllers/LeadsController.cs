@@ -24,7 +24,7 @@ public class LeadsController : ControllerBase
 
         if (tenantId.HasValue)
         {
-            query = query.Where(l => l.TenantId == tenantId.Value);
+            query = query.Where(l => l.CompanyId == tenantId.Value);
         }
 
         var leads = await query.OrderByDescending(l => l.CreatedAt).ToListAsync(ct);
@@ -111,7 +111,7 @@ public class LeadsController : ControllerBase
 
         var lead = new Lead
         {
-            TenantId = dto.TenantId,
+            CompanyId = dto.TenantId,
             Name = dto.Name.Trim(),
             Phone = dto.Phone.Trim(),
             Email = string.IsNullOrWhiteSpace(dto.Email) ? null : dto.Email.Trim(),

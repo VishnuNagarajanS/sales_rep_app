@@ -35,7 +35,7 @@ export interface Tenant {
   updatedAt?: string;
 }
 
-export type RoleCode = 'super_admin' | 'company_admin' | 'sales_manager' | 'sales_executive' | 'irm';
+export type RoleCode = 'super_admin' | 'company_admin' | 'sales_executive' | 'irm';
 
 export interface Role {
   id: string;
@@ -307,8 +307,9 @@ export interface SiteVisit {
   scheduledAt: string;
   assignedAgentId: string;
   assignedAgentName: string;
-  status: 'Scheduled' | 'Completed' | 'Rescheduled' | 'Cancelled' | 'No-show';
+  status: 'Requested' | 'Pending' | 'Scheduled' | 'Completed' | 'Rescheduled' | 'Cancelled' | 'No-show';
   outcomeNotes?: string;
+  visitorNote?: string;
   contactType?: 'lead' | 'customer';
   leadId?: string;
 }
@@ -703,3 +704,101 @@ export interface ChatSettings {
     whoCanCreateGroups: 'everyone' | 'managers_admins';
   };
 }
+
+// ============================================================================
+// Super Admin Platform Types
+// ============================================================================
+
+export interface SubscriptionPackage {
+  id: string;
+  name: string;
+  code: string;
+  description: string;
+  tier: 'Starter' | 'Growth' | 'Enterprise';
+  priceMonthly: number;
+  currency: string;
+  maxUsers: number;
+  maxStorageGb: number;
+  features: string[];
+  isPopular?: boolean;
+  isActive: boolean;
+  enrolledTenantsCount?: number;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface TenantDidMapping {
+  id: string;
+  phoneNumber: string;
+  tenantId: string;
+  tenantName: string;
+  tenantSlug: string;
+  routingStrategy: 'Round-Robin' | 'Skill/Priority' | 'Least-Busy Rep' | 'Direct Extension';
+  queueName: string;
+  enableRecording: boolean;
+  enableAiWhisper: boolean;
+  status: 'Online' | 'Offline' | 'Reserved';
+  channelsCount: number;
+  allocatedAt: string;
+  notes?: string;
+}
+
+export interface PlatformCarrierSettings {
+  primaryCarrier: string;
+  secondaryCarrier: string;
+  sipRealm: string;
+  webrtcGatewayUrl: string;
+  recordingRetentionDays: number;
+  maxConcurrentChannels: number;
+  emergencyRoutingEnabled: boolean;
+  whisperAiModel: string;
+  lastTestedAt?: string;
+  testStatus?: 'Success' | 'Degraded' | 'Offline';
+}
+
+export interface SystemDiagnostics {
+  apiStatus: 'Healthy' | 'Degraded' | 'Down';
+  apiLatencyMs: number;
+  dbPoolActive: number;
+  dbPoolMax: number;
+  dbLatencyMs: number;
+  memoryUsedMb: number;
+  memoryLimitMb: number;
+  storageUsedGb: number;
+  storageLimitGb: number;
+  activeSessions: number;
+  activeWebSockets: number;
+  telephonyDropRate: number;
+  systemUptimePercentage: number;
+  lastBackupAt: string;
+}
+
+export interface BroadcastAnnouncement {
+  id: string;
+  title: string;
+  message: string;
+  priority: 'info' | 'warning' | 'critical';
+  targetAudience: 'all' | 'tenant_admins' | 'sales_reps';
+  targetTenantId?: string; // null or 'all' for all tenants
+  isActive: boolean;
+  createdAt: string;
+  createdBy: string;
+  expiresAt?: string;
+}
+
+export interface PlatformMetrics {
+  totalTenants: number;
+  activeTenants: number;
+  onboardingTenants: number;
+  suspendedTenants: number;
+  totalUsers: number;
+  activeUsers: number;
+  callsToday: number;
+  callsConnected: number;
+  totalLeads: number;
+  totalPipelineValue: number;
+  totalCustomers: number;
+  systemHealthScore: number;
+}
+
+export * from './kanban';

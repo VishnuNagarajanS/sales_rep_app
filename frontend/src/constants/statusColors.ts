@@ -38,6 +38,7 @@ export const STATUS_COLOR_MAP: Record<string, { bg: string; text: string; border
   Sold: { bg: 'rgba(239, 68, 68, 0.12)', text: '#dc2626', border: 'rgba(239, 68, 68, 0.3)', variant: 'danger' },
 
   // Site Visits & Consultations
+  Requested: { bg: 'rgba(245, 158, 11, 0.15)', text: '#d97706', border: 'rgba(245, 158, 11, 0.4)', variant: 'warning' },
   Scheduled: { bg: 'rgba(59, 130, 246, 0.12)', text: '#2563eb', border: 'rgba(59, 130, 246, 0.3)', variant: 'info' },
   Rescheduled: { bg: 'rgba(245, 158, 11, 0.12)', text: '#d97706', border: 'rgba(245, 158, 11, 0.3)', variant: 'warning' },
   'No-show': { bg: 'rgba(239, 68, 68, 0.12)', text: '#dc2626', border: 'rgba(239, 68, 68, 0.3)', variant: 'danger' },

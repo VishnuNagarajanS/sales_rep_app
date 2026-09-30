@@ -1,0 +1,174 @@
+using backend.Data;
+using backend.DTOs.Common;
+using backend.DTOs.Jamin;
+using backend.Models.Entities;
+using backend.Services.Interfaces.Jamin;
+using Microsoft.EntityFrameworkCore;
+
+namespace backend.Services.Implementations.Jamin;
+
+public class JaminPlotService : IJaminPlotService
+{
+    private readonly ApplicationDbContext _context;
+    private const int JaminTenantId = 2;
+
+    public JaminPlotService(ApplicationDbContext context)
+    {
+        _context = context;
+    }
+
+    public async Task<ApiResponse<List<JaminPlotResponseDto>>> GetPlotsAsync(int? projectId = null, string? status = null, CancellationToken ct = default)
+    {
+        var query = _context.JaminPlots.Where(p => p.CompanyId == JaminTenantId);
+
+        if (projectId.HasValue && projectId.Value > 0)
+        {
+            query = query.Where(p => p.ProjectId == projectId.Value);
+        }
+
+        if (!string.IsNullOrEmpty(status) && status != "All")
+        {
+            query = query.Where(p => p.Status == status);
+        }
+
+        var plots = await query.OrderBy(p => p.PlotNumber).ToListAsync(ct);
+        return ApiResponse<List<JaminPlotResponseDto>>.SuccessResult(plots.Select(MapToDto).ToList());
+    }
+
+    public async Task<ApiResponse<JaminPlotResponseDto>> GetPlotByIdAsync(int id, CancellationToken ct = default)
+    {
+        var plot = await _context.JaminPlots
+            .FirstOrDefaultAsync(p => p.Id == id && p.CompanyId == JaminTenantId, ct);
+
+        if (plot == null)
+        {
+            return ApiResponse<JaminPlotResponseDto>.FailureResult("Plot not found.");
+        }
+
+        return ApiResponse<JaminPlotResponseDto>.SuccessResult(MapToDto(plot));
+    }
+
+    public async Task<ApiResponse<JaminPlotResponseDto>> CreatePlotAsync(CreateJaminPlotDto dto, CancellationToken ct = default)
+    {
+        var project = await _context.JaminProjects
+            .FirstOrDefaultAsync(p => p.Id == dto.ProjectId && p.CompanyId == JaminTenantId, ct);
+
+        if (project == null)
+        {
+            return ApiResponse<JaminPlotResponseDto>.FailureResult("Project not found.");
+        }
+
+        var plot = new JaminPlot
+        {
+            CompanyId = JaminTenantId,
+            ProjectId = dto.ProjectId,
+            PlotNumber = dto.PlotNumber.Trim(),
+            Dimensions = dto.Dimensions?.Trim() ?? "30 x 40",
+            AreaSqFt = dto.AreaSqFt > 0 ? dto.AreaSqFt : 1200,
+            Facing = dto.Facing?.Trim() ?? "East",
+            Status = "Available",
+            Price = dto.Price,
+            Notes = dto.Notes?.Trim(),
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _context.JaminPlots.Add(plot);
+        project.TotalPlots = await _context.JaminPlots.CountAsync(p => p.ProjectId == dto.ProjectId, ct) + 1;
+        project.AvailablePlots = await _context.JaminPlots.CountAsync(p => p.ProjectId == dto.ProjectId && p.Status == "Available", ct) + 1;
+
+        await _context.SaveChangesAsync(ct);
+
+        return ApiResponse<JaminPlotResponseDto>.SuccessResult(MapToDto(plot), "Plot created successfully.");
+    }
+
+    public async Task<ApiResponse<JaminPlotResponseDto>> UpdatePlotAsync(int id, UpdateJaminPlotDto dto, CancellationToken ct = default)
+    {
+        var plot = await _context.JaminPlots
+            .FirstOrDefaultAsync(p => p.Id == id && p.CompanyId == JaminTenantId, ct);
+
+        if (plot == null)
+        {
+            return ApiResponse<JaminPlotResponseDto>.FailureResult("Plot not found.");
+        }
+
+        if (dto.PlotNumber != null) plot.PlotNumber = dto.PlotNumber.Trim();
+        if (dto.Dimensions != null) plot.Dimensions = dto.Dimensions.Trim();
+        if (dto.AreaSqFt.HasValue) plot.AreaSqFt = dto.AreaSqFt.Value;
+        if (dto.Facing != null) plot.Facing = dto.Facing.Trim();
+        if (dto.Status != null) plot.Status = dto.Status.Trim();
+        if (dto.Price.HasValue) plot.Price = dto.Price.Value;
+        if (dto.Notes != null) plot.Notes = dto.Notes.Trim();
+
+        plot.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(ct);
+
+        return ApiResponse<JaminPlotResponseDto>.SuccessResult(MapToDto(plot), "Plot updated successfully.");
+    }
+
+    public async Task<ApiResponse<JaminPlotResponseDto>> HoldPlotAsync(int id, HoldPlotRequestDto dto, CancellationToken ct = default)
+    {
+        var plot = await _context.JaminPlots
+            .FirstOrDefaultAsync(p => p.Id == id && p.CompanyId == JaminTenantId, ct);
+
+        if (plot == null)
+        {
+            return ApiResponse<JaminPlotResponseDto>.FailureResult("Plot not found.");
+        }
+
+        if (plot.Status != "Available")
+        {
+            return ApiResponse<JaminPlotResponseDto>.FailureResult($"Cannot hold plot in '{plot.Status}' status.");
+        }
+
+        plot.Status = "Hold";
+        plot.HeldByCustomerName = dto.CustomerName.Trim();
+        plot.HeldByCustomerPhone = dto.CustomerPhone.Trim();
+        plot.HoldExpiresAt = DateTime.UtcNow.AddDays(dto.HoldDays > 0 ? dto.HoldDays : 7);
+        if (!string.IsNullOrEmpty(dto.Notes)) plot.Notes = dto.Notes.Trim();
+        plot.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(ct);
+
+        return ApiResponse<JaminPlotResponseDto>.SuccessResult(MapToDto(plot), "Plot placed on hold successfully.");
+    }
+
+    public async Task<ApiResponse<JaminPlotResponseDto>> ReleasePlotHoldAsync(int id, CancellationToken ct = default)
+    {
+        var plot = await _context.JaminPlots
+            .FirstOrDefaultAsync(p => p.Id == id && p.CompanyId == JaminTenantId, ct);
+
+        if (plot == null)
+        {
+            return ApiResponse<JaminPlotResponseDto>.FailureResult("Plot not found.");
+        }
+
+        plot.Status = "Available";
+        plot.HeldByCustomerName = null;
+        plot.HeldByCustomerPhone = null;
+        plot.HoldExpiresAt = null;
+        plot.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(ct);
+
+        return ApiResponse<JaminPlotResponseDto>.SuccessResult(MapToDto(plot), "Plot hold released. Status is now Available.");
+    }
+
+    private static JaminPlotResponseDto MapToDto(JaminPlot p) => new()
+    {
+        Id = p.Id,
+        CompanyId = p.CompanyId,
+        ProjectId = p.ProjectId,
+        PlotNumber = p.PlotNumber,
+        Dimensions = p.Dimensions,
+        AreaSqFt = p.AreaSqFt,
+        Facing = p.Facing,
+        Status = p.Status,
+        Price = p.Price,
+        HeldByCustomerName = p.HeldByCustomerName,
+        HeldByCustomerPhone = p.HeldByCustomerPhone,
+        HoldExpiresAt = p.HoldExpiresAt,
+        Notes = p.Notes,
+        CreatedAt = p.CreatedAt,
+        UpdatedAt = p.UpdatedAt
+    };
+}

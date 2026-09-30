@@ -28,7 +28,7 @@ public class LeadConfiguration : IEntityTypeConfiguration<Lead>
 
         builder.Property(l => l.Source)
             .HasMaxLength(100)
-            .IsRequired();
+            .HasDefaultValue("Website Inbound");
 
         builder.Property(l => l.Status)
             .HasMaxLength(50)
@@ -38,55 +38,27 @@ public class LeadConfiguration : IEntityTypeConfiguration<Lead>
             .HasMaxLength(50)
             .HasDefaultValue("Medium");
 
-        builder.Property(l => l.AssignedAgentName)
-            .HasMaxLength(150);
-
-        // Website Form Intake Fields (Jamin)
-        builder.Property(l => l.TargetDevelopment)
-            .HasMaxLength(200);
-
-        builder.Property(l => l.PreferredVisitDate)
-            .HasMaxLength(100);
-
-        builder.Property(l => l.PreferredTimeSlot)
-            .HasMaxLength(100);
-
-        builder.Property(l => l.AnythingWeShouldKnow)
-            .HasMaxLength(2000);
-
-        builder.Property(l => l.WhatAreYouLookingFor)
-            .HasMaxLength(2000);
-
-        builder.Property(l => l.BudgetRange)
-            .HasMaxLength(100);
-
-        // GHL Fields
-        builder.Property(l => l.InvestmentCapacity)
-            .HasMaxLength(100);
-
-        builder.Property(l => l.AssetClass)
-            .HasMaxLength(100);
-
-        builder.Property(l => l.Horizon)
-            .HasMaxLength(100);
-
-        builder.Property(l => l.InvestorType)
-            .HasMaxLength(100);
-
         builder.Property(l => l.Notes)
             .HasMaxLength(4000);
 
         builder.Property(l => l.CreatedAt)
             .HasDefaultValueSql("NOW()");
 
+        builder.Ignore(l => l.TenantId);
+
         // Indexes
-        builder.HasIndex(l => new { l.TenantId, l.Phone });
+        builder.HasIndex(l => new { l.CompanyId, l.Phone });
         builder.HasIndex(l => l.Status);
 
         // Relationships
-        builder.HasOne(l => l.Tenant)
+        builder.HasOne(l => l.Company)
             .WithMany(t => t.Leads)
-            .HasForeignKey(l => l.TenantId)
+            .HasForeignKey(l => l.CompanyId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(l => l.AssignedAgent)
+            .WithMany()
+            .HasForeignKey(l => l.AssignedAgentId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

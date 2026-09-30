@@ -72,7 +72,7 @@ export const ConversationList: React.FC<Props> = ({
     };
   }, [openMenuConvId]);
 
-  const isManagerOrAdmin = me?.roleCode === 'company_admin' || me?.roleCode === 'super_admin' || me?.roleCode === 'sales_manager';
+  const isManagerOrAdmin = me?.roleCode === 'company_admin' || me?.roleCode === 'super_admin';
 
   const handleTogglePin = (e: React.MouseEvent, convId: string) => {
     e.stopPropagation();

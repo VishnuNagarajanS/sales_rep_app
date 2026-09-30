@@ -20,7 +20,7 @@ import {
   KanbanStageDef,
   ActivityLogItem,
   adminKanbanService,
-} from '../../mock_data/adminKanbanData';
+} from '../../services/adminKanbanService';
 import { useAuth } from '../../context/AuthContext';
 
 interface ActivityLogDrawerProps {

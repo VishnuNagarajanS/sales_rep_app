@@ -289,6 +289,24 @@
   box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
 }
 
+.ckyc-otp-box.ckyc-otp-error {
+  border-color: var(--ckyc-error);
+  background-color: var(--ckyc-error-bg);
+}
+
+.ckyc-otp-box.ckyc-otp-error:focus {
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+}
+
+.ckyc-spin {
+  animation: ckyc-spin-keyframes 1s linear infinite;
+}
+
+@keyframes ckyc-spin-keyframes {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .ckyc-resend-link {
   font-size: 13px;
   color: var(--ckyc-primary-dark);
@@ -298,6 +316,16 @@
   border: none;
   padding: 0;
   text-decoration: underline;
+}
+
+.ckyc-resend-link:hover:not(:disabled) {
+  color: var(--ckyc-primary);
+}
+
+.ckyc-resend-link:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  text-decoration: none;
 }
 
 /* ── Screen 4: Wizard 5-Steps ── */

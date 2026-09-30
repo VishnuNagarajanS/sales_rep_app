@@ -612,7 +612,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <StatusChip status={sv.status} size="sm" />
-                      {sv.status === 'Pending' && (
+                      {(sv.status === 'Pending' || sv.status === 'Requested') && (
                         <button
                           type="button"
                           className="btn btn-sm btn-primary"

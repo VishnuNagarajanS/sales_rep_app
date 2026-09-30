@@ -110,23 +110,6 @@ export const ROLES: Record<string, Role> = {
       PERMISSIONS.CHAT_VIEW, PERMISSIONS.CHAT_SEND,
     ],
   },
-  sales_manager: {
-    id: 'role-mgr',
-    name: 'Sales Manager',
-    code: 'sales_manager',
-    permissions: [
-      PERMISSIONS.LEADS_VIEW, PERMISSIONS.LEADS_CREATE, PERMISSIONS.LEADS_UPDATE, PERMISSIONS.LEADS_ASSIGN, PERMISSIONS.LEADS_EXPORT, PERMISSIONS.LEADS_CONVERT,
-      PERMISSIONS.CUSTOMERS_VIEW, PERMISSIONS.CUSTOMERS_CREATE, PERMISSIONS.CUSTOMERS_UPDATE,
-      PERMISSIONS.DEALS_VIEW, PERMISSIONS.DEALS_CREATE, PERMISSIONS.DEALS_UPDATE,
-      PERMISSIONS.CALLS_MAKE, PERMISSIONS.CALLS_RECEIVE, PERMISSIONS.CALLS_VIEW, PERMISSIONS.CALLS_RECORDINGS_PLAY,
-      PERMISSIONS.FOLLOWUPS_VIEW, PERMISSIONS.FOLLOWUPS_CREATE, PERMISSIONS.FOLLOWUPS_UPDATE,
-      PERMISSIONS.PROPERTIES_VIEW, PERMISSIONS.PROPERTIES_UPDATE, PERMISSIONS.SITE_VISITS_VIEW, PERMISSIONS.SITE_VISITS_CREATE, PERMISSIONS.BOOKINGS_VIEW, PERMISSIONS.BOOKINGS_CREATE,
-      PERMISSIONS.INVESTORS_VIEW, PERMISSIONS.INVESTORS_CREATE, PERMISSIONS.CONSULTATIONS_VIEW, PERMISSIONS.CONSULTATIONS_CREATE, PERMISSIONS.OPPORTUNITIES_VIEW, PERMISSIONS.OPPORTUNITIES_CREATE,
-      PERMISSIONS.REPORTS_VIEW, PERMISSIONS.REPORTS_EXPORT,
-      PERMISSIONS.USERS_VIEW,
-      PERMISSIONS.CHAT_VIEW, PERMISSIONS.CHAT_SEND,
-    ],
-  },
   sales_executive: {
     id: 'role-exec',
     name: 'Sales Executive',
@@ -175,8 +158,8 @@ export const ROLES: Record<string, Role> = {
 export const USERS: User[] = [
   {
     id: 'usr-super-01',
-    name: 'Alex Rivera (Super Admin)',
-    email: 'alex@nexusplatform.io',
+    name: 'Yanosh',
+    email: 'yanosh@ghlindiaventures.com',
     phone: '+91 98800 11000',
     role: ROLES.super_admin,
     status: 'Active',
@@ -184,8 +167,8 @@ export const USERS: User[] = [
   },
   {
     id: 'usr-ghl-admin',
-    name: 'Vikram Malhotra',
-    email: 'vikram@ghlindiatrust.com',
+    name: 'Vishnu',
+    email: 'vishnu@ghlindiaventures.com',
     phone: '+91 98450 22334',
     role: ROLES.company_admin,
     companyId: 't-ghl-01',
@@ -196,8 +179,8 @@ export const USERS: User[] = [
   },
   {
     id: 'usr-ghl-exec',
-    name: 'Ananya Iyer',
-    email: 'ananya@ghlindiatrust.com',
+    name: 'Naveen',
+    email: 'naveen@ghlindiaventures.com',
     phone: '+91 97420 55667',
     role: ROLES.sales_executive,
     companyId: 't-ghl-01',
@@ -208,8 +191,8 @@ export const USERS: User[] = [
   },
   {
     id: 'usr-ghl-irm',
-    name: 'Rohan Varma',
-    email: 'rohan.varma@ghlindiatrust.com',
+    name: 'Dhinakaran',
+    email: 'dhinakaran@ghlindiaventures.com',
     phone: '+91 98110 77889',
     role: ROLES.irm,
     companyId: 't-ghl-01',
@@ -271,8 +254,8 @@ export const USERS: User[] = [
   },
   {
     id: 'usr-jamin-admin',
-    name: 'Kavita Rao',
-    email: 'kavita@jaminbazaar.com',
+    name: 'Mani',
+    email: 'mani@ghlindiaventures.com',
     phone: '+91 98860 33445',
     role: ROLES.company_admin,
     companyId: 't-jamin-02',
@@ -717,8 +700,6 @@ export const INITIAL_CALLS: CallRecord[] = [
   {
     id: 'call-01',
     companyId: 't-ghl-01',
-    leadId: 'lead-ghl-01',
-    contactId: 'lead-ghl-01',
     contactName: 'Dr. Rajesh Nambiar',
     contactPhone: '+91 98451 12233',
     direction: 'outbound',
@@ -734,8 +715,6 @@ export const INITIAL_CALLS: CallRecord[] = [
   {
     id: 'call-02',
     companyId: 't-jamin-02',
-    leadId: 'lead-jam-02',
-    contactId: 'lead-jam-02',
     contactName: 'Deepak Kulkarni',
     contactPhone: '+91 97312 88990',
     direction: 'inbound',
@@ -751,8 +730,6 @@ export const INITIAL_CALLS: CallRecord[] = [
   {
     id: 'call-03',
     companyId: 't-jamin-02',
-    customerId: 'cust-jam-01',
-    contactId: 'cust-jam-01',
     contactName: 'Siddharth Rao',
     contactPhone: '+91 99001 77665',
     direction: 'outbound',
@@ -763,94 +740,7 @@ export const INITIAL_CALLS: CallRecord[] = [
     timestamp: 'Yesterday, 04:30 PM',
     notes: 'Token confirmation call. Siddharth transferred ₹5,00,000 via RTGS.',
   },
-  // ── GHL IRM Lead calls ── Agent call + IRM call per lead ──────────────
-  // lead-ghl-01  Dr. Rajesh Nambiar  (call-01 covers Agent; this covers IRM)
-  {
-    id: 'call-ghl-01-irm',
-    companyId: 't-ghl-01',
-    leadId: 'lead-ghl-01',
-    contactId: 'lead-ghl-01',
-    contactName: 'Dr. Rajesh Nambiar',
-    contactPhone: '+91 98451 12233',
-    direction: 'outbound',
-    duration: 621, // 10m 21s
-    agentId: 'usr-ghl-irm',
-    agentName: 'Rohan Varma',
-    disposition: 'Interested',
-    timestamp: 'Today, 2:45 PM',
-    recordingUrl: 'https://cdn.nexusplatform.io/recordings/call-ghl-01-irm.mp3',
-    transcription: 'IRM introduced AIF Category II structured debt product (14% IRR, 3-yr lock-in). Dr. Nambiar confirmed ₹3 Cr allocation intent. KYC initiation scheduled for Thursday.',
-    notes: 'Sent term sheet and fund factsheet via email.',
-  },
-  // lead-ghl-02  Sunita & Arvind Mehta
-  {
-    id: 'call-ghl-02-agent',
-    companyId: 't-ghl-01',
-    leadId: 'lead-ghl-02',
-    contactId: 'lead-ghl-02',
-    contactName: 'Sunita & Arvind Mehta',
-    contactPhone: '+91 99882 33445',
-    direction: 'outbound',
-    duration: 253, // 4m 13s
-    agentId: 'usr-ghl-exec',
-    agentName: 'Ananya Iyer',
-    disposition: 'Follow-up Required',
-    timestamp: 'Yesterday, 3:10 PM',
-    recordingUrl: 'https://cdn.nexusplatform.io/recordings/call-ghl-02-agent.mp3',
-    transcription: 'Discussed NRI fractional ownership model for warehouse logistics parks. Arvind asked about repatriation of yield income under FEMA. Follow-up with FEMA advisory note.',
-    notes: 'Needs clarification on FEMA repatriation rules before committing.',
-  },
-  {
-    id: 'call-ghl-02-irm',
-    companyId: 't-ghl-01',
-    leadId: 'lead-ghl-02',
-    contactId: 'lead-ghl-02',
-    contactName: 'Sunita & Arvind Mehta',
-    contactPhone: '+91 99882 33445',
-    direction: 'inbound',
-    duration: 478, // 7m 58s
-    agentId: 'usr-ghl-irm',
-    agentName: 'Rohan Varma',
-    disposition: 'Interested',
-    timestamp: 'Today, 10:00 AM',
-    recordingUrl: 'https://cdn.nexusplatform.io/recordings/call-ghl-02-irm.mp3',
-    transcription: 'Arvind confirmed ₹1.5 Cr budget. IRM walked through Industrial Logistics Park allocation, FEMA compliance structure, and yield distribution timeline (quarterly). Sunita preferred shorter 3-yr horizon.',
-    notes: 'IRM to prepare customised allocation plan. KYC initiation in progress.',
-  },
-  // lead-ghl-03  Karthik Somayaji
-  {
-    id: 'call-ghl-03-agent',
-    companyId: 't-ghl-01',
-    leadId: 'lead-ghl-03',
-    contactId: 'lead-ghl-03',
-    contactName: 'Karthik Somayaji',
-    contactPhone: '+91 94480 77889',
-    direction: 'inbound',
-    duration: 187, // 3m 7s
-    agentId: 'usr-ghl-exec-02',
-    agentName: 'Priya Sharma',
-    disposition: 'Interested',
-    timestamp: '2 days ago, 05:15 PM',
-    notes: 'Karthik reached out after reading article on tax-optimised commercial yield funds. Requested product brochure.',
-  },
-  {
-    id: 'call-ghl-03-irm',
-    companyId: 't-ghl-01',
-    leadId: 'lead-ghl-03',
-    contactId: 'lead-ghl-03',
-    contactName: 'Karthik Somayaji',
-    contactPhone: '+91 94480 77889',
-    direction: 'outbound',
-    duration: 312, // 5m 12s
-    agentId: 'usr-ghl-irm',
-    agentName: 'Rohan Varma',
-    disposition: 'Follow-up Required',
-    timestamp: 'Yesterday, 11:30 AM',
-    transcription: 'IRM explained Commercial Yield Fund structure — 10.5% net IRR post-tax, Section 10(23FBB) exempt. Karthik expressed interest but mentioned need to liquidate FDs first (matures next month).',
-    notes: 'Follow up in 30 days once FD matures. WhatsApp brochure sent.',
-  },
 ];
-
 
 export const INITIAL_FOLLOWUPS: Followup[] = [
   {
@@ -1124,7 +1014,6 @@ export const INITIAL_CONSULTATIONS: Consultation[] = [
     status: 'Scheduled',
     agenda: 'Review lease deed covenants and tax pass-through structure for Pre-Leased IT Park Suite.',
     outcomeNotes: 'Financial models and tenant credit rating sheets prepared.',
-    referredByAgentName: 'Suresh Kumar',
   },
   {
     id: 'cns-02',
@@ -1138,7 +1027,6 @@ export const INITIAL_CONSULTATIONS: Consultation[] = [
     status: 'Completed',
     agenda: 'Introductory advisory on fractional commercial real estate yields vs residential rental yields.',
     outcomeNotes: 'Client expressed clear interest in Grade-A commercial asset. Next step: Term sheet.',
-    referredByAgentName: 'Ananya Iyer',
   },
   {
     id: 'cns-03',
@@ -1152,7 +1040,6 @@ export const INITIAL_CONSULTATIONS: Consultation[] = [
     status: 'Scheduled',
     agenda: 'Whitefield Grade-A IT Park tranche allocation and yields discussion.',
     outcomeNotes: 'Term sheet shared; awaiting confirmation on ₹15 Cr ticket.',
-    referredByAgentName: 'Priya Rajan',
   },
   {
     id: 'cns-04',
@@ -1166,7 +1053,6 @@ export const INITIAL_CONSULTATIONS: Consultation[] = [
     status: 'Scheduled',
     agenda: 'Review lease deed covenants and tax structure for Pre-Leased Logistics Hub.',
     outcomeNotes: 'Preparing comparison matrix for 9% gross yield.',
-    referredByAgentName: 'Suresh Kumar',
   },
 ];
 
@@ -1259,8 +1145,8 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
   {
     id: 'aud-02',
     timestamp: 'Today, 11:20 AM',
-    actorName: 'Ananya Iyer',
-    actorEmail: 'ananya@ghlindiatrust.com',
+    actorName: 'Naveen',
+    actorEmail: 'naveen@ghlindiaventures.com',
     action: 'CALL_DISPOSITION_LOGGED',
     entityType: 'CallRecord',
     entityId: 'call-01',
@@ -1271,8 +1157,8 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
   {
     id: 'aud-03',
     timestamp: 'Yesterday, 04:35 PM',
-    actorName: 'Kavita Rao',
-    actorEmail: 'kavita@jaminbazaar.com',
+    actorName: 'Mani',
+    actorEmail: 'mani@ghlindiaventures.com',
     action: 'BOOKING_CONFIRMED',
     entityType: 'Booking',
     entityId: 'bkg-01',
@@ -1283,8 +1169,8 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
   {
     id: 'aud-04',
     timestamp: 'Yesterday, 02:15 PM',
-    actorName: 'Alex Rivera',
-    actorEmail: 'alex@nexusplatform.io',
+    actorName: 'Yanosh',
+    actorEmail: 'yanosh@ghlindiaventures.com',
     action: 'TENANT_FEATURE_UPDATED',
     entityType: 'Tenant',
     entityId: 't-ghl-01',

@@ -3,11 +3,41 @@ import { Calendar, Plus, CheckCircle2, Phone, Users, UserCheck } from 'lucide-re
 import { SiteVisit, Lead, Customer } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { storageService } from '../../services/storageService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import './SiteVisitsPage.css';
+const getStoredSiteVisits = (tenantId?: string): SiteVisit[] => {
+  try {
+    const raw = localStorage.getItem('nexus_site_visits');
+    const all = raw ? JSON.parse(raw) : [];
+    return tenantId ? all.filter((s: SiteVisit) => s.companyId === tenantId) : all;
+  } catch {
+    return [];
+  }
+};
+
+const saveStoredSiteVisit = (visit: SiteVisit) => {
+  try {
+    const raw = localStorage.getItem('nexus_site_visits');
+    const all: SiteVisit[] = raw ? JSON.parse(raw) : [];
+    const idx = all.findIndex(s => s.id === visit.id);
+    if (idx >= 0) all[idx] = visit;
+    else all.unshift(visit);
+    localStorage.setItem('nexus_site_visits', JSON.stringify(all));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
+
+const addStoredAuditLog = (log: any) => {
+  try {
+    const raw = localStorage.getItem('nexus_audit_logs');
+    const all = raw ? JSON.parse(raw) : [];
+    all.unshift(log);
+    localStorage.setItem('nexus_audit_logs', JSON.stringify(all));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
 
 export const SiteVisitsPage: React.FC = () => {
   const { tenant, user } = useAuth();
@@ -44,9 +74,7 @@ export const SiteVisitsPage: React.FC = () => {
   const [notes, setNotes] = useState('');
 
   const loadData = () => {
-    setSiteVisits(storageService.getSiteVisits(tenant?.id));
-    setLeads(storageService.getLeads(tenant?.id));
-    setCustomers(storageService.getCustomers(tenant?.id));
+    setSiteVisits(getStoredSiteVisits(tenant?.id));
   };
 
   useEffect(() => {
@@ -103,10 +131,10 @@ export const SiteVisitsPage: React.FC = () => {
       outcomeNotes: notes,
     };
 
-    storageService.saveSiteVisit(newVisit);
+    saveStoredSiteVisit(newVisit);
 
-    // Audit log
-    storageService.addAuditLog({
+    // Also notify
+    addStoredAuditLog({
       id: `aud-${Date.now()}`,
       timestamp: 'Just now',
       actorName: user?.name || 'Agent',
@@ -130,8 +158,7 @@ export const SiteVisitsPage: React.FC = () => {
   };
 
   const handleMarkComplete = (visit: SiteVisit) => {
-    storageService.saveSiteVisit({ ...visit, status: 'Completed' });
-    loadData();
+    saveStoredSiteVisit({ ...visit, status: 'Completed' });
   };
 
   const columns: Column<SiteVisit>[] = [
@@ -211,7 +238,7 @@ export const SiteVisitsPage: React.FC = () => {
     {
       label: 'Confirm Visit',
       icon: <CheckCircle2 size={14} color="#d97706" style={{ marginRight: 6 }} />,
-      hidden: sv => sv.status !== 'Pending',
+      hidden: sv => sv.status !== 'Pending' && sv.status !== 'Requested',
       onClick: sv => handleConfirmVisit(sv),
     },
     {

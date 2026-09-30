@@ -14,10 +14,69 @@ import {
   Info,
 } from 'lucide-react';
 import { NotificationItem, User as UserType } from '../../types';
-import { storageService } from '../../services/storageService';
 import { useAuth } from '../../context/AuthContext';
 import { Modal } from '../../components/common/Modal';
 import './NotificationsPage.css';
+
+const getStoredUsers = (tenantSlug?: string): UserType[] => {
+  try {
+    const raw = localStorage.getItem('nexus_users');
+    const users = raw ? JSON.parse(raw) : [];
+    return tenantSlug ? users.filter((u: any) => u.companySlug === tenantSlug) : users;
+  } catch {
+    return [];
+  }
+};
+
+const getStoredNotifications = (tenantId?: string, userId?: string, roleCode?: string): NotificationItem[] => {
+  try {
+    const raw = localStorage.getItem('nexus_notifications');
+    const all = raw ? JSON.parse(raw) : [];
+    return all.filter((n: any) => {
+      if (n.tenantId && tenantId && n.tenantId !== tenantId) return false;
+      if (n.recipientUserId && userId && n.recipientUserId !== userId) return false;
+      if (n.recipientRoleCode && roleCode && n.recipientRoleCode !== roleCode) return false;
+      return true;
+    });
+  } catch {
+    return [];
+  }
+};
+
+const markAllStoredNotificationsRead = (tenantId?: string, userId?: string) => {
+  try {
+    const raw = localStorage.getItem('nexus_notifications');
+    const all = raw ? JSON.parse(raw) : [];
+    all.forEach((n: any) => {
+      if ((!tenantId || n.tenantId === tenantId) && (!userId || n.recipientUserId === userId)) {
+        n.read = true;
+      }
+    });
+    localStorage.setItem('nexus_notifications', JSON.stringify(all));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
+
+const createStoredNotification = (notif: NotificationItem) => {
+  try {
+    const raw = localStorage.getItem('nexus_notifications');
+    const all = raw ? JSON.parse(raw) : [];
+    all.unshift(notif);
+    localStorage.setItem('nexus_notifications', JSON.stringify(all));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
+
+const markStoredNotificationRead = (id: string) => {
+  try {
+    const raw = localStorage.getItem('nexus_notifications');
+    const all = raw ? JSON.parse(raw) : [];
+    const item = all.find((n: any) => n.id === id);
+    if (item) item.read = true;
+    localStorage.setItem('nexus_notifications', JSON.stringify(all));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
 
 interface NotificationsPageProps {
   onNavigate: (route: string) => void;
@@ -46,11 +105,11 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
 
   // Load tenant users for recipient dropdown
   const tenantUsers: UserType[] = useMemo(() => {
-    return storageService.getUsers(tenant?.slug) || [];
+    return getStoredUsers(tenant?.slug) || [];
   }, [tenant?.slug]);
 
   const loadData = () => {
-    setNotifications(storageService.getNotifications(tenant?.id, user?.id, user?.role?.code));
+    setNotifications(getStoredNotifications(tenant?.id, user?.id, user?.role?.code));
   };
 
   useEffect(() => {
@@ -71,7 +130,7 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
   }, [isAdmin]);
 
   const handleMarkAll = () => {
-    storageService.markAllNotificationsRead(tenant?.id, user?.id);
+    markAllStoredNotificationsRead(tenant?.id, user?.id);
   };
 
   // Helper to get descriptive recipient label
@@ -119,7 +178,7 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
       createdAt: new Date().toISOString(),
     };
 
-    storageService.createNotification(newNotification);
+    createStoredNotification(newNotification);
 
     // Reset Form & Close
     setTitle('');
@@ -222,7 +281,7 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
                 key={n.id}
                 className={`notification-item-row ${!n.read ? 'unread' : ''} ${isUrgent ? 'row-urgent' : ''}`}
                 onClick={() => {
-                  storageService.markNotificationRead(n.id);
+                  markStoredNotificationRead(n.id);
                   if (n.link) onNavigate(n.link.replace('/', ''));
                 }}
               >

@@ -8,9 +8,17 @@ interface DrawerProps {
   title: string;
   subtitle?: string;
   children: React.ReactNode;
+  size?: 'sm' | 'md' | 'lg' | 'xl' | string;
   width?: string | number;
   footer?: React.ReactNode;
 }
+
+const DRAWER_SIZE_MAP: Record<string, number> = {
+  sm: 400,
+  md: 540,
+  lg: 760,
+  xl: 960,
+};
 
 export const Drawer: React.FC<DrawerProps> = ({
   isOpen,
@@ -18,9 +26,11 @@ export const Drawer: React.FC<DrawerProps> = ({
   title,
   subtitle,
   children,
-  width = 540,
+  size,
+  width,
   footer,
 }) => {
+  const resolvedWidth = width ?? (size ? (DRAWER_SIZE_MAP[size] ?? size) : 540);
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isOpen) {
@@ -50,7 +60,7 @@ export const Drawer: React.FC<DrawerProps> = ({
         className="animate-slide-right"
         style={{
           width: '100%',
-          maxWidth: typeof width === 'number' ? `${width}px` : width,
+          maxWidth: typeof resolvedWidth === 'number' ? `${resolvedWidth}px` : resolvedWidth,
           height: '100%',
           backgroundColor: 'var(--bg-surface)',
           display: 'flex',
