@@ -452,6 +452,7 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         status: lead.status || 'New',
         priority: lead.priority,
         notes: lead.notes,
+        assignedAgentId: nid(lead.assignedAgentId) || undefined,
         companyId: nid(lead.companyId) || 1,
         investmentCapacity: customFields['Investment Capacity'] ?? customFields['investmentCapacity'],
         assetClass: customFields['Asset Class'] ?? customFields['assetClass'],
@@ -465,6 +466,7 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         window.dispatchEvent(new Event('nexus_storage_updated'));
         return saved;
       }
+      throw new Error(res?.message || 'Failed to create lead');
     } else {
       const payload: Record<string, any> = {
         name: lead.name,
@@ -492,15 +494,12 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         window.dispatchEvent(new Event('nexus_storage_updated'));
         return saved;
       }
+      throw new Error(res?.message || 'Failed to update lead');
     }
-  } catch (err) {
-    console.warn('[ghlApiService] API lead save failed, persisting locally:', err);
+  } catch (err: any) {
+    console.error('[ghlApiService] API lead save failed:', err);
+    throw err;
   }
-
-  // Fallback / mirror to storageService
-  storageService.saveLead(lead);
-  window.dispatchEvent(new Event('nexus_storage_updated'));
-  return lead;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

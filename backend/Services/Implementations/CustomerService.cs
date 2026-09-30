@@ -41,7 +41,7 @@ public class CustomerService : ICustomerService
             query = query.Where(c => c.CompanyId == companyId.Value);
         }
 
-        if (role == "sales_executive" && agentId.HasValue)
+        if ((role == "sales_executive" || role == "irm") && agentId.HasValue)
         {
             query = query.Where(c => c.AssignedAgentId == agentId.Value);
         }
@@ -67,7 +67,7 @@ public class CustomerService : ICustomerService
             query = query.Where(c => c.CompanyId == companyId.Value);
         }
 
-        if (role == "sales_executive" && agentId.HasValue)
+        if ((role == "sales_executive" || role == "irm") && agentId.HasValue)
         {
             query = query.Where(c => c.AssignedAgentId == agentId.Value);
         }
@@ -185,6 +185,23 @@ public class CustomerService : ICustomerService
         var companyId = _currentUser.CompanyId;
         if (!companyId.HasValue || companyId.Value <= 0)
             return ApiResponse<CustomerResponseDto>.FailureResult("Unauthorized: Company ID is missing.");
+
+        // Canonical Customer Duplicate Check
+        var phoneDigits = new string(dto.Phone.Where(char.IsDigit).ToArray());
+        if (phoneDigits.Length > 10) phoneDigits = phoneDigits[^10..];
+        var cleanEmail = dto.Email?.Trim().ToLowerInvariant() ?? string.Empty;
+
+        var existingCust = await _context.Customers.FirstOrDefaultAsync(c =>
+            c.CompanyId == companyId.Value &&
+            ((!string.IsNullOrEmpty(phoneDigits) && c.Phone.Contains(phoneDigits)) ||
+             (!string.IsNullOrEmpty(cleanEmail) && c.Email.ToLower() == cleanEmail)), ct);
+
+        if (existingCust != null)
+        {
+            return ApiResponse<CustomerResponseDto>.FailureResult(
+                $"A customer already exists with this contact information: {existingCust.Name} ({existingCust.Phone} / {existingCust.Email}).",
+                new List<string> { "Duplicate contact information" });
+        }
 
         var customer = new Customer
         {

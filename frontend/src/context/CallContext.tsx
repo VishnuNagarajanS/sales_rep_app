@@ -374,11 +374,22 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      // 2. Follow-up Required -> Create follow-up record; keep IRM leads as 'Interested' (visible in IRM My Leads)
+      // 2. Follow-up Required -> Create or reuse follow-up record; move lead status to 'Follow-up Required'
       else if (disposition === 'Follow-up Required') {
         const followupScheduledAt = scheduleFollowup?.scheduledAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         const followupPriority = scheduleFollowup?.priority || 'High';
         const followupNotes = scheduleFollowup?.notes || (notes ? `Follow-up required: ${notes}` : `Follow-up required from call with ${lastCallRecord.contactName}`);
+
+        if (matchedLead) {
+          // Setting status to 'Follow-up Required' reliably moves it out of My Leads (Interested only) to Follow-up
+          // while preserving the row in the shared database leads table.
+          matchedLead.status = 'Follow-up Required';
+          matchedLead.nextFollowupDate = followupScheduledAt;
+          if (notes) {
+            matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Follow-up Required: ${notes}`;
+          }
+          apiSaveLead(matchedLead).catch(console.error);
+        }
 
         apiSaveFollowup({
           id: `flw-${Date.now()}`,
@@ -394,19 +405,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           assignedAgentId: matchedLead?.assignedAgentId || user.id,
           assignedAgentName: matchedLead?.assignedAgentName || user.name,
         }).catch(console.error);
-
-        if (matchedLead) {
-          // IRM leads must keep status='Interested' so they remain visible in IRM My Leads.
-          // Sales Exec leads use 'Follow-up Required' to move to the Follow-up section.
-          const isIrmUser = (user as any)?.role?.code === 'irm';
-          const updatedStatus: Lead['status'] = isIrmUser ? 'Interested' : 'Follow-up Required';
-          matchedLead.status = updatedStatus;
-          matchedLead.nextFollowupDate = followupScheduledAt;
-          if (notes) {
-            matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Follow-up Required: ${notes}`;
-          }
-          apiSaveLead(matchedLead).catch(console.error);
-        }
       }
 
       // 3. Call Back -> Keep in Leads section, update status to Callback

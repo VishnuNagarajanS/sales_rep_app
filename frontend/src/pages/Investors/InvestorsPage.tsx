@@ -345,14 +345,15 @@ export const InvestorsPage: React.FC = () => {
       render: (inv: Investor) => <span style={{ fontSize: 12 }}>{inv.preferredAssetClass}</span>,
     } as Column<Investor>]),
     ...(isGhlIrm ? [{
-      key: 'investorType' as any,
-      header: 'Structure',
+      key: 'investmentAmount' as any,
+      header: 'Investment Amount',
+      sortable: true,
       render: (inv: Investor) => {
         const matchingDeal = convertedDeals.find(d => d.customerId === inv.id || d.customerName.toLowerCase() === inv.name.toLowerCase());
-        const type = matchingDeal?.investorType || 'AIF';
+        const amt = matchingDeal?.value || (inv.committedAUM && !isNaN(Number(inv.committedAUM)) && Number(inv.committedAUM) > 0 ? Number(inv.committedAUM) : null);
         return (
-          <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 4, background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
-            {type}
+          <span style={{ fontWeight: 700, color: amt ? '#059669' : 'var(--text-muted)', fontSize: 13 }}>
+            {amt ? `₹${amt.toLocaleString('en-IN')}` : '—'}
           </span>
         );
       },
@@ -536,17 +537,15 @@ export const InvestorsPage: React.FC = () => {
                 </div>
                 {(() => {
                   const matchingDeal = convertedDeals.find(d => d.customerId === selectedInvestor.id || d.customerName.toLowerCase() === selectedInvestor.name.toLowerCase());
-                  if (matchingDeal?.investorType) {
-                    return (
-                      <div>
-                        <span style={{ color: 'var(--text-secondary)' }}>Investor Structure:</span>
-                        <div style={{ fontWeight: 800, color: 'var(--primary-600)', marginTop: 4 }}>
-                          {matchingDeal.investorType}
-                        </div>
+                  const amt = matchingDeal?.value || (selectedInvestor.committedAUM && !isNaN(Number(selectedInvestor.committedAUM)) && Number(selectedInvestor.committedAUM) > 0 ? Number(selectedInvestor.committedAUM) : null);
+                  return (
+                    <div>
+                      <span style={{ color: 'var(--text-secondary)' }}>Investment Amount:</span>
+                      <div style={{ fontWeight: 800, color: amt ? '#059669' : 'var(--text-muted)', marginTop: 4, fontSize: 15 }}>
+                        {amt ? `₹${amt.toLocaleString('en-IN')}` : '—'}
                       </div>
-                    );
-                  }
-                  return null;
+                    </div>
+                  );
                 })()}
               </div>
             </div>

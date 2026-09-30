@@ -79,6 +79,7 @@ export type CustomerKycStatus =
   | 'Needs Correction'
   | 'Wrong'
   | 'Rejected'
+  | 'Assisted KYC – Submitted for Verification'
   | 'Pending';
 
 export interface MockKycProvider {

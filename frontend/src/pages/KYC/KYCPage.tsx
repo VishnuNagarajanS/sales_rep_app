@@ -24,6 +24,8 @@ import {
   Edit2,
   Send,
   RefreshCw,
+  UserCheck,
+  Save,
 } from 'lucide-react';
 import { SendKycLinkModal } from './components/SendKycLinkModal';
 import { KycStatusBadge } from './components/KycStatusBadge';
@@ -32,6 +34,7 @@ import { getCustomerKycStatus, normalizeLegacyKycStatus, KycChecklist, CustomerK
 import { KycRowActionsMenu } from './components/KycRowActionsMenu';
 import { KycReviewDrawer } from './components/KycReviewDrawer';
 import { KycVerifyModal } from './components/KycVerifyModal';
+import { KycStageActionDropdown } from './components/KycStageActionDropdown';
 import { PERMISSIONS } from '../../constants/permissions';
 import { Deal, DealActivity, DocumentItem, Lead, Customer } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -305,6 +308,11 @@ const GhlIrmKycView: React.FC = () => {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [sameAsPermanent, setSameAsPermanent] = useState(false);
 
+  // Assisted KYC State
+  const [isAssistedFlow, setIsAssistedFlow] = useState<boolean>(false);
+  const [isAssistedReviewModalOpen, setIsAssistedReviewModalOpen] = useState<boolean>(false);
+  const [customerConsentChecked, setCustomerConsentChecked] = useState<boolean>(false);
+
   const enrichDealWithContact = (d: Deal, leadsList: Lead[], customersList: Customer[]): Deal => {
     if (d.phone && d.email) return d;
     const matchLead = leadsList.find(
@@ -346,6 +354,21 @@ const GhlIrmKycView: React.FC = () => {
     if (deal.kycStatus === 'Verified') return 'Verified';
     if (deal.kycStatus === 'Wrong') return 'Needs Correction';
 
+    // 1.5 Check if Assisted KYC was submitted for this deal
+    const assistedKey = `nexus_kyc_assisted_${deal.id}`;
+    const assistedRaw = localStorage.getItem(assistedKey);
+    if (assistedRaw) {
+      try {
+        const parsed = JSON.parse(assistedRaw);
+        if (parsed.status === 'Assisted KYC – Submitted for Verification') {
+          return 'Assisted KYC – Submitted for Verification';
+        }
+      } catch {}
+    }
+    if ((deal as any).customerKycStatus === 'Assisted KYC – Submitted for Verification') {
+      return 'Assisted KYC – Submitted for Verification';
+    }
+
     // 2. Check DB KYC record by email/phone
     const emailKey = (deal.email || '').toLowerCase().trim();
     const phoneDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
@@ -386,7 +409,20 @@ const GhlIrmKycView: React.FC = () => {
       const localLeads = storageService.getLeads(tenant?.id) || [];
       const localCustomers = storageService.getCustomers(tenant?.id) || [];
       const enriched = allDeals.map(d => enrichDealWithContact(d, localLeads, localCustomers));
-      setDeals(enriched.filter(d => d.stage === 'qualified_investor'));
+      const isIrmUser = user?.role?.code === 'irm';
+      const qualified = enriched
+        .filter(d => d.stage === 'qualified_investor')
+        .filter(d => !isIrmUser || (d.assignedAgentId && String(d.assignedAgentId) === String(user?.id)) || (d.assignedAgentName && d.assignedAgentName === user?.name));
+      const seenCustomer = new Set<string>();
+      const dedupedDeals = qualified.filter(d => {
+        const ph = (d.phone || '').replace(/\D/g, '').slice(-10);
+        const em = (d.email || '').trim().toLowerCase();
+        const key = ph ? `ph:${ph}` : em ? `em:${em}` : d.customerId ? `cid:${d.customerId}` : `id:${d.id}`;
+        if (seenCustomer.has(key)) return false;
+        seenCustomer.add(key);
+        return true;
+      });
+      setDeals(dedupedDeals);
       setLeads(localLeads);
       setCustomers(localCustomers);
       setIsLoading(false);
@@ -404,7 +440,27 @@ const GhlIrmKycView: React.FC = () => {
         const leadsList = apiLeads || [];
         const customersList = apiCustomers || [];
         const enriched = (allDeals || []).map(d => enrichDealWithContact(d, leadsList, customersList));
-        setDeals(enriched.filter(d => d.stage === 'qualified_investor'));
+        const qualified = enriched.filter(d => d.stage === 'qualified_investor');
+        const isIrmUser = user?.role?.code === 'irm';
+        const scopedQualified = isIrmUser
+          ? qualified.filter(d =>
+              (d.assignedAgentId && String(d.assignedAgentId) === String(user?.id)) ||
+              (d.assignedAgentName && d.assignedAgentName === user?.name)
+            )
+          : qualified;
+
+        const seenCustomer = new Set<string>();
+        const dedupedDeals: Deal[] = [];
+        for (const d of scopedQualified) {
+          const ph = (d.phone || '').replace(/\D/g, '').slice(-10);
+          const em = (d.email || '').trim().toLowerCase();
+          const key = ph ? `ph:${ph}` : em ? `em:${em}` : d.customerId ? `cid:${d.customerId}` : `id:${d.id}`;
+          if (!seenCustomer.has(key)) {
+            seenCustomer.add(key);
+            dedupedDeals.push(d);
+          }
+        }
+        setDeals(dedupedDeals);
         setLeads(leadsList);
         setCustomers(customersList);
         setIsLoading(false);
@@ -766,10 +822,11 @@ const GhlIrmKycView: React.FC = () => {
   };
 
   // Helper to open the 5-step wizard prefilled with deal info
-  const startKycFlow = (deal?: Deal, targetStep?: 1 | 2 | 3 | 4 | 5) => {
+  const startKycFlow = (deal?: Deal, targetStep?: 1 | 2 | 3 | 4 | 5, isAssisted?: boolean) => {
     const targetDeal = deal || selectedCustomerDeal || null;
     setSelectedDeal(targetDeal);
     if (targetDeal) setSelectedCustomerDeal(targetDeal);
+    setIsAssistedFlow(!!isAssisted);
 
     // Check if there is existing saved KYC data for this deal
     const savedKycKey = targetDeal ? `nexus_kyc_data_${targetDeal.id}` : null;
@@ -787,21 +844,68 @@ const GhlIrmKycView: React.FC = () => {
     }
 
     if (targetDeal && (!savedKycKey || !localStorage.getItem(savedKycKey))) {
+      const matchLead = leads.find(l => (targetDeal.phone && l.phone && l.phone.replace(/\D/g, '').slice(-10) === targetDeal.phone.replace(/\D/g, '').slice(-10)) || (l.id === targetDeal.customerId));
+      const matchCust = customers.find(c => (targetDeal.phone && c.phone && c.phone.replace(/\D/g, '').slice(-10) === targetDeal.phone.replace(/\D/g, '').slice(-10)) || (c.id === targetDeal.customerId));
+      const custom = matchLead?.customFields || matchCust?.customFields || {};
+
       initialForm = {
         ...BLANK_KYC_FORM,
         investorName: targetDeal.customerName || '',
         phone: targetDeal.phone || '+91 ',
         email: targetDeal.email || '',
-        city: targetDeal.location || '',
+        city: targetDeal.location || custom.city || '',
         nameAsPerPan: targetDeal.customerName || '',
         accountHolderName: targetDeal.customerName || '',
+        panNumber: custom.panNumber || custom.pan || '',
+        aadhaarNumber: custom.aadhaarNumber || custom.aadhaar || '',
+        occupation: custom.occupation || '',
+        address: custom.address || '',
+        state: custom.state || '',
+        pincode: custom.pincode || '',
       };
+    }
+
+    // Check if there was a saved draft with step info
+    let resumeStep = targetStep;
+    if (!resumeStep && targetDeal) {
+      try {
+        const draftMeta = localStorage.getItem(`nexus_kyc_draft_${targetDeal.id}`);
+        if (draftMeta) {
+          const parsed = JSON.parse(draftMeta);
+          if (parsed.step && parsed.step >= 1 && parsed.step <= 5) {
+            resumeStep = parsed.step;
+          }
+        }
+      } catch {}
     }
 
     setFormData(initialForm);
     setFormErrors({});
-    setCurrentStep(targetStep || 1);
+    setCurrentStep(resumeStep || 1);
     setViewMode('flow');
+  };
+
+  const startAssistedKycFlow = (deal: Deal, targetStep?: 1 | 2 | 3 | 4 | 5) => {
+    startKycFlow(deal, targetStep, true);
+  };
+
+  const handleSaveDraft = () => {
+    if (!selectedDeal) return;
+    const dealId = selectedDeal.id;
+    localStorage.setItem(`nexus_kyc_data_${dealId}`, JSON.stringify(formData));
+    localStorage.setItem(`nexus_kyc_draft_${dealId}`, JSON.stringify({
+      isAssisted: true,
+      step: currentStep,
+      savedAt: new Date().toISOString(),
+      assistedByIrmId: user?.id,
+      assistedByIrmName: user?.name,
+    }));
+    const currentStatus = localStorage.getItem(`nexus_kyc_status_${dealId}`);
+    if (currentStatus !== 'Completed' && currentStatus !== 'Submitted for Review') {
+      localStorage.setItem(`nexus_kyc_status_${dealId}`, 'Draft');
+    }
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+    showToast('Assisted KYC draft saved. You can resume at any time.');
   };
 
   const handleOpenSectionEdit = (section: 'personal' | 'address') => {
@@ -1283,16 +1387,44 @@ const GhlIrmKycView: React.FC = () => {
     }
   };
 
-  // Submit KYC for Review
-  const handleSubmitKycForReview = () => {
+  const handleOpenReviewForSubmission = () => {
     if (!validateStep(5)) return;
+    setCustomerConsentChecked(false);
+    setIsAssistedReviewModalOpen(true);
+  };
+
+  const handleConfirmAssistedSubmit = async () => {
+    if (!customerConsentChecked) {
+      showToast('Please obtain and confirm customer consent before submitting.');
+      return;
+    }
+    if (!selectedDeal) return;
 
     const investorName = formData.investorName.trim();
-    const dealId = selectedDeal ? selectedDeal.id : `deal-${Date.now()}`;
+    const dealId = selectedDeal.id;
+    const nowIso = new Date().toISOString();
+
+    const assistedMetadata = {
+      isAssisted: true,
+      assistedByIrmId: user?.id,
+      assistedByIrmName: user?.name,
+      submittedAt: nowIso,
+      customerConsentObtained: true,
+      customerConsentTimestamp: nowIso,
+      status: 'Assisted KYC – Submitted for Verification',
+    };
 
     // 1. Persist full KYC form data in localStorage
-    localStorage.setItem(`nexus_kyc_data_${dealId}`, JSON.stringify(formData));
-    localStorage.setItem(`nexus_kyc_status_${dealId}`, 'Completed');
+    localStorage.setItem(`nexus_kyc_data_${dealId}`, JSON.stringify({
+      ...formData,
+      assistedMetadata,
+    }));
+    localStorage.setItem(`nexus_kyc_status_${dealId}`, 'Submitted for Review');
+    localStorage.setItem(`nexus_kyc_assisted_${dealId}`, JSON.stringify(assistedMetadata));
+
+    // Clear draft
+    localStorage.removeItem(`nexus_kyc_draft_${dealId}`);
+
     try {
       const raw = localStorage.getItem('nexus_mock_kyc_records');
       const records = raw ? JSON.parse(raw) : {};
@@ -1300,9 +1432,14 @@ const GhlIrmKycView: React.FC = () => {
         ...(records[dealId] || {}),
         status: 'Submitted',
         kycStatus: 'Pending',
+        isAssisted: true,
+        assistedByIrmId: user?.id,
+        assistedByIrmName: user?.name,
+        submittedAt: nowIso,
       };
       localStorage.setItem('nexus_mock_kyc_records', JSON.stringify(records));
     } catch {}
+
     window.dispatchEvent(new Event('nexus_storage_updated'));
 
     // 2. Persist Document metadata in storageService
@@ -1341,33 +1478,53 @@ const GhlIrmKycView: React.FC = () => {
       storageService.saveDocument(docItem);
     });
 
-    // 3. Log deal activity
-    if (selectedDeal) {
-      const activity: DealActivity = {
-        id: `act-${Date.now()}`,
-        dealId: selectedDeal.id,
-        companyId: tenant?.id || '',
-        type: 'note',
-        text: `KYC & Documents submitted for review (Basic, Identity, Bank, Demat: ${formData.hasNoDemat ? 'Skipped' : 'Provided'}, Nominees: ${formData.nominees.length}).`,
-        loggedByName: user?.name || 'IRM User',
-        loggedByRole: 'IRM',
-        timestamp: new Date().toISOString(),
-      };
-      storageService.addDealActivity(activity);
+    // 3. Log deal activity & audit log
+    const activityText = `Assisted KYC – Submitted for Verification on behalf of customer with consent by IRM ${user?.name || 'IRM User'} (ID: ${user?.id || '—'}) at ${new Date(nowIso).toLocaleString()}`;
+    const activity: DealActivity = {
+      id: `act-${Date.now()}`,
+      dealId: selectedDeal.id,
+      companyId: tenant?.id || '',
+      type: 'note',
+      text: activityText,
+      loggedByName: user?.name || 'IRM User',
+      loggedByRole: 'IRM',
+      timestamp: nowIso,
+    };
+    storageService.addDealActivity(activity);
+
+    storageService.addAuditLog({
+      id: `aud-${Date.now()}`,
+      timestamp: nowIso,
+      actorName: user?.name || 'IRM User',
+      actorEmail: user?.email || '',
+      action: 'assisted_kyc_submit',
+      entityType: 'kyc',
+      entityId: selectedDeal.id,
+      details: activityText,
+    });
+
+    // 4. Update deal with Assisted KYC status and attribution
+    const updatedDeal: Deal = {
+      ...selectedDeal,
+      customerKycStatus: 'Assisted KYC – Submitted for Verification' as any,
+      notes: selectedDeal.notes ? `${selectedDeal.notes} | ${activityText}` : activityText,
+    };
+    try {
+      await persistDeal(updatedDeal);
+    } catch (e) {
+      console.warn('Error saving deal:', e);
     }
 
-    // 4. Update deal or create qualified deal if new
-    if (selectedDeal) {
-      const updatedDeal: Deal = {
-        ...selectedDeal,
-        notes: selectedDeal.notes ? `${selectedDeal.notes} | KYC Submitted` : 'KYC Submitted for Review',
-      };
-      persistDeal(updatedDeal).catch(e => showToast("Error saving deal:"));
-    }
-
+    setIsAssistedReviewModalOpen(false);
+    setIsAssistedFlow(false);
+    showToast(`Assisted KYC for "${investorName}" submitted for verification!`);
     loadData();
-    showToast(`KYC & Documents for "${investorName}" submitted for review!`);
     setViewMode('table');
+  };
+
+  // Submit KYC for Review
+  const handleSubmitKycForReview = () => {
+    handleOpenReviewForSubmission();
   };
 
   // Nominee helpers
@@ -1558,8 +1715,14 @@ const GhlIrmKycView: React.FC = () => {
           );
         }
 
-        // Customer submitted: waiting for IRM review — show a status badge, not a send button
-        if (status === 'Submitted' || status === 'Under Verification' || status === 'Completed') {
+        // Customer or IRM submitted: waiting for IRM review — show a status badge, not a send button
+        if (
+          status === 'Submitted' ||
+          status === 'Under Verification' ||
+          status === 'Completed' ||
+          status === 'Assisted KYC – Submitted for Verification'
+        ) {
+          const isAssisted = status === 'Assisted KYC – Submitted for Verification';
           return (
             <span
               style={{
@@ -1570,52 +1733,35 @@ const GhlIrmKycView: React.FC = () => {
                 fontWeight: 600,
                 padding: '4px 10px',
                 borderRadius: 6,
-                backgroundColor: 'rgba(99, 102, 241, 0.10)',
-                color: '#6366f1',
-                border: '1px solid rgba(99, 102, 241, 0.25)',
+                backgroundColor: isAssisted ? 'rgba(124, 58, 237, 0.10)' : 'rgba(99, 102, 241, 0.10)',
+                color: isAssisted ? '#7c3aed' : '#6366f1',
+                border: isAssisted ? '1px solid rgba(124, 58, 237, 0.25)' : '1px solid rgba(99, 102, 241, 0.25)',
                 whiteSpace: 'nowrap',
               }}
-              title="Customer has submitted the KYC form — awaiting IRM review"
+              title={isAssisted ? "Assisted KYC submitted — awaiting IRM verification" : "Customer has submitted the KYC form — awaiting IRM review"}
             >
               <CheckCircle size={12} />
-              KYC Submitted
+              {isAssisted ? 'Assisted Submitted' : 'KYC Submitted'}
             </span>
           );
         }
 
         const isResend = ['Link Sent', 'In Progress', 'Needs Correction', 'Rejected'].includes(status);
+        const isIrmRole = user?.role?.code === 'irm';
 
         return (
-          <div style={{ display: 'inline-flex', alignItems: 'center', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
-            <button
-              type="button"
-              className="btn btn-sm btn-secondary"
-              title={isResend ? 'Resend Customer KYC Link' : 'Send Customer KYC Link'}
-              style={{
-                fontSize: 11,
-                padding: '5px 10px',
-                fontWeight: 600,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                borderRadius: 6,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-                flexShrink: 0,
-                borderColor: 'var(--primary-500, #3b82f6)',
-                color: 'var(--primary-600, #2563eb)',
-                background: 'rgba(37, 99, 235, 0.06)',
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                const enriched = enrichDealWithContact(deal, leads, customers);
-                setSendLinkDeal(enriched);
-              }}
-            >
-              {isResend ? <RefreshCw size={12} /> : <Send size={12} />}
-              {isResend ? 'Resend Link' : 'Send KYC Link'}
-            </button>
-          </div>
+          <KycStageActionDropdown
+            deal={deal}
+            isResend={isResend}
+            isIrmRole={isIrmRole}
+            onSendLink={() => {
+              const enriched = enrichDealWithContact(deal, leads, customers);
+              setSendLinkDeal(enriched);
+            }}
+            onAssistedKyc={() => {
+              startAssistedKycFlow(deal);
+            }}
+          />
         );
       },
     },
@@ -1633,6 +1779,7 @@ const GhlIrmKycView: React.FC = () => {
             onShowToast={msg => showToast(msg)}
             onViewProfile={d => handleOpenCustomerProfile(d)}
             onEditKyc={d => startKycFlow(d)}
+            onAssistedKyc={d => startAssistedKycFlow(d)}
             onCallInvestor={d => initiateCall(d.customerName, d.phone || '', 'customer', d.id)}
             // Only show "Advance to Opportunity" after KYC is fully completed
             onAdvanceStage={normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Verified' ? d => handleAdvanceStage(d) : undefined}
@@ -2761,7 +2908,7 @@ const GhlIrmKycView: React.FC = () => {
 
             {/* ── ACTION NAVIGATION BAR ── */}
             <div className="kyc-nav-bar">
-              <div className="kyc-nav-left">
+              <div className="kyc-nav-left" style={{ display: 'flex', gap: 10 }}>
                 <button
                   type="button"
                   className="btn btn-secondary"
@@ -2769,10 +2916,19 @@ const GhlIrmKycView: React.FC = () => {
                 >
                   <ArrowLeft size={14} style={{ marginRight: 6 }} /> Back
                 </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={handleSaveDraft}
+                  title="Save current details as draft"
+                  style={{ border: '1px solid var(--border-color)', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+                >
+                  <Save size={14} /> Save Draft
+                </button>
               </div>
 
               <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                Step {currentStep} of 5
+                Step {currentStep} of 5 {isAssistedFlow ? '• Assisted KYC' : ''}
               </div>
 
               <div className="kyc-nav-right">
@@ -2788,10 +2944,10 @@ const GhlIrmKycView: React.FC = () => {
                   <button
                     type="button"
                     className="btn btn-primary"
-                    style={{ backgroundColor: '#059669', borderColor: '#059669' }}
-                    onClick={handleSubmitKycForReview}
+                    style={{ backgroundColor: '#7c3aed', borderColor: '#7c3aed', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                    onClick={handleOpenReviewForSubmission}
                   >
-                    <CheckCircle size={15} style={{ marginRight: 6 }} /> Submit KYC for Review
+                    <CheckCircle size={15} /> Review &amp; Submit on Behalf
                   </button>
                 )}
               </div>
@@ -3172,6 +3328,147 @@ const GhlIrmKycView: React.FC = () => {
 
       {/* Review Customer KYC Drawer */}
       <KycReviewDrawer isOpen={!!reviewDeal} onClose={() => setReviewDeal(null)} deal={reviewDeal} onShowToast={showToast} onChangeKycStatus={handleStatusChange} />
+
+      {/* ── Assisted KYC Review & Consent Confirmation Modal ── */}
+      <Modal
+        isOpen={isAssistedReviewModalOpen && !!selectedDeal}
+        onClose={() => setIsAssistedReviewModalOpen(false)}
+        title="Review & Submit Assisted KYC"
+        subtitle={`Submitting KYC on behalf of customer: ${formData.investorName || selectedDeal?.customerName}`}
+        maxWidth={640}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', gap: 12 }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setIsAssistedReviewModalOpen(false)}
+            >
+              Back to Edit
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{
+                backgroundColor: customerConsentChecked ? '#7c3aed' : '#a78bfa',
+                borderColor: customerConsentChecked ? '#7c3aed' : '#a78bfa',
+                cursor: customerConsentChecked ? 'pointer' : 'not-allowed',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+              disabled={!customerConsentChecked}
+              onClick={handleConfirmAssistedSubmit}
+            >
+              <CheckCircle size={15} /> Confirm &amp; Submit for Verification
+            </button>
+          </div>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Summary Box */}
+          <div style={{ background: 'var(--bg-card, #f8fafc)', border: '1px solid var(--border-color, #e2e8f0)', borderRadius: 8, padding: 14 }}>
+            <h4 style={{ margin: '0 0 10px', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+              Application Summary
+            </h4>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 12 }}>
+              <div>
+                <span style={{ color: 'var(--text-secondary)' }}>Full Name:</span>
+                <div style={{ fontWeight: 600 }}>{formData.investorName || '—'}</div>
+              </div>
+              <div>
+                <span style={{ color: 'var(--text-secondary)' }}>Contact Phone:</span>
+                <div style={{ fontWeight: 600 }}>{formData.phone || '—'}</div>
+              </div>
+              <div>
+                <span style={{ color: 'var(--text-secondary)' }}>Email:</span>
+                <div style={{ fontWeight: 600 }}>{formData.email || '—'}</div>
+              </div>
+              <div>
+                <span style={{ color: 'var(--text-secondary)' }}>PAN Number:</span>
+                <div style={{ fontWeight: 600 }}>{formData.panNumber || '—'}</div>
+              </div>
+              <div>
+                <span style={{ color: 'var(--text-secondary)' }}>Aadhaar Number:</span>
+                <div style={{ fontWeight: 600 }}>
+                  {formData.aadhaarNumber ? `•••• •••• ${formData.aadhaarNumber.slice(-4)}` : '—'}
+                </div>
+              </div>
+              <div>
+                <span style={{ color: 'var(--text-secondary)' }}>Bank &amp; Account:</span>
+                <div style={{ fontWeight: 600 }}>
+                  {formData.bankName ? `${formData.bankName} (${formData.accountNumber ? '••••' + formData.accountNumber.slice(-4) : '—'})` : '—'}
+                </div>
+              </div>
+            </div>
+
+            {/* Documents preview summary */}
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-color, #e2e8f0)', fontSize: 12 }}>
+              <span style={{ color: 'var(--text-secondary)' }}>Uploaded Documents:</span>
+              <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {formData.panDoc && (
+                  <span style={{ padding: '2px 8px', borderRadius: 4, background: 'rgba(16, 185, 129, 0.1)', color: '#059669', fontSize: 11, fontWeight: 600 }}>
+                    ✓ PAN Card
+                  </span>
+                )}
+                {formData.aadhaarDoc && (
+                  <span style={{ padding: '2px 8px', borderRadius: 4, background: 'rgba(16, 185, 129, 0.1)', color: '#059669', fontSize: 11, fontWeight: 600 }}>
+                    ✓ Aadhaar Card
+                  </span>
+                )}
+                {formData.bankProofDoc && (
+                  <span style={{ padding: '2px 8px', borderRadius: 4, background: 'rgba(16, 185, 129, 0.1)', color: '#059669', fontSize: 11, fontWeight: 600 }}>
+                    ✓ Bank Proof
+                  </span>
+                )}
+                {formData.dematDoc && !formData.hasNoDemat && (
+                  <span style={{ padding: '2px 8px', borderRadius: 4, background: 'rgba(16, 185, 129, 0.1)', color: '#059669', fontSize: 11, fontWeight: 600 }}>
+                    ✓ Demat
+                  </span>
+                )}
+                {!formData.panDoc && !formData.aadhaarDoc && !formData.bankProofDoc && (
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>No documents attached</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* IRM Attribution Info */}
+          <div style={{ background: 'rgba(124, 58, 237, 0.05)', border: '1px solid rgba(124, 58, 237, 0.2)', borderRadius: 8, padding: 12, fontSize: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, color: '#7c3aed', marginBottom: 4 }}>
+              <UserCheck size={14} /> IRM Assisted Onboarding Record
+            </div>
+            <div style={{ color: 'var(--text-secondary)' }}>
+              Entered By: <strong style={{ color: 'var(--text-primary)' }}>{user?.name || 'IRM User'}</strong> (ID: {user?.id || '—'}) • Timestamp: <strong>{new Date().toLocaleString()}</strong>
+            </div>
+          </div>
+
+          {/* Customer Consent Checkbox (Mandatory) */}
+          <div style={{
+            background: customerConsentChecked ? 'rgba(16, 185, 129, 0.06)' : 'rgba(245, 158, 11, 0.08)',
+            border: `1px solid ${customerConsentChecked ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
+            borderRadius: 8,
+            padding: 14,
+          }}>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', fontSize: 13, lineHeight: '1.4' }}>
+              <input
+                type="checkbox"
+                checked={customerConsentChecked}
+                onChange={e => setCustomerConsentChecked(e.target.checked)}
+                style={{ width: 18, height: 18, marginTop: 2, cursor: 'pointer', accentColor: '#7c3aed', flexShrink: 0 }}
+              />
+              <span style={{ color: 'var(--text-primary)' }}>
+                <strong>Customer Consent &amp; Authorization:</strong> I certify that the information and documents entered in this form were provided directly by the customer (<strong>{formData.investorName || selectedDeal?.customerName}</strong>), and the customer has granted explicit consent and authorization for the IRM to submit this KYC application on their behalf.
+              </span>
+            </label>
+            {!customerConsentChecked && (
+              <div style={{ marginTop: 6, marginLeft: 28, fontSize: 11, color: '#d97706', fontWeight: 600 }}>
+                * Customer consent must be recorded before submission.
+              </div>
+            )}
+          </div>
+        </div>
+      </Modal>
+
       {/* KycVerifyModal — opened from profile card Verify KYC button */}
       {verifyModalDeal && profileKycData && (
         <KycVerifyModal
@@ -3334,7 +3631,7 @@ const OriginalKYCView: React.FC = () => {
       sortable: true,
       render: deal => (
         <span style={{ color: '#10b981', fontWeight: 800, fontSize: 13 }}>
-          {deal.investmentRange || formatCurrency(deal.value)}
+          {deal.investmentRange || (deal.value > 0 ? formatCurrency(deal.value) : '—')}
         </span>
       ),
     },
@@ -3343,7 +3640,7 @@ const OriginalKYCView: React.FC = () => {
       header: 'Preferred Asset Class',
       render: deal => (
         <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-          {deal.preferredAssetClass || 'Commercial Pre-Leased'}
+          {deal.preferredAssetClass || '—'}
         </span>
       ),
     },

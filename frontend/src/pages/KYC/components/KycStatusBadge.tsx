@@ -9,6 +9,7 @@ import {
   XCircle,
   AlertTriangle,
   CheckCircle2,
+  UserCheck,
 } from 'lucide-react';
 import './KycLinkComponents.css';
 
@@ -22,7 +23,8 @@ export type CustomerKycStatus =
   | 'Completed'
   | 'Rejected'
   | 'Needs Correction'
-  | 'Wrong';
+  | 'Wrong'
+  | 'Assisted KYC – Submitted for Verification';
 
 interface KycStatusBadgeProps {
   status: CustomerKycStatus;
@@ -30,6 +32,24 @@ interface KycStatusBadgeProps {
 
 export const KycStatusBadge: React.FC<KycStatusBadgeProps> = ({ status }) => {
   switch (status) {
+    case 'Assisted KYC – Submitted for Verification':
+      return (
+        <span
+          className="kyc-link-badge"
+          style={{
+            background: 'rgba(124, 58, 237, 0.12)',
+            color: '#7c3aed',
+            borderColor: 'rgba(124, 58, 237, 0.3)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            fontWeight: 600,
+          }}
+        >
+          <UserCheck size={11} />
+          Assisted KYC – Submitted for Verification
+        </span>
+      );
     case 'Pending':
       return (
         <span className="kyc-link-badge kyc-link-badge-pending">

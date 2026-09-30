@@ -44,7 +44,7 @@ public class GhlDealsController : ControllerBase
         if (companyId.HasValue)
             query = query.Where(d => d.CompanyId == companyId.Value);
 
-        if (role == "sales_executive" && agentId.HasValue)
+        if ((role == "sales_executive" || role == "irm") && agentId.HasValue)
             query = query.Where(d => d.AssignedAgentId == agentId.Value);
 
         return query;
@@ -112,6 +112,39 @@ public class GhlDealsController : ControllerBase
         if (!companyId.HasValue || companyId.Value <= 0)
             return Unauthorized(ApiResponse<GhlDealResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
 
+        // Deduplication & canonical deal reuse:
+        // If a deal already exists for this customer in this company, update it instead of creating duplicates
+        GhlDeal? existingDeal = null;
+        if (dto.CustomerId.HasValue && dto.CustomerId.Value > 0)
+        {
+            existingDeal = await _db.GhlDeals.FirstOrDefaultAsync(d =>
+                d.CompanyId == companyId.Value &&
+                d.CustomerId == dto.CustomerId.Value, ct);
+        }
+        if (existingDeal == null && !string.IsNullOrWhiteSpace(dto.CustomerName))
+        {
+            var custNameLower = dto.CustomerName.Trim().ToLower();
+            existingDeal = await _db.GhlDeals.FirstOrDefaultAsync(d =>
+                d.CompanyId == companyId.Value &&
+                d.CustomerName.ToLower() == custNameLower, ct);
+        }
+
+        if (existingDeal != null)
+        {
+            existingDeal.Stage = string.IsNullOrWhiteSpace(dto.Stage) ? existingDeal.Stage : dto.Stage.Trim();
+            if (dto.Value > 0) existingDeal.Value = dto.Value;
+            if (!string.IsNullOrWhiteSpace(dto.Notes)) existingDeal.Notes = dto.Notes.Trim();
+            if (dto.InvestmentRange != null) existingDeal.InvestmentRange = OptionalFieldNormalizer.Normalize(dto.InvestmentRange);
+            if (dto.PreferredAssetClass != null) existingDeal.PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass);
+            if (agentId.HasValue && agentId.Value > 0) existingDeal.AssignedAgentId = agentId.Value;
+            existingDeal.StageEnteredAt = DateTime.UtcNow;
+
+            await _db.SaveChangesAsync(ct);
+            await _db.Entry(existingDeal).Reference(d => d.AssignedAgent).LoadAsync(ct);
+
+            return Ok(ApiResponse<GhlDealResponseDto>.SuccessResult(MapToDto(existingDeal), "Deal updated."));
+        }
+
         var deal = new GhlDeal
         {
             CompanyId = companyId.Value,
@@ -176,8 +209,9 @@ public class GhlDealsController : ControllerBase
     [Authorize(Roles = "company_admin,super_admin")]
     public async Task<ActionResult<ApiResponse<bool>>> DeleteDeal(int id, CancellationToken ct)
     {
+        var isSuperAdmin = _currentUser.Role == "super_admin";
         var deal = await _db.GhlDeals
-            .FirstOrDefaultAsync(d => d.Id == id && d.CompanyId == _currentUser.CompanyId, ct);
+            .FirstOrDefaultAsync(d => d.Id == id && (isSuperAdmin || d.CompanyId == _currentUser.CompanyId), ct);
 
         if (deal == null)
             return NotFound(ApiResponse<bool>.FailureResult("Deal not found."));

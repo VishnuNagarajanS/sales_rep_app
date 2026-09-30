@@ -499,7 +499,16 @@ export const LeadsPage: React.FC = () => {
 
   const handleSaveLead = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.phone) return;
+    if (!formData.name || !formData.phone) {
+      showToast('Please provide both contact name and phone number.');
+      return;
+    }
+
+    const cleanPhone = (formData.phone || '').replace(/\D/g, '');
+    if (cleanPhone.length < 10) {
+      showToast('Please enter a valid phone number with at least 10 digits.');
+      return;
+    }
 
     // Pull real agent ID and name at save-time to prevent stale/fallback placeholder IDs from leaking
     const resolvedAgentId = (isLeadScopedUser && user?.id)
@@ -516,7 +525,7 @@ export const LeadsPage: React.FC = () => {
     let isUpdated = isExistingById;
 
     if (!isExistingById) {
-      const normNewPhone = (formData.phone || '').replace(/\D/g, '').slice(-10);
+      const normNewPhone = cleanPhone.slice(-10);
       const normNewEmail = (formData.email || '').trim().toLowerCase();
 
       const existingMatch = leads.find(l => {
@@ -530,7 +539,11 @@ export const LeadsPage: React.FC = () => {
         return false;
       });
       if (existingMatch) {
-        showToast(`Duplicate found: "${existingMatch.name}" already has this phone/email. Updating existing record.`);
+        if (existingMatch.assignedAgentId && String(existingMatch.assignedAgentId) !== String(resolvedAgentId)) {
+          showToast(`⚠️ Lead already exists for "${existingMatch.name}" and is currently assigned to ${existingMatch.assignedAgentName || 'another agent'}.`);
+          return;
+        }
+        showToast(`Duplicate found: "${existingMatch.name}" already exists. Updating existing record.`);
         isUpdated = true;
         leadToSave = {
           ...existingMatch,
@@ -559,7 +572,7 @@ export const LeadsPage: React.FC = () => {
     } else {
       leadToSave = {
         ...formData,
-        status: formData.status || 'New',
+        status: isIrm ? 'Interested' : (formData.status || 'New'),
         assignedAgentId: resolvedAgentId,
         assignedAgentName: resolvedAgentName,
         companyId: targetCompanyId,
@@ -567,25 +580,14 @@ export const LeadsPage: React.FC = () => {
     }
 
     try {
-      const saved = await apiSaveLead(leadToSave);
-      setLeads(prev => {
-        const idx = prev.findIndex(l => l.id === saved.id);
-        if (idx >= 0) {
-          const next = [...prev];
-          next[idx] = saved;
-          return next;
-        }
-        return [saved, ...prev];
-      });
+      await apiSaveLead(leadToSave);
+      await loadData();
       showToast(isUpdated ? 'Lead updated successfully.' : 'New lead created successfully.');
+      setIsEditDrawerOpen(false);
     } catch (err: any) {
       console.error('[LeadsPage] Failed to save lead:', err);
-      storageService.saveLead(leadToSave);
-      setLeads(prev => [leadToSave, ...prev.filter(l => l.id !== leadToSave.id)]);
-      showToast('Lead saved locally.');
+      showToast(`⚠️ ${err.message || 'Failed to save lead record.'}`);
     }
-
-    setIsEditDrawerOpen(false);
   };
 
   const handleDeleteLead = async (lead: Lead) => {

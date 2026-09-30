@@ -72,37 +72,31 @@ public class OtpService : IOtpService
             _cache.TryGetValue($"kyc_email_otp_{targetEmail.ToLower()}", out existing);
         }
 
-        string otpCode;
-        // Re-use a very recent OTP (within 45s) to guard against rapid double-requests in the same session
-        if (existing != null && !string.IsNullOrEmpty(existing.Otp) && (DateTime.UtcNow - existing.CreatedAt).TotalSeconds < 45)
-        {
-            otpCode = existing.Otp;
-            _logger.LogInformation("[KYC OTP] Re-using recent code for {Email} (within cooldown)", targetEmail);
-        }
-        else
-        {
-            // Generate 6-digit cryptographic OTP
-            otpCode = RandomNumberGenerator.GetInt32(100000, 1000000).ToString("D6");
-        }
+        // Issue a fresh valid 6-digit cryptographic OTP on every send/resend
+        var otpCode = RandomNumberGenerator.GetInt32(100000, 1000000).ToString("D6");
 
-        // 3. Cache OTP for 5 minutes with all recently issued valid OTPs
+        // Cache OTP for 5 minutes; invalidate previous OTPs so old codes cannot be re-used
         var entry = new CachedOtpEntry
         {
             Otp = otpCode,
             Email = targetEmail,
             Token = cleanToken,
-            FailedAttempts = existing?.FailedAttempts ?? 0,
+            FailedAttempts = 0,
             CreatedAt = DateTime.UtcNow,
-            ValidOtps = existing != null ? new List<string>(existing.ValidOtps) : new List<string>()
+            ValidOtps = new List<string> { otpCode }
         };
-
-        if (!entry.ValidOtps.Contains(otpCode))
-        {
-            entry.ValidOtps.Add(otpCode);
-        }
 
         _cache.Set(cacheKey, entry, TimeSpan.FromMinutes(5));
         _cache.Set($"kyc_email_otp_{targetEmail.ToLower()}", entry, TimeSpan.FromMinutes(5));
+
+        // Also cache under token prefix without 'tok_' and slug so lookup is resilient
+        var subToken = cleanToken.StartsWith("tok_") ? cleanToken[4..] : cleanToken;
+        var tokenPrefix = subToken.Contains('_') ? subToken.Split('_')[0] : subToken;
+        if (!string.IsNullOrEmpty(tokenPrefix) && tokenPrefix != cleanToken)
+        {
+            _cache.Set($"kyc_token_otp_{tokenPrefix}", entry, TimeSpan.FromMinutes(5));
+            _cache.Set($"kyc_token_otp_tok_{tokenPrefix}", entry, TimeSpan.FromMinutes(5));
+        }
 
         // 4. Dispatch Email via Gmail SMTP (OTP not logged at info level to prevent exposure)
         _logger.LogInformation("[KYC OTP] Sending verification code to {Email}", targetEmail);
@@ -144,6 +138,16 @@ public class OtpService : IOtpService
         {
             activeKey = GetCacheKey(cleanToken, string.Empty);
             _cache.TryGetValue(activeKey, out entry);
+
+            if (entry == null)
+            {
+                var subToken = cleanToken.StartsWith("tok_") ? cleanToken[4..] : cleanToken;
+                var tokenPrefix = subToken.Contains('_') ? subToken.Split('_')[0] : subToken;
+                if (!string.IsNullOrEmpty(tokenPrefix))
+                {
+                    _cache.TryGetValue($"kyc_token_otp_{tokenPrefix}", out entry);
+                }
+            }
         }
 
         // Fallback: look up by email if token key missed

@@ -11,6 +11,7 @@ public class CreateLeadDto
     public string? Status { get; set; } = "New";
     public string? Priority { get; set; } = "Medium";
     public string? Notes { get; set; }
+    public int? AssignedAgentId { get; set; }
 
     // GHL Custom Fields
     public string? InvestmentCapacity { get; set; } // e.g. "₹1 Cr – ₹5 Cr"

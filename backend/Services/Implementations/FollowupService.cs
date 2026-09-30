@@ -40,7 +40,7 @@ public class FollowupService : IFollowupService
             query = query.Where(f => f.CompanyId == companyId.Value);
         }
 
-        if (role == "sales_executive" && agentId.HasValue)
+        if ((role == "sales_executive" || role == "irm") && agentId.HasValue)
         {
             query = query.Where(f => f.AssignedAgentId == agentId.Value);
         }
@@ -66,7 +66,7 @@ public class FollowupService : IFollowupService
             query = query.Where(f => f.CompanyId == companyId.Value);
         }
 
-        if (role == "sales_executive" && agentId.HasValue)
+        if ((role == "sales_executive" || role == "irm") && agentId.HasValue)
         {
             query = query.Where(f => f.AssignedAgentId == agentId.Value);
         }
@@ -142,6 +142,41 @@ public class FollowupService : IFollowupService
         var companyId = _currentUser.CompanyId;
         if (!companyId.HasValue || companyId.Value <= 0)
             return ApiResponse<FollowupResponseDto>.FailureResult("Unauthorized: Company ID is missing.");
+
+        // Enforce at most one active pending Follow-up per canonical contact and company
+        var contactPhoneDigits = new string(dto.ContactPhone.Where(char.IsDigit).ToArray());
+        if (contactPhoneDigits.Length > 10) contactPhoneDigits = contactPhoneDigits[^10..];
+
+        var existingPending = await _context.Followups
+            .Include(f => f.AssignedAgent)
+            .FirstOrDefaultAsync(f =>
+                f.CompanyId == companyId.Value &&
+                f.Status == FollowupStatus.Pending &&
+                (f.ContactId == dto.ContactId.Trim() ||
+                 (!string.IsNullOrEmpty(contactPhoneDigits) && f.ContactPhone.Contains(contactPhoneDigits))), ct);
+
+        if (existingPending != null)
+        {
+            // Reuse and update the existing active pending follow-up (idempotency)
+            existingPending.ScheduledAt = dto.ScheduledAt;
+            if (!string.IsNullOrWhiteSpace(dto.Priority)) existingPending.Priority = dto.Priority.Trim();
+            if (!string.IsNullOrWhiteSpace(dto.Notes)) existingPending.Notes = dto.Notes.Trim();
+            existingPending.AssignedAgentId = agentId.Value;
+            existingPending.UpdatedAt = DateTime.UtcNow;
+
+            if (existingPending.ContactType == "lead" && int.TryParse(existingPending.ContactId, out var existingLeadId))
+            {
+                var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == existingLeadId && l.CompanyId == companyId, ct);
+                if (lead != null)
+                {
+                    lead.NextFollowupDate = existingPending.ScheduledAt;
+                }
+            }
+
+            await _context.SaveChangesAsync(ct);
+            await _context.Entry(existingPending).Reference(f => f.AssignedAgent).LoadAsync(ct);
+            return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(existingPending), "Existing pending follow-up updated.");
+        }
 
         var followup = new Followup
         {

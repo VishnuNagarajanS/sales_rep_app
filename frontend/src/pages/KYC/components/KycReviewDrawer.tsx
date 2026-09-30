@@ -17,6 +17,7 @@ import {
   Smartphone,
   Mail,
   Send,
+  UserCheck,
 } from 'lucide-react';
 import { Deal } from '../../../types';
 import { KycStatusDropdown } from './KycStatusDropdown';
@@ -100,6 +101,20 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
       parsedNominees = [];
     }
   }
+
+  let savedLocalKyc: any = null;
+  let assistedMeta: any = null;
+  try {
+    const raw = localStorage.getItem(`nexus_kyc_data_${deal.id}`);
+    if (raw) {
+      savedLocalKyc = JSON.parse(raw);
+      assistedMeta = savedLocalKyc?.assistedMetadata;
+    }
+    if (!assistedMeta) {
+      const aRaw = localStorage.getItem(`nexus_kyc_assisted_${deal.id}`);
+      if (aRaw) assistedMeta = JSON.parse(aRaw);
+    }
+  } catch {}
 
   const fallbackData = getKycReviewData(deal);
 
@@ -358,6 +373,28 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
 
         {/* Drawer Body */}
         <div className="kyc-link-drawer-body">
+          {assistedMeta && (
+            <div
+              style={{
+                background: 'rgba(124, 58, 237, 0.08)',
+                border: '1px solid rgba(124, 58, 237, 0.25)',
+                borderRadius: 8,
+                padding: '12px 14px',
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, color: '#7c3aed', fontSize: 13 }}>
+                <UserCheck size={16} /> Assisted KYC – Submitted on Behalf by IRM
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
+                Entered by IRM: <strong style={{ color: 'var(--text-primary)' }}>{assistedMeta.assistedByIrmName || 'IRM'}</strong> (ID: {assistedMeta.assistedByIrmId || '—'}) • Submitted: <strong>{new Date(assistedMeta.submittedAt).toLocaleString()}</strong>
+              </div>
+              <div style={{ fontSize: 11, color: '#059669', marginTop: 4, fontWeight: 600 }}>
+                ✓ Customer consent and authorization recorded at submission
+              </div>
+            </div>
+          )}
+
           {normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Verified' && (
             <div
               style={{

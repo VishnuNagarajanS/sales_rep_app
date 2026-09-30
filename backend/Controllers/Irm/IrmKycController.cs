@@ -31,26 +31,42 @@ public class IrmKycController : ControllerBase
     [Authorize]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
+        var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
+        var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
         var companyId = User.GetCompanyId(0);
+        if (companyId <= 0 && isPlatformAdmin) companyId = 1;
         if (companyId <= 0)
             return Unauthorized();
 
         var result = await _kycService.GetByIdAsync(id, companyId, ct);
-        if (result.Success)
-            return Ok(result);
+        if (!result.Success)
+        {
+            result = await _kycService.GetByInvestorIdAsync(id, companyId, ct);
+        }
 
-        var byInvestor = await _kycService.GetByInvestorIdAsync(id, companyId, ct);
-        if (byInvestor.Success)
-            return Ok(byInvestor);
+        if (!result.Success)
+            return NotFound(result);
 
-        return NotFound(result);
+        if (!isPlatformAdmin)
+        {
+            var userId = User.GetUserId();
+            if (result.Data?.IrmId != null && result.Data.IrmId != userId)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<KycDto>.ErrorResponse("Access denied: You can only view KYC records assigned to you."));
+            }
+        }
+
+        return Ok(result);
     }
 
     [HttpGet("by-email")]
     [Authorize]
     public async Task<IActionResult> GetByEmail([FromQuery] string email, CancellationToken ct)
     {
+        var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
+        var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
         var companyId = User.GetCompanyId(0);
+        if (companyId <= 0 && isPlatformAdmin) companyId = 1;
         if (companyId <= 0)
             return Unauthorized();
 
@@ -58,20 +74,31 @@ public class IrmKycController : ControllerBase
         if (!result.Success)
             return NotFound(result);
 
+        if (!isPlatformAdmin)
+        {
+            var userId = User.GetUserId();
+            if (result.Data?.IrmId != null && result.Data.IrmId != userId)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<KycDto>.ErrorResponse("Access denied: You can only view KYC records assigned to you."));
+            }
+        }
+
         return Ok(result);
     }
 
     [HttpGet("all")]
     [Authorize]
-    public async Task<IActionResult> GetAllKycs([FromQuery] string? status, CancellationToken ct)
+    public async Task<IActionResult> GetAllKycs([FromQuery] string? status, [FromQuery] int? companyId, CancellationToken ct)
     {
-        var companyId = User.GetCompanyId(0);
-        if (companyId <= 0)
+        var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
+        var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
+        var effectiveCompanyId = companyId ?? User.GetCompanyId(0);
+        if (effectiveCompanyId <= 0 && isPlatformAdmin) effectiveCompanyId = 1;
+        if (effectiveCompanyId <= 0)
             return Unauthorized();
 
         int? effectiveIrmId = null;
-        var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
-        if (role != "admin" && role != "ghl_admin" && role != "super_admin")
+        if (!isPlatformAdmin)
         {
             var userId = User.GetUserId();
             if (userId <= 0)
@@ -79,7 +106,7 @@ public class IrmKycController : ControllerBase
             effectiveIrmId = userId;
         }
 
-        var result = await _kycService.GetAllAsync(companyId, status, effectiveIrmId, ct);
+        var result = await _kycService.GetAllAsync(effectiveCompanyId, status, effectiveIrmId, ct);
         return Ok(result);
     }
 
@@ -156,9 +183,21 @@ public class IrmKycController : ControllerBase
     [Authorize]
     public async Task<IActionResult> ReviewKyc(int id, [FromBody] KycReviewDto dto, CancellationToken ct)
     {
+        var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
+        var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
         var companyId = User.GetCompanyId(0);
+        if (companyId <= 0 && isPlatformAdmin) companyId = 1;
         if (companyId <= 0)
             return Unauthorized();
+
+        var userId = User.GetUserId();
+        if (!isPlatformAdmin)
+        {
+            var kycRec = await _db.InvestorKycs.FirstOrDefaultAsync(k => k.Id == id && k.CompanyId == companyId, ct);
+            if (kycRec == null) return NotFound(ApiResponse<KycDto>.ErrorResponse("KYC record not found"));
+            if (kycRec.IrmId.HasValue && kycRec.IrmId.Value != userId)
+                return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<KycDto>.ErrorResponse("Access denied: You can only review KYC records assigned to you."));
+        }
 
         var result = await _kycService.ReviewKycAsync(id, companyId, dto, ct);
         if (!result.Success)
@@ -193,7 +232,10 @@ public class IrmKycController : ControllerBase
     [Authorize]
     public async Task<IActionResult> UpdateKycStatus(int id, [FromBody] UpdateKycStatusDto dto, CancellationToken ct)
     {
+        var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
+        var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
         var companyId = User.GetCompanyId(0);
+        if (companyId <= 0 && isPlatformAdmin) companyId = 1;
         if (companyId <= 0)
             return Unauthorized();
 
@@ -212,10 +254,15 @@ public class IrmKycController : ControllerBase
             }
         }
 
-        // Enforce record lookup
+        // Enforce record lookup and ownership
         var kyc = await _db.InvestorKycs.FirstOrDefaultAsync(k => k.Id == id && k.CompanyId == companyId, ct);
         if (kyc == null)
             return NotFound(ApiResponse<bool>.ErrorResponse("KYC record not found."));
+
+        if (!isPlatformAdmin && kyc.IrmId.HasValue && kyc.IrmId.Value != userId)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<bool>.ErrorResponse("Access denied: You can only update KYC records assigned to you."));
+        }
 
         if (string.IsNullOrWhiteSpace(dto.Status) || 
             (dto.Status != "Pending" && dto.Status != "Wrong" && dto.Status != "Verified"))
