@@ -40,9 +40,11 @@ public class PlatformPackagesController : ControllerBase
         var dtos = packages.Select(p =>
         {
             var enrolledCount = tenants.Count(t =>
-                !string.IsNullOrWhiteSpace(t.SubscriptionPlan) &&
-                (t.SubscriptionPlan.Equals(p.Name, StringComparison.OrdinalIgnoreCase) ||
-                 t.SubscriptionPlan.Equals(p.Code, StringComparison.OrdinalIgnoreCase)));
+            {
+                var plan = string.IsNullOrWhiteSpace(t.SubscriptionPlan) ? "Starter CRM Tier" : t.SubscriptionPlan;
+                return plan.Equals(p.Name, StringComparison.OrdinalIgnoreCase) ||
+                       plan.Equals(p.Code, StringComparison.OrdinalIgnoreCase);
+            });
 
             return MapToResponseDto(p, enrolledCount);
         }).ToList();
@@ -58,7 +60,7 @@ public class PlatformPackagesController : ControllerBase
             return NotFound(ApiResponse<PackageResponseDto>.FailureResult("Subscription package not found."));
 
         var enrolledCount = await _context.Tenants
-            .CountAsync(t => t.SubscriptionPlan == pkg.Name || t.SubscriptionPlan == pkg.Code, ct);
+            .CountAsync(t => (t.SubscriptionPlan ?? "Starter CRM Tier") == pkg.Name || (t.SubscriptionPlan ?? "Starter CRM Tier") == pkg.Code, ct);
 
         return Ok(ApiResponse<PackageResponseDto>.SuccessResult(MapToResponseDto(pkg, enrolledCount)));
     }
@@ -217,7 +219,7 @@ public class PlatformPackagesController : ControllerBase
             return NotFound(ApiResponse<bool>.FailureResult("Subscription package not found."));
 
         var enrolledCount = await _context.Tenants
-            .CountAsync(t => t.SubscriptionPlan == pkg.Name || t.SubscriptionPlan == pkg.Code, ct);
+            .CountAsync(t => (t.SubscriptionPlan ?? "Starter CRM Tier") == pkg.Name || (t.SubscriptionPlan ?? "Starter CRM Tier") == pkg.Code, ct);
 
         if (enrolledCount > 0)
             return BadRequest(ApiResponse<bool>.FailureResult($"Cannot delete package tier '{pkg.Name}'. It is currently assigned to {enrolledCount} active tenant organization(s)."));

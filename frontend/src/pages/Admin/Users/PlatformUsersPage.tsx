@@ -35,16 +35,17 @@ export const PlatformUsersPage: React.FC = () => {
   const [selectedRoleFilter, setSelectedRoleFilter] = useState('all');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('all');
 
-  // Provision User Modal state
+  // Provision User Modal state (Super Admin can create ONLY Company Admins)
   const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false);
-  const [provisionUserType, setProvisionUserType] = useState<'platform_admin' | 'tenant_user'>('tenant_user');
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newPhone, setNewPhone] = useState('+91 98450 ');
   const [newCompanyId, setNewCompanyId] = useState('');
-  const [newRoleCode, setNewRoleCode] = useState('company_admin');
-  const [newDesignation, setNewDesignation] = useState('Organization Administrator');
+  const [newRoleCode] = useState('company_admin');
+  const [newDesignation, setNewDesignation] = useState('Company Administrator');
   const [newEmployeeCode, setNewEmployeeCode] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Edit User Drawer state
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -69,40 +70,32 @@ export const PlatformUsersPage: React.FC = () => {
 
   const loadData = async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
       const [tList, rMap, uList] = await Promise.all([
         superAdminService.fetchTenantsFromApi(),
         superAdminService.fetchRolesFromApi(),
         superAdminService.fetchUsersFromApi(),
       ]);
-      setTenants(tList);
-      setRoles(rMap);
-      setUsers(uList);
-    } catch {
-      setTenants(superAdminService.getTenants());
-      setRoles(superAdminService.getRoles());
-      setUsers(superAdminService.getUsers());
+      setTenants(tList || []);
+      setRoles(rMap || {});
+      setUsers(uList || []);
+    } catch (err: any) {
+      console.error('Failed to load user directory from API:', err);
+      setLoadError(err.message || 'Failed to load user directory from database.');
     } finally {
       setIsLoading(false);
     }
   };
 
   const applyFilters = async () => {
-    setIsLoading(true);
-    try {
-      const list = await superAdminService.fetchUsersFromApi();
-      setUsers(list);
-    } catch {
-      setUsers(superAdminService.getUsers());
-    } finally {
-      setIsLoading(false);
-    }
+    await loadData();
   };
 
   useEffect(() => {
     loadData();
     const handleUpdate = () => {
-      setUsers(superAdminService.getUsers());
+      loadData();
     };
     window.addEventListener('nexus_admin_updated', handleUpdate);
     window.addEventListener('nexus_storage_updated', handleUpdate);
@@ -117,33 +110,52 @@ export const PlatformUsersPage: React.FC = () => {
     setTimeout(() => setFeedbackMsg(''), 3000);
   };
 
-  // Handle Provisioning
+  // Handle Provisioning (Super Admin can create ONLY Company Admins)
   const handleProvisionUser = async () => {
-    if (!newName || !newEmail) return;
+    if (!newName.trim() || !newEmail.trim()) {
+      alert('Full Name and Work Email are required.');
+      return;
+    }
 
-    const isPlatform = provisionUserType === 'platform_admin';
-    const targetRole = isPlatform
-      ? (roles.super_admin || { id: '1', name: 'Super Admin', code: 'super_admin', permissions: [] })
-      : (roles[newRoleCode] || roles.company_admin || { id: '2', name: 'Company Admin', code: 'company_admin', permissions: [] });
-    const targetCompany = isPlatform ? undefined : newCompanyId || tenants[0]?.id;
+    const targetCompanyId = newCompanyId || tenants[0]?.id;
+    if (!targetCompanyId) {
+      alert('A valid Tenant Organization must be assigned for Company Admin creation.');
+      return;
+    }
 
-    await superAdminService.createUserApi({
-      name: newName,
-      email: newEmail,
-      phone: newPhone,
-      role: targetRole,
-      companyId: targetCompany,
-      designation: newDesignation,
-      employeeCode: newEmployeeCode,
-      status: 'Active',
-    });
+    const companyAdminRole = roles.company_admin || {
+      id: '2',
+      name: 'Company Admin',
+      code: 'company_admin',
+      permissions: [],
+      isSystemRole: true,
+    };
 
-    setIsProvisionModalOpen(false);
-    // Reset
-    setNewName('');
-    setNewEmail('');
-    showFeedback(`User account "${newName}" provisioned successfully in database.`);
-    await applyFilters();
+    setIsSubmitting(true);
+    try {
+      await superAdminService.createUserApi({
+        name: newName.trim(),
+        email: newEmail.trim(),
+        phone: newPhone.trim(),
+        role: companyAdminRole,
+        companyId: targetCompanyId,
+        designation: newDesignation || 'Company Administrator',
+        employeeCode: newEmployeeCode.trim() || undefined,
+        status: 'Active',
+      });
+
+      setIsProvisionModalOpen(false);
+      // Reset form
+      setNewName('');
+      setNewEmail('');
+      setNewEmployeeCode('');
+      showFeedback(`Company Admin account "${newName.trim()}" provisioned successfully in database.`);
+      await loadData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to provision Company Admin.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Handle Editing
@@ -293,15 +305,21 @@ export const PlatformUsersPage: React.FC = () => {
           <button
             className="btn btn-primary btn-sm btn-provision-user"
             onClick={() => {
-              setProvisionUserType('tenant_user');
               setNewCompanyId(tenants[0]?.id || '');
+              setNewDesignation('Company Administrator');
               setIsProvisionModalOpen(true);
             }}
           >
-            <UserPlus size={14} /> Provision User Account
+            <UserPlus size={14} /> Provision Company Admin
           </button>
         </div>
       </div>
+
+      {loadError && (
+        <div className="users-feedback-alert animate-fade-in" style={{ background: 'rgba(239, 68, 68, 0.15)', borderColor: 'rgba(239, 68, 68, 0.35)', color: '#f87171' }}>
+          <AlertTriangle size={16} /> {loadError}
+        </div>
+      )}
 
       {feedbackMsg && (
         <div className="users-feedback-alert animate-fade-in">
@@ -426,7 +444,7 @@ export const PlatformUsersPage: React.FC = () => {
                     <td>
                       <span className="tenant-tag-badge">
                         <Building2 size={12} />
-                        {u.companyName || 'Platform Console (Global)'}
+                        {u.companyName || (u.companyId ? (tenants.find(t => String(t.id) === String(u.companyId))?.name || `Tenant #${u.companyId}`) : 'Platform Console (Global)')}
                       </span>
                     </td>
 
@@ -495,30 +513,17 @@ export const PlatformUsersPage: React.FC = () => {
       {/* ========================================================================= */}
       {/* PROVISION USER MODAL */}
       {/* ========================================================================= */}
+      {/* ========================================================================= */}
+      {/* PROVISION COMPANY ADMIN MODAL */}
+      {/* ========================================================================= */}
       {isProvisionModalOpen && (
         <Modal
           isOpen={isProvisionModalOpen}
           onClose={() => setIsProvisionModalOpen(false)}
-          title="⚡ Provision User Identity Account"
+          title="⚡ Provision Company Admin Account"
           size="md"
         >
           <div className="provision-modal-content">
-            {/* User Type Switcher */}
-            <div className="user-type-selector-tabs">
-              <button
-                className={`type-tab ${provisionUserType === 'tenant_user' ? 'active' : ''}`}
-                onClick={() => setProvisionUserType('tenant_user')}
-              >
-                Tenant Organization Rep
-              </button>
-              <button
-                className={`type-tab ${provisionUserType === 'platform_admin' ? 'active' : ''}`}
-                onClick={() => setProvisionUserType('platform_admin')}
-              >
-                ⚡ Platform Super Admin
-              </button>
-            </div>
-
             <div className="form-group">
               <label className="form-label required">Full Name</label>
               <input
@@ -564,64 +569,46 @@ export const PlatformUsersPage: React.FC = () => {
               </div>
             </div>
 
-            {provisionUserType === 'tenant_user' ? (
-              <>
-                <div className="form-group">
-                  <label className="form-label required">Assign Tenant Organization</label>
-                  <select
-                    className="form-control"
-                    value={newCompanyId}
-                    onChange={e => setNewCompanyId(e.target.value)}
-                  >
-                    {tenants.map(t => (
-                      <option key={t.id} value={t.id}>
-                        {t.name} ({t.slug})
-                      </option>
-                    ))}
-                  </select>
-                </div>
+            <div className="form-group">
+              <label className="form-label required">Assign Tenant Organization</label>
+              <select
+                className="form-control"
+                value={newCompanyId}
+                onChange={e => setNewCompanyId(e.target.value)}
+              >
+                {tenants.map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} ({t.slug})
+                  </option>
+                ))}
+              </select>
+            </div>
 
-                <div className="form-grid-two">
-                  <div className="form-group">
-                    <label className="form-label required">Role Scope</label>
-                    <select
-                      className="form-control"
-                      value={newRoleCode}
-                      onChange={e => setNewRoleCode(e.target.value)}
-                    >
-                      {Object.values(roles)
-                        .filter(r => r.code !== 'super_admin')
-                        .map(r => (
-                          <option key={r.code} value={r.code}>
-                            {r.name} {r.isSystemRole ? '(System)' : '(Custom)'}
-                          </option>
-                        ))}
-                    </select>
-                    <span style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', display: 'block' }}>
-                      Assign organization root administrator or custom operational role.
-                    </span>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label">Designation / Title</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={newDesignation}
-                      onChange={e => setNewDesignation(e.target.value)}
-                    />
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="platform-admin-notice">
-                <Shield size={18} color="#c084fc" />
-                <div>
-                  <strong>Root Operator Privileges:</strong> This account will be provisioned with platform-wide
-                  Super Admin privileges across all tenant nodes, telephony gateways, and security audit ledgers.
-                </div>
+            <div className="form-grid-two">
+              <div className="form-group">
+                <label className="form-label required">Role Scope</label>
+                <select
+                  className="form-control"
+                  value="company_admin"
+                  disabled
+                >
+                  <option value="company_admin">Company Admin (Tenant Scope)</option>
+                </select>
+                <span style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', display: 'block' }}>
+                  Super Admin can provision Company Admins only. Sales Executives, IRMs, and other team members must be invited by their respective Company Admin.
+                </span>
               </div>
-            )}
+
+              <div className="form-group">
+                <label className="form-label">Designation / Title</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={newDesignation}
+                  onChange={e => setNewDesignation(e.target.value)}
+                />
+              </div>
+            </div>
 
             <div className="modal-actions-footer">
               <button className="btn btn-ghost" onClick={() => setIsProvisionModalOpen(false)}>
@@ -629,10 +616,10 @@ export const PlatformUsersPage: React.FC = () => {
               </button>
               <button
                 className="btn btn-primary"
-                disabled={!newName || !newEmail}
+                disabled={!newName || !newEmail || isSubmitting}
                 onClick={handleProvisionUser}
               >
-                Provision Account
+                {isSubmitting ? 'Provisioning...' : 'Provision Account'}
               </button>
             </div>
           </div>

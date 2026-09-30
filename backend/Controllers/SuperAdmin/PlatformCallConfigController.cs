@@ -54,6 +54,8 @@ public class PlatformCallConfigController : ControllerBase
             await _context.SaveChangesAsync(ct);
         }
 
+        var (primaryHealth, failoverHealth, sttHealth) = EvaluateTrunkHealth(settings);
+
         var dto = new CarrierSettingsResponseDto
         {
             PrimaryCarrier = settings.PrimaryCarrier,
@@ -71,7 +73,10 @@ public class PlatformCallConfigController : ControllerBase
             MaskedAccountSid = MaskSid(settings.AccountSid),
             PrimaryGatewayHost = settings.PrimaryGatewayHost,
             FailoverGatewayHost = settings.FailoverGatewayHost,
-            Status = settings.Status
+            Status = settings.Status,
+            PrimaryTrunkHealth = primaryHealth,
+            FailoverTrunkHealth = failoverHealth,
+            SpeechToTextHealth = sttHealth
         };
 
         return Ok(ApiResponse<CarrierSettingsResponseDto>.SuccessResult(dto));
@@ -145,6 +150,8 @@ public class PlatformCallConfigController : ControllerBase
 
         await _context.SaveChangesAsync(ct);
 
+        var (updPrimaryHealth, updFailoverHealth, updSttHealth) = EvaluateTrunkHealth(settings);
+
         var dto = new CarrierSettingsResponseDto
         {
             PrimaryCarrier = settings.PrimaryCarrier,
@@ -162,10 +169,48 @@ public class PlatformCallConfigController : ControllerBase
             MaskedAccountSid = MaskSid(settings.AccountSid),
             PrimaryGatewayHost = settings.PrimaryGatewayHost,
             FailoverGatewayHost = settings.FailoverGatewayHost,
-            Status = settings.Status
+            Status = settings.Status,
+            PrimaryTrunkHealth = updPrimaryHealth,
+            FailoverTrunkHealth = updFailoverHealth,
+            SpeechToTextHealth = updSttHealth
         };
 
         return Ok(ApiResponse<CarrierSettingsResponseDto>.SuccessResult(dto, "Platform carrier settings updated successfully."));
+    }
+
+    private static (string PrimaryHealth, string FailoverHealth, string SttHealth) EvaluateTrunkHealth(CarrierSettings settings)
+    {
+        string primaryHealth = "offline";
+        if (!string.IsNullOrWhiteSpace(settings.PrimaryCarrier))
+        {
+            if (settings.Status == "Inactive")
+                primaryHealth = "offline";
+            else if (settings.Status == "Degraded" || settings.TestStatus == "Degraded")
+                primaryHealth = "degraded";
+            else if (settings.TestStatus == "Failed")
+                primaryHealth = "offline";
+            else
+                primaryHealth = "online";
+        }
+
+        string failoverHealth = "offline";
+        if (!string.IsNullOrWhiteSpace(settings.SecondaryCarrier))
+        {
+            if (settings.Status == "Inactive")
+                failoverHealth = "offline";
+            else if (!settings.EmergencyRoutingEnabled)
+                failoverHealth = "degraded";
+            else
+                failoverHealth = "online";
+        }
+
+        string sttHealth = "offline";
+        if (!string.IsNullOrWhiteSpace(settings.WhisperAiModel))
+        {
+            sttHealth = "online";
+        }
+
+        return (primaryHealth, failoverHealth, sttHealth);
     }
 
     [HttpPost("carrier/test")]
@@ -531,6 +576,101 @@ public class PlatformCallConfigController : ControllerBase
 
         await _context.SaveChangesAsync(ct);
         return Ok(ApiResponse<bool>.SuccessResult(true, $"DID hotline {phone} released successfully."));
+    }
+
+    // ── TELEPHONY ROUTING SANDBOX / CALL SIMULATION ─────────────────────────
+
+    [HttpPost("simulate-call")]
+    public async Task<ActionResult<ApiResponse<SimulateCallResultDto>>> SimulateInboundCall(
+        [FromBody] SimulateCallRequestDto req,
+        CancellationToken ct = default)
+    {
+        var targetPhone = req.PhoneNumber?.Trim();
+        var did = await _context.TenantDidMappings
+            .Include(d => d.Tenant)
+            .FirstOrDefaultAsync(d => d.PhoneNumber == targetPhone, ct);
+
+        if (did == null && !string.IsNullOrWhiteSpace(targetPhone))
+        {
+            did = await _context.TenantDidMappings.Include(d => d.Tenant).FirstOrDefaultAsync(ct);
+        }
+
+        if (did == null)
+        {
+            return NotFound(ApiResponse<SimulateCallResultDto>.FailureResult("No virtual DID mapping found to simulate."));
+        }
+
+        var carrier = await _context.CarrierSettings.FirstOrDefaultAsync(ct);
+        var primaryCarrier = carrier?.PrimaryCarrier ?? "Platform SIP Gateway";
+        var gatewayHost = carrier?.PrimaryGatewayHost ?? "sip.trunk.nexusplatform.io";
+        var isGatewayOnline = carrier?.Status != "Inactive";
+        var whisperModel = carrier?.WhisperAiModel ?? "OpenAI Whisper-Large-v3";
+        var retentionDays = carrier?.RecordingRetentionDays ?? 180;
+
+        var tenantName = did.Tenant?.Name ?? (did.TenantId.HasValue ? $"Tenant #{did.TenantId}" : "Unassigned Reserve Pool");
+        var tenantIdDisplay = did.TenantId?.ToString() ?? "RESERVED";
+
+        // Query real users/agents assigned to this tenant organization
+        List<User> activeAgents = new();
+        if (did.TenantId.HasValue)
+        {
+            activeAgents = await _context.Users
+                .Where(u => u.CompanyId == did.TenantId.Value && u.Status == backend.Models.Enums.UserStatus.Active)
+                .OrderBy(u => u.Id)
+                .Take(5)
+                .ToListAsync(ct);
+        }
+
+        var traceLogs = new List<string>
+        {
+            $"[T+0.0s] Inbound SIP INVITE received on Virtual DID: {did.PhoneNumber} (Status: {did.Status})",
+            $"[T+0.2s] Carrier Gateway: Handshake verified with {primaryCarrier} ({gatewayHost}) - Gateway status: {(isGatewayOnline ? "ONLINE" : "DEGRADED")}",
+            $"[T+0.4s] Tenant Resolution: Mapping matched tenant organization -> \"{tenantName}\" (ID: {tenantIdDisplay})",
+            $"[T+0.6s] Queue Execution: Routing Strategy [{did.RoutingStrategy}] dispatched to queue \"{did.QueueName}\" across {did.ChannelsCount} SIP channels",
+            $"[T+0.8s] Speech Intelligence: " + (did.EnableAiWhisper ? $"Streaming active to {whisperModel}" : "AI transcription disabled") + (did.EnableRecording ? $" | Cloud recording enabled ({retentionDays}-day retention)" : " | Cloud recording disabled")
+        };
+
+        if (activeAgents.Count > 0)
+        {
+            var rep = activeAgents[0];
+            traceLogs.Add($"[T+1.0s] Agent Allocation: Candidate Rep found (\"{rep.Name}\" - {rep.Email}, Status: Active). Signaling target softphone... Call Connected!");
+        }
+        else if (did.TenantId.HasValue)
+        {
+            traceLogs.Add($"[T+1.0s] Queue Attendant: No live softphone agents currently registered in {tenantName}. Dispatched to Tenant Automated Interactive Attendant / Voicemail Queue.");
+        }
+        else
+        {
+            traceLogs.Add("[T+1.0s] Reserve Trunk: DID is unallocated in reserve pool. Call redirected to Platform Default Welcome Gateway.");
+        }
+
+        _context.AuditLogs.Add(new AuditLog
+        {
+            Action = "SIMULATE_INBOUND_CALL",
+            EntityType = "TenantDidMapping",
+            EntityId = did.PhoneNumber,
+            CompanyId = did.TenantId,
+            ActorName = _currentUser.Email ?? "Super Admin",
+            ActorEmail = _currentUser.Email ?? "admin@platform.com",
+            Details = $"Super Admin executed inbound call routing trace on DID {did.PhoneNumber} ({tenantName}).",
+            Module = "CallConfig",
+            Status = "success",
+            Timestamp = DateTime.UtcNow
+        });
+        await _context.SaveChangesAsync(ct);
+
+        var result = new SimulateCallResultDto
+        {
+            Success = true,
+            PhoneNumber = did.PhoneNumber,
+            TenantName = tenantName,
+            RoutingStrategy = did.RoutingStrategy,
+            QueueName = did.QueueName,
+            TraceLogs = traceLogs,
+            ExecutedAt = DateTime.UtcNow
+        };
+
+        return Ok(ApiResponse<SimulateCallResultDto>.SuccessResult(result, "Telephony routing trace simulation executed successfully."));
     }
 
     private static string? MaskSid(string? sid)

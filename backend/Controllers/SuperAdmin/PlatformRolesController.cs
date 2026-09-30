@@ -118,6 +118,7 @@ public class PlatformRolesController : ControllerBase
     /// Creates a new custom role with specified permissions.
     /// </summary>
     [HttpPost]
+    [Authorize(Roles = "super_admin")]
     public async Task<ActionResult<ApiResponse<PlatformRoleDto>>> CreateRole([FromBody] CreateRoleRequestDto req)
     {
         if (string.IsNullOrWhiteSpace(req.Name))
@@ -196,6 +197,7 @@ public class PlatformRolesController : ControllerBase
     /// Updates an existing role (Custom role name/desc/status/permissions, or System role permissions).
     /// </summary>
     [HttpPut("{id}")]
+    [Authorize(Roles = "super_admin")]
     public async Task<ActionResult<ApiResponse<PlatformRoleDto>>> UpdateRole(int id, [FromBody] UpdateRoleRequestDto req)
     {
         var role = await _context.Roles.FirstOrDefaultAsync(r => r.Id == id);
@@ -285,6 +287,7 @@ public class PlatformRolesController : ControllerBase
     /// Activates or deactivates a custom role.
     /// </summary>
     [HttpPatch("{id}/status")]
+    [Authorize(Roles = "super_admin")]
     public async Task<ActionResult<ApiResponse<PlatformRoleDto>>> ToggleRoleStatus(int id, [FromBody] UpdateRoleStatusDto req)
     {
         var role = await _context.Roles.FirstOrDefaultAsync(r => r.Id == id);
@@ -339,6 +342,7 @@ public class PlatformRolesController : ControllerBase
     /// Safely deletes a custom role. Prevents deletion of system roles and roles with active assigned users.
     /// </summary>
     [HttpDelete("{id}")]
+    [Authorize(Roles = "super_admin")]
     public async Task<ActionResult<ApiResponse<bool>>> DeleteRole(int id)
     {
         var role = await _context.Roles.FirstOrDefaultAsync(r => r.Id == id);

@@ -784,7 +784,11 @@ export interface PlatformCarrierSettings {
   status?: string;
   lastTestedAt?: string;
   testStatus?: 'Success' | 'Degraded' | 'Offline';
+  primaryTrunkHealth?: 'online' | 'degraded' | 'offline';
+  failoverTrunkHealth?: 'online' | 'degraded' | 'offline';
+  speechToTextHealth?: 'online' | 'degraded' | 'offline';
 }
+
 
 export interface SystemDiagnostics {
   apiStatus: 'Healthy' | 'Degraded' | 'Down';
@@ -801,7 +805,12 @@ export interface SystemDiagnostics {
   telephonyDropRate: number;
   systemUptimePercentage: number;
   lastBackupAt: string;
+  trunkStatus?: string;
+  trunkTestStatus?: string;
+  databaseConnected?: boolean;
 }
+
+
 
 export interface BroadcastAnnouncement {
   id: string;

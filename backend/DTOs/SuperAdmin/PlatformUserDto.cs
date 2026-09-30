@@ -79,6 +79,12 @@ public class UpdatePlatformUserDto
     public string? CompanyId { get; set; }
     public string? Designation { get; set; }
     public string? Status { get; set; }
+    public string? Password { get; set; }
+}
+
+public class AdminResetPasswordRequestDto
+{
+    public string? NewPassword { get; set; }
 }
 
 public class PermissionItemDto

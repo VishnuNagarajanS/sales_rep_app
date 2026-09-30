@@ -730,64 +730,52 @@ class SuperAdminService {
   // ── USERS ─────────────────────────────────────────────────────────────────
 
   async fetchUsersFromApi(filters?: { companyId?: string; roleCode?: string; status?: string; search?: string }): Promise<User[]> {
-    try {
-      const res = await apiClient.get<ApiResponse<User[]>>('/super-admin/users', filters);
-      if (res && res.data) {
-        if (!filters || Object.keys(filters).length === 0) {
-          localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(res.data));
-        }
-        return res.data;
-      }
-    } catch (err) {
-      console.warn('Could not fetch users from /api/super-admin/users, falling back to local cache:', err);
+    const res = await apiClient.get<ApiResponse<User[]>>('/super-admin/users', filters);
+    if (!res || !res.data) {
+      throw new Error(res?.message || 'Failed to fetch users from database.');
     }
-    return this.getUsers(filters);
+    if (!filters || Object.keys(filters).length === 0) {
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(res.data));
+    }
+    return res.data;
   }
 
   async createUserApi(userData: Partial<User>, initialPassword?: string): Promise<User> {
-    try {
-      const res = await apiClient.post<ApiResponse<User>>('/super-admin/users', {
-        name: userData.name,
-        email: userData.email,
-        phone: userData.phone,
-        password: initialPassword,
-        roleCode: userData.role?.code,
-        companyId: userData.companyId,
-        designation: userData.designation,
-        employeeCode: userData.employeeCode,
-        status: userData.status || 'Active',
-      });
-      if (res && res.data) {
-        await this.fetchUsersFromApi();
-        notifyAdminStorageUpdated();
-        return res.data;
-      }
-    } catch (err) {
-      console.warn('Could not create user via API, saving locally:', err);
+    const res = await apiClient.post<ApiResponse<User>>('/super-admin/users', {
+      name: userData.name,
+      email: userData.email,
+      phone: userData.phone,
+      password: initialPassword,
+      roleCode: userData.role?.code || 'company_admin',
+      companyId: userData.companyId,
+      designation: userData.designation,
+      employeeCode: userData.employeeCode,
+      status: userData.status || 'Active',
+    });
+    if (!res || !res.data) {
+      throw new Error(res?.message || 'Failed to provision user in database.');
     }
-    return this.createUser(userData, initialPassword);
+    await this.fetchUsersFromApi();
+    notifyAdminStorageUpdated();
+    return res.data;
   }
 
   async updateUserApi(id: string, updates: Partial<User>): Promise<User | undefined> {
-    try {
-      const res = await apiClient.put<ApiResponse<User>>(`/super-admin/users/${id}`, {
-        name: updates.name,
-        email: updates.email,
-        phone: updates.phone,
-        roleCode: updates.role?.code,
-        companyId: updates.companyId,
-        designation: updates.designation,
-        status: updates.status,
-      });
-      if (res && res.data) {
-        await this.fetchUsersFromApi();
-        notifyAdminStorageUpdated();
-        return res.data;
-      }
-    } catch (err) {
-      console.warn('Could not update user via API, updating locally:', err);
+    const res = await apiClient.put<ApiResponse<User>>(`/super-admin/users/${id}`, {
+      name: updates.name,
+      email: updates.email,
+      phone: updates.phone,
+      roleCode: updates.role?.code,
+      companyId: updates.companyId,
+      designation: updates.designation,
+      status: updates.status,
+    });
+    if (!res || !res.data) {
+      throw new Error(res?.message || 'Failed to update user profile in database.');
     }
-    return this.updateUser(id, updates);
+    await this.fetchUsersFromApi();
+    notifyAdminStorageUpdated();
+    return res.data;
   }
 
   async toggleUserStatusApi(id: string, status: 'Active' | 'Invited' | 'Disabled'): Promise<User | undefined> {
@@ -795,29 +783,21 @@ class SuperAdminService {
   }
 
   async deleteUserApi(id: string): Promise<boolean> {
-    try {
-      const res = await apiClient.delete<ApiResponse<boolean>>(`/super-admin/users/${id}`);
-      if (res && res.data) {
-        await this.fetchUsersFromApi();
-        notifyAdminStorageUpdated();
-        return true;
-      }
-    } catch (err) {
-      console.warn('Could not delete user via API, deleting locally:', err);
+    const res = await apiClient.delete<ApiResponse<boolean>>(`/super-admin/users/${id}`);
+    if (!res || !res.data) {
+      throw new Error(res?.message || 'Failed to delete user from database.');
     }
-    return this.deleteUser(id);
+    await this.fetchUsersFromApi();
+    notifyAdminStorageUpdated();
+    return true;
   }
 
   async resetUserPasswordApi(id: string): Promise<{ success: boolean; tempPassword?: string }> {
-    try {
-      const res = await apiClient.post<ApiResponse<{ tempPassword: string }>>(`/super-admin/users/${id}/reset-password`);
-      if (res && res.data) {
-        return { success: true, tempPassword: res.data.tempPassword };
-      }
-    } catch (err) {
-      console.warn('Could not reset password via API, falling back to local generator:', err);
+    const res = await apiClient.post<ApiResponse<{ tempPassword: string }>>(`/super-admin/users/${id}/reset-password`);
+    if (!res || !res.data) {
+      throw new Error(res?.message || 'Failed to generate temporary credentials.');
     }
-    return this.resetUserPassword(id);
+    return { success: true, tempPassword: res.data.tempPassword };
   }
 
   getUsers(filters?: { companyId?: string; roleCode?: string; status?: string; search?: string }): User[] {
@@ -1685,16 +1665,12 @@ class SuperAdminService {
   // ── TELEPHONY & DID MAPPINGS ──────────────────────────────────────────────
 
   async fetchDidMappingsFromApi(): Promise<TenantDidMapping[]> {
-    try {
-      const res = await apiClient.get<ApiResponse<TenantDidMapping[]>>('/super-admin/call-config/dids');
-      if (res && res.data) {
-        localStorage.setItem(STORAGE_KEYS.DIDS, JSON.stringify(res.data));
-        return res.data;
-      }
-    } catch (err) {
-      console.warn('Could not fetch DIDs from API, falling back to local cache:', err);
+    const res = await apiClient.get<ApiResponse<TenantDidMapping[]>>('/super-admin/call-config/dids');
+    if (res && res.data) {
+      localStorage.setItem(STORAGE_KEYS.DIDS, JSON.stringify(res.data));
+      return res.data;
     }
-    return this.getDidMappings();
+    throw new Error(res?.message || 'Failed to fetch DIDs from backend');
   }
 
   getDidMappings(): TenantDidMapping[] {
@@ -1828,16 +1804,12 @@ class SuperAdminService {
   // ── CARRIER SETTINGS ──────────────────────────────────────────────────────
 
   async fetchCarrierSettingsFromApi(): Promise<PlatformCarrierSettings> {
-    try {
-      const res = await apiClient.get<ApiResponse<PlatformCarrierSettings>>('/super-admin/call-config/carrier');
-      if (res && res.data) {
-        localStorage.setItem(STORAGE_KEYS.CARRIER_SETTINGS, JSON.stringify(res.data));
-        return res.data;
-      }
-    } catch (err) {
-      console.warn('Could not fetch carrier settings from API, falling back to local cache:', err);
+    const res = await apiClient.get<ApiResponse<PlatformCarrierSettings>>('/super-admin/call-config/carrier');
+    if (res && res.data) {
+      localStorage.setItem(STORAGE_KEYS.CARRIER_SETTINGS, JSON.stringify(res.data));
+      return res.data;
     }
-    return this.getCarrierSettings();
+    throw new Error(res?.message || 'Failed to fetch carrier settings from backend');
   }
 
   getCarrierSettings(): PlatformCarrierSettings {
@@ -1918,6 +1890,31 @@ class SuperAdminService {
     };
   }
 
+  async simulateInboundCall(phoneNumber: string): Promise<{
+    success: boolean;
+    phoneNumber: string;
+    tenantName: string;
+    routingStrategy: string;
+    queueName: string;
+    traceLogs: string[];
+    executedAt: string;
+  }> {
+    const res = await apiClient.post<ApiResponse<{
+      success: boolean;
+      phoneNumber: string;
+      tenantName: string;
+      routingStrategy: string;
+      queueName: string;
+      traceLogs: string[];
+      executedAt: string;
+    }>>('/super-admin/call-config/simulate-call', { phoneNumber });
+
+    if (res && res.data) {
+      return res.data;
+    }
+    throw new Error(res?.message || 'Failed to execute call simulation on telephony gateway');
+  }
+
   // ── AUDIT LOGS ────────────────────────────────────────────────────────────
 
   async fetchAuditLogsFromApi(filters?: {
@@ -1933,12 +1930,12 @@ class SuperAdminService {
   }): Promise<AuditLog[]> {
     try {
       const params: Record<string, any> = {
-        pageNumber: filters?.pageNumber || 1,
+        page: filters?.pageNumber || 1,
         pageSize: filters?.pageSize || 200,
       };
 
       if (filters?.companyId && filters.companyId !== 'all') {
-        params.companyId = filters.companyId === 'global' ? '0' : filters.companyId;
+        params.companyId = filters.companyId;
       }
       if (filters?.action && filters.action !== 'all') {
         params.action = filters.action;
@@ -1950,10 +1947,10 @@ class SuperAdminService {
         params.search = filters.search;
       }
       if (filters?.from) {
-        params.fromDate = filters.from;
+        params.from = filters.from;
       }
       if (filters?.to) {
-        params.toDate = filters.to;
+        params.to = filters.to;
       }
 
       const res = await apiClient.get<any>('/audit-logs', params);
@@ -2080,15 +2077,16 @@ class SuperAdminService {
   // ── SYSTEM DIAGNOSTICS & ANNOUNCEMENTS ─────────────────────────────────────
 
   async fetchSystemDiagnosticsFromApi(): Promise<SystemDiagnostics> {
-    try {
-      const res = await apiClient.get<ApiResponse<SystemDiagnostics>>('/super-admin/system/diagnostics');
-      if (res && res.data) {
-        return res.data;
-      }
-    } catch (err) {
-      console.warn('Could not fetch diagnostics from API, using cached state:', err);
+    const start = performance.now();
+    const res = await apiClient.get<ApiResponse<SystemDiagnostics>>('/super-admin/system/diagnostics');
+    const roundtripMs = Math.round(performance.now() - start);
+    if (res && res.data) {
+      return {
+        ...res.data,
+        apiLatencyMs: res.data.apiLatencyMs > 0 ? res.data.apiLatencyMs : roundtripMs,
+      };
     }
-    return this.getSystemDiagnostics();
+    throw new Error(res?.message || 'Failed to fetch diagnostics from backend');
   }
 
   getSystemDiagnostics(): SystemDiagnostics {
@@ -2111,17 +2109,26 @@ class SuperAdminService {
   }
 
   async fetchAnnouncementsFromApi(): Promise<BroadcastAnnouncement[]> {
+    const res = await apiClient.get<ApiResponse<BroadcastAnnouncement[]>>('/super-admin/system/announcements');
+    if (res && res.data) {
+      localStorage.setItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(res.data));
+      return res.data;
+    }
+    throw new Error(res?.message || 'Failed to fetch announcements from backend');
+  }
+
+  async fetchActiveAnnouncementsFromApi(): Promise<BroadcastAnnouncement[]> {
     try {
-      const res = await apiClient.get<ApiResponse<BroadcastAnnouncement[]>>('/super-admin/system/announcements');
+      const res = await apiClient.get<ApiResponse<BroadcastAnnouncement[]>>('/announcements/active');
       if (res && res.data) {
-        localStorage.setItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(res.data));
         return res.data;
       }
-    } catch (err) {
-      console.warn('Could not fetch announcements from API, falling back to local cache:', err);
+      return [];
+    } catch {
+      return [];
     }
-    return this.getAnnouncements();
   }
+
 
   getAnnouncements(): BroadcastAnnouncement[] {
     try {
@@ -2215,18 +2222,14 @@ class SuperAdminService {
   }
 
   async fetchMaintenanceModeFromApi(): Promise<{ enabled: boolean; message: string; bypassSecret: string }> {
-    try {
-      const res = await apiClient.get<ApiResponse<{ enabled: boolean; message: string; bypassSecret: string }>>(
-        '/super-admin/system/maintenance'
-      );
-      if (res && res.data) {
-        localStorage.setItem(STORAGE_KEYS.MAINTENANCE_MODE, JSON.stringify(res.data));
-        return res.data;
-      }
-    } catch (err) {
-      console.warn('Could not fetch maintenance mode from API, falling back to local cache:', err);
+    const res = await apiClient.get<ApiResponse<{ enabled: boolean; message: string; bypassSecret: string }>>(
+      '/super-admin/system/maintenance'
+    );
+    if (res && res.data) {
+      localStorage.setItem(STORAGE_KEYS.MAINTENANCE_MODE, JSON.stringify(res.data));
+      return res.data;
     }
-    return this.getMaintenanceMode();
+    throw new Error(res?.message || 'Failed to fetch maintenance mode from backend');
   }
 
   getMaintenanceMode(): { enabled: boolean; message: string; bypassSecret: string } {
@@ -2383,6 +2386,30 @@ class SuperAdminService {
       announcements: this.getAnnouncements(),
     };
     return JSON.stringify(snapshot, null, 2);
+  }
+
+  async exportPlatformSnapshotApi(): Promise<string> {
+    const res = await apiClient.get<ApiResponse<any>>('/super-admin/system/backup/export');
+    if (res && res.data) {
+      return JSON.stringify(res.data, null, 2);
+    }
+    throw new Error(res?.message || 'Failed to generate database backup from backend server');
+  }
+
+  async testDatabaseDiagnostic(): Promise<{ success: boolean; latencyMs: number; status: string; message: string }> {
+    const res = await apiClient.post<ApiResponse<{ success: boolean; latencyMs: number; status: string; message: string }>>(
+      '/super-admin/system/diagnostics/database'
+    );
+    if (res && res.data) return res.data;
+    throw new Error(res?.message || 'Database diagnostic probe failed');
+  }
+
+  async testApiDiagnostic(): Promise<{ success: boolean; latencyMs: number; status: string; message: string }> {
+    const res = await apiClient.post<ApiResponse<{ success: boolean; latencyMs: number; status: string; message: string }>>(
+      '/super-admin/system/diagnostics/api'
+    );
+    if (res && res.data) return res.data;
+    throw new Error(res?.message || 'API diagnostic probe failed');
   }
 }
 

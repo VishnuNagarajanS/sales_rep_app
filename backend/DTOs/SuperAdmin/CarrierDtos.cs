@@ -20,7 +20,11 @@ public class CarrierSettingsResponseDto
     public string? PrimaryGatewayHost { get; set; }
     public string? FailoverGatewayHost { get; set; }
     public string Status { get; set; } = "Active";
+    public string PrimaryTrunkHealth { get; set; } = "online";
+    public string FailoverTrunkHealth { get; set; } = "online";
+    public string SpeechToTextHealth { get; set; } = "online";
 }
+
 
 public class UpdateCarrierSettingsRequestDto
 {
@@ -48,3 +52,20 @@ public class CarrierTestResultDto
     public string Message { get; set; } = string.Empty;
     public DateTime TestedAt { get; set; } = DateTime.UtcNow;
 }
+
+public class SimulateCallRequestDto
+{
+    public string PhoneNumber { get; set; } = string.Empty;
+}
+
+public class SimulateCallResultDto
+{
+    public bool Success { get; set; }
+    public string PhoneNumber { get; set; } = string.Empty;
+    public string TenantName { get; set; } = string.Empty;
+    public string RoutingStrategy { get; set; } = string.Empty;
+    public string QueueName { get; set; } = string.Empty;
+    public List<string> TraceLogs { get; set; } = new();
+    public DateTime ExecutedAt { get; set; } = DateTime.UtcNow;
+}
+

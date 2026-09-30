@@ -1,3 +1,4 @@
+using backend.Authentication.Interfaces;
 using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.SuperAdmin;
@@ -16,10 +17,12 @@ namespace backend.Controllers.SuperAdmin;
 public class PlatformUsersController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
+    private readonly ICurrentUserService _currentUser;
 
-    public PlatformUsersController(ApplicationDbContext context)
+    public PlatformUsersController(ApplicationDbContext context, ICurrentUserService currentUser)
     {
         _context = context;
+        _currentUser = currentUser;
     }
 
     /// <summary>
@@ -90,7 +93,7 @@ public class PlatformUsersController : ControllerBase
                 u.Name.ToLower().Contains(s) ||
                 u.Email.ToLower().Contains(s) ||
                 u.Phone.ToLower().Contains(s) ||
-                (u.Company != null && u.Company.Name.ToLower().Contains(s)));
+                (u.Company != null && (u.Company.Name.ToLower().Contains(s) || u.Company.Slug.ToLower().Contains(s))));
         }
 
         var users = await query.OrderBy(u => u.Id).ToListAsync();
@@ -112,8 +115,9 @@ public class PlatformUsersController : ControllerBase
             CompanySlug = u.Company?.Slug,
             CompanyName = u.Company?.Name,
             Status = u.Status.ToString(),
-            LastLogin = u.LastLoginAt.HasValue ? u.LastLoginAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : "Just now",
+            LastLogin = u.LastLoginAt.HasValue ? u.LastLoginAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : "Never",
             Avatar = u.AvatarUrl,
+            Designation = u.Role?.Name ?? "Platform User",
             CreatedAt = u.CreatedAt.ToString("o"),
             UpdatedAt = u.UpdatedAt?.ToString("o")
         }).ToList();
@@ -150,8 +154,9 @@ public class PlatformUsersController : ControllerBase
             CompanySlug = u.Company?.Slug,
             CompanyName = u.Company?.Name,
             Status = u.Status.ToString(),
-            LastLogin = u.LastLoginAt.HasValue ? u.LastLoginAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : "Just now",
+            LastLogin = u.LastLoginAt.HasValue ? u.LastLoginAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : "Never",
             Avatar = u.AvatarUrl,
+            Designation = u.Role?.Name ?? "Platform User",
             CreatedAt = u.CreatedAt.ToString("o"),
             UpdatedAt = u.UpdatedAt?.ToString("o")
         };
@@ -159,27 +164,55 @@ public class PlatformUsersController : ControllerBase
         return Ok(ApiResponse<PlatformUserDto>.SuccessResult(dto));
     }
 
+    /// <summary>
+    /// Super Admin user provisioning: can create ONLY Company Admins.
+    /// Other operational roles (Sales Executive, IRM, etc.) must be created by their respective Company Admin.
+    /// </summary>
     [HttpPost]
     public async Task<ActionResult<ApiResponse<PlatformUserDto>>> CreateUser([FromBody] CreatePlatformUserDto req)
     {
         if (string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.Name))
             return BadRequest(ApiResponse<PlatformUserDto>.FailureResult("Name and Email are required."));
 
+        // MANDATORY ENFORCEMENT: Super Admin can create ONLY Company Admins
+        var requestedRole = req.RoleCode?.Trim().ToLowerInvariant();
+        if (requestedRole != "company_admin")
+        {
+            return BadRequest(ApiResponse<PlatformUserDto>.FailureResult(
+                "Super Admin is authorized to create Company Admin users only. Other roles (Sales Executive, IRM, etc.) must be created by their respective Company Admin."));
+        }
+
+        // Validate Tenant Organization: Company Admin must belong to a valid tenant organization
+        if (string.IsNullOrWhiteSpace(req.CompanyId) || req.CompanyId.Equals("global", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(ApiResponse<PlatformUserDto>.FailureResult(
+                "A valid Tenant Organization must be assigned for Company Admin creation."));
+        }
+
+        int companyId;
+        if (int.TryParse(req.CompanyId, out var cid))
+        {
+            var tenantExists = await _context.Tenants.AnyAsync(t => t.Id == cid);
+            if (!tenantExists)
+                return BadRequest(ApiResponse<PlatformUserDto>.FailureResult($"Tenant organization with ID {cid} not found."));
+            companyId = cid;
+        }
+        else
+        {
+            var tenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Slug.ToLower() == req.CompanyId.Trim().ToLower());
+            if (tenant == null)
+                return BadRequest(ApiResponse<PlatformUserDto>.FailureResult($"Tenant organization '{req.CompanyId}' not found."));
+            companyId = tenant.Id;
+        }
+
         var normalizedEmail = req.Email.Trim().ToLowerInvariant();
         var existing = await _context.Users.AnyAsync(u => u.Email.ToLower() == normalizedEmail);
         if (existing)
             return BadRequest(ApiResponse<PlatformUserDto>.FailureResult($"User with email '{req.Email}' already exists."));
 
-        var role = await _context.Roles.FirstOrDefaultAsync(r => r.Code == req.RoleCode);
+        var role = await _context.Roles.FirstOrDefaultAsync(r => r.Code == "company_admin");
         if (role == null)
-            return BadRequest(ApiResponse<PlatformUserDto>.FailureResult($"Role '{req.RoleCode}' is invalid."));
-
-        int? companyId = null;
-        if (!string.IsNullOrWhiteSpace(req.CompanyId) && !req.CompanyId.Equals("global", StringComparison.OrdinalIgnoreCase))
-        {
-            if (int.TryParse(req.CompanyId, out var cid))
-                companyId = cid;
-        }
+            return BadRequest(ApiResponse<PlatformUserDto>.FailureResult("Role 'company_admin' is not configured in database."));
 
         var password = string.IsNullOrWhiteSpace(req.Password) ? "Password@123" : req.Password;
         var passwordHash = BCrypt.Net.BCrypt.HashPassword(password);
@@ -200,8 +233,21 @@ public class PlatformUsersController : ControllerBase
         await _context.SaveChangesAsync();
 
         await _context.Entry(newUser).Reference(u => u.Role).LoadAsync();
-        if (newUser.CompanyId.HasValue)
-            await _context.Entry(newUser).Reference(u => u.Company).LoadAsync();
+        await _context.Entry(newUser).Reference(u => u.Company).LoadAsync();
+
+        _context.AuditLogs.Add(new AuditLog
+        {
+            Action = "CREATE_COMPANY_ADMIN",
+            EntityType = "User",
+            EntityId = newUser.Id.ToString(),
+            ActorName = _currentUser.Email ?? "Super Admin",
+            ActorEmail = _currentUser.Email ?? "admin@platform.com",
+            Details = $"Super Admin provisioned Company Admin '{newUser.Name}' ({newUser.Email}) for organization '{newUser.Company?.Name}' (ID: {companyId}).",
+            Module = "Users",
+            Status = "success",
+            Timestamp = DateTime.UtcNow
+        });
+        await _context.SaveChangesAsync();
 
         var dto = new PlatformUserDto
         {
@@ -216,15 +262,18 @@ public class PlatformUsersController : ControllerBase
                 Code = newUser.Role.Code,
                 Permissions = newUser.Role.Permissions ?? new List<string>()
             },
-            CompanyId = newUser.CompanyId.HasValue ? newUser.CompanyId.Value.ToString() : null,
+            CompanyId = newUser.CompanyId.ToString(),
             CompanySlug = newUser.Company?.Slug,
             CompanyName = newUser.Company?.Name,
             Status = newUser.Status.ToString(),
             LastLogin = "Never",
+            Avatar = newUser.AvatarUrl,
+            EmployeeCode = req.EmployeeCode,
+            Designation = req.Designation ?? newUser.Role?.Name ?? "Company Administrator",
             CreatedAt = newUser.CreatedAt.ToString("o")
         };
 
-        return CreatedAtAction(nameof(GetUserById), new { id = newUser.Id }, ApiResponse<PlatformUserDto>.SuccessResult(dto, "User created successfully."));
+        return CreatedAtAction(nameof(GetUserById), new { id = newUser.Id }, ApiResponse<PlatformUserDto>.SuccessResult(dto, "Company Admin provisioned successfully."));
     }
 
     [HttpPut("{id}")]
@@ -275,7 +324,27 @@ public class PlatformUsersController : ControllerBase
             user.Status = st;
         }
 
+        if (!string.IsNullOrWhiteSpace(req.Password))
+        {
+            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password);
+        }
+
         user.UpdatedAt = DateTime.UtcNow;
+
+        _context.AuditLogs.Add(new AuditLog
+        {
+            Action = "UPDATE_USER",
+            EntityType = "User",
+            EntityId = user.Id.ToString(),
+            CompanyId = user.CompanyId,
+            ActorName = _currentUser.Email ?? "Super Admin",
+            ActorEmail = _currentUser.Email ?? "admin@platform.com",
+            Details = $"Super Admin updated user '{user.Name}' ({user.Email}) with role '{user.Role?.Name}' and status '{user.Status}'.",
+            Module = "Users",
+            Status = "success",
+            Timestamp = DateTime.UtcNow
+        });
+
         await _context.SaveChangesAsync();
 
         var dto = new PlatformUserDto
@@ -286,10 +355,10 @@ public class PlatformUsersController : ControllerBase
             Phone = user.Phone,
             Role = new PlatformRoleDto
             {
-                Id = user.Role.Id.ToString(),
-                Name = user.Role.Name,
-                Code = user.Role.Code,
-                Permissions = user.Role.Permissions ?? new List<string>()
+                Id = user.Role?.Id.ToString() ?? "0",
+                Name = user.Role?.Name ?? "User",
+                Code = user.Role?.Code ?? "user",
+                Permissions = user.Role?.Permissions ?? new List<string>()
             },
             CompanyId = user.CompanyId.HasValue ? user.CompanyId.Value.ToString() : null,
             CompanySlug = user.Company?.Slug,
@@ -313,22 +382,58 @@ public class PlatformUsersController : ControllerBase
         if (user.Email.Equals("yanosh@ghlindiaventures.com", StringComparison.OrdinalIgnoreCase))
             return BadRequest(ApiResponse<bool>.FailureResult("Root Super Admin cannot be deleted."));
 
+        var userName = user.Name;
+        var userEmail = user.Email;
+        var userCompanyId = user.CompanyId;
+
         _context.Users.Remove(user);
+
+        _context.AuditLogs.Add(new AuditLog
+        {
+            Action = "DELETE_USER",
+            EntityType = "User",
+            EntityId = id.ToString(),
+            CompanyId = userCompanyId,
+            ActorName = _currentUser.Email ?? "Super Admin",
+            ActorEmail = _currentUser.Email ?? "admin@platform.com",
+            Details = $"Super Admin permanently deleted user account '{userName}' ({userEmail}).",
+            Module = "Users",
+            Status = "success",
+            Timestamp = DateTime.UtcNow
+        });
+
         await _context.SaveChangesAsync();
 
         return Ok(ApiResponse<bool>.SuccessResult(true, "User deleted successfully."));
     }
 
     [HttpPost("{id}/reset-password")]
-    public async Task<ActionResult<ApiResponse<object>>> ResetPassword(int id)
+    public async Task<ActionResult<ApiResponse<object>>> ResetPassword(int id, [FromBody] AdminResetPasswordRequestDto? req = null)
     {
         var user = await _context.Users.FindAsync(id);
         if (user == null)
             return NotFound(ApiResponse<object>.FailureResult($"User with ID {id} not found."));
 
-        var tempPassword = $"Nexus#{new Random().Next(1000, 9999)}!";
+        var tempPassword = !string.IsNullOrWhiteSpace(req?.NewPassword)
+            ? req.NewPassword
+            : $"Nexus#{new Random().Next(1000, 9999)}!";
         user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(tempPassword);
         user.UpdatedAt = DateTime.UtcNow;
+
+        _context.AuditLogs.Add(new AuditLog
+        {
+            Action = "RESET_PASSWORD",
+            EntityType = "User",
+            EntityId = user.Id.ToString(),
+            CompanyId = user.CompanyId,
+            ActorName = _currentUser.Email ?? "Super Admin",
+            ActorEmail = _currentUser.Email ?? "admin@platform.com",
+            Details = $"Super Admin generated temporary credentials for user '{user.Name}' ({user.Email}).",
+            Module = "Users",
+            Status = "success",
+            Timestamp = DateTime.UtcNow
+        });
+
         await _context.SaveChangesAsync();
 
         return Ok(ApiResponse<object>.SuccessResult(new { tempPassword }, "Temporary password generated successfully."));
@@ -360,7 +465,11 @@ public class PlatformUsersController : ControllerBase
         var previousMonthLeads = await _context.Leads.CountAsync(l => l.CreatedAt >= prevMonthStart && l.CreatedAt < currentMonthStart, ct);
 
         var totalCustomers = await _context.Customers.CountAsync(ct);
-        var dealSum = await _context.GhlDeals.SumAsync(d => (long)d.Value, ct);
+        var ghlDealSum = await _context.GhlDeals.SumAsync(d => d.Value, ct);
+        var irmDealSum = await _context.IrmPipelineCards
+            .Where(c => c.Value.HasValue)
+            .SumAsync(c => c.Value!.Value, ct);
+        var totalPipelineValue = (long)Math.Round(ghlDealSum + irmDealSum);
 
         var metrics = new PlatformMetricsDto
         {
@@ -375,7 +484,7 @@ public class PlatformUsersController : ControllerBase
             TotalLeads = totalLeads,
             CurrentMonthLeads = currentMonthLeads,
             PreviousMonthLeads = previousMonthLeads,
-            TotalPipelineValue = dealSum,
+            TotalPipelineValue = totalPipelineValue,
             TotalCustomers = totalCustomers,
             SystemHealthScore = 100.0
         };

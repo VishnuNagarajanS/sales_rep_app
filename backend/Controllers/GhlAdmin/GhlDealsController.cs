@@ -140,7 +140,7 @@ public class GhlDealsController : ControllerBase
     {
         var deal = await _db.GhlDeals
             .Include(d => d.AssignedAgent)
-            .FirstOrDefaultAsync(d => d.Id == id && d.CompanyId == _currentUser.CompanyId, ct);
+            .FirstOrDefaultAsync(d => d.Id == id && (!_currentUser.CompanyId.HasValue || d.CompanyId == _currentUser.CompanyId.Value), ct);
 
         if (deal == null)
             return NotFound(ApiResponse<GhlDealResponseDto>.FailureResult("Deal not found."));
@@ -169,10 +169,11 @@ public class GhlDealsController : ControllerBase
     public async Task<ActionResult<ApiResponse<bool>>> DeleteDeal(int id, CancellationToken ct)
     {
         var deal = await _db.GhlDeals
-            .FirstOrDefaultAsync(d => d.Id == id && d.CompanyId == _currentUser.CompanyId, ct);
+            .FirstOrDefaultAsync(d => d.Id == id && (!_currentUser.CompanyId.HasValue || d.CompanyId == _currentUser.CompanyId.Value), ct);
 
         if (deal == null)
             return NotFound(ApiResponse<bool>.FailureResult("Deal not found."));
+
 
         _db.GhlDeals.Remove(deal);
         await _db.SaveChangesAsync(ct);

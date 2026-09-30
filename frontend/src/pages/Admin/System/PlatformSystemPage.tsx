@@ -25,12 +25,34 @@ import { Modal } from '../../../components/common/Modal';
 import './PlatformSystemPage.css';
 
 export const PlatformSystemPage: React.FC = () => {
-  const [diagnostics, setDiagnostics] = useState<SystemDiagnostics>(() =>
-    superAdminService.getSystemDiagnostics()
-  );
+  const [diagnostics, setDiagnostics] = useState<SystemDiagnostics>({
+    apiStatus: 'Healthy',
+    apiLatencyMs: 0,
+    dbPoolActive: 0,
+    dbPoolMax: 100,
+    dbLatencyMs: 0,
+    memoryUsedMb: 0,
+    memoryLimitMb: 1,
+    storageUsedGb: 0,
+    storageLimitGb: 1,
+    activeSessions: 0,
+    activeWebSockets: 0,
+    telephonyDropRate: 0,
+    systemUptimePercentage: 100,
+    lastBackupAt: '',
+    databaseConnected: true,
+  });
   const [announcements, setAnnouncements] = useState<BroadcastAnnouncement[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [maintenance, setMaintenance] = useState(() => superAdminService.getMaintenanceMode());
+  const [maintenance, setMaintenance] = useState<{ enabled: boolean; message: string; bypassSecret: string }>({
+    enabled: false,
+    message: 'Platform under scheduled maintenance.',
+    bypassSecret: '',
+  });
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isTogglingMaint, setIsTogglingMaint] = useState(false);
 
   // Announcement Modal
   const [isAnnModalOpen, setIsAnnModalOpen] = useState(false);
@@ -44,6 +66,8 @@ export const PlatformSystemPage: React.FC = () => {
   const [successMsg, setSuccessMsg] = useState('');
 
   const loadData = async () => {
+    setIsLoading(true);
+    setErrorMsg(null);
     try {
       const [diag, anns, allTenants, maint] = await Promise.all([
         superAdminService.fetchSystemDiagnosticsFromApi(),
@@ -52,15 +76,14 @@ export const PlatformSystemPage: React.FC = () => {
         superAdminService.fetchMaintenanceModeFromApi(),
       ]);
       setDiagnostics(diag);
-      setAnnouncements(anns);
-      setTenants(allTenants);
+      setAnnouncements(anns || []);
+      setTenants(allTenants || []);
       setMaintenance(maint);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load system data from API:', err);
-      setDiagnostics(superAdminService.getSystemDiagnostics());
-      setAnnouncements(superAdminService.getAnnouncements());
-      setTenants(superAdminService.getTenants());
-      setMaintenance(superAdminService.getMaintenanceMode());
+      setErrorMsg(err.message || 'Failed to load system health & diagnostics from backend server.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -119,33 +142,43 @@ export const PlatformSystemPage: React.FC = () => {
 
   const handleToggleMaintenance = async () => {
     const nextState = !maintenance.enabled;
+    setIsTogglingMaint(true);
     try {
-      const updated = await superAdminService.setMaintenanceModeApi(nextState);
+      const updated = await superAdminService.setMaintenanceModeApi(nextState, maintenance.message);
       setMaintenance(updated);
       showSuccess(`Platform maintenance mode ${nextState ? 'ENABLED' : 'DISABLED'}.`);
     } catch (err: any) {
       alert(err.message || 'Failed to toggle maintenance mode');
+    } finally {
+      setIsTogglingMaint(false);
     }
   };
 
-  const handleDownloadSnapshot = () => {
-    const jsonStr = superAdminService.exportPlatformSnapshot();
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute(
-      'download',
-      `NexusSales_Platform_Backup_Snapshot_${new Date().toISOString().slice(0, 10)}.json`
-    );
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    showSuccess('Platform snapshot backup exported successfully.');
+  const handleDownloadSnapshot = async () => {
+    setIsExporting(true);
+    try {
+      const jsonStr = await superAdminService.exportPlatformSnapshotApi();
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute(
+        'download',
+        `NexusSales_Platform_Backup_Snapshot_${new Date().toISOString().slice(0, 10)}.json`
+      );
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showSuccess('Platform snapshot backup exported successfully.');
+    } catch (err: any) {
+      alert(err.message || 'Failed to export platform backup from database');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
-  const memoryPercent = Math.round((diagnostics.memoryUsedMb / diagnostics.memoryLimitMb) * 100);
-  const storagePercent = Math.round((diagnostics.storageUsedGb / diagnostics.storageLimitGb) * 100);
+  const memoryPercent = diagnostics.memoryLimitMb > 0 ? Math.min(100, Math.round((diagnostics.memoryUsedMb / diagnostics.memoryLimitMb) * 100)) : 0;
+  const storagePercent = diagnostics.storageLimitGb > 0 ? Math.min(100, Math.round((diagnostics.storageUsedGb / diagnostics.storageLimitGb) * 100)) : 0;
 
   return (
     <div className="platform-system-page-container">
@@ -162,8 +195,8 @@ export const PlatformSystemPage: React.FC = () => {
         </div>
 
         <div className="system-header-actions">
-          <button className="btn btn-secondary btn-sm" onClick={handleDownloadSnapshot}>
-            <Download size={14} /> Export Platform Backup (.JSON)
+          <button className="btn btn-secondary btn-sm" disabled={isExporting} onClick={handleDownloadSnapshot}>
+            <Download size={14} className={isExporting ? 'animate-spin' : ''} /> {isExporting ? 'Exporting...' : 'Export Platform Backup (.JSON)'}
           </button>
           <button
             className="btn btn-primary btn-sm btn-new-announcement"
@@ -173,6 +206,12 @@ export const PlatformSystemPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {errorMsg && (
+        <div className="system-success-alert animate-fade-in" style={{ background: 'rgba(239, 68, 68, 0.15)', borderColor: 'rgba(239, 68, 68, 0.35)', color: '#f87171' }}>
+          <AlertTriangle size={16} /> {errorMsg}
+        </div>
+      )}
 
       {successMsg && (
         <div className="system-success-alert animate-fade-in">
@@ -185,10 +224,10 @@ export const PlatformSystemPage: React.FC = () => {
         <div className="card diag-card">
           <div className="diag-card-header">
             <span className="diag-label">API SERVER STATUS</span>
-            <Server size={18} color="#4ade80" />
+            <Server size={18} color={diagnostics.apiStatus === 'Healthy' ? '#4ade80' : '#f87171'} />
           </div>
-          <div className="diag-val text-green">
-            <span className="status-dot green" /> {diagnostics.apiStatus}
+          <div className={`diag-val ${diagnostics.apiStatus === 'Healthy' ? 'text-green' : 'text-amber'}`}>
+            <span className={`status-dot ${diagnostics.apiStatus === 'Healthy' ? 'green' : 'red'}`} /> {diagnostics.apiStatus}
           </div>
           <div className="diag-sub">
             <span>Latency: {diagnostics.apiLatencyMs}ms</span>
@@ -275,9 +314,10 @@ export const PlatformSystemPage: React.FC = () => {
 
         <button
           className={`btn ${maintenance.enabled ? 'btn-success' : 'btn-danger'} btn-sm btn-toggle-maint`}
+          disabled={isTogglingMaint}
           onClick={handleToggleMaintenance}
         >
-          {maintenance.enabled ? 'Disable Maintenance Mode' : 'Enable Maintenance Lock'}
+          {isTogglingMaint ? 'Updating Mode...' : maintenance.enabled ? 'Disable Maintenance Mode' : 'Enable Maintenance Lock'}
         </button>
       </div>
 
@@ -311,7 +351,14 @@ export const PlatformSystemPage: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {announcements.length === 0 ? (
+              {isLoading && announcements.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: '32px', color: '#94a3b8' }}>
+                    <Activity size={16} className="animate-spin" style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: '8px' }} />
+                    Loading broadcast announcements from database...
+                  </td>
+                </tr>
+              ) : announcements.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="no-ann-cell">
                     No active broadcast announcements.

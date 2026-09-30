@@ -20,7 +20,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
-import { Tenant, User, AuditLog, PlatformMetrics, PlatformCarrierSettings } from '../../../types';
+import { Tenant, User, AuditLog, PlatformMetrics, PlatformCarrierSettings, TenantDidMapping } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
 import './PlatformDashboardPage.css';
 
@@ -36,22 +36,25 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
   const [metrics, setMetrics] = useState<PlatformMetrics>(() => superAdminService.getPlatformMetrics());
   const [diagnostics, setDiagnostics] = useState(() => superAdminService.getSystemDiagnostics());
   const [carrierSettings, setCarrierSettings] = useState<PlatformCarrierSettings>(() => superAdminService.getCarrierSettings());
+  const [dids, setDids] = useState<TenantDidMapping[]>(() => superAdminService.getDidMappings());
 
   const loadData = async () => {
     try {
-      const [allTenants, allUsers, liveLogs, liveDiag, liveMetrics, liveCarrier] = await Promise.all([
+      const [allTenants, allUsers, liveLogs, liveDiag, liveMetrics, liveCarrier, liveDids] = await Promise.all([
         superAdminService.fetchTenantsFromApi(),
         superAdminService.fetchUsersFromApi(),
         superAdminService.fetchAuditLogsFromApi(),
         superAdminService.fetchSystemDiagnosticsFromApi(),
         superAdminService.fetchPlatformMetricsFromApi(),
         superAdminService.fetchCarrierSettingsFromApi(),
+        superAdminService.fetchDidMappingsFromApi(),
       ]);
       setTenants(allTenants);
       setUsers(allUsers);
       setAuditLogs(liveLogs);
       setDiagnostics(liveDiag);
       setCarrierSettings(liveCarrier);
+      setDids(liveDids);
       if (liveMetrics) {
         setMetrics(liveMetrics);
       }
@@ -62,6 +65,7 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
       setAuditLogs(superAdminService.getAuditLogs());
       setDiagnostics(superAdminService.getSystemDiagnostics());
       setMetrics(superAdminService.getPlatformMetrics());
+      setDids(superAdminService.getDidMappings());
     }
   };
 
@@ -142,7 +146,45 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
 
   const formattedLeadGrowth = `${leadGrowthPercentage > 0 ? '+' : ''}${leadGrowthPercentage.toFixed(1)}%`;
 
+  const getTrunkHealthLabel = () => {
+    if (!carrierSettings || !carrierSettings.primaryCarrier) {
+      return 'Trunks Not Configured';
+    }
+    if (diagnostics.trunkStatus) {
+      return `Trunk: ${diagnostics.trunkStatus}`;
+    }
+    if (carrierSettings.testStatus === 'Success' && carrierSettings.lastTestedAt) {
+      return `Trunk: ${carrierSettings.status || 'Verified'}`;
+    }
+    if (carrierSettings.status) {
+      return `Trunk: ${carrierSettings.status}`;
+    }
+    return 'Trunks Unmonitored';
+  };
+
+  const primaryTrunkHealth = carrierSettings.primaryTrunkHealth || (
+    !carrierSettings.primaryCarrier ? 'offline' :
+    carrierSettings.status === 'Inactive' ? 'offline' :
+    carrierSettings.status === 'Degraded' || carrierSettings.testStatus === 'Degraded' ? 'degraded' :
+    'online'
+  );
+
+  const failoverTrunkHealth = carrierSettings.failoverTrunkHealth || (
+    !carrierSettings.secondaryCarrier ? 'offline' :
+    !carrierSettings.emergencyRoutingEnabled ? 'degraded' :
+    carrierSettings.status === 'Inactive' ? 'offline' :
+    'online'
+  );
+
+  const speechToTextHealth = carrierSettings.speechToTextHealth || (
+    !carrierSettings.whisperAiModel ? 'offline' : 'online'
+  );
+
+  const databasePoolHealth = diagnostics.databaseConnected !== false ? 'online' : 'offline';
+
   return (
+
+
     <div className="platform-dashboard-page">
       {/* Platform Header & Quick Action Bar */}
       <div className="platform-header-section">
@@ -262,7 +304,7 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
             <span className="status-badge-inline success">
               {metrics.callsToday > 0 ? Math.round((metrics.callsConnected / metrics.callsToday) * 100) : 0}% Connected
             </span>
-            <span className="text-muted-xs">Zero carrier drops</span>
+            <span className="text-muted-xs">{diagnostics.telephonyDropRate}% carrier drops</span>
           </div>
         </div>
 
@@ -276,9 +318,9 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
           <div className="platform-telemetry-val text-green">{diagnostics.systemUptimePercentage}%</div>
           <div className="platform-telemetry-sub">
             <span className="status-badge-inline success">
-              <Activity size={12} /> {diagnostics.apiLatencyMs}ms Latency
+              <Activity size={12} /> {Math.round(diagnostics.apiLatencyMs)}ms Latency
             </span>
-            <span className="text-muted-xs">Trunks 100% OK</span>
+            <span className="text-muted-xs">{getTrunkHealthLabel()}</span>
           </div>
         </div>
       </div>
@@ -286,35 +328,35 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
       {/* Telephony Infrastructure Realtime Telemetry Bar */}
       <div className="card carrier-telemetry-bar">
         <div className="carrier-bar-col">
-          <div className="carrier-bar-indicator online">●</div>
+          <div className={`carrier-bar-indicator ${primaryTrunkHealth}`}>●</div>
           <div>
             <div className="carrier-bar-title">Primary SIP Trunk</div>
-            <div className="carrier-bar-desc">{carrierSettings.primaryCarrier || 'Primary Gateway (Configured)'}</div>
+            <div className="carrier-bar-desc">{carrierSettings.primaryCarrier || 'Not Configured'}</div>
           </div>
         </div>
         <div className="carrier-bar-divider" />
         <div className="carrier-bar-col">
-          <div className="carrier-bar-indicator online">●</div>
+          <div className={`carrier-bar-indicator ${failoverTrunkHealth}`}>●</div>
           <div>
             <div className="carrier-bar-title">Failover Redundancy</div>
-            <div className="carrier-bar-desc">{carrierSettings.secondaryCarrier || 'Redundant Trunk (Hot Standby)'}</div>
+            <div className="carrier-bar-desc">{carrierSettings.secondaryCarrier || 'Not Configured'}</div>
           </div>
         </div>
         <div className="carrier-bar-divider" />
         <div className="carrier-bar-col">
-          <div className="carrier-bar-indicator online">●</div>
+          <div className={`carrier-bar-indicator ${speechToTextHealth}`}>●</div>
           <div>
             <div className="carrier-bar-title">Speech-to-Text AI</div>
-            <div className="carrier-bar-desc">{carrierSettings.whisperAiModel || 'Whisper AI Engine'}</div>
+            <div className="carrier-bar-desc">{carrierSettings.whisperAiModel || 'Not Configured'}</div>
           </div>
         </div>
         <div className="carrier-bar-divider" />
         <div className="carrier-bar-col">
-          <div className="carrier-bar-indicator online">●</div>
+          <div className={`carrier-bar-indicator ${databasePoolHealth}`}>●</div>
           <div>
             <div className="carrier-bar-title">Active Database Pool</div>
             <div className="carrier-bar-desc">
-              {diagnostics.dbPoolActive} / {diagnostics.dbPoolMax} Connections ({diagnostics.dbLatencyMs}ms)
+              {diagnostics.dbPoolActive} / {diagnostics.dbPoolMax} Connections ({Math.round(diagnostics.dbLatencyMs)}ms)
             </div>
           </div>
         </div>
@@ -388,7 +430,10 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
                       </td>
 
                       <td className="platform-matrix-td-center platform-matrix-did">
-                        <code>+91 80 4700 800{t.slug === 'ghl' ? '1' : t.slug === 'jamin' ? '2' : '9'}</code>
+                        {(() => {
+                          const mappedDid = dids.find(d => String(d.tenantId) === String(t.id) || d.tenantSlug === t.slug);
+                          return <code>{mappedDid ? mappedDid.phoneNumber : 'Unassigned'}</code>;
+                        })()}
                       </td>
 
                       <td className="platform-matrix-td-center">
