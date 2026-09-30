@@ -104,15 +104,17 @@ public class KycService : IKycService
         {
             existing = new InvestorKyc
             {
-                InvestorId = investor.Id,
+                InvestorId = investor?.Id ?? 0,
                 CompanyId = companyId,
                 IrmId = irmId,
                 InvestorName = investorName,
                 Phone = recipientPhone,
                 Email = recipientEmail,
-                Status = KycStatus.Draft,
+                // LinkSent: link dispatched, customer has NOT yet submitted
+                Status = KycStatus.LinkSent,
                 KycLinkToken = token,
                 KycLinkSent = true,
+                KycLinkSentAt = DateTime.UtcNow,
                 KycLinkExpiresAt = expiresAt,
                 CreatedAt = DateTime.UtcNow
             };
@@ -120,19 +122,17 @@ public class KycService : IKycService
         }
         else
         {
-            existing.Status = KycStatus.Draft;
-            existing.SubmittedAt = null;
-            existing.VerifiedBy = null;
-            existing.VerifiedAt = null;
-            existing.Remarks = null;
-            existing.ReviewRemarks = null;
-            existing.FlaggedSectionsJson = null;
+            // Resend: refresh token, expiry, and sent timestamp. Keep existing submission data intact.
             existing.KycLinkToken = token;
             existing.KycLinkSent = true;
+            existing.KycLinkSentAt = DateTime.UtcNow;
             existing.KycLinkExpiresAt = expiresAt;
             if (!string.IsNullOrWhiteSpace(recipientEmail)) existing.Email = recipientEmail;
             if (!string.IsNullOrWhiteSpace(recipientPhone)) existing.Phone = recipientPhone;
             if (!string.IsNullOrWhiteSpace(investorName)) existing.InvestorName = investorName;
+            // Upgrade Draft to LinkSent; do NOT downgrade a record that is already submitted/reviewed
+            if (existing.Status == KycStatus.Draft)
+                existing.Status = KycStatus.LinkSent;
             await _kycRepo.UpdateAsync(existing, ct);
         }
 
@@ -201,9 +201,13 @@ public class KycService : IKycService
             return ApiResponse<KycDto>.ErrorResponse("KYC record not found");
         }
 
-        if (kyc.Status == KycStatus.Approved || (kyc.SubmittedAt != null && kyc.Status == KycStatus.PendingReview))
+        if (kyc.Status == KycStatus.Approved)
         {
-            return ApiResponse<KycDto>.ErrorResponse("This KYC link has already been used");
+            return ApiResponse<KycDto>.ErrorResponse("This KYC has already been verified and approved.");
+        }
+        if (kyc.SubmittedAt != null && kyc.Status == KycStatus.PendingReview)
+        {
+            return ApiResponse<KycDto>.ErrorResponse("You have already submitted your KYC. It is currently awaiting IRM verification.");
         }
 
         kyc.InvestorName = !string.IsNullOrWhiteSpace(dto.InvestorName) ? dto.InvestorName : kyc.InvestorName;
@@ -253,6 +257,9 @@ public class KycService : IKycService
             kyc.Remarks = null;
             kyc.ReviewRemarks = null;
             kyc.FlaggedSectionsJson = null;
+            // Invalidate the link token after submission so it cannot be reused
+            kyc.KycLinkToken = null;
+            kyc.KycLinkExpiresAt = null;
         }
 
         if (kyc.Id == 0)
@@ -302,8 +309,11 @@ public class KycService : IKycService
         if (kyc == null)
             return ApiResponse<KycDto>.ErrorResponse("Invalid or expired KYC token");
 
-        if (kyc.Status == KycStatus.Approved || (kyc.SubmittedAt != null && kyc.Status == KycStatus.PendingReview))
-            return ApiResponse<KycDto>.ErrorResponse("This KYC link has already been used");
+        if (kyc.Status == KycStatus.Approved)
+            return ApiResponse<KycDto>.ErrorResponse("This KYC has already been verified and approved.");
+
+        if (kyc.SubmittedAt != null && kyc.Status == KycStatus.PendingReview)
+            return ApiResponse<KycDto>.ErrorResponse("You have already submitted your KYC. It is currently awaiting IRM verification.");
 
         return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc));
     }
@@ -373,6 +383,8 @@ public class KycService : IKycService
         Remarks = k.Remarks,
         FlaggedSections = k.FlaggedSectionsJson,
         KycLinkSent = k.KycLinkSent,
+        KycLinkSentAt = k.KycLinkSentAt,
+        SubmittedAt = k.SubmittedAt,
         CreatedAt = k.CreatedAt,
         UpdatedAt = k.UpdatedAt
     };
@@ -422,6 +434,8 @@ public class KycService : IKycService
         Remarks = k.Remarks,
         FlaggedSections = k.FlaggedSectionsJson,
         KycLinkSent = k.KycLinkSent,
+        KycLinkSentAt = k.KycLinkSentAt,
+        SubmittedAt = k.SubmittedAt,
         CreatedAt = k.CreatedAt,
         UpdatedAt = k.UpdatedAt
     };

@@ -52,24 +52,18 @@ public class OtpService : IOtpService
             kyc = await ResolveKycByTokenAsync(cleanToken, ct);
         }
 
-        var targetEmail = !string.IsNullOrWhiteSpace(dto.Email)
-            ? dto.Email.Trim()
-            : (!string.IsNullOrWhiteSpace(kyc?.Email) ? kyc.Email.Trim() : string.Empty);
+        // Always use the email stored on the KYC record — never fall back to a hardcoded address
+        var targetEmail = !string.IsNullOrWhiteSpace(kyc?.Email)
+            ? kyc.Email.Trim()
+            : (!string.IsNullOrWhiteSpace(dto.Email) ? dto.Email.Trim() : string.Empty);
 
-        if (string.IsNullOrWhiteSpace(targetEmail) || !targetEmail.Contains('@'))
+        if (string.IsNullOrWhiteSpace(targetEmail))
         {
-            return ApiResponse<SendKycOtpResponseDto>.ErrorResponse("A valid email address is required to receive the verification code.");
+            return ApiResponse<SendKycOtpResponseDto>.ErrorResponse(
+                "Unable to determine the investor email address. Please ensure a valid email is associated with this KYC request.");
         }
 
-        var targetName = !string.IsNullOrWhiteSpace(kyc?.InvestorName) 
-            ? kyc.InvestorName 
-            : "Valued Investor";
-
-        if (kyc != null && string.IsNullOrWhiteSpace(kyc.Email) && !string.IsNullOrWhiteSpace(targetEmail))
-        {
-            kyc.Email = targetEmail;
-            await _kycRepo.UpdateAsync(kyc, ct);
-        }
+        var targetName = kyc?.InvestorName ?? "Investor";
 
         var cacheKey = GetCacheKey(cleanToken, targetEmail);
         _cache.TryGetValue(cacheKey, out CachedOtpEntry? existing);
@@ -79,15 +73,15 @@ public class OtpService : IOtpService
         }
 
         string otpCode;
-        // If an OTP was already sent within the last 45 seconds, re-use it so rapid double-requests in dev mode stay identical
+        // Re-use a very recent OTP (within 45s) to guard against rapid double-requests in the same session
         if (existing != null && !string.IsNullOrEmpty(existing.Otp) && (DateTime.UtcNow - existing.CreatedAt).TotalSeconds < 45)
         {
             otpCode = existing.Otp;
-            _logger.LogInformation("[KYC OTP RE-USED] Re-using recent OTP {Otp} for {Email} (requested within cooldown)", otpCode, targetEmail);
+            _logger.LogInformation("[KYC OTP] Re-using recent code for {Email} (within cooldown)", targetEmail);
         }
         else
         {
-            // 2. Generate 6-digit cryptographic OTP
+            // Generate 6-digit cryptographic OTP
             otpCode = RandomNumberGenerator.GetInt32(100000, 1000000).ToString("D6");
         }
 
@@ -110,70 +104,65 @@ public class OtpService : IOtpService
         _cache.Set(cacheKey, entry, TimeSpan.FromMinutes(5));
         _cache.Set($"kyc_email_otp_{targetEmail.ToLower()}", entry, TimeSpan.FromMinutes(5));
 
-        // 4. Dispatch Email via Gmail SMTP
-        _logger.LogInformation("==================================================");
-        _logger.LogInformation("[KYC OTP GENERATED] Recipient: {Email} | OTP: {Otp} (Valid: 5m)", targetEmail, otpCode);
-        _logger.LogInformation("==================================================");
+        // 4. Dispatch Email via Gmail SMTP (OTP not logged at info level to prevent exposure)
+        _logger.LogInformation("[KYC OTP] Sending verification code to {Email}", targetEmail);
 
         var emailDelivered = await _emailService.SendKycOtpEmailAsync(targetEmail, targetName, otpCode, 5, ct);
 
+        if (!emailDelivered)
+        {
+            _logger.LogWarning("[KYC OTP] Email delivery failed for {Email}: {Error}", targetEmail, _emailService.LastError);
+        }
+
         var masked = MaskEmail(targetEmail);
-        var message = emailDelivered 
-            ? $"6-digit verification code sent to {masked}" 
-            : $"Verification code generated for {masked} (Check server console for OTP)";
+        var message = emailDelivered
+            ? $"6-digit verification code sent to {masked}"
+            : $"Verification code could not be delivered to {masked}. Please check the email address or try again.";
 
         return ApiResponse<SendKycOtpResponseDto>.SuccessResponse(new SendKycOtpResponseDto
         {
-            Success = true,
+            Success = emailDelivered,
             MaskedEmail = masked,
             ExpiresInSeconds = 300,
             Message = message
         }, message);
     }
 
-    public async Task<ApiResponse<VerifyKycOtpResponseDto>> VerifyKycOtpAsync(VerifyKycOtpRequestDto dto, CancellationToken ct = default)
+    public Task<ApiResponse<VerifyKycOtpResponseDto>> VerifyKycOtpAsync(VerifyKycOtpRequestDto dto, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(dto.Otp))
         {
-            return ApiResponse<VerifyKycOtpResponseDto>.ErrorResponse("Please enter the 6-digit verification code.");
+            return Task.FromResult(ApiResponse<VerifyKycOtpResponseDto>.ErrorResponse("Please enter the 6-digit verification code."));
         }
 
         var cleanToken = CleanToken(dto.Token);
         CachedOtpEntry? entry = null;
         string activeKey = string.Empty;
 
+        // Primary: look up by token (most specific — matches the exact KYC request)
         if (!string.IsNullOrWhiteSpace(cleanToken))
         {
             activeKey = GetCacheKey(cleanToken, string.Empty);
             _cache.TryGetValue(activeKey, out entry);
         }
 
+        // Fallback: look up by email if token key missed
         if (entry == null && !string.IsNullOrWhiteSpace(dto.Email))
         {
             activeKey = $"kyc_email_otp_{dto.Email.Trim().ToLower()}";
             _cache.TryGetValue(activeKey, out entry);
         }
 
-        if (entry == null && !string.IsNullOrWhiteSpace(cleanToken))
-        {
-            var kyc = await ResolveKycByTokenAsync(cleanToken, ct);
-            if (kyc != null && !string.IsNullOrWhiteSpace(kyc.Email))
-            {
-                activeKey = $"kyc_email_otp_{kyc.Email.Trim().ToLower()}";
-                _cache.TryGetValue(activeKey, out entry);
-            }
-        }
-
         if (entry == null)
         {
-            return ApiResponse<VerifyKycOtpResponseDto>.ErrorResponse("Verification code has expired or was not requested. Please click Resend Code.");
+            return Task.FromResult(ApiResponse<VerifyKycOtpResponseDto>.ErrorResponse("Verification code has expired or was not requested. Please click Resend Code."));
         }
 
         // Rate limit check
         if (entry.FailedAttempts >= 5)
         {
             if (!string.IsNullOrEmpty(activeKey)) _cache.Remove(activeKey);
-            return ApiResponse<VerifyKycOtpResponseDto>.ErrorResponse("Too many incorrect attempts. Please request a new verification code.");
+            return Task.FromResult(ApiResponse<VerifyKycOtpResponseDto>.ErrorResponse("Too many incorrect attempts. Please request a new verification code."));
         }
 
         var inputOtp = dto.Otp.Trim();
@@ -188,19 +177,19 @@ public class OtpService : IOtpService
             if (!string.IsNullOrEmpty(entry.Token)) _cache.Remove($"kyc_token_otp_{entry.Token}");
             if (!string.IsNullOrEmpty(entry.Email)) _cache.Remove($"kyc_email_otp_{entry.Email.ToLower()}");
 
-            _logger.LogInformation("[KYC OTP VERIFIED] Successfully verified identity for {Email} with OTP {Otp}", entry.Email, inputOtp);
+            _logger.LogInformation("[KYC OTP] Identity verified for {Email}", entry.Email);
 
-            return ApiResponse<VerifyKycOtpResponseDto>.SuccessResponse(new VerifyKycOtpResponseDto
+            return Task.FromResult(ApiResponse<VerifyKycOtpResponseDto>.SuccessResponse(new VerifyKycOtpResponseDto
             {
                 Verified = true,
                 Message = "Identity verified successfully!"
-            }, "Identity verified successfully!");
+            }, "Identity verified successfully!"));
         }
 
         // Incorrect code
         entry.FailedAttempts++;
         var remaining = 5 - entry.FailedAttempts;
-        return ApiResponse<VerifyKycOtpResponseDto>.ErrorResponse($"Invalid verification code. {remaining} attempt(s) remaining.");
+        return Task.FromResult(ApiResponse<VerifyKycOtpResponseDto>.ErrorResponse($"Invalid verification code. {remaining} attempt(s) remaining."));
     }
 
     private async Task<InvestorKyc?> ResolveKycByTokenAsync(string token, CancellationToken ct)

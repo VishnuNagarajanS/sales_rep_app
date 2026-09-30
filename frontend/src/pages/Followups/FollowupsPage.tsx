@@ -54,8 +54,8 @@ export const FollowupsPage: React.FC = () => {
 
   // IRM Custom Preferences state
   const [isEditingPref, setIsEditingPref] = useState<boolean>(false);
-  const [prefAssetClass, setPrefAssetClass] = useState<string>('CO-AIF');
-  const [prefHorizon, setPrefHorizon] = useState<string>('3-5 Years');
+  const [prefAssetClass, setPrefAssetClass] = useState<string>('');
+  const [prefHorizon, setPrefHorizon] = useState<string>('');
   const [isPrefConfirmed, setIsPrefConfirmed] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -358,7 +358,7 @@ export const FollowupsPage: React.FC = () => {
       matchingCustomer?.customFields?.investmentCapacity ||
       matchingCustomer?.customFields?.totalAUMCommitted ||
       (drawerFollowup as any)?.investmentCapacity ||
-      '₹10 Lakh to ₹1 Cr';
+      '';   // No hardcoded default — only use what the contact actually provided
 
     // 1. Create or update deal in stage 'qualified_investor' — save to DB first, fallback to localStorage
     const allDeals = storageService.getDeals(tenant?.id) || [];
@@ -385,8 +385,10 @@ export const FollowupsPage: React.FC = () => {
       notes: `Ready for KYC. Moved from Follow-ups by IRM (${user?.name || 'Rohan Varma'}).`,
       createdAt: new Date().toISOString().slice(0, 10),
       priority: drawerFollowup.priority || 'High',
-      preferredAssetClass: prefAssetClass || 'CO-AIF',
-      investmentRange: investmentCapacity,
+      // Only set preferredAssetClass if IRM has confirmed it; do not default to 'CO-AIF'
+      ...(prefAssetClass && isPrefConfirmed ? { preferredAssetClass: prefAssetClass } : {}),
+      // Only set investmentRange if actually provided; do not default
+      ...(investmentCapacity ? { investmentRange: investmentCapacity } : {}),
     };
 
     // Save deal to DB (API) — this persists stage='qualified_investor' in Neon

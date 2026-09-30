@@ -80,6 +80,8 @@ public class InvestorKyc
     public string? KycLinkToken { get; set; }
     public DateTime? KycLinkExpiresAt { get; set; }
     public bool KycLinkSent { get; set; } = false;
+    /// <summary>Timestamp of the most recent successful KYC link dispatch (or resend).</summary>
+    public DateTime? KycLinkSentAt { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }

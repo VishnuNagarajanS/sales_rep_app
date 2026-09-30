@@ -64,6 +64,8 @@ public class KycDto
     public string? Remarks { get; set; }
     public string? FlaggedSections { get; set; }
     public bool KycLinkSent { get; set; }
+    public DateTime? KycLinkSentAt { get; set; }
+    public DateTime? SubmittedAt { get; set; }
 
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
@@ -123,6 +125,8 @@ public class KycListDto
     public string? Remarks { get; set; }
     public string? FlaggedSections { get; set; }
     public bool KycLinkSent { get; set; }
+    public DateTime? KycLinkSentAt { get; set; }
+    public DateTime? SubmittedAt { get; set; }
 
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }

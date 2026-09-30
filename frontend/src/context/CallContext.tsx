@@ -374,7 +374,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      // 2. Follow-up Required -> Move to Follow-up section, remove from active Leads
+      // 2. Follow-up Required -> Create follow-up record; keep IRM leads as 'Interested' (visible in IRM My Leads)
       else if (disposition === 'Follow-up Required') {
         const followupScheduledAt = scheduleFollowup?.scheduledAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         const followupPriority = scheduleFollowup?.priority || 'High';
@@ -396,7 +396,11 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }).catch(console.error);
 
         if (matchedLead) {
-          matchedLead.status = 'Follow-up Required';
+          // IRM leads must keep status='Interested' so they remain visible in IRM My Leads.
+          // Sales Exec leads use 'Follow-up Required' to move to the Follow-up section.
+          const isIrmUser = (user as any)?.role?.code === 'irm';
+          const updatedStatus: Lead['status'] = isIrmUser ? 'Interested' : 'Follow-up Required';
+          matchedLead.status = updatedStatus;
           matchedLead.nextFollowupDate = followupScheduledAt;
           if (notes) {
             matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Follow-up Required: ${notes}`;

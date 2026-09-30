@@ -516,8 +516,21 @@ export const LeadsPage: React.FC = () => {
     let isUpdated = isExistingById;
 
     if (!isExistingById) {
-      const existingMatch = leads.find(l => l.phone === formData.phone && (!targetCompanyId || isTenantMatch(l.companyId, targetCompanyId)));
+      const normNewPhone = (formData.phone || '').replace(/\D/g, '').slice(-10);
+      const normNewEmail = (formData.email || '').trim().toLowerCase();
+
+      const existingMatch = leads.find(l => {
+        if (!targetCompanyId || isTenantMatch(l.companyId, targetCompanyId)) {
+          const normLPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+          const normLEmail = (l.email || '').trim().toLowerCase();
+          const phoneMatch = normNewPhone && normLPhone && normNewPhone === normLPhone;
+          const emailMatch = normNewEmail && normLEmail && normNewEmail === normLEmail;
+          return phoneMatch || emailMatch;
+        }
+        return false;
+      });
       if (existingMatch) {
+        showToast(`Duplicate found: "${existingMatch.name}" already has this phone/email. Updating existing record.`);
         isUpdated = true;
         leadToSave = {
           ...existingMatch,
@@ -685,6 +698,13 @@ export const LeadsPage: React.FC = () => {
     const companyId = tenant?.id || 't-ghl-01';
     const promises: Promise<any>[] = [];
 
+    // Build a dedup set from the current leads so we can detect duplicates quickly
+    const normalizePhone = (ph: string) => (ph || '').replace(/\D/g, '').slice(-10);
+    const normalizeEmail = (em: string) => (em || '').trim().toLowerCase();
+
+    const existingPhones = new Set(leads.map(l => normalizePhone(l.phone)).filter(Boolean));
+    const existingEmails = new Set(leads.map(l => normalizeEmail(l.email)).filter(Boolean));
+
     parsedRows.forEach((row, index) => {
       const nameVal = row[columnMap['name']];
       const phoneVal = row[columnMap['phone']];
@@ -698,6 +718,19 @@ export const LeadsPage: React.FC = () => {
       let priorityVal = 'Medium';
       if (['Low', 'Medium', 'High', 'Urgent'].includes(String(rawPriority))) priorityVal = rawPriority;
 
+      // ── Duplicate check ──────────────────────────────────────────────────────
+      const normPhone = normalizePhone(phoneVal);
+      const normEmail = normalizeEmail(emailVal);
+      if ((normPhone && existingPhones.has(normPhone)) || (normEmail && existingEmails.has(normEmail))) {
+        console.info(`[CSV Import] Skipping duplicate: ${nameVal} — phone ${phoneVal} or email ${emailVal} already exists`);
+        skipCount++;
+        return;
+      }
+      // Register the new values so later rows in the same batch don't duplicate each other
+      if (normPhone) existingPhones.add(normPhone);
+      if (normEmail) existingEmails.add(normEmail);
+      // ─────────────────────────────────────────────────────────────────────────
+
       const newLead: Lead = {
         id: `lead-${Date.now()}-${index}`,
         companyId,
@@ -707,7 +740,7 @@ export const LeadsPage: React.FC = () => {
         location: locationVal,
         source: sourceVal,
         priority: priorityVal as any,
-        status: 'New',
+        status: isIrm ? 'Interested' : 'New',
         assignedAgentId: user?.id || 'usr-exec',
         assignedAgentName: user?.name || 'Agent',
         createdAt: new Date().toISOString().split('T')[0],
@@ -721,6 +754,7 @@ export const LeadsPage: React.FC = () => {
     setImportResults({ success: successCount, skipped: skipCount });
     loadData();
   };
+
 
   const resetImportState = () => {
     setImportFile(null);

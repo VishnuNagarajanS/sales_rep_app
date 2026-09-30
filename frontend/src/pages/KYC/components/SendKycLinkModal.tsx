@@ -110,9 +110,7 @@ GHL India Ventures | IRM Desk`;
     let failureMessage = '';
 
     try {
-      const parsedId = (deal as any).investorId || (typeof deal.customerId === 'number' ? deal.customerId : parseInt(String(deal.customerId || ''), 10));
       const payload = {
-        investorId: Number.isInteger(parsedId) && parsedId > 0 ? parsedId : undefined,
         customerName: deal.customerName,
         phone: resolvedPhone || deal.phone || '',
         email: resolvedEmail || deal.email || '',
