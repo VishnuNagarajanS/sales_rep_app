@@ -81,6 +81,7 @@ export const CustomersPage: React.FC = () => {
     : customers;
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'calls' | 'followups' | 'timeline' | 'documents'>('overview');
+  const [customerDocsTab, setCustomerDocsTab] = useState<'customer' | 'company'>('customer');
   const [statusFilter, setStatusFilter] = useState('All');
   const [agentFilter, setAgentFilter] = useState('All');
   const [assignmentFilter, setAssignmentFilter] = useState<'All' | 'Assigned' | 'Unassigned'>('All');
@@ -1021,16 +1022,55 @@ export const CustomersPage: React.FC = () => {
 
               {activeTab === 'documents' && selectedCustomer && (
                 <div className="customer-docs-stack">
-                  <DocumentUploader
-                    entityType="customer"
-                    entityId={selectedCustomer.id}
-                    allowedCategories={['KYC', 'Agreement', 'Payment Receipt', 'Identity Proof', 'Other']}
-                  />
-                  <DocumentList
-                    entityType="customer"
-                    entityId={selectedCustomer.id}
-                    canDelete
-                  />
+                  <div className="incall-docs-tabs-bar" style={{ marginBottom: 16 }}>
+                    {[
+                      { id: 'customer' as const, label: 'Customer Documents' },
+                      { id: 'company' as const, label: 'Company Resources' },
+                    ].map(tab => (
+                      <button
+                        key={tab.id}
+                        className="btn btn-ghost incall-docs-tab-btn"
+                        style={{
+                          borderBottom: customerDocsTab === tab.id ? '2px solid var(--primary-600)' : '2px solid transparent',
+                          color: customerDocsTab === tab.id ? 'var(--primary-600)' : 'var(--text-secondary)',
+                          fontWeight: customerDocsTab === tab.id ? 700 : 500,
+                        }}
+                        onClick={() => setCustomerDocsTab(tab.id)}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {customerDocsTab === 'customer' && (
+                    <>
+                      <DocumentUploader
+                        entityType="customer"
+                        entityId={selectedCustomer.id}
+                        allowedCategories={['KYC', 'Agreement', 'Payment Receipt', 'Identity Proof', 'Other']}
+                      />
+                      <DocumentList
+                        entityType="customer"
+                        entityId={selectedCustomer.id}
+                        canDelete
+                      />
+                    </>
+                  )}
+
+                  {customerDocsTab === 'company' && tenant && (
+                    <>
+                      <DocumentUploader
+                        entityType="company"
+                        entityId={tenant.id}
+                        allowedCategories={['Brochure', 'Price List', 'Terms & Conditions', 'Policy Document', 'Other']}
+                      />
+                      <DocumentList
+                        entityType="company"
+                        entityId={tenant.id}
+                        canDelete={false}
+                      />
+                    </>
+                  )}
                 </div>
               )}
             </div>

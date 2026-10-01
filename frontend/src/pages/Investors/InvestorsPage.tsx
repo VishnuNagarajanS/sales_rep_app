@@ -72,6 +72,7 @@ export const InvestorsPage: React.FC = () => {
   const [drawerTab, setDrawerTab] = useState<
     'overview' | 'calls' | 'consultations' | 'opportunities' | 'followups' | 'documents'
   >('overview');
+  const [docsTab, setDocsTab] = useState<'investor' | 'company'>('investor');
 
   // ── Filters ───────────────────────────────────────────────────────────────
   const [statusFilter, setStatusFilter] = useState('All');
@@ -561,27 +562,64 @@ export const InvestorsPage: React.FC = () => {
             </div>
 
             {/* Documents */}
-            <div className="card investor-info-card">
-              <h4 className="investor-info-title">
-                Documents
-              </h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <DocumentUploader
-                  entityType="investor"
-                  entityId={selectedInvestor.id}
-                  allowedCategories={[
-                    'KYC',
-                    'Mandate Agreement',
-                    'Term Sheet',
-                    'PAN / Aadhar',
-                    'Other',
-                  ]}
-                />
-                <DocumentList
-                  entityType="investor"
-                  entityId={selectedInvestor.id}
-                  canDelete
-                />
+            <div className="card investor-info-card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div className="incall-docs-tabs-bar" style={{ borderBottom: '1px solid var(--border-light)' }}>
+                {[
+                  { id: 'investor' as const, label: 'Investor Documents' },
+                  { id: 'company' as const, label: 'Company Resources' },
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    className="btn btn-ghost incall-docs-tab-btn"
+                    style={{
+                      borderBottom: docsTab === tab.id ? '2px solid var(--primary-600)' : '2px solid transparent',
+                      color: docsTab === tab.id ? 'var(--primary-600)' : 'var(--text-secondary)',
+                      fontWeight: docsTab === tab.id ? 700 : 500,
+                      borderRadius: 0,
+                      padding: '12px 16px',
+                    }}
+                    onClick={() => setDocsTab(tab.id)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ padding: 20 }}>
+                {docsTab === 'investor' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <DocumentUploader
+                      entityType="investor"
+                      entityId={selectedInvestor.id}
+                      allowedCategories={[
+                        'KYC',
+                        'Mandate Agreement',
+                        'Term Sheet',
+                        'PAN / Aadhar',
+                        'Other',
+                      ]}
+                    />
+                    <DocumentList
+                      entityType="investor"
+                      entityId={selectedInvestor.id}
+                      canDelete
+                    />
+                  </div>
+                )}
+                {docsTab === 'company' && tenant && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <DocumentUploader
+                      entityType="company"
+                      entityId={tenant.id}
+                      allowedCategories={['Brochure', 'Price List', 'Terms & Conditions', 'Policy Document', 'Other']}
+                    />
+                    <DocumentList
+                      entityType="company"
+                      entityId={tenant.id}
+                      canDelete={false}
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </div>
