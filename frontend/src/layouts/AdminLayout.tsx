@@ -3,6 +3,7 @@ import { Sidebar } from '../components/layout/Sidebar';
 import { TopBar } from '../components/layout/TopBar';
 import { superAdminService } from '../services/superAdminService';
 import { BroadcastAnnouncement } from '../types';
+import { NetworkStatusBanner } from '../components/common/NetworkStatusBanner';
 import './AdminLayout.css';
 
 interface AdminLayoutProps {
@@ -39,6 +40,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
 
   return (
     <div className="app-container admin-theme">
+      <NetworkStatusBanner />
       {/* Super Admin Dark Console Sidebar */}
       <Sidebar currentRoute={currentRoute} onNavigate={onNavigate} />
 

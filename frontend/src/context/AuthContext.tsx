@@ -40,6 +40,29 @@ const saveStoredUser = (targetUser: User) => {
   } catch {}
 };
 
+export function isJwtExpired(token: string | null | undefined): boolean {
+  if (!token) return true;
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return false;
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    const parsed = JSON.parse(jsonPayload);
+    if (parsed && typeof parsed.exp === 'number') {
+      return parsed.exp * 1000 <= Date.now();
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export { getStoredTenants, getStoredUsers, saveStoredUser };
 
 interface AuthContextType {
@@ -55,6 +78,7 @@ interface AuthContextType {
   switchPersona: (roleCode: RoleCode, tenantSlug?: TenantSlug) => void;
   setUser: (user: User | null) => void;
   setTenant: (tenant: Tenant | null) => void;
+  revalidateSession: () => Promise<void>;
 }
 
 export interface MockAuthProvider {
@@ -75,6 +99,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // User session state
   const [user, setUser] = useState<User | null>(() => {
+    // Check if token exists and is expired in dev/API mode
+    const token = sessionStorage.getItem('nexus_auth_token') || localStorage.getItem('nexus_auth_token');
+    if (!isMockMode() && token && isJwtExpired(token)) {
+      sessionStorage.removeItem('nexus_auth_token');
+      sessionStorage.removeItem('nexus_current_user');
+      localStorage.removeItem('nexus_auth_token');
+      localStorage.removeItem('nexus_current_user');
+      return null;
+    }
+
     const saved = sessionStorage.getItem('nexus_current_user');
     if (saved) {
       try {
@@ -125,6 +159,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (user) {
       sessionStorage.setItem('nexus_current_user', JSON.stringify(user));
+      localStorage.setItem('nexus_current_user', JSON.stringify(user));
     } else {
       sessionStorage.removeItem('nexus_current_user');
       sessionStorage.removeItem('nexus_auth_token');
@@ -136,6 +171,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (tenant) {
       sessionStorage.setItem('nexus_current_tenant', JSON.stringify(tenant));
+      localStorage.setItem('nexus_current_tenant', JSON.stringify(tenant));
     } else {
       sessionStorage.removeItem('nexus_current_tenant');
       localStorage.removeItem('nexus_current_tenant');
@@ -343,6 +379,80 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {}
   };
 
+  const revalidateSession = async () => {
+    if (!user || isMockMode()) return;
+    const token = sessionStorage.getItem('nexus_auth_token') || localStorage.getItem('nexus_auth_token');
+    if (!token || isJwtExpired(token)) {
+      logout();
+      return;
+    }
+    try {
+      const res: any = await apiClient.get('/auth/me');
+      if (res && res.success && res.data) {
+        setUser(res.data);
+      }
+    } catch {
+      // 401 triggers nexus_auth_unauthorized automatically
+    }
+  };
+
+  useEffect(() => {
+    const handleStorageEvent = (e: StorageEvent) => {
+      // Multi-tab synchronization
+      if (e.key === 'nexus_auth_token') {
+        if (!e.newValue) {
+          // Another tab logged out -> Log out this tab cleanly
+          logout();
+        } else if (e.newValue !== sessionStorage.getItem('nexus_auth_token')) {
+          // Another tab changed active session
+          sessionStorage.setItem('nexus_auth_token', e.newValue);
+          const rawUser = localStorage.getItem('nexus_current_user');
+          if (rawUser) {
+            try {
+              setUser(JSON.parse(rawUser));
+            } catch {}
+          }
+          const rawTenant = localStorage.getItem('nexus_current_tenant');
+          if (rawTenant) {
+            try {
+              setTenant(JSON.parse(rawTenant));
+            } catch {}
+          }
+        }
+      }
+    };
+
+    const handleUnauthorized = () => {
+      logout();
+    };
+
+    let lastRevalidation = 0;
+    const handleRevalidate = () => {
+      const now = Date.now();
+      if (now - lastRevalidation < 15000) return;
+      lastRevalidation = now;
+      revalidateSession();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        handleRevalidate();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageEvent);
+    window.addEventListener('nexus_auth_unauthorized', handleUnauthorized);
+    window.addEventListener('focus', handleRevalidate);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageEvent);
+      window.removeEventListener('nexus_auth_unauthorized', handleUnauthorized);
+      window.removeEventListener('focus', handleRevalidate);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [user]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -358,6 +468,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         switchPersona,
         setUser,
         setTenant,
+        revalidateSession,
       }}
     >
       {children}

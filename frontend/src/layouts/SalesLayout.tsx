@@ -4,6 +4,7 @@ import { TopBar } from '../components/layout/TopBar';
 import { useTheme } from '../context/ThemeContext';
 import { superAdminService } from '../services/superAdminService';
 import { BroadcastAnnouncement } from '../types';
+import { NetworkStatusBanner } from '../components/common/NetworkStatusBanner';
 import {
   IncomingCallPopup,
   InCallBar,
@@ -59,6 +60,7 @@ export const SalesLayout: React.FC<SalesLayoutProps> = ({
 
   return (
     <div className={`app-container ${theme === 'dark' ? 'dark-theme' : ''}`}>
+      <NetworkStatusBanner />
       {/* Dynamic Tenant-Aware Sidebar */}
       <Sidebar currentRoute={currentRoute} onNavigate={onNavigate} />
 

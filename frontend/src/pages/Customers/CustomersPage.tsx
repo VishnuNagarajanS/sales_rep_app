@@ -17,6 +17,7 @@ import {
 import { Customer, CallRecord, Followup, Deal, Lead, IrmProfile, CustomFieldDefinition } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
+import { useUnsavedChanges } from '../../context/NavigationGuardContext';
 import { storageService } from '../../services/storageService';
 import { isMockMode } from '../../config/environment';
 import {
@@ -116,6 +117,16 @@ export const CustomersPage: React.FC = () => {
   const [newStatus, setNewStatus] = useState<'Active' | 'VIP' | 'Inactive'>('Active');
   const [newCustomFields, setNewCustomFields] = useState<Record<string, any>>({});
   const [addErrors, setAddErrors] = useState<{ name?: string; phone?: string }>({});
+  const [isSubmittingCustomer, setIsSubmittingCustomer] = useState(false);
+  const [addCustomerError, setAddCustomerError] = useState<string | null>(null);
+
+  // Unsaved changes check
+  const isAddCustomerDirty = isAddModalOpen && (newName.trim() !== '' || newPhone.trim() !== '' || newEmail.trim() !== '');
+  useUnsavedChanges(
+    isAddCustomerDirty,
+    'You have unsaved information in the Add Customer form. Are you sure you want to leave?',
+    'customers-page'
+  );
 
   const [calls, setCalls] = useState<CallRecord[]>([]);
   const [followups, setFollowups] = useState<Followup[]>([]);
@@ -513,9 +524,11 @@ export const CustomersPage: React.FC = () => {
     setNewStatus('Active');
     setNewCustomFields({});
     setAddErrors({});
+    setAddCustomerError(null);
   };
 
-  const handleAddCustomer = () => {
+  const handleAddCustomer = async () => {
+    if (isSubmittingCustomer) return;
     const errors: { name?: string; phone?: string } = {};
     if (!newName.trim()) errors.name = 'Name is required.';
     if (!newPhone.trim()) errors.phone = 'Phone is required.';
@@ -523,31 +536,40 @@ export const CustomersPage: React.FC = () => {
       setAddErrors(errors);
       return;
     }
-    const newCustomer: import('../../types').Customer = {
-      id: `cust-${Date.now()}`,
-      companyId: tenant?.id || '',
-      name: newName.trim(),
-      phone: newPhone.trim(),
-      email: newEmail.trim(),
-      status: newStatus,
-      assignedAgentId: user?.id || '',
-      assignedAgentName: user?.name || '',
-      location: newLocation.trim(),
-      lastContacted: new Date().toISOString().split('T')[0],
-      openDealsCount: 0,
-      totalValue: 0,
-      createdAt: new Date().toISOString().split('T')[0],
-      notes: '',
-      customFields: newCustomFields,
-    };
-    apiSaveCustomer(newCustomer)
-      .then(saved => {
-        setSelectedCustomer(saved);
-        loadData();
-      })
-      .catch(console.error);
-    setIsAddModalOpen(false);
-    resetAddForm();
+
+    setAddCustomerError(null);
+    setIsSubmittingCustomer(true);
+    try {
+      const newCustomer: import('../../types').Customer = {
+        id: `cust-${Date.now()}`,
+        companyId: tenant?.id || '',
+        name: newName.trim(),
+        phone: newPhone.trim(),
+        email: newEmail.trim(),
+        status: newStatus,
+        assignedAgentId: user?.id || '',
+        assignedAgentName: user?.name || '',
+        location: newLocation.trim(),
+        lastContacted: new Date().toISOString().split('T')[0],
+        openDealsCount: 0,
+        totalValue: 0,
+        createdAt: new Date().toISOString().split('T')[0],
+        notes: '',
+        customFields: newCustomFields,
+      };
+
+      const saved = await apiSaveCustomer(newCustomer);
+      setSelectedCustomer(saved);
+      await loadData();
+      setIsAddModalOpen(false);
+      resetAddForm();
+      showToast(`✓ Customer "${saved.name}" created successfully.`);
+    } catch (err: any) {
+      console.error('Failed to create customer:', err);
+      setAddCustomerError(err?.message || 'Failed to create customer. Please check your connection and retry.');
+    } finally {
+      setIsSubmittingCustomer(false);
+    }
   };
 
   const getCustomerValueDisplay = (c: Customer): string => {
@@ -1095,16 +1117,21 @@ export const CustomersPage: React.FC = () => {
         subtitle="Create a fresh customer account and assign it to yourself."
         footer={
           <>
-            <button className="btn btn-secondary" onClick={() => { setIsAddModalOpen(false); resetAddForm(); }}>
+            <button className="btn btn-secondary" disabled={isSubmittingCustomer} onClick={() => { setIsAddModalOpen(false); resetAddForm(); }}>
               Cancel
             </button>
-            <button className="btn btn-primary" onClick={handleAddCustomer}>
-              Create Customer
+            <button className="btn btn-primary" disabled={isSubmittingCustomer} onClick={handleAddCustomer}>
+              {isSubmittingCustomer ? 'Creating Customer...' : 'Create Customer'}
             </button>
           </>
         }
       >
         <div className="customer-modal-stack">
+          {addCustomerError && (
+            <div className="form-error" style={{ padding: '8px 12px', background: 'rgba(239, 68, 68, 0.15)', borderRadius: 6, border: '1px solid #ef4444' }}>
+              ⚠️ {addCustomerError}
+            </div>
+          )}
           {/* Name */}
           <div className="form-group">
             <label className="form-label">Name *</label>

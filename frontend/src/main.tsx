@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './styles/shared/index.css';
 import App from './App.tsx';
 import { AuthProvider } from './context/AuthContext';
+import { NavigationGuardProvider } from './context/NavigationGuardContext';
 import { CallProvider } from './context/CallContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { CustomerKycApp } from './pages/CustomerKyc/CustomerKycApp';
@@ -21,11 +22,13 @@ createRoot(document.getElementById('root')!).render(
       </ThemeProvider>
     ) : (
       <AuthProvider>
-        <ThemeProvider>
-          <CallProvider>
-            <App />
-          </CallProvider>
-        </ThemeProvider>
+        <NavigationGuardProvider>
+          <ThemeProvider>
+            <CallProvider>
+              <App />
+            </CallProvider>
+          </ThemeProvider>
+        </NavigationGuardProvider>
       </AuthProvider>
     )}
   </StrictMode>,

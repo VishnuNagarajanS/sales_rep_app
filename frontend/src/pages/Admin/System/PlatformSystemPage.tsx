@@ -32,6 +32,7 @@ import {
   GlobalConfig,
 } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
+import { useUnsavedChanges } from '../../../context/NavigationGuardContext';
 import { Modal } from '../../../components/common/Modal';
 import './PlatformSystemPage.css';
 
@@ -69,6 +70,28 @@ export const PlatformSystemPage: React.FC = () => {
   const [annPriority, setAnnPriority] = useState<'info' | 'warning' | 'critical'>('info');
   const [annAudience, setAnnAudience] = useState<'all' | 'tenant_admins' | 'sales_reps'>('all');
   const [annTenantId, setAnnTenantId] = useState('all');
+  const [isCreatingAnn, setIsCreatingAnn] = useState(false);
+  const [isActionInProgress, setIsActionInProgress] = useState(false);
+
+  // Unsaved changes check
+  const isConfigDirty = !!globalConfig && !!configForm && (
+    configForm.platformName !== globalConfig.platformName ||
+    configForm.supportEmail !== globalConfig.supportEmail ||
+    configForm.defaultTimezone !== globalConfig.defaultTimezone ||
+    configForm.sessionTimeoutMinutes !== globalConfig.sessionTimeoutMinutes ||
+    configForm.maxUploadSizeMb !== globalConfig.maxUploadSizeMb ||
+    configForm.tokenExpirationMinutes !== globalConfig.tokenExpirationMinutes ||
+    configForm.passwordMinLength !== globalConfig.passwordMinLength ||
+    configForm.enforceMfa !== globalConfig.enforceMfa ||
+    configForm.recordingRetentionDays !== globalConfig.recordingRetentionDays
+  );
+  const isAnnDirty = isAnnModalOpen && (annTitle.trim() !== '' || annMessage.trim() !== '');
+
+  useUnsavedChanges(
+    isConfigDirty || isAnnDirty,
+    'You have unsaved changes in system settings or broadcast announcement. Are you sure you want to leave?',
+    'platform-system-page'
+  );
 
   const showSuccess = (msg: string) => {
     setSuccessMsg(msg);
@@ -167,7 +190,8 @@ export const PlatformSystemPage: React.FC = () => {
   };
 
   const handleCreateAnnouncement = async () => {
-    if (!annTitle.trim() || !annMessage.trim()) return;
+    if (!annTitle.trim() || !annMessage.trim() || isCreatingAnn) return;
+    setIsCreatingAnn(true);
 
     try {
       const created = await superAdminService.createAnnouncementApi({
@@ -185,26 +209,38 @@ export const PlatformSystemPage: React.FC = () => {
       showSuccess('Broadcast announcement published to database.');
     } catch (err: any) {
       alert(err.message || 'Failed to publish announcement');
+    } finally {
+      setIsCreatingAnn(false);
     }
   };
 
   const handleToggleAnnouncement = async (id: string, current: boolean) => {
+    if (isActionInProgress) return;
+    setIsActionInProgress(true);
     try {
       await superAdminService.toggleAnnouncementApi(id, !current);
       setAnnouncements(prev => prev.map(a => (a.id === id ? { ...a, isActive: !current } : a)));
       showSuccess(`Broadcast banner ${!current ? 'ACTIVATED' : 'DEACTIVATED'}.`);
     } catch (err: any) {
       alert(err.message || 'Failed to toggle announcement');
+    } finally {
+      setIsActionInProgress(false);
     }
   };
 
   const handleDeleteAnnouncement = async (id: string) => {
-    try {
-      await superAdminService.deleteAnnouncementApi(id);
-      setAnnouncements(prev => prev.filter(a => a.id !== id));
-      showSuccess('Broadcast announcement deleted from database.');
-    } catch (err: any) {
-      alert(err.message || 'Failed to delete announcement');
+    if (isActionInProgress) return;
+    if (confirm('Are you sure you want to delete this broadcast announcement?')) {
+      setIsActionInProgress(true);
+      try {
+        await superAdminService.deleteAnnouncementApi(id);
+        setAnnouncements(prev => prev.filter(a => a.id !== id));
+        showSuccess('Broadcast announcement deleted from database.');
+      } catch (err: any) {
+        alert(err.message || 'Failed to delete announcement');
+      } finally {
+        setIsActionInProgress(false);
+      }
     }
   };
 
@@ -939,6 +975,7 @@ export const PlatformSystemPage: React.FC = () => {
                                 <input
                                   type="checkbox"
                                   checked={ann.isActive}
+                                  disabled={isActionInProgress}
                                   onChange={() => handleToggleAnnouncement(ann.id, ann.isActive)}
                                 />
                                 <span className="switch-slider round" />
@@ -949,6 +986,7 @@ export const PlatformSystemPage: React.FC = () => {
                               <button
                                 className="btn-delete-ann"
                                 title="Delete Announcement"
+                                disabled={isActionInProgress}
                                 onClick={() => handleDeleteAnnouncement(ann.id)}
                               >
                                 <Trash2 size={14} />
@@ -1028,15 +1066,15 @@ export const PlatformSystemPage: React.FC = () => {
             </div>
 
             <div className="modal-actions-footer">
-              <button className="btn btn-ghost" onClick={() => setIsAnnModalOpen(false)}>
+              <button className="btn btn-ghost" disabled={isCreatingAnn} onClick={() => setIsAnnModalOpen(false)}>
                 Cancel
               </button>
               <button
                 className="btn btn-primary"
-                disabled={!annTitle.trim() || !annMessage.trim()}
+                disabled={!annTitle.trim() || !annMessage.trim() || isCreatingAnn}
                 onClick={handleCreateAnnouncement}
               >
-                Publish Broadcast Banner
+                {isCreatingAnn ? 'Publishing...' : 'Publish Broadcast Banner'}
               </button>
             </div>
           </div>

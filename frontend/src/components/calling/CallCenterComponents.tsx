@@ -1067,6 +1067,7 @@ export const DispositionModal: React.FC = () => {
   const [followupDate, setFollowupDate] = useState('');
   const [followupTime, setFollowupTime] = useState('');
   const [followupPriority, setFollowupPriority] = useState<'Low' | 'Medium' | 'High'>('High');
+  const [isSavingDispo, setIsSavingDispo] = useState(false);
 
   // Reset all form state fresh for every new call — keyed on lastCallRecord.id so
   // it fires once per finished call, before the modal renders to the agent.
@@ -1126,29 +1127,35 @@ export const DispositionModal: React.FC = () => {
         ? allDispositions.filter(d => d !== 'Converted')
         : allDispositions;
 
-  const handleSave = () => {
-    // Combine date + time into a proper ISO string so scheduledAt is parseable
-    const targetDate = followupDate || (() => {
-      const d = new Date();
-      d.setDate(d.getDate() + 1);
-      return d.toISOString().slice(0, 10);
-    })();
-    const combinedDateTime = (scheduleFollowup || disposition === 'Follow-up Required')
-      ? new Date(`${targetDate}T${followupTime || '11:00'}:00`).toISOString()
-      : '';
+  const handleSave = async () => {
+    if (isSavingDispo) return;
+    setIsSavingDispo(true);
+    try {
+      // Combine date + time into a proper ISO string so scheduledAt is parseable
+      const targetDate = followupDate || (() => {
+        const d = new Date();
+        d.setDate(d.getDate() + 1);
+        return d.toISOString().slice(0, 10);
+      })();
+      const combinedDateTime = (scheduleFollowup || disposition === 'Follow-up Required')
+        ? new Date(`${targetDate}T${followupTime || '11:00'}:00`).toISOString()
+        : '';
 
-    saveDisposition(
-      disposition,
-      notes,
-      combinedDateTime
-        ? {
-          scheduledAt: combinedDateTime,
-          priority: followupPriority,
-          notes: notes ? `Follow-up required from call with ${lastCallRecord.contactName}: ${notes}` : `Follow-up required from call with ${lastCallRecord.contactName}`,
-        }
-        : undefined,
-      (disposition === 'Not Interested' || disposition === 'Wrong Number') ? reason : undefined
-    );
+      await saveDisposition(
+        disposition,
+        notes,
+        combinedDateTime
+          ? {
+            scheduledAt: combinedDateTime,
+            priority: followupPriority,
+            notes: notes ? `Follow-up required from call with ${lastCallRecord.contactName}: ${notes}` : `Follow-up required from call with ${lastCallRecord.contactName}`,
+          }
+          : undefined,
+        (disposition === 'Not Interested' || disposition === 'Wrong Number') ? reason : undefined
+      );
+    } finally {
+      setIsSavingDispo(false);
+    }
   };
 
   return (
@@ -1160,11 +1167,11 @@ export const DispositionModal: React.FC = () => {
       maxWidth={580}
       footer={
         <>
-          <button className="btn btn-secondary" onClick={closeDispositionModal}>
+          <button className="btn btn-secondary" disabled={isSavingDispo} onClick={closeDispositionModal}>
             Skip for Now
           </button>
-          <button className="btn btn-primary" onClick={handleSave}>
-            Save Disposition & Wrap Up
+          <button className="btn btn-primary" disabled={isSavingDispo} onClick={handleSave}>
+            {isSavingDispo ? 'Wrapping up...' : 'Save Disposition & Wrap Up'}
           </button>
         </>
       }

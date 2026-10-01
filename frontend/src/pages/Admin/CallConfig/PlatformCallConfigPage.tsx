@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { TenantDidMapping, PlatformCarrierSettings, Tenant } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
+import { useUnsavedChanges } from '../../../context/NavigationGuardContext';
 import { Modal } from '../../../components/common/Modal';
 import './PlatformCallConfigPage.css';
 
@@ -52,6 +53,15 @@ export const PlatformCallConfigPage: React.FC = () => {
   const [didEnableRecording, setDidEnableRecording] = useState(true);
   const [didEnableAiWhisper, setDidEnableAiWhisper] = useState(true);
   const [didChannels, setDidChannels] = useState(8);
+  const [isSavingDid, setIsSavingDid] = useState(false);
+  const [isActionInProgress, setIsActionInProgress] = useState(false);
+
+  // Unsaved changes check
+  useUnsavedChanges(
+    isDidModalOpen && didPhone.trim() !== '',
+    'You have unsaved changes in virtual DID allocation. Are you sure you want to leave?',
+    'callconfig-page'
+  );
 
   // Carrier Test state
   const [isTestingCarrier, setIsTestingCarrier] = useState(false);
@@ -126,7 +136,8 @@ export const PlatformCallConfigPage: React.FC = () => {
   };
 
   const handleSaveDid = async () => {
-    if (!didPhone.trim()) return;
+    if (!didPhone.trim() || isSavingDid) return;
+    setIsSavingDid(true);
 
     try {
       if (editingDidId) {
@@ -159,17 +170,23 @@ export const PlatformCallConfigPage: React.FC = () => {
       setIsDidModalOpen(false);
     } catch (err: any) {
       alert(err.message || 'Failed to save virtual DID');
+    } finally {
+      setIsSavingDid(false);
     }
   };
 
   const handleDeleteDid = async (did: TenantDidMapping) => {
+    if (isActionInProgress) return;
     if (confirm(`Release virtual DID number "${did.phoneNumber}" back to reserve pool?`)) {
+      setIsActionInProgress(true);
       try {
         await superAdminService.deleteDidMappingApi(did.id);
         setDids(prev => prev.filter(d => d.id !== did.id));
         showSuccess(`DID ${did.phoneNumber} released.`);
       } catch (err: any) {
         alert(err.message || 'Failed to release DID');
+      } finally {
+        setIsActionInProgress(false);
       }
     }
   };
@@ -359,6 +376,7 @@ export const PlatformCallConfigPage: React.FC = () => {
                       <button
                         className="action-btn text-danger"
                         title="Release Number"
+                        disabled={isActionInProgress}
                         onClick={() => handleDeleteDid(d)}
                       >
                         <Trash2 size={13} />
@@ -659,11 +677,11 @@ export const PlatformCallConfigPage: React.FC = () => {
             </div>
 
             <div className="modal-actions-footer">
-              <button className="btn btn-ghost" onClick={() => setIsDidModalOpen(false)}>
+              <button className="btn btn-ghost" disabled={isSavingDid} onClick={() => setIsDidModalOpen(false)}>
                 Cancel
               </button>
-              <button className="btn btn-primary" onClick={handleSaveDid}>
-                {editingDidId ? 'Save Configuration' : 'Allocate DID'}
+              <button className="btn btn-primary" disabled={isSavingDid || !didPhone.trim()} onClick={handleSaveDid}>
+                {isSavingDid ? 'Saving...' : (editingDidId ? 'Save Configuration' : 'Allocate DID')}
               </button>
             </div>
           </div>

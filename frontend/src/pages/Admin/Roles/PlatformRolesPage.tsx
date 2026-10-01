@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Role, PermissionGroup } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
+import { useUnsavedChanges } from '../../../context/NavigationGuardContext';
 import { Modal } from '../../../components/common/Modal';
 import './PlatformRolesPage.css';
 
@@ -73,6 +74,22 @@ export const PlatformRolesPage: React.FC = () => {
   const [confirmToggleRole, setConfirmToggleRole] = useState<Role | null>(null);
   const [confirmDeleteRole, setConfirmDeleteRole] = useState<Role | null>(null);
   const [deleteErrorMessage, setDeleteErrorMessage] = useState('');
+  const [isActionInProgress, setIsActionInProgress] = useState(false);
+
+  // Unsaved changes check
+  const isCreateDirty = isCreateModalOpen && (createName.trim() !== '' || createCode.trim() !== '');
+  const isEditDirty = isEditModalOpen && !!editingRole && (
+    editName !== editingRole.name ||
+    editDescription !== (editingRole.description || '') ||
+    editIsActive !== (editingRole.isActive !== false) ||
+    JSON.stringify(editSelectedPermissions) !== JSON.stringify(editingRole.permissions || [])
+  );
+
+  useUnsavedChanges(
+    hasUnsavedMatrixChanges || isCreateDirty || isEditDirty,
+    'You have unsaved changes in role configurations or matrix permissions. Are you sure you want to leave?',
+    'platform-roles-page'
+  );
 
   // Auto-clear feedback
   const showFeedback = (text: string, type: 'success' | 'error' = 'success') => {
@@ -371,7 +388,8 @@ export const PlatformRolesPage: React.FC = () => {
   };
 
   const handleExecuteToggleStatus = async () => {
-    if (!confirmToggleRole) return;
+    if (!confirmToggleRole || isActionInProgress) return;
+    setIsActionInProgress(true);
     const newStatus = !(confirmToggleRole.isActive !== false);
     try {
       await superAdminService.toggleRoleStatusApi(confirmToggleRole.id, newStatus);
@@ -380,6 +398,8 @@ export const PlatformRolesPage: React.FC = () => {
       showFeedback(`Role "${confirmToggleRole.name}" ${newStatus ? 'activated' : 'deactivated'} successfully.`);
     } catch (err: any) {
       showFeedback(err.message || 'Failed to toggle role status.', 'error');
+    } finally {
+      setIsActionInProgress(false);
     }
   };
 
@@ -402,7 +422,8 @@ export const PlatformRolesPage: React.FC = () => {
   };
 
   const handleExecuteDeleteRole = async () => {
-    if (!confirmDeleteRole || deleteErrorMessage) return;
+    if (!confirmDeleteRole || deleteErrorMessage || isActionInProgress) return;
+    setIsActionInProgress(true);
     try {
       await superAdminService.deleteRoleApi(confirmDeleteRole.id);
       setRoles(superAdminService.getRoles());
@@ -410,6 +431,8 @@ export const PlatformRolesPage: React.FC = () => {
       showFeedback(`Custom role "${confirmDeleteRole.name}" removed successfully.`);
     } catch (err: any) {
       showFeedback(err.message || 'Failed to delete role.', 'error');
+    } finally {
+      setIsActionInProgress(false);
     }
   };
 
@@ -525,10 +548,11 @@ export const PlatformRolesPage: React.FC = () => {
           {activeTab === 'matrix' && (
             <button
               className={`btn btn-save-matrix ${hasUnsavedMatrixChanges ? 'dirty-pulse' : ''}`}
+              disabled={isSavingMatrix || !hasUnsavedMatrixChanges}
               onClick={handleSaveMatrix}
             >
               <Check size={16} />
-              Save Matrix Changes
+              {isSavingMatrix ? 'Saving Matrix...' : 'Save Matrix Changes'}
             </button>
           )}
 
@@ -1387,14 +1411,17 @@ export const PlatformRolesPage: React.FC = () => {
               )}
             </p>
             <div className="confirm-modal-footer">
-              <button className="btn btn-ghost" onClick={() => setConfirmToggleRole(null)}>
+              <button className="btn btn-ghost" disabled={isActionInProgress} onClick={() => setConfirmToggleRole(null)}>
                 Cancel
               </button>
               <button
                 className={`btn ${confirmToggleRole.isActive !== false ? 'btn-danger' : 'btn-primary'}`}
+                disabled={isActionInProgress}
                 onClick={handleExecuteToggleStatus}
               >
-                {confirmToggleRole.isActive !== false ? 'Deactivate Role' : 'Activate Role'}
+                {isActionInProgress
+                  ? 'Updating...'
+                  : (confirmToggleRole.isActive !== false ? 'Deactivate Role' : 'Activate Role')}
               </button>
             </div>
           </div>
@@ -1426,12 +1453,12 @@ export const PlatformRolesPage: React.FC = () => {
             )}
 
             <div className="confirm-modal-footer">
-              <button className="btn btn-ghost" onClick={() => setConfirmDeleteRole(null)}>
+              <button className="btn btn-ghost" disabled={isActionInProgress} onClick={() => setConfirmDeleteRole(null)}>
                 {deleteErrorMessage ? 'Close' : 'Cancel'}
               </button>
               {!deleteErrorMessage && (
-                <button className="btn btn-danger" onClick={handleExecuteDeleteRole}>
-                  <Trash2 size={14} /> Delete Role
+                <button className="btn btn-danger" disabled={isActionInProgress} onClick={handleExecuteDeleteRole}>
+                  <Trash2 size={14} /> {isActionInProgress ? 'Deleting...' : 'Delete Role'}
                 </button>
               )}
             </div>

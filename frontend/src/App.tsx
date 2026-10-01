@@ -152,6 +152,7 @@ import {
   getCustomers as apiGetCustomers,
 } from './services/ghlApiService';
 import { PERMISSIONS } from './constants/permissions';
+import { useNavigationGuard, useUnsavedChanges } from './context/NavigationGuardContext';
 import './App.css';
 
 export const App: React.FC = () => {
@@ -247,6 +248,12 @@ export const App: React.FC = () => {
     return window.history.state?.extraState || null;
   });
 
+  const { isDirty, dirtyMessage, confirmNavigation, clearDirty } = useNavigationGuard();
+  const isDirtyRef = useRef(isDirty);
+  isDirtyRef.current = isDirty;
+  const dirtyMessageRef = useRef(dirtyMessage);
+  dirtyMessageRef.current = dirtyMessage;
+
   const currentRouteRef = useRef(currentRoute);
   currentRouteRef.current = currentRoute;
 
@@ -291,8 +298,6 @@ export const App: React.FC = () => {
 
     const targetPath = routeToPath(activeRoute, isSuperAdmin);
 
-    // CRITICAL: Ensure there is always a deep anti-exit trap buffer in history
-    // so pressing the browser Back button can NEVER escape to the Edge new tab!
     const isArmed = sessionStorage.getItem('nexus_has_armed_trap') === 'true';
     if (!isArmed || !window.history.state || !window.history.state.auth || window.history.state.isTrap || !window.history.state.index) {
       window.history.replaceState(
@@ -336,7 +341,7 @@ export const App: React.FC = () => {
     };
   }, [isAuthenticated]);
 
-  // Handle browser Back / Forward events
+  // Handle browser Back / Forward events & back-forward cache protection
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
       // 1. If unauthenticated, ensure user stays on /login
@@ -347,14 +352,30 @@ export const App: React.FC = () => {
         return;
       }
 
-      // 2. User is authenticated:
+      // 2. If there are unsaved changes, prompt user before navigating
+      if (isDirtyRef.current) {
+        const confirmed = window.confirm(
+          dirtyMessageRef.current || 'You have unsaved changes. Are you sure you want to discard them and navigate away?'
+        );
+        if (!confirmed) {
+          const currentPath = routeToPath(currentRouteRef.current, isSuperAdminRef.current);
+          window.history.pushState(
+            { auth: true, route: currentRouteRef.current, index: currentIndexRef.current },
+            '',
+            currentPath
+          );
+          return;
+        }
+        clearDirty();
+      }
+
+      // 3. User is authenticated:
       const state = event.state;
 
       // Trap Back button if it attempts to leave authenticated application,
       // lands on trap entry, has no state, or returns to /login
       if (!state || !state.auth || state.isTrap || !state.index || state.index <= 0 || window.location.pathname === '/login') {
         const currentPath = routeToPath(currentRouteRef.current, isSuperAdminRef.current);
-        // Immediately replenish the anti-exit trap buffer at current location
         window.history.pushState(
           { auth: true, route: currentRouteRef.current, index: 0, isTrap: true },
           '',
@@ -369,7 +390,7 @@ export const App: React.FC = () => {
         return;
       }
 
-      // 3. Normal in-app internal navigation (Back / Forward between pages)
+      // 4. Normal in-app internal navigation (Back / Forward between pages)
       if (state.route) {
         currentIndexRef.current = state.index || 1;
         setCurrentRoute(state.route);
@@ -378,29 +399,57 @@ export const App: React.FC = () => {
       }
     };
 
+    // Back-Forward Cache (bfcache) revalidation
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        const hasAuth = !!sessionStorage.getItem('nexus_current_user') || !!localStorage.getItem('nexus_current_user');
+        if (!hasAuth && window.location.pathname !== '/login') {
+          window.location.replace('/login');
+        }
+      }
+    };
+
     window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+    window.addEventListener('pageshow', handlePageShow);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('pageshow', handlePageShow);
+    };
+  }, [clearDirty]);
 
-  // Handle route change
+  // Handle route change with Navigation Guard confirmation
   const navigate = (route: string, extraState?: any) => {
-    setCurrentRoute(route);
-    setNavExtraState(extraState || null);
-    sessionStorage.setItem('nexus_current_route', route);
+    confirmNavigation(() => {
+      setCurrentRoute(route);
+      setNavExtraState(extraState || null);
+      sessionStorage.setItem('nexus_current_route', route);
 
-    const nextIndex = (currentIndexRef.current || 1) + 1;
-    currentIndexRef.current = nextIndex;
+      const nextIndex = (currentIndexRef.current || 1) + 1;
+      currentIndexRef.current = nextIndex;
 
-    const targetPath = routeToPath(route, isSuperAdmin);
-    window.history.pushState(
-      { auth: true, route, extraState: extraState || null, index: nextIndex },
-      '',
-      targetPath
-    );
+      const targetPath = routeToPath(route, isSuperAdmin);
+      window.history.pushState(
+        { auth: true, route, extraState: extraState || null, index: nextIndex },
+        '',
+        targetPath
+      );
+    });
   };
+
+  const [isSavingQuickCreate, setIsSavingQuickCreate] = useState(false);
+  const [quickCreateError, setQuickCreateError] = useState<string | null>(null);
+
+  const isQuickCreateDirty = quickCreateType !== null && (
+    quickName.trim().length > 0 ||
+    quickPhone.replace('+91 ', '').trim().length > 0 ||
+    quickNotes.trim().length > 0
+  );
+  useUnsavedChanges(isQuickCreateDirty, 'You have unsaved changes in Quick Create. Are you sure you want to discard them?', 'app-quick-create');
 
   const handleOpenQuickCreate = (type: 'lead' | 'followup' | 'deal' | 'visit' | 'consultation') => {
     setQuickCreateType(type);
+    setQuickCreateError(null);
+    setIsSavingQuickCreate(false);
     setQuickName('');
     setQuickPhone('+91 ');
     setQuickEmail('');
@@ -425,128 +474,135 @@ export const App: React.FC = () => {
     setSelectedCustomerId(tenantCustomers[0]?.id || '');
   };
 
-  const handleSaveQuickCreate = (e: React.FormEvent) => {
+  const handleSaveQuickCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!quickName) return;
+    if (!quickName.trim() || isSavingQuickCreate) return;
+    setQuickCreateError(null);
+    setIsSavingQuickCreate(true);
 
-    if (quickCreateType === 'lead') {
-      const newLead = {
-        id: `lead-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
-        name: quickName,
-        phone: quickPhone,
-        email: quickEmail,
-        location: quickLocation,
-        source: quickSource,
-        status: 'New' as const,
-        priority: 'Medium' as const,
-        assignedAgentId: user?.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec'),
-        assignedAgentName: user?.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer'),
-        createdAt: new Date().toISOString().split('T')[0],
-        notes: quickNotes,
-        customFields: {
-          assetClass: quickAssetClass,
-          preferredAssetClass: quickAssetClass,
-          investmentCapacity: quickInvestmentCapacity,
-        },
-      };
-      apiSaveLead(newLead).catch(console.error);
-
-    } else if (quickCreateType === 'followup') {
-      const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
-      const newFlw = {
-        id: `flw-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
-        contactId: `contact-${Date.now()}`,
-        contactName: quickName,
-        contactPhone: quickPhone,
-        contactType: 'lead' as const,
-        scheduledAt: combinedDateTime,
-        scheduledDate,
-        scheduledTime,
-        priority: 'High' as const,
-        status: 'Pending' as const,
-        notes: quickNotes,
-        assignedAgentId: user?.id || 'usr-exec',
-        assignedAgentName: user?.name || 'Agent',
-      };
-      apiSaveFollowup(newFlw).catch(console.error);
-
-    } else if (quickCreateType === 'consultation') {
-      // Task 1 — Schedule Consultation
-      const newCons = {
-        id: `cons-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
-        investorId: consInvestorId || `investor-${Date.now()}`,
-        investorName: consInvestorName,
-        investorPhone: consInvestorPhone,
-        scheduledAt: consSlot.trim(),
-        consultantId: user?.id || 'usr-exec',
-        consultantName: consConsultantName.trim() || user?.name || 'Agent',
-        status: consStatus,
-        agenda: consAgenda.trim(),
-        outcomeNotes: consOutcome.trim() || undefined,
-      };
-      apiSaveConsultation(newCons).catch(console.error);
-
-    } else if (quickCreateType === 'visit') {
-      // Task 2 — Schedule Site Visit
-      // Handled via local events
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-
-    } else if (quickCreateType === 'deal') {
-      // Task 4 — Deal linked to real customer
-      let resolvedCustomerId: string;
-      let resolvedCustomerName: string;
-
-      if (dealCustomerMode === 'existing' && selectedCustomerId) {
-        // Link to the chosen existing customer
-        const existing = tenantCustomers.find(c => c.id === selectedCustomerId);
-        resolvedCustomerId = existing?.id || selectedCustomerId;
-        resolvedCustomerName = existing?.name || 'Customer';
-      } else {
-        // Create a real Customer record first so it shows in Customer 360
-        if (!newCustomerName) return;
-        resolvedCustomerId = `cust-${Date.now()}`;
-        resolvedCustomerName = newCustomerName;
-        const newCust = {
-          id: resolvedCustomerId,
+    try {
+      if (quickCreateType === 'lead') {
+        const newLead = {
+          id: `lead-${Date.now()}`,
           companyId: tenant?.id || 't-ghl-01',
-          name: resolvedCustomerName,
-          phone: quickPhone,
-          email: '',
-          status: 'Active' as const,
+          name: quickName.trim(),
+          phone: quickPhone.trim(),
+          email: quickEmail.trim(),
+          location: quickLocation.trim(),
+          source: quickSource,
+          status: 'New' as const,
+          priority: 'Medium' as const,
+          assignedAgentId: user?.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec'),
+          assignedAgentName: user?.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer'),
+          createdAt: new Date().toISOString().split('T')[0],
+          notes: quickNotes,
+          customFields: {
+            assetClass: quickAssetClass,
+            preferredAssetClass: quickAssetClass,
+            investmentCapacity: quickInvestmentCapacity,
+          },
+        };
+        await apiSaveLead(newLead);
+
+      } else if (quickCreateType === 'followup') {
+        const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
+        const newFlw = {
+          id: `flw-${Date.now()}`,
+          companyId: tenant?.id || 't-ghl-01',
+          contactId: `contact-${Date.now()}`,
+          contactName: quickName.trim(),
+          contactPhone: quickPhone.trim(),
+          contactType: 'lead' as const,
+          scheduledAt: combinedDateTime,
+          scheduledDate,
+          scheduledTime,
+          priority: 'High' as const,
+          status: 'Pending' as const,
+          notes: quickNotes,
           assignedAgentId: user?.id || 'usr-exec',
           assignedAgentName: user?.name || 'Agent',
-          location: 'Bengaluru',
-          lastContacted: new Date().toISOString().split('T')[0],
-          openDealsCount: 1,
-          totalValue: 5000000,
-          createdAt: new Date().toISOString().split('T')[0],
-          notes: '',
-          customFields: {},
         };
-        apiSaveCustomer(newCust).catch(console.error);
+        await apiSaveFollowup(newFlw);
+
+      } else if (quickCreateType === 'consultation') {
+        // Task 1 — Schedule Consultation
+        const newCons = {
+          id: `cons-${Date.now()}`,
+          companyId: tenant?.id || 't-ghl-01',
+          investorId: consInvestorId || `investor-${Date.now()}`,
+          investorName: consInvestorName || quickName.trim(),
+          investorPhone: consInvestorPhone || quickPhone.trim(),
+          scheduledAt: consSlot.trim(),
+          consultantId: user?.id || 'usr-exec',
+          consultantName: consConsultantName.trim() || user?.name || 'Agent',
+          status: consStatus,
+          agenda: consAgenda.trim(),
+          outcomeNotes: consOutcome.trim() || undefined,
+        };
+        await apiSaveConsultation(newCons);
+
+      } else if (quickCreateType === 'visit') {
+        // Task 2 — Schedule Site Visit
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+
+      } else if (quickCreateType === 'deal') {
+        // Task 4 — Deal linked to real customer
+        let resolvedCustomerId: string;
+        let resolvedCustomerName: string;
+
+        if (dealCustomerMode === 'existing' && selectedCustomerId) {
+          const existing = tenantCustomers.find(c => c.id === selectedCustomerId);
+          resolvedCustomerId = existing?.id || selectedCustomerId;
+          resolvedCustomerName = existing?.name || 'Customer';
+        } else {
+          if (!newCustomerName.trim()) {
+            throw new Error('Please enter customer full name.');
+          }
+          resolvedCustomerId = `cust-${Date.now()}`;
+          resolvedCustomerName = newCustomerName.trim();
+          const newCust = {
+            id: resolvedCustomerId,
+            companyId: tenant?.id || 't-ghl-01',
+            name: resolvedCustomerName,
+            phone: quickPhone.trim(),
+            email: '',
+            status: 'Active' as const,
+            assignedAgentId: user?.id || 'usr-exec',
+            assignedAgentName: user?.name || 'Agent',
+            location: 'Bengaluru',
+            lastContacted: new Date().toISOString().split('T')[0],
+            openDealsCount: 1,
+            totalValue: 5000000,
+            createdAt: new Date().toISOString().split('T')[0],
+            notes: '',
+            customFields: {},
+          };
+          await apiSaveCustomer(newCust);
+        }
+
+        const newDeal = {
+          id: `deal-${Date.now()}`,
+          companyId: tenant?.id || 't-ghl-01',
+          title: quickName.trim(),
+          customerId: resolvedCustomerId,
+          customerName: resolvedCustomerName,
+          stage: 'new',
+          value: 5000000,
+          expectedCloseDate: '30 Days',
+          assignedAgentId: user?.id || 'usr-exec',
+          assignedAgentName: user?.name || 'Agent',
+          notes: quickNotes,
+          createdAt: new Date().toISOString().split('T')[0],
+        };
+        await apiSaveDeal(newDeal);
       }
 
-      const newDeal = {
-        id: `deal-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
-        title: quickName,
-        customerId: resolvedCustomerId,
-        customerName: resolvedCustomerName,
-        stage: 'new',
-        value: 5000000,
-        expectedCloseDate: '30 Days',
-        assignedAgentId: user?.id || 'usr-exec',
-        assignedAgentName: user?.name || 'Agent',
-        notes: quickNotes,
-        createdAt: new Date().toISOString().split('T')[0],
-      };
-      apiSaveDeal(newDeal).catch(console.error);
+      setQuickCreateType(null);
+    } catch (err: any) {
+      setQuickCreateError(err.message || 'Failed to save entry. Please verify your connection and try again.');
+    } finally {
+      setIsSavingQuickCreate(false);
     }
-
-    setQuickCreateType(null);
   };
 
   // If unauthenticated
@@ -1076,12 +1132,38 @@ export const App: React.FC = () => {
             </>
           )}
 
+          {quickCreateError && (
+            <div
+              className="alert alert-danger"
+              style={{
+                marginBottom: 12,
+                padding: '8px 12px',
+                background: 'rgba(239, 68, 68, 0.12)',
+                color: '#ef4444',
+                borderRadius: 6,
+                fontSize: 13,
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+              }}
+            >
+              {quickCreateError}
+            </div>
+          )}
+
           <div className="app-modal-actions">
-            <button type="button" className="btn btn-secondary" onClick={() => setQuickCreateType(null)}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setQuickCreateType(null)}
+              disabled={isSavingQuickCreate}
+            >
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
-              Save Entry
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={isSavingQuickCreate}
+            >
+              {isSavingQuickCreate ? 'Saving Entry...' : 'Save Entry'}
             </button>
           </div>
         </form>

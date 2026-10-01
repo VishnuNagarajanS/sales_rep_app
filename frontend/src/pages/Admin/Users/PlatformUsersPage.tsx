@@ -22,6 +22,7 @@ import { superAdminService } from '../../../services/superAdminService';
 import { StatusChip } from '../../../components/common/StatusChip';
 import { Modal } from '../../../components/common/Modal';
 import { Drawer } from '../../../components/common/Drawer';
+import { useUnsavedChanges } from '../../../context/NavigationGuardContext';
 import './PlatformUsersPage.css';
 
 export const PlatformUsersPage: React.FC = () => {
@@ -56,17 +57,32 @@ export const PlatformUsersPage: React.FC = () => {
   const [editCompanyId, setEditCompanyId] = useState('');
   const [editRoleCode, setEditRoleCode] = useState('');
   const [editDesignation, setEditDesignation] = useState('');
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+  const [isActionInProgress, setIsActionInProgress] = useState<string | null>(null);
 
   // Password Reset Modal state
   const [resettingUser, setResettingUser] = useState<User | null>(null);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [generatedTempPassword, setGeneratedTempPassword] = useState('');
   const [hasCopiedPassword, setHasCopiedPassword] = useState(false);
+  const [isResettingPwd, setIsResettingPwd] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
 
   // Success Feedback
   const [feedbackMsg, setFeedbackMsg] = useState('');
+
+  // Unsaved changes tracking
+  const isProvisionDirty = isProvisionModalOpen && (newName.trim().length > 0 || newEmail.trim().length > 0);
+  const isEditDirty = isEditDrawerOpen && editingUser !== null && (
+    editName !== editingUser.name ||
+    editEmail !== editingUser.email ||
+    editPhone !== editingUser.phone ||
+    editDesignation !== (editingUser.designation || '') ||
+    editRoleCode !== editingUser.role.code ||
+    (editCompanyId === 'global' ? Boolean(editingUser.companyId) : editCompanyId !== (editingUser.companyId || ''))
+  );
+  useUnsavedChanges(isProvisionDirty || isEditDirty, 'You have unsaved changes in user details. Are you sure you want to discard them?');
 
   const loadData = async () => {
     setIsLoading(true);
@@ -171,35 +187,50 @@ export const PlatformUsersPage: React.FC = () => {
   };
 
   const handleSaveEditUser = async () => {
-    if (!editingUser) return;
+    if (!editingUser || isSubmittingEdit) return;
 
-    const isGlobal = editCompanyId === 'global';
-    const targetRole = roles[editRoleCode] || editingUser.role;
-    const tenantObj = isGlobal ? undefined : tenants.find(t => t.id === editCompanyId);
+    setIsSubmittingEdit(true);
+    try {
+      const isGlobal = editCompanyId === 'global';
+      const targetRole = roles[editRoleCode] || editingUser.role;
+      const tenantObj = isGlobal ? undefined : tenants.find(t => t.id === editCompanyId);
 
-    await superAdminService.updateUserApi(editingUser.id, {
-      name: editName,
-      email: editEmail,
-      phone: editPhone,
-      role: targetRole,
-      companyId: isGlobal ? undefined : editCompanyId,
-      companyName: isGlobal ? 'Platform Console (Global)' : tenantObj?.name,
-      companySlug: isGlobal ? undefined : tenantObj?.slug,
-      designation: editDesignation,
-    });
+      await superAdminService.updateUserApi(editingUser.id, {
+        name: editName.trim(),
+        email: editEmail.trim(),
+        phone: editPhone.trim(),
+        role: targetRole,
+        companyId: isGlobal ? undefined : editCompanyId,
+        companyName: isGlobal ? 'Platform Console (Global)' : tenantObj?.name,
+        companySlug: isGlobal ? undefined : tenantObj?.slug,
+        designation: editDesignation.trim(),
+      });
 
-    setIsEditDrawerOpen(false);
-    showFeedback(`User profile for "${editName}" updated in database.`);
-    await applyFilters();
+      setIsEditDrawerOpen(false);
+      showFeedback(`User profile for "${editName}" updated in database.`);
+      await applyFilters();
+    } catch (err: any) {
+      alert(err.message || 'Failed to update user profile in database.');
+    } finally {
+      setIsSubmittingEdit(false);
+    }
   };
 
   // Handle Password Reset
   const openResetModal = async (u: User) => {
-    setResettingUser(u);
-    const result = await superAdminService.resetUserPasswordApi(u.id);
-    setGeneratedTempPassword(result.tempPassword || 'Nexus#2026!');
-    setHasCopiedPassword(false);
-    setIsResetModalOpen(true);
+    if (isResettingPwd) return;
+    setIsResettingPwd(true);
+    try {
+      setResettingUser(u);
+      const result = await superAdminService.resetUserPasswordApi(u.id);
+      setGeneratedTempPassword(result.tempPassword || 'Nexus#2026!');
+      setHasCopiedPassword(false);
+      setIsResetModalOpen(true);
+    } catch (err: any) {
+      alert(err.message || 'Failed to reset password.');
+    } finally {
+      setIsResettingPwd(false);
+    }
   };
 
   const copyToClipboard = () => {
@@ -210,22 +241,38 @@ export const PlatformUsersPage: React.FC = () => {
 
   // Handle Toggle Status
   const handleToggleStatus = async (u: User) => {
-    const nextStatus = u.status === 'Active' ? 'Disabled' : 'Active';
-    await superAdminService.toggleUserStatusApi(u.id, nextStatus);
-    showFeedback(`User status for ${u.name} set to ${nextStatus}.`);
-    await applyFilters();
+    if (isActionInProgress) return;
+    setIsActionInProgress(`status-${u.id}`);
+    try {
+      const nextStatus = u.status === 'Active' ? 'Disabled' : 'Active';
+      await superAdminService.toggleUserStatusApi(u.id, nextStatus);
+      showFeedback(`User status for ${u.name} set to ${nextStatus}.`);
+      await applyFilters();
+    } catch (err: any) {
+      alert(err.message || 'Failed to update user status.');
+    } finally {
+      setIsActionInProgress(null);
+    }
   };
 
   // Handle Delete
   const handleDeleteUser = async (u: User) => {
+    if (isActionInProgress) return;
     if (u.email === 'yanosh@ghlindiaventures.com') {
       alert('The root platform Super Admin cannot be deleted.');
       return;
     }
     if (confirm(`Are you sure you want to permanently delete user "${u.name}" (${u.email})?`)) {
-      await superAdminService.deleteUserApi(u.id);
-      showFeedback(`User account "${u.name}" removed from database.`);
-      await applyFilters();
+      setIsActionInProgress(`delete-${u.id}`);
+      try {
+        await superAdminService.deleteUserApi(u.id);
+        showFeedback(`User account "${u.name}" removed from database.`);
+        await applyFilters();
+      } catch (err: any) {
+        alert(err.message || 'Failed to delete user account.');
+      } finally {
+        setIsActionInProgress(null);
+      }
     }
   };
 

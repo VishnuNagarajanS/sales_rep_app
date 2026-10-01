@@ -21,6 +21,7 @@ import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { User, RoleCode } from '../../types';
 import { SYSTEM_ROLES } from '../../constants/roles';
+import { useUnsavedChanges } from '../../context/NavigationGuardContext';
 import './CompanyUsersPage.css';
 
 const getStoredUsers = (tenantSlug?: string, tenantId?: string): User[] => {
@@ -134,6 +135,20 @@ export const CompanyUsersPage: React.FC = () => {
   const [tempPassword, setTempPassword] = useState('');
   const [hasCopiedTempPassword, setHasCopiedTempPassword] = useState(false);
 
+  const [isSubmittingInvite, setIsSubmittingInvite] = useState(false);
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+  const [isActionInProgress, setIsActionInProgress] = useState<string | null>(null);
+
+  const isInviteDirty = isInviteModalOpen && (inviteName.trim().length > 0 || inviteEmail.trim().length > 0);
+  const isEditDirty = editingUser !== null && (
+    editName !== editingUser.name ||
+    editPhone !== (editingUser.phone || '') ||
+    editDesignation !== (editingUser.designation || '') ||
+    editRoleCode !== editingUser.role.code
+  );
+
+  useUnsavedChanges(isInviteDirty || isEditDirty, 'You have unsaved changes in user management. Are you sure you want to discard them?');
+
   // ── Invite / Add Handlers ─────────────────────────────────────────────────
   const handleOpenInvite = () => {
     setInviteName('');
@@ -150,6 +165,7 @@ export const CompanyUsersPage: React.FC = () => {
 
   const handleCreateOrInvite = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmittingInvite) return;
     setInviteError(null);
 
     const trimmedEmail = inviteEmail.trim();
@@ -165,48 +181,53 @@ export const CompanyUsersPage: React.FC = () => {
       return;
     }
 
-    const assignedRole = SYSTEM_ROLES[inviteRole] || SYSTEM_ROLES.sales_executive;
-    const isInstant = creationMode === 'instant_password';
-    const tempPass = isInstant
-      ? `Nexus#${Math.floor(1000 + Math.random() * 9000)}`
-      : undefined;
+    setIsSubmittingInvite(true);
+    try {
+      const assignedRole = SYSTEM_ROLES[inviteRole] || SYSTEM_ROLES.sales_executive;
+      const isInstant = creationMode === 'instant_password';
+      const tempPass = isInstant
+        ? `Nexus#${Math.floor(1000 + Math.random() * 9000)}`
+        : undefined;
 
-    const newUser: User = {
-      id: `usr-${tenant?.slug || 'ghl'}-${Date.now().toString(36)}`,
-      name: trimmedName,
-      email: trimmedEmail,
-      phone: invitePhone.trim() || '+91 98000 00000',
-      role: assignedRole,
-      companyId: tenant?.id,
-      companySlug: tenant?.slug,
-      companyName: tenant?.name,
-      designation: inviteDesignation.trim() || undefined,
-      status: isInstant ? 'Active' : 'Invited',
-      lastLogin: isInstant ? 'Pending First Login' : 'Never',
-    };
+      const newUser: User = {
+        id: `usr-${tenant?.slug || 'ghl'}-${Date.now().toString(36)}`,
+        name: trimmedName,
+        email: trimmedEmail,
+        phone: invitePhone.trim() || '+91 98000 00000',
+        role: assignedRole,
+        companyId: tenant?.id,
+        companySlug: tenant?.slug,
+        companyName: tenant?.name,
+        designation: inviteDesignation.trim() || undefined,
+        status: isInstant ? 'Active' : 'Invited',
+        lastLogin: isInstant ? 'Pending First Login' : 'Never',
+      };
 
-    saveStoredUser(newUser);
+      saveStoredUser(newUser);
 
-    // Audit log
-    addStoredAuditLog({
-      id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
-      actorName: user?.name || 'Company Admin',
-      actorEmail: user?.email || 'admin@nexus.com',
-      action: isInstant ? 'USER_PROVISIONED' : 'USER_INVITED',
-      entityType: 'User',
-      entityId: newUser.id,
-      companyId: tenant?.id,
-      companyName: tenant?.name,
-      details: `${isInstant ? 'Provisioned' : 'Invited'} ${newUser.name} (${newUser.email}) as ${newUser.role.name} with designation [${newUser.designation || 'None'}].`,
-    });
+      // Audit log
+      addStoredAuditLog({
+        id: `aud-${Date.now()}`,
+        timestamp: 'Just now',
+        actorName: user?.name || 'Company Admin',
+        actorEmail: user?.email || 'admin@nexus.com',
+        action: isInstant ? 'USER_PROVISIONED' : 'USER_INVITED',
+        entityType: 'User',
+        entityId: newUser.id,
+        companyId: tenant?.id,
+        companyName: tenant?.name,
+        details: `${isInstant ? 'Provisioned' : 'Invited'} ${newUser.name} (${newUser.email}) as ${newUser.role.name} with designation [${newUser.designation || 'None'}].`,
+      });
 
-    if (isInstant && tempPass) {
-      setGeneratedNewPassword(tempPass);
-      showToast('success', `Team member ${newUser.name} provisioned successfully.`);
-    } else {
-      setIsInviteModalOpen(false);
-      showToast('success', `Invitation sent to ${newUser.email}.`);
+      if (isInstant && tempPass) {
+        setGeneratedNewPassword(tempPass);
+        showToast('success', `Team member ${newUser.name} provisioned successfully.`);
+      } else {
+        setIsInviteModalOpen(false);
+        showToast('success', `Invitation sent to ${newUser.email}.`);
+      }
+    } finally {
+      setIsSubmittingInvite(false);
     }
   };
 
@@ -220,38 +241,43 @@ export const CompanyUsersPage: React.FC = () => {
   };
 
   const handleSaveEditUser = () => {
-    if (!editingUser) return;
+    if (!editingUser || isSubmittingEdit) return;
 
-    const updatedRole = SYSTEM_ROLES[editRoleCode] || editingUser.role;
-    const oldRole = editingUser.role;
+    setIsSubmittingEdit(true);
+    try {
+      const updatedRole = SYSTEM_ROLES[editRoleCode] || editingUser.role;
+      const oldRole = editingUser.role;
 
-    const updated: User = {
-      ...editingUser,
-      name: editName.trim() || editingUser.name,
-      phone: editPhone.trim() || editingUser.phone,
-      designation: editDesignation.trim() || editingUser.designation,
-      role: updatedRole,
-    };
+      const updated: User = {
+        ...editingUser,
+        name: editName.trim() || editingUser.name,
+        phone: editPhone.trim() || editingUser.phone,
+        designation: editDesignation.trim() || editingUser.designation,
+        role: updatedRole,
+      };
 
-    saveStoredUser(updated);
+      saveStoredUser(updated);
 
-    addStoredAuditLog({
-      id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
-      actorName: user?.name || 'Company Admin',
-      actorEmail: user?.email || 'admin@nexus.com',
-      action: 'USER_UPDATED',
-      entityType: 'User',
-      entityId: updated.id,
-      companyId: tenant?.id,
-      companyName: tenant?.name,
-      beforeValue: { roleCode: oldRole.code, roleName: oldRole.name, name: editingUser.name },
-      afterValue: { roleCode: updatedRole.code, roleName: updatedRole.name, name: updated.name },
-      details: `Company Admin updated team member profile for ${updated.name} (${updated.email}).`,
-    });
+      addStoredAuditLog({
+        id: `aud-${Date.now()}`,
+        timestamp: 'Just now',
+        actorName: user?.name || 'Company Admin',
+        actorEmail: user?.email || 'admin@nexus.com',
+        action: 'USER_UPDATED',
+        entityType: 'User',
+        entityId: updated.id,
+        companyId: tenant?.id,
+        companyName: tenant?.name,
+        beforeValue: { roleCode: oldRole.code, roleName: oldRole.name, name: editingUser.name },
+        afterValue: { roleCode: updatedRole.code, roleName: updatedRole.name, name: updated.name },
+        details: `Company Admin updated team member profile for ${updated.name} (${updated.email}).`,
+      });
 
-    showToast('success', `Updated profile for ${updated.name}.`);
-    setEditingUser(null);
+      showToast('success', `Updated profile for ${updated.name}.`);
+      setEditingUser(null);
+    } finally {
+      setIsSubmittingEdit(false);
+    }
   };
 
   // ── Password Reset Handlers ───────────────────────────────────────────────
@@ -299,81 +325,105 @@ export const CompanyUsersPage: React.FC = () => {
   };
 
   const handleRevokeInvite = (u: User) => {
+    if (isActionInProgress) return;
     if (!window.confirm(`Revoke pending invitation for ${u.name} (${u.email})?`)) return;
 
-    deleteStoredUser(u.id);
+    setIsActionInProgress(`revoke-${u.id}`);
+    try {
+      deleteStoredUser(u.id);
 
-    addStoredAuditLog({
-      id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
-      actorName: user?.name || 'Company Admin',
-      actorEmail: user?.email || 'admin@nexus.com',
-      action: 'INVITATION_REVOKED',
-      entityType: 'User',
-      entityId: u.id,
-      companyId: tenant?.id,
-      companyName: tenant?.name,
-      details: `Revoked pending invitation for ${u.name} (${u.email}).`,
-    });
-    showToast('success', `Invitation for ${u.name} has been revoked.`);
+      addStoredAuditLog({
+        id: `aud-${Date.now()}`,
+        timestamp: 'Just now',
+        actorName: user?.name || 'Company Admin',
+        actorEmail: user?.email || 'admin@nexus.com',
+        action: 'INVITATION_REVOKED',
+        entityType: 'User',
+        entityId: u.id,
+        companyId: tenant?.id,
+        companyName: tenant?.name,
+        details: `Revoked pending invitation for ${u.name} (${u.email}).`,
+      });
+      showToast('success', `Invitation for ${u.name} has been revoked.`);
+    } finally {
+      setIsActionInProgress(null);
+    }
   };
 
   const handleDeactivateUser = (u: User) => {
+    if (isActionInProgress) return;
     if (!window.confirm(`Deactivate account for ${u.name}? They will lose active system access.`)) return;
 
-    saveStoredUser({ ...u, status: 'Disabled' });
+    setIsActionInProgress(`deactivate-${u.id}`);
+    try {
+      saveStoredUser({ ...u, status: 'Disabled' });
 
-    addStoredAuditLog({
-      id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
-      actorName: user?.name || 'Company Admin',
-      actorEmail: user?.email || 'admin@nexus.com',
-      action: 'USER_DEACTIVATED',
-      entityType: 'User',
-      entityId: u.id,
-      companyId: tenant?.id,
-      companyName: tenant?.name,
-      details: `Deactivated user account for ${u.name} (${u.email}).`,
-    });
-    showToast('success', `User account for ${u.name} has been deactivated.`);
+      addStoredAuditLog({
+        id: `aud-${Date.now()}`,
+        timestamp: 'Just now',
+        actorName: user?.name || 'Company Admin',
+        actorEmail: user?.email || 'admin@nexus.com',
+        action: 'USER_DEACTIVATED',
+        entityType: 'User',
+        entityId: u.id,
+        companyId: tenant?.id,
+        companyName: tenant?.name,
+        details: `Deactivated user account for ${u.name} (${u.email}).`,
+      });
+      showToast('success', `User account for ${u.name} has been deactivated.`);
+    } finally {
+      setIsActionInProgress(null);
+    }
   };
 
   const handleReactivateUser = (u: User) => {
-    saveStoredUser({ ...u, status: 'Active' });
+    if (isActionInProgress) return;
+    setIsActionInProgress(`reactivate-${u.id}`);
+    try {
+      saveStoredUser({ ...u, status: 'Active' });
 
-    addStoredAuditLog({
-      id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
-      actorName: user?.name || 'Company Admin',
-      actorEmail: user?.email || 'admin@nexus.com',
-      action: 'USER_REACTIVATED',
-      entityType: 'User',
-      entityId: u.id,
-      companyId: tenant?.id,
-      companyName: tenant?.name,
-      details: `Reactivated user account for ${u.name} (${u.email}).`,
-    });
-    showToast('success', `User account for ${u.name} reactivated.`);
+      addStoredAuditLog({
+        id: `aud-${Date.now()}`,
+        timestamp: 'Just now',
+        actorName: user?.name || 'Company Admin',
+        actorEmail: user?.email || 'admin@nexus.com',
+        action: 'USER_REACTIVATED',
+        entityType: 'User',
+        entityId: u.id,
+        companyId: tenant?.id,
+        companyName: tenant?.name,
+        details: `Reactivated user account for ${u.name} (${u.email}).`,
+      });
+      showToast('success', `User account for ${u.name} reactivated.`);
+    } finally {
+      setIsActionInProgress(null);
+    }
   };
 
   const handleDeleteUser = (u: User) => {
+    if (isActionInProgress) return;
     if (!window.confirm(`Permanently remove ${u.name} (${u.email}) from ${tenant?.name}? This cannot be undone.`)) return;
 
-    deleteStoredUser(u.id);
+    setIsActionInProgress(`delete-${u.id}`);
+    try {
+      deleteStoredUser(u.id);
 
-    addStoredAuditLog({
-      id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
-      actorName: user?.name || 'Company Admin',
-      actorEmail: user?.email || 'admin@nexus.com',
-      action: 'USER_DELETED',
-      entityType: 'User',
-      entityId: u.id,
-      companyId: tenant?.id,
-      companyName: tenant?.name,
-      details: `Deleted team member record for ${u.name} (${u.email}).`,
-    });
-    showToast('success', `User ${u.name} permanently removed.`);
+      addStoredAuditLog({
+        id: `aud-${Date.now()}`,
+        timestamp: 'Just now',
+        actorName: user?.name || 'Company Admin',
+        actorEmail: user?.email || 'admin@nexus.com',
+        action: 'USER_DELETED',
+        entityType: 'User',
+        entityId: u.id,
+        companyId: tenant?.id,
+        companyName: tenant?.name,
+        details: `Deleted team member record for ${u.name} (${u.email}).`,
+      });
+      showToast('success', `User ${u.name} permanently removed.`);
+    } finally {
+      setIsActionInProgress(null);
+    }
   };
 
   // ── Roles Summary & Expand State ─────────────────────────────────────────
@@ -745,11 +795,16 @@ export const CompanyUsersPage: React.FC = () => {
             </div>
 
             <div className="company-user-modal-actions">
-              <button type="button" className="btn btn-secondary" onClick={() => setIsInviteModalOpen(false)}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setIsInviteModalOpen(false)}
+                disabled={isSubmittingInvite}
+              >
                 Cancel
               </button>
-              <button type="submit" className="btn btn-primary">
-                {creationMode === 'instant_password' ? 'Create & View Credentials' : 'Send Email Invitation'}
+              <button type="submit" className="btn btn-primary" disabled={isSubmittingInvite}>
+                {isSubmittingInvite ? 'Saving...' : (creationMode === 'instant_password' ? 'Create & View Credentials' : 'Send Email Invitation')}
               </button>
             </div>
           </form>
@@ -768,6 +823,7 @@ export const CompanyUsersPage: React.FC = () => {
               type="button"
               className="btn btn-secondary"
               onClick={() => setEditingUser(null)}
+              disabled={isSubmittingEdit}
             >
               Cancel
             </button>
@@ -775,8 +831,9 @@ export const CompanyUsersPage: React.FC = () => {
               type="button"
               className="btn btn-primary"
               onClick={handleSaveEditUser}
+              disabled={isSubmittingEdit}
             >
-              Save Changes
+              {isSubmittingEdit ? 'Saving Changes...' : 'Save Changes'}
             </button>
           </>
         }

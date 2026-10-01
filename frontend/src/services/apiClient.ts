@@ -44,6 +44,39 @@ class ApiClient {
     return res.json();
   }
 
+  private async safeFetch(url: string, options: RequestInit, timeoutMs = 25000): Promise<Response> {
+    if (typeof window !== 'undefined' && typeof window.navigator !== 'undefined' && !window.navigator.onLine) {
+      throw new Error('Network unavailable: Your browser is currently offline. Please check your internet connection.');
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const res = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      return res;
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        throw new Error('Network timeout: The server took too long to respond. Please try again.');
+      }
+      if (
+        typeof window !== 'undefined' &&
+        (!window.navigator.onLine ||
+          err.message?.includes('Failed to fetch') ||
+          err.message?.includes('NetworkError') ||
+          err.message?.includes('Load failed'))
+      ) {
+        throw new Error('Network unavailable: Unable to reach the server. Please verify your connection.');
+      }
+      throw err;
+    }
+  }
+
   async get<T>(endpoint: string, params?: Record<string, any>): Promise<T> {
     let url = `${API_BASE_URL}${endpoint}`;
     if (params) {
@@ -58,7 +91,7 @@ class ApiClient {
         url += (url.includes('?') ? '&' : '?') + qs;
       }
     }
-    const res = await fetch(url, {
+    const res = await this.safeFetch(url, {
       method: 'GET',
       headers: this.getHeaders(),
     });
@@ -66,7 +99,7 @@ class ApiClient {
   }
 
   async post<T>(endpoint: string, body?: any): Promise<T> {
-    const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const res = await this.safeFetch(`${API_BASE_URL}${endpoint}`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: body ? JSON.stringify(body) : undefined,
@@ -75,7 +108,7 @@ class ApiClient {
   }
 
   async put<T>(endpoint: string, body: any): Promise<T> {
-    const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const res = await this.safeFetch(`${API_BASE_URL}${endpoint}`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify(body),
@@ -84,7 +117,7 @@ class ApiClient {
   }
 
   async delete<T>(endpoint: string): Promise<T> {
-    const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const res = await this.safeFetch(`${API_BASE_URL}${endpoint}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
@@ -92,7 +125,7 @@ class ApiClient {
   }
 
   async patch<T>(endpoint: string, body?: any): Promise<T> {
-    const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const res = await this.safeFetch(`${API_BASE_URL}${endpoint}`, {
       method: 'PATCH',
       headers: this.getHeaders(),
       body: body ? JSON.stringify(body) : undefined,

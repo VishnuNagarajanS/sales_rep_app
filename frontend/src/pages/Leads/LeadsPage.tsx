@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { Lead, Customer, Deal } from '../../types';
 import { useAuth } from '../../context/AuthContext';
+import { useUnsavedChanges } from '../../context/NavigationGuardContext';
 import { useCall } from '../../context/CallContext';
 import { getLeads, saveLead as apiSaveLead, saveCustomer as apiSaveCustomer, saveOpportunity as apiSaveOpportunity, getFollowups, isTenantMatch } from '../../services/ghlApiService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
@@ -208,6 +209,20 @@ export const LeadsPage: React.FC = () => {
   const [formData, setFormData] = useState<Partial<Lead>>({});
   const [convertDealTitle, setConvertDealTitle] = useState('');
   const [convertDealValue, setConvertDealValue] = useState<number>(5000000);
+  const [isSubmittingLead, setIsSubmittingLead] = useState(false);
+  const [isConvertingLead, setIsConvertingLead] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+
+  // Unsaved changes check
+  const isEditDirty = isEditDrawerOpen && !!formData.name && formData.name.trim() !== '';
+  const isImportDirty = isImportModalOpen && !!importFile;
+  const isConvertDirty = isConvertModalOpen && !!convertDealTitle.trim();
+
+  useUnsavedChanges(
+    isEditDirty || isImportDirty || isConvertDirty,
+    'You have unsaved lead information or an in-progress workflow. Are you sure you want to leave?',
+    'leads-page'
+  );
 
   const currentAssetClass =
     formData.customFields?.assetClass ||
@@ -499,6 +514,7 @@ export const LeadsPage: React.FC = () => {
 
   const handleSaveLead = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmittingLead) return;
     if (!formData.name || !formData.phone) {
       showToast('Please provide both contact name and phone number.');
       return;
@@ -579,6 +595,7 @@ export const LeadsPage: React.FC = () => {
       } as Lead;
     }
 
+    setIsSubmittingLead(true);
     try {
       await apiSaveLead(leadToSave);
       await loadData();
@@ -587,6 +604,8 @@ export const LeadsPage: React.FC = () => {
     } catch (err: any) {
       console.error('[LeadsPage] Failed to save lead:', err);
       showToast(`⚠️ ${err.message || 'Failed to save lead record.'}`);
+    } finally {
+      setIsSubmittingLead(false);
     }
   };
 
@@ -615,50 +634,73 @@ export const LeadsPage: React.FC = () => {
   };
 
   const handleConfirmConvert = async () => {
-    if (!selectedLead || !tenant) return;
+    if (!selectedLead || !tenant || isConvertingLead) return;
+    setIsConvertingLead(true);
 
-    // 1. Create Customer
-    const newCustomer: Customer = {
-      id: `cust-${Date.now()}`,
-      companyId: tenant.id,
-      name: selectedLead.name,
-      phone: selectedLead.phone,
-      email: selectedLead.email,
-      status: 'Active',
-      assignedAgentId: selectedLead.assignedAgentId,
-      assignedAgentName: selectedLead.assignedAgentName,
-      location: selectedLead.location,
-      lastContacted: 'Today',
-      openDealsCount: 1,
-      totalValue: convertDealValue,
-      createdAt: new Date().toISOString().split('T')[0],
-      notes: `Converted from lead. Original notes: ${selectedLead.notes}`,
-      customFields: selectedLead.customFields,
-    };
-    const savedCustomer = await apiSaveCustomer(newCustomer).catch(() => newCustomer);
+    try {
+      // 1. Create Customer
+      const newCustomer: Customer = {
+        id: `cust-${Date.now()}`,
+        companyId: tenant.id,
+        name: selectedLead.name,
+        phone: selectedLead.phone,
+        email: selectedLead.email,
+        status: 'Active',
+        assignedAgentId: selectedLead.assignedAgentId,
+        assignedAgentName: selectedLead.assignedAgentName,
+        location: selectedLead.location,
+        lastContacted: 'Today',
+        openDealsCount: 1,
+        totalValue: convertDealValue,
+        createdAt: new Date().toISOString().split('T')[0],
+        notes: `Converted from lead. Original notes: ${selectedLead.notes || ''}`,
+        customFields: selectedLead.customFields,
+      };
+      const savedCustomer = await apiSaveCustomer(newCustomer);
 
-    // 2. Create Opportunity (maps to Deal/Investment Opportunity in GHL)
-    const newDeal: Deal = {
-      id: `deal-${Date.now()}`,
-      companyId: tenant.id,
-      title: convertDealTitle,
-      customerId: savedCustomer.id,
-      customerName: savedCustomer.name,
-      stage: tenant.slug === 'jamin' ? 'site_visit' : 'consultation',
-      value: convertDealValue,
-      expectedCloseDate: 'Within 30 Days',
-      assignedAgentId: selectedLead.assignedAgentId,
-      assignedAgentName: selectedLead.assignedAgentName,
-      notes: `Deal initiated upon converting lead ${selectedLead.name}.`,
-      createdAt: new Date().toISOString().split('T')[0],
-    };
-    await apiSaveOpportunity({ id: newDeal.id, companyId: newDeal.companyId, investorId: savedCustomer.id, investorName: savedCustomer.name, title: newDeal.title, stage: 'Enquiry', targetAmount: convertDealValue, committedAmount: 0, assignedAgentId: selectedLead.assignedAgentId || '', assignedAgentName: selectedLead.assignedAgentName || '', expectedCloseDate: 'Within 30 Days', notes: newDeal.notes || '' }).catch(console.error);
+      // 2. Create Opportunity (maps to Deal/Investment Opportunity in GHL)
+      const newDeal: Deal = {
+        id: `deal-${Date.now()}`,
+        companyId: tenant.id,
+        title: convertDealTitle,
+        customerId: savedCustomer.id,
+        customerName: savedCustomer.name,
+        stage: tenant.slug === 'jamin' ? 'site_visit' : 'consultation',
+        value: convertDealValue,
+        expectedCloseDate: 'Within 30 Days',
+        assignedAgentId: selectedLead.assignedAgentId,
+        assignedAgentName: selectedLead.assignedAgentName,
+        notes: `Deal initiated upon converting lead ${selectedLead.name}.`,
+        createdAt: new Date().toISOString().split('T')[0],
+      };
+      await apiSaveOpportunity({
+        id: newDeal.id,
+        companyId: newDeal.companyId,
+        investorId: savedCustomer.id,
+        investorName: savedCustomer.name,
+        title: newDeal.title,
+        stage: 'Enquiry',
+        targetAmount: convertDealValue,
+        committedAmount: 0,
+        assignedAgentId: selectedLead.assignedAgentId || '',
+        assignedAgentName: selectedLead.assignedAgentName || '',
+        expectedCloseDate: 'Within 30 Days',
+        notes: newDeal.notes || ''
+      });
 
-    // 3. Mark Lead as Converted
-    await apiSaveLead({ ...selectedLead, status: 'Converted' }).catch(console.error);
+      // 3. Mark Lead as Converted
+      await apiSaveLead({ ...selectedLead, status: 'Converted' });
 
-    setIsConvertModalOpen(false);
-    setIsDetailDrawerOpen(false);
+      showToast(`✓ ${selectedLead.name} successfully converted to customer and deal created.`);
+      setIsConvertModalOpen(false);
+      setIsDetailDrawerOpen(false);
+      await loadData();
+    } catch (err: any) {
+      console.error('[LeadsPage] Failed to convert lead:', err);
+      alert(err?.message || 'Failed to convert lead to customer and deal.');
+    } finally {
+      setIsConvertingLead(false);
+    }
   };
 
   const handleFileSelect = (file: File) => {
@@ -695,6 +737,9 @@ export const LeadsPage: React.FC = () => {
   };
 
   const handleImportLeads = async () => {
+    if (isImporting) return;
+    setIsImporting(true);
+
     let successCount = 0;
     let skipCount = 0;
     const companyId = tenant?.id || 't-ghl-01';
@@ -707,54 +752,61 @@ export const LeadsPage: React.FC = () => {
     const existingPhones = new Set(leads.map(l => normalizePhone(l.phone)).filter(Boolean));
     const existingEmails = new Set(leads.map(l => normalizeEmail(l.email)).filter(Boolean));
 
-    parsedRows.forEach((row, index) => {
-      const nameVal = row[columnMap['name']];
-      const phoneVal = row[columnMap['phone']];
+    try {
+      parsedRows.forEach((row, index) => {
+        const nameVal = row[columnMap['name']];
+        const phoneVal = row[columnMap['phone']];
 
-      if (!nameVal || !phoneVal) { skipCount++; return; }
+        if (!nameVal || !phoneVal) { skipCount++; return; }
 
-      const emailVal = row[columnMap['email']] || '';
-      const locationVal = row[columnMap['location']] || '';
-      const sourceVal = row[columnMap['source']] || 'CSV Import';
-      const rawPriority = row[columnMap['priority']];
-      let priorityVal = 'Medium';
-      if (['Low', 'Medium', 'High', 'Urgent'].includes(String(rawPriority))) priorityVal = rawPriority;
+        const emailVal = row[columnMap['email']] || '';
+        const locationVal = row[columnMap['location']] || '';
+        const sourceVal = row[columnMap['source']] || 'CSV Import';
+        const rawPriority = row[columnMap['priority']];
+        let priorityVal = 'Medium';
+        if (['Low', 'Medium', 'High', 'Urgent'].includes(String(rawPriority))) priorityVal = rawPriority;
 
-      // ── Duplicate check ──────────────────────────────────────────────────────
-      const normPhone = normalizePhone(phoneVal);
-      const normEmail = normalizeEmail(emailVal);
-      if ((normPhone && existingPhones.has(normPhone)) || (normEmail && existingEmails.has(normEmail))) {
-        console.info(`[CSV Import] Skipping duplicate: ${nameVal} — phone ${phoneVal} or email ${emailVal} already exists`);
-        skipCount++;
-        return;
-      }
-      // Register the new values so later rows in the same batch don't duplicate each other
-      if (normPhone) existingPhones.add(normPhone);
-      if (normEmail) existingEmails.add(normEmail);
-      // ─────────────────────────────────────────────────────────────────────────
+        // ── Duplicate check ──────────────────────────────────────────────────────
+        const normPhone = normalizePhone(phoneVal);
+        const normEmail = normalizeEmail(emailVal);
+        if ((normPhone && existingPhones.has(normPhone)) || (normEmail && existingEmails.has(normEmail))) {
+          console.info(`[CSV Import] Skipping duplicate: ${nameVal} — phone ${phoneVal} or email ${emailVal} already exists`);
+          skipCount++;
+          return;
+        }
+        // Register the new values so later rows in the same batch don't duplicate each other
+        if (normPhone) existingPhones.add(normPhone);
+        if (normEmail) existingEmails.add(normEmail);
+        // ─────────────────────────────────────────────────────────────────────────
 
-      const newLead: Lead = {
-        id: `lead-${Date.now()}-${index}`,
-        companyId,
-        name: nameVal,
-        phone: phoneVal,
-        email: emailVal,
-        location: locationVal,
-        source: sourceVal,
-        priority: priorityVal as any,
-        status: isIrm ? 'Interested' : 'New',
-        assignedAgentId: user?.id || 'usr-exec',
-        assignedAgentName: user?.name || 'Agent',
-        createdAt: new Date().toISOString().split('T')[0],
-        notes: '',
-        customFields: {}
-      };
-      promises.push(apiSaveLead(newLead).then(() => { successCount++; }).catch(() => { skipCount++; }));
-    });
+        const newLead: Lead = {
+          id: `lead-${Date.now()}-${index}`,
+          companyId,
+          name: nameVal,
+          phone: phoneVal,
+          email: emailVal,
+          location: locationVal,
+          source: sourceVal,
+          priority: priorityVal as any,
+          status: isIrm ? 'Interested' : 'New',
+          assignedAgentId: user?.id || 'usr-exec',
+          assignedAgentName: user?.name || 'Agent',
+          createdAt: new Date().toISOString().split('T')[0],
+          notes: '',
+          customFields: {}
+        };
+        promises.push(apiSaveLead(newLead).then(() => { successCount++; }).catch(() => { skipCount++; }));
+      });
 
-    await Promise.all(promises);
-    setImportResults({ success: successCount, skipped: skipCount });
-    loadData();
+      await Promise.all(promises);
+      setImportResults({ success: successCount, skipped: skipCount });
+      await loadData();
+    } catch (err: any) {
+      console.error('[LeadsPage] CSV import failed:', err);
+      showToast(`⚠️ Import encountered an error: ${err.message || 'Partial import completed.'}`);
+    } finally {
+      setIsImporting(false);
+    }
   };
 
 
@@ -1437,12 +1489,13 @@ export const LeadsPage: React.FC = () => {
             <button
               type="button"
               className="btn btn-secondary"
+              disabled={isSubmittingLead}
               onClick={() => setIsEditDrawerOpen(false)}
             >
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
-              Save Lead Record
+            <button type="submit" className="btn btn-primary" disabled={isSubmittingLead}>
+              {isSubmittingLead ? 'Saving Lead...' : 'Save Lead Record'}
             </button>
           </div>
         </form>
@@ -1456,11 +1509,11 @@ export const LeadsPage: React.FC = () => {
         subtitle={`Moving ${selectedLead?.name} into your active Customer 360 database`}
         footer={
           <>
-            <button className="btn btn-secondary" onClick={() => setIsConvertModalOpen(false)}>
+            <button className="btn btn-secondary" disabled={isConvertingLead} onClick={() => setIsConvertModalOpen(false)}>
               Cancel
             </button>
-            <button className="btn btn-primary" onClick={handleConfirmConvert}>
-              Confirm Conversion & Create Deal
+            <button className="btn btn-primary" disabled={isConvertingLead || !convertDealTitle.trim()} onClick={handleConfirmConvert}>
+              {isConvertingLead ? 'Converting Lead...' : 'Confirm Conversion & Create Deal'}
             </button>
           </>
         }
@@ -1527,9 +1580,9 @@ export const LeadsPage: React.FC = () => {
               <button
                 className="btn btn-primary"
                 onClick={handleImportLeads}
-                disabled={!columnMap['name'] || !columnMap['phone']}
+                disabled={!columnMap['name'] || !columnMap['phone'] || isImporting}
               >
-                Import Leads
+                {isImporting ? 'Importing Prospects...' : 'Import Leads'}
               </button>
             </div>
           ) : (

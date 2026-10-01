@@ -1,24 +1,64 @@
 import React, { useState } from 'react';
 import { Settings, Save, Building2, Clock, Globe, Shield, Library } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useUnsavedChanges } from '../../context/NavigationGuardContext';
+import { superAdminService } from '../../services/superAdminService';
 import { DocumentUploader } from '../../components/common/DocumentUploader';
 import { DocumentList } from '../../components/common/DocumentList';
 import { PERMISSIONS } from '../../constants/permissions';
+import { Tenant } from '../../types';
 import './CompanySettingsPage.css';
 
 export const CompanySettingsPage: React.FC = () => {
-  const { tenant, permissions } = useAuth();
+  const { tenant, setTenant, permissions } = useAuth();
   const canManageSettings = permissions.includes(PERMISSIONS.SETTINGS_UPDATE);
   const [companyName, setCompanyName] = useState(tenant?.name || '');
   const [tagline, setTagline] = useState(tenant?.tagline || '');
   const [timezone, setTimezone] = useState(tenant?.timezone || 'Asia/Kolkata (IST)');
   const [businessHours, setBusinessHours] = useState(tenant?.businessHours || '09:30 AM - 07:00 PM IST');
+  const [isSaving, setIsSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
-  const handleSave = (e: React.FormEvent) => {
+  // Unsaved changes check
+  const isDirty = !!tenant && (
+    companyName.trim() !== tenant.name ||
+    tagline.trim() !== (tenant.tagline || '') ||
+    timezone.trim() !== (tenant.timezone || 'Asia/Kolkata (IST)') ||
+    businessHours.trim() !== (tenant.businessHours || '09:30 AM - 07:00 PM IST')
+  );
+
+  useUnsavedChanges(
+    isDirty,
+    'You have unsaved changes in company profile settings. Are you sure you want to leave?',
+    'company-settings'
+  );
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 3000);
+    if (!tenant || isSaving) return;
+    if (!companyName.trim()) {
+      alert('Organization name cannot be empty.');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const updatedTenant: Tenant = {
+        ...tenant,
+        name: companyName.trim(),
+        tagline: tagline.trim(),
+        timezone: timezone.trim(),
+        businessHours: businessHours.trim(),
+      };
+      const saved = await superAdminService.updateTenantApi(updatedTenant);
+      setTenant(saved);
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 3000);
+    } catch (err: any) {
+      alert(err?.message || 'Failed to save organization settings.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -103,8 +143,12 @@ export const CompanySettingsPage: React.FC = () => {
           </div>
         </div>
 
-        <button type="submit" className="btn btn-primary company-settings-save-btn">
-          <Save size={15} /> Save Organization Settings
+        <button
+          type="submit"
+          className="btn btn-primary company-settings-save-btn"
+          disabled={isSaving || !companyName.trim()}
+        >
+          <Save size={15} /> {isSaving ? 'Saving Settings...' : 'Save Organization Settings'}
         </button>
       </form>
 

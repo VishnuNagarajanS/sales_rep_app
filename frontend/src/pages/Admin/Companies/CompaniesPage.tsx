@@ -26,6 +26,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
+import { useUnsavedChanges } from '../../../context/NavigationGuardContext';
 import { Tenant, User, SubscriptionPackage } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
 import { storageService } from '../../../services/storageService';
@@ -95,6 +96,33 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPhone, setNewUserPhone] = useState('+91 98450 ');
   const [newUserRole, setNewUserRole] = useState<'company_admin'>('company_admin');
+  const [isSavingDrawer, setIsSavingDrawer] = useState(false);
+  const [isDeployingWizard, setIsDeployingWizard] = useState(false);
+  const [isActionInProgress, setIsActionInProgress] = useState(false);
+  const [isAddingUser, setIsAddingUser] = useState(false);
+
+  // Unsaved changes check
+  const isWizardDirty = isWizardOpen && (wizardName.trim() !== '' || wizardSlug.trim() !== '' || wizardAdminEmail.trim() !== '');
+  const isDrawerDirty = isDetailDrawerOpen && !!drawerTenantEdit && !!selectedTenant && (
+    drawerTenantEdit.name !== selectedTenant.name ||
+    drawerTenantEdit.industry !== selectedTenant.industry ||
+    drawerTenantEdit.tagline !== selectedTenant.tagline ||
+    drawerTenantEdit.brandColor !== selectedTenant.brandColor ||
+    drawerTenantEdit.timezone !== selectedTenant.timezone ||
+    drawerTenantEdit.currency !== selectedTenant.currency ||
+    drawerTenantEdit.businessHours !== selectedTenant.businessHours ||
+    drawerTenantEdit.subscriptionPlan !== selectedTenant.subscriptionPlan ||
+    (drawerTenantEdit.phone || '') !== (selectedTenant.phone || '') ||
+    (drawerTenantEdit.defaultRoutingStrategy || '') !== (selectedTenant.defaultRoutingStrategy || '') ||
+    JSON.stringify(drawerTenantEdit.enabledFeatures || []) !== JSON.stringify(selectedTenant.enabledFeatures || [])
+  );
+  const isAddUserDirty = isAddUserModalOpen && (newUserName.trim() !== '' || newUserEmail.trim() !== '');
+
+  useUnsavedChanges(
+    isWizardDirty || isDrawerDirty || isAddUserDirty,
+    'You have unsaved changes in organization configuration. Are you sure you want to leave?',
+    'companies-page'
+  );
 
   // ── Assigned Reps & Tenant Isolation ──────────────────────────────────────
   const activeTenantKeyRef = useRef<string | null>(null);
@@ -295,7 +323,8 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
   };
 
   const handleSaveDrawerTenant = async () => {
-    if (!drawerTenantEdit) return;
+    if (!drawerTenantEdit || isSavingDrawer) return;
+    setIsSavingDrawer(true);
     try {
       const updated = await superAdminService.updateTenantApi(drawerTenantEdit);
       setSelectedTenant(updated);
@@ -305,6 +334,8 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       setTimeout(() => setSaveSuccessMsg(''), 3000);
     } catch (err: any) {
       alert(err.message || 'Failed to update organization settings.');
+    } finally {
+      setIsSavingDrawer(false);
     }
   };
 
@@ -318,7 +349,8 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
   };
 
   const handleToggleTenantStatus = async (newStatus: 'Active' | 'Inactive' | 'Suspended') => {
-    if (!selectedTenant) return;
+    if (!selectedTenant || isActionInProgress) return;
+    setIsActionInProgress(true);
     try {
       const updated = await superAdminService.toggleTenantStatusApi(selectedTenant.id, newStatus);
       if (updated) {
@@ -330,11 +362,14 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       }
     } catch (err: any) {
       alert(err.message || 'Failed to update organization status.');
+    } finally {
+      setIsActionInProgress(false);
     }
   };
 
   const handleAddUserToCompany = async () => {
-    if (!selectedTenant || !newUserName || !newUserEmail) return;
+    if (!selectedTenant || !newUserName || !newUserEmail || isAddingUser) return;
+    setIsAddingUser(true);
     const roles = superAdminService.getRoles();
     try {
       await superAdminService.createUserApi({
@@ -354,12 +389,15 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       setNewUserEmail('');
     } catch (err: any) {
       alert(err.message || 'Failed to provision company administrator.');
+    } finally {
+      setIsAddingUser(false);
     }
   };
 
   // Complete Onboarding Wizard
   const handleDeployOrganization = async () => {
-    if (!wizardName.trim()) return;
+    if (!wizardName.trim() || isDeployingWizard) return;
+    setIsDeployingWizard(true);
 
     try {
       const newTenant = await superAdminService.createTenantApi(
@@ -400,6 +438,8 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       setWizardAdminEmail('');
     } catch (err: any) {
       alert(err.message || 'Failed to deploy new organization.');
+    } finally {
+      setIsDeployingWizard(false);
     }
   };
 
@@ -1137,9 +1177,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
               ) : (
                 <button
                   className="btn btn-primary btn-deploy-confirm"
+                  disabled={isDeployingWizard}
                   onClick={handleDeployOrganization}
                 >
-                  <Sparkles size={15} /> Confirm & Deploy Organization
+                  <Sparkles size={15} /> {isDeployingWizard ? 'Deploying...' : 'Confirm & Deploy Organization'}
                 </button>
               )}
             </div>
@@ -1189,9 +1230,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                 </button>
                 <button
                   className="btn btn-primary btn-sm"
+                  disabled={isSavingDrawer}
                   onClick={handleSaveDrawerTenant}
                 >
-                  <Save size={13} /> Save Changes
+                  <Save size={13} /> {isSavingDrawer ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
             </div>
@@ -1447,6 +1489,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                       {selectedTenant.status !== 'Active' && (
                         <button
                           className="btn btn-secondary btn-sm"
+                          disabled={isActionInProgress}
                           onClick={() => handleToggleTenantStatus('Active')}
                         >
                           <CheckCircle2 size={13} color="#10b981" /> Activate Organization
@@ -1456,6 +1499,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                       {selectedTenant.status !== 'Suspended' && (
                         <button
                           className="btn btn-secondary btn-sm btn-suspend"
+                          disabled={isActionInProgress}
                           onClick={() => handleToggleTenantStatus('Suspended')}
                         >
                           <AlertTriangle size={13} color="#f59e0b" /> Suspend Organization
@@ -1464,19 +1508,23 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
 
                       <button
                         className="btn btn-danger btn-sm"
+                        disabled={isActionInProgress}
                         onClick={async () => {
                           if (confirm(`Are you sure you want to permanently delete organization "${selectedTenant.name}"?`)) {
+                            setIsActionInProgress(true);
                             try {
                               await superAdminService.deleteTenantApi(selectedTenant.id);
                               setTenants(prev => prev.filter(t => t.id !== selectedTenant.id));
                               setIsDetailDrawerOpen(false);
                             } catch (err: any) {
                               alert(err.message || 'Failed to delete organization');
+                            } finally {
+                              setIsActionInProgress(false);
                             }
                           }
                         }}
                       >
-                        <Trash2 size={13} /> Delete Organization
+                        <Trash2 size={13} /> {isActionInProgress ? 'Processing...' : 'Delete Organization'}
                       </button>
                     </div>
                   </div>
@@ -1545,10 +1593,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
               </button>
               <button
                 className="btn btn-primary"
-                disabled={!newUserName || !newUserEmail}
+                disabled={!newUserName || !newUserEmail || isAddingUser}
                 onClick={handleAddUserToCompany}
               >
-                Provision Account
+                {isAddingUser ? 'Provisioning...' : 'Provision Account'}
               </button>
             </div>
           </div>
