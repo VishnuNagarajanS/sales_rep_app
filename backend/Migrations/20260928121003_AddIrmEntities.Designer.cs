@@ -1023,18 +1023,8 @@ namespace backend.Migrations
                             RoleId = 4,
                             Status = "Active"
                         },
-                        new
-                        {
-                            Id = 4,
-                            CompanyId = 2,
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Email = "kavita@jaminbazaar.com",
-                            Name = "Kavita Rao",
-                            PasswordHash = "$2a$11$z2c3Nc1pe7Tqmxj6Rm15NOt8vuAyyKfqzGtBKpiFU2NcPZxsjt5p.",
-                            Phone = "+91 98450 33445",
-                            RoleId = 2,
-                            Status = "Active"
-                        },
+                        
+                       
                         new
                         {
                             Id = 5,

@@ -35,7 +35,7 @@ export interface Tenant {
   updatedAt?: string;
 }
 
-export type RoleCode = 'super_admin' | 'company_admin' | 'sales_executive' | 'irm';
+export type RoleCode = 'super_admin' | 'company_admin' | 'sales_executive' | 'irm' | 'sales_manager';
 
 export interface Role {
   id: string;
@@ -91,6 +91,16 @@ export interface Lead {
   createdAt: string;
   notes: string;
   customFields: Record<string, any>;
+  targetDevelopment?: string;
+  preferredVisitDate?: string;
+  preferredTimeSlot?: string;
+  anythingWeShouldKnow?: string;
+  whatAreYouLookingFor?: string;
+  budgetRange?: string;
+  investmentCapacity?: string;
+  assetClass?: string;
+  horizon?: string;
+  investorType?: string;
   departmentId?: string;
   teamId?: string;
   queueId?: string;
@@ -303,6 +313,7 @@ export interface SiteVisit {
   customerPhone: string;
   projectId: string;
   projectName: string;
+  plotId?: string;
   plotNumber?: string;
   scheduledAt: string;
   assignedAgentId: string;

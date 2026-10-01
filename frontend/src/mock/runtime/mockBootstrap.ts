@@ -22,10 +22,8 @@ import { INITIAL_ADMIN_KANBAN_CARDS } from '../data/kanbanFixtures';
 import {
   GHL_GROUP_CONVERSATION,
   GHL_DM_CONVERSATION,
-  JAMIN_DM_CONVERSATION,
   GHL_GROUP_MESSAGES,
   GHL_DM_MESSAGES,
-  JAMIN_DM_MESSAGES,
 } from '../chat/demoConversations';
 import { mockStorageAdapter } from './mockStorageAdapter';
 import { registerMockStorageAdapter, registerMockBootstrapRunner } from '../../services/storageService';
@@ -90,12 +88,10 @@ export function runMockBootstrap(force = false): void {
     const chatConversations = [
       GHL_GROUP_CONVERSATION,
       GHL_DM_CONVERSATION,
-      JAMIN_DM_CONVERSATION,
     ];
     setIfMissing(MOCK_STORAGE_KEYS.CHAT_CONVERSATIONS, chatConversations);
     setIfMissing(mockMsgKey(GHL_GROUP_CONVERSATION.id), GHL_GROUP_MESSAGES);
     setIfMissing(mockMsgKey(GHL_DM_CONVERSATION.id), GHL_DM_MESSAGES);
-    setIfMissing(mockMsgKey(JAMIN_DM_CONVERSATION.id), JAMIN_DM_MESSAGES);
 
     localStorage.setItem(MOCK_STORAGE_KEYS.BOOTSTRAPPED, 'true');
   } catch (error) {

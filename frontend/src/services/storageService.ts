@@ -15,6 +15,7 @@ import {
   AuditLog,
   NotificationItem,
   User,
+  IrmProfile,
   Tenant,
   DocumentItem,
   Department,
@@ -54,14 +55,14 @@ class StorageService {
       if (typeof window === 'undefined' || !window.localStorage) return;
       const MIGRATION_KEY = 'nexus_leads_deduped_v1';
       if (localStorage.getItem(MIGRATION_KEY)) return;
-      this.cleanupDuplicateLeads();
+      this._dedupeLeadsInternal();
       localStorage.setItem(MIGRATION_KEY, 'true');
     } catch (e) {
       console.error('Error in runLeadsDedupMigration:', e);
     }
   }
 
-  private cleanupDuplicateLeads(): void {
+  private _dedupeLeadsInternal(): void {
     try {
       const leads = this.get<Lead[]>('leads', []);
       if (!leads || leads.length === 0) return;
@@ -1079,3 +1080,13 @@ class StorageService {
 }
 
 export const storageService = new StorageService();
+
+let _mockStorageAdapter: any = null;
+export function registerMockStorageAdapter(adapter: any): void {
+  _mockStorageAdapter = adapter;
+}
+
+let _mockBootstrapRunner: any = null;
+export function registerMockBootstrapRunner(runner: any): void {
+  _mockBootstrapRunner = runner;
+}

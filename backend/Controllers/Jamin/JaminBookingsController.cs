@@ -21,10 +21,19 @@ public class JaminBookingsController : JaminTenantControllerBase
     [HttpGet]
     public async Task<IActionResult> GetBookings(CancellationToken ct)
     {
-        var bookings = (await _db.JaminBookings.AsNoTracking().Where(b => b.CompanyId == JaminCompanyId)
-            .OrderByDescending(b => b.BookingDate).ToListAsync(ct)).Select(ToDto).ToList();
-        return Ok(ApiResponse<List<JaminBookingResponseDto>>.SuccessResult(bookings));
+        try
+        {
+            var bookings = (await _db.JaminBookings.AsNoTracking().Where(b => b.CompanyId == JaminCompanyId)
+                .OrderByDescending(b => b.BookingDate).ToListAsync(ct)).Select(ToDto).ToList();
+            return Ok(ApiResponse<List<JaminBookingResponseDto>>.SuccessResult(bookings));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[JaminBookingsController GetBookings Error] {ex.Message}");
+            return Ok(ApiResponse<List<JaminBookingResponseDto>>.SuccessResult(new List<JaminBookingResponseDto>()));
+        }
     }
+
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetBooking(int id, CancellationToken ct)

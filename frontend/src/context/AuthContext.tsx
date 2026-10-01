@@ -211,7 +211,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             : slug === 'ghl'
               ? 'Naveen'
               : slug === 'jamin'
-                ? 'Pooja Hegde'
+                ? 'Mani'
                 : `${targetTenant.name} Agent`,
       email:
         roleCode === 'company_admin'
@@ -222,7 +222,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             ? 'dhinakaran@ghlindiaventures.com'
             : slug === 'ghl'
               ? 'naveen@ghlindiaventures.com'
-              : `sales@${slug}.com`,
+              : 'mani@ghlindiaventures.com',
       phone: '+91 98450 00000',
       role: MOCK_ROLES[roleCode] || MOCK_ROLES.company_admin,
       companyId: targetTenant.id,

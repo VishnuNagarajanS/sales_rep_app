@@ -89,12 +89,7 @@ namespace backend.Migrations
                         onDelete: ReferentialAction.Cascade);
                 });
 
-            migrationBuilder.InsertData(
-                table: "users",
-                columns: new[] { "Id", "CompanyId", "CreatedAt", "Email", "Name", "PasswordHash", "Phone", "RoleId", "Status" },
-                values: new object[] { 5, 2, new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc), "pooja@jaminbazaar.com", "Pooja Hegde", "$2a$11$z2c3Nc1pe7Tqmxj6Rm15NOt8vuAyyKfqzGtBKpiFU2NcPZxsjt5p.", "+91 99160 44889", 4, "Active" });
-
-            migrationBuilder.CreateIndex(
+                        migrationBuilder.CreateIndex(
                 name: "IX_leads_Status",
                 table: "leads",
                 column: "Status");

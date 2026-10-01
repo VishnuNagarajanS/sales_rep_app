@@ -45,7 +45,7 @@ export const CallHistoryPage: React.FC = () => {
       setConsultations(consultationsData || []);
     } catch (err) {
       console.error('Failed to load call history', err);
-      setCalls(storageService.getCalls(tenant?.id));
+      setCalls([]);
     }
     try {
       const rawUsers = localStorage.getItem('nexus_users');

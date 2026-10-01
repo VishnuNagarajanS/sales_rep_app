@@ -1,5 +1,5 @@
 import { apiClient } from './apiClient';
-import { User } from '../types';
+import { User, RoleCode } from '../types';
 
 interface ApiResponse<T> {
   data: T;
@@ -25,7 +25,7 @@ const mapDtoToUser = (dto: AdminUserDto): User => {
   if (dto.status === 1) statusStr = 'Invited';
   if (dto.status === 2) statusStr = 'Disabled';
 
-  let roleCode = 'sales_executive';
+  let roleCode: RoleCode = 'sales_executive';
   if (dto.roleName?.toLowerCase().includes('admin')) {
     roleCode = 'company_admin';
   } else if (dto.roleName?.toLowerCase().includes('manager')) {
@@ -38,8 +38,10 @@ const mapDtoToUser = (dto: AdminUserDto): User => {
     email: dto.email,
     phone: dto.phone || '',
     role: {
+      id: (dto.roleId ?? 0).toString(),
       code: roleCode,
-      name: dto.roleName || 'Unknown Role'
+      name: dto.roleName || 'Unknown Role',
+      permissions: []
     },
     status: statusStr,
     lastLogin: dto.lastLoginAt,

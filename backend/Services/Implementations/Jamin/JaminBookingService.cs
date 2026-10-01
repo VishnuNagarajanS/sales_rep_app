@@ -82,6 +82,18 @@ public class JaminBookingService : IJaminBookingService
             }
         }
 
+        // Resolve Customer ID if not explicitly passed
+        int? customerId = dto.CustomerId;
+        if (!customerId.HasValue && !string.IsNullOrEmpty(dto.CustomerPhone))
+        {
+            var matchedCustomer = await _context.Customers
+                .FirstOrDefaultAsync(c => c.Phone == dto.CustomerPhone.Trim() && c.CompanyId == JaminTenantId, ct);
+            if (matchedCustomer != null)
+            {
+                customerId = matchedCustomer.Id;
+            }
+        }
+
         // Resolve Agent name
         string agentName = "Pooja Hegde";
         if (dto.AssignedAgentId.HasValue && dto.AssignedAgentId.Value > 0)
@@ -93,6 +105,7 @@ public class JaminBookingService : IJaminBookingService
         var booking = new JaminBooking
         {
             CompanyId = JaminTenantId,
+            CustomerId = customerId,
             ProjectId = dto.ProjectId,
             PlotId = dto.PlotId,
             CustomerName = dto.CustomerName.Trim(),
@@ -102,6 +115,7 @@ public class JaminBookingService : IJaminBookingService
             TotalPlotPrice = dto.TotalPlotPrice,
             TokenAmountPaid = dto.TokenAmountPaid,
             PaymentMode = dto.PaymentMode?.Trim() ?? "Bank Transfer / NEFT",
+            PaymentTerms = dto.PaymentTerms?.Trim(),
             Status = "Token Paid",
             BookingDate = DateTime.UtcNow,
             AssignedAgentId = dto.AssignedAgentId ?? 1,
@@ -127,6 +141,10 @@ public class JaminBookingService : IJaminBookingService
         }
 
         booking.Status = dto.Status.Trim();
+        if (!string.IsNullOrEmpty(dto.PaymentTerms))
+        {
+            booking.PaymentTerms = dto.PaymentTerms.Trim();
+        }
         if (!string.IsNullOrEmpty(dto.Notes))
         {
             booking.Notes = dto.Notes.Trim();
@@ -143,6 +161,7 @@ public class JaminBookingService : IJaminBookingService
                 plot.Status = "Available";
                 plot.HeldByCustomerName = null;
                 plot.HeldByCustomerPhone = null;
+                plot.HoldByAgent = null;
                 plot.HoldExpiresAt = null;
                 plot.UpdatedAt = DateTime.UtcNow;
             }
@@ -167,6 +186,7 @@ public class JaminBookingService : IJaminBookingService
     {
         Id = b.Id,
         CompanyId = b.CompanyId,
+        CustomerId = b.CustomerId,
         ProjectId = b.ProjectId,
         PlotId = b.PlotId,
         CustomerName = b.CustomerName,
@@ -176,6 +196,7 @@ public class JaminBookingService : IJaminBookingService
         TotalPlotPrice = b.TotalPlotPrice,
         TokenAmountPaid = b.TokenAmountPaid,
         PaymentMode = b.PaymentMode,
+        PaymentTerms = b.PaymentTerms,
         Status = b.Status,
         BookingDate = b.BookingDate,
         AssignedAgentId = b.AssignedAgentId,

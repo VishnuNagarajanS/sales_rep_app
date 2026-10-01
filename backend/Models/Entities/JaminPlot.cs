@@ -32,13 +32,21 @@ public class JaminPlot
     /// <summary>Plot price in INR.</summary>
     public decimal Price { get; set; }
 
+    /// <summary>Price per square foot in INR.</summary>
+    public decimal PricePerSqft { get; set; }
+
     // Hold tracking
     public string? HeldByCustomerName { get; set; }
     public string? HeldByCustomerPhone { get; set; }
+    public string? HoldByAgent { get; set; }
     public DateTime? HoldExpiresAt { get; set; }
 
     public string? Notes { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
+
+    // Navigation
+    public ICollection<SiteVisit> SiteVisits { get; set; } = new List<SiteVisit>();
+    public ICollection<JaminBooking> Bookings { get; set; } = new List<JaminBooking>();
 }

@@ -5,6 +5,9 @@ public class JaminSiteVisitDto
     public int Id { get; set; }
     public int TenantId { get; set; }
     public int? LeadId { get; set; }
+    public int? CustomerId { get; set; }
+    public int? ProjectId { get; set; }
+    public int? PlotId { get; set; }
     public string CustomerName { get; set; } = string.Empty;
     public string CustomerPhone { get; set; } = string.Empty;
     public string? ContactType { get; set; }
@@ -22,11 +25,14 @@ public class JaminSiteVisitDto
 public class ScheduleSiteVisitRequestDto
 {
     public int? LeadId { get; set; }
+    public int? CustomerId { get; set; }
+    public int? ProjectId { get; set; }
+    public int? PlotId { get; set; }
     public string CustomerName { get; set; } = string.Empty;
     public string CustomerPhone { get; set; } = string.Empty;
     public string? ContactType { get; set; } = "lead";
-    public string ProjectName { get; set; } = "Jamin Garden — Varapatty";
-    public string? PlotNumber { get; set; } = "Plot #15";
+    public string ProjectName { get; set; } = string.Empty;
+    public string? PlotNumber { get; set; }
     public string ScheduledAt { get; set; } = string.Empty;
     public int? AssignedAgentId { get; set; }
     public string? AssignedAgentName { get; set; }

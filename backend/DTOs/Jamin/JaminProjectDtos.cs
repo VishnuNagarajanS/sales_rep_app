@@ -13,6 +13,10 @@ public class JaminProjectResponseDto
     public int TotalPlots { get; set; }
     public int AvailablePlots { get; set; }
     public int BookedPlots { get; set; }
+    public int HeldPlots { get; set; }
+    public int RegisteredPlots { get; set; }
+    public int TotalSiteVisits { get; set; }
+    public int TotalBookings { get; set; }
     public string PriceRange { get; set; } = string.Empty;
     public string? ImageUrl { get; set; }
     public DateTime CreatedAt { get; set; }

@@ -156,4 +156,17 @@ public class LeadsController : ControllerBase
             siteVisit
         }, "Intake processed successfully"));
     }
+
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> DeleteLead(int id, CancellationToken ct)
+    {
+        var lead = await _db.Leads.FirstOrDefaultAsync(l => l.Id == id, ct);
+        if (lead == null)
+            return NotFound(ApiResponse<bool>.FailureResult("Lead not found"));
+
+        _db.Leads.Remove(lead);
+        await _db.SaveChangesAsync(ct);
+        return Ok(ApiResponse<bool>.SuccessResult(true, "Lead deleted successfully"));
+    }
 }
+

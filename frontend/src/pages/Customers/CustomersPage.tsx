@@ -35,6 +35,7 @@ import { DocumentList } from '../../components/common/DocumentList';
 import { Modal } from '../../components/common/Modal';
 import { Timeline, TimelineEvent } from '../../components/common/Timeline';
 import { MOCK_IRMS } from '../../mock_data/mockData';
+import { jaminApiService } from '../../services/jaminApiService';
 import './CustomersPage.css';
 
 const getCustomFieldDefinitions = (tenantId?: string): CustomFieldDefinition[] => {
@@ -493,21 +494,26 @@ export const CustomersPage: React.FC = () => {
   const [svPlot, setSvPlot] = useState('Plot #15');
   const [svDate, setSvDate] = useState(getTomorrowDate);
   const [svTimeSlot, setSvTimeSlot] = useState('11:00 AM');
-  const [svHostAgent, setSvHostAgent] = useState('Pooja Hegde');
+  const [svHostAgent, setSvHostAgent] = useState('');
   const [svNotes, setSvNotes] = useState('');
+  const [jaminAgents, setJaminAgents] = useState<Array<{ id: string; name: string; email: string }>>([]);
 
-  const jaminAgents = [
-    { id: 'usr-jamin-exec', name: 'Pooja Hegde', email: 'pooja@jaminbazaar.com' },
-    { id: 'usr-jamin-exec-02', name: 'Vikram Malhotra', email: 'vikram@jaminbazaar.com' },
-    { id: 'usr-jamin-exec-03', name: 'Suresh Kumar', email: 'suresh@jaminbazaar.com' },
-  ];
+  useEffect(() => {
+    if (isJamin) {
+      jaminApiService.getAgents().then(data => {
+        if (data && data.length > 0) {
+          setJaminAgents(data.map(a => ({ id: String(a.id), name: a.name, email: a.email })));
+        }
+      });
+    }
+  }, [isJamin]);
 
   const handleOpenScheduleSiteVisit = () => {
     setSvProject('Greenfield Meadows Phase 2');
     setSvPlot('Plot #15');
     setSvDate(getTomorrowDate());
     setSvTimeSlot('11:00 AM');
-    setSvHostAgent(selectedCustomer?.assignedAgentName || user?.name || 'Pooja Hegde');
+    setSvHostAgent(selectedCustomer?.assignedAgentName || user?.name || (jaminAgents[0]?.name || 'Agent'));
     setSvNotes('');
     setIsSiteVisitModalOpen(true);
   };
@@ -516,7 +522,7 @@ export const CustomersPage: React.FC = () => {
     e.preventDefault();
     if (!selectedCustomer) return;
 
-    const hostAg = jaminAgents.find(a => a.name === svHostAgent);
+    const hostAg = jaminAgents.find(a => a.name === svHostAgent || a.id === svHostAgent);
 
     const dateFormatted = (() => {
       try {
@@ -539,8 +545,8 @@ export const CustomersPage: React.FC = () => {
       projectName: svProject,
       plotNumber: svPlot,
       scheduledAt: dateFormatted,
-      assignedAgentId: hostAg?.id || user?.id || 'usr-jamin-exec',
-      assignedAgentName: svHostAgent,
+      assignedAgentId: hostAg?.id || user?.id || '1',
+      assignedAgentName: hostAg?.name || svHostAgent || user?.name || 'Agent',
       status: 'Scheduled',
       outcomeNotes: svNotes,
     };
@@ -551,7 +557,7 @@ export const CustomersPage: React.FC = () => {
       id: `aud-${Date.now()}`,
       timestamp: 'Just now',
       actorName: user?.name || 'Agent',
-      actorEmail: user?.email || 'agent@jaminbazaar.com',
+      actorEmail: user?.email || 'admin@ghlindiaventures.com',
       action: 'SITE_VISIT_SCHEDULED',
       entityType: 'SiteVisit',
       entityId: newVisit.id,

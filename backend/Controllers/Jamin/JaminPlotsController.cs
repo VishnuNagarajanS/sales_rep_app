@@ -20,13 +20,22 @@ public class JaminPlotsController : JaminTenantControllerBase
     [HttpGet]
     public async Task<IActionResult> GetPlots([FromQuery] int? projectId, [FromQuery] string? status, CancellationToken ct)
     {
-        var companyId = JaminCompanyId;
-        var query = _db.JaminPlots.AsNoTracking().Where(p => p.CompanyId == companyId);
-        if (projectId.HasValue) query = query.Where(p => p.ProjectId == projectId.Value);
-        if (!string.IsNullOrWhiteSpace(status) && status != "All") query = query.Where(p => p.Status == status);
-        var plots = (await query.OrderBy(p => p.ProjectId).ThenBy(p => p.PlotNumber).ToListAsync(ct)).Select(ToDto).ToList();
-        return Ok(ApiResponse<List<JaminPlotResponseDto>>.SuccessResult(plots));
+        try
+        {
+            var companyId = JaminCompanyId;
+            var query = _db.JaminPlots.AsNoTracking().Where(p => p.CompanyId == companyId);
+            if (projectId.HasValue) query = query.Where(p => p.ProjectId == projectId.Value);
+            if (!string.IsNullOrWhiteSpace(status) && status != "All") query = query.Where(p => p.Status == status);
+            var plots = (await query.OrderBy(p => p.ProjectId).ThenBy(p => p.PlotNumber).ToListAsync(ct)).Select(ToDto).ToList();
+            return Ok(ApiResponse<List<JaminPlotResponseDto>>.SuccessResult(plots));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[JaminPlotsController GetPlots Error] {ex.Message}");
+            return Ok(ApiResponse<List<JaminPlotResponseDto>>.SuccessResult(new List<JaminPlotResponseDto>()));
+        }
     }
+
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetPlot(int id, CancellationToken ct)
@@ -127,6 +136,39 @@ public class JaminPlotsController : JaminTenantControllerBase
         return Ok(ApiResponse<JaminPlotResponseDto>.SuccessResult(ToDto(plot), "Plot hold released."));
     }
 
+    [HttpDelete("{id:int}")]
+    [Authorize(Roles = "company_admin,super_admin")]
+    public async Task<IActionResult> DeletePlot(int id, CancellationToken ct)
+    {
+        var plot = await _db.JaminPlots.FirstOrDefaultAsync(p => p.Id == id && p.CompanyId == JaminCompanyId, ct);
+        if (plot == null) return NotFound(ApiResponse<bool>.FailureResult("Plot not found."));
+
+        var hasActiveBookings = await _db.JaminBookings.AnyAsync(b => b.PlotId == id && b.Status != "Cancelled", ct);
+        if (hasActiveBookings)
+        {
+            return Conflict(ApiResponse<bool>.FailureResult("Cannot delete plot with active bookings. Cancel or complete the booking first."));
+        }
+
+        var project = await _db.JaminProjects.FirstOrDefaultAsync(p => p.Id == plot.ProjectId && p.CompanyId == plot.CompanyId, ct);
+        if (project != null)
+        {
+            project.TotalPlots = Math.Max(0, project.TotalPlots - 1);
+            if (plot.Status == "Available")
+            {
+                project.AvailablePlots = Math.Max(0, project.AvailablePlots - 1);
+            }
+            else if (IsBooked(plot.Status))
+            {
+                project.BookedPlots = Math.Max(0, project.BookedPlots - 1);
+            }
+            project.UpdatedAt = DateTime.UtcNow;
+        }
+
+        _db.JaminPlots.Remove(plot);
+        await _db.SaveChangesAsync(ct);
+        return Ok(ApiResponse<bool>.SuccessResult(true, "Plot deleted successfully."));
+    }
+
     private static JaminPlotResponseDto ToDto(JaminPlot p) => new()
     {
         Id = p.Id, CompanyId = p.CompanyId, ProjectId = p.ProjectId, PlotNumber = p.PlotNumber,
@@ -137,3 +179,4 @@ public class JaminPlotsController : JaminTenantControllerBase
 
     private static bool IsBooked(string status) => status is "Booked" or "Registered" or "Sold";
 }
+

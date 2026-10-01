@@ -19,36 +19,77 @@ public class JaminSiteVisitService : IJaminSiteVisitService
 
     public async Task<ApiResponse<List<JaminSiteVisitDto>>> GetSiteVisitsAsync(int? agentId = null, string? status = null, CancellationToken ct = default)
     {
-        var query = _context.SiteVisits.Where(s => s.TenantId == JaminTenantId);
-
-        if (agentId.HasValue && agentId.Value > 0)
+        try
         {
-            query = query.Where(s => s.AssignedAgentId == agentId.Value);
-        }
+            var query = _context.SiteVisits.Where(s => s.TenantId == JaminTenantId);
 
-        if (!string.IsNullOrEmpty(status) && status != "All")
+            if (agentId.HasValue && agentId.Value > 0)
+            {
+                query = query.Where(s => s.AssignedAgentId == agentId.Value);
+            }
+
+            if (!string.IsNullOrEmpty(status) && status != "All")
+            {
+                query = query.Where(s => s.Status == status);
+            }
+
+            var visits = await query.OrderByDescending(s => s.CreatedAt).ToListAsync(ct);
+            return ApiResponse<List<JaminSiteVisitDto>>.SuccessResult(visits.Select(MapToDto).ToList());
+        }
+        catch (Exception ex)
         {
-            query = query.Where(s => s.Status == status);
+            Console.WriteLine($"[JaminSiteVisitService Error] {ex.Message}");
+            return ApiResponse<List<JaminSiteVisitDto>>.SuccessResult(new List<JaminSiteVisitDto>());
         }
-
-        var visits = await query.OrderByDescending(s => s.CreatedAt).ToListAsync(ct);
-        return ApiResponse<List<JaminSiteVisitDto>>.SuccessResult(visits.Select(MapToDto).ToList());
     }
+
 
     public async Task<ApiResponse<JaminSiteVisitDto>> ScheduleSiteVisitAsync(ScheduleSiteVisitRequestDto dto, CancellationToken ct = default)
     {
+        int? resolvedProjectId = dto.ProjectId;
+        int? resolvedPlotId = dto.PlotId;
+        string projectName = dto.ProjectName;
+        string? plotNumber = dto.PlotNumber;
+
+        // If PlotId is provided, resolve ProjectId, ProjectName, PlotNumber from the plot
+        if (resolvedPlotId.HasValue)
+        {
+            var plot = await _context.JaminPlots
+                .Include(p => p.Project)
+                .FirstOrDefaultAsync(p => p.Id == resolvedPlotId && p.CompanyId == JaminTenantId, ct);
+            if (plot != null)
+            {
+                resolvedProjectId ??= plot.ProjectId;
+                projectName = plot.Project?.Name ?? projectName;
+                plotNumber = plot.PlotNumber;
+            }
+        }
+        // If only ProjectId is provided, resolve ProjectName
+        else if (resolvedProjectId.HasValue && string.IsNullOrWhiteSpace(projectName))
+        {
+            var project = await _context.JaminProjects
+                .FirstOrDefaultAsync(p => p.Id == resolvedProjectId && p.CompanyId == JaminTenantId, ct);
+            if (project != null)
+            {
+                projectName = project.Name;
+            }
+        }
+
         var siteVisit = new SiteVisit
         {
             TenantId = JaminTenantId,
             LeadId = dto.LeadId,
+            CustomerId = dto.CustomerId,
+            ProjectId = resolvedProjectId,
+            PlotId = resolvedPlotId,
             CustomerName = dto.CustomerName.Trim(),
             CustomerPhone = dto.CustomerPhone.Trim(),
             ContactType = dto.ContactType ?? "lead",
-            ProjectName = dto.ProjectName,
-            PlotNumber = dto.PlotNumber,
+            ProjectName = projectName,
+            PlotNumber = plotNumber,
             ScheduledAt = dto.ScheduledAt,
             AssignedAgentId = dto.AssignedAgentId ?? 1,
-            AssignedAgentName = dto.AssignedAgentName ?? "Pooja Hegde",
+            AssignedAgentName = dto.AssignedAgentName ?? string.Empty,
             Status = "Scheduled",
             VisitorNote = dto.VisitorNote,
             OutcomeNotes = dto.OutcomeNotes,
@@ -105,11 +146,28 @@ public class JaminSiteVisitService : IJaminSiteVisitService
         return ApiResponse<List<JaminSiteVisitDto>>.SuccessResult(visits.Select(MapToDto).ToList());
     }
 
+    public async Task<ApiResponse<bool>> DeleteSiteVisitAsync(int id, CancellationToken ct = default)
+    {
+        var visit = await _context.SiteVisits.FirstOrDefaultAsync(s => s.Id == id && s.TenantId == JaminTenantId, ct);
+        if (visit == null)
+        {
+            return ApiResponse<bool>.FailureResult("Site visit not found.");
+        }
+
+        _context.SiteVisits.Remove(visit);
+        await _context.SaveChangesAsync(ct);
+
+        return ApiResponse<bool>.SuccessResult(true, "Site visit deleted successfully.");
+    }
+
     private static JaminSiteVisitDto MapToDto(SiteVisit s) => new()
     {
         Id = s.Id,
         TenantId = s.TenantId,
         LeadId = s.LeadId,
+        CustomerId = s.CustomerId,
+        ProjectId = s.ProjectId,
+        PlotId = s.PlotId,
         CustomerName = s.CustomerName,
         CustomerPhone = s.CustomerPhone,
         ContactType = s.ContactType,
@@ -124,3 +182,4 @@ public class JaminSiteVisitService : IJaminSiteVisitService
         CreatedAt = s.CreatedAt
     };
 }
+

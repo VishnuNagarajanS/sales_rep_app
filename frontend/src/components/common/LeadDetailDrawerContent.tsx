@@ -278,6 +278,26 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                   <div style={{ fontWeight: 600 }}>{selectedLead.createdAt}</div>
                 </div>
               )}
+              {selectedLead.targetDevelopment && (
+                <div>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>TARGET DEVELOPMENT</span>
+                  <div style={{ fontWeight: 600, color: '#059669' }}>{selectedLead.targetDevelopment}</div>
+                </div>
+              )}
+              {(selectedLead.customFields?.budgetRange || (selectedLead as any).budgetRange) && (
+                <div>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>BUDGET RANGE</span>
+                  <div style={{ fontWeight: 600 }}>{selectedLead.customFields?.budgetRange || (selectedLead as any).budgetRange}</div>
+                </div>
+              )}
+              {((selectedLead as any).preferredVisitDate || (selectedLead as any).preferredTimeSlot) && (
+                <div>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>PREFERRED VISIT</span>
+                  <div style={{ fontWeight: 600 }}>
+                    {[(selectedLead as any).preferredVisitDate, (selectedLead as any).preferredTimeSlot].filter(Boolean).join(' • ')}
+                  </div>
+                </div>
+              )}
               {(selectedLead as any).preferredLanguage && (
                 <div>
                   <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>PREFERRED LANGUAGE</span>

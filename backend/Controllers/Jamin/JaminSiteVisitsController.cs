@@ -80,4 +80,21 @@ public class JaminSiteVisitsController : JaminTenantControllerBase
 
         return Ok(result);
     }
+
+    /// <summary>
+    /// Deletes or cancels a site visit.
+    /// </summary>
+    [HttpDelete("{id:int}")]
+    [Authorize]
+    public async Task<IActionResult> DeleteSiteVisit(int id, CancellationToken ct)
+    {
+        var result = await _siteVisitService.DeleteSiteVisitAsync(id, ct);
+        if (!result.Success)
+        {
+            return NotFound(result);
+        }
+
+        return Ok(result);
+    }
 }
+

@@ -8,6 +8,37 @@
   gap: 16px;
 }
 
+.app-quickcreate-form .form-label,
+.modal-card .form-label,
+.modal-body .form-label {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: #1e293b !important; /* Dark Slate for crystal clear readability */
+  margin-bottom: 4px;
+}
+
+.app-quickcreate-form .form-input,
+.app-quickcreate-form .form-select,
+.app-quickcreate-form .form-textarea,
+.modal-card .form-input,
+.modal-card .form-select,
+.modal-card .form-textarea {
+  border: 1px solid #cbd5e1 !important;
+  color: #0f172a !important;
+  background-color: #ffffff !important;
+  font-size: 13.5px !important;
+}
+
+.app-quickcreate-form .form-input:focus,
+.app-quickcreate-form .form-select:focus,
+.app-quickcreate-form .form-textarea:focus,
+.modal-card .form-input:focus,
+.modal-card .form-select:focus,
+.modal-card .form-textarea:focus {
+  border-color: #059669 !important;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.15) !important;
+}
+
 .app-segmented-toggle {
   display: flex;
   background-color: var(--bg-surface-hover);
@@ -34,7 +65,8 @@
 
 .app-new-customer-label {
   font-size: 11px;
-  color: var(--text-secondary);
+  color: #475569 !important;
+  font-weight: 600;
 }
 
 .app-schedule-grid {

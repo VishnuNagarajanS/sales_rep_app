@@ -14,8 +14,8 @@ export const INITIAL_BOOKINGS: Booking[] = [
     bookingAmount: 500000,
     totalAmount: 7200000,
     status: 'Confirmed',
-    agentId: 'usr-jamin-exec',
-    agentName: 'Pooja Hegde',
+    agentId: 'usr-jamin-admin',
+    agentName: 'Mani',
     paymentTerms: 'Token ₹5L paid via RTGS. 20% on agreement signing (March 18), 80% upon registration via HDFC loan.',
   },
 ];

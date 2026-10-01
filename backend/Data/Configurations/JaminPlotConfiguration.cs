@@ -29,11 +29,17 @@ public class JaminPlotConfiguration : IEntityTypeConfiguration<JaminPlot>
         builder.Property(p => p.Price)
             .HasPrecision(18, 2);
 
+        builder.Property(p => p.PricePerSqft)
+            .HasPrecision(18, 2);
+
         builder.Property(p => p.HeldByCustomerName)
             .HasMaxLength(150);
 
         builder.Property(p => p.HeldByCustomerPhone)
             .HasMaxLength(50);
+
+        builder.Property(p => p.HoldByAgent)
+            .HasMaxLength(150);
 
         builder.Property(p => p.Notes)
             .HasMaxLength(2000);

@@ -3,8 +3,8 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
   {
     id: 'aud-01',
     timestamp: 'Today, 02:10 PM',
-    actorName: 'Pooja Hegde',
-    actorEmail: 'pooja@jaminbazaar.com',
+    actorName: 'Mani',
+    actorEmail: 'mani@ghlindiaventures.com',
     action: 'PLOT_HOLD_CREATED',
     entityType: 'Plot',
     entityId: 'plot-07',
@@ -27,8 +27,8 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
   {
     id: 'aud-03',
     timestamp: 'Yesterday, 04:35 PM',
-    actorName: 'Kavita Rao',
-    actorEmail: 'kavita@jaminbazaar.com',
+    actorName: 'Mani',
+    actorEmail: 'mani@ghlindiaventures.com',
     action: 'BOOKING_CONFIRMED',
     entityType: 'Booking',
     entityId: 'bkg-01',

@@ -110,16 +110,4 @@ export const MOCK_USERS: User[] = [
     status: 'Active',
     lastLogin: 'Today, 02:00 PM',
   },
-  {
-    id: 'usr-jamin-exec',
-    name: 'Pooja Hegde',
-    email: 'pooja@jaminbazaar.com',
-    phone: '+91 99160 44889',
-    role: MOCK_ROLES.sales_executive,
-    companyId: 't-jamin-02',
-    companySlug: 'jamin',
-    companyName: 'Jamin Bazaar',
-    status: 'Active',
-    lastLogin: 'Today, 10:15 AM',
-  },
 ];

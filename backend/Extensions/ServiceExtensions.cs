@@ -16,9 +16,25 @@ public static class ServiceExtensions
 {
     public static IServiceCollection AddApplicationServices(this IServiceCollection services, IConfiguration configuration)
     {
-        // 1. Database Context
-        var connectionString = configuration.GetConnectionString("DefaultConnection")
-                               ?? throw new InvalidOperationException("DefaultConnection connection string is not configured.");
+        // 1. Database Context - prioritize .env DATABASE_URL / DB_* parameters
+        var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL")
+                               ?? configuration.GetConnectionString("DefaultConnection");
+
+        var dbHost = Environment.GetEnvironmentVariable("DB_HOST");
+        if (!string.IsNullOrEmpty(dbHost) && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DATABASE_URL")))
+        {
+            var port = Environment.GetEnvironmentVariable("DB_PORT") ?? "5432";
+            var db = Environment.GetEnvironmentVariable("DB_NAME") ?? "neondb";
+            var user = Environment.GetEnvironmentVariable("DB_USER") ?? "neondb_owner";
+            var pass = Environment.GetEnvironmentVariable("DB_PASSWORD") ?? "";
+            var ssl = Environment.GetEnvironmentVariable("DB_SSL_MODE") ?? "Require";
+            connectionString = $"Host={dbHost};Port={port};Database={db};Username={user};Password={pass};SSL Mode={ssl};Trust Server Certificate=true;Channel Binding=require";
+        }
+
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new InvalidOperationException("Database connection string is not configured in .env or appsettings.json.");
+        }
 
         services.AddDbContext<ApplicationDbContext>(options =>
             options.UseNpgsql(connectionString));

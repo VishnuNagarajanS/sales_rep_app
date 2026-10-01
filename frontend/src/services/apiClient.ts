@@ -13,7 +13,17 @@ export interface PagedResult<T = any> {
   totalPages: number;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5106/api').replace(/\/+$/, '');
+
+function buildUrl(endpoint: string): string {
+  let path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  if (API_BASE_URL.endsWith('/api') && path.startsWith('/api/')) {
+    path = path.substring(4); // avoid duplicate /api/api
+  } else if (!API_BASE_URL.endsWith('/api') && !path.startsWith('/api/')) {
+    path = `/api${path}`;
+  }
+  return `${API_BASE_URL}${path}`;
+}
 
 class ApiClient {
   private getHeaders(): HeadersInit {
@@ -45,7 +55,7 @@ class ApiClient {
   }
 
   async get<T>(endpoint: string, params?: Record<string, any>): Promise<T> {
-    let url = `${API_BASE_URL}${endpoint}`;
+    let url = buildUrl(endpoint);
     if (params) {
       const query = new URLSearchParams();
       Object.entries(params).forEach(([k, v]) => {
@@ -66,7 +76,7 @@ class ApiClient {
   }
 
   async post<T>(endpoint: string, body?: any): Promise<T> {
-    const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const res = await fetch(buildUrl(endpoint), {
       method: 'POST',
       headers: this.getHeaders(),
       body: body ? JSON.stringify(body) : undefined,
@@ -75,7 +85,7 @@ class ApiClient {
   }
 
   async put<T>(endpoint: string, body: any): Promise<T> {
-    const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const res = await fetch(buildUrl(endpoint), {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify(body),
@@ -84,7 +94,7 @@ class ApiClient {
   }
 
   async delete<T>(endpoint: string): Promise<T> {
-    const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const res = await fetch(buildUrl(endpoint), {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
@@ -92,7 +102,7 @@ class ApiClient {
   }
 
   async patch<T>(endpoint: string, body?: any): Promise<T> {
-    const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const res = await fetch(buildUrl(endpoint), {
       method: 'PATCH',
       headers: this.getHeaders(),
       body: body ? JSON.stringify(body) : undefined,

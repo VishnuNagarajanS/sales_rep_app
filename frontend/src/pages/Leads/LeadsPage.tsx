@@ -15,6 +15,7 @@ import { Lead, Customer, Deal, Followup, SiteVisit } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { apiClient } from '../../services/apiClient';
+import { jaminApiService } from '../../services/jaminApiService';
 import { storageService } from '../../services/storageService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
@@ -154,7 +155,7 @@ export const LeadsPage: React.FC = () => {
   const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02';
   const canJaminAssign =
     isJamin &&
-    (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin' || roleCode === 'sales_manager' || roleCode === 'manager');
+    (['company_admin', 'admin', 'super_admin', 'sales_manager', 'manager'].includes(String(roleCode)));
   const [jaminAssignMode, setJaminAssignMode] = useState<'none' | 'manual' | 'auto'>('none');
   const [selectedJaminLeadIds, setSelectedJaminLeadIds] = useState<Set<string>>(new Set());
   const [isJaminAssignModalOpen, setIsJaminAssignModalOpen] = useState(false);
@@ -163,11 +164,21 @@ export const LeadsPage: React.FC = () => {
   const [jaminAiDistribution, setJaminAiDistribution] = useState<Record<string, Lead[]>>({});
   const [isJaminAiEditMode, setIsJaminAiEditMode] = useState(false);
 
-  const jaminAgents = [
-    { id: 'usr-jamin-exec', name: 'Pooja Hegde', email: 'pooja@jaminbazaar.com' },
-    { id: 'usr-jamin-exec-02', name: 'Vikram Malhotra', email: 'vikram@jaminbazaar.com' },
-    { id: 'usr-jamin-exec-03', name: 'Suresh Kumar', email: 'suresh@jaminbazaar.com' },
-  ];
+  const [jaminAgents, setJaminAgents] = useState<Array<{ id: string; name: string; email: string }>>([]);
+
+  useEffect(() => {
+    if (isJamin) {
+      jaminApiService.getAgents().then(data => {
+        if (data && data.length > 0) {
+          setJaminAgents(data.map(a => ({
+            id: String(a.id),
+            name: a.name,
+            email: a.email,
+          })));
+        }
+      });
+    }
+  }, [isJamin]);
 
   // Jamin Quick Schedule Follow-up state
   const [isJaminScheduleModalOpen, setIsJaminScheduleModalOpen] = useState(false);
@@ -188,7 +199,7 @@ export const LeadsPage: React.FC = () => {
   });
   const [leadVisitTimeSlot, setLeadVisitTimeSlot] = useState('11:00 AM');
   const [leadVisitNotes, setLeadVisitNotes] = useState('');
-  const [leadVisitHostAgent, setLeadVisitHostAgent] = useState('Pooja Hegde');
+  const [leadVisitHostAgent, setLeadVisitHostAgent] = useState('');
 
   // GHL Admin assign-mode state
   const isGhlAdmin =
@@ -236,8 +247,23 @@ export const LeadsPage: React.FC = () => {
     }));
   };
 
-  const loadData = () => {
-    const updated = storageService.getLeads(tenant?.id);
+  const loadData = async () => {
+    let updated: Lead[] = [];
+    if (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2') {
+      try {
+        const liveLeads = await jaminApiService.getLeads(true);
+        if (liveLeads && liveLeads.length > 0) {
+          updated = liveLeads;
+        } else {
+          updated = storageService.getLeads(tenant?.id);
+        }
+      } catch {
+        updated = storageService.getLeads(tenant?.id);
+      }
+    } else {
+      updated = storageService.getLeads(tenant?.id);
+    }
+
     setLeads(updated);
     setSelectedLead(prev => {
       if (!prev) return null;
@@ -387,7 +413,7 @@ export const LeadsPage: React.FC = () => {
       id: `aud-${Date.now()}`,
       timestamp: 'Just now',
       actorName: user?.name || 'Admin',
-      actorEmail: user?.email || 'admin@jaminbazaar.com',
+      actorEmail: user?.email || 'admin@ghlindiaventures.com',
       action: 'LEADS_ASSIGNED',
       entityType: 'Lead',
       entityId: Array.from(selectedJaminLeadIds).join(','),
@@ -463,7 +489,7 @@ export const LeadsPage: React.FC = () => {
       id: `aud-${Date.now()}`,
       timestamp: 'Just now',
       actorName: user?.name || 'Admin',
-      actorEmail: user?.email || 'admin@jaminbazaar.com',
+      actorEmail: user?.email || 'admin@ghlindiaventures.com',
       action: 'LEADS_AUTO_ASSIGNED',
       entityType: 'Lead',
       entityId: `bulk-ai-${Date.now()}`,
@@ -509,7 +535,7 @@ export const LeadsPage: React.FC = () => {
       id: `aud-${Date.now()}`,
       timestamp: 'Just now',
       actorName: user?.name || 'Admin',
-      actorEmail: user?.email || 'admin@jaminbazaar.com',
+      actorEmail: user?.email || 'admin@ghlindiaventures.com',
       action: 'LEADS_AUTO_ASSIGNED',
       entityType: 'Lead',
       entityId: `auto-${Date.now()}`,
@@ -616,7 +642,7 @@ export const LeadsPage: React.FC = () => {
       id: `aud-${Date.now()}`,
       timestamp: 'Just now',
       actorName: user?.name || 'Agent',
-      actorEmail: user?.email || 'agent@jaminbazaar.com',
+      actorEmail: user?.email || 'admin@ghlindiaventures.com',
       action: 'FOLLOWUP_SCHEDULED',
       entityType: 'Lead',
       entityId: selectedLead.id,
@@ -652,7 +678,7 @@ export const LeadsPage: React.FC = () => {
     setLeadVisitHostAgent(
       lead.assignedAgentName && lead.assignedAgentName !== 'Unassigned'
         ? lead.assignedAgentName
-        : (user?.name || 'Pooja Hegde')
+        : (user?.name || (jaminAgents[0]?.name || 'Agent'))
     );
     setIsLeadSiteVisitModalOpen(true);
   };
@@ -661,7 +687,7 @@ export const LeadsPage: React.FC = () => {
     e.preventDefault();
     if (!selectedLead) return;
 
-    const hostAg = jaminAgents.find(a => a.name === leadVisitHostAgent);
+    const hostAg = jaminAgents.find(a => a.name === leadVisitHostAgent || a.id === leadVisitHostAgent);
 
     const dateFormatted = (() => {
       try {
@@ -685,8 +711,8 @@ export const LeadsPage: React.FC = () => {
       projectName: leadVisitProject,
       plotNumber: leadVisitPlot,
       scheduledAt: dateFormatted,
-      assignedAgentId: hostAg?.id || selectedLead.assignedAgentId || user?.id || 'usr-jamin-exec',
-      assignedAgentName: leadVisitHostAgent || 'Pooja Hegde',
+      assignedAgentId: hostAg?.id || selectedLead.assignedAgentId || user?.id || '1',
+      assignedAgentName: hostAg?.name || leadVisitHostAgent || user?.name || 'Agent',
       status: 'Scheduled',
       outcomeNotes: leadVisitNotes,
     };
@@ -697,7 +723,7 @@ export const LeadsPage: React.FC = () => {
       id: `aud-${Date.now()}`,
       timestamp: 'Just now',
       actorName: user?.name || 'Agent',
-      actorEmail: user?.email || 'agent@jamin.com',
+      actorEmail: user?.email || 'admin@ghlindiaventures.com',
       action: 'SITE_VISIT_SCHEDULED',
       entityType: 'SiteVisit',
       entityId: newVisit.id,
@@ -810,7 +836,7 @@ export const LeadsPage: React.FC = () => {
       : (user.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec'));
     const defaultAgentName = (isJamin && canJaminAssign)
       ? 'Unassigned'
-      : (user.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer'));
+      : (user.name || 'Agent');
 
     setFormData({
       id: `lead-${Date.now()}`,
@@ -901,35 +927,46 @@ export const LeadsPage: React.FC = () => {
     }
 
     try {
+      const effectiveCompanyId = isJaminUser ? 2 : (typeof targetCompanyId === 'number' ? targetCompanyId : (parseInt(String(targetCompanyId), 10) || 1));
+      const parsedAgentId = resolvedAgentId && !isNaN(Number(resolvedAgentId)) ? Number(resolvedAgentId) : undefined;
+
       if (!isUpdated) {
         // Create in backend
-        const res = await apiClient.post<any>('/sales-executive/leads', {
+        const res = await apiClient.post<any>('/leads', {
           name: leadToSave.name,
           phone: leadToSave.phone,
-          companyId: typeof targetCompanyId === 'number' ? targetCompanyId : parseInt(targetCompanyId, 10) || 1,
+          companyId: effectiveCompanyId,
           email: leadToSave.email,
           location: leadToSave.location,
           source: leadToSave.source,
           priority: leadToSave.priority,
           notes: leadToSave.notes,
+          targetDevelopment: leadToSave.targetDevelopment,
+          assignedAgentId: parsedAgentId,
+          assignedAgentName: resolvedAgentName !== 'Unassigned' ? resolvedAgentName : undefined,
+          budgetRange: leadToSave.customFields?.budgetRange || leadToSave.customFields?.investmentCapacity || '',
           investmentCapacity: leadToSave.customFields?.investmentCapacity || ''
         });
         if (res.success && res.data) {
-          leadToSave.id = `db-${res.data.id}`;
+          leadToSave.id = String(res.data.id);
         }
       } else {
         // Update in backend
-        if (leadToSave.id.toString().startsWith('db-')) {
-          const dbId = leadToSave.id.toString().replace('db-', '');
-          await apiClient.put<any>(`/sales-executive/leads/${dbId}`, {
+        const numericId = parseInt(String(leadToSave.id).replace('db-', ''), 10);
+        if (!isNaN(numericId)) {
+          await apiClient.put<any>(`/leads/${numericId}`, {
             name: leadToSave.name,
             phone: leadToSave.phone,
-            companyId: typeof targetCompanyId === 'number' ? targetCompanyId : parseInt(targetCompanyId, 10) || 1,
+            companyId: effectiveCompanyId,
             email: leadToSave.email,
             location: leadToSave.location,
             source: leadToSave.source,
             priority: leadToSave.priority,
             notes: leadToSave.notes,
+            targetDevelopment: leadToSave.targetDevelopment,
+            assignedAgentId: parsedAgentId,
+            assignedAgentName: resolvedAgentName !== 'Unassigned' ? resolvedAgentName : undefined,
+            budgetRange: leadToSave.customFields?.budgetRange || leadToSave.customFields?.investmentCapacity || '',
             investmentCapacity: leadToSave.customFields?.investmentCapacity || ''
           });
         }

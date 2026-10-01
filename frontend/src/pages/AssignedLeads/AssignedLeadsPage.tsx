@@ -9,6 +9,7 @@ import { Lead } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
+import { jaminApiService } from '../../services/jaminApiService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { Drawer } from '../../components/common/Drawer';
@@ -34,11 +35,6 @@ export const AssignedLeadsPage: React.FC = () => {
   // Agent reassignment confirmation state for Edit panel
   const [pendingAgent, setPendingAgent] = useState<{ id: string | number; name: string } | null>(null);
   const [isReassignConfirmOpen, setIsReassignConfirmOpen] = useState(false);
-
-  const roleCode = user?.role?.code;
-  const isGhlAdmin =
-    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
-    (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
 
   // Date range helpers
   const formatDateYMD = (d: Date): string => {
@@ -115,8 +111,17 @@ export const AssignedLeadsPage: React.FC = () => {
     setDateTo(to);
   };
 
-  const loadData = () => {
-    const allLeads = storageService.getLeads(tenant?.id);
+  const loadData = async () => {
+    let allLeads: Lead[] = [];
+    try {
+      if (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2') {
+        allLeads = await jaminApiService.getLeads(true);
+      } else {
+        allLeads = storageService.getLeads(tenant?.id);
+      }
+    } catch {
+      allLeads = storageService.getLeads(tenant?.id);
+    }
 
     // Merge any mock assignments from session storage if present
     let sessionAssignments: Array<{ leadId: string; agentId: number; agentName: string }> = [];
@@ -160,14 +165,29 @@ export const AssignedLeadsPage: React.FC = () => {
     setIsEditDrawerOpen(true);
   };
 
-  // Populate agent options from MOCK_AGENTS, ensuring the current assigned agent is included
+  const [dynamicAgents, setDynamicAgents] = useState<Array<{ id: string | number; name: string }>>([]);
+
+  useEffect(() => {
+    if (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2') {
+      jaminApiService.getAgents().then(data => {
+        if (data && data.length > 0) {
+          setDynamicAgents(data.map(a => ({ id: a.id, name: a.name })));
+        }
+      });
+    }
+  }, [tenant?.id]);
+
+  // Populate agent options from backend API or MOCK_AGENTS, ensuring current assigned agent is included
   const agentOptions = useMemo<Array<{ id: string | number; name: string }>>(() => {
-    const list: Array<{ id: string | number; name: string }> = [...MOCK_AGENTS];
+    const baseList = (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2') && dynamicAgents.length > 0
+      ? dynamicAgents
+      : MOCK_AGENTS;
+    const list: Array<{ id: string | number; name: string }> = [...baseList];
     if (formData.assignedAgentName && !list.some(a => a.name.toLowerCase() === formData.assignedAgentName?.toLowerCase())) {
       list.unshift({ id: 'current', name: formData.assignedAgentName });
     }
     return list;
-  }, [formData.assignedAgentName]);
+  }, [formData.assignedAgentName, dynamicAgents, tenant?.id]);
 
   const handleAgentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newName = e.target.value;
@@ -257,15 +277,17 @@ export const AssignedLeadsPage: React.FC = () => {
     },
     {
       key: 'investmentAmount',
-      header: 'Investment Amount Range',
+      header: tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' ? 'Target Development / Budget' : 'Investment Amount Range',
       sortable: true,
       render: l => {
-        const amount =
-          l.customFields?.investmentCapacity ||
+        const val =
+          l.targetDevelopment ||
           l.customFields?.budgetRange ||
+          l.customFields?.investmentCapacity ||
           (l as any).investmentAmount ||
+          l.location ||
           '—';
-        return <span className="lead-investment-val">{amount}</span>;
+        return <span className="lead-investment-val">{val}</span>;
       },
     },
     {
@@ -377,15 +399,6 @@ export const AssignedLeadsPage: React.FC = () => {
       return true;
     });
   }, [leads, agentFilter, datePreset, dateFrom, dateTo]);
-
-  if (!isGhlAdmin) {
-    return (
-      <div className="assigned-leads-unauthorized">
-        <h3>Access Restricted</h3>
-        <p>This module is only accessible to GHL India Ventures Company Admin.</p>
-      </div>
-    );
-  }
 
   return (
     <div className="leads-page assigned-leads-page">

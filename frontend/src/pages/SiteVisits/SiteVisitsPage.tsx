@@ -1,107 +1,100 @@
-import React, { useState, useEffect } from 'react';
-import { Calendar, Plus, CheckCircle2, Phone, Users, UserCheck } from 'lucide-react';
-import { SiteVisit, Lead, Customer } from '../../types';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Calendar, Plus, CheckCircle2, Phone, RefreshCw } from 'lucide-react';
+import { SiteVisit } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
+import { jaminApiService } from '../../services/jaminApiService';
 import './SiteVisitsPage.css';
-const getStoredSiteVisits = (tenantId?: string): SiteVisit[] => {
-  try {
-    const raw = localStorage.getItem('nexus_site_visits');
-    const all = raw ? JSON.parse(raw) : [];
-    return tenantId ? all.filter((s: SiteVisit) => s.companyId === tenantId) : all;
-  } catch {
-    return [];
-  }
-};
-
-const saveStoredSiteVisit = (visit: SiteVisit) => {
-  try {
-    const raw = localStorage.getItem('nexus_site_visits');
-    const all: SiteVisit[] = raw ? JSON.parse(raw) : [];
-    const idx = all.findIndex(s => s.id === visit.id);
-    if (idx >= 0) all[idx] = visit;
-    else all.unshift(visit);
-    localStorage.setItem('nexus_site_visits', JSON.stringify(all));
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-  } catch {}
-};
-
-const addStoredAuditLog = (log: any) => {
-  try {
-    const raw = localStorage.getItem('nexus_audit_logs');
-    const all = raw ? JSON.parse(raw) : [];
-    all.unshift(log);
-    localStorage.setItem('nexus_audit_logs', JSON.stringify(all));
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-  } catch {}
-};
+const TIME_SLOTS = [
+  'Morning · 9–11 am',
+  'Midday · 11 am–1 pm',
+  'Afternoon · 2–4 pm',
+  'Evening · 4–6 pm',
+];
 
 export const SiteVisitsPage: React.FC = () => {
-  const { tenant, user } = useAuth();
+  const { user } = useAuth();
   const { initiateCall } = useCall();
 
   const [siteVisits, setSiteVisits] = useState<SiteVisit[]>([]);
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
+  const [plots, setPlots] = useState<any[]>([]);
+  const [filteredPlots, setFilteredPlots] = useState<any[]>([]);
+  const [agents, setAgents] = useState<Array<{ id: number; name: string; email: string }>>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
 
-  const jaminAgents = [
-    { id: 'usr-jamin-exec', name: 'Pooja Hegde', email: 'pooja@jaminbazaar.com' },
-    { id: 'usr-jamin-exec-02', name: 'Vikram Malhotra', email: 'vikram@jaminbazaar.com' },
-    { id: 'usr-jamin-exec-03', name: 'Suresh Kumar', email: 'suresh@jaminbazaar.com' },
-  ];
-
   // Form state
-  const [clientSource, setClientSource] = useState<'lead' | 'customer' | 'custom'>('customer');
-  const [selectedEntityId, setSelectedEntityId] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('+91 ');
-  const [hostAgentId, setHostAgentId] = useState(user?.id || 'usr-jamin-exec');
-  const [hostAgentName, setHostAgentName] = useState(user?.name || 'Pooja Hegde');
-  const [projectName, setProjectName] = useState('Greenfield Meadows Phase 2');
-  const [plotNumber, setPlotNumber] = useState('');
+  const [hostAgentId, setHostAgentId] = useState<number>(0);
+  const [hostAgentName, setHostAgentName] = useState('');
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
+  const [selectedPlotId, setSelectedPlotId] = useState<string>('');
+
   const getTomorrowDate = () => {
     const d = new Date();
     d.setDate(d.getDate() + 1);
     return d.toISOString().split('T')[0];
   };
-
   const [visitDate, setVisitDate] = useState(getTomorrowDate);
-  const [visitTimeSlot, setVisitTimeSlot] = useState('11:00 AM');
+  const [visitTimeSlot, setVisitTimeSlot] = useState(TIME_SLOTS[0]);
   const [notes, setNotes] = useState('');
 
-  const loadData = () => {
-    setSiteVisits(getStoredSiteVisits(tenant?.id));
-  };
+  // ── Load all data ──────────────────────────────────────────────────────────
+  const loadAll = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [visits, projs, allPlots, agentList] = await Promise.all([
+        jaminApiService.getSiteVisits(true),
+        jaminApiService.getProjects(),
+        jaminApiService.getPlots(),
+        jaminApiService.getAgents(),
+      ]);
+      setSiteVisits(visits);
+      setProjects(projs);
+      setPlots(allPlots);
+      setAgents(agentList || []);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
+  useEffect(() => { loadAll(); }, [loadAll]);
+
+  // When selectedProjectId changes, filter plots
   useEffect(() => {
-    loadData();
-    const handleUpdate = () => loadData();
-    window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
-  }, [tenant?.id]);
+    if (selectedProjectId) {
+      setFilteredPlots(plots.filter(p => String(p.projectId) === selectedProjectId));
+    } else {
+      setFilteredPlots([]);
+    }
+    setSelectedPlotId('');
+  }, [selectedProjectId, plots]);
 
+  // ── Modal open / reset ─────────────────────────────────────────────────────
   const handleOpenScheduleModal = () => {
-    setClientSource('customer');
-    setSelectedEntityId('');
     setCustomerName('');
     setCustomerPhone('+91 ');
-    setHostAgentId(user?.id || 'usr-jamin-exec');
-    setHostAgentName(user?.name || 'Pooja Hegde');
-    setProjectName('Jamin Garden — Varapatty');
-    setPlotNumber('Plot #15');
+    const defaultAgent = agents.length > 0 ? agents[0] : null;
+    setHostAgentId(defaultAgent ? defaultAgent.id : Number(user?.id) || 0);
+    setHostAgentName(defaultAgent ? defaultAgent.name : (user?.name || 'Agent'));
+    setSelectedProjectId(projects.length > 0 ? String(projects[0].id) : '');
+    setSelectedPlotId('');
     setVisitDate(getTomorrowDate());
-    setVisitTimeSlot('Morning · 9–11 am');
+    setVisitTimeSlot(TIME_SLOTS[0]);
     setNotes('');
     setIsScheduleModalOpen(true);
   };
 
-  const handleScheduleVisit = (e: React.FormEvent) => {
+  // ── Schedule submit ────────────────────────────────────────────────────────
+  const handleScheduleVisit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customerName || !customerPhone) return;
+    if (!customerName.trim() || !customerPhone.trim()) return;
 
     const dateFormatted = (() => {
       try {
@@ -113,54 +106,42 @@ export const SiteVisitsPage: React.FC = () => {
       }
     })();
 
-    const newVisit: SiteVisit = {
-      id: `sv-${Date.now()}`,
-      companyId: tenant?.id || 't-jamin-02',
-      customerId: clientSource === 'customer' ? selectedEntityId : `cust-${Date.now()}`,
-      customerName,
-      customerPhone,
-      contactType: clientSource === 'custom' ? undefined : clientSource,
-      leadId: clientSource === 'lead' ? selectedEntityId : undefined,
-      projectId: 'proj-01',
-      projectName,
-      plotNumber,
-      scheduledAt: dateFormatted,
-      assignedAgentId: hostAgentId || user?.id || 'usr-jamin-exec',
-      assignedAgentName: hostAgentName || user?.name || 'Pooja Hegde',
-      status: 'Scheduled',
-      outcomeNotes: notes,
-    };
+    const project = projects.find((p: any) => String(p.id) === selectedProjectId);
+    const plot = filteredPlots.find((p: any) => String(p.id) === selectedPlotId);
 
-    saveStoredSiteVisit(newVisit);
-
-    // Also notify
-    addStoredAuditLog({
-      id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
-      actorName: user?.name || 'Agent',
-      actorEmail: user?.email || 'agent@jamin.com',
-      action: 'SITE_VISIT_SCHEDULED',
-      entityType: 'SiteVisit',
-      entityId: newVisit.id,
-      companyId: tenant?.id,
-      companyName: tenant?.name,
-      details: `Scheduled site visit for ${clientSource.toUpperCase()}: ${customerName} at ${projectName} (${plotNumber}).`,
-    });
-
-    setIsScheduleModalOpen(false);
-    setCustomerName('');
-    setNotes('');
+    setIsSubmitting(true);
+    try {
+      await jaminApiService.scheduleSiteVisit({
+        customerName: customerName.trim(),
+        customerPhone: customerPhone.trim(),
+        projectId: selectedProjectId ? Number(selectedProjectId) : undefined,
+        plotId: selectedPlotId ? Number(selectedPlotId) : undefined,
+        projectName: project?.name ?? '',
+        plotNumber: plot?.plotNumber ?? '',
+        scheduledAt: dateFormatted,
+        visitorNote: notes.trim() || undefined,
+        assignedAgentId: hostAgentId,
+        assignedAgentName: hostAgentName,
+      });
+      setIsScheduleModalOpen(false);
+      await loadAll();
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleConfirmVisit = (visit: SiteVisit) => {
-    storageService.saveSiteVisit({ ...visit, status: 'Scheduled' });
-    loadData();
+  // ── Row actions ────────────────────────────────────────────────────────────
+  const handleConfirmVisit = async (sv: SiteVisit) => {
+    await jaminApiService.confirmSiteVisit(sv.id);
+    await loadAll();
   };
 
-  const handleMarkComplete = (visit: SiteVisit) => {
-    saveStoredSiteVisit({ ...visit, status: 'Completed' });
+  const handleMarkComplete = async (sv: SiteVisit) => {
+    await jaminApiService.completeSiteVisit(sv.id, 'Site visit completed.');
+    await loadAll();
   };
 
+  // ── Table columns ──────────────────────────────────────────────────────────
   const columns: Column<SiteVisit>[] = [
     {
       key: 'scheduledAt',
@@ -169,7 +150,7 @@ export const SiteVisitsPage: React.FC = () => {
       render: sv => (
         <div>
           <div className="sitevisit-slot-title">{sv.scheduledAt}</div>
-          <div className="sitevisit-slot-id">ID: {sv.id}</div>
+          <div className="sitevisit-slot-id">ID #{sv.id}</div>
         </div>
       ),
     },
@@ -211,7 +192,7 @@ export const SiteVisitsPage: React.FC = () => {
         <div>
           <div className="sitevisit-project-name">{sv.projectName}</div>
           <div className="sitevisit-plot-target">
-            {sv.plotNumber || 'General Project Tour'}
+            {sv.plotNumber && sv.plotNumber !== 'Layout Tour' ? sv.plotNumber : 'General Project Tour'}
           </div>
         </div>
       ),
@@ -249,6 +230,7 @@ export const SiteVisitsPage: React.FC = () => {
     },
   ];
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="sitevisits-page-container">
       <div className="page-header">
@@ -257,13 +239,17 @@ export const SiteVisitsPage: React.FC = () => {
             <Calendar size={24} color="#dc2626" /> Site Visits Log & Scheduling
           </h1>
           <p className="page-subtitle">
-            Coordinate customer site walkthroughs, cab logistics, and plot inspections for {tenant?.name}.
+            Coordinate customer site walkthroughs — linked to real Projects and Plots for live count tracking.
           </p>
         </div>
-
-        <button className="btn btn-primary" onClick={handleOpenScheduleModal}>
-          <Plus size={15} /> Schedule Site Visit
-        </button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn btn-secondary" onClick={loadAll} title="Refresh">
+            <RefreshCw size={15} />
+          </button>
+          <button className="btn btn-primary" onClick={handleOpenScheduleModal}>
+            <Plus size={15} /> Schedule Site Visit
+          </button>
+        </div>
       </div>
 
       <DataTable
@@ -274,135 +260,16 @@ export const SiteVisitsPage: React.FC = () => {
         searchPlaceholder="Search visits by customer, project, or plot..."
       />
 
-      {/* Schedule Visit Modal */}
+      {/* ── Schedule Visit Modal ──────────────────────────────────────────── */}
       <Modal
         isOpen={isScheduleModalOpen}
         onClose={() => setIsScheduleModalOpen(false)}
         title="Schedule Prospective Buyer Site Visit"
-        subtitle="Book layout walkthrough and link directly to Lead or Customer"
+        subtitle="Book layout walkthrough — linked to Project & Plot for auto-count tracking"
       >
         <form onSubmit={handleScheduleVisit} className="sitevisit-form">
-          {/* Client Type Options: Customer, Lead, or Custom */}
-          <div className="form-group" style={{ marginBottom: 16 }}>
-            <label className="form-label" style={{ fontWeight: 600, marginBottom: 8, display: 'block' }}>
-              Select Client Type
-            </label>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
-                gap: 6,
-                background: 'var(--bg-card-subtle, #f1f5f9)',
-                padding: 4,
-                borderRadius: 8,
-                border: '1px solid var(--border-base)',
-              }}
-            >
-              {(['customer', 'lead', 'custom'] as const).map(type => {
-                const label = type === 'customer' ? 'Customer' : type === 'lead' ? 'Lead' : 'Custom';
-                const isSelected = clientSource === type;
-                return (
-                  <button
-                    key={type}
-                    type="button"
-                    onClick={() => {
-                      setClientSource(type);
-                      setSelectedEntityId('');
-                      setCustomerName('');
-                      setCustomerPhone(type === 'custom' ? '+91 ' : '');
-                    }}
-                    style={{
-                      padding: '9px 12px',
-                      borderRadius: 6,
-                      border: 'none',
-                      cursor: 'pointer',
-                      fontSize: 13,
-                      fontWeight: isSelected ? 700 : 500,
-                      background: isSelected
-                        ? 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)'
-                        : 'transparent',
-                      color: isSelected ? '#ffffff' : 'var(--text-secondary)',
-                      boxShadow: isSelected ? '0 2px 6px rgba(220, 38, 38, 0.3)' : 'none',
-                      transition: 'all 0.2s ease',
-                      textAlign: 'center',
-                    }}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
 
-          {/* Downside Dropdown based on chosen Client Type */}
-          {clientSource !== 'custom' ? (
-            <div className="form-group" style={{ marginBottom: 14 }}>
-              <label className="form-label">
-                {clientSource === 'customer' ? 'Select Customer *' : 'Select Lead *'}
-              </label>
-              {clientSource === 'customer' ? (
-                <select
-                  className="form-select"
-                  required
-                  value={selectedEntityId}
-                  onChange={e => {
-                    const id = e.target.value;
-                    setSelectedEntityId(id);
-                    const c = customers.find(item => item.id === id);
-                    if (c) {
-                      setCustomerName(c.name);
-                      setCustomerPhone(c.phone);
-                      if (c.assignedAgentName) {
-                        setHostAgentName(c.assignedAgentName);
-                        setHostAgentId(c.assignedAgentId || '');
-                      }
-                    } else {
-                      setCustomerName('');
-                      setCustomerPhone('');
-                    }
-                  }}
-                >
-                  <option value="">-- Choose a Customer --</option>
-                  {customers.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.phone}) {c.tier ? `— ${c.tier}` : ''}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <select
-                  className="form-select"
-                  required
-                  value={selectedEntityId}
-                  onChange={e => {
-                    const id = e.target.value;
-                    setSelectedEntityId(id);
-                    const l = leads.find(item => item.id === id);
-                    if (l) {
-                      setCustomerName(l.name);
-                      setCustomerPhone(l.phone);
-                      if (l.assignedAgentName && l.assignedAgentName !== 'Unassigned') {
-                        setHostAgentName(l.assignedAgentName);
-                        setHostAgentId(l.assignedAgentId || '');
-                      }
-                    } else {
-                      setCustomerName('');
-                      setCustomerPhone('');
-                    }
-                  }}
-                >
-                  <option value="">-- Choose a Lead --</option>
-                  {leads.map(l => (
-                    <option key={l.id} value={l.id}>
-                      {l.name} ({l.phone}) {l.projectInterest ? `— ${l.projectInterest}` : ''}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-          ) : null}
-
-          {/* Standard Separate Text Boxes for Name and Mobile */}
+          {/* Client Name & Phone */}
           <div className="sitevisit-form-grid-2">
             <div className="form-group">
               <label className="form-label">Client Name *</label>
@@ -410,23 +277,9 @@ export const SiteVisitsPage: React.FC = () => {
                 type="text"
                 className="form-input"
                 required
-                readOnly={clientSource !== 'custom'}
                 value={customerName}
-                onChange={e => {
-                  if (clientSource === 'custom') {
-                    setCustomerName(e.target.value);
-                  }
-                }}
-                placeholder={
-                  clientSource === 'custom'
-                    ? 'e.g. Sunil Rao'
-                    : `Pick a ${clientSource} from dropdown above`
-                }
-                style={
-                  clientSource !== 'custom'
-                    ? { background: 'var(--bg-card-subtle, #f3f4f6)', cursor: 'not-allowed', color: 'var(--text-secondary)' }
-                    : {}
-                }
+                onChange={e => setCustomerName(e.target.value)}
+                placeholder="e.g. Sunil Rao"
               />
             </div>
             <div className="form-group">
@@ -436,32 +289,63 @@ export const SiteVisitsPage: React.FC = () => {
                 inputMode="tel"
                 className="form-input"
                 required
-                readOnly={clientSource !== 'custom'}
                 value={customerPhone}
-                onChange={e => {
-                  if (clientSource === 'custom') {
-                    setCustomerPhone(e.target.value.replace(/[a-zA-Z]/g, '').replace(/[^0-9+\s\-*#()]/g, ''));
-                  }
-                }}
-                onKeyDown={e => {
-                  if (clientSource === 'custom' && e.key.length === 1 && /[a-zA-Z]/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
-                    e.preventDefault();
-                  }
-                }}
-                placeholder={
-                  clientSource === 'custom'
-                    ? '+91 98800 00000'
-                    : `Pick a ${clientSource} from dropdown above`
+                onChange={e =>
+                  setCustomerPhone(e.target.value.replace(/[a-zA-Z]/g, '').replace(/[^0-9+\s\-*#()]/g, ''))
                 }
-                style={
-                  clientSource !== 'custom'
-                    ? { background: 'var(--bg-card-subtle, #f3f4f6)', cursor: 'not-allowed', color: 'var(--text-secondary)' }
-                    : {}
-                }
+                placeholder="+91 98800 00000"
               />
             </div>
           </div>
 
+          {/* Project → Plot linked dropdowns */}
+          <div className="sitevisit-form-grid-2">
+            <div className="form-group">
+              <label className="form-label">Project *</label>
+              <select
+                className="form-select"
+                required
+                value={selectedProjectId}
+                onChange={e => setSelectedProjectId(e.target.value)}
+              >
+                <option value="">-- Select Project --</option>
+                {projects.map((p: any) => (
+                  <option key={p.id} value={String(p.id)}>
+                    {p.name} — {p.location}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">
+                Plot{' '}
+                <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                  (optional)
+                </span>
+              </label>
+              <select
+                className="form-select"
+                value={selectedPlotId}
+                onChange={e => setSelectedPlotId(e.target.value)}
+                disabled={!selectedProjectId || filteredPlots.length === 0}
+              >
+                <option value="">-- General Project Tour --</option>
+                {filteredPlots.map((pl: any) => (
+                  <option key={pl.id} value={String(pl.id)}>
+                    {pl.plotNumber} · {pl.dimensions} · {pl.status}
+                    {pl.price ? ` · ₹${Number(pl.price).toLocaleString('en-IN')}` : ''}
+                  </option>
+                ))}
+              </select>
+              {selectedProjectId && filteredPlots.length === 0 && (
+                <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
+                  No plots added for this project yet.
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Visit Date & Time */}
           <div className="sitevisit-form-grid-2">
             <div className="form-group">
               <label className="form-label">Visit Date *</label>
@@ -482,59 +366,36 @@ export const SiteVisitsPage: React.FC = () => {
                 value={visitTimeSlot}
                 onChange={e => setVisitTimeSlot(e.target.value)}
               >
-                <option value="Morning · 9–11 am">Morning · 9–11 am</option>
-                <option value="Midday · 11 am–1 pm">Midday · 11 am–1 pm</option>
-                <option value="Afternoon · 2–4 pm">Afternoon · 2–4 pm</option>
-                <option value="Evening · 4–6 pm">Evening · 4–6 pm</option>
+                {TIME_SLOTS.map(slot => (
+                  <option key={slot} value={slot}>{slot}</option>
+                ))}
               </select>
             </div>
           </div>
 
+          {/* Host Agent */}
           <div className="form-group">
             <label className="form-label">Host Escort Agent</label>
             <select
               className="form-select"
-              value={hostAgentName}
+              value={hostAgentId}
               onChange={e => {
-                const ag = jaminAgents.find(a => a.name === e.target.value);
-                setHostAgentName(e.target.value);
-                setHostAgentId(ag?.id || '');
+                const id = Number(e.target.value);
+                setHostAgentId(id);
+                const ag = agents.find(a => a.id === id);
+                setHostAgentName(ag?.name || '');
               }}
             >
-              {jaminAgents.map(ag => (
-                <option key={ag.id} value={ag.name}>
+              <option value="0">-- Select Agent --</option>
+              {agents.map(ag => (
+                <option key={ag.id} value={ag.id}>
                   {ag.name} ({ag.email})
                 </option>
               ))}
             </select>
           </div>
 
-          <div className="sitevisit-form-grid-2">
-            <div className="form-group">
-              <label className="form-label">Development Target</label>
-              <select
-                className="form-select"
-                value={projectName}
-                onChange={e => setProjectName(e.target.value)}
-              >
-                <option value="Jamin Garden — Varapatty">Jamin Garden — Varapatty (Coimbatore)</option>
-                <option value="Jamin Garden — Edappadi">Jamin Garden — Edappadi (Salem)</option>
-                <option value="Jamin Garden — Shastri Nagar">Jamin Garden — Shastri Nagar (Erode)</option>
-                <option value="Trichy's Tulip">Trichy's Tulip (Tiruchirappalli)</option>
-              </select>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Plot Number Target</label>
-              <input
-                type="text"
-                className="form-input"
-                value={plotNumber}
-                onChange={e => setPlotNumber(e.target.value)}
-                placeholder="e.g. Plot #15"
-              />
-            </div>
-          </div>
-
+          {/* Notes */}
           <div className="form-group">
             <label className="form-label">Logistics / Pickup Notes</label>
             <textarea
@@ -547,11 +408,16 @@ export const SiteVisitsPage: React.FC = () => {
           </div>
 
           <div className="sitevisit-form-actions">
-            <button type="button" className="btn btn-secondary" onClick={() => setIsScheduleModalOpen(false)}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setIsScheduleModalOpen(false)}
+              disabled={isSubmitting}
+            >
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
-              Confirm Schedule
+            <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
+              {isSubmitting ? 'Scheduling...' : 'Confirm Schedule'}
             </button>
           </div>
         </form>

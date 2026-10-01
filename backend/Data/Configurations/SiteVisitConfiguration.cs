@@ -53,6 +53,7 @@ public class SiteVisitConfiguration : IEntityTypeConfiguration<SiteVisit>
         // Indexes
         builder.HasIndex(sv => new { sv.TenantId, sv.Status });
         builder.HasIndex(sv => sv.LeadId);
+        builder.HasIndex(sv => sv.CustomerId);
 
         // Relationships
         builder.HasOne(sv => sv.Tenant)
@@ -64,5 +65,23 @@ public class SiteVisitConfiguration : IEntityTypeConfiguration<SiteVisit>
             .WithMany(l => l.SiteVisits)
             .HasForeignKey(sv => sv.LeadId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(sv => sv.Customer)
+            .WithMany()
+            .HasForeignKey(sv => sv.CustomerId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(sv => sv.Project)
+            .WithMany(p => p.SiteVisits)
+            .HasForeignKey(sv => sv.ProjectId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(sv => sv.Plot)
+            .WithMany(p => p.SiteVisits)
+            .HasForeignKey(sv => sv.PlotId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasIndex(sv => sv.ProjectId);
+        builder.HasIndex(sv => sv.PlotId);
     }
 }

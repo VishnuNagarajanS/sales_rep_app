@@ -1,0 +1,265 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 1200" width="100%" height="100%">
+  <defs>
+    <!-- Grid pattern for CAD blueprint background -->
+    <pattern id="cadGrid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#f1f5f9" stroke-width="0.8"/>
+    </pattern>
+    <!-- Park dot pattern -->
+    <pattern id="parkDots" width="14" height="14" patternUnits="userSpaceOnUse">
+      <circle cx="7" cy="7" r="1.8" fill="#10b981" opacity="0.8"/>
+    </pattern>
+    <!-- Filter for subtle drop shadow on plots -->
+    <filter id="plotShadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="#000000" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="600" height="1200" fill="#ffffff"/>
+  <rect width="600" height="1200" fill="url(#cadGrid)"/>
+
+  <!-- Compass / North Arrow -->
+  <g transform="translate(520, 60)">
+    <circle cx="0" cy="0" r="24" fill="#ffffff" stroke="#0f172a" stroke-width="1.5"/>
+    <path d="M 0 -20 L 6 0 L -6 0 Z" fill="#dc2626"/>
+    <path d="M 0 20 L 6 0 L -6 0 Z" fill="#64748b"/>
+    <text x="0" y="-24" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#dc2626">N</text>
+  </g>
+
+  <!-- Outer Master Boundary Line (Red highlight) -->
+  <path d="M 270 30 L 570 45 L 560 520 L 380 520 L 350 1080 L 100 1130 L 260 30 Z" 
+        fill="none" stroke="#ef4444" stroke-width="3.5" stroke-linejoin="round"/>
+
+  <!-- Main Roads (Terracotta / Orange road fill) -->
+  <!-- 12.0M Main Central Avenue Spine -->
+  <path d="M 270 40 L 315 42 L 310 170 L 300 370 L 290 580 L 360 580 L 330 1080 L 270 1090 L 300 580 L 220 580 L 230 380 L 245 175 L 255 40 Z" 
+        fill="#e29578" opacity="0.85"/>
+
+  <!-- Lateral 9.0M Roads across layout -->
+  <!-- Road 1 -->
+  <path d="M 305 130 L 565 145 L 565 185 L 302 170 Z" fill="#e29578" opacity="0.85"/>
+  <!-- Road 2 -->
+  <path d="M 295 330 L 562 345 L 562 385 L 292 370 Z" fill="#e29578" opacity="0.85"/>
+  <!-- Road 3 -->
+  <path d="M 285 540 L 558 555 L 558 595 L 282 580 Z" fill="#e29578" opacity="0.85"/>
+  <!-- Road 4 (Lower spine) -->
+  <path d="M 175 730 L 315 730 L 313 770 L 165 770 Z" fill="#e29578" opacity="0.85"/>
+  <!-- Road 5 (Lower spine) -->
+  <path d="M 145 920 L 295 920 L 293 960 L 135 960 Z" fill="#e29578" opacity="0.85"/>
+
+  <!-- Road Text Labels -->
+  <text x="430" y="162" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#431407">9.0 M WIDE ROAD</text>
+  <text x="420" y="362" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#431407">9.0 M WIDE ROAD</text>
+  <text x="420" y="572" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#431407">9.0 M WIDE ROAD</text>
+  <text x="240" y="754" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#431407">9.0 M WIDE ROAD</text>
+  <text x="215" y="944" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#431407">9.0 M WIDE ROAD</text>
+
+  <!-- Vertical Road label -->
+  <text transform="translate(315, 850) rotate(85)" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#431407">12.0 M MAIN CENTRAL BOULEVARD ROAD</text>
+
+  <!-- ── TOP SECTOR PLOTS (Plots 31 to 38) ────────────────────────── -->
+  <!-- Plot 31 -->
+  <rect x="315" y="48" width="40" height="80" rx="3" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <circle cx="335" cy="80" r="11" fill="#c084fc"/>
+  <text x="335" y="84" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">31</text>
+  <text x="335" y="115" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#475569">30x40</text>
+
+  <!-- Plot 32 -->
+  <rect x="358" y="50" width="45" height="80" rx="3" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <circle cx="380" cy="80" r="11" fill="#c084fc"/>
+  <text x="380" y="84" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">32</text>
+  <text x="380" y="115" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#475569">30x40</text>
+
+  <!-- Plot 33 -->
+  <rect x="406" y="52" width="50" height="80" rx="3" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <circle cx="431" cy="80" r="11" fill="#c084fc"/>
+  <text x="431" y="84" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">33</text>
+  <text x="431" y="115" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#475569">30x50</text>
+
+  <!-- Plot 34 -->
+  <rect x="459" y="54" width="50" height="80" rx="3" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <circle cx="484" cy="80" r="11" fill="#c084fc"/>
+  <text x="484" y="84" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">34</text>
+  <text x="484" y="115" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#475569">30x50</text>
+
+  <!-- Plot 35 (Corner) -->
+  <rect x="512" y="56" width="52" height="80" rx="3" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <circle cx="538" cy="80" r="11" fill="#c084fc"/>
+  <text x="538" y="84" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">35</text>
+  <text x="538" y="115" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#475569">Corner</text>
+
+  <!-- ── SECTOR 2 (Plots 21 to 30) ────────────────────────────────── -->
+  <!-- Top Row of Sector 2 -->
+  <rect x="310" y="190" width="55" height="65" rx="3" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <circle cx="337" cy="220" r="11" fill="#c084fc"/>
+  <text x="337" y="224" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">21</text>
+  <text x="337" y="245" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#475569">1200 SFT</text>
+
+  <rect x="368" y="192" width="60" height="65" rx="3" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <circle cx="398" cy="220" r="11" fill="#c084fc"/>
+  <text x="398" y="224" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">22</text>
+  <text x="398" y="245" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#475569">1200 SFT</text>
+
+  <rect x="431" y="194" width="60" height="65" rx="3" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <circle cx="461" cy="220" r="11" fill="#c084fc"/>
+  <text x="461" y="224" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">23</text>
+  <text x="461" y="245" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#475569">1500 SFT</text>
+
+  <rect x="494" y="196" width="68" height="65" rx="3" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <circle cx="528" cy="220" r="11" fill="#c084fc"/>
+  <text x="528" y="224" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">24</text>
+  <text x="528" y="245" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#475569">1500 SFT</text>
+
+  <!-- Bottom Row of Sector 2 -->
+  <rect x="305" y="258" width="55" height="68" rx="3" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <circle cx="332" cy="292" r="11" fill="#c084fc"/>
+  <text x="332" y="296" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">25</text>
+  <text x="332" y="316" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#475569">1200 SFT</text>
+
+  <rect x="363" y="260" width="60" height="68" rx="3" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <circle cx="393" cy="292" r="11" fill="#c084fc"/>
+  <text x="393" y="296" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">26</text>
+  <text x="393" y="316" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#475569">1200 SFT</text>
+
+  <rect x="426" y="262" width="60" height="68" rx="3" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <circle cx="456" cy="292" r="11" fill="#c084fc"/>
+  <text x="456" y="296" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">27</text>
+  <text x="456" y="316" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#475569">1500 SFT</text>
+
+  <rect x="489" y="264" width="70" height="68" rx="3" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <circle cx="524" cy="292" r="11" fill="#c084fc"/>
+  <text x="524" y="296" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">28</text>
+  <text x="524" y="316" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#475569">1500 SFT</text>
+
+  <!-- ── SECTOR 3 (Plots 11 to 20 & Commercial) ──────────────────── -->
+  <rect x="298" y="390" width="58" height="68" rx="3" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <circle cx="327" cy="424" r="11" fill="#c084fc"/>
+  <text x="327" y="428" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">15</text>
+  <text x="327" y="448" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#475569">1200 SFT</text>
+
+  <rect x="359" y="392" width="65" height="68" rx="3" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <circle cx="391" cy="424" r="11" fill="#c084fc"/>
+  <text x="391" y="428" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">16</text>
+  <text x="391" y="448" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#475569">1200 SFT</text>
+
+  <rect x="427" y="394" width="65" height="68" rx="3" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <circle cx="459" cy="424" r="11" fill="#c084fc"/>
+  <text x="459" y="428" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">17</text>
+  <text x="459" y="448" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#475569">1500 SFT</text>
+
+  <!-- Commercial Shop Plots (Green & Blue) -->
+  <rect x="495" y="396" width="30" height="68" rx="3" fill="#bae6fd" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <text x="510" y="432" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" font-weight="bold" fill="#0369a1">SHOP 1</text>
+  
+  <rect x="528" y="398" width="30" height="68" rx="3" fill="#bbf7d0" stroke="#16a34a" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <text x="543" y="432" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" font-weight="bold" fill="#15803d">SHOP 2</text>
+
+  <!-- Bottom of Sector 3 -->
+  <rect x="290" y="462" width="58" height="74" rx="3" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <circle cx="319" cy="498" r="11" fill="#c084fc"/>
+  <text x="319" y="502" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">18</text>
+  <text x="319" y="524" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#475569">1200 SFT</text>
+
+  <rect x="351" y="464" width="65" height="74" rx="3" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <circle cx="383" cy="498" r="11" fill="#c084fc"/>
+  <text x="383" y="502" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">19</text>
+  <text x="383" y="524" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#475569">1200 SFT</text>
+
+  <rect x="419" y="466" width="65" height="74" rx="3" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+  <circle cx="451" cy="498" r="11" fill="#c084fc"/>
+  <text x="451" y="502" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">20</text>
+  <text x="451" y="524" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#475569">1500 SFT</text>
+
+  <!-- ── CENTRAL PARK & CLUBHOUSE AMENITY ZONE ──────────────────── -->
+  <rect x="345" y="600" width="210" height="100" rx="6" fill="#f0fdf4" stroke="#16a34a" stroke-width="2" filter="url(#plotShadow)"/>
+  <rect x="345" y="600" width="210" height="100" rx="6" fill="url(#parkDots)"/>
+  <rect x="410" y="625" width="80" height="45" rx="4" fill="#dcfce7" stroke="#15803d" stroke-width="1.5"/>
+  <text x="450" y="645" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#166534">PARK &amp; PLAY AREA</text>
+  <text x="450" y="658" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#15803d">94.31 METERS PERIMETER</text>
+
+  <!-- ── LOWER SPINE LEFT QUADRANTS (Plots 01 to 10) ─────────────── -->
+  <!-- Block A: Plots 09 & 10 -->
+  <g transform="translate(160, 410)">
+    <rect x="0" y="0" width="55" height="55" rx="4" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+    <circle cx="27" cy="27" r="11" fill="#c084fc"/>
+    <text x="27" y="31" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">09</text>
+    
+    <rect x="58" y="0" width="55" height="55" rx="4" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+    <circle cx="85" cy="27" r="11" fill="#c084fc"/>
+    <text x="85" y="31" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">10</text>
+    
+    <rect x="0" y="58" width="55" height="55" rx="4" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+    <circle cx="27" cy="85" r="11" fill="#c084fc"/>
+    <text x="27" y="89" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">11</text>
+    
+    <rect x="58" y="58" width="55" height="55" rx="4" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+    <circle cx="85" cy="85" r="11" fill="#c084fc"/>
+    <text x="85" y="89" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">12</text>
+  </g>
+
+  <!-- Block B: Plots 05 to 08 -->
+  <g transform="translate(140, 600)">
+    <rect x="0" y="0" width="58" height="58" rx="4" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+    <circle cx="29" cy="29" r="11" fill="#c084fc"/>
+    <text x="29" y="33" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">05</text>
+    
+    <rect x="62" y="0" width="58" height="58" rx="4" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+    <circle cx="91" cy="29" r="11" fill="#c084fc"/>
+    <text x="91" y="33" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">06</text>
+    
+    <rect x="0" y="62" width="58" height="58" rx="4" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+    <circle cx="29" cy="91" r="11" fill="#c084fc"/>
+    <text x="29" y="95" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">07</text>
+    
+    <!-- Plot 08 Highlighted / Held -->
+    <rect x="62" y="62" width="58" height="58" rx="4" fill="#fef3c7" stroke="#d97706" stroke-width="2" filter="url(#plotShadow)"/>
+    <circle cx="91" cy="91" r="11" fill="#f59e0b"/>
+    <text x="91" y="95" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">08</text>
+    <text x="91" y="112" text-anchor="middle" font-family="Arial, sans-serif" font-size="7" font-weight="bold" fill="#b45309">BOOKED</text>
+  </g>
+
+  <!-- Block C: Plots 01 to 04 (Grand Entrance Sector) -->
+  <g transform="translate(120, 790)">
+    <rect x="0" y="0" width="62" height="62" rx="4" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+    <circle cx="31" cy="31" r="11" fill="#c084fc"/>
+    <text x="31" y="35" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">01</text>
+    <text x="31" y="52" text-anchor="middle" font-family="Arial, sans-serif" font-size="7" fill="#475569">30 x 40</text>
+    
+    <rect x="66" y="0" width="62" height="62" rx="4" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+    <circle cx="97" cy="31" r="11" fill="#c084fc"/>
+    <text x="97" y="35" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">02</text>
+    <text x="97" y="52" text-anchor="middle" font-family="Arial, sans-serif" font-size="7" fill="#475569">30 x 40</text>
+    
+    <!-- Plot 03 Held with Special Highlight -->
+    <rect x="0" y="66" width="62" height="62" rx="4" fill="#fef3c7" stroke="#b45309" stroke-width="2.5" filter="url(#plotShadow)"/>
+    <circle cx="31" cy="97" r="11" fill="#d97706"/>
+    <text x="31" y="101" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">03</text>
+    <text x="31" y="118" text-anchor="middle" font-family="Arial, sans-serif" font-size="7" font-weight="bold" fill="#b45309">HOLD</text>
+    
+    <rect x="66" y="66" width="62" height="62" rx="4" fill="#ecfeff" stroke="#0284c7" stroke-width="1.2" filter="url(#plotShadow)"/>
+    <circle cx="97" cy="97" r="11" fill="#c084fc"/>
+    <text x="97" y="101" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#ffffff">04</text>
+    <text x="97" y="118" text-anchor="middle" font-family="Arial, sans-serif" font-size="7" fill="#475569">40 x 60</text>
+  </g>
+
+  <!-- ── GATED ENTRANCE & NATIONAL HIGHWAY LINK ────────────────── -->
+  <!-- Highway Band at bottom -->
+  <polygon points="10,1170 420,1110 425,1140 10,1200" fill="#fef08a" stroke="#ca8a04" stroke-width="1.5"/>
+  <text transform="translate(210, 1150) rotate(-7)" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#713f12">
+    PROPOSED 80 FT WIDE STATE HIGHWAY / MAIN ACCESS ROAD
+  </text>
+
+  <!-- Grand Entry Arch & Security Gate -->
+  <g transform="translate(300, 1100)">
+    <rect x="-35" y="-12" width="70" height="24" rx="4" fill="#0f172a" stroke="#ffffff" stroke-width="1.5"/>
+    <text x="0" y="3" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" font-weight="bold" fill="#38bdf8">MAIN GATE</text>
+  </g>
+
+  <!-- Title Badge Top Left -->
+  <g transform="translate(40, 60)">
+    <rect x="0" y="0" width="200" height="75" rx="8" fill="#ffffff" stroke="#0f172a" stroke-width="1.5" filter="url(#plotShadow)"/>
+    <text x="14" y="24" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#0f172a">MASTER LAYOUT PLAN</text>
+    <text x="14" y="42" font-family="Arial, sans-serif" font-size="9" fill="#059669" font-weight="bold">DTCP / BMRDA SANCTIONED</text>
+    <text x="14" y="58" font-family="Arial, sans-serif" font-size="8" fill="#64748b">SCALE: 1:500 • CLEAR TITLES</text>
+  </g>
+</svg>

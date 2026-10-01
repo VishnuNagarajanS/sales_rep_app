@@ -39,4 +39,5 @@ public class JaminProject
     // Navigation
     public ICollection<JaminPlot> Plots { get; set; } = new List<JaminPlot>();
     public ICollection<JaminBooking> Bookings { get; set; } = new List<JaminBooking>();
+    public ICollection<SiteVisit> SiteVisits { get; set; } = new List<SiteVisit>();
 }

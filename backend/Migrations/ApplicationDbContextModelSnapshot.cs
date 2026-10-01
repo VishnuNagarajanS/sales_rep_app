@@ -1731,19 +1731,8 @@ namespace backend.Migrations
                             Phone = "+91 98110 77889",
                             RoleId = 5,
                             Status = "Active"
-                        },
-                        new
-                        {
-                            Id = 6,
-                            CompanyId = 2,
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Email = "rajesh@jaminbazaar.com",
-                            Name = "Rajesh Sharma",
-                            PasswordHash = "$2a$11$z2c3Nc1pe7Tqmxj6Rm15NOt8vuAyyKfqzGtBKpiFU2NcPZxsjt5p.",
-                            Phone = "+91 98450 44556",
-                            RoleId = 4,
-                            Status = "Active"
-                        });
+                        }
+                       );
                 });
 
             modelBuilder.Entity("backend.Models.Entities.AuditLog", b =>

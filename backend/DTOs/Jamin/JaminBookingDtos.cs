@@ -6,6 +6,7 @@ public class JaminBookingResponseDto
 {
     public int Id { get; set; }
     public int CompanyId { get; set; }
+    public int? CustomerId { get; set; }
     public int? ProjectId { get; set; }
     public int? PlotId { get; set; }
     public string CustomerName { get; set; } = string.Empty;
@@ -15,6 +16,7 @@ public class JaminBookingResponseDto
     public decimal TotalPlotPrice { get; set; }
     public decimal TokenAmountPaid { get; set; }
     public string PaymentMode { get; set; } = "Bank Transfer / NEFT";
+    public string? PaymentTerms { get; set; }
     public string Status { get; set; } = "Token Paid";
     public DateTime BookingDate { get; set; }
     public int? AssignedAgentId { get; set; }
@@ -28,6 +30,7 @@ public class JaminBookingResponseDto
 
 public class CreateJaminBookingDto
 {
+    public int? CustomerId { get; set; }
     public string CustomerName { get; set; } = string.Empty;
     public string CustomerPhone { get; set; } = string.Empty;
     public int? ProjectId { get; set; }
@@ -37,6 +40,7 @@ public class CreateJaminBookingDto
     public decimal TotalPlotPrice { get; set; }
     public decimal TokenAmountPaid { get; set; }
     public string? PaymentMode { get; set; }
+    public string? PaymentTerms { get; set; }
     public int? AssignedAgentId { get; set; }
     public string? Notes { get; set; }
 }
@@ -45,5 +49,6 @@ public class UpdateJaminBookingStatusDto
 {
     /// <summary>Token Paid | Agreement Signed | Registration Completed | Cancelled.</summary>
     public string Status { get; set; } = string.Empty;
+    public string? PaymentTerms { get; set; }
     public string? Notes { get; set; }
 }

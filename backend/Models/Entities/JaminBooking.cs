@@ -17,6 +17,9 @@ public class JaminBooking
     public int? PlotId { get; set; }
     public JaminPlot? Plot { get; set; }
 
+    public int? CustomerId { get; set; }
+    public Customer? Customer { get; set; }
+
     public string CustomerName { get; set; } = string.Empty;
     public string CustomerPhone { get; set; } = string.Empty;
 
@@ -34,6 +37,9 @@ public class JaminBooking
 
     /// <summary>Bank Transfer / NEFT / RTGS / UPI / Cheque.</summary>
     public string PaymentMode { get; set; } = "Bank Transfer / NEFT";
+
+    /// <summary>Installment terms / milestones (e.g. 20% advance, 80% on registration).</summary>
+    public string? PaymentTerms { get; set; }
 
     /// <summary>Token Paid | Agreement Signed | Registration Completed | Cancelled.</summary>
     public string Status { get; set; } = "Token Paid";

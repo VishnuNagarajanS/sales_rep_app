@@ -58,16 +58,22 @@ public class JaminPlotService : IJaminPlotService
             return ApiResponse<JaminPlotResponseDto>.FailureResult("Project not found.");
         }
 
+        var area = dto.AreaSqFt > 0 ? dto.AreaSqFt : 1200;
+        var pricePerSqft = dto.PricePerSqft.HasValue && dto.PricePerSqft.Value > 0
+            ? dto.PricePerSqft.Value
+            : (area > 0 ? Math.Round(dto.Price / area, 2) : 0);
+
         var plot = new JaminPlot
         {
             CompanyId = JaminTenantId,
             ProjectId = dto.ProjectId,
             PlotNumber = dto.PlotNumber.Trim(),
             Dimensions = dto.Dimensions?.Trim() ?? "30 x 40",
-            AreaSqFt = dto.AreaSqFt > 0 ? dto.AreaSqFt : 1200,
+            AreaSqFt = area,
             Facing = dto.Facing?.Trim() ?? "East",
             Status = "Available",
             Price = dto.Price,
+            PricePerSqft = pricePerSqft,
             Notes = dto.Notes?.Trim(),
             CreatedAt = DateTime.UtcNow
         };
@@ -97,6 +103,9 @@ public class JaminPlotService : IJaminPlotService
         if (dto.Facing != null) plot.Facing = dto.Facing.Trim();
         if (dto.Status != null) plot.Status = dto.Status.Trim();
         if (dto.Price.HasValue) plot.Price = dto.Price.Value;
+        if (dto.PricePerSqft.HasValue) plot.PricePerSqft = dto.PricePerSqft.Value;
+        else if (dto.Price.HasValue && plot.AreaSqFt > 0) plot.PricePerSqft = Math.Round(dto.Price.Value / plot.AreaSqFt, 2);
+        if (dto.HoldByAgent != null) plot.HoldByAgent = dto.HoldByAgent.Trim();
         if (dto.Notes != null) plot.Notes = dto.Notes.Trim();
 
         plot.UpdatedAt = DateTime.UtcNow;
@@ -123,6 +132,7 @@ public class JaminPlotService : IJaminPlotService
         plot.Status = "Hold";
         plot.HeldByCustomerName = dto.CustomerName.Trim();
         plot.HeldByCustomerPhone = dto.CustomerPhone.Trim();
+        plot.HoldByAgent = dto.HoldByAgent?.Trim();
         plot.HoldExpiresAt = DateTime.UtcNow.AddDays(dto.HoldDays > 0 ? dto.HoldDays : 7);
         if (!string.IsNullOrEmpty(dto.Notes)) plot.Notes = dto.Notes.Trim();
         plot.UpdatedAt = DateTime.UtcNow;
@@ -145,6 +155,7 @@ public class JaminPlotService : IJaminPlotService
         plot.Status = "Available";
         plot.HeldByCustomerName = null;
         plot.HeldByCustomerPhone = null;
+        plot.HoldByAgent = null;
         plot.HoldExpiresAt = null;
         plot.UpdatedAt = DateTime.UtcNow;
 
@@ -164,8 +175,10 @@ public class JaminPlotService : IJaminPlotService
         Facing = p.Facing,
         Status = p.Status,
         Price = p.Price,
+        PricePerSqft = p.PricePerSqft > 0 ? p.PricePerSqft : (p.AreaSqFt > 0 ? Math.Round(p.Price / p.AreaSqFt, 2) : 0),
         HeldByCustomerName = p.HeldByCustomerName,
         HeldByCustomerPhone = p.HeldByCustomerPhone,
+        HoldByAgent = p.HoldByAgent,
         HoldExpiresAt = p.HoldExpiresAt,
         Notes = p.Notes,
         CreatedAt = p.CreatedAt,

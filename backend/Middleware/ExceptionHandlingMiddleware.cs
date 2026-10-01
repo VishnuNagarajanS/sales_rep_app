@@ -23,6 +23,7 @@ public class ExceptionHandlingMiddleware
         }
         catch (Exception ex)
         {
+            Console.WriteLine($"[CRITICAL UNHANDLED EXCEPTION] {ex}");
             _logger.LogError(ex, "An unhandled exception occurred: {Message}", ex.Message);
             await HandleExceptionAsync(context, ex);
         }
@@ -33,9 +34,16 @@ public class ExceptionHandlingMiddleware
         context.Response.ContentType = "application/json";
         context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
 
+        var message = exception.Message;
+        var details = new List<string>();
+        if (exception.InnerException != null)
+        {
+            details.Add(exception.InnerException.Message);
+        }
+
         var response = ApiResponse<object>.FailureResult(
-            "An unexpected error occurred. Please try again later.",
-            new List<string> { "Internal server error." }
+            string.IsNullOrWhiteSpace(message) ? "An unexpected error occurred. Please try again later." : message,
+            details.Count > 0 ? details : new List<string> { "Internal server error." }
         );
 
         var json = JsonSerializer.Serialize(response, new JsonSerializerOptions

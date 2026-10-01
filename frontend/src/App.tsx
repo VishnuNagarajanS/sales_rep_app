@@ -271,8 +271,8 @@ export const App: React.FC = () => {
         source: quickSource,
         status: 'New',
         priority: 'Medium',
-        assignedAgentId: user?.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec'),
-        assignedAgentName: user?.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer'),
+        assignedAgentId: user?.id || '1',
+        assignedAgentName: user?.name || 'Agent',
         createdAt: new Date().toISOString().split('T')[0],
         notes: quickNotes,
         customFields: tenant?.slug === 'jamin'
@@ -439,11 +439,7 @@ export const App: React.FC = () => {
         </ProtectedRoute>
       ) : currentRoute === 'assigned-leads' ? (
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
-          {isGhlAdmin ? (
-            <AssignedLeadsPage />
-          ) : (
-            <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
-          )}
+          <AssignedLeadsPage />
         </ProtectedRoute>
       ) : currentRoute === 'customers' ? (
         <ProtectedRoute permission={PERMISSIONS.CUSTOMERS_VIEW}>

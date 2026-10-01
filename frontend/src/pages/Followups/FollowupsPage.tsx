@@ -34,6 +34,7 @@ import {
   SALES_EXECUTIVE_USERS,
   IRM_USERS,
 } from '../../mock_data/adminFollowupsData';
+import { jaminApiService } from '../../services/jaminApiService';
 import { DateRangePreset } from '../../types/kanban';
 import './FollowupsPage.css';
 import '../Leads/LeadsPage.css';
@@ -45,6 +46,7 @@ export const FollowupsPage: React.FC = () => {
   const [followups, setFollowups] = useState<Followup[]>([]);
   const [callsList, setCallsList] = useState<CallRecord[]>([]);
   const [allLeads, setAllLeads] = useState<Lead[]>([]);
+  const [jaminAgents, setJaminAgents] = useState<Array<{ id: string; name: string; email: string }>>([]);
   const [activeTab, setActiveTab] = useState<'all' | 'due' | 'overdue'>('all');
   const [rescheduleItem, setRescheduleItem] = useState<Followup | null>(null);
   const [rescheduleDate, setRescheduleDate] = useState('');
@@ -52,6 +54,23 @@ export const FollowupsPage: React.FC = () => {
   const [rescheduleType, setRescheduleType] = useState<'call' | 'whatsapp' | 'meeting'>('call');
   const [rescheduleAgentId, setRescheduleAgentId] = useState('');
   const [rescheduleNotes, setRescheduleNotes] = useState('');
+
+  useEffect(() => {
+    if (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02') {
+      jaminApiService.getAgents().then(data => {
+        if (data && data.length > 0) {
+          setJaminAgents(data.map(a => ({ id: String(a.id), name: a.name, email: a.email })));
+        }
+      });
+    }
+  }, [tenant?.slug, tenant?.id]);
+
+  const personOptions = useMemo(() => {
+    if (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02') {
+      return jaminAgents;
+    }
+    return (SALES_EXECUTIVE_USERS || []).map(u => ({ id: u.id, name: u.name, email: u.email }));
+  }, [tenant?.slug, tenant?.id, jaminAgents]);
 
   const handleOpenRescheduleModal = (f: Followup) => {
     setRescheduleItem(f);
@@ -489,15 +508,7 @@ export const FollowupsPage: React.FC = () => {
       status: 'Rescheduled',
     });
 
-    const isJamin = tenant?.slug === 'jamin';
-    const jaminAgents = [
-      { id: 'usr-jamin-exec', name: 'Pooja Hegde', email: 'pooja@jaminbazaar.com' },
-      { id: 'usr-jamin-exec-02', name: 'Vikram Malhotra', email: 'vikram@jaminbazaar.com' },
-      { id: 'usr-jamin-exec-03', name: 'Suresh Kumar', email: 'suresh@jaminbazaar.com' },
-    ];
-    const targetAgent = isJamin
-      ? jaminAgents.find(a => a.id === rescheduleAgentId || a.name === rescheduleAgentId)
-      : (personOptions as any[]).find(p => p.id === rescheduleAgentId || p.name === rescheduleAgentId);
+    const targetAgent = personOptions.find((p: any) => p.id === rescheduleAgentId || p.name === rescheduleAgentId);
 
     const newFollowup: Followup = {
       id: `fup-${Date.now()}`,
@@ -1153,21 +1164,11 @@ export const FollowupsPage: React.FC = () => {
               value={rescheduleAgentId}
               onChange={e => setRescheduleAgentId(e.target.value)}
             >
-              {tenant?.slug === 'jamin'
-                ? [
-                    { id: 'usr-jamin-exec', name: 'Pooja Hegde (pooja@jaminbazaar.com)' },
-                    { id: 'usr-jamin-exec-02', name: 'Vikram Malhotra (vikram@jaminbazaar.com)' },
-                    { id: 'usr-jamin-exec-03', name: 'Suresh Kumar (suresh@jaminbazaar.com)' },
-                  ].map(ag => (
-                    <option key={ag.id} value={ag.id}>
-                      {ag.name}
-                    </option>
-                  ))
-                : personOptions.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
+              {(personOptions || []).map((p: any) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} {p.email ? `(${p.email})` : ''}
+                </option>
+              ))}
             </select>
           </div>
 

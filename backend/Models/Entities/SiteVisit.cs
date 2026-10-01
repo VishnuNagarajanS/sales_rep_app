@@ -9,6 +9,18 @@ public class SiteVisit
     public int? LeadId { get; set; }
     public Lead? Lead { get; set; }
 
+    /// <summary>Optional FK to customers. Set when scheduled for an existing customer.</summary>
+    public int? CustomerId { get; set; }
+    public Customer? Customer { get; set; }
+
+    /// <summary>Optional FK to jamin_projects. Set when visiting a project site.</summary>
+    public int? ProjectId { get; set; }
+    public JaminProject? Project { get; set; }
+
+    /// <summary>Optional FK to jamin_plots. Set when visiting a specific plot.</summary>
+    public int? PlotId { get; set; }
+    public JaminPlot? Plot { get; set; }
+
     public string CustomerName { get; set; } = string.Empty;
     public string CustomerPhone { get; set; } = string.Empty;
     public string? ContactType { get; set; }

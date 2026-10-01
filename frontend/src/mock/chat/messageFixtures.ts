@@ -79,30 +79,3 @@ export const GHL_DM_MESSAGES: ChatMessage[] = [
     reactions: [],
   },
 ];
-
-export const JAMIN_DM_MESSAGES: ChatMessage[] = [
-  {
-    id: 'msg-jamin-dm-1',
-    conversationId: 'conv-dm-jamin-exec-admin',
-    senderId: 'usr-jamin-admin',
-    senderName: 'Mani',
-    content: 'Hi Pooja, please confirm the weekend site visits schedule.',
-    isDeleted: false,
-    isEdited: false,
-    createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-    updatedAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-    reactions: [],
-  },
-  {
-    id: 'msg-jamin-dm-2',
-    conversationId: 'conv-dm-jamin-exec-admin',
-    senderId: 'usr-jamin-exec',
-    senderName: 'Pooja Hegde',
-    content: 'The site visit for Greenfield Meadows Phase 2 is confirmed for tomorrow.',
-    isDeleted: false,
-    isEdited: false,
-    createdAt: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
-    updatedAt: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
-    reactions: [{ emoji: '✅', userId: 'usr-jamin-admin', userName: 'Mani' }],
-  },
-];

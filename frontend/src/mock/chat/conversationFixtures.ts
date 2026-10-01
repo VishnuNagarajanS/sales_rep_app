@@ -30,16 +30,6 @@ export const JAMIN_CHAT_ADMIN: ChatMember = {
   status: 'online',
 };
 
-export const JAMIN_CHAT_EXEC: ChatMember = {
-  id: 'usr-jamin-exec',
-  name: 'Pooja Hegde',
-  email: 'pooja.hegde@jaminbazaar.com',
-  roleCode: 'sales_executive',
-  roleName: 'Sales Executive',
-  companyId: 't-jamin-02',
-  status: 'online',
-};
-
 export const GHL_GROUP_CONVERSATION: ChatConversation = {
   id: 'conv-grp-ghl-sales',
   companyId: 't-ghl-01',
@@ -69,22 +59,6 @@ export const GHL_DM_CONVERSATION: ChatConversation = {
   lastMessage: {
     content: 'All documents for Dr. Rajesh Nambiar are uploaded and verified.',
     senderName: 'Naveen',
-    isDeleted: false,
-  },
-};
-
-export const JAMIN_DM_CONVERSATION: ChatConversation = {
-  id: 'conv-dm-jamin-exec-admin',
-  companyId: 't-jamin-02',
-  type: 'dm',
-  memberIds: [JAMIN_CHAT_ADMIN.id, JAMIN_CHAT_EXEC.id],
-  members: [JAMIN_CHAT_ADMIN, JAMIN_CHAT_EXEC],
-  unreadCount: 0,
-  createdAt: new Date(Date.now() - 3600000 * 6).toISOString(),
-  updatedAt: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
-  lastMessage: {
-    content: 'The site visit for Greenfield Meadows Phase 2 is confirmed for tomorrow.',
-    senderName: 'Pooja Hegde',
     isDeleted: false,
   },
 };

@@ -3,6 +3,7 @@ using backend.DTOs.Common;
 using backend.DTOs.Jamin;
 using backend.Extensions;
 using backend.Models.Entities;
+using backend.Services.Interfaces.Jamin;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -15,33 +16,26 @@ namespace backend.Controllers.Jamin;
 public class JaminProjectsController : JaminTenantControllerBase
 {
     private readonly ApplicationDbContext _db;
-    public JaminProjectsController(ApplicationDbContext db) => _db = db;
+    private readonly IJaminProjectService _projectService;
+
+    public JaminProjectsController(ApplicationDbContext db, IJaminProjectService projectService)
+    {
+        _db = db;
+        _projectService = projectService;
+    }
 
     [HttpGet]
-    public async Task<IActionResult> GetProjects(CancellationToken ct)
+    public async Task<IActionResult> GetProjects([FromQuery] string? status, CancellationToken ct)
     {
-        var companyId = JaminCompanyId;
-        var projects = await _db.JaminProjects.AsNoTracking()
-            .Where(p => p.CompanyId == companyId)
-            .OrderBy(p => p.Name)
-            .Select(p => new JaminProjectResponseDto
-            {
-                Id = p.Id, CompanyId = p.CompanyId, Name = p.Name, Location = p.Location,
-                Status = p.Status, Description = p.Description, TotalPlots = p.TotalPlots,
-                AvailablePlots = p.AvailablePlots, BookedPlots = p.BookedPlots,
-                PriceRange = p.PriceRange, ImageUrl = p.ImageUrl, CreatedAt = p.CreatedAt, UpdatedAt = p.UpdatedAt
-            }).ToListAsync(ct);
-        return Ok(ApiResponse<List<JaminProjectResponseDto>>.SuccessResult(projects));
+        var result = await _projectService.GetProjectsAsync(status, ct);
+        return Ok(result);
     }
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetProjectById(int id, CancellationToken ct)
     {
-        var companyId = JaminCompanyId;
-        var project = await ProjectQuery(companyId).FirstOrDefaultAsync(p => p.Id == id, ct);
-        return project == null
-            ? NotFound(ApiResponse<JaminProjectResponseDto>.FailureResult("Project not found."))
-            : Ok(ApiResponse<JaminProjectResponseDto>.SuccessResult(project));
+        var result = await _projectService.GetProjectByIdAsync(id, ct);
+        return result.Success ? Ok(result) : NotFound(result);
     }
 
     [HttpPost]
@@ -97,6 +91,14 @@ public class JaminProjectsController : JaminTenantControllerBase
         return Ok(ApiResponse<JaminProjectResponseDto>.SuccessResult(result, "Project updated."));
     }
 
+    [HttpDelete("{id:int}")]
+    [Authorize(Roles = "company_admin,super_admin")]
+    public async Task<IActionResult> DeleteProject(int id, CancellationToken ct)
+    {
+        var result = await _projectService.DeleteProjectAsync(id, ct);
+        return result.Success ? Ok(result) : NotFound(result);
+    }
+
     private IQueryable<JaminProjectResponseDto> ProjectQuery(int companyId) => _db.JaminProjects.AsNoTracking()
         .Where(p => p.CompanyId == companyId)
         .Select(p => new JaminProjectResponseDto
@@ -115,3 +117,4 @@ public class JaminProjectsController : JaminTenantControllerBase
         UpdatedAt = p.UpdatedAt
     };
 }
+

@@ -19,32 +19,62 @@ public class JaminProjectService : IJaminProjectService
 
     public async Task<ApiResponse<List<JaminProjectResponseDto>>> GetProjectsAsync(string? status = null, CancellationToken ct = default)
     {
-        var query = _context.JaminProjects
-            .Include(p => p.Plots)
-            .Where(p => p.CompanyId == JaminTenantId);
-
-        if (!string.IsNullOrEmpty(status) && status != "All")
+        try
         {
-            query = query.Where(p => p.Status == status);
-        }
+            var query = _context.JaminProjects
+                .AsNoTracking()
+                .Include(p => p.Plots)
+                .Where(p => p.CompanyId == JaminTenantId);
 
-        var projects = await query.OrderByDescending(p => p.CreatedAt).ToListAsync(ct);
-        return ApiResponse<List<JaminProjectResponseDto>>.SuccessResult(projects.Select(MapToDto).ToList());
+            if (!string.IsNullOrEmpty(status) && status != "All")
+            {
+                query = query.Where(p => p.Status == status);
+            }
+
+            var projects = await query.OrderByDescending(p => p.CreatedAt).ToListAsync(ct);
+            return ApiResponse<List<JaminProjectResponseDto>>.SuccessResult(projects.Select(MapToDto).ToList());
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[JaminProjectService Error] {ex.Message}");
+            // Safe fallback without Include
+            var fallback = await _context.JaminProjects
+                .AsNoTracking()
+                .Where(p => p.CompanyId == JaminTenantId)
+                .OrderByDescending(p => p.CreatedAt)
+                .ToListAsync(ct);
+            return ApiResponse<List<JaminProjectResponseDto>>.SuccessResult(fallback.Select(MapToDto).ToList());
+        }
     }
 
     public async Task<ApiResponse<JaminProjectResponseDto>> GetProjectByIdAsync(int id, CancellationToken ct = default)
     {
-        var project = await _context.JaminProjects
-            .Include(p => p.Plots)
-            .FirstOrDefaultAsync(p => p.Id == id && p.CompanyId == JaminTenantId, ct);
-
-        if (project == null)
+        try
         {
-            return ApiResponse<JaminProjectResponseDto>.FailureResult("Project not found.");
-        }
+            var project = await _context.JaminProjects
+                .AsNoTracking()
+                .Include(p => p.Plots)
+                .FirstOrDefaultAsync(p => p.Id == id && p.CompanyId == JaminTenantId, ct);
 
-        return ApiResponse<JaminProjectResponseDto>.SuccessResult(MapToDto(project));
+            if (project == null)
+            {
+                return ApiResponse<JaminProjectResponseDto>.FailureResult("Project not found.");
+            }
+
+            return ApiResponse<JaminProjectResponseDto>.SuccessResult(MapToDto(project));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[JaminProjectService Error] {ex.Message}");
+            var project = await _context.JaminProjects
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.Id == id && p.CompanyId == JaminTenantId, ct);
+
+            if (project == null) return ApiResponse<JaminProjectResponseDto>.FailureResult("Project not found.");
+            return ApiResponse<JaminProjectResponseDto>.SuccessResult(MapToDto(project));
+        }
     }
+
 
     public async Task<ApiResponse<JaminProjectResponseDto>> CreateProjectAsync(CreateJaminProjectDto dto, CancellationToken ct = default)
     {
@@ -114,8 +144,20 @@ public class JaminProjectService : IJaminProjectService
 
     private static JaminProjectResponseDto MapToDto(JaminProject p)
     {
-        var availableCount = p.Plots.Any() ? p.Plots.Count(pl => pl.Status == "Available") : p.AvailablePlots;
-        var bookedCount = p.Plots.Any() ? p.Plots.Count(pl => pl.Status == "Booked" || pl.Status == "Registered") : p.BookedPlots;
+        var plots = p.Plots ?? new List<JaminPlot>();
+        var hasPlots = plots.Count > 0;
+        var availableCount = hasPlots ? plots.Count(pl => pl.Status == "Available") : p.AvailablePlots;
+        var bookedCount    = hasPlots ? plots.Count(pl => pl.Status == "Booked") : p.BookedPlots;
+        var heldCount      = hasPlots ? plots.Count(pl => pl.Status == "Hold") : 0;
+        var registeredCount = hasPlots ? plots.Count(pl => pl.Status == "Registered") : 0;
+
+        var directVisits = p.SiteVisits?.Count ?? 0;
+        var plotVisits = plots.Sum(pl => pl.SiteVisits?.Count ?? 0);
+        var siteVisitCount = directVisits + plotVisits;
+
+        var directBookings = p.Bookings?.Count ?? 0;
+        var plotBookings = plots.Sum(pl => pl.Bookings?.Count ?? 0);
+        var bookingCount = directBookings + plotBookings;
 
         return new JaminProjectResponseDto
         {
@@ -125,9 +167,13 @@ public class JaminProjectService : IJaminProjectService
             Location = p.Location,
             Status = p.Status,
             Description = p.Description,
-            TotalPlots = p.TotalPlots,
+            TotalPlots = hasPlots ? plots.Count : p.TotalPlots,
             AvailablePlots = availableCount,
             BookedPlots = bookedCount,
+            HeldPlots = heldCount,
+            RegisteredPlots = registeredCount,
+            TotalSiteVisits = siteVisitCount,
+            TotalBookings = bookingCount,
             PriceRange = p.PriceRange,
             ImageUrl = p.ImageUrl,
             CreatedAt = p.CreatedAt,

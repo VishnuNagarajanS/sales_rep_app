@@ -603,20 +603,7 @@ class SuperAdminService {
             designation: 'Institutional Relationship Manager',
             createdAt: '2026-01-05T00:00:00Z',
           },
-          {
-            id: '6',
-            name: 'Rajesh Sharma',
-            email: 'rajesh@jaminbazaar.com',
-            phone: '+91 98450 44556',
-            role: SYSTEM_ROLES.sales_executive,
-            companyId: '2',
-            companySlug: 'jamin',
-            companyName: 'Jamin Bazaar',
-            status: 'Active',
-            lastLogin: '3 hours ago',
-            designation: 'Senior Land Acquisition Consultant',
-            createdAt: '2026-01-03T00:00:00Z',
-          },
+
         ];
         localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
       } else {

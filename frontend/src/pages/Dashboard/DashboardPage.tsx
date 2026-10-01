@@ -24,6 +24,7 @@ import {
   getInvestors,
   getOpportunities,
 } from '../../services/ghlApiService';
+import { jaminApiService } from '../../services/jaminApiService';
 import {
   Lead,
   Deal,
@@ -33,19 +34,11 @@ import {
   Investor,
   InvestmentOpportunity,
   Plot,
+  SiteVisit,
 } from '../../types';
 import { StatusChip } from '../../components/common/StatusChip';
 import { FEATURES } from '../../constants/features';
 import './DashboardPage.css';
-
-const getStoredPlots = (): Plot[] => {
-  try {
-    const raw = localStorage.getItem('nexus_plots');
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-};
 
 interface DashboardPageProps {
   onNavigate: (route: string) => void;
@@ -60,33 +53,53 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
   const [deals, setDeals] = useState<Deal[]>([]);
   const [calls, setCalls] = useState<CallRecord[]>([]);
   const [followups, setFollowups] = useState<Followup[]>([]);
-  const [plots, setPlots] = useState<Plot[]>(() => getStoredPlots());
+  const [plots, setPlots] = useState<any[]>([]);
+  const [siteVisits, setSiteVisits] = useState<SiteVisit[]>([]);
+  const [bookings, setBookings] = useState<any[]>([]);
   const [consultations, setConsultations] = useState<Consultation[]>([]);
   const [investors, setInvestors] = useState<Investor[]>([]);
   const [opportunities, setOpportunities] = useState<InvestmentOpportunity[]>([]);
 
+  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2' || enabledFeatures.includes(FEATURES.PROPERTIES);
+
   const loadData = async () => {
     try {
-      const [l, d, c, f, con, inv, opp] = await Promise.all([
-        getLeads(tenant?.id),
-        getDeals(tenant?.id),
-        getCalls(tenant?.id),
-        getFollowups(tenant?.id),
-        getConsultations(tenant?.id),
-        getInvestors(tenant?.id),
-        getOpportunities(tenant?.id),
-      ]);
-      setLeads(l);
-      setDeals(d);
-      setCalls(c);
-      setFollowups(f);
-      setConsultations(con);
-      setInvestors(inv);
-      setOpportunities(opp);
+      if (isJamin) {
+        const [l, f, plt, sv, bkg, c] = await Promise.all([
+          jaminApiService.getLeads(true),
+          jaminApiService.getFollowups(true),
+          jaminApiService.getPlots(),
+          jaminApiService.getSiteVisits(true),
+          jaminApiService.getBookings(),
+          getCalls(tenant?.id),
+        ]);
+        setLeads(l);
+        setFollowups(f);
+        setPlots(plt);
+        setSiteVisits(sv);
+        setBookings(bkg);
+        setCalls(c);
+      } else {
+        const [l, d, c, f, con, inv, opp] = await Promise.all([
+          getLeads(tenant?.id),
+          getDeals(tenant?.id),
+          getCalls(tenant?.id),
+          getFollowups(tenant?.id),
+          getConsultations(tenant?.id),
+          getInvestors(tenant?.id),
+          getOpportunities(tenant?.id),
+        ]);
+        setLeads(l);
+        setDeals(d);
+        setCalls(c);
+        setFollowups(f);
+        setConsultations(con);
+        setInvestors(inv);
+        setOpportunities(opp);
+      }
     } catch (err) {
       console.error('Failed to load dashboard data', err);
     }
-    setPlots(getStoredPlots());
   };
 
   // Sync with storage updates
