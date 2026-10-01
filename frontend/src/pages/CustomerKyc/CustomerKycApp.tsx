@@ -57,11 +57,15 @@ export const CustomerKycApp: React.FC = () => {
 
   const [token] = useState<string>(() => extractTokenFromUrl());
 
-  // Screen switcher state
-  const [currentScreen, setCurrentScreen] = useState<ScreenId>('otp');
+  // Screen switcher state (initializes to loading if token present, invalid if missing)
+  const [currentScreen, setCurrentScreen] = useState<ScreenId>(() => {
+    const t = extractTokenFromUrl();
+    return t ? 'loading' : 'invalid';
+  });
   const [wizardStep, setWizardStep] = useState<WizardStep>(1);
 
   // Screen 3: Real-Time Free Email OTP state
+  const [registeredEmail, setRegisteredEmail] = useState<string>('');
   const [maskedEmail, setMaskedEmail] = useState<string>('your registered email');
   const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
   const [otpSending, setOtpSending] = useState<boolean>(false);
@@ -258,17 +262,17 @@ export const CustomerKycApp: React.FC = () => {
     return () => clearInterval(timer);
   }, [countdown]);
 
-  // Function to dispatch OTP to investor's email
-  const handleSendOtp = async (customEmail?: string) => {
+  // Function to dispatch OTP to investor's registered email
+  const handleSendOtp = async (customEmail?: string, customToken?: string) => {
     setOtpSending(true);
     setOtpError(null);
     setOtpSuccess(null);
 
-    const activeToken = token || extractTokenFromUrl();
-    let emailToSend = (customEmail || formData.email || '').trim();
+    const activeToken = customToken || token || extractTokenFromUrl();
+    const emailToSend = (customEmail || registeredEmail || formData.email || '').trim();
 
-    if (!emailToSend) {
-      setOtpError('Please enter your email address to receive the verification code.');
+    if (!emailToSend && !activeToken) {
+      setOtpError('No registered email address found for this KYC session. Please contact your Relationship Manager.');
       setOtpSending(false);
       return;
     }
@@ -279,21 +283,24 @@ export const CustomerKycApp: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token: activeToken,
-          email: emailToSend,
+          email: emailToSend || undefined,
         }),
       });
 
       const json = await res.json();
-      if (res.ok && json.success && json.data) {
+      if (res.ok && json.success && json.data?.success) {
         setMaskedEmail(json.data.maskedEmail || 'your email');
         setOtpSuccess(json.data.message || 'Verification code sent to your email!');
         setCountdown(45);
+        setOtpError(null);
         // Focus first box
         setTimeout(() => otpInputRefs.current[0]?.focus(), 100);
       } else {
-        setOtpError(json.message || 'Failed to send verification code. Please try again.');
+        setOtpSuccess(null);
+        setOtpError(json.message || 'Failed to send verification code. Please try again or contact your IRM.');
       }
     } catch (err) {
+      setOtpSuccess(null);
       setOtpError('Unable to connect to verification server. Please ensure backend is running.');
     } finally {
       setOtpSending(false);
@@ -313,12 +320,7 @@ export const CustomerKycApp: React.FC = () => {
     setOtpSuccess(null);
 
     const activeToken = token || extractTokenFromUrl();
-    let emailToVerify = formData.email?.trim() || '';
-    if (!emailToVerify) {
-      setOtpError('Email address is required for verification.');
-      setOtpVerifying(false);
-      return;
-    }
+    const emailToVerify = (registeredEmail || formData.email || '').trim();
 
     try {
       const res = await fetch('/api/irm/kyc/otp/verify', {
@@ -326,7 +328,7 @@ export const CustomerKycApp: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token: activeToken,
-          email: emailToVerify,
+          email: emailToVerify || undefined,
           otp: code,
         }),
       });
@@ -656,47 +658,66 @@ export const CustomerKycApp: React.FC = () => {
 
     const initializeKycAndOtp = async () => {
       const activeToken = token || extractTokenFromUrl();
-      let resolvedEmail = formData.email;
-
-      if (activeToken) {
-        try {
-          const res = await fetch(`/api/irm/kyc/public/${encodeURIComponent(activeToken)}`);
-          if (res.ok) {
-            const json = await res.json();
-            if (json.success && json.data) {
-              const k = json.data;
-              if (k.email) resolvedEmail = k.email;
-              setFormData(prev => ({
-                ...prev,
-                investorName: k.investorName || prev.investorName,
-                phone: k.phone || prev.phone,
-                email: k.email || prev.email,
-                fatherName: k.fatherName || prev.fatherName,
-                dob: k.dateOfBirth || k.dob || prev.dob,
-                nameAsPerPan: k.nameAsPerPan || prev.nameAsPerPan,
-                city: k.city || prev.city,
-                state: k.state || prev.state,
-                gender: k.gender || prev.gender,
-                investorType: k.investorType || prev.investorType,
-                residentType: k.residentType || prev.residentType,
-                occupation: k.occupation || prev.occupation,
-                panNumber: k.panNumber || prev.panNumber,
-                aadhaarNumber: k.aadhaarNumber || prev.aadhaarNumber,
-                address: k.addressLine1 || prev.address,
-                pincode: k.pincode || prev.pincode,
-                bankName: k.bankName || prev.bankName,
-                accountNumber: k.accountNumber || prev.accountNumber,
-                ifscCode: k.ifscCode || prev.ifscCode,
-                accountType: k.accountType || prev.accountType,
-              }));
-            }
-          }
-        } catch (e) {
-          // Token fetch failed or not found, proceed with default sample
-        }
+      if (!activeToken) {
+        setCurrentScreen('invalid');
+        return;
       }
 
-      handleSendOtp(resolvedEmail);
+      setCurrentScreen('loading');
+      try {
+        const res = await fetch(`/api/irm/kyc/public/${encodeURIComponent(activeToken)}`);
+        if (!res.ok) {
+          setCurrentScreen('invalid');
+          return;
+        }
+
+        const json = await res.json();
+        if (!json.success || !json.data) {
+          setCurrentScreen('invalid');
+          return;
+        }
+
+        const k = json.data;
+        const regEmail = (k.email || '').trim();
+        setRegisteredEmail(regEmail);
+
+        setFormData(prev => ({
+          ...prev,
+          investorName: k.investorName || prev.investorName,
+          phone: k.phone || prev.phone,
+          email: regEmail || prev.email,
+          fatherName: k.fatherName || prev.fatherName,
+          dob: k.dateOfBirth || k.dob || prev.dob,
+          nameAsPerPan: k.nameAsPerPan || prev.nameAsPerPan,
+          city: k.city || prev.city,
+          state: k.state || prev.state,
+          gender: k.gender || prev.gender,
+          investorType: k.investorType || prev.investorType,
+          residentType: k.residentType || prev.residentType,
+          occupation: k.occupation || prev.occupation,
+          panNumber: k.panNumber || prev.panNumber,
+          aadhaarNumber: k.aadhaarNumber || prev.aadhaarNumber,
+          address: k.addressLine1 || prev.address,
+          pincode: k.pincode || prev.pincode,
+          bankName: k.bankName || prev.bankName,
+          accountNumber: k.accountNumber || prev.accountNumber,
+          ifscCode: k.ifscCode || prev.ifscCode,
+          accountType: k.accountType || prev.accountType,
+        }));
+
+        setCurrentScreen('otp');
+
+        if (!regEmail) {
+          setOtpError('No registered email address is associated with this KYC request. Please contact your Relationship Manager.');
+          setOtpSuccess(null);
+          return;
+        }
+
+        // Send OTP to registered customer email
+        await handleSendOtp(regEmail, activeToken);
+      } catch (e) {
+        setCurrentScreen('invalid');
+      }
     };
 
     initializeKycAndOtp();
@@ -934,7 +955,15 @@ export const CustomerKycApp: React.FC = () => {
                 </div>
               </div>
               <p className="ckyc-card-desc">
-                We've sent a 6-digit one-time passcode to <strong style={{ color: 'var(--ckyc-text-primary)' }}>{maskedEmail}</strong>. Enter it below to access your KYC onboarding profile.
+                {otpSuccess ? (
+                  <>We've sent a 6-digit one-time passcode to <strong style={{ color: 'var(--ckyc-text-primary)' }}>{maskedEmail}</strong>. Enter it below to access your KYC onboarding profile.</>
+                ) : otpSending ? (
+                  <>Sending a 6-digit one-time passcode to your registered email...</>
+                ) : otpError ? (
+                  <>A 6-digit one-time passcode to your registered email is required to access your KYC onboarding profile.</>
+                ) : (
+                  <>Enter the 6-digit one-time passcode sent to <strong style={{ color: 'var(--ckyc-text-primary)' }}>{maskedEmail}</strong> to access your KYC onboarding profile.</>
+                )}
               </p>
             </div>
 
@@ -1031,7 +1060,7 @@ export const CustomerKycApp: React.FC = () => {
                 <button
                   type="button"
                   className="ckyc-resend-link"
-                  onClick={() => handleSendOtp()}
+                  onClick={() => handleSendOtp(registeredEmail)}
                   disabled={otpSending}
                   style={{
                     display: 'inline-flex',

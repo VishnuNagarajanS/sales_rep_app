@@ -78,7 +78,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   const [agentFilter, setAgentFilter] = useState('All');
 
   // IRM-specific state
-  const [cardIndex, setCardIndex] = useState<Record<string, number>>({});
   const [irmDetailDeal, setIrmDetailDeal] = useState<Deal | null>(null);
 
   // Role-based scoping: Sales Executives see only their own deals.
@@ -433,9 +432,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                       No deals in this stage
                     </div>
                   ) : (
-                    (() => {
-                      const currIdx = Math.min(cardIndex[stage.id] || 0, Math.max(0, stageDeals.length - 1));
-                      const deal = stageDeals[currIdx];
+                    stageDeals.map(deal => {
                       const daysInStage = getDaysInStage(deal);
 
                       return (
@@ -496,53 +493,15 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                             </span>
                           </div>
 
-                          {/* Footer: Investment range + pagination */}
+                          {/* Footer: Investment range */}
                           <div className="irm-card-footer">
                             <span className="irm-card-investment-range">
                               {deal.investmentRange || formatCurrency(deal.value)}
                             </span>
-                            {stageDeals.length > 1 && (
-                              <div
-                                className="irm-card-pagination"
-                                onClick={e => e.stopPropagation()}
-                              >
-                                <span>{currIdx + 1}/{stageDeals.length}</span>
-                                <button
-                                  type="button"
-                                  className="irm-page-btn"
-                                  disabled={currIdx === 0}
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    setCardIndex(prev => ({
-                                      ...prev,
-                                      [stage.id]: Math.max(0, currIdx - 1),
-                                    }));
-                                  }}
-                                  title="Previous Deal"
-                                >
-                                  ‹
-                                </button>
-                                <button
-                                  type="button"
-                                  className="irm-page-btn"
-                                  disabled={currIdx >= stageDeals.length - 1}
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    setCardIndex(prev => ({
-                                      ...prev,
-                                      [stage.id]: Math.min(stageDeals.length - 1, currIdx + 1),
-                                    }));
-                                  }}
-                                  title="Next Deal"
-                                >
-                                  ›
-                                </button>
-                              </div>
-                            )}
                           </div>
                         </div>
                       );
-                    })()
+                    })
                   )
                 ) : (
                   stageDeals.length === 0 ? (

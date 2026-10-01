@@ -52,8 +52,8 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
         if (request.LeadId.HasValue)
         {
             var lead = await context.Set<Lead>().FirstOrDefaultAsync(x => x.Id == request.LeadId && x.CompanyId == currentUser.CompanyId.Value && x.AssignedAgentId == currentUser.UserId.Value, cancellationToken);
-            if (lead != null && request.Disposition is "Interested" or "Not Interested" or "Wrong Number") lead.Status = request.Disposition == "Wrong Number" ? "Junk" : request.Disposition;
-            if (lead != null && request.Disposition is "Follow-up Required" or "Call Back") context.Set<Followup>().Add(new Followup { CompanyId = currentUser.CompanyId.Value, AssignedAgentId = currentUser.UserId.Value, LeadId = lead.Id, ContactId = lead.Id.ToString(), ContactType = "lead", ContactName = lead.Name, ContactPhone = lead.Phone, ScheduledAt = request.FollowupAt ?? DateTime.UtcNow.AddDays(1), Notes = request.Notes ?? string.Empty });
+            if (lead != null && request.Disposition is "Interested" or "Not Interested" or "Wrong Number" or "No Response") lead.Status = request.Disposition == "Wrong Number" ? "Junk" : request.Disposition;
+            if (lead != null && request.Disposition is "Follow-up Required" or "Call Back" or "No Response") context.Set<Followup>().Add(new Followup { CompanyId = currentUser.CompanyId.Value, AssignedAgentId = currentUser.UserId.Value, LeadId = lead.Id, ContactId = lead.Id.ToString(), ContactType = "lead", ContactName = lead.Name, ContactPhone = lead.Phone, ScheduledAt = request.FollowupAt ?? DateTime.UtcNow.AddDays(1), Notes = request.Notes ?? string.Empty });
         }
         await context.SaveChangesAsync(cancellationToken);
         return ApiResponse<CallRecordDto>.SuccessResult(Map(record), "Disposition processed");

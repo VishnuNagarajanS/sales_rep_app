@@ -72,6 +72,8 @@ public class SalesExecutiveFollowupsController : ControllerBase
         var result = await _followupService.CreateFollowupAsync(dto, ct);
         if (!result.Success)
         {
+            if (result.Message.StartsWith("Access denied"))
+                return StatusCode(StatusCodes.Status403Forbidden, result);
             if (result.Message.StartsWith("Unauthorized"))
                 return Unauthorized(result);
             return BadRequest(result);
@@ -91,7 +93,11 @@ public class SalesExecutiveFollowupsController : ControllerBase
     {
         var result = await _followupService.UpdateFollowupAsync(id, dto, ct);
         if (!result.Success)
+        {
+            if (result.Message.StartsWith("Access denied"))
+                return StatusCode(StatusCodes.Status403Forbidden, result);
             return NotFound(result);
+        }
 
         return Ok(result);
     }
@@ -106,7 +112,11 @@ public class SalesExecutiveFollowupsController : ControllerBase
     {
         var result = await _followupService.CompleteFollowupAsync(id, ct);
         if (!result.Success)
+        {
+            if (result.Message.StartsWith("Access denied"))
+                return StatusCode(StatusCodes.Status403Forbidden, result);
             return NotFound(result);
+        }
 
         return Ok(result);
     }
@@ -121,7 +131,11 @@ public class SalesExecutiveFollowupsController : ControllerBase
     {
         var result = await _followupService.DeleteFollowupAsync(id, ct);
         if (!result.Success)
+        {
+            if (result.Message.StartsWith("Access denied"))
+                return StatusCode(StatusCodes.Status403Forbidden, result);
             return NotFound(result);
+        }
 
         return Ok(result);
     }

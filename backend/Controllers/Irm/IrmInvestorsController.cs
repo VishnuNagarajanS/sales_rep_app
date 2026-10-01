@@ -61,6 +61,11 @@ public class IrmInvestorsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateInvestorDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<InvestorDto>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM investor data."));
+        }
+
         var companyId = User.GetCompanyId();
         var irmId = User.GetUserId();
         var result = await _investorService.CreateAsync(companyId, irmId, dto, ct);
@@ -73,6 +78,11 @@ public class IrmInvestorsController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateInvestorDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<InvestorDto>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM investor data."));
+        }
+
         var companyId = User.GetCompanyId();
         var role = User.GetUserRole()?.ToLowerInvariant();
         var userId = User.GetUserId();
@@ -96,6 +106,11 @@ public class IrmInvestorsController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<bool>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM investor data."));
+        }
+
         var companyId = User.GetCompanyId();
         var role = User.GetUserRole()?.ToLowerInvariant();
         var userId = User.GetUserId();

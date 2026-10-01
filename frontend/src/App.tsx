@@ -164,6 +164,16 @@ export const App: React.FC = () => {
     sessionStorage.setItem('nexus_current_route', route);
   };
 
+  useEffect(() => {
+    const handleCustomNav = (e: any) => {
+      if (e.detail) {
+        navigate(e.detail);
+      }
+    };
+    window.addEventListener('nexus_navigate', handleCustomNav);
+    return () => window.removeEventListener('nexus_navigate', handleCustomNav);
+  }, []);
+
   const handleOpenQuickCreate = (type: 'lead' | 'followup' | 'deal' | 'visit' | 'consultation') => {
     setQuickCreateType(type);
     setQuickName('');
@@ -360,7 +370,7 @@ export const App: React.FC = () => {
         <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
       ) : currentRoute === 'leads' ? (
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
-          <LeadsPage />
+          <LeadsPage onNavigate={navigate} />
         </ProtectedRoute>
       ) : currentRoute === 'assigned-leads' ? (
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>

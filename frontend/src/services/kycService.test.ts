@@ -1,4 +1,4 @@
-﻿import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { canTransition, normalizeLegacyKycStatus } from './kycService';
 
 describe('kycService', () => {
@@ -68,6 +68,18 @@ describe('kycService', () => {
       expect(normalizeLegacyKycStatus(null)).toBe('Pending');
       expect(normalizeLegacyKycStatus(undefined)).toBe('Pending');
       expect(normalizeLegacyKycStatus('unknown_status')).toBe('Pending');
+    });
+  });
+
+  describe('Assisted Draft status', () => {
+    it('treats Assisted Draft as incomplete and not ready for auto-verification', () => {
+      // Draft must not bypass to Verified or Submitted without completing steps
+      expect(canTransition('Assisted Draft', 'Verified')).toBe(false);
+      expect(canTransition('Assisted Draft', 'Submitted')).toBe(false);
+    });
+
+    it('does not normalize Assisted Draft to Verified', () => {
+      expect(normalizeLegacyKycStatus('Assisted Draft')).toBe('Pending');
     });
   });
 });

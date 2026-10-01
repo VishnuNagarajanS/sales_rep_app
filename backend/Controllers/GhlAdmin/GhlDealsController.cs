@@ -3,6 +3,7 @@ using backend.Helpers;
 using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.GhlDeals;
+using backend.Extensions;
 using backend.Models.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -20,6 +21,11 @@ namespace backend.Controllers.GhlAdmin;
 [Authorize(Roles = "sales_executive,company_admin,sales_manager,super_admin,irm")]
 public class GhlDealsController : ControllerBase
 {
+    private static readonly HashSet<string> IrmStages = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "leads", "followup", "qualified_investor", "investment_opportunity", "converted"
+    };
+
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
 
@@ -27,6 +33,23 @@ public class GhlDealsController : ControllerBase
     {
         _db = db;
         _currentUser = currentUser;
+    }
+
+    private static bool IsIrmDeal(GhlDeal deal)
+    {
+        if (deal.AssignedAgent?.Role != null &&
+            (deal.AssignedAgent.Role.Code.Equals("irm", StringComparison.OrdinalIgnoreCase) ||
+             deal.AssignedAgent.Role.Name.Equals("IRM", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(deal.Stage) && IrmStages.Contains(deal.Stage.Trim()))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     // ── Scoping helpers ───────────────────────────────────────────────────────
@@ -104,6 +127,12 @@ public class GhlDealsController : ControllerBase
     public async Task<ActionResult<ApiResponse<GhlDealResponseDto>>> CreateDeal(
         [FromBody] CreateGhlDealDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin() && !string.IsNullOrWhiteSpace(dto.Stage) && IrmStages.Contains(dto.Stage.Trim()))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<GhlDealResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM deal data."));
+        }
+
         var agentId = _currentUser.UserId;
         if (!agentId.HasValue || agentId.Value <= 0)
             return Unauthorized(ApiResponse<GhlDealResponseDto>.FailureResult("Unauthorized: User ID is missing."));
@@ -117,20 +146,32 @@ public class GhlDealsController : ControllerBase
         GhlDeal? existingDeal = null;
         if (dto.CustomerId.HasValue && dto.CustomerId.Value > 0)
         {
-            existingDeal = await _db.GhlDeals.FirstOrDefaultAsync(d =>
-                d.CompanyId == companyId.Value &&
-                d.CustomerId == dto.CustomerId.Value, ct);
+            existingDeal = await _db.GhlDeals
+                .Include(d => d.AssignedAgent)
+                .ThenInclude(a => a.Role)
+                .FirstOrDefaultAsync(d =>
+                    d.CompanyId == companyId.Value &&
+                    d.CustomerId == dto.CustomerId.Value, ct);
         }
         if (existingDeal == null && !string.IsNullOrWhiteSpace(dto.CustomerName))
         {
             var custNameLower = dto.CustomerName.Trim().ToLower();
-            existingDeal = await _db.GhlDeals.FirstOrDefaultAsync(d =>
-                d.CompanyId == companyId.Value &&
-                d.CustomerName.ToLower() == custNameLower, ct);
+            existingDeal = await _db.GhlDeals
+                .Include(d => d.AssignedAgent)
+                .ThenInclude(a => a.Role)
+                .FirstOrDefaultAsync(d =>
+                    d.CompanyId == companyId.Value &&
+                    d.CustomerName.ToLower() == custNameLower, ct);
         }
 
         if (existingDeal != null)
         {
+            if (IsIrmDeal(existingDeal) && User.IsGhlAdmin())
+            {
+                return StatusCode(StatusCodes.Status403Forbidden,
+                    ApiResponse<GhlDealResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM deal data."));
+            }
+
             existingDeal.Stage = string.IsNullOrWhiteSpace(dto.Stage) ? existingDeal.Stage : dto.Stage.Trim();
             if (dto.Value > 0) existingDeal.Value = dto.Value;
             if (!string.IsNullOrWhiteSpace(dto.Notes)) existingDeal.Notes = dto.Notes.Trim();
@@ -179,10 +220,17 @@ public class GhlDealsController : ControllerBase
     {
         var deal = await _db.GhlDeals
             .Include(d => d.AssignedAgent)
+            .ThenInclude(a => a.Role)
             .FirstOrDefaultAsync(d => d.Id == id && d.CompanyId == _currentUser.CompanyId, ct);
 
         if (deal == null)
             return NotFound(ApiResponse<GhlDealResponseDto>.FailureResult("Deal not found."));
+
+        if (IsIrmDeal(deal) && User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<GhlDealResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM deal data."));
+        }
 
         if (dto.Title != null) deal.Title = dto.Title.Trim();
         if (dto.Stage != null) deal.Stage = dto.Stage.Trim();
@@ -211,10 +259,18 @@ public class GhlDealsController : ControllerBase
     {
         var isSuperAdmin = _currentUser.Role == "super_admin";
         var deal = await _db.GhlDeals
+            .Include(d => d.AssignedAgent)
+            .ThenInclude(a => a.Role)
             .FirstOrDefaultAsync(d => d.Id == id && (isSuperAdmin || d.CompanyId == _currentUser.CompanyId), ct);
 
         if (deal == null)
             return NotFound(ApiResponse<bool>.FailureResult("Deal not found."));
+
+        if (IsIrmDeal(deal) && User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<bool>.FailureResult("Access denied: GHL Admin has read-only access to IRM deal data."));
+        }
 
         _db.GhlDeals.Remove(deal);
         await _db.SaveChangesAsync(ct);
@@ -260,11 +316,19 @@ public class GhlDealsController : ControllerBase
             return Unauthorized(ApiResponse<GhlDealActivityResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
 
         // Verify deal belongs to this company
-        var dealExists = await _db.GhlDeals
-            .AnyAsync(d => d.Id == id && d.CompanyId == companyId.Value, ct);
+        var deal = await _db.GhlDeals
+            .Include(d => d.AssignedAgent)
+            .ThenInclude(a => a.Role)
+            .FirstOrDefaultAsync(d => d.Id == id && d.CompanyId == companyId.Value, ct);
 
-        if (!dealExists)
+        if (deal == null)
             return NotFound(ApiResponse<GhlDealActivityResponseDto>.FailureResult("Deal not found."));
+
+        if (IsIrmDeal(deal) && User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<GhlDealActivityResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM deal data."));
+        }
 
         var activity = new GhlDealActivity
         {

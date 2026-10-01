@@ -27,6 +27,12 @@ public class CallRecord
     public string Disposition { get; set; } = string.Empty;
     public string? Notes { get; set; } = string.Empty;
 
+    [NotMapped]
+    public string? RecordingUrl { get; set; }
+
+    [NotMapped]
+    public string? Transcript { get; set; }
+
     public int? LeadId { get; set; }
     public int? CustomerId { get; set; }
 

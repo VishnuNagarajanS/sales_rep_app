@@ -655,6 +655,41 @@ export async function saveCustomer(customer: Customer): Promise<Customer> {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function mapCallRecord(c: Record<string, any>): CallRecord {
+  const notes = c.notes;
+  let reason = c.reason;
+  if (!reason && notes) {
+    const match = notes.match(/(?:\[(?:Skip Reason|Reason)\]:\s*|(?:Skip Reason|Reason):\s*)([^\n]+)/i);
+    if (match) {
+      reason = match[1].trim();
+    }
+  }
+
+  // Determine categorization from backend attributes or stored source markers
+  const roleCode = (c.agentRole || c.callerType || '').toLowerCase();
+  const sourceCode = (c.source || '').toLowerCase();
+  const notesStr = notes || '';
+  const isIrm =
+    roleCode === 'irm' ||
+    sourceCode === 'irm' ||
+    c.connectVia === 'Connect via IRM' ||
+    notesStr.includes('Connect via IRM') ||
+    notesStr.includes('Connected to IRM') ||
+    notesStr.includes('[Source: irm]');
+
+  const callerType: 'Agent' | 'IRM' = isIrm ? 'IRM' : 'Agent';
+  const connectVia: 'Connect via Agent' | 'Connect via IRM' = isIrm ? 'Connect via IRM' : 'Connect via Agent';
+  const agentRole = isIrm ? 'IRM' : 'Agent';
+
+  // Only assign recordingUrl and transcription if real and not placeholder/mock
+  const recordingUrl = (c.recordingUrl && typeof c.recordingUrl === 'string' && !c.recordingUrl.includes('sample.mp3'))
+    ? c.recordingUrl
+    : undefined;
+
+  const rawTranscript = c.transcript || c.transcription;
+  const transcription = (rawTranscript && typeof rawTranscript === 'string' && !rawTranscript.startsWith('Automated Call Transcript: Agent'))
+    ? rawTranscript
+    : undefined;
+
   return {
     id: sid(c.id),
     companyId: sid(c.companyId),
@@ -664,9 +699,16 @@ function mapCallRecord(c: Record<string, any>): CallRecord {
     duration: c.duration ?? 0,
     agentId: sid(c.agentId),
     agentName: c.agentName ?? '',
+    agentRole: agentRole,
+    callerType: callerType,
+    connectVia: connectVia,
+    source: isIrm ? 'irm' : (c.source || 'agent'),
     disposition: c.disposition ?? 'No Response',
     timestamp: c.timestamp ?? new Date().toISOString(),
-    notes: c.notes,
+    notes: notes,
+    reason: reason,
+    recordingUrl: recordingUrl,
+    transcription: transcription,
     leadId: c.leadId ? sid(c.leadId) : undefined,
     customerId: c.customerId ? sid(c.customerId) : undefined,
   };
@@ -691,6 +733,85 @@ export async function logCall(call: CallRecord): Promise<CallRecord> {
   const res: ApiResponse<any> = await apiClient.post('/sales-executive/calls', payload);
   if (!res.success || !res.data) throw new Error(res.message);
   window.dispatchEvent(new Event('nexus_storage_updated'));
+  return mapCallRecord(res.data);
+}
+
+export interface SendCustomerMessagePayload {
+  recipientEmail?: string;
+  recipientPhone?: string;
+  recipientName: string;
+  message: string;
+  channel?: string;
+  leadId?: number;
+  customerId?: number;
+  dealId?: number;
+}
+
+export interface SendCustomerMessageResult {
+  success: boolean;
+  delivered: boolean;
+  channel: string;
+  recipient?: string;
+  message: string;
+  deliveryResult: string;
+  sentAt: string;
+  sentByName: string;
+  sentByRole: string;
+}
+
+export async function sendCustomerMessage(
+  payload: SendCustomerMessagePayload
+): Promise<SendCustomerMessageResult> {
+  const res: ApiResponse<SendCustomerMessageResult> = await apiClient.post(
+    '/sales-executive/calls/send-customer-message',
+    payload
+  );
+  if (res && res.data) {
+    return res.data;
+  }
+  return {
+    success: false,
+    delivered: false,
+    channel: payload.channel || 'email',
+    recipient: payload.recipientEmail || payload.recipientPhone,
+    message: payload.message,
+    deliveryResult: res?.message || 'Failed to dispatch customer message',
+    sentAt: new Date().toISOString(),
+    sentByName: '',
+    sentByRole: '',
+  };
+}
+
+export interface MessagingChannelStatus {
+  channel: 'email' | 'sms' | 'whatsapp';
+  name: string;
+  configured: boolean;
+  provider: string;
+  statusMessage: string;
+}
+
+export async function getMessagingChannels(): Promise<MessagingChannelStatus[]> {
+  try {
+    const res: ApiResponse<MessagingChannelStatus[]> = await apiClient.get(
+      '/sales-executive/calls/messaging-channels'
+    );
+    if (res && res.data) {
+      return res.data;
+    }
+  } catch (err) {
+    console.error('Failed to fetch messaging channels from backend', err);
+  }
+  return [
+    { channel: 'email', name: 'Email', configured: true, provider: 'SMTP (smtp.gmail.com)', statusMessage: 'Active and configured via Gmail SMTP.' },
+    { channel: 'sms', name: 'SMS', configured: false, provider: 'None', statusMessage: 'No SMS gateway provider (e.g., Twilio / AWS SNS) is configured on the backend server.' },
+    { channel: 'whatsapp', name: 'WhatsApp', configured: false, provider: 'None', statusMessage: 'No WhatsApp Business API provider is configured on the backend server.' },
+  ];
+}
+
+export async function getCallById(id: string | number): Promise<CallRecord> {
+  const numericId = typeof id === 'string' ? parseInt(id.replace(/\D/g, ''), 10) : id;
+  const res: ApiResponse<any> = await apiClient.get(`/sales-executive/calls/${numericId || id}`);
+  if (!res.success || !res.data) throw new Error(res.message || 'Call record not found');
   return mapCallRecord(res.data);
 }
 

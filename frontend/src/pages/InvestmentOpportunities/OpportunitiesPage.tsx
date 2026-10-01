@@ -80,11 +80,13 @@ export const OpportunitiesPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
 
-  // ── Role scoping ──────────────────────────────────────────────────────────
   const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
   const isIrm = roleCode === 'irm';
   const isGhlIrm = isIrm && tenant?.slug === 'ghl';
+  const isGhlAdmin =
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1') &&
+    ['company_admin', 'admin', 'super_admin', 'ghl_admin'].includes(roleCode as string);
 
   // ── Core data ─────────────────────────────────────────────────────────────
   const [opps, setOpps] = useState<InvestmentOpportunity[]>([]);
@@ -346,16 +348,19 @@ export const OpportunitiesPage: React.FC = () => {
       label: 'Edit',
       icon: <Edit2 size={14} color="var(--primary-600)" style={{ marginRight: 6 }} />,
       onClick: o => openEditModal(o),
+      hidden: () => isGhlAdmin,
     },
     {
       label: 'Move Stage',
       icon: <ArrowRight size={14} style={{ marginRight: 6 }} />,
       onClick: o => openStageModal(o),
+      hidden: () => isGhlAdmin,
     },
     {
       label: 'Delete',
       icon: <Trash2 size={14} color="#dc2626" style={{ marginRight: 6 }} />,
       onClick: o => handleDeleteOpp(o),
+      hidden: () => isGhlAdmin,
     },
   ];
 
@@ -785,7 +790,7 @@ export const OpportunitiesPage: React.FC = () => {
           </p>
         </div>
 
-        {!isGhlIrm && (
+        {!isGhlIrm && !isGhlAdmin && (
           <button
             id="opps-new-opportunity"
             className="btn btn-primary"
@@ -814,7 +819,7 @@ export const OpportunitiesPage: React.FC = () => {
           data={filteredOpps}
           keyExtractor={o => o.id}
           rowActions={rowActions}
-          onRowClick={o => openEditModal(o)}
+          onRowClick={isGhlAdmin ? undefined : o => openEditModal(o)}
           searchPlaceholder="Search opportunities by asset title or investor..."
           filtersNode={
             <FilterBar
@@ -845,7 +850,7 @@ export const OpportunitiesPage: React.FC = () => {
 
       {/* ── Create / Edit Opportunity Modal ──────────────────────────────── */}
       <Modal
-        isOpen={isModalOpen}
+        isOpen={isModalOpen && !isGhlAdmin}
         onClose={closeModal}
         title={editingOpp ? 'Edit Opportunity' : 'New Investment Opportunity'}
         subtitle={

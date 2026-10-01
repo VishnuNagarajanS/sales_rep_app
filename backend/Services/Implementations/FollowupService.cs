@@ -48,13 +48,39 @@ public class FollowupService : IFollowupService
         return query;
     }
 
+    private bool IsGhlAdmin()
+    {
+        var role = (_currentUser.Role ?? string.Empty).ToLowerInvariant();
+        var companyId = _currentUser.CompanyId;
+        return (companyId == 1 || !companyId.HasValue) &&
+               (role == "admin" || role == "ghl_admin" || role == "company_admin" || role == "super_admin");
+    }
+
+    private static bool IsIrmFollowup(Followup f)
+    {
+        if (string.Equals(f.AssignedToRole, "irm", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (string.Equals(f.ContactType, "investor", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (f.InvestorId.HasValue && f.InvestorId.Value > 0)
+            return true;
+        if (f.AssignedAgent?.Role != null &&
+            (string.Equals(f.AssignedAgent.Role.Code, "irm", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(f.AssignedAgent.Role.Name, "IRM", StringComparison.OrdinalIgnoreCase)))
+            return true;
+        return false;
+    }
+
     private async Task<Followup?> FindScopedFollowupAsync(int id, CancellationToken ct)
     {
         var role = _currentUser.Role;
         var agentId = _currentUser.UserId;
         var companyId = _currentUser.CompanyId;
 
-        var query = _context.Followups.Include(f => f.AssignedAgent).Where(f => f.Id == id);
+        var query = _context.Followups
+            .Include(f => f.AssignedAgent)
+            .ThenInclude(a => a.Role)
+            .Where(f => f.Id == id);
 
         if (role == "super_admin")
         {
@@ -135,6 +161,11 @@ public class FollowupService : IFollowupService
 
     public async Task<ApiResponse<FollowupResponseDto>> CreateFollowupAsync(CreateFollowupDto dto, CancellationToken ct = default)
     {
+        if (IsGhlAdmin() && string.Equals(dto.ContactType, "investor", StringComparison.OrdinalIgnoreCase))
+        {
+            return ApiResponse<FollowupResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM follow-up data.");
+        }
+
         var agentId = _currentUser.UserId;
         if (!agentId.HasValue || agentId.Value <= 0)
             return ApiResponse<FollowupResponseDto>.FailureResult("Unauthorized: User ID is missing.");
@@ -149,6 +180,7 @@ public class FollowupService : IFollowupService
 
         var existingPending = await _context.Followups
             .Include(f => f.AssignedAgent)
+            .ThenInclude(a => a.Role)
             .FirstOrDefaultAsync(f =>
                 f.CompanyId == companyId.Value &&
                 f.Status == FollowupStatus.Pending &&
@@ -157,6 +189,11 @@ public class FollowupService : IFollowupService
 
         if (existingPending != null)
         {
+            if (IsIrmFollowup(existingPending) && IsGhlAdmin())
+            {
+                return ApiResponse<FollowupResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM follow-up data.");
+            }
+
             // Reuse and update the existing active pending follow-up (idempotency)
             existingPending.ScheduledAt = dto.ScheduledAt;
             if (!string.IsNullOrWhiteSpace(dto.Priority)) existingPending.Priority = dto.Priority.Trim();
@@ -218,6 +255,11 @@ public class FollowupService : IFollowupService
         if (followup == null)
             return ApiResponse<FollowupResponseDto>.FailureResult("Follow-up not found or access denied.");
 
+        if (IsIrmFollowup(followup) && IsGhlAdmin())
+        {
+            return ApiResponse<FollowupResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM follow-up data.");
+        }
+
         if (dto.ScheduledAt.HasValue) followup.ScheduledAt = dto.ScheduledAt.Value;
         if (!string.IsNullOrWhiteSpace(dto.Priority)) followup.Priority = dto.Priority.Trim();
         if (!string.IsNullOrWhiteSpace(dto.Status) && Enum.TryParse<FollowupStatus>(dto.Status, true, out var parsedSt))
@@ -239,6 +281,11 @@ public class FollowupService : IFollowupService
         if (followup == null)
             return ApiResponse<FollowupResponseDto>.FailureResult("Follow-up not found or access denied.");
 
+        if (IsIrmFollowup(followup) && IsGhlAdmin())
+        {
+            return ApiResponse<FollowupResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM follow-up data.");
+        }
+
         followup.Status = FollowupStatus.Completed;
         followup.CompletedAt = DateTime.UtcNow;
         followup.UpdatedAt = DateTime.UtcNow;
@@ -253,6 +300,11 @@ public class FollowupService : IFollowupService
         var followup = await FindScopedFollowupAsync(id, ct);
         if (followup == null)
             return ApiResponse<bool>.FailureResult("Follow-up not found or access denied.");
+
+        if (IsIrmFollowup(followup) && IsGhlAdmin())
+        {
+            return ApiResponse<bool>.FailureResult("Access denied: GHL Admin has read-only access to IRM follow-up data.");
+        }
 
         _context.Followups.Remove(followup);
         await _context.SaveChangesAsync(ct);

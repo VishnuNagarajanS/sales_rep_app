@@ -176,16 +176,22 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({ onOpenQuickC
 
   // Drag and Drop support
   const handleDragStart = (e: React.DragEvent, cardId: string) => {
+    if (selectedRole === 'irm') {
+      e.preventDefault();
+      return;
+    }
     e.dataTransfer.setData('text/plain', cardId);
     e.dataTransfer.effectAllowed = 'move';
   };
 
   const handleDragOver = (e: React.DragEvent) => {
+    if (selectedRole === 'irm') return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
   };
 
   const handleDrop = (e: React.DragEvent, targetStageId: string) => {
+    if (selectedRole === 'irm') return;
     e.preventDefault();
     const cardId = e.dataTransfer.getData('text/plain');
     if (!cardId) return;
@@ -362,13 +368,27 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({ onOpenQuickC
                       <div
                         key={card.id}
                         className="admin-kanban-card"
-                        draggable
+                        draggable={selectedRole !== 'irm'}
                         onDragStart={e => handleDragStart(e, card.id)}
                         onClick={() => setSelectedCard(card)}
                       >
                         {/* Card Header */}
-                        <div className="admin-card-header">
+                        <div className="admin-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <span className="admin-card-name">{card.title}</span>
+                          {selectedRole === 'irm' && (
+                            <span
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                padding: '2px 6px',
+                                borderRadius: 4,
+                                background: 'rgba(124, 58, 237, 0.1)',
+                                color: '#7c3aed',
+                              }}
+                            >
+                              Read-Only
+                            </span>
+                          )}
                         </div>
 
                         {/* Contact Row */}
@@ -403,28 +423,30 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({ onOpenQuickC
                             </span>
                           )}
 
-                          <div className="admin-card-stage-movers">
-                            {colIdx > 0 && (
-                              <button
-                                type="button"
-                                className="admin-stage-nav-btn"
-                                title={`Move backward to ${stages[colIdx - 1].name}`}
-                                onClick={e => handleMoveCard(card, 'backward', e)}
-                              >
-                                <ChevronLeft size={13} />
-                              </button>
-                            )}
-                            {colIdx < stages.length - 1 && (
-                              <button
-                                type="button"
-                                className="admin-stage-nav-btn"
-                                title={`Advance forward to ${stages[colIdx + 1].name}`}
-                                onClick={e => handleMoveCard(card, 'forward', e)}
-                              >
-                                <ChevronRight size={13} />
-                              </button>
-                            )}
-                          </div>
+                          {selectedRole !== 'irm' && (
+                            <div className="admin-card-stage-movers">
+                              {colIdx > 0 && (
+                                <button
+                                  type="button"
+                                  className="admin-stage-nav-btn"
+                                  title={`Move backward to ${stages[colIdx - 1].name}`}
+                                  onClick={e => handleMoveCard(card, 'backward', e)}
+                                >
+                                  <ChevronLeft size={13} />
+                                </button>
+                              )}
+                              {colIdx < stages.length - 1 && (
+                                <button
+                                  type="button"
+                                  className="admin-stage-nav-btn"
+                                  title={`Advance forward to ${stages[colIdx + 1].name}`}
+                                  onClick={e => handleMoveCard(card, 'forward', e)}
+                                >
+                                  <ChevronRight size={13} />
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     );

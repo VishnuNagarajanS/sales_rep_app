@@ -50,9 +50,13 @@ public class OtpService : IOtpService
         if (!string.IsNullOrWhiteSpace(cleanToken))
         {
             kyc = await ResolveKycByTokenAsync(cleanToken, ct);
+            if (kyc == null && string.IsNullOrWhiteSpace(dto.Email))
+            {
+                return ApiResponse<SendKycOtpResponseDto>.ErrorResponse("Invalid or expired KYC token. Please check your link or contact your IRM.");
+            }
         }
 
-        // Always use the email stored on the KYC record — never fall back to a hardcoded address
+        // Always prioritize the email stored on the KYC record associated with the token
         var targetEmail = !string.IsNullOrWhiteSpace(kyc?.Email)
             ? kyc.Email.Trim()
             : (!string.IsNullOrWhiteSpace(dto.Email) ? dto.Email.Trim() : string.Empty);
@@ -60,17 +64,12 @@ public class OtpService : IOtpService
         if (string.IsNullOrWhiteSpace(targetEmail))
         {
             return ApiResponse<SendKycOtpResponseDto>.ErrorResponse(
-                "Unable to determine the investor email address. Please ensure a valid email is associated with this KYC request.");
+                "No registered email address is associated with this KYC request. Please contact your Relationship Manager.");
         }
 
-        var targetName = kyc?.InvestorName ?? "Investor";
+        var targetName = !string.IsNullOrWhiteSpace(kyc?.InvestorName) ? kyc.InvestorName.Trim() : "Investor";
 
         var cacheKey = GetCacheKey(cleanToken, targetEmail);
-        _cache.TryGetValue(cacheKey, out CachedOtpEntry? existing);
-        if (existing == null)
-        {
-            _cache.TryGetValue($"kyc_email_otp_{targetEmail.ToLower()}", out existing);
-        }
 
         // Issue a fresh valid 6-digit cryptographic OTP on every send/resend
         var otpCode = RandomNumberGenerator.GetInt32(100000, 1000000).ToString("D6");
@@ -87,7 +86,17 @@ public class OtpService : IOtpService
         };
 
         _cache.Set(cacheKey, entry, TimeSpan.FromMinutes(5));
-        _cache.Set($"kyc_email_otp_{targetEmail.ToLower()}", entry, TimeSpan.FromMinutes(5));
+        _cache.Set($"kyc_email_otp_{targetEmail.ToLowerInvariant()}", entry, TimeSpan.FromMinutes(5));
+
+        if (!string.IsNullOrEmpty(cleanToken))
+        {
+            _cache.Set($"kyc_token_otp_{cleanToken}", entry, TimeSpan.FromMinutes(5));
+        }
+
+        if (kyc != null && !string.IsNullOrWhiteSpace(kyc.KycLinkToken))
+        {
+            _cache.Set($"kyc_token_otp_{kyc.KycLinkToken}", entry, TimeSpan.FromMinutes(5));
+        }
 
         // Also cache under token prefix without 'tok_' and slug so lookup is resilient
         var subToken = cleanToken.StartsWith("tok_") ? cleanToken[4..] : cleanToken;
@@ -103,19 +112,26 @@ public class OtpService : IOtpService
 
         var emailDelivered = await _emailService.SendKycOtpEmailAsync(targetEmail, targetName, otpCode, 5, ct);
 
+        var masked = MaskEmail(targetEmail);
+
         if (!emailDelivered)
         {
             _logger.LogWarning("[KYC OTP] Email delivery failed for {Email}: {Error}", targetEmail, _emailService.LastError);
+
+            // Invalidate cached entry since delivery failed
+            _cache.Remove(cacheKey);
+            _cache.Remove($"kyc_email_otp_{targetEmail.ToLowerInvariant()}");
+            if (!string.IsNullOrEmpty(cleanToken)) _cache.Remove($"kyc_token_otp_{cleanToken}");
+
+            return ApiResponse<SendKycOtpResponseDto>.ErrorResponse(
+                $"Failed to deliver verification code to {masked}. {_emailService.LastError ?? "Please verify your email provider settings or try again."}");
         }
 
-        var masked = MaskEmail(targetEmail);
-        var message = emailDelivered
-            ? $"6-digit verification code sent to {masked}"
-            : $"Verification code could not be delivered to {masked}. Please check the email address or try again.";
+        var message = $"6-digit verification code sent to {masked}";
 
         return ApiResponse<SendKycOtpResponseDto>.SuccessResponse(new SendKycOtpResponseDto
         {
-            Success = emailDelivered,
+            Success = true,
             MaskedEmail = masked,
             ExpiresInSeconds = 300,
             Message = message
@@ -176,17 +192,35 @@ public class OtpService : IOtpService
         // Compare entered OTP
         if (isMatch)
         {
-            // Match success! Remove from cache so it cannot be re-used
+            // Match success! Remove all alias keys from cache so it cannot be re-used
             if (!string.IsNullOrEmpty(activeKey)) _cache.Remove(activeKey);
-            if (!string.IsNullOrEmpty(entry.Token)) _cache.Remove($"kyc_token_otp_{entry.Token}");
-            if (!string.IsNullOrEmpty(entry.Email)) _cache.Remove($"kyc_email_otp_{entry.Email.ToLower()}");
+            if (!string.IsNullOrEmpty(cleanToken))
+            {
+                _cache.Remove($"kyc_token_otp_{cleanToken}");
+                var subToken = cleanToken.StartsWith("tok_") ? cleanToken[4..] : cleanToken;
+                var tokenPrefix = subToken.Contains('_') ? subToken.Split('_')[0] : subToken;
+                if (!string.IsNullOrEmpty(tokenPrefix))
+                {
+                    _cache.Remove($"kyc_token_otp_{tokenPrefix}");
+                    _cache.Remove($"kyc_token_otp_tok_{tokenPrefix}");
+                }
+            }
+            if (!string.IsNullOrEmpty(entry.Token) && entry.Token != cleanToken)
+            {
+                _cache.Remove($"kyc_token_otp_{entry.Token}");
+            }
+            if (!string.IsNullOrEmpty(entry.Email))
+            {
+                _cache.Remove($"kyc_email_otp_{entry.Email.ToLowerInvariant()}");
+            }
 
             _logger.LogInformation("[KYC OTP] Identity verified for {Email}", entry.Email);
 
             return Task.FromResult(ApiResponse<VerifyKycOtpResponseDto>.SuccessResponse(new VerifyKycOtpResponseDto
             {
                 Verified = true,
-                Message = "Identity verified successfully!"
+                Message = "Identity verified successfully!",
+                Email = entry.Email
             }, "Identity verified successfully!"));
         }
 

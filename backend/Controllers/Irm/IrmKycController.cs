@@ -179,6 +179,68 @@ public class IrmKycController : ControllerBase
         return Ok(result);
     }
 
+    [HttpPost("assisted-draft")]
+    [Authorize]
+    public async Task<IActionResult> SaveAssistedDraft([FromBody] SubmitKycDto dto, CancellationToken ct)
+    {
+        var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
+        var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
+        var companyId = User.GetCompanyId(0);
+        if (companyId <= 0 && isPlatformAdmin) companyId = 1;
+        if (companyId <= 0)
+            return Unauthorized();
+
+        var userId = User.GetUserId();
+        if (userId <= 0)
+            return Unauthorized();
+
+        dto.IsFinalSubmit = false;
+        var result = await _kycService.SaveAssistedKycAsync(companyId, userId, dto, ct);
+        if (!result.Success)
+            return BadRequest(result);
+
+        return Ok(result);
+    }
+
+    [HttpPost("assisted-submit")]
+    [Authorize]
+    public async Task<IActionResult> SubmitAssistedKyc([FromBody] SubmitKycDto dto, CancellationToken ct)
+    {
+        var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
+        var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
+        var companyId = User.GetCompanyId(0);
+        if (companyId <= 0 && isPlatformAdmin) companyId = 1;
+        if (companyId <= 0)
+            return Unauthorized();
+
+        var userId = User.GetUserId();
+        if (userId <= 0)
+            return Unauthorized();
+
+        dto.IsFinalSubmit = true;
+        var result = await _kycService.SaveAssistedKycAsync(companyId, userId, dto, ct);
+        if (!result.Success)
+            return BadRequest(result);
+
+        // Also update linked deal if present
+        if (result.Data != null)
+        {
+            var kycId = result.Data.Id;
+            var deal = await _db.GhlDeals.FirstOrDefaultAsync(d =>
+                (d.KycId == kycId || (dto.InvestorId > 0 && d.CustomerId == dto.InvestorId) || (!string.IsNullOrEmpty(dto.Email) && d.CustomerName == dto.InvestorName)) &&
+                d.CompanyId == companyId, ct);
+            if (deal != null)
+            {
+                deal.KycId = kycId;
+                deal.KycStatus = "Assisted KYC – Submitted for Verification";
+                deal.UpdatedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync(ct);
+            }
+        }
+
+        return Ok(result);
+    }
+
     [HttpPost("{id:int}/review")]
     [Authorize]
     public async Task<IActionResult> ReviewKyc(int id, [FromBody] KycReviewDto dto, CancellationToken ct)

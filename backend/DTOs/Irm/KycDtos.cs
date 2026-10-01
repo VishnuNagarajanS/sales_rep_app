@@ -237,5 +237,6 @@ public class VerifyKycOtpResponseDto
 {
     public bool Verified { get; set; }
     public string Message { get; set; } = string.Empty;
+    public string? Email { get; set; }
 }
 

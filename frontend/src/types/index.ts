@@ -210,7 +210,8 @@ export type CallDisposition =
   | 'Call Back'
   | 'Wrong Number'
   | 'Converted'
-  | 'No Response';
+  | 'No Response'
+  | 'Skipped';
 
 export interface CallRecord {
   id: string;
@@ -221,6 +222,9 @@ export interface CallRecord {
   duration: number; // in seconds
   agentId: string;
   agentName: string;
+  agentRole?: string;
+  callerType?: 'Agent' | 'IRM';
+  connectVia?: 'Connect via Agent' | 'Connect via IRM';
   disposition: CallDisposition;
   timestamp: string;
   recordingUrl?: string;

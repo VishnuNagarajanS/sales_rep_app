@@ -13,6 +13,12 @@ import {
   Clock,
   Lock,
   Sparkles,
+  Volume2,
+  FileText,
+  ChevronDown,
+  ChevronUp,
+  AlertCircle,
+  User,
 } from 'lucide-react';
 import { Customer, CallRecord, Followup, Deal, Lead, IrmProfile, CustomFieldDefinition } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -82,6 +88,8 @@ export const CustomersPage: React.FC = () => {
     : customers;
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'calls' | 'followups' | 'timeline' | 'documents'>('overview');
+  const [callCategoryFilter, setCallCategoryFilter] = useState<'all' | 'agent' | 'irm'>('all');
+  const [expandedCallIds, setExpandedCallIds] = useState<Record<string, boolean>>({});
   const [statusFilter, setStatusFilter] = useState('All');
   const [agentFilter, setAgentFilter] = useState('All');
   const [assignmentFilter, setAssignmentFilter] = useState<'All' | 'Assigned' | 'Unassigned'>('All');
@@ -492,10 +500,100 @@ export const CustomersPage: React.FC = () => {
     setEditingRecommendationCustomerId(null);
   };
 
-  // Filter linked records for selected customer
-  const customerCalls = calls.filter(
-    c => selectedCustomer && (c.contactPhone === selectedCustomer.phone || c.contactName === selectedCustomer.name)
-  );
+  // Call History helpers
+  const formatCallDuration = (seconds?: number): string => {
+    if (!seconds || seconds <= 0) return '0s';
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    if (m === 0) return `${s}s`;
+    if (s === 0) return `${m}m`;
+    return `${m}m ${s}s`;
+  };
+
+  const formatCallTimestamp = (ts?: string): string => {
+    if (!ts) return 'Unknown date';
+    try {
+      const d = new Date(ts);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true,
+        });
+      }
+    } catch {}
+    return ts;
+  };
+
+  const toggleCallExpand = (callId: string) => {
+    setExpandedCallIds(prev => ({
+      ...prev,
+      [callId]: !prev[callId],
+    }));
+  };
+
+  const toggleAllCallsExpand = (callsToToggle: CallRecord[]) => {
+    const allExpanded = callsToToggle.length > 0 && callsToToggle.every(c => expandedCallIds[c.id]);
+    const nextState: Record<string, boolean> = { ...expandedCallIds };
+    callsToToggle.forEach(c => {
+      nextState[c.id] = !allExpanded;
+    });
+    setExpandedCallIds(nextState);
+  };
+
+  // Filter linked records for selected customer using ID, normalized phone, or exact name
+  const customerCalls = useMemo(() => {
+    if (!selectedCustomer) return [];
+    const custDigits = (selectedCustomer.phone || '').replace(/\D/g, '').slice(-10);
+    const custName = (selectedCustomer.name || '').trim().toLowerCase();
+
+    return calls.filter(c => {
+      if (c.customerId && (c.customerId === selectedCustomer.id || String(c.customerId) === String(selectedCustomer.id))) {
+        return true;
+      }
+      if (custDigits && custDigits.length >= 7) {
+        const cDigits = (c.contactPhone || '').replace(/\D/g, '').slice(-10);
+        if (cDigits && cDigits === custDigits) {
+          return true;
+        }
+      }
+      if (custName && c.contactName && c.contactName.trim().toLowerCase() === custName) {
+        return true;
+      }
+      return false;
+    });
+  }, [calls, selectedCustomer]);
+
+  // Respect existing call ownership and role permissions: An IRM user is strictly authorized only to view their own calls
+  const isIrmUser = roleCode === 'irm';
+  const authorizedCustomerCalls = useMemo(() => {
+    return customerCalls.filter(c => {
+      if (isIrmUser) {
+        const matchesId = c.agentId && (c.agentId === user?.id || String(c.agentId) === String(user?.id));
+        const matchesName = c.agentName && (c.agentName.toLowerCase() === (user?.name || '').toLowerCase() || c.agentName === user?.name);
+        return matchesId || matchesName;
+      }
+      return true;
+    });
+  }, [customerCalls, isIrmUser, user?.id, user?.name]);
+
+  // Keep Agent and IRM calls correctly categorized using the call's stored source
+  const agentCustomerCalls = useMemo(() => {
+    return authorizedCustomerCalls.filter(c => c.callerType !== 'IRM' && c.connectVia !== 'Connect via IRM' && c.source !== 'irm');
+  }, [authorizedCustomerCalls]);
+
+  const irmCustomerCalls = useMemo(() => {
+    return authorizedCustomerCalls.filter(c => c.callerType === 'IRM' || c.connectVia === 'Connect via IRM' || c.source === 'irm');
+  }, [authorizedCustomerCalls]);
+
+  const displayedCustomerCalls = useMemo(() => {
+    if (callCategoryFilter === 'agent') return agentCustomerCalls;
+    if (callCategoryFilter === 'irm') return irmCustomerCalls;
+    return authorizedCustomerCalls;
+  }, [callCategoryFilter, agentCustomerCalls, irmCustomerCalls, authorizedCustomerCalls]);
 
   const customerFollowups = followups.filter(
     f => selectedCustomer && (f.contactPhone === selectedCustomer.phone || f.contactName === selectedCustomer.name)
@@ -567,7 +665,7 @@ export const CustomersPage: React.FC = () => {
         id: c.id,
         type: 'call',
         title: `${c.direction === 'outbound' ? 'Outbound' : 'Inbound'} Call — ${c.disposition}`,
-        description: c.transcription || undefined,
+        description: c.notes ? `${c.notes}${c.transcription ? `\n\n${c.transcription}` : ''}` : (c.transcription || undefined),
         timestamp: c.timestamp,
         actorName: c.agentName,
       });
@@ -889,7 +987,7 @@ export const CustomersPage: React.FC = () => {
             <div className="customer-tabs-bar">
               {[
                 { id: 'overview', label: 'Overview' },
-                { id: 'calls', label: `Calls (${customerCalls.length})` },
+                { id: 'calls', label: `Calls (${authorizedCustomerCalls.length})` },
                 { id: 'followups', label: `Follow-ups (${customerFollowups.length})` },
                 { id: 'timeline', label: 'Activity Timeline' },
                 { id: 'documents', label: 'Documents' },
@@ -982,46 +1080,368 @@ export const CustomersPage: React.FC = () => {
                       </div>
                     );
                   })()}
+                  {/* Recent Call History Preview in Overview */}
+                  <div className="card customer-profile-card" style={{ marginTop: 16 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                      <h4 className="customer-section-heading" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Phone size={15} color="var(--primary-600)" />
+                        Call History ({authorizedCustomerCalls.length})
+                      </h4>
+                      {authorizedCustomerCalls.length > 0 && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ fontSize: 12, color: 'var(--primary-600)', padding: '2px 8px' }}
+                          onClick={() => setActiveTab('calls')}
+                        >
+                          View Full History →
+                        </button>
+                      )}
+                    </div>
+
+                    {authorizedCustomerCalls.length === 0 ? (
+                      <div className="customer-empty-text" style={{ padding: '20px 12px' }}>
+                        No call records logged yet with this customer.
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {authorizedCustomerCalls.slice(0, 2).map(c => {
+                          const isExpanded = !!expandedCallIds[c.id];
+                          return (
+                            <div key={c.id} className="customer-call-card-item">
+                              <div className="customer-call-compact-row">
+                                <div className="customer-call-meta-left">
+                                  <span className={`customer-call-direction-badge ${c.direction === 'inbound' ? 'is-inbound' : 'is-outbound'}`}>
+                                    {c.direction === 'inbound' ? '↙ Inbound' : '↗ Outbound'}
+                                  </span>
+                                  <span className="customer-call-date">{formatCallTimestamp(c.timestamp)}</span>
+                                  <span className="customer-call-sep">•</span>
+                                  <span className="customer-call-duration">
+                                    <Clock size={12} /> {formatCallDuration(c.duration)}
+                                  </span>
+                                  <StatusChip status={c.disposition} size="sm" />
+                                </div>
+                                <div className="customer-call-meta-right">
+                                  <span className={`customer-call-connect-badge ${c.callerType === 'IRM' || c.connectVia === 'Connect via IRM' ? 'is-irm' : 'is-agent'}`}>
+                                    {c.callerType === 'IRM' || c.connectVia === 'Connect via IRM' ? (
+                                      <>
+                                        <Sparkles size={12} /> Connect via IRM
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Phone size={12} /> Connect via Agent
+                                      </>
+                                    )}
+                                  </span>
+                                  <span className="customer-call-agent-label">
+                                    <User size={12} />
+                                    <strong>{c.agentName || 'System'}</strong>
+                                    <span className={`customer-call-role-tag ${c.callerType === 'IRM' ? 'role-irm' : 'role-agent'}`}>
+                                      {c.callerType === 'IRM' ? 'IRM' : 'Agent'}
+                                    </span>
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost btn-sm customer-call-expand-btn"
+                                    onClick={() => toggleCallExpand(c.id)}
+                                  >
+                                    {isExpanded ? (
+                                      <>
+                                        <span>Collapse</span>
+                                        <ChevronUp size={14} />
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span>Details</span>
+                                        <ChevronDown size={14} />
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+                              {isExpanded && (
+                                <div className="customer-call-expanded-panel">
+                                  {c.notes && (
+                                    <div className="customer-call-notes-section">
+                                      <div className="customer-call-section-label">Discussion Notes</div>
+                                      <div className="customer-call-notes-content">{c.notes}</div>
+                                    </div>
+                                  )}
+                                  {c.reason && (
+                                    <div className="customer-call-reason-section">
+                                      <span className="customer-call-reason-label">
+                                        {c.disposition === 'Skipped' ? 'Skip Reason:' : 'Outcome Reason:'}
+                                      </span>{' '}
+                                      <span>{c.reason}</span>
+                                    </div>
+                                  )}
+                                  <div className="customer-call-media-card">
+                                    <div className="customer-call-media-header">
+                                      <div className="customer-call-media-title">
+                                        <Volume2 size={14} />
+                                        <span>Voice Recording</span>
+                                      </div>
+                                      <span className={`badge badge-sm ${c.recordingUrl ? 'badge-success' : 'badge-neutral'}`}>
+                                        {c.recordingUrl ? 'Recording Available' : 'Unavailable'}
+                                      </span>
+                                    </div>
+                                    {c.recordingUrl ? (
+                                      <div className="customer-call-audio-wrap">
+                                        <audio controls src={c.recordingUrl} className="customer-call-audio-player" />
+                                      </div>
+                                    ) : (
+                                      <div className="customer-call-diagnostic-box">
+                                        <AlertCircle size={16} className="customer-call-diag-icon" />
+                                        <div className="customer-call-diag-body">
+                                          <strong>Audio recording not available for this call.</strong>
+                                          <p>
+                                            No telephony audio recording is attached to this record. Voice recording requires carrier PBX trunking (e.g., Twilio Voice / Exotel) and secure cloud media bucket storage (AWS S3 or Azure Blob) configured on the backend server.
+                                          </p>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="customer-call-media-card">
+                                    <div className="customer-call-media-header">
+                                      <div className="customer-call-media-title">
+                                        <FileText size={14} />
+                                        <span>Call Transcript</span>
+                                      </div>
+                                      <span className={`badge badge-sm ${c.transcription ? 'badge-success' : 'badge-neutral'}`}>
+                                        {c.transcription ? 'Transcript Available' : 'Transcript unavailable'}
+                                      </span>
+                                    </div>
+                                    {c.transcription ? (
+                                      <div className="customer-call-transcript-wrap">
+                                        <p className="customer-call-transcript-text">{c.transcription}</p>
+                                      </div>
+                                    ) : (
+                                      <div className="customer-call-diagnostic-box">
+                                        <FileText size={16} className="customer-call-diag-icon" />
+                                        <div className="customer-call-diag-body">
+                                          <strong>Transcript unavailable</strong>
+                                          <p>
+                                            Speech-to-text transcription service is not currently configured on the server. Automatic transcripts require integrating an AI speech-to-text provider (e.g., OpenAI Whisper API, Deepgram, or AWS Transcribe) into the audio capture pipeline.
+                                          </p>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
               {activeTab === 'calls' && (
                 <div className="customer-calls-stack">
-                  {customerCalls.length === 0 ? (
+                  {/* Call History Header Bar */}
+                  <div className="customer-calls-header-bar">
+                    <div className="customer-calls-header-title">
+                      <Phone size={17} color="var(--primary-600)" />
+                      <span>Customer Call History ({displayedCustomerCalls.length})</span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      {/* Filter pills */}
+                      <div className="customer-call-filter-pills">
+                        <button
+                          type="button"
+                          className={`btn btn-sm ${callCategoryFilter === 'all' ? 'btn-primary' : 'btn-ghost'}`}
+                          onClick={() => setCallCategoryFilter('all')}
+                        >
+                          All ({authorizedCustomerCalls.length})
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn btn-sm ${callCategoryFilter === 'agent' ? 'btn-primary' : 'btn-ghost'}`}
+                          onClick={() => setCallCategoryFilter('agent')}
+                        >
+                          Connect via Agent ({agentCustomerCalls.length})
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn btn-sm ${callCategoryFilter === 'irm' ? 'btn-primary' : 'btn-ghost'}`}
+                          onClick={() => setCallCategoryFilter('irm')}
+                        >
+                          Connect via IRM ({irmCustomerCalls.length})
+                        </button>
+                      </div>
+
+                      {/* Expand / Collapse All */}
+                      {displayedCustomerCalls.length > 0 && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ fontSize: 12 }}
+                          onClick={() => toggleAllCallsExpand(displayedCustomerCalls)}
+                        >
+                          {displayedCustomerCalls.every(c => expandedCallIds[c.id]) ? 'Collapse All' : 'Expand All'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Call Records List */}
+                  {displayedCustomerCalls.length === 0 ? (
                     <div className="customer-empty-text">
-                      No calls logged yet with this customer. Click "Click to Call" to initiate a call.
+                      {callCategoryFilter === 'agent'
+                        ? 'No Connect via Agent call records found for this customer.'
+                        : callCategoryFilter === 'irm'
+                        ? 'No Connect via IRM call records found for this customer.'
+                        : 'No call records logged yet with this customer. Click "Click to Call" to initiate a call.'}
                     </div>
                   ) : (
-                    customerCalls.map(c => (
-                      <div
-                        key={c.id}
-                        className="card customer-call-card"
-                      >
-                        <div>
-                          <div className="customer-call-meta">
-                            <StatusChip status={c.direction} size="sm" />
-                            <StatusChip status={c.disposition} size="sm" />
-                            <span className="customer-call-duration">
-                              Duration: {Math.floor(c.duration / 60)}m {c.duration % 60}s • {c.timestamp}
-                            </span>
+                    displayedCustomerCalls.map(c => {
+                      const isExpanded = !!expandedCallIds[c.id];
+                      return (
+                        <div key={c.id} className="customer-call-card-item">
+                          {/* Compact Row */}
+                          <div className="customer-call-compact-row">
+                            <div className="customer-call-meta-left">
+                              <span className={`customer-call-direction-badge ${c.direction === 'inbound' ? 'is-inbound' : 'is-outbound'}`}>
+                                {c.direction === 'inbound' ? '↙ Inbound' : '↗ Outbound'}
+                              </span>
+                              <span className="customer-call-date">{formatCallTimestamp(c.timestamp)}</span>
+                              <span className="customer-call-sep">•</span>
+                              <span className="customer-call-duration">
+                                <Clock size={12} /> {formatCallDuration(c.duration)}
+                              </span>
+                              <StatusChip status={c.disposition} size="sm" />
+                            </div>
+
+                            <div className="customer-call-meta-right">
+                              {/* Connect Via Category */}
+                              <span className={`customer-call-connect-badge ${c.callerType === 'IRM' || c.connectVia === 'Connect via IRM' ? 'is-irm' : 'is-agent'}`}>
+                                {c.callerType === 'IRM' || c.connectVia === 'Connect via IRM' ? (
+                                  <>
+                                    <Sparkles size={12} /> Connect via IRM
+                                  </>
+                                ) : (
+                                  <>
+                                    <Phone size={12} /> Connect via Agent
+                                  </>
+                                )}
+                              </span>
+
+                              {/* Caller Name & Role */}
+                              <span className="customer-call-agent-label">
+                                <User size={12} />
+                                <strong>{c.agentName || 'System'}</strong>
+                                <span className={`customer-call-role-tag ${c.callerType === 'IRM' ? 'role-irm' : 'role-agent'}`}>
+                                  {c.callerType === 'IRM' ? 'IRM' : 'Agent'}
+                                </span>
+                              </span>
+
+                              {/* Expand / Collapse Button */}
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm customer-call-expand-btn"
+                                onClick={() => toggleCallExpand(c.id)}
+                              >
+                                {isExpanded ? (
+                                  <>
+                                    <span>Collapse</span>
+                                    <ChevronUp size={14} />
+                                  </>
+                                ) : (
+                                  <>
+                                    <span>Details</span>
+                                    <ChevronDown size={14} />
+                                  </>
+                                )}
+                              </button>
+                            </div>
                           </div>
-                          {c.transcription && (
-                            <p className="customer-call-transcript">
-                              "{c.transcription}"
-                            </p>
+
+                          {/* Expanded Details Panel */}
+                          {isExpanded && (
+                            <div className="customer-call-expanded-panel">
+                              {/* Discussion Notes */}
+                              {c.notes && (
+                                <div className="customer-call-notes-section">
+                                  <div className="customer-call-section-label">Discussion Notes</div>
+                                  <div className="customer-call-notes-content">{c.notes}</div>
+                                </div>
+                              )}
+
+                              {/* Outcome Reason */}
+                              {c.reason && (
+                                <div className="customer-call-reason-section">
+                                  <span className="customer-call-reason-label">
+                                    {c.disposition === 'Skipped' ? 'Skip Reason:' : 'Outcome Reason:'}
+                                  </span>{' '}
+                                  <span>{c.reason}</span>
+                                </div>
+                              )}
+
+                              {/* Voice Recording Area */}
+                              <div className="customer-call-media-card">
+                                <div className="customer-call-media-header">
+                                  <div className="customer-call-media-title">
+                                    <Volume2 size={14} />
+                                    <span>Voice Recording</span>
+                                  </div>
+                                  <span className={`badge badge-sm ${c.recordingUrl ? 'badge-success' : 'badge-neutral'}`}>
+                                    {c.recordingUrl ? 'Recording Available' : 'Recording Unavailable'}
+                                  </span>
+                                </div>
+
+                                {c.recordingUrl ? (
+                                  <div className="customer-call-audio-wrap">
+                                    <audio controls src={c.recordingUrl} className="customer-call-audio-player" />
+                                  </div>
+                                ) : (
+                                  <div className="customer-call-diagnostic-box">
+                                    <AlertCircle size={16} className="customer-call-diag-icon" />
+                                    <div className="customer-call-diag-body">
+                                      <strong>Audio recording not available for this call.</strong>
+                                      <p>
+                                        No telephony audio recording is attached to this call record. Voice recording requires carrier PBX trunking (e.g., Twilio Voice / Exotel) and secure cloud media bucket storage (AWS S3 or Azure Blob) configured on the backend server.
+                                      </p>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Call Transcript Area */}
+                              <div className="customer-call-media-card">
+                                <div className="customer-call-media-header">
+                                  <div className="customer-call-media-title">
+                                    <FileText size={14} />
+                                    <span>Call Transcript</span>
+                                  </div>
+                                  <span className={`badge badge-sm ${c.transcription ? 'badge-success' : 'badge-neutral'}`}>
+                                    {c.transcription ? 'Transcript Available' : 'Transcript unavailable'}
+                                  </span>
+                                </div>
+
+                                {c.transcription ? (
+                                  <div className="customer-call-transcript-wrap">
+                                    <p className="customer-call-transcript-text">{c.transcription}</p>
+                                  </div>
+                                ) : (
+                                  <div className="customer-call-diagnostic-box">
+                                    <FileText size={16} className="customer-call-diag-icon" />
+                                    <div className="customer-call-diag-body">
+                                      <strong>Transcript unavailable</strong>
+                                      <p>
+                                        Speech-to-text transcription service is not currently configured on the server. Automatic transcripts require integrating an AI speech-to-text provider (e.g., OpenAI Whisper API, Deepgram, or AWS Transcribe) into the audio capture pipeline.
+                                      </p>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                           )}
                         </div>
-
-                        {c.recordingUrl && (
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => alert(`Simulated Playback: Playing audio for call with ${c.contactName}`)}
-                          >
-                            <Play size={13} color="var(--primary-600)" /> Play Recording
-                          </button>
-                        )}
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               )}

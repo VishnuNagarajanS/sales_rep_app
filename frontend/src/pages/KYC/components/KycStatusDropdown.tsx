@@ -105,14 +105,22 @@ export const KycStatusDropdown: React.FC<Props> = ({
 
   const displayStatus = localStatus || currentStatus;
 
+  const isDraftOnly =
+    customerKycStatus === 'Assisted Draft' ||
+    Boolean(localStorage.getItem(`nexus_kyc_draft_${deal.id}`) && !localStorage.getItem(`nexus_kyc_assisted_${deal.id}`));
+
   const canVerifyCustomer =
-    customerKycStatus === 'Completed' ||
-    customerKycStatus === 'Submitted' ||
-    customerKycStatus === 'Under Verification' ||
-    customerKycStatus === 'Verified' ||
-    Boolean((deal as any).pan || (deal as any).panNumber || (deal as any).customerKycStatus === 'Submitted' || (deal as any).customerKycStatus === 'Completed') ||
-    Boolean(localStorage.getItem(`nexus_kyc_status_${deal.id}`) === 'Completed') ||
-    Boolean(localStorage.getItem(`nexus_kyc_data_${deal.id}`));
+    !isDraftOnly && (
+      customerKycStatus === 'Completed' ||
+      customerKycStatus === 'Submitted' ||
+      customerKycStatus === 'Under Verification' ||
+      customerKycStatus === 'Verified' ||
+      customerKycStatus === 'Assisted KYC – Submitted for Verification' ||
+      Boolean((deal as any).customerKycStatus === 'Submitted' || (deal as any).customerKycStatus === 'Completed' || (deal as any).customerKycStatus === 'Assisted KYC – Submitted for Verification') ||
+      Boolean(localStorage.getItem(`nexus_kyc_status_${deal.id}`) === 'Completed') ||
+      Boolean(localStorage.getItem(`nexus_kyc_status_${deal.id}`) === 'Submitted for Review') ||
+      Boolean(localStorage.getItem(`nexus_kyc_assisted_${deal.id}`))
+    );
 
   const allChecklistCompleted =
     checklist.identity &&
@@ -129,6 +137,10 @@ export const KycStatusDropdown: React.FC<Props> = ({
     setIsOpen(false);
 
     if (status === 'Verified') {
+      if (isDraftOnly) {
+        triggerToast('Cannot verify: Assisted KYC is currently an incomplete draft and has not been submitted yet.', 'error');
+        return;
+      }
       if (!canVerifyCustomer) {
         triggerToast('Customer has not submitted KYC details yet.', 'error');
         return;

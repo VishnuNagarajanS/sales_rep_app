@@ -79,6 +79,7 @@ export type CustomerKycStatus =
   | 'Needs Correction'
   | 'Wrong'
   | 'Rejected'
+  | 'Assisted Draft'
   | 'Assisted KYC – Submitted for Verification'
   | 'Pending';
 

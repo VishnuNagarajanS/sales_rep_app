@@ -1020,15 +1020,17 @@ export const FollowupsPage: React.FC = () => {
                 </div>
 
                 <div className="followup-actions-right">
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    onClick={e => {
-                      e.stopPropagation();
-                      setRescheduleItem(f);
-                    }}
-                  >
-                    Reschedule
-                  </button>
+                  {!(isGhlAdmin && fRole === 'IRM') && (
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={e => {
+                        e.stopPropagation();
+                        setRescheduleItem(f);
+                      }}
+                    >
+                      Reschedule
+                    </button>
+                  )}
                   <button
                     className="btn btn-call btn-sm"
                     onClick={e => {
@@ -1099,8 +1101,8 @@ export const FollowupsPage: React.FC = () => {
           footer={
             drawerFollowup && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: isExec ? 'flex-end' : 'space-between', width: '100%', gap: 10 }}>
-                {/* Ready for KYC button (Hidden for Sales Executive, available for IRM / Admins) */}
-                {!isExec && (
+                {/* Ready for KYC button (Hidden for Sales Executive and GHL Admin, available for IRM) */}
+                {!isExec && !isGhlAdmin && (
                   <button
                     type="button"
                     className="btn btn-primary"
@@ -1123,15 +1125,17 @@ export const FollowupsPage: React.FC = () => {
 
                 {/* Right side buttons */}
                 <div style={{ display: 'flex', gap: 10, marginLeft: isExec ? 'auto' : undefined }}>
-                  <button
-                    className="btn btn-secondary"
-                    onClick={() => {
-                      setRescheduleItem(drawerFollowup);
-                      setDrawerFollowup(null);
-                    }}
-                  >
-                    Reschedule
-                  </button>
+                  {!(isGhlAdmin && drawerFollowupRole === 'IRM') && (
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        setRescheduleItem(drawerFollowup);
+                        setDrawerFollowup(null);
+                      }}
+                    >
+                      Reschedule
+                    </button>
+                  )}
                   <button
                     className="btn btn-call"
                     onClick={() => {
@@ -1480,18 +1484,19 @@ export const FollowupsPage: React.FC = () => {
                       <h4 className="lead-custom-title" style={{ margin: 0 }}>
                         {tenant?.name || 'GHL India Ventures'} Custom Attributes
                       </h4>
-                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', fontWeight: 600, color: 'var(--text-primary)' }}>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: isGhlAdmin ? 'default' : 'pointer', fontWeight: 600, color: 'var(--text-primary)' }}>
                         <input
                           type="checkbox"
                           checked={Boolean(isPrefConfirmed)}
+                          disabled={isGhlAdmin}
                           onChange={e => handleTogglePrefCheckbox(e.target.checked, matchingLead, matchingCustomer)}
-                          style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--primary-600)' }}
+                          style={{ width: 16, height: 16, cursor: isGhlAdmin ? 'not-allowed' : 'pointer', accentColor: 'var(--primary-600)' }}
                         />
-                        <span>Set by IRM</span>
+                        <span>Set by IRM {isGhlAdmin && '(Read-only)'}</span>
                       </label>
                     </div>
 
-                    {isEditingPref ? (
+                    {!isGhlAdmin && isEditingPref ? (
                       <div>
                         <div className="lead-detail-grid" style={{ gap: 14 }}>
                           <div>

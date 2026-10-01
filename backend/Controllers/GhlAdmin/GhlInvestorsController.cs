@@ -3,6 +3,7 @@ using backend.Helpers;
 using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.GhlInvestors;
+using backend.Extensions;
 using backend.Models.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -111,6 +112,12 @@ public class GhlInvestorsController : ControllerBase
     public async Task<ActionResult<ApiResponse<GhlInvestorResponseDto>>> CreateInvestor(
         [FromBody] CreateGhlInvestorDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<GhlInvestorResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM investor data."));
+        }
+
         var agentId = _currentUser.UserId;
         if (!agentId.HasValue || agentId.Value <= 0)
             return Unauthorized(ApiResponse<GhlInvestorResponseDto>.FailureResult("Unauthorized: User ID is missing."));
@@ -150,6 +157,12 @@ public class GhlInvestorsController : ControllerBase
     public async Task<ActionResult<ApiResponse<GhlInvestorResponseDto>>> UpdateInvestor(
         int id, [FromBody] UpdateGhlInvestorDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<GhlInvestorResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM investor data."));
+        }
+
         var investor = await _db.GhlInvestors
             .Include(i => i.AssignedAgent)
             .FirstOrDefaultAsync(i => i.Id == id && i.CompanyId == _currentUser.CompanyId, ct);
@@ -180,6 +193,12 @@ public class GhlInvestorsController : ControllerBase
     [Authorize(Roles = "company_admin,super_admin,irm")]
     public async Task<ActionResult<ApiResponse<bool>>> DeleteInvestor(int id, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<bool>.FailureResult("Access denied: GHL Admin has read-only access to IRM investor data."));
+        }
+
         var investor = await _db.GhlInvestors
             .FirstOrDefaultAsync(i => i.Id == id && i.CompanyId == _currentUser.CompanyId, ct);
 

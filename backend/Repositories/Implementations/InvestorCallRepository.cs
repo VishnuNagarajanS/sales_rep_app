@@ -18,6 +18,9 @@ public class InvestorCallRepository : IInvestorCallRepository
         return await query.OrderByDescending(c => c.CalledAt).ToListAsync(ct);
     }
 
+    public async Task<InvestorCall?> GetByIdAsync(int id, CancellationToken ct = default)
+        => await _db.InvestorCalls.FirstOrDefaultAsync(c => c.Id == id, ct);
+
     public async Task<InvestorCall> CreateAsync(InvestorCall call, CancellationToken ct = default)
     {
         _db.InvestorCalls.Add(call);

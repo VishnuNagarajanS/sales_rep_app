@@ -24,6 +24,27 @@ public class InvestorCallService : IInvestorCallService
         return ApiResponse<List<CallLogDto>>.SuccessResponse(calls.Select(MapToDto).ToList());
     }
 
+    public async Task<ApiResponse<CallLogDto>> GetByIdAsync(int id, int companyId, int? userId, string role, CancellationToken ct = default)
+    {
+        var call = await _callRepo.GetByIdAsync(id, ct);
+        if (call == null)
+        {
+            return ApiResponse<CallLogDto>.ErrorResponse("Call record not found.");
+        }
+
+        if (role != "super_admin" && call.CompanyId != companyId)
+        {
+            return ApiResponse<CallLogDto>.ErrorResponse("Access denied: You cannot access calls from another company.");
+        }
+
+        if (role == "irm" && userId.HasValue && call.IrmId != userId.Value)
+        {
+            return ApiResponse<CallLogDto>.ErrorResponse("Access denied: You are only authorized to view your own call records.");
+        }
+
+        return ApiResponse<CallLogDto>.SuccessResponse(MapToDto(call));
+    }
+
     public async Task<ApiResponse<CallLogDto>> LogCallAsync(int companyId, int irmId, LogCallDto dto, CancellationToken ct = default)
     {
         var user = await _userRepo.GetByIdAsync(irmId, ct);

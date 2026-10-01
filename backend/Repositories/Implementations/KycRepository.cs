@@ -40,7 +40,9 @@ public class KycRepository : IKycRepository
     public async Task<InvestorKyc?> GetByTokenAsync(string token, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(token)) return null;
-        var direct = await _db.InvestorKycs.FirstOrDefaultAsync(k => k.KycLinkToken == token && k.KycLinkExpiresAt > DateTime.UtcNow, ct);
+        var direct = await _db.InvestorKycs.FirstOrDefaultAsync(k => 
+            k.KycLinkToken == token && 
+            (!k.KycLinkExpiresAt.HasValue || k.KycLinkExpiresAt.Value > DateTime.UtcNow), ct);
         if (direct != null) return direct;
 
         var subToken = token.Replace("tok_", "").Trim();
@@ -49,7 +51,7 @@ public class KycRepository : IKycRepository
         {
             var match = await _db.InvestorKycs.FirstOrDefaultAsync(k => 
                 k.KycLinkToken != null && 
-                k.KycLinkExpiresAt > DateTime.UtcNow &&
+                (!k.KycLinkExpiresAt.HasValue || k.KycLinkExpiresAt.Value > DateTime.UtcNow) &&
                 k.KycLinkToken.StartsWith(tokenPrefix), ct);
             if (match != null) return match;
         }
