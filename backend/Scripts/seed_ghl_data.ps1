@@ -1,14 +1,26 @@
 $ErrorActionPreference = "Stop"
 
-# Log in as GHL Company Admin (Vishnu)
-$login = Invoke-RestMethod -Uri "http://localhost:5106/api/auth/login" -Method Post -ContentType "application/json" -Body '{"email":"vishnu@ghlindiaventures.com","password":"Password@123"}'
+# Credentials must be supplied via environment variables before running this script:
+#   $env:SEED_EMAIL    – e.g. admin@yourcompany.com
+#   $env:SEED_PASSWORD – the user's password
+$seedEmail    = $env:SEED_EMAIL
+$seedPassword = $env:SEED_PASSWORD
+
+if (-not $seedEmail -or -not $seedPassword) {
+    Write-Error "SEED_EMAIL and SEED_PASSWORD environment variables must be set before running this script."
+    exit 1
+}
+
+# Log in and acquire bearer token
+$loginBody = "{`"email`":`"$seedEmail`",`"password`":`"$seedPassword`"}"
+$login = Invoke-RestMethod -Uri "http://localhost:5106/api/auth/login" -Method Post -ContentType "application/json" -Body $loginBody
 $token = $login.data.token
 $headers = @{
     "Authorization" = "Bearer $token"
     "Content-Type" = "application/json"
 }
 
-Write-Host "Logged in successfully as Vishnu. Token acquired."
+Write-Host "Logged in successfully. Token acquired."
 
 # 1. Seed Investors
 $investors = @(

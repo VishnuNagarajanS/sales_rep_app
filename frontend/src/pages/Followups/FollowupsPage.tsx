@@ -31,11 +31,7 @@ import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { Drawer } from '../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
-import {
-  FollowupRoleFilter,
-  SALES_EXECUTIVE_USERS,
-  IRM_USERS,
-} from '../../mock_data/adminFollowupsData';
+type FollowupRoleFilter = 'sales_executive' | 'irm';
 import { DateRangePreset } from '../../types/kanban';
 import './FollowupsPage.css';
 import '../Leads/LeadsPage.css';
@@ -106,7 +102,7 @@ export const FollowupsPage: React.FC = () => {
 
   const personOptions = useMemo(() => {
     if (selectedRole === 'sales_executive') {
-      return storageService.getAgents ? storageService.getAgents(tenant?.id) : SALES_EXECUTIVE_USERS;
+      return storageService.getAgents(tenant?.id);
     }
   }, [selectedRole, tenant?.id]);
 
@@ -568,7 +564,7 @@ export const FollowupsPage: React.FC = () => {
     if ((f.assignedAgentName || '').toLowerCase().includes('dhinakaran')) {
       return 'IRM';
     }
-    const irmsList = storageService.getIrms ? storageService.getIrms(tenant?.id) : IRM_USERS;
+    const irmsList = storageService.getIrms(tenant?.id);
     if (
       irmsList.some(
         (u: any) =>

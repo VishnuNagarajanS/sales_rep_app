@@ -33,7 +33,7 @@ const getCallPreferences = (): CallPreferences => {
     return DEFAULT_CALL_PREFS;
   }
 };
-import { MOCK_AGENTS, MOCK_IRMS } from '../../mock_data/mockData';
+
 
 import {
   Phone,

@@ -15,7 +15,7 @@ import { DataTable, Column, RowAction } from '../../components/common/DataTable'
 import { FilterBar } from '../../components/common/FilterBar';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
-import { MOCK_AGENTS } from '../../mock_data/mockData';
+
 import './AssignedLeadsPage.css';
 
 const getCustomFieldDefinitions = (tenantId?: string): CustomFieldDefinition[] => {
@@ -192,9 +192,9 @@ export const AssignedLeadsPage: React.FC = () => {
     setIsEditDrawerOpen(true);
   };
 
-  // Populate agent options from storageService or MOCK_AGENTS, ensuring the current assigned agent is included
+  // Populate agent options from storageService, ensuring the current assigned agent is included
   const agentOptions = useMemo<Array<{ id: string | number; name: string }>>(() => {
-    const list: Array<{ id: string | number; name: string }> = storageService.getAgents ? [...storageService.getAgents(tenant?.id)] : [...MOCK_AGENTS];
+    const list: Array<{ id: string | number; name: string }> = [...storageService.getAgents(tenant?.id)];
     if (formData.assignedAgentName && !list.some(a => a.name.toLowerCase() === formData.assignedAgentName?.toLowerCase())) {
       list.unshift({ id: 'current', name: formData.assignedAgentName });
     }

@@ -165,8 +165,10 @@ public class PlatformUsersController : ControllerBase
                 companyId = cid;
         }
 
-        var password = string.IsNullOrWhiteSpace(req.Password) ? "Password@123" : req.Password;
-        var passwordHash = BCrypt.Net.BCrypt.HashPassword(password);
+        if (string.IsNullOrWhiteSpace(req.Password))
+            return BadRequest(ApiResponse<object>.FailureResult("Password is required when creating a new user."));
+
+        var passwordHash = BCrypt.Net.BCrypt.HashPassword(req.Password);
 
         var newUser = new User
         {

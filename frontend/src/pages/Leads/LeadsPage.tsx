@@ -58,8 +58,7 @@ const CAPACITY_OPTIONS = [
   '₹10 Cr – ₹25 Cr',
   '₹25 Cr+'
 ];
-import { MOCK_AGENTS } from '../../mock_data/mockData';
-export { MOCK_AGENTS };
+
 
 interface LeadsPageProps {
   onNavigate?: (route: string) => void;

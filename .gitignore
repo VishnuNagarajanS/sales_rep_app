@@ -41,6 +41,10 @@ lerna-debug.log*
 *.env
 !.env.example
 
+# Backend local secrets (never commit these)
+backend/appsettings.Development.json
+backend/appsettings.Local.json
+
 # OS Generated Files
 .DS_Store
 .DS_Store?
@@ -66,6 +70,7 @@ desktop.ini
 # Testing & Coverage
 coverage/
 .nyc_output/
+backend.Tests/
 
 # Temporary / Scratch files
 tmp/

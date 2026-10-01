@@ -14,6 +14,7 @@ import { DEFAULT_TENANTS } from '../constants/defaultTenants';
 import { SYSTEM_ROLES } from '../constants/roles';
 import { FEATURES } from '../constants/features';
 import { apiClient, ApiResponse } from './apiClient';
+import { isMockMode } from '../config/environment';
 
 // Storage Keys
 const STORAGE_KEYS = {
@@ -534,8 +535,8 @@ class SuperAdminService {
       const raw = localStorage.getItem(STORAGE_KEYS.USERS);
       let users: User[] = raw ? JSON.parse(raw) : [];
 
-      // Clean up legacy users with outdated IDs or empty list
-      if (users.length === 0 || users.some(u => u.id.startsWith('usr-'))) {
+      // Clean up legacy users or seed demo users in mock mode only
+      if (isMockMode() && (users.length === 0 || users.some(u => u.id.startsWith('usr-')))) {
         users = [
           {
             id: '1',
