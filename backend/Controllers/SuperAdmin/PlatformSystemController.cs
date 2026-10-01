@@ -1,6 +1,9 @@
 using System.Diagnostics;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using backend.Authentication.Interfaces;
+using backend.Configuration;
 using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.SuperAdmin;
@@ -8,6 +11,7 @@ using backend.Models.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace backend.Controllers.SuperAdmin;
 
@@ -18,15 +22,23 @@ public class PlatformSystemController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
+    private readonly IConfiguration _configuration;
+    private readonly IOptionsMonitor<SmtpSettings> _smtpOptions;
     private readonly ILogger<PlatformSystemController> _logger;
+
+    private SmtpSettings Smtp => _smtpOptions.CurrentValue;
 
     public PlatformSystemController(
         ApplicationDbContext context,
         ICurrentUserService currentUser,
+        IConfiguration configuration,
+        IOptionsMonitor<SmtpSettings> smtpOptions,
         ILogger<PlatformSystemController> logger)
     {
         _context = context;
         _currentUser = currentUser;
+        _configuration = configuration;
+        _smtpOptions = smtpOptions;
         _logger = logger;
     }
 
@@ -344,7 +356,14 @@ public class PlatformSystemController : ControllerBase
 
         try
         {
-            await _context.Database.ExecuteSqlRawAsync("SELECT 1", ct);
+            if (_context.Database.IsRelational())
+            {
+                await _context.Database.ExecuteSqlRawAsync("SELECT 1", ct);
+            }
+            else
+            {
+                _ = await _context.Users.AnyAsync(ct);
+            }
             dbSw.Stop();
             dbConnected = true;
             dbLatencyMs = Math.Round(dbSw.Elapsed.TotalMilliseconds, 2);
@@ -512,9 +531,22 @@ public class PlatformSystemController : ControllerBase
             activeDbConnections = 1;
         }
 
+        var totalUsers = await _context.Users.CountAsync(ct);
+        var totalTenants = await _context.Tenants.CountAsync(ct);
+        var totalAuditLogs = await _context.AuditLogs.CountAsync(ct);
+        var storageFreeGb = storageLimitGb > storageUsedGb ? Math.Round(storageLimitGb - storageUsedGb, 1) : 0;
+
+        var lastBackupSetting = await _context.PlatformSettings.AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Key == "last_platform_backup_at", ct);
+        string lastBackupAt = lastBackupSetting?.Value 
+            ?? (lastAudit != default ? lastAudit.ToString("o") : string.Empty);
+
+        var uptimeTimeSpan = DateTime.UtcNow - processStartTime;
+        var processUptimeFormatted = $"{uptimeTimeSpan.Days}d {uptimeTimeSpan.Hours}h {uptimeTimeSpan.Minutes}m";
+
         var diagnostics = new SystemDiagnosticsDto
         {
-            ApiStatus = dbConnected ? "Healthy" : "Degraded",
+            ApiStatus = dbConnected ? (dbLatencyMs > 500 ? "Degraded" : "Healthy") : "Unhealthy",
             ApiLatencyMs = Math.Max(1.0, dbLatencyMs),
             DbPoolActive = activeDbConnections,
             DbPoolMax = dbPoolMax,
@@ -523,16 +555,28 @@ public class PlatformSystemController : ControllerBase
             MemoryLimitMb = memoryLimitMb,
             StorageUsedGb = storageUsedGb,
             StorageLimitGb = storageLimitGb,
+            StorageFreeGb = storageFreeGb,
             ActiveSessions = activeUsersCount,
-            ActiveWebSockets = Math.Max(0, activeUsersCount / 2),
+            ActiveWebSockets = activeUsersCount,
             TelephonyDropRate = telephonyDropRate,
             SystemUptimePercentage = uptimePercentage,
-            LastBackupAt = (lastAudit != default ? lastAudit : DateTime.UtcNow.AddHours(-4)).ToString("o"),
+            LastBackupAt = lastBackupAt,
             DatabaseConnected = dbConnected,
             ServerTimeUtc = DateTime.UtcNow.ToString("o"),
             TrunkStatus = carrier?.Status ?? "Not Configured",
             TrunkTestStatus = carrier?.TestStatus,
-            TrunkLastTestedAt = carrier?.LastTestedAt?.ToString("o")
+            TrunkLastTestedAt = carrier?.LastTestedAt?.ToString("o"),
+            TotalUsers = totalUsers,
+            ActiveUsers = activeUsersCount,
+            TotalTenants = totalTenants,
+            TotalCalls = totalCalls,
+            FailedCalls = failedCalls,
+            TotalAuditLogs = totalAuditLogs,
+            ServerHost = Environment.MachineName,
+            OsDescription = RuntimeInformation.OSDescription,
+            FrameworkDescription = RuntimeInformation.FrameworkDescription,
+            ProcessUptime = processUptimeFormatted,
+            ProcessStartTimeUtc = processStartTime
         };
 
         return Ok(ApiResponse<SystemDiagnosticsDto>.SuccessResult(diagnostics));
@@ -552,26 +596,33 @@ public class PlatformSystemController : ControllerBase
 
         try
         {
-            await _context.Database.ExecuteSqlRawAsync("SELECT 1", ct);
+            if (_context.Database.IsRelational())
+            {
+                await _context.Database.ExecuteSqlRawAsync("SELECT 1", ct);
+                try
+                {
+                    var connStr = _context.Database.GetConnectionString();
+                    if (!string.IsNullOrWhiteSpace(connStr))
+                    {
+                        var csb = new Npgsql.NpgsqlConnectionStringBuilder(connStr);
+                        maxPool = csb.MaxPoolSize;
+                    }
+                    activeConnections = await _context.Database
+                        .SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM pg_stat_activity WHERE datname = current_database() AND state = 'active'")
+                        .FirstOrDefaultAsync(ct);
+                    if (activeConnections <= 0) activeConnections = 1;
+                }
+                catch { }
+
+                message = $"PostgreSQL query execution succeeded. Handshake verified in {sw.Elapsed.TotalMilliseconds:F1}ms. Active connections: {activeConnections}/{maxPool}.";
+            }
+            else
+            {
+                _ = await _context.Users.AnyAsync(ct);
+                message = $"Database provider query verified in {sw.Elapsed.TotalMilliseconds:F1}ms.";
+            }
             sw.Stop();
             dbConnected = true;
-
-            try
-            {
-                var connStr = _context.Database.GetConnectionString();
-                if (!string.IsNullOrWhiteSpace(connStr))
-                {
-                    var csb = new Npgsql.NpgsqlConnectionStringBuilder(connStr);
-                    maxPool = csb.MaxPoolSize;
-                }
-                activeConnections = await _context.Database
-                    .SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM pg_stat_activity WHERE datname = current_database() AND state = 'active'")
-                    .FirstOrDefaultAsync(ct);
-                if (activeConnections <= 0) activeConnections = 1;
-            }
-            catch { }
-
-            message = $"PostgreSQL query execution succeeded. Handshake verified in {sw.Elapsed.TotalMilliseconds:F1}ms. Active connections: {activeConnections}/{maxPool}.";
         }
         catch (Exception ex)
         {
@@ -724,6 +775,26 @@ public class PlatformSystemController : ControllerBase
             platformSettings = settings
         };
 
+        var backupTimestamp = DateTime.UtcNow.ToString("o");
+        var backupSetting = await _context.PlatformSettings.FirstOrDefaultAsync(s => s.Key == "last_platform_backup_at", ct);
+        if (backupSetting == null)
+        {
+            _context.PlatformSettings.Add(new PlatformSetting
+            {
+                Key = "last_platform_backup_at",
+                Value = backupTimestamp,
+                Description = "Timestamp of the last full platform database backup export",
+                UpdatedAt = DateTime.UtcNow,
+                UpdatedBy = _currentUser.Email ?? "Super Admin"
+            });
+        }
+        else
+        {
+            backupSetting.Value = backupTimestamp;
+            backupSetting.UpdatedAt = DateTime.UtcNow;
+            backupSetting.UpdatedBy = _currentUser.Email ?? "Super Admin";
+        }
+
         _context.AuditLogs.Add(new AuditLog
         {
             Action = "EXPORT_PLATFORM_BACKUP",
@@ -739,6 +810,484 @@ public class PlatformSystemController : ControllerBase
         await _context.SaveChangesAsync(ct);
 
         return Ok(ApiResponse<object>.SuccessResult(snapshot, "Database backup snapshot exported successfully."));
+    }
+
+    // ── DEPENDENCY HEALTH CHECKS ─────────────────────────────────────────────
+
+    [HttpGet("health-checks")]
+    [Authorize(Roles = "super_admin")]
+    public async Task<ActionResult<ApiResponse<SystemHealthReportDto>>> GetHealthChecks(CancellationToken ct = default)
+    {
+        var report = await RunHealthChecksInternalAsync(ct);
+        return Ok(ApiResponse<SystemHealthReportDto>.SuccessResult(report));
+    }
+
+    [HttpPost("health-checks/probe")]
+    [Authorize(Roles = "super_admin")]
+    public async Task<ActionResult<ApiResponse<SystemHealthReportDto>>> ProbeHealthChecks(CancellationToken ct = default)
+    {
+        var report = await RunHealthChecksInternalAsync(ct);
+
+        _context.AuditLogs.Add(new AuditLog
+        {
+            Action = "PROBE_HEALTH_CHECKS",
+            EntityType = "System",
+            EntityId = "health_probe",
+            ActorName = _currentUser.Email ?? "Super Admin",
+            ActorEmail = _currentUser.Email ?? "admin@platform.com",
+            Details = $"Super Admin executed live dependency health probe across all services. Result: {report.OverallStatus} ({report.HealthyCount}/{report.Checks.Count} Healthy).",
+            Module = "System",
+            Status = report.OverallStatus == "Healthy" ? "success" : "warning",
+            Timestamp = DateTime.UtcNow
+        });
+        await _context.SaveChangesAsync(ct);
+
+        return Ok(ApiResponse<SystemHealthReportDto>.SuccessResult(report, "Live health probes executed successfully."));
+    }
+
+    [HttpPost("health-checks/smtp/test")]
+    [Authorize(Roles = "super_admin")]
+    public async Task<ActionResult<ApiResponse<DiagnosticTestResultDto>>> TestSmtpDiagnostic(CancellationToken ct = default)
+    {
+        var (success, latencyMs, msg) = await CheckSmtpServerAsync(Smtp.Host, Smtp.Port, ct);
+
+        _context.AuditLogs.Add(new AuditLog
+        {
+            Action = "TEST_SMTP_CONNECTION",
+            EntityType = "System",
+            EntityId = "smtp",
+            ActorName = _currentUser.Email ?? "Super Admin",
+            ActorEmail = _currentUser.Email ?? "admin@platform.com",
+            Details = $"Super Admin executed live SMTP diagnostic probe to {Smtp.Host}:{Smtp.Port}. Status: {(success ? "Healthy" : "Failed")}, Latency: {latencyMs}ms.",
+            Module = "System",
+            Status = success ? "success" : "failure",
+            Timestamp = DateTime.UtcNow
+        });
+        await _context.SaveChangesAsync(ct);
+
+        var result = new DiagnosticTestResultDto
+        {
+            Success = success,
+            Target = $"SMTP Relay ({Smtp.Host}:{Smtp.Port})",
+            LatencyMs = latencyMs,
+            Status = success ? "Healthy" : "Degraded",
+            Message = msg,
+            Details = new Dictionary<string, object>
+            {
+                ["Host"] = Smtp.Host,
+                ["Port"] = Smtp.Port,
+                ["EnableSsl"] = Smtp.EnableSsl,
+                ["SenderEmail"] = Smtp.SenderEmail,
+                ["SenderName"] = Smtp.SenderName
+            },
+            TestedAt = DateTime.UtcNow
+        };
+
+        return Ok(ApiResponse<DiagnosticTestResultDto>.SuccessResult(result, success ? "SMTP server responded successfully." : "SMTP server probe failed."));
+    }
+
+    private async Task<SystemHealthReportDto> RunHealthChecksInternalAsync(CancellationToken ct)
+    {
+        var checks = new List<SystemHealthCheckItemDto>();
+
+        // 1. PostgreSQL Database
+        var dbSw = Stopwatch.StartNew();
+        bool dbOk = false;
+        string dbMsg;
+        int activeConn = 1;
+        int maxPool = 100;
+
+        try
+        {
+            if (_context.Database.IsRelational())
+            {
+                await _context.Database.ExecuteSqlRawAsync("SELECT 1", ct);
+                try
+                {
+                    var connStr = _context.Database.GetConnectionString();
+                    if (!string.IsNullOrWhiteSpace(connStr))
+                    {
+                        var csb = new Npgsql.NpgsqlConnectionStringBuilder(connStr);
+                        maxPool = csb.MaxPoolSize;
+                    }
+                    activeConn = await _context.Database
+                        .SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM pg_stat_activity WHERE datname = current_database() AND state = 'active'")
+                        .FirstOrDefaultAsync(ct);
+                    if (activeConn <= 0) activeConn = 1;
+                }
+                catch { }
+
+                dbMsg = $"PostgreSQL connection alive and responding. Active pool connections: {activeConn}/{maxPool}.";
+            }
+            else
+            {
+                _ = await _context.Users.AnyAsync(ct);
+                dbMsg = "Database provider responsive and query execution verified.";
+            }
+            dbSw.Stop();
+            dbOk = true;
+        }
+        catch (Exception ex)
+        {
+            dbSw.Stop();
+            dbOk = false;
+            dbMsg = $"Database query failed: {ex.Message}";
+        }
+
+        checks.Add(new SystemHealthCheckItemDto
+        {
+            Name = "PostgreSQL Database Engine",
+            Component = "Database",
+            Status = dbOk ? (dbSw.Elapsed.TotalMilliseconds > 500 ? "Degraded" : "Healthy") : "Unhealthy",
+            LatencyMs = Math.Round(dbSw.Elapsed.TotalMilliseconds, 1),
+            Message = dbMsg,
+            Details = new Dictionary<string, object>
+            {
+                ["Engine"] = "PostgreSQL (Neon Cloud)",
+                ["ActiveConnections"] = activeConn,
+                ["MaxPoolSize"] = maxPool
+            },
+            CheckedAt = DateTime.UtcNow
+        });
+
+        // 2. Kestrel API Runtime
+        var apiSw = Stopwatch.StartNew();
+        var proc = Process.GetCurrentProcess();
+        var memMb = Math.Round((double)proc.WorkingSet64 / (1024 * 1024), 1);
+        var threadCount = ThreadPool.ThreadCount;
+        apiSw.Stop();
+
+        checks.Add(new SystemHealthCheckItemDto
+        {
+            Name = "Kestrel ASP.NET Core Runtime",
+            Component = "API Server",
+            Status = "Healthy",
+            LatencyMs = Math.Round(apiSw.Elapsed.TotalMilliseconds, 1),
+            Message = $"API server is operational. Memory Working Set: {memMb}MB. Threadpool threads: {threadCount}.",
+            Details = new Dictionary<string, object>
+            {
+                ["ProcessId"] = proc.Id,
+                ["WorkingSetMb"] = memMb,
+                ["ThreadCount"] = threadCount,
+                ["Framework"] = RuntimeInformation.FrameworkDescription,
+                ["OS"] = RuntimeInformation.OSDescription
+            },
+            CheckedAt = DateTime.UtcNow
+        });
+
+        // 3. JWT Authentication & Security Infrastructure
+        var authSw = Stopwatch.StartNew();
+        var secretKey = _configuration["JwtSettings:SecretKey"] ?? string.Empty;
+        var issuer = _configuration["JwtSettings:Issuer"] ?? "NexusSalesApi";
+        var audience = _configuration["JwtSettings:Audience"] ?? "NexusSalesClient";
+        var expirationMin = _configuration.GetValue<int>("JwtSettings:ExpirationMinutes", 60);
+        authSw.Stop();
+
+        bool authOk = secretKey.Length >= 32;
+        checks.Add(new SystemHealthCheckItemDto
+        {
+            Name = "JWT Token & Auth Infrastructure",
+            Component = "Authentication",
+            Status = authOk ? "Healthy" : "Degraded",
+            LatencyMs = Math.Round(authSw.Elapsed.TotalMilliseconds, 1),
+            Message = authOk 
+                ? $"HMAC-SHA256 signing active with secure entropy ({secretKey.Length} chars). Token lifetime: {expirationMin}m."
+                : "JWT Secret Key length is under recommended 256-bit entropy threshold.",
+            Details = new Dictionary<string, object>
+            {
+                ["Issuer"] = issuer,
+                ["Audience"] = audience,
+                ["ExpirationMinutes"] = expirationMin,
+                ["SecretKeyConfigured"] = !string.IsNullOrWhiteSpace(secretKey)
+            },
+            CheckedAt = DateTime.UtcNow
+        });
+
+        // 4. SMTP Email Service
+        var (smtpOk, smtpLatency, smtpMsg) = await CheckSmtpServerAsync(Smtp.Host, Smtp.Port, ct);
+        checks.Add(new SystemHealthCheckItemDto
+        {
+            Name = "SMTP Email Gateway",
+            Component = "Email Notifications",
+            Status = string.IsNullOrWhiteSpace(Smtp.Host) ? "Not Configured" : (smtpOk ? "Healthy" : "Degraded"),
+            LatencyMs = smtpLatency,
+            Message = smtpMsg,
+            Details = new Dictionary<string, object>
+            {
+                ["Host"] = Smtp.Host,
+                ["Port"] = Smtp.Port,
+                ["EnableSsl"] = Smtp.EnableSsl,
+                ["SenderEmail"] = Smtp.SenderEmail,
+                ["SenderName"] = Smtp.SenderName
+            },
+            CheckedAt = DateTime.UtcNow
+        });
+
+        // 5. Cloud Media & Disk Storage
+        var storageSw = Stopwatch.StartNew();
+        bool storageOk = true;
+        string storageMsg;
+        double storageFreeGb = 0;
+        double storageTotalGb = 0;
+
+        try
+        {
+            var drive = new DriveInfo(Path.GetPathRoot(AppDomain.CurrentDomain.BaseDirectory) ?? "C:");
+            if (drive.IsReady)
+            {
+                storageTotalGb = Math.Round((double)drive.TotalSize / (1024 * 1024 * 1024), 1);
+                storageFreeGb = Math.Round((double)drive.AvailableFreeSpace / (1024 * 1024 * 1024), 1);
+            }
+            storageSw.Stop();
+            storageOk = storageFreeGb >= 1.0;
+            storageMsg = storageOk 
+                ? $"Storage volume healthy. Available free disk: {storageFreeGb}GB / {storageTotalGb}GB."
+                : $"Low disk warning. Only {storageFreeGb}GB free space remaining.";
+        }
+        catch (Exception ex)
+        {
+            storageSw.Stop();
+            storageOk = false;
+            storageMsg = $"Storage check error: {ex.Message}";
+        }
+
+        checks.Add(new SystemHealthCheckItemDto
+        {
+            Name = "Application Drive & Media Vault",
+            Component = "Storage",
+            Status = storageOk ? "Healthy" : "Degraded",
+            LatencyMs = Math.Round(storageSw.Elapsed.TotalMilliseconds, 1),
+            Message = storageMsg,
+            Details = new Dictionary<string, object>
+            {
+                ["FreeSpaceGb"] = storageFreeGb,
+                ["TotalSpaceGb"] = storageTotalGb
+            },
+            CheckedAt = DateTime.UtcNow
+        });
+
+        // 6. Telephony Carrier Trunk
+        var carrier = await _context.CarrierSettings.AsNoTracking().FirstOrDefaultAsync(ct);
+        checks.Add(new SystemHealthCheckItemDto
+        {
+            Name = "Telephony Gateway & SIP Carrier",
+            Component = "Telephony",
+            Status = carrier != null && carrier.Status == "Active" ? "Healthy" : (carrier != null ? "Degraded" : "Not Configured"),
+            LatencyMs = 0,
+            Message = carrier != null 
+                ? $"Primary Carrier: {carrier.PrimaryCarrier}. Status: {carrier.Status}. Gateway: {carrier.PrimaryGatewayHost}."
+                : "No telephony carrier trunk configured in system.",
+            Details = new Dictionary<string, object>
+            {
+                ["PrimaryCarrier"] = carrier?.PrimaryCarrier ?? "None",
+                ["GatewayHost"] = carrier?.PrimaryGatewayHost ?? "None",
+                ["MaxConcurrentChannels"] = carrier?.MaxConcurrentChannels ?? 0
+            },
+            CheckedAt = DateTime.UtcNow
+        });
+
+        var healthyCount = checks.Count(c => c.Status == "Healthy");
+        var degradedCount = checks.Count(c => c.Status == "Degraded" || c.Status == "Not Configured");
+        var unhealthyCount = checks.Count(c => c.Status == "Unhealthy");
+
+        var overallStatus = unhealthyCount > 0 ? "Unhealthy" : (degradedCount > 0 ? "Degraded" : "Healthy");
+
+        return new SystemHealthReportDto
+        {
+            OverallStatus = overallStatus,
+            HealthyCount = healthyCount,
+            DegradedCount = degradedCount,
+            UnhealthyCount = unhealthyCount,
+            Checks = checks,
+            GeneratedAt = DateTime.UtcNow
+        };
+    }
+
+    private static async Task<(bool success, double latencyMs, string message)> CheckSmtpServerAsync(string host, int port, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return (false, 0, "SMTP host is not configured in application settings.");
+        }
+
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var tcpClient = new TcpClient();
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(3));
+
+            await tcpClient.ConnectAsync(host, port, cts.Token);
+            sw.Stop();
+            return (true, Math.Round(sw.Elapsed.TotalMilliseconds, 1), $"TCP handshake with {host}:{port} succeeded in {sw.Elapsed.TotalMilliseconds:F1}ms.");
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return (false, Math.Round(sw.Elapsed.TotalMilliseconds, 1), $"Could not connect to {host}:{port}: {ex.Message}");
+        }
+    }
+
+    // ── GLOBAL SYSTEM CONFIGURATION ──────────────────────────────────────────
+
+    [HttpGet("config")]
+    [Authorize(Roles = "super_admin")]
+    public async Task<ActionResult<ApiResponse<GlobalConfigDto>>> GetGlobalConfig(CancellationToken ct = default)
+    {
+        var setting = await _context.PlatformSettings.AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Key == "global_platform_config", ct);
+
+        var carrier = await _context.CarrierSettings.AsNoTracking().FirstOrDefaultAsync(ct);
+
+        GlobalConfigDto config;
+        if (setting != null && !string.IsNullOrWhiteSpace(setting.Value))
+        {
+            try
+            {
+                config = JsonSerializer.Deserialize<GlobalConfigDto>(setting.Value, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                    ?? new GlobalConfigDto();
+            }
+            catch
+            {
+                config = new GlobalConfigDto();
+            }
+            config.LastUpdatedAt = setting.UpdatedAt;
+            config.LastUpdatedBy = setting.UpdatedBy;
+        }
+        else
+        {
+            config = new GlobalConfigDto
+            {
+                PlatformName = "NexusSales Enterprise",
+                SupportEmail = "support@ghlindiaventures.com",
+                DefaultTimezone = "Asia/Kolkata (IST)",
+                SessionTimeoutMinutes = 60,
+                MaxUploadSizeMb = 25,
+                EnforceMfa = false,
+                TokenExpirationMinutes = _configuration.GetValue<int>("JwtSettings:ExpirationMinutes", 60),
+                PasswordMinLength = 8,
+                RecordingRetentionDays = carrier?.RecordingRetentionDays ?? 90
+            };
+        }
+
+        // Always overlay current runtime SMTP & Database configuration (masking secrets)
+        config.SmtpHost = Smtp.Host;
+        config.SmtpPort = Smtp.Port;
+        config.SmtpEnableSsl = Smtp.EnableSsl;
+        if (string.IsNullOrWhiteSpace(config.SmtpSenderEmail))
+            config.SmtpSenderEmail = Smtp.SenderEmail;
+        if (string.IsNullOrWhiteSpace(config.SmtpSenderName))
+            config.SmtpSenderName = Smtp.SenderName;
+        config.DatabaseEngine = "PostgreSQL (Neon Cloud)";
+        if (carrier != null)
+            config.RecordingRetentionDays = carrier.RecordingRetentionDays;
+
+        return Ok(ApiResponse<GlobalConfigDto>.SuccessResult(config));
+    }
+
+    [HttpPut("config")]
+    [Authorize(Roles = "super_admin")]
+    public async Task<ActionResult<ApiResponse<GlobalConfigDto>>> UpdateGlobalConfig(
+        [FromBody] UpdateGlobalConfigRequestDto req,
+        CancellationToken ct = default)
+    {
+        var setting = await _context.PlatformSettings
+            .FirstOrDefaultAsync(s => s.Key == "global_platform_config", ct);
+
+        GlobalConfigDto current;
+        if (setting != null && !string.IsNullOrWhiteSpace(setting.Value))
+        {
+            try
+            {
+                current = JsonSerializer.Deserialize<GlobalConfigDto>(setting.Value, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                    ?? new GlobalConfigDto();
+            }
+            catch
+            {
+                current = new GlobalConfigDto();
+            }
+        }
+        else
+        {
+            current = new GlobalConfigDto();
+        }
+
+        if (!string.IsNullOrWhiteSpace(req.PlatformName))
+            current.PlatformName = req.PlatformName.Trim();
+        if (!string.IsNullOrWhiteSpace(req.SupportEmail))
+            current.SupportEmail = req.SupportEmail.Trim();
+        if (!string.IsNullOrWhiteSpace(req.DefaultTimezone))
+            current.DefaultTimezone = req.DefaultTimezone.Trim();
+        if (req.SessionTimeoutMinutes.HasValue && req.SessionTimeoutMinutes.Value > 0)
+            current.SessionTimeoutMinutes = req.SessionTimeoutMinutes.Value;
+        if (req.MaxUploadSizeMb.HasValue && req.MaxUploadSizeMb.Value > 0)
+            current.MaxUploadSizeMb = req.MaxUploadSizeMb.Value;
+        if (req.EnforceMfa.HasValue)
+            current.EnforceMfa = req.EnforceMfa.Value;
+        if (req.TokenExpirationMinutes.HasValue && req.TokenExpirationMinutes.Value > 0)
+            current.TokenExpirationMinutes = req.TokenExpirationMinutes.Value;
+        if (req.PasswordMinLength.HasValue && req.PasswordMinLength.Value >= 6)
+            current.PasswordMinLength = req.PasswordMinLength.Value;
+        if (req.RecordingRetentionDays.HasValue && req.RecordingRetentionDays.Value > 0)
+        {
+            current.RecordingRetentionDays = req.RecordingRetentionDays.Value;
+            var carrier = await _context.CarrierSettings.FirstOrDefaultAsync(ct);
+            if (carrier != null)
+            {
+                carrier.RecordingRetentionDays = req.RecordingRetentionDays.Value;
+                carrier.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(req.SmtpSenderEmail))
+            current.SmtpSenderEmail = req.SmtpSenderEmail.Trim();
+        if (!string.IsNullOrWhiteSpace(req.SmtpSenderName))
+            current.SmtpSenderName = req.SmtpSenderName.Trim();
+
+        current.LastUpdatedAt = DateTime.UtcNow;
+        current.LastUpdatedBy = _currentUser.Email ?? "Super Admin";
+
+        var jsonValue = JsonSerializer.Serialize(current, new JsonSerializerOptions { WriteIndented = false });
+
+        if (setting == null)
+        {
+            _context.PlatformSettings.Add(new PlatformSetting
+            {
+                Key = "global_platform_config",
+                Value = jsonValue,
+                Description = "Global platform configuration and policy settings",
+                UpdatedAt = DateTime.UtcNow,
+                UpdatedBy = _currentUser.Email ?? "Super Admin"
+            });
+        }
+        else
+        {
+            setting.Value = jsonValue;
+            setting.UpdatedAt = DateTime.UtcNow;
+            setting.UpdatedBy = _currentUser.Email ?? "Super Admin";
+        }
+
+        _context.AuditLogs.Add(new AuditLog
+        {
+            Action = "UPDATE_GLOBAL_CONFIG",
+            EntityType = "System",
+            EntityId = "global_config",
+            ActorName = _currentUser.Email ?? "Super Admin",
+            ActorEmail = _currentUser.Email ?? "admin@platform.com",
+            Details = $"Super Admin updated global platform configuration: \"{current.PlatformName}\" [Timeout: {current.SessionTimeoutMinutes}m, UploadMax: {current.MaxUploadSizeMb}MB, Retention: {current.RecordingRetentionDays}d].",
+            Module = "System",
+            Status = "success",
+            Timestamp = DateTime.UtcNow
+        });
+
+        await _context.SaveChangesAsync(ct);
+
+        // Overlay runtime settings
+        current.SmtpHost = Smtp.Host;
+        current.SmtpPort = Smtp.Port;
+        current.SmtpEnableSsl = Smtp.EnableSsl;
+        current.DatabaseEngine = "PostgreSQL (Neon Cloud)";
+
+        return Ok(ApiResponse<GlobalConfigDto>.SuccessResult(current, "Global platform configuration updated successfully."));
     }
 
     private class UptimeTelemetryRecord

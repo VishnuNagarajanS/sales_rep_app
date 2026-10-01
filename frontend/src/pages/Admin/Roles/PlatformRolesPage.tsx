@@ -108,7 +108,7 @@ export const PlatformRolesPage: React.FC = () => {
   useEffect(() => {
     loadData();
     const handleStorageChange = () => {
-      setRoles(superAdminService.getRoles());
+      loadData();
     };
     window.addEventListener('nexus_admin_updated', handleStorageChange);
     window.addEventListener('nexus_storage_updated', handleStorageChange);
@@ -437,12 +437,22 @@ export const PlatformRolesPage: React.FC = () => {
     setHasUnsavedMatrixChanges(true);
   };
 
-  const handleSaveMatrix = () => {
-    Object.keys(roles).forEach(code => {
-      superAdminService.updateRolePermissions(code, roles[code].permissions);
-    });
-    setHasUnsavedMatrixChanges(false);
-    showFeedback('Matrix permissions committed and synchronized successfully.');
+  const [isSavingMatrix, setIsSavingMatrix] = useState(false);
+
+  const handleSaveMatrix = async () => {
+    setIsSavingMatrix(true);
+    try {
+      const updates = Object.values(roles)
+        .filter(r => r.code !== 'super_admin')
+        .map(r => superAdminService.updateRoleApi(r.id, { permissions: r.permissions }));
+      await Promise.all(updates);
+      setHasUnsavedMatrixChanges(false);
+      showFeedback('Matrix permissions committed and synchronized successfully to database.');
+    } catch (err: any) {
+      showFeedback(err?.message || 'Failed to persist matrix permissions to database.', 'error');
+    } finally {
+      setIsSavingMatrix(false);
+    }
   };
 
   // Filtered permission groups for Matrix

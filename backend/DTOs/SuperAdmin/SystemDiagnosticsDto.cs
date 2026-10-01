@@ -22,6 +22,20 @@ public class SystemDiagnosticsDto
     public string? TrunkStatus { get; set; }
     public string? TrunkTestStatus { get; set; }
     public string? TrunkLastTestedAt { get; set; }
+
+    // Real Database & Platform Metrics
+    public int TotalUsers { get; set; }
+    public int ActiveUsers { get; set; }
+    public int TotalTenants { get; set; }
+    public int TotalCalls { get; set; }
+    public int FailedCalls { get; set; }
+    public int TotalAuditLogs { get; set; }
+    public string ServerHost { get; set; } = string.Empty;
+    public string OsDescription { get; set; } = string.Empty;
+    public string FrameworkDescription { get; set; } = string.Empty;
+    public string ProcessUptime { get; set; } = string.Empty;
+    public DateTime ProcessStartTimeUtc { get; set; }
+    public double StorageFreeGb { get; set; }
 }
 
 public class DiagnosticTestResultDto

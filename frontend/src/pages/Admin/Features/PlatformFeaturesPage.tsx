@@ -42,7 +42,12 @@ export const PlatformFeaturesPage: React.FC = () => {
   // Success Feedback
   const [successMsg, setSuccessMsg] = useState('');
 
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const loadData = async () => {
+    setIsLoading(true);
+    setLoadError(null);
     try {
       const [allPackages, allTenants] = await Promise.all([
         superAdminService.fetchPackagesFromApi(),
@@ -50,10 +55,11 @@ export const PlatformFeaturesPage: React.FC = () => {
       ]);
       setPackages(allPackages);
       setTenants(allTenants);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error fetching packages from API:', err);
-      setPackages(superAdminService.getPackages());
-      setTenants(superAdminService.getTenants());
+      setLoadError(err?.message || 'Unable to connect to packages server.');
+    } finally {
+      setIsLoading(false);
     }
   };
 

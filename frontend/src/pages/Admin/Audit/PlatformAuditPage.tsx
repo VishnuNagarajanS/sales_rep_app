@@ -38,18 +38,21 @@ export const PlatformAuditPage: React.FC = () => {
   const [isInspectDrawerOpen, setIsInspectDrawerOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const loadData = async () => {
     try {
       const allTenants = await superAdminService.fetchTenantsFromApi();
       setTenants(allTenants);
-    } catch {
-      setTenants(superAdminService.getTenants());
+    } catch (err: any) {
+      console.warn('Could not load tenants for audit filters:', err);
     }
     await applyFilters();
   };
 
   const applyFilters = async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
       const list = await superAdminService.fetchAuditLogsFromApi({
         companyId: selectedCompanyFilter,
@@ -60,14 +63,10 @@ export const PlatformAuditPage: React.FC = () => {
         to: toDate ? new Date(toDate + 'T23:59:59').toISOString() : undefined,
       });
       setLogs(list);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load audit logs from API:', err);
-      setLogs(superAdminService.getAuditLogs({
-        companyId: selectedCompanyFilter,
-        action: selectedActionFilter,
-        module: selectedModuleFilter,
-        search: searchQuery,
-      }));
+      setLoadError(err?.message || 'Failed to load audit logs from backend server.');
+      setLogs([]);
     } finally {
       setIsLoading(false);
     }

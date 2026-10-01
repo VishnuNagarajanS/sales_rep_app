@@ -445,10 +445,7 @@ public class PlatformUsersController : ControllerBase
         [FromQuery] string? timeZone = null,
         CancellationToken ct = default)
     {
-        var now = DateTime.UtcNow;
-        var currentMonthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
-        var nextMonthStart = currentMonthStart.AddMonths(1);
-        var prevMonthStart = currentMonthStart.AddMonths(-1);
+        var (currentMonthStart, nextMonthStart, prevMonthStart) = GetMonthUtcRanges(timeZone);
 
         var totalTenants = await _context.Tenants.CountAsync(ct);
         var activeTenants = await _context.Tenants.CountAsync(t => t.IsActive && t.Status != "Suspended", ct);
@@ -458,6 +455,13 @@ public class PlatformUsersController : ControllerBase
         var totalUsers = await _context.Users.CountAsync(ct);
         var activeUsers = await _context.Users.CountAsync(u => u.Status == UserStatus.Active, ct);
 
+        // Real role distribution counts from database
+        var superAdminCount = await _context.Users.CountAsync(u => u.RoleId == 1, ct);
+        var companyAdminCount = await _context.Users.CountAsync(u => u.RoleId == 2, ct);
+        var salesExecCount = await _context.Users.CountAsync(u => u.RoleId == 3, ct);
+        var irmCount = await _context.Users.CountAsync(u => u.RoleId == 4, ct);
+
+        var totalCalls = await _context.CallRecords.CountAsync(ct);
         var (callsToday, callsConnected) = await CalculateCallsTodayAsync(timeZone, ct);
 
         var totalLeads = await _context.Leads.CountAsync(ct);
@@ -471,6 +475,29 @@ public class PlatformUsersController : ControllerBase
             .SumAsync(c => c.Value!.Value, ct);
         var totalPipelineValue = (long)Math.Round(ghlDealSum + irmDealSum);
 
+        // Real system health score from persistent uptime telemetry
+        double systemHealthScore = 100.0;
+        try
+        {
+            var telemetry = await _context.PlatformSettings
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.Key == "system_uptime_telemetry", ct);
+            if (telemetry != null && !string.IsNullOrWhiteSpace(telemetry.Value))
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(telemetry.Value);
+                if (doc.RootElement.TryGetProperty("TotalChecks", out var tc) && doc.RootElement.TryGetProperty("SuccessfulChecks", out var sc))
+                {
+                    var total = tc.GetInt32();
+                    var succ = sc.GetInt32();
+                    if (total > 0)
+                    {
+                        systemHealthScore = Math.Round(((double)succ / total) * 100.0, 1);
+                    }
+                }
+            }
+        }
+        catch { }
+
         var metrics = new PlatformMetricsDto
         {
             TotalTenants = totalTenants,
@@ -479,6 +506,11 @@ public class PlatformUsersController : ControllerBase
             SuspendedTenants = suspendedTenants,
             TotalUsers = totalUsers,
             ActiveUsers = activeUsers,
+            SuperAdminCount = superAdminCount,
+            CompanyAdminCount = companyAdminCount,
+            SalesExecutiveCount = salesExecCount,
+            IrmCount = irmCount,
+            TotalCalls = totalCalls,
             CallsToday = callsToday,
             CallsConnected = callsConnected,
             TotalLeads = totalLeads,
@@ -486,7 +518,7 @@ public class PlatformUsersController : ControllerBase
             PreviousMonthLeads = previousMonthLeads,
             TotalPipelineValue = totalPipelineValue,
             TotalCustomers = totalCustomers,
-            SystemHealthScore = 100.0
+            SystemHealthScore = systemHealthScore
         };
 
         return Ok(ApiResponse<PlatformMetricsDto>.SuccessResult(metrics));
@@ -509,43 +541,48 @@ public class PlatformUsersController : ControllerBase
         return Ok(ApiResponse<CallsTodayMetricsDto>.SuccessResult(result));
     }
 
-    private static (DateTime UtcStart, DateTime UtcEnd) GetTodayUtcRange(string? timeZoneId)
+    private static TimeZoneInfo ResolveTimeZone(string? timeZoneId)
     {
         TimeZoneInfo tz;
         if (!string.IsNullOrWhiteSpace(timeZoneId))
         {
             var cleanId = timeZoneId.Split('(')[0].Trim();
-            if (!TimeZoneInfo.TryFindSystemTimeZoneById(cleanId, out tz!) &&
-                !TimeZoneInfo.TryFindSystemTimeZoneById(timeZoneId.Trim(), out tz!))
+            if (TimeZoneInfo.TryFindSystemTimeZoneById(cleanId, out tz!) ||
+                TimeZoneInfo.TryFindSystemTimeZoneById(timeZoneId.Trim(), out tz!))
             {
-                if (cleanId.Equals("Asia/Kolkata", StringComparison.OrdinalIgnoreCase) ||
-                    cleanId.Equals("IST", StringComparison.OrdinalIgnoreCase) ||
-                    cleanId.Equals("Asia/Calcutta", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (!TimeZoneInfo.TryFindSystemTimeZoneById("India Standard Time", out tz!))
-                    {
-                        tz = TimeZoneInfo.CreateCustomTimeZone("IST", TimeSpan.FromHours(5.5), "India Standard Time", "India Standard Time");
-                    }
-                }
-                else
-                {
-                    if (!TimeZoneInfo.TryFindSystemTimeZoneById("India Standard Time", out tz!) &&
-                        !TimeZoneInfo.TryFindSystemTimeZoneById("Asia/Kolkata", out tz!))
-                    {
-                        tz = TimeZoneInfo.CreateCustomTimeZone("IST", TimeSpan.FromHours(5.5), "India Standard Time", "India Standard Time");
-                    }
-                }
+                return tz;
             }
-        }
-        else
-        {
-            if (!TimeZoneInfo.TryFindSystemTimeZoneById("Asia/Kolkata", out tz!) &&
-                !TimeZoneInfo.TryFindSystemTimeZoneById("India Standard Time", out tz!))
+
+            if (cleanId.Equals("Asia/Kolkata", StringComparison.OrdinalIgnoreCase) ||
+                cleanId.Equals("IST", StringComparison.OrdinalIgnoreCase) ||
+                cleanId.Equals("Asia/Calcutta", StringComparison.OrdinalIgnoreCase))
             {
-                tz = TimeZoneInfo.CreateCustomTimeZone("IST", TimeSpan.FromHours(5.5), "India Standard Time", "India Standard Time");
+                if (TimeZoneInfo.TryFindSystemTimeZoneById("India Standard Time", out tz!))
+                {
+                    return tz;
+                }
+                return TimeZoneInfo.CreateCustomTimeZone("IST", TimeSpan.FromHours(5.5), "India Standard Time", "India Standard Time");
             }
+
+            if (TimeZoneInfo.TryFindSystemTimeZoneById("India Standard Time", out tz!) ||
+                TimeZoneInfo.TryFindSystemTimeZoneById("Asia/Kolkata", out tz!))
+            {
+                return tz;
+            }
+            return TimeZoneInfo.CreateCustomTimeZone("IST", TimeSpan.FromHours(5.5), "India Standard Time", "India Standard Time");
         }
 
+        if (TimeZoneInfo.TryFindSystemTimeZoneById("Asia/Kolkata", out tz!) ||
+            TimeZoneInfo.TryFindSystemTimeZoneById("India Standard Time", out tz!))
+        {
+            return tz;
+        }
+        return TimeZoneInfo.CreateCustomTimeZone("IST", TimeSpan.FromHours(5.5), "India Standard Time", "India Standard Time");
+    }
+
+    private static (DateTime UtcStart, DateTime UtcEnd) GetTodayUtcRange(string? timeZoneId)
+    {
+        var tz = ResolveTimeZone(timeZoneId);
         var localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz);
         var localTodayStart = localNow.Date;
         var localTomorrowStart = localTodayStart.AddDays(1);
@@ -554,6 +591,22 @@ public class PlatformUsersController : ControllerBase
         var utcEnd = TimeZoneInfo.ConvertTimeToUtc(localTomorrowStart, tz);
 
         return (utcStart, utcEnd);
+    }
+
+    private static (DateTime CurrentMonthStart, DateTime NextMonthStart, DateTime PrevMonthStart) GetMonthUtcRanges(string? timeZoneId)
+    {
+        var tz = ResolveTimeZone(timeZoneId);
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz);
+
+        var localCurrentMonthStart = new DateTime(localNow.Year, localNow.Month, 1, 0, 0, 0, DateTimeKind.Unspecified);
+        var localNextMonthStart = localCurrentMonthStart.AddMonths(1);
+        var localPrevMonthStart = localCurrentMonthStart.AddMonths(-1);
+
+        var currentMonthStart = TimeZoneInfo.ConvertTimeToUtc(localCurrentMonthStart, tz);
+        var nextMonthStart = TimeZoneInfo.ConvertTimeToUtc(localNextMonthStart, tz);
+        var prevMonthStart = TimeZoneInfo.ConvertTimeToUtc(localPrevMonthStart, tz);
+
+        return (currentMonthStart, nextMonthStart, prevMonthStart);
     }
 
     private async Task<(int CallsToday, int CallsConnected)> CalculateCallsTodayAsync(string? timeZone, CancellationToken ct)

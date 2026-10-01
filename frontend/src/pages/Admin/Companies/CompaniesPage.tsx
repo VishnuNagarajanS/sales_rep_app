@@ -204,15 +204,12 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       const apiUsers = await superAdminService.fetchUsersFromApi({ companyId: targetCompanyFilter });
       if (activeTenantKeyRef.current === key) {
         const isolated = filterUsersForTenant(apiUsers, tenant);
-        if (isolated.length > 0) {
-          setDrawerUsers(isolated);
-        } else {
-          setDrawerUsers(getCachedAssignedReps(tenant));
-        }
+        setDrawerUsers(isolated);
       }
-    } catch {
+    } catch (err) {
+      console.error('Failed to load assigned reps for tenant from API:', err);
       if (activeTenantKeyRef.current === key) {
-        setDrawerUsers(getCachedAssignedReps(tenant));
+        setDrawerUsers([]);
       }
     }
   };
@@ -238,7 +235,12 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
     loadTenantAssignedReps(tenant);
   };
 
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const loadData = async () => {
+    setIsLoading(true);
+    setLoadError(null);
     try {
       const [allTenants, allPackages] = await Promise.all([
         superAdminService.fetchTenantsFromApi(),
@@ -253,17 +255,16 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
           openTenantDrawer(match);
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error loading tenants from API:', err);
-      const fallbackTenants = superAdminService.getTenants();
-      setTenants(fallbackTenants);
-      setPackages(superAdminService.getPackages());
+      setLoadError(err?.message || 'Unable to connect to organizations server.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleStorageUpdate = () => {
-    setTenants(superAdminService.getTenants());
-    setPackages(superAdminService.getPackages());
+    loadData();
   };
 
   useEffect(() => {
@@ -282,7 +283,6 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       if (lastLoadedTenantKeyRef.current !== key) {
         lastLoadedTenantKeyRef.current = key;
         activeTenantKeyRef.current = key;
-        setDrawerUsers(getCachedAssignedReps(selectedTenant));
         loadTenantAssignedReps(selectedTenant);
       }
     }

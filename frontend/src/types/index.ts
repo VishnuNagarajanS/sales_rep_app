@@ -807,6 +807,7 @@ export interface SystemDiagnostics {
   memoryLimitMb: number;
   storageUsedGb: number;
   storageLimitGb: number;
+  storageFreeGb?: number;
   activeSessions: number;
   activeWebSockets: number;
   telephonyDropRate: number;
@@ -814,7 +815,59 @@ export interface SystemDiagnostics {
   lastBackupAt: string;
   trunkStatus?: string;
   trunkTestStatus?: string;
+  trunkLastTestedAt?: string;
   databaseConnected?: boolean;
+  serverTimeUtc?: string;
+  totalUsers?: number;
+  activeUsers?: number;
+  totalTenants?: number;
+  totalCalls?: number;
+  failedCalls?: number;
+  totalAuditLogs?: number;
+  serverHost?: string;
+  osDescription?: string;
+  frameworkDescription?: string;
+  processUptime?: string;
+  processStartTimeUtc?: string;
+}
+
+export interface SystemHealthCheckItem {
+  name: string;
+  component: string;
+  status: 'Healthy' | 'Degraded' | 'Unhealthy' | 'Not Configured';
+  latencyMs: number;
+  message: string;
+  details: Record<string, any>;
+  checkedAt: string;
+}
+
+export interface SystemHealthReport {
+  overallStatus: 'Healthy' | 'Degraded' | 'Unhealthy';
+  healthyCount: number;
+  degradedCount: number;
+  unhealthyCount: number;
+  checks: SystemHealthCheckItem[];
+  generatedAt: string;
+}
+
+export interface GlobalConfig {
+  platformName: string;
+  supportEmail: string;
+  defaultTimezone: string;
+  sessionTimeoutMinutes: number;
+  maxUploadSizeMb: number;
+  enforceMfa: boolean;
+  tokenExpirationMinutes: number;
+  passwordMinLength: number;
+  recordingRetentionDays: number;
+  smtpHost: string;
+  smtpPort: number;
+  smtpEnableSsl: boolean;
+  smtpSenderEmail: string;
+  smtpSenderName: string;
+  databaseEngine: string;
+  lastUpdatedAt?: string;
+  lastUpdatedBy?: string;
 }
 
 
@@ -839,6 +892,11 @@ export interface PlatformMetrics {
   suspendedTenants: number;
   totalUsers: number;
   activeUsers: number;
+  superAdminCount?: number;
+  companyAdminCount?: number;
+  salesExecutiveCount?: number;
+  irmCount?: number;
+  totalCalls?: number;
   callsToday: number;
   callsConnected: number;
   totalLeads: number;

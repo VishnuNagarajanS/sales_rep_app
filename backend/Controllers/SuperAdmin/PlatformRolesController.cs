@@ -83,18 +83,28 @@ public class PlatformRolesController : ControllerBase
     }
 
     /// <summary>
-    /// Retrieves a single role by Id.
+    /// Retrieves a single role by Id or Code.
     /// </summary>
     [HttpGet("{id}")]
-    public async Task<ActionResult<ApiResponse<PlatformRoleDto>>> GetRoleById(int id)
+    public async Task<ActionResult<ApiResponse<PlatformRoleDto>>> GetRoleById(string id)
     {
-        var role = await _context.Roles.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id);
+        Role? role = null;
+        if (int.TryParse(id, out var intId))
+        {
+            role = await _context.Roles.AsNoTracking().FirstOrDefaultAsync(r => r.Id == intId);
+        }
+        if (role == null)
+        {
+            var cleanCode = id.Trim().ToLower();
+            role = await _context.Roles.AsNoTracking().FirstOrDefaultAsync(r => r.Code.ToLower() == cleanCode);
+        }
+
         if (role == null)
         {
             return NotFound(ApiResponse<PlatformRoleDto>.FailureResult("Role not found."));
         }
 
-        var usersCount = await _context.Users.CountAsync(u => u.RoleId == id);
+        var usersCount = await _context.Users.CountAsync(u => u.RoleId == role.Id);
 
         var dto = new PlatformRoleDto
         {
@@ -198,9 +208,19 @@ public class PlatformRolesController : ControllerBase
     /// </summary>
     [HttpPut("{id}")]
     [Authorize(Roles = "super_admin")]
-    public async Task<ActionResult<ApiResponse<PlatformRoleDto>>> UpdateRole(int id, [FromBody] UpdateRoleRequestDto req)
+    public async Task<ActionResult<ApiResponse<PlatformRoleDto>>> UpdateRole(string id, [FromBody] UpdateRoleRequestDto req)
     {
-        var role = await _context.Roles.FirstOrDefaultAsync(r => r.Id == id);
+        Role? role = null;
+        if (int.TryParse(id, out var intId))
+        {
+            role = await _context.Roles.FirstOrDefaultAsync(r => r.Id == intId);
+        }
+        if (role == null)
+        {
+            var cleanCode = id.Trim().ToLower();
+            role = await _context.Roles.FirstOrDefaultAsync(r => r.Code.ToLower() == cleanCode);
+        }
+
         if (role == null)
         {
             return NotFound(ApiResponse<PlatformRoleDto>.FailureResult("Role not found."));
@@ -223,7 +243,7 @@ public class PlatformRolesController : ControllerBase
             // Custom role
             if (!string.IsNullOrWhiteSpace(req.Name))
             {
-                var duplicate = await _context.Roles.AnyAsync(r => r.Id != id && r.Name.ToLower() == req.Name.Trim().ToLower());
+                var duplicate = await _context.Roles.AnyAsync(r => r.Id != role.Id && r.Name.ToLower() == req.Name.Trim().ToLower());
                 if (duplicate)
                 {
                     return BadRequest(ApiResponse<PlatformRoleDto>.FailureResult($"A role with the name '{req.Name}' already exists."));
@@ -263,7 +283,7 @@ public class PlatformRolesController : ControllerBase
 
         await _context.SaveChangesAsync();
 
-        var usersCount = await _context.Users.CountAsync(u => u.RoleId == id);
+        var usersCount = await _context.Users.CountAsync(u => u.RoleId == role.Id);
 
         var dto = new PlatformRoleDto
         {
@@ -288,9 +308,19 @@ public class PlatformRolesController : ControllerBase
     /// </summary>
     [HttpPatch("{id}/status")]
     [Authorize(Roles = "super_admin")]
-    public async Task<ActionResult<ApiResponse<PlatformRoleDto>>> ToggleRoleStatus(int id, [FromBody] UpdateRoleStatusDto req)
+    public async Task<ActionResult<ApiResponse<PlatformRoleDto>>> ToggleRoleStatus(string id, [FromBody] UpdateRoleStatusDto req)
     {
-        var role = await _context.Roles.FirstOrDefaultAsync(r => r.Id == id);
+        Role? role = null;
+        if (int.TryParse(id, out var intId))
+        {
+            role = await _context.Roles.FirstOrDefaultAsync(r => r.Id == intId);
+        }
+        if (role == null)
+        {
+            var cleanCode = id.Trim().ToLower();
+            role = await _context.Roles.FirstOrDefaultAsync(r => r.Code.ToLower() == cleanCode);
+        }
+
         if (role == null)
         {
             return NotFound(ApiResponse<PlatformRoleDto>.FailureResult("Role not found."));
@@ -318,7 +348,7 @@ public class PlatformRolesController : ControllerBase
 
         await _context.SaveChangesAsync();
 
-        var usersCount = await _context.Users.CountAsync(u => u.RoleId == id);
+        var usersCount = await _context.Users.CountAsync(u => u.RoleId == role.Id);
 
         var dto = new PlatformRoleDto
         {
@@ -343,9 +373,19 @@ public class PlatformRolesController : ControllerBase
     /// </summary>
     [HttpDelete("{id}")]
     [Authorize(Roles = "super_admin")]
-    public async Task<ActionResult<ApiResponse<bool>>> DeleteRole(int id)
+    public async Task<ActionResult<ApiResponse<bool>>> DeleteRole(string id)
     {
-        var role = await _context.Roles.FirstOrDefaultAsync(r => r.Id == id);
+        Role? role = null;
+        if (int.TryParse(id, out var intId))
+        {
+            role = await _context.Roles.FirstOrDefaultAsync(r => r.Id == intId);
+        }
+        if (role == null)
+        {
+            var cleanCode = id.Trim().ToLower();
+            role = await _context.Roles.FirstOrDefaultAsync(r => r.Code.ToLower() == cleanCode);
+        }
+
         if (role == null)
         {
             return NotFound(ApiResponse<bool>.FailureResult("Role not found."));
@@ -356,7 +396,7 @@ public class PlatformRolesController : ControllerBase
             return BadRequest(ApiResponse<bool>.FailureResult("System roles are protected and cannot be deleted."));
         }
 
-        var assignedUsersCount = await _context.Users.CountAsync(u => u.RoleId == id);
+        var assignedUsersCount = await _context.Users.CountAsync(u => u.RoleId == role.Id);
         if (assignedUsersCount > 0)
         {
             return BadRequest(ApiResponse<bool>.FailureResult(

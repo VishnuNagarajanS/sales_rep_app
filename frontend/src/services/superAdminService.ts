@@ -11,6 +11,8 @@ import {
   SystemDiagnostics,
   BroadcastAnnouncement,
   PlatformMetrics,
+  SystemHealthReport,
+  GlobalConfig,
 } from '../types';
 import { DEFAULT_TENANTS } from '../constants/defaultTenants';
 import { SYSTEM_ROLES } from '../constants/roles';
@@ -41,164 +43,6 @@ export const notifyAdminStorageUpdated = () => {
 };
 
 // ============================================================================
-// Initial Seed Data
-// ============================================================================
-
-const SEED_PACKAGES: SubscriptionPackage[] = [
-  {
-    id: 'pkg-standard-crm',
-    name: 'Starter CRM Tier',
-    code: 'starter_crm',
-    description: 'Essential inbound leads, customer directory, softphone calling, and follow-ups.',
-    tier: 'Starter',
-    priceMonthly: 14999,
-    currency: '₹',
-    maxUsers: 15,
-    maxStorageGb: 50,
-    features: [
-      FEATURES.LEADS,
-      FEATURES.CUSTOMERS,
-      FEATURES.FOLLOWUPS,
-      FEATURES.CALLS,
-      FEATURES.REPORTS,
-    ],
-    isActive: true,
-    enrolledTenantsCount: 0,
-    createdAt: '2026-01-01T00:00:00Z',
-  },
-  {
-    id: 'pkg-real-estate-pro',
-    name: 'Plotted Land Operations Pro',
-    code: 'jamin_real_estate_pro',
-    description: 'Tailored for plotted development builders with interactive plot layouts, site visit logistics, and token bookings.',
-    tier: 'Growth',
-    priceMonthly: 39999,
-    currency: '₹',
-    maxUsers: 50,
-    maxStorageGb: 250,
-    features: [
-      FEATURES.LEADS,
-      FEATURES.CUSTOMERS,
-      FEATURES.DEALS,
-      FEATURES.FOLLOWUPS,
-      FEATURES.CALLS,
-      FEATURES.CALL_RECORDING,
-      FEATURES.CALL_TRANSCRIPTION,
-      FEATURES.PROPERTIES,
-      FEATURES.SITE_VISITS,
-      FEATURES.BOOKINGS,
-      FEATURES.REPORTS,
-    ],
-    isPopular: true,
-    isActive: true,
-    enrolledTenantsCount: 1,
-    createdAt: '2026-01-01T00:00:00Z',
-  },
-  {
-    id: 'pkg-wealth-enterprise',
-    name: 'Wealth Advisory Enterprise Suite',
-    code: 'ghl_wealth_enterprise',
-    description: 'Engineered for institutional capital syndicates, private family offices, and CRE investment opportunities.',
-    tier: 'Enterprise',
-    priceMonthly: 79999,
-    currency: '₹',
-    maxUsers: 150,
-    maxStorageGb: 1000,
-    features: [
-      FEATURES.LEADS,
-      FEATURES.CUSTOMERS,
-      FEATURES.DEALS,
-      FEATURES.FOLLOWUPS,
-      FEATURES.CALLS,
-      FEATURES.CALL_RECORDING,
-      FEATURES.CALL_TRANSCRIPTION,
-      FEATURES.INVESTORS,
-      FEATURES.CONSULTATIONS,
-      FEATURES.INVESTMENT_OPPORTUNITIES,
-      FEATURES.REPORTS,
-    ],
-    isActive: true,
-    enrolledTenantsCount: 1,
-    createdAt: '2026-01-01T00:00:00Z',
-  },
-];
-
-const SEED_DIDS: TenantDidMapping[] = [
-  {
-    id: 'did-001',
-    phoneNumber: '+91 80 4700 8001',
-    tenantId: '1',
-    tenantName: 'GHL India Ventures',
-    tenantSlug: 'ghl',
-    routingStrategy: 'Skill/Priority',
-    queueName: 'HNW Wealth Advisory Queue',
-    enableRecording: true,
-    enableAiWhisper: true,
-    status: 'Online',
-    channelsCount: 8,
-    allocatedAt: '2026-01-10T10:00:00Z',
-    notes: 'Primary inbound trunk for HNW wealth consultations',
-  },
-  {
-    id: 'did-002',
-    phoneNumber: '+91 80 4700 8002',
-    tenantId: '2',
-    tenantName: 'Jamin Bazaar',
-    tenantSlug: 'jamin',
-    routingStrategy: 'Round-Robin',
-    queueName: 'Plotted Enclaves Telecallers',
-    enableRecording: true,
-    enableAiWhisper: true,
-    status: 'Online',
-    channelsCount: 12,
-    allocatedAt: '2026-01-15T14:30:00Z',
-    notes: 'Buyer inquiry hotline for gated community layouts',
-  },
-  {
-    id: 'did-003',
-    phoneNumber: '+91 80 4700 8003',
-    tenantId: '',
-    tenantName: 'Unassigned Pool',
-    tenantSlug: '',
-    routingStrategy: 'Round-Robin',
-    queueName: 'Available DID Reserve',
-    enableRecording: false,
-    enableAiWhisper: false,
-    status: 'Reserved',
-    channelsCount: 4,
-    allocatedAt: '2026-02-01T09:00:00Z',
-    notes: 'Spare DID number for next enterprise onboarding',
-  },
-];
-
-const SEED_CARRIER_SETTINGS: PlatformCarrierSettings = {
-  primaryCarrier: 'Twilio Elastic SIP Trunking (Mumbai AP-South)',
-  secondaryCarrier: 'Exotel Cloud Gateway (Failover Redundant)',
-  sipRealm: 'sip.trunk.nexusplatform.io:5060',
-  webrtcGatewayUrl: 'wss://webrtc.nexusplatform.io/gateway',
-  recordingRetentionDays: 180,
-  maxConcurrentChannels: 100,
-  emergencyRoutingEnabled: true,
-  whisperAiModel: 'OpenAI Whisper-Large-v3 (Self-Hosted on GPU cluster)',
-  lastTestedAt: '2026-09-26T10:00:00Z',
-  testStatus: 'Success',
-};
-
-const SEED_ANNOUNCEMENTS: BroadcastAnnouncement[] = [
-  {
-    id: 'ann-001',
-    title: 'Platform Infrastructure Upgrade',
-    message: 'Scheduled zero-downtime database optimization today at 11:30 PM IST. Telephony routing will not be interrupted.',
-    priority: 'info',
-    targetAudience: 'all',
-    isActive: true,
-    createdAt: '2026-09-26T08:00:00Z',
-    createdBy: 'Yanosh',
-    expiresAt: '2026-09-27T06:00:00Z',
-  },
-];
-
-// ============================================================================
 // Service Implementation
 // ============================================================================
 
@@ -206,48 +50,20 @@ class SuperAdminService {
   // ── TENANTS / COMPANIES ───────────────────────────────────────────────────
 
   async fetchTenantsFromApi(): Promise<Tenant[]> {
-    try {
-      const res = await apiClient.get<ApiResponse<Tenant[]>>('/super-admin/tenants');
-      if (res && res.data) {
-        localStorage.setItem(STORAGE_KEYS.TENANTS, JSON.stringify(res.data));
-        return res.data;
-      }
-    } catch (err) {
-      console.warn('Could not fetch tenants from API, falling back to local cache:', err);
+    const res = await apiClient.get<ApiResponse<Tenant[]>>('/super-admin/tenants');
+    if (res && res.data) {
+      localStorage.setItem(STORAGE_KEYS.TENANTS, JSON.stringify(res.data));
+      return res.data;
     }
-    return this.getTenants();
+    throw new Error(res?.message || 'Failed to fetch organizations from backend database.');
   }
 
   getTenants(): Tenant[] {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.TENANTS);
-      if (!raw) {
-        const initial = [
-          {
-            ...DEFAULT_TENANTS.ghl,
-            status: 'Active' as const,
-            subscriptionPlan: 'Wealth Advisory Enterprise Suite',
-            leadSla: 15,
-            callEnabled: true,
-            recordingEnabled: true,
-            transcriptionEnabled: true,
-          },
-          {
-            ...DEFAULT_TENANTS.jamin,
-            status: 'Active' as const,
-            subscriptionPlan: 'Plotted Land Operations Pro',
-            leadSla: 30,
-            callEnabled: true,
-            recordingEnabled: true,
-            transcriptionEnabled: true,
-          },
-        ];
-        localStorage.setItem(STORAGE_KEYS.TENANTS, JSON.stringify(initial));
-        return initial;
-      }
-      return JSON.parse(raw);
+      return raw ? JSON.parse(raw) : [];
     } catch {
-      return [DEFAULT_TENANTS.ghl, DEFAULT_TENANTS.jamin];
+      return [];
     }
   }
 
@@ -805,106 +621,6 @@ class SuperAdminService {
       const raw = localStorage.getItem(STORAGE_KEYS.USERS);
       let users: User[] = raw ? JSON.parse(raw) : [];
 
-      // Clean up legacy users with outdated IDs or empty list
-      if (users.length === 0 || users.some(u => u.id.startsWith('usr-'))) {
-        users = [
-          {
-            id: '1',
-            name: 'Yanosh',
-            email: 'yanosh@ghlindiaventures.com',
-            phone: '+91 98800 11000',
-            role: SYSTEM_ROLES.super_admin,
-            status: 'Active',
-            lastLogin: 'Just now',
-            createdAt: '2026-01-01T00:00:00Z',
-          },
-          {
-            id: '2',
-            name: 'Vishnu',
-            email: 'vishnu@ghlindiaventures.com',
-            phone: '+91 98450 11223',
-            role: SYSTEM_ROLES.company_admin,
-            companyId: '1',
-            companySlug: 'ghl',
-            companyName: 'GHL India Ventures',
-            status: 'Active',
-            lastLogin: '10 mins ago',
-            designation: 'Chief Investment Officer',
-            createdAt: '2026-01-01T00:00:00Z',
-          },
-          {
-            id: '3',
-            name: 'Naveen',
-            email: 'naveen@ghlindiaventures.com',
-            phone: '+91 98450 22334',
-            role: SYSTEM_ROLES.sales_executive,
-            companyId: '1',
-            companySlug: 'ghl',
-            companyName: 'GHL India Ventures',
-            status: 'Active',
-            lastLogin: '1 hour ago',
-            designation: 'Senior Wealth Advisory Rep',
-            createdAt: '2026-01-02T00:00:00Z',
-          },
-          {
-            id: '4',
-            name: 'Mani',
-            email: 'mani@ghlindiaventures.com',
-            phone: '+91 98450 33445',
-            role: SYSTEM_ROLES.company_admin,
-            companyId: '2',
-            companySlug: 'jamin',
-            companyName: 'Jamin Bazaar',
-            status: 'Active',
-            lastLogin: '2 hours ago',
-            designation: 'Head of Sales & Marketing',
-            createdAt: '2026-01-01T00:00:00Z',
-          },
-          {
-            id: '5',
-            name: 'Dhinakaran',
-            email: 'dhinakaran@ghlindiaventures.com',
-            phone: '+91 98110 77889',
-            role: SYSTEM_ROLES.irm,
-            companyId: '1',
-            companySlug: 'ghl',
-            companyName: 'GHL India Ventures',
-            status: 'Active',
-            lastLogin: 'Yesterday',
-            designation: 'Institutional Relationship Manager',
-            createdAt: '2026-01-05T00:00:00Z',
-          },
-          {
-            id: '6',
-            name: 'Rajesh Sharma',
-            email: 'rajesh@jaminbazaar.com',
-            phone: '+91 98450 44556',
-            role: SYSTEM_ROLES.sales_executive,
-            companyId: '2',
-            companySlug: 'jamin',
-            companyName: 'Jamin Bazaar',
-            status: 'Active',
-            lastLogin: '3 hours ago',
-            designation: 'Senior Land Acquisition Consultant',
-            createdAt: '2026-01-03T00:00:00Z',
-          },
-        ];
-        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
-      } else {
-        // Sanitize: ensure all users have a valid role from dynamic roles or SYSTEM_ROLES
-        const availableRoles = this.getRoles();
-        let modified = false;
-        users.forEach(u => {
-          if (!u.role || (!availableRoles[u.role.code] && !SYSTEM_ROLES[u.role.code])) {
-            u.role = SYSTEM_ROLES.sales_executive;
-            modified = true;
-          }
-        });
-        if (modified) {
-          localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
-        }
-      }
-
       if (!filters) return users;
 
       return users.filter(u => {
@@ -1287,43 +1003,15 @@ class SuperAdminService {
       permissions: data.permissions,
     };
 
-    let createdRole: Role;
-    try {
-      const res = await apiClient.post<ApiResponse<Role>>('/super-admin/roles', payload);
-      if (res && res.data) {
-        createdRole = res.data;
-      } else {
-        throw new Error('No role returned from server');
-      }
-    } catch (err: any) {
-      console.warn('API call failed, creating role locally:', err);
-      createdRole = {
-        id: `role-${Date.now()}`,
-        name: payload.name,
-        code: cleanCode.toLowerCase(),
-        description: payload.description,
-        isSystemRole: false,
-        isActive: payload.isActive,
-        permissions: payload.permissions,
-        permissionsCount: payload.permissions.length,
-        usersCount: 0,
-        createdAt: new Date().toISOString(),
-      };
+    const res = await apiClient.post<ApiResponse<Role>>('/super-admin/roles', payload);
+    if (!res || !res.data) {
+      throw new Error(res?.message || 'Failed to create role on server');
     }
 
+    const createdRole = res.data;
     const roles = this.getRoles();
     roles[createdRole.code] = createdRole;
     localStorage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(roles));
-
-    this.addAuditLog({
-      action: 'CREATE_ROLE',
-      entityType: 'Role',
-      entityId: createdRole.code,
-      details: `Super Admin created custom role "${createdRole.name}" (${createdRole.code}) with ${createdRole.permissions.length} permissions.`,
-      module: 'Roles',
-      status: 'success',
-      afterValue: createdRole,
-    });
 
     notifyAdminStorageUpdated();
     return createdRole;
@@ -1338,58 +1026,31 @@ class SuperAdminService {
       permissions?: string[];
     }
   ): Promise<Role> {
-    let updatedRole: Role | null = null;
-    try {
-      const res = await apiClient.put<ApiResponse<Role>>(`/super-admin/roles/${id}`, data);
-      if (res && res.data) {
-        updatedRole = res.data;
-      }
-    } catch (err) {
-      console.warn('API update failed, updating locally:', err);
+    const res = await apiClient.put<ApiResponse<Role>>(`/super-admin/roles/${id}`, data);
+    if (!res || !res.data) {
+      throw new Error(res?.message || 'Failed to update role on server');
     }
 
+    const updatedRole = res.data;
     const roles = this.getRoles();
     const existingKey = Object.keys(roles).find(k => roles[k].id === id || roles[k].code === id);
     if (existingKey) {
-      const before = { ...roles[existingKey] };
       roles[existingKey] = {
         ...roles[existingKey],
-        ...(data.name ? { name: data.name } : {}),
-        ...(data.description !== undefined ? { description: data.description } : {}),
-        ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
-        ...(data.permissions ? { permissions: data.permissions } : {}),
-        ...(updatedRole || {}),
+        ...updatedRole,
         updatedAt: new Date().toISOString(),
       };
-      if (!updatedRole) {
-        updatedRole = roles[existingKey];
-      }
       localStorage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(roles));
-
-      this.addAuditLog({
-        action: 'UPDATE_ROLE',
-        entityType: 'Role',
-        entityId: id,
-        details: `Super Admin updated role "${roles[existingKey].name}" (${roles[existingKey].code}).`,
-        module: 'Roles',
-        status: 'success',
-        beforeValue: before,
-        afterValue: roles[existingKey],
-      });
       notifyAdminStorageUpdated();
     }
 
-    if (!updatedRole) {
-      throw new Error(`Role ${id} not found`);
-    }
     return updatedRole;
   }
 
   async toggleRoleStatusApi(id: string, isActive: boolean): Promise<boolean> {
-    try {
-      await apiClient.patch(`/super-admin/roles/${id}/status`, { isActive });
-    } catch (err) {
-      console.warn('API status toggle failed, updating locally:', err);
+    const res = await apiClient.patch<ApiResponse<Role>>(`/super-admin/roles/${id}/status`, { isActive });
+    if (!res || !res.data) {
+      throw new Error(res?.message || 'Failed to toggle role status on server');
     }
 
     const roles = this.getRoles();
@@ -1398,57 +1059,25 @@ class SuperAdminService {
       roles[existingKey].isActive = isActive;
       roles[existingKey].updatedAt = new Date().toISOString();
       localStorage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(roles));
-
-      this.addAuditLog({
-        action: isActive ? 'ACTIVATE_ROLE' : 'DEACTIVATE_ROLE',
-        entityType: 'Role',
-        entityId: id,
-        details: `Super Admin ${isActive ? 'activated' : 'deactivated'} role "${roles[existingKey].name}".`,
-        module: 'Roles',
-        status: 'success',
-      });
       notifyAdminStorageUpdated();
       return true;
     }
-    return false;
+    return true;
   }
 
   async deleteRoleApi(id: string): Promise<boolean> {
+    const res = await apiClient.delete<ApiResponse<boolean>>(`/super-admin/roles/${id}`);
+    if (!res || res.data === false) {
+      throw new Error(res?.message || 'Failed to delete role from server');
+    }
+
     const roles = this.getRoles();
     const existingKey = Object.keys(roles).find(k => roles[k].id === id || roles[k].code === id);
-    if (!existingKey) return false;
-
-    const targetRole = roles[existingKey];
-    if (targetRole.isSystemRole || ['super_admin', 'company_admin', 'sales_executive', 'irm'].includes(targetRole.code)) {
-      throw new Error('System roles cannot be deleted.');
+    if (existingKey) {
+      delete roles[existingKey];
+      localStorage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(roles));
+      notifyAdminStorageUpdated();
     }
-
-    const users = this.getUsers();
-    const assignedUsers = users.filter(u => u.role?.code === targetRole.code || u.role?.id === targetRole.id);
-    if (assignedUsers.length > 0) {
-      throw new Error(`Cannot delete role "${targetRole.name}". ${assignedUsers.length} user(s) are currently assigned to this role. Please reassign them first.`);
-    }
-
-    try {
-      await apiClient.delete(`/super-admin/roles/${id}`);
-    } catch (err: any) {
-      console.warn('API delete failed, proceeding locally:', err);
-    }
-
-    delete roles[existingKey];
-    localStorage.setItem(STORAGE_KEYS.ROLES, JSON.stringify(roles));
-
-    this.addAuditLog({
-      action: 'DELETE_ROLE',
-      entityType: 'Role',
-      entityId: id,
-      details: `Super Admin removed custom role "${targetRole.name}" (${targetRole.code}).`,
-      module: 'Roles',
-      status: 'success',
-      beforeValue: targetRole,
-    });
-
-    notifyAdminStorageUpdated();
     return true;
   }
 
@@ -1512,28 +1141,20 @@ class SuperAdminService {
   // ── PACKAGES & ENTITLEMENTS ───────────────────────────────────────────────
 
   async fetchPackagesFromApi(): Promise<SubscriptionPackage[]> {
-    try {
-      const res = await apiClient.get<ApiResponse<SubscriptionPackage[]>>('/super-admin/packages');
-      if (res && res.data) {
-        localStorage.setItem(STORAGE_KEYS.PACKAGES, JSON.stringify(res.data));
-        return res.data;
-      }
-    } catch (err) {
-      console.warn('Could not fetch packages from API, falling back to local cache:', err);
+    const res = await apiClient.get<ApiResponse<SubscriptionPackage[]>>('/super-admin/packages');
+    if (res && res.data) {
+      localStorage.setItem(STORAGE_KEYS.PACKAGES, JSON.stringify(res.data));
+      return res.data;
     }
-    return this.getPackages();
+    throw new Error(res?.message || 'Failed to fetch subscription packages from backend');
   }
 
   getPackages(): SubscriptionPackage[] {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.PACKAGES);
-      if (!raw) {
-        localStorage.setItem(STORAGE_KEYS.PACKAGES, JSON.stringify(SEED_PACKAGES));
-        return SEED_PACKAGES;
-      }
-      return JSON.parse(raw);
+      return raw ? JSON.parse(raw) : [];
     } catch {
-      return SEED_PACKAGES;
+      return [];
     }
   }
 
@@ -1676,13 +1297,9 @@ class SuperAdminService {
   getDidMappings(): TenantDidMapping[] {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.DIDS);
-      if (!raw) {
-        localStorage.setItem(STORAGE_KEYS.DIDS, JSON.stringify(SEED_DIDS));
-        return SEED_DIDS;
-      }
-      return JSON.parse(raw);
+      return raw ? JSON.parse(raw) : [];
     } catch {
-      return SEED_DIDS;
+      return [];
     }
   }
 
@@ -1815,14 +1432,24 @@ class SuperAdminService {
   getCarrierSettings(): PlatformCarrierSettings {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.CARRIER_SETTINGS);
-      if (!raw) {
-        localStorage.setItem(STORAGE_KEYS.CARRIER_SETTINGS, JSON.stringify(SEED_CARRIER_SETTINGS));
-        return SEED_CARRIER_SETTINGS;
-      }
-      return JSON.parse(raw);
-    } catch {
-      return SEED_CARRIER_SETTINGS;
-    }
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return {
+      primaryCarrier: 'Twilio Elastic SIP Trunking',
+      secondaryCarrier: 'Tata Communications SIP',
+      sipRealm: 'sip.nexussales.internal',
+      webrtcGatewayUrl: 'wss://webrtc.nexussales.internal:8443/ws',
+      recordingRetentionDays: 90,
+      maxConcurrentChannels: 64,
+      emergencyRoutingEnabled: true,
+      whisperAiModel: 'Whisper-Large-v3-Turbo',
+      lastTestedAt: '',
+      testStatus: 'Offline',
+      accountSid: '',
+      authToken: '',
+      primaryGatewayHost: 'sip.nexussales.internal',
+      failoverGatewayHost: '',
+    };
   }
 
   async updateCarrierSettingsApi(settings: PlatformCarrierSettings): Promise<PlatformCarrierSettings> {
@@ -1979,7 +1606,8 @@ class SuperAdminService {
         return mapped;
       }
     } catch (err) {
-      console.warn('Could not fetch audit logs from /api/audit-logs, falling back to local store:', err);
+      console.warn('Could not fetch audit logs from /api/audit-logs:', err);
+      throw err;
     }
     return this.getAuditLogs(filters);
   }
@@ -2028,10 +1656,10 @@ class SuperAdminService {
     try {
       const logs = this.getAuditLogs();
       const newLog: AuditLog = {
-        id: `aud-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        id: `aud-${Date.now()}-${logs.length + 1}`,
         timestamp: new Date().toISOString(),
-        actorName: log.actorName || 'Yanosh',
-        actorEmail: log.actorEmail || 'yanosh@ghlindiaventures.com',
+        actorName: log.actorName || 'Super Admin',
+        actorEmail: log.actorEmail || 'admin@platform.com',
         action: log.action || 'PLATFORM_OPERATION',
         entityType: log.entityType || 'Platform',
         entityId: log.entityId || '0',
@@ -2039,7 +1667,7 @@ class SuperAdminService {
         companyName: log.companyName || (log.companyId ? `Company #${log.companyId}` : 'PLATFORM CONSOLE'),
         details: log.details || 'Platform operation executed.',
         ipAddress: '127.0.0.1 (Platform Console)',
-        userAgent: 'Nexus Platform Console v2.4 (Internal)',
+        userAgent: 'Nexus Platform Console (Internal)',
         module: log.module || 'Platform',
         status: log.status || 'success',
         beforeValue: log.beforeValue,
@@ -2090,22 +1718,72 @@ class SuperAdminService {
   }
 
   getSystemDiagnostics(): SystemDiagnostics {
+    try {
+      const raw = localStorage.getItem('nexus_system_diagnostics');
+      if (raw) return JSON.parse(raw);
+    } catch {}
+
     return {
       apiStatus: 'Healthy',
       apiLatencyMs: 0,
       dbPoolActive: 0,
-      dbPoolMax: 50,
+      dbPoolMax: 100,
       dbLatencyMs: 0,
       memoryUsedMb: 0,
-      memoryLimitMb: 2048,
+      memoryLimitMb: 0,
       storageUsedGb: 0,
-      storageLimitGb: 250,
+      storageLimitGb: 0,
       activeSessions: 0,
       activeWebSockets: 0,
       telephonyDropRate: 0.0,
       systemUptimePercentage: 100.0,
-      lastBackupAt: new Date().toISOString(),
+      lastBackupAt: '',
     };
+  }
+
+  // ── DEPENDENCY HEALTH CHECKS ──────────────────────────────────────────────
+
+  async fetchSystemHealthChecksFromApi(): Promise<SystemHealthReport> {
+    const res = await apiClient.get<ApiResponse<SystemHealthReport>>('/super-admin/system/health-checks');
+    if (res && res.data) {
+      return res.data;
+    }
+    throw new Error(res?.message || 'Failed to fetch dependency health report');
+  }
+
+  async probeSystemHealthChecksFromApi(): Promise<SystemHealthReport> {
+    const res = await apiClient.post<ApiResponse<SystemHealthReport>>('/super-admin/system/health-checks/probe');
+    if (res && res.data) {
+      return res.data;
+    }
+    throw new Error(res?.message || 'Failed to execute dependency health probe');
+  }
+
+  async testSmtpDiagnosticApi(): Promise<{ success: boolean; latencyMs: number; status: string; message: string; details: Record<string, any> }> {
+    const res = await apiClient.post<ApiResponse<{ success: boolean; latencyMs: number; status: string; message: string; details: Record<string, any> }>>(
+      '/super-admin/system/health-checks/smtp/test'
+    );
+    if (res && res.data) return res.data;
+    throw new Error(res?.message || 'SMTP diagnostic probe failed');
+  }
+
+  // ── GLOBAL CONFIGURATION ──────────────────────────────────────────────────
+
+  async fetchGlobalConfigFromApi(): Promise<GlobalConfig> {
+    const res = await apiClient.get<ApiResponse<GlobalConfig>>('/super-admin/system/config');
+    if (res && res.data) {
+      return res.data;
+    }
+    throw new Error(res?.message || 'Failed to fetch global configuration');
+  }
+
+  async updateGlobalConfigApi(payload: Partial<GlobalConfig>): Promise<GlobalConfig> {
+    const res = await apiClient.put<ApiResponse<GlobalConfig>>('/super-admin/system/config', payload);
+    if (res && res.data) {
+      notifyAdminStorageUpdated();
+      return res.data;
+    }
+    throw new Error(res?.message || 'Failed to update global configuration');
   }
 
   async fetchAnnouncementsFromApi(): Promise<BroadcastAnnouncement[]> {
@@ -2133,14 +1811,9 @@ class SuperAdminService {
   getAnnouncements(): BroadcastAnnouncement[] {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.ANNOUNCEMENTS);
-      if (!raw) {
-        localStorage.setItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(SEED_ANNOUNCEMENTS));
-        return SEED_ANNOUNCEMENTS;
-      }
-      return JSON.parse(raw);
-    } catch {
-      return SEED_ANNOUNCEMENTS;
-    }
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return [];
   }
 
   async createAnnouncementApi(ann: Partial<BroadcastAnnouncement>): Promise<BroadcastAnnouncement> {
@@ -2235,9 +1908,9 @@ class SuperAdminService {
   getMaintenanceMode(): { enabled: boolean; message: string; bypassSecret: string } {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.MAINTENANCE_MODE);
-      return raw ? JSON.parse(raw) : { enabled: false, message: 'Platform under scheduled maintenance.', bypassSecret: 'nexus-admin-2026' };
+      return raw ? JSON.parse(raw) : { enabled: false, message: 'Platform under scheduled maintenance.', bypassSecret: '' };
     } catch {
-      return { enabled: false, message: 'Platform under scheduled maintenance.', bypassSecret: 'nexus-admin-2026' };
+      return { enabled: false, message: 'Platform under scheduled maintenance.', bypassSecret: '' };
     }
   }
 
@@ -2276,17 +1949,13 @@ class SuperAdminService {
   // ── PLATFORM TELEMETRY METRICS ────────────────────────────────────────────
 
   async fetchPlatformMetricsFromApi(): Promise<PlatformMetrics> {
-    try {
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const res = await apiClient.get<ApiResponse<PlatformMetrics>>('/super-admin/metrics', { timeZone: tz });
-      if (res && res.data) {
-        localStorage.setItem(STORAGE_KEYS.METRICS, JSON.stringify(res.data));
-        return res.data;
-      }
-    } catch (err) {
-      console.warn('Could not fetch platform metrics from API, falling back to local calculation:', err);
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const res = await apiClient.get<ApiResponse<PlatformMetrics>>('/super-admin/metrics', { timeZone: tz });
+    if (res && res.data) {
+      localStorage.setItem(STORAGE_KEYS.METRICS, JSON.stringify(res.data));
+      return res.data;
     }
-    return this.getPlatformMetrics();
+    throw new Error(res?.message || 'Failed to fetch platform metrics from backend');
   }
 
   async fetchCallsTodayMetricsFromApi(): Promise<{ callsToday: number; callsConnected: number } | null> {
@@ -2319,11 +1988,7 @@ class SuperAdminService {
       const cached = localStorage.getItem(STORAGE_KEYS.METRICS);
       if (cached) {
         const parsed = JSON.parse(cached);
-        if (typeof parsed.totalLeads === 'number') {
-          if (parsed.callsToday === 384 && parsed.callsConnected === 341) {
-            parsed.callsToday = 0;
-            parsed.callsConnected = 0;
-          }
+        if (typeof parsed.totalTenants === 'number') {
           return parsed;
         }
       }
@@ -2335,25 +2000,6 @@ class SuperAdminService {
     const onboardingTenants = tenants.filter(t => t.status === 'Inactive');
     const suspendedTenants = tenants.filter(t => t.status === 'Suspended');
 
-    const leads = storageService.getLeads();
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth();
-
-    const currentMonthLeads = leads.filter(l => {
-      const d = new Date(l.createdAt);
-      return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
-    }).length;
-
-    const prevMonthDate = new Date(currentYear, currentMonth - 1, 1);
-    const prevYear = prevMonthDate.getFullYear();
-    const prevMonth = prevMonthDate.getMonth();
-
-    const previousMonthLeads = leads.filter(l => {
-      const d = new Date(l.createdAt);
-      return d.getFullYear() === prevYear && d.getMonth() === prevMonth;
-    }).length;
-
     return {
       totalTenants: tenants.length,
       activeTenants: activeTenants.length,
@@ -2361,11 +2007,16 @@ class SuperAdminService {
       suspendedTenants: suspendedTenants.length,
       totalUsers: users.length,
       activeUsers: users.filter(u => u.status === 'Active').length,
+      superAdminCount: users.filter(u => u.role?.id === '1' || u.role?.code === 'super_admin').length,
+      companyAdminCount: users.filter(u => u.role?.id === '2' || u.role?.code === 'company_admin').length,
+      salesExecutiveCount: users.filter(u => u.role?.id === '3' || u.role?.code === 'sales_executive').length,
+      irmCount: users.filter(u => u.role?.id === '4' || u.role?.code === 'irm').length,
+      totalCalls: 0,
       callsToday: 0,
       callsConnected: 0,
-      totalLeads: leads.length,
-      currentMonthLeads,
-      previousMonthLeads,
+      totalLeads: 0,
+      currentMonthLeads: 0,
+      previousMonthLeads: 0,
       totalPipelineValue: 0,
       totalCustomers: 0,
       systemHealthScore: 100,

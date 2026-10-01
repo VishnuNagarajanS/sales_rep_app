@@ -1835,14 +1835,6 @@ namespace backend.Migrations
                         new
                         {
                             Id = 3,
-                            Code = "sales_manager",
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Name = "Sales Manager",
-                            Permissions = new List<string> { "leads.view", "leads.create", "leads.update", "leads.assign", "leads.export", "leads.convert", "customers.view", "customers.create", "customers.update", "deals.view", "deals.create", "deals.update", "calls.make", "calls.receive", "calls.view", "calls.recordings.play", "followups.view", "followups.create", "followups.update", "properties.view", "properties.update", "site_visits.view", "site_visits.create", "bookings.view", "bookings.create", "investors.view", "investors.create", "consultations.view", "consultations.create", "opportunities.view", "opportunities.create", "reports.view", "reports.export", "users.view" }
-                        },
-                        new
-                        {
-                            Id = 4,
                             Code = "sales_executive",
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Description = "Frontline sales representative executing dialer outreach.",
@@ -1853,7 +1845,7 @@ namespace backend.Migrations
                         },
                         new
                         {
-                            Id = 5,
+                            Id = 4,
                             Code = "irm",
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Description = "Institutional Relationship Manager for HNW wealth & CRE.",

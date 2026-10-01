@@ -418,93 +418,93 @@ export const PlatformUsersPage: React.FC = () => {
                   const isSuperAdminUser = u.role.code === 'super_admin';
                   return (
                     <tr key={u.id} className="user-table-row">
-                    <td>
-                      <div className="user-identity-cell">
-                        <div
-                          className="user-avatar-circle"
-                          style={{
-                            backgroundColor: isSuperAdminUser ? '#8b5cf6' : '#334155',
-                          }}
-                        >
-                          {u.name.slice(0, 2).toUpperCase()}
-                        </div>
-                        <div>
-                          <div className="user-name-title">
-                            {u.name}
-                            {isSuperAdminUser && <span className="super-crown">⚡</span>}
-                          </div>
-                          <div className="user-email-subtitle">
-                            {u.email} • {u.phone}
-                          </div>
-                          {u.designation && <div className="user-designation-tag">{u.designation}</div>}
-                        </div>
-                      </div>
-                    </td>
-
-                    <td>
-                      <span className="tenant-tag-badge">
-                        <Building2 size={12} />
-                        {u.companyName || (u.companyId ? (tenants.find(t => String(t.id) === String(u.companyId))?.name || `Tenant #${u.companyId}`) : 'Platform Console (Global)')}
-                      </span>
-                    </td>
-
-                    <td>
-                      <div className="role-cell-wrap">
-                        <span className={`role-badge ${u.role.code}`}>{u.role.name}</span>
-                        <span className="role-privilege-count">
-                          {u.role.permissions.length} Privileges
-                        </span>
-                      </div>
-                    </td>
-
-                    <td>
-                      <span className={`user-status-pill ${u.status.toLowerCase()}`}>
-                        {u.status}
-                      </span>
-                    </td>
-
-                    <td>
-                      <span className="last-login-text">{u.lastLogin || 'Never'}</span>
-                    </td>
-
-                    <td style={{ textAlign: 'right' }}>
-                      <div className="user-row-actions">
-                        <button
-                          className="action-icon-btn"
-                          title="Reset Password"
-                          onClick={() => openResetModal(u)}
-                        >
-                          <KeyRound size={14} />
-                        </button>
-                        <button
-                          className="action-icon-btn"
-                          title="Edit Profile"
-                          onClick={() => openEditDrawer(u)}
-                        >
-                          <Edit2 size={14} />
-                        </button>
-                        <button
-                          className={`action-icon-btn ${u.status === 'Active' ? 'text-amber' : 'text-green'}`}
-                          title={u.status === 'Active' ? 'Suspend Account' : 'Activate Account'}
-                          onClick={() => handleToggleStatus(u)}
-                        >
-                          {u.status === 'Active' ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}
-                        </button>
-                        {!isSuperAdminUser && (
-                          <button
-                            className="action-icon-btn text-danger"
-                            title="Delete User"
-                            onClick={() => handleDeleteUser(u)}
+                      <td>
+                        <div className="user-identity-cell">
+                          <div
+                            className="user-avatar-circle"
+                            style={{
+                              backgroundColor: isSuperAdminUser ? '#8b5cf6' : '#334155',
+                            }}
                           >
-                            <Trash2 size={14} />
+                            {u.name.slice(0, 2).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="user-name-title">
+                              {u.name}
+                              {isSuperAdminUser && <span className="super-crown">⚡</span>}
+                            </div>
+                            <div className="user-email-subtitle">
+                              {u.email} • {u.phone}
+                            </div>
+                            {u.designation && <div className="user-designation-tag">{u.designation}</div>}
+                          </div>
+                        </div>
+                      </td>
+
+                      <td>
+                        <span className="tenant-tag-badge">
+                          <Building2 size={12} />
+                          {u.companyName || (u.companyId ? (tenants.find(t => String(t.id) === String(u.companyId))?.name || `Tenant #${u.companyId}`) : 'Platform Console (Global)')}
+                        </span>
+                      </td>
+
+                      <td>
+                        <div className="role-cell-wrap">
+                          <span className={`role-badge ${u.role.code}`}>{u.role.name}</span>
+                          <span className="role-privilege-count">
+                            {u.role.permissions.length} Privileges
+                          </span>
+                        </div>
+                      </td>
+
+                      <td>
+                        <span className={`user-status-pill ${u.status.toLowerCase()}`}>
+                          {u.status}
+                        </span>
+                      </td>
+
+                      <td>
+                        <span className="last-login-text">{u.lastLogin || 'Never'}</span>
+                      </td>
+
+                      <td style={{ textAlign: 'right' }}>
+                        <div className="user-row-actions">
+                          <button
+                            className="action-icon-btn"
+                            title="Reset Password"
+                            onClick={() => openResetModal(u)}
+                          >
+                            <KeyRound size={14} />
                           </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
+                          <button
+                            className="action-icon-btn"
+                            title="Edit Profile"
+                            onClick={() => openEditDrawer(u)}
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            className={`action-icon-btn ${u.status === 'Active' ? 'text-amber' : 'text-green'}`}
+                            title={u.status === 'Active' ? 'Suspend Account' : 'Activate Account'}
+                            onClick={() => handleToggleStatus(u)}
+                          >
+                            {u.status === 'Active' ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}
+                          </button>
+                          {!isSuperAdminUser && (
+                            <button
+                              className="action-icon-btn text-danger"
+                              title="Delete User"
+                              onClick={() => handleDeleteUser(u)}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>

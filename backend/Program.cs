@@ -78,14 +78,23 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
-    var useInMemory = config.GetValue<bool>("UseInMemoryDatabase", false);
+    var connectionString = config.GetConnectionString("DefaultConnection");
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        connectionString = config["ConnectionStrings:DefaultConnection"]
+            ?? config["ConnectionString:DefaultConnection"];
+    }
+    var hasValidConnectionString = !string.IsNullOrWhiteSpace(connectionString) && !connectionString.Equals("InMemory", StringComparison.OrdinalIgnoreCase);
+    var useInMemory = config.GetValue<bool>("UseInMemoryDatabase", !hasValidConnectionString) || !hasValidConnectionString;
     var db = scope.ServiceProvider.GetRequiredService<backend.Data.ApplicationDbContext>();
     if (useInMemory)
     {
+        Console.WriteLine("[Database] WARNING: Running with in-memory database. Password changes and state will not persist across restarts.");
         db.Database.EnsureCreated();
     }
     else
     {
+        Console.WriteLine($"[Database] Connected to persistent database provider: {db.Database.ProviderName}");
         try
         {
             db.Database.ExecuteSqlRaw(@"
