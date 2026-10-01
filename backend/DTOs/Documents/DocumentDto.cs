@@ -13,6 +13,7 @@ namespace backend.DTOs.Documents
         public string Category { get; set; } = null!;
         public string EntityType { get; set; } = null!;
         public string EntityId { get; set; } = null!;
+        public string? FileUrl { get; set; }
     }
 
     public class CreateDocumentDto
@@ -23,5 +24,6 @@ namespace backend.DTOs.Documents
         public string Category { get; set; } = null!;
         public string EntityType { get; set; } = null!;
         public string EntityId { get; set; } = null!;
+        public Microsoft.AspNetCore.Http.IFormFile? File { get; set; }
     }
 }

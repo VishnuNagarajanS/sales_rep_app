@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { apiClient } from '../../services/apiClient';
 import { isMockMode } from '../../config/environment';
-import { FileText, FileImage, FileSpreadsheet, Trash2, File } from 'lucide-react';
+import { FileText, FileImage, FileSpreadsheet, Trash2, File, Share2, Mail, MessageSquare, Download } from 'lucide-react';
 import { DocumentItem } from '../../types';
 import { EmptyState } from './EmptyState';
 import './DocumentList.css';
@@ -139,16 +139,55 @@ export const DocumentList: React.FC<DocumentListProps> = ({
             </div>
           </div>
 
-          {/* Delete */}
-          {canDelete && (
-            <button
-              className="btn btn-ghost btn-sm btn-icon document-item-delete-btn"
-              title="Remove document record"
-              onClick={() => handleDelete(doc.id)}
-            >
-              <Trash2 size={14} />
-            </button>
-          )}
+          {/* Actions */}
+          <div className="document-item-actions" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            {doc.fileUrl && (
+              <>
+                <button
+                  className="btn btn-ghost btn-sm btn-icon"
+                  title="Share via WhatsApp"
+                  onClick={() => {
+                    const text = encodeURIComponent(`Hi, here is the document you requested: ${doc.name}\n${doc.fileUrl}`);
+                    window.open(`https://wa.me/?text=${text}`, '_blank');
+                  }}
+                  style={{ color: '#25D366' }}
+                >
+                  <MessageSquare size={16} />
+                </button>
+                <button
+                  className="btn btn-ghost btn-sm btn-icon"
+                  title="Share via Email"
+                  onClick={() => {
+                    const subject = encodeURIComponent(`Document: ${doc.name}`);
+                    const body = encodeURIComponent(`Hi,\n\nHere is the document we discussed:\n${doc.fileUrl}\n\nThank you.`);
+                    window.open(`mailto:?subject=${subject}&body=${body}`);
+                  }}
+                >
+                  <Mail size={16} />
+                </button>
+                <button
+                  className="btn btn-ghost btn-sm btn-icon"
+                  title="Download / Copy Link"
+                  onClick={() => {
+                    navigator.clipboard.writeText(doc.fileUrl || '');
+                    window.open(doc.fileUrl, '_blank');
+                  }}
+                >
+                  <Download size={16} />
+                </button>
+              </>
+            )}
+
+            {canDelete && (
+              <button
+                className="btn btn-ghost btn-sm btn-icon document-item-delete-btn"
+                title="Remove document record"
+                onClick={() => handleDelete(doc.id)}
+              >
+                <Trash2 size={16} />
+              </button>
+            )}
+          </div>
         </div>
       ))}
     </div>

@@ -426,6 +426,7 @@ export interface DocumentItem {
   category: string;
   entityType?: 'lead' | 'customer' | 'investor' | 'booking' | 'consultation' | 'company';
   entityId?: string;
+  fileUrl?: string;
 }
 
 export interface Department {

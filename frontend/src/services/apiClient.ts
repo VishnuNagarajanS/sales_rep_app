@@ -80,6 +80,20 @@ class ApiClient {
     return this.handleResponse<T>(res);
   }
 
+  async postFormData<T>(endpoint: string, formData: FormData): Promise<T> {
+    const headers = this.getHeaders();
+    // Remove Content-Type so the browser sets it automatically with the boundary for multipart/form-data
+    if ('Content-Type' in headers) {
+      delete (headers as any)['Content-Type'];
+    }
+    const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+      method: 'POST',
+      headers: headers,
+      body: formData,
+    });
+    return this.handleResponse<T>(res);
+  }
+
   async put<T>(endpoint: string, body: any): Promise<T> {
     const res = await fetch(`${API_BASE_URL}${endpoint}`, {
       method: 'PUT',

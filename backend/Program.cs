@@ -286,6 +286,8 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors("DefaultCorsPolicy");
 
+app.UseStaticFiles(); // Added to serve uploaded documents
+
 app.UseAuthentication();
 app.UseAuthorization();
 

@@ -19,6 +19,8 @@ namespace backend.Models.Entities
         public string EntityType { get; set; } = null!;
         public string EntityId { get; set; } = null!;
 
+        public string? FileUrl { get; set; } // Nullable for backwards compatibility
+
         public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
     }
 }

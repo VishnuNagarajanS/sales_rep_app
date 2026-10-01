@@ -14,10 +14,12 @@ namespace backend.Controllers
     public class DocumentsController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly IWebHostEnvironment _env;
 
-        public DocumentsController(ApplicationDbContext context)
+        public DocumentsController(ApplicationDbContext context, IWebHostEnvironment env)
         {
             _context = context;
+            _env = env;
         }
 
         [HttpGet]
@@ -38,16 +40,39 @@ namespace backend.Controllers
                 UploadedAt = d.UploadedAt.ToString("dd MMM yyyy"),
                 Category = d.Category,
                 EntityType = d.EntityType,
-                EntityId = d.EntityId
+                EntityId = d.EntityId,
+                FileUrl = d.FileUrl
             });
 
             return Ok(new { success = true, data = dtos, message = "" });
         }
 
         [HttpPost]
-        public async Task<IActionResult> UploadDocument([FromBody] CreateDocumentDto dto)
+        public async Task<IActionResult> UploadDocument([FromForm] CreateDocumentDto dto)
         {
             var userName = User.FindFirstValue(ClaimTypes.Name) ?? "Unknown User";
+            string? fileUrl = null;
+
+            if (dto.File != null && dto.File.Length > 0)
+            {
+                var uploadsFolder = Path.Combine(_env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "uploads");
+                if (!Directory.Exists(uploadsFolder))
+                {
+                    Directory.CreateDirectory(uploadsFolder);
+                }
+
+                var uniqueFileName = Guid.NewGuid().ToString() + "_" + dto.File.FileName;
+                var filePath = Path.Combine(uploadsFolder, uniqueFileName);
+
+                using (var stream = new FileStream(filePath, FileMode.Create))
+                {
+                    await dto.File.CopyToAsync(stream);
+                }
+
+                var request = HttpContext.Request;
+                var baseUrl = $"{request.Scheme}://{request.Host}{request.PathBase}";
+                fileUrl = $"{baseUrl}/uploads/{uniqueFileName}";
+            }
             
             var doc = new Document
             {
@@ -58,7 +83,8 @@ namespace backend.Controllers
                 EntityType = dto.EntityType,
                 EntityId = dto.EntityId,
                 UploadedBy = userName,
-                UploadedAt = DateTime.UtcNow
+                UploadedAt = DateTime.UtcNow,
+                FileUrl = fileUrl
             };
 
             _context.Documents.Add(doc);
@@ -74,10 +100,11 @@ namespace backend.Controllers
                 UploadedAt = doc.UploadedAt.ToString("dd MMM yyyy"),
                 Category = doc.Category,
                 EntityType = doc.EntityType,
-                EntityId = doc.EntityId
+                EntityId = doc.EntityId,
+                FileUrl = doc.FileUrl
             };
 
-            return Ok(new { success = true, data = resultDto, message = "Document metadata saved successfully." });
+            return Ok(new { success = true, data = resultDto, message = "Document uploaded successfully." });
         }
 
         [HttpDelete("{id}")]

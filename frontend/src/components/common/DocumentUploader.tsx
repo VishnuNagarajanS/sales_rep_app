@@ -84,15 +84,14 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({
         onUploaded?.(doc);
         showToast('success', `"${file.name}" logged successfully.`);
       } else {
-        const payload = {
-          name: file.name,
-          size: formatFileSize(file.size),
-          type: file.type || 'application/octet-stream',
-          category: selectedCategory,
-          entityType,
-          entityId
-        };
-        const res = await apiClient.post('/documents', payload);
+        const formData = new FormData();
+        formData.append('name', file.name);
+        formData.append('category', selectedCategory);
+        formData.append('entityType', entityType);
+        formData.append('entityId', entityId);
+        formData.append('file', file);
+        
+        const res = await apiClient.postFormData('/documents', formData);
         if (res.success && res.data) {
           onUploaded?.(res.data);
           window.dispatchEvent(new Event('nexus_storage_updated'));
