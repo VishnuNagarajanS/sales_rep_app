@@ -78,7 +78,6 @@ namespace backend.Migrations
 
                     b.HasIndex("CompanyId");
 
-<<<<<<< HEAD
                     b.ToTable("AuditLogs", (string)null);
                 });
 
@@ -159,9 +158,7 @@ namespace backend.Migrations
                             TargetAudience = "all",
                             Title = "Platform Infrastructure Upgrade"
                         });
-=======
                     b.ToTable("AuditLogs");
->>>>>>> origin/dhinakaran
                 });
 
             modelBuilder.Entity("backend.Models.Entities.CallRecord", b =>
@@ -659,30 +656,24 @@ namespace backend.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-<<<<<<< HEAD
-=======
                     b.Property<string>("FlaggedSections")
                         .HasColumnType("text");
 
                     b.Property<bool>("InvestmentAmountConfirmed")
                         .HasColumnType("boolean");
 
->>>>>>> origin/dhinakaran
                     b.Property<string>("InvestmentRange")
                         .HasColumnType("text");
 
                     b.Property<string>("InvestorType")
                         .HasColumnType("text");
 
-<<<<<<< HEAD
-=======
                     b.Property<int?>("KycId")
                         .HasColumnType("integer");
 
                     b.Property<string>("KycStatus")
                         .HasColumnType("text");
 
->>>>>>> origin/dhinakaran
                     b.Property<string>("LostReason")
                         .HasColumnType("text");
 
@@ -697,12 +688,9 @@ namespace backend.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-<<<<<<< HEAD
-=======
                     b.Property<string>("Remarks")
                         .HasColumnType("text");
 
->>>>>>> origin/dhinakaran
                     b.Property<string>("Stage")
                         .IsRequired()
                         .HasColumnType("text");
@@ -720,15 +708,12 @@ namespace backend.Migrations
                     b.Property<decimal>("Value")
                         .HasColumnType("numeric");
 
-<<<<<<< HEAD
-=======
                     b.Property<DateTime?>("VerifiedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("VerifiedBy")
                         .HasColumnType("text");
 
->>>>>>> origin/dhinakaran
                     b.HasKey("Id");
 
                     b.HasIndex("AssignedAgentId");
@@ -737,11 +722,8 @@ namespace backend.Migrations
 
                     b.HasIndex("CustomerId");
 
-<<<<<<< HEAD
                     b.ToTable("GhlDeals", (string)null);
-=======
                     b.ToTable("GhlDeals");
->>>>>>> origin/dhinakaran
                 });
 
             modelBuilder.Entity("backend.Models.Entities.GhlDealActivity", b =>
@@ -792,11 +774,8 @@ namespace backend.Migrations
 
                     b.HasIndex("DealId");
 
-<<<<<<< HEAD
                     b.ToTable("GhlDealActivities", (string)null);
-=======
                     b.ToTable("GhlDealActivities");
->>>>>>> origin/dhinakaran
                 });
 
             modelBuilder.Entity("backend.Models.Entities.GhlInvestmentOpportunity", b =>
@@ -852,11 +831,8 @@ namespace backend.Migrations
 
                     b.HasIndex("InvestorId");
 
-<<<<<<< HEAD
                     b.ToTable("GhlInvestmentOpportunities", (string)null);
-=======
                     b.ToTable("GhlInvestmentOpportunities");
->>>>>>> origin/dhinakaran
                 });
 
             modelBuilder.Entity("backend.Models.Entities.GhlInvestor", b =>
@@ -925,11 +901,8 @@ namespace backend.Migrations
 
                     b.HasIndex("CompanyId");
 
-<<<<<<< HEAD
                     b.ToTable("GhlInvestors", (string)null);
-=======
                     b.ToTable("GhlInvestors");
->>>>>>> origin/dhinakaran
                 });
 
             modelBuilder.Entity("backend.Models.Entities.InvestmentOpportunity", b =>
@@ -1002,11 +975,8 @@ namespace backend.Migrations
 
                     b.HasIndex("CreatedByIrmId");
 
-<<<<<<< HEAD
                     b.ToTable("InvestmentOpportunities", (string)null);
-=======
                     b.ToTable("InvestmentOpportunities");
->>>>>>> origin/dhinakaran
 
                     b.HasData(
                         new
@@ -1097,11 +1067,8 @@ namespace backend.Migrations
 
                     b.HasIndex("CompanyId");
 
-<<<<<<< HEAD
                     b.ToTable("Investors", (string)null);
-=======
                     b.ToTable("Investors");
->>>>>>> origin/dhinakaran
 
                     b.HasData(
                         new
@@ -1197,11 +1164,8 @@ namespace backend.Migrations
 
                     b.HasIndex("IrmId");
 
-<<<<<<< HEAD
                     b.ToTable("InvestorCalls", (string)null);
-=======
                     b.ToTable("InvestorCalls");
->>>>>>> origin/dhinakaran
                 });
 
             modelBuilder.Entity("backend.Models.Entities.InvestorKyc", b =>
@@ -1248,12 +1212,9 @@ namespace backend.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
-<<<<<<< HEAD
-=======
                     b.Property<string>("DateOfBirth")
                         .HasColumnType("text");
 
->>>>>>> origin/dhinakaran
                     b.Property<string>("DematAccountNumber")
                         .HasColumnType("text");
 
@@ -1267,15 +1228,12 @@ namespace backend.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-<<<<<<< HEAD
-=======
                     b.Property<string>("FatherName")
                         .HasColumnType("text");
 
                     b.Property<string>("FlaggedSectionsJson")
                         .HasColumnType("text");
 
->>>>>>> origin/dhinakaran
                     b.Property<string>("Gender")
                         .IsRequired()
                         .HasColumnType("text");
@@ -1303,11 +1261,9 @@ namespace backend.Migrations
                     b.Property<bool>("KycLinkSent")
                         .HasColumnType("boolean");
 
-<<<<<<< HEAD
                     b.Property<string>("KycLinkToken")
                         .HasColumnType("text");
 
-=======
                     b.Property<DateTime?>("KycLinkSentAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1317,7 +1273,6 @@ namespace backend.Migrations
                     b.Property<string>("NameAsPerPan")
                         .HasColumnType("text");
 
->>>>>>> origin/dhinakaran
                     b.Property<string>("NomineesJson")
                         .HasColumnType("text");
 
@@ -1340,12 +1295,9 @@ namespace backend.Migrations
                     b.Property<string>("Pincode")
                         .HasColumnType("text");
 
-<<<<<<< HEAD
-=======
                     b.Property<string>("Remarks")
                         .HasColumnType("text");
 
->>>>>>> origin/dhinakaran
                     b.Property<string>("ResidentType")
                         .IsRequired()
                         .HasColumnType("text");
@@ -1359,12 +1311,9 @@ namespace backend.Migrations
                     b.Property<int?>("ReviewedByIrmId")
                         .HasColumnType("integer");
 
-<<<<<<< HEAD
-=======
                     b.Property<string>("SectionVerificationsJson")
                         .HasColumnType("text");
 
->>>>>>> origin/dhinakaran
                     b.Property<string>("SignatureUrl")
                         .HasColumnType("text");
 
@@ -1380,15 +1329,12 @@ namespace backend.Migrations
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
-<<<<<<< HEAD
-=======
                     b.Property<DateTime?>("VerifiedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("VerifiedBy")
                         .HasColumnType("text");
 
->>>>>>> origin/dhinakaran
                     b.HasKey("Id");
 
                     b.HasIndex("CompanyId");
@@ -1397,11 +1343,8 @@ namespace backend.Migrations
 
                     b.HasIndex("IrmId");
 
-<<<<<<< HEAD
                     b.ToTable("InvestorKycs", (string)null);
-=======
                     b.ToTable("InvestorKycs");
->>>>>>> origin/dhinakaran
                 });
 
             modelBuilder.Entity("backend.Models.Entities.IrmPipelineCard", b =>
@@ -1480,11 +1423,8 @@ namespace backend.Migrations
 
                     b.HasIndex("InvestorId");
 
-<<<<<<< HEAD
                     b.ToTable("IrmPipelineCards", (string)null);
-=======
                     b.ToTable("IrmPipelineCards");
->>>>>>> origin/dhinakaran
 
                     b.HasData(
                         new
@@ -1908,7 +1848,6 @@ namespace backend.Migrations
                             Id = 4,
                             Code = "irm",
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-<<<<<<< HEAD
                             Description = "Institutional Relationship Manager for HNW wealth & CRE.",
                             IsActive = true,
                             IsSystemRole = true,
@@ -2041,7 +1980,6 @@ namespace backend.Migrations
                             Name = "Wealth Advisory Enterprise Suite",
                             PriceMonthly = 79999m,
                             Tier = "Enterprise"
-=======
                             Name = "Sales Executive",
                             Permissions = new List<string> { "leads.view", "leads.create", "leads.update", "leads.convert", "customers.view", "customers.create", "customers.update", "deals.view", "deals.create", "deals.update", "calls.make", "calls.receive", "calls.view", "followups.view", "followups.create", "followups.update", "properties.view", "site_visits.view", "site_visits.create", "bookings.view", "bookings.create", "investors.view", "investors.create", "consultations.view", "consultations.create", "opportunities.view", "opportunities.create", "reports.view" }
                         },
@@ -2052,7 +1990,6 @@ namespace backend.Migrations
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Name = "IRM",
                             Permissions = new List<string> { "leads.view", "leads.create", "followups.view", "followups.create", "followups.update", "deals.view", "deals.create", "deals.update", "investors.view", "investors.create", "investors.update", "consultations.view", "consultations.create", "consultations.update", "opportunities.view", "opportunities.create", "opportunities.update", "calls.make", "calls.receive", "calls.view", "reports.view", "chat.view", "chat.send", "kyc.verify" }
->>>>>>> origin/dhinakaran
                         });
                 });
 
@@ -2178,10 +2115,7 @@ namespace backend.Migrations
                             Id = 1,
                             BrandColor = "#0284c7",
                             BusinessHours = "10:00 AM - 06:30 PM IST",
-<<<<<<< HEAD
                             CallEnabled = true,
-=======
->>>>>>> origin/dhinakaran
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Currency = "₹ INR",
                             EnabledFeatures = new List<string> { "leads", "customers", "deals", "followups", "calls", "call-recording", "call-transcription", "investors", "consultations", "investment-opportunities", "reports", "users", "roles", "company-settings", "audit-logs" },
@@ -2199,10 +2133,7 @@ namespace backend.Migrations
                             Id = 2,
                             BrandColor = "#059669",
                             BusinessHours = "10:00 AM - 06:30 PM IST",
-<<<<<<< HEAD
                             CallEnabled = true,
-=======
->>>>>>> origin/dhinakaran
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Currency = "₹ INR",
                             EnabledFeatures = new List<string> { "leads", "customers", "deals", "followups", "calls", "call-recording", "call-transcription", "properties", "site-visits", "bookings", "reports", "users", "roles", "company-settings", "audit-logs" },
@@ -2461,11 +2392,8 @@ namespace backend.Migrations
                             Name = "Dhinakaran",
                             PasswordHash = "$2a$11$z2c3Nc1pe7Tqmxj6Rm15NOt8vuAyyKfqzGtBKpiFU2NcPZxsjt5p.",
                             Phone = "+91 98110 77889",
-<<<<<<< HEAD
                             RoleId = 4,
-=======
                             RoleId = 5,
->>>>>>> origin/dhinakaran
                             Status = "Active"
                         },
                         new
@@ -2477,11 +2405,8 @@ namespace backend.Migrations
                             Name = "Rajesh Sharma",
                             PasswordHash = "$2a$11$z2c3Nc1pe7Tqmxj6Rm15NOt8vuAyyKfqzGtBKpiFU2NcPZxsjt5p.",
                             Phone = "+91 98450 44556",
-<<<<<<< HEAD
                             RoleId = 3,
-=======
                             RoleId = 4,
->>>>>>> origin/dhinakaran
                             Status = "Active"
                         });
                 });
@@ -2495,7 +2420,6 @@ namespace backend.Migrations
                     b.Navigation("Company");
                 });
 
-<<<<<<< HEAD
             modelBuilder.Entity("backend.Models.Entities.BroadcastAnnouncement", b =>
                 {
                     b.HasOne("backend.Models.Entities.Tenant", "TargetTenant")
@@ -2506,8 +2430,6 @@ namespace backend.Migrations
                     b.Navigation("TargetTenant");
                 });
 
-=======
->>>>>>> origin/dhinakaran
             modelBuilder.Entity("backend.Models.Entities.CallRecord", b =>
                 {
                     b.HasOne("backend.Models.Entities.User", "Agent")
@@ -2607,7 +2529,6 @@ namespace backend.Migrations
                     b.Navigation("Company");
 
                     b.Navigation("Investor");
-<<<<<<< HEAD
                 });
 
             modelBuilder.Entity("backend.Models.Entities.GhlDeal", b =>
@@ -2813,8 +2734,6 @@ namespace backend.Migrations
                     b.Navigation("Company");
 
                     b.Navigation("Investor");
-=======
->>>>>>> origin/dhinakaran
                 });
 
             modelBuilder.Entity("backend.Models.Entities.GhlDeal", b =>
@@ -2907,8 +2826,6 @@ namespace backend.Migrations
                     b.Navigation("Company");
                 });
 
-<<<<<<< HEAD
-=======
             modelBuilder.Entity("backend.Models.Entities.InvestmentOpportunity", b =>
                 {
                     b.HasOne("backend.Models.Entities.Tenant", "Company")
@@ -3042,7 +2959,6 @@ namespace backend.Migrations
                     b.Navigation("Company");
                 });
 
->>>>>>> origin/dhinakaran
             modelBuilder.Entity("backend.Models.Entities.OpportunityPitch", b =>
                 {
                     b.HasOne("backend.Models.Entities.Investor", "Investor")
@@ -3070,7 +2986,6 @@ namespace backend.Migrations
                     b.Navigation("PitchedByIrm");
                 });
 
-<<<<<<< HEAD
             modelBuilder.Entity("backend.Models.Entities.TenantDidMapping", b =>
                 {
                     b.HasOne("backend.Models.Entities.Tenant", "Tenant")
@@ -3081,8 +2996,6 @@ namespace backend.Migrations
                     b.Navigation("Tenant");
                 });
 
-=======
->>>>>>> origin/dhinakaran
             modelBuilder.Entity("backend.Models.Entities.User", b =>
                 {
                     b.HasOne("backend.Models.Entities.Tenant", "Company")

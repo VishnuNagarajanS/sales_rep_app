@@ -211,11 +211,7 @@ public class GhlDealsController : ControllerBase
     {
         var isSuperAdmin = _currentUser.Role == "super_admin";
         var deal = await _db.GhlDeals
-<<<<<<< HEAD
             .FirstOrDefaultAsync(d => d.Id == id && (!_currentUser.CompanyId.HasValue || d.CompanyId == _currentUser.CompanyId.Value), ct);
-=======
-            .FirstOrDefaultAsync(d => d.Id == id && (isSuperAdmin || d.CompanyId == _currentUser.CompanyId), ct);
->>>>>>> origin/dhinakaran
 
         if (deal == null)
             return NotFound(ApiResponse<bool>.FailureResult("Deal not found."));
