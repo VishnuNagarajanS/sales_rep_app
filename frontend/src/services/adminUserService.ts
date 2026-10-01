@@ -14,6 +14,7 @@ interface AdminUserDto {
   phone: string;
   roleId: number;
   roleName: string;
+  roleCode: string;
   status: number;
   lastLoginAt?: string;
   avatarUrl?: string;
@@ -25,13 +26,16 @@ const mapDtoToUser = (dto: AdminUserDto): User => {
   if (dto.status === 1) statusStr = 'Invited';
   if (dto.status === 2) statusStr = 'Disabled';
 
-  let roleCode = 'sales_executive';
-  if (dto.roleName?.toLowerCase().includes('admin')) {
-    roleCode = 'company_admin';
-  } else if (dto.roleName?.toLowerCase().includes('manager')) {
-    roleCode = 'sales_manager';
-  } else if (dto.roleName?.toLowerCase().includes('irm') || dto.roleName?.toLowerCase().includes('institutional')) {
-    roleCode = 'irm';
+  // Use roleCode directly from backend (authoritative), fall back to name-based detection
+  let roleCode = dto.roleCode || 'sales_executive';
+  if (!dto.roleCode) {
+    if (dto.roleName?.toLowerCase().includes('admin')) {
+      roleCode = 'company_admin';
+    } else if (dto.roleName?.toLowerCase().includes('manager')) {
+      roleCode = 'sales_manager';
+    } else if (dto.roleName?.toLowerCase().includes('irm') || dto.roleName?.toLowerCase().includes('institutional')) {
+      roleCode = 'irm';
+    }
   }
 
   return {
@@ -63,10 +67,10 @@ export const adminUserService = {
   },
 
     createUser: async (userData: any): Promise<User> => {
-    let roleId = 4;
+    let roleId = 3;
     if (userData.role.code === 'company_admin') roleId = 2;
-    else if (userData.role.code === 'sales_manager') roleId = 3;
-    else if (userData.role.code === 'irm') roleId = 5;
+    else if (userData.role.code === 'sales_manager') roleId = 5;
+    else if (userData.role.code === 'irm') roleId = 4;
 
     const payload = {
       name: userData.name,
@@ -82,10 +86,10 @@ export const adminUserService = {
   },
 
   updateUser: async (id: string, userData: any): Promise<User> => {
-    let roleId = 4;
+    let roleId = 3;
     if (userData.role.code === 'company_admin') roleId = 2;
-    else if (userData.role.code === 'sales_manager') roleId = 3;
-    else if (userData.role.code === 'irm') roleId = 5;
+    else if (userData.role.code === 'sales_manager') roleId = 5;
+    else if (userData.role.code === 'irm') roleId = 4;
 
     const payload = {
       name: userData.name,
@@ -99,10 +103,10 @@ export const adminUserService = {
   },
 
   transferRole: async (id: string, newUserId: number, newRoleCode: string): Promise<User> => {
-    let roleId = 4;
+    let roleId = 3;
     if (newRoleCode === 'company_admin') roleId = 2;
-    else if (newRoleCode === 'sales_manager') roleId = 3;
-    else if (newRoleCode === 'irm') roleId = 5;
+    else if (newRoleCode === 'sales_manager') roleId = 5;
+    else if (newRoleCode === 'irm') roleId = 4;
 
     const res = await apiClient.post<ApiResponse<AdminUserDto>>(`/AdminUsers/${id}/transfer-role`, {
       newUserId,

@@ -65,9 +65,9 @@ public class ApplicationDbContext : DbContext
         // 1. Roles (Integer IDs 1, 2, 3, 4, 5)
         var superAdminRoleId = 1;
         var companyAdminRoleId = 2;
-        var salesManagerRoleId = 3;
-        var salesExecutiveRoleId = 4;
-        var irmRoleId = 5;
+        var salesExecutiveRoleId = 3;
+        var irmRoleId = 4;
+        var salesManagerRoleId = 5;
 
         modelBuilder.Entity<Role>().HasData(
             new Role

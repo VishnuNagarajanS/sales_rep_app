@@ -10,6 +10,7 @@ public class AdminUserDto
     public string Phone { get; set; } = string.Empty;
     public int RoleId { get; set; }
     public string RoleName { get; set; } = string.Empty;
+    public string RoleCode { get; set; } = string.Empty;
     public UserStatus Status { get; set; }
     public DateTime? LastLoginAt { get; set; }
     public string? AvatarUrl { get; set; }

@@ -149,8 +149,13 @@ using (var scope = app.Services.CreateScope())
                     ALTER TABLE followups ALTER COLUMN ""Status"" SET DEFAULT 'Pending';
                     ALTER TABLE followups ALTER COLUMN ""Priority"" DROP NOT NULL;
                     ALTER TABLE followups ALTER COLUMN ""Priority"" SET DEFAULT 'Medium';
-                    ALTER TABLE ""Leads"" ALTER COLUMN ""AssignedAgentId"" DROP NOT NULL;
-                END ;
+
+                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Leads' AND column_name = 'AssignedAgentId') THEN
+                        ALTER TABLE ""Leads"" ALTER COLUMN ""AssignedAgentId"" DROP NOT NULL;
+                    ELSIF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'leads' AND column_name = 'AssignedAgentId') THEN
+                        ALTER TABLE leads ALTER COLUMN ""AssignedAgentId"" DROP NOT NULL;
+                    END IF;
+                END $$;
             ";
             db.Database.ExecuteSqlRaw(sql);
         }

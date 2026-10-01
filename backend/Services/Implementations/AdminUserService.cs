@@ -32,6 +32,7 @@ public class AdminUserService : IAdminUserService
                 Phone = u.Phone,
                 RoleId = u.RoleId,
                 RoleName = u.Role != null ? u.Role.Name : "Unknown",
+                RoleCode = u.Role != null ? u.Role.Code : "sales_executive",
                 Status = u.Status,
                 LastLoginAt = u.LastLoginAt,
                 AvatarUrl = u.AvatarUrl,
@@ -55,6 +56,7 @@ public class AdminUserService : IAdminUserService
                 Phone = u.Phone,
                 RoleId = u.RoleId,
                 RoleName = u.Role != null ? u.Role.Name : "Unknown",
+                RoleCode = u.Role != null ? u.Role.Code : "sales_executive",
                 Status = u.Status,
                 LastLoginAt = u.LastLoginAt,
                 AvatarUrl = u.AvatarUrl,
@@ -118,6 +120,7 @@ public class AdminUserService : IAdminUserService
             Phone = newUser.Phone,
             RoleId = newUser.RoleId,
             RoleName = role.Name,
+            RoleCode = role.Code,
             Status = newUser.Status,
             CreatedAt = newUser.CreatedAt
         };
@@ -157,6 +160,7 @@ public class AdminUserService : IAdminUserService
             Phone = user.Phone,
             RoleId = user.RoleId,
             RoleName = user.Role.Name,
+            RoleCode = user.Role.Code,
             Status = user.Status,
             LastLoginAt = user.LastLoginAt,
             AvatarUrl = user.AvatarUrl,
@@ -238,7 +242,8 @@ public class AdminUserService : IAdminUserService
                 LastLoginAt = oldUser.LastLoginAt,
                 AvatarUrl = oldUser.AvatarUrl,
                 RoleId = oldUser.RoleId,
-                RoleName = oldUser.Role.Name
+                RoleName = oldUser.Role.Name,
+                RoleCode = oldUser.Role.Code
             };
 
             return ApiResponse<AdminUserDto>.SuccessResult(dto, "Transferred active data and updated role successfully.");
