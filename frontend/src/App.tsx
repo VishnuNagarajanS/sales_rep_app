@@ -1,4 +1,85 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+
+export const routeToPath = (route: string, isSuperAdmin: boolean): string => {
+  if (isSuperAdmin) {
+    switch (route) {
+      case 'admin-dashboard':
+      case 'dashboard':
+        return '/dashboard';
+      case 'admin-companies':
+        return '/companies';
+      case 'admin-users':
+        return '/users';
+      case 'admin-roles':
+        return '/roles';
+      case 'admin-features':
+        return '/features';
+      case 'admin-call-config':
+        return '/settings';
+      case 'admin-audit':
+        return '/audit';
+      case 'admin-system':
+        return '/system-health';
+      default:
+        return '/dashboard';
+    }
+  } else {
+    switch (route) {
+      case 'dashboard':
+        return '/dashboard';
+      case 'company-users':
+        return '/users';
+      case 'company-settings':
+        return '/settings';
+      case 'company-audit':
+        return '/audit';
+      default:
+        return `/${route}`;
+    }
+  }
+};
+
+export const pathToRoute = (pathname: string, isSuperAdmin: boolean): string => {
+  const cleanPath = pathname.replace(/\/+$/, '') || '/';
+  if (cleanPath === '/' || cleanPath === '/dashboard') {
+    return isSuperAdmin ? 'admin-dashboard' : 'dashboard';
+  }
+  if (isSuperAdmin) {
+    switch (cleanPath) {
+      case '/companies':
+        return 'admin-companies';
+      case '/users':
+        return 'admin-users';
+      case '/roles':
+        return 'admin-roles';
+      case '/features':
+        return 'admin-features';
+      case '/settings':
+      case '/call-config':
+        return 'admin-call-config';
+      case '/audit':
+        return 'admin-audit';
+      case '/system-health':
+      case '/system':
+        return 'admin-system';
+      default:
+        return 'admin-dashboard';
+    }
+  } else {
+    switch (cleanPath) {
+      case '/users':
+        return 'company-users';
+      case '/settings':
+        return 'company-settings';
+      case '/audit':
+        return 'company-audit';
+      default: {
+        const seg = cleanPath.slice(1);
+        return seg || 'dashboard';
+      }
+    }
+  }
+};
 import { useAuth } from './context/AuthContext';
 import { AuthLayout } from './layouts/AuthLayout';
 import { SalesLayout } from './layouts/SalesLayout';
@@ -83,7 +164,14 @@ export const App: React.FC = () => {
 
   const { isAuthenticated, isSuperAdmin, tenant, user } = useAuth();
   const [currentRoute, setCurrentRoute] = useState<string>(() => {
-    return sessionStorage.getItem('nexus_current_route') || 'dashboard';
+    const path = window.location.pathname;
+    if (path && path !== '/' && path !== '/login') {
+      const mapped = pathToRoute(path, isSuperAdmin);
+      if (mapped) return mapped;
+    }
+    const saved = sessionStorage.getItem('nexus_current_route');
+    if (saved) return saved;
+    return isSuperAdmin ? 'admin-dashboard' : 'dashboard';
   });
 
   const roleCode = user?.role?.code;
@@ -155,13 +243,160 @@ export const App: React.FC = () => {
   const [dealCustomerMode, setDealCustomerMode] = useState<'existing' | 'new'>('existing');
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [newCustomerName, setNewCustomerName] = useState('');
-  const [navExtraState, setNavExtraState] = useState<any>(null);
+  const [navExtraState, setNavExtraState] = useState<any>(() => {
+    return window.history.state?.extraState || null;
+  });
+
+  const currentRouteRef = useRef(currentRoute);
+  currentRouteRef.current = currentRoute;
+
+  const isSuperAdminRef = useRef(isSuperAdmin);
+  isSuperAdminRef.current = isSuperAdmin;
+
+  const isAuthenticatedRef = useRef(isAuthenticated);
+  isAuthenticatedRef.current = isAuthenticated;
+
+  const currentIndexRef = useRef<number>(1);
+
+  // Synchronize history state and enforce auth guards on mount or auth change
+  useEffect(() => {
+    if (!isAuthenticated) {
+      sessionStorage.removeItem('nexus_has_armed_trap');
+      if (
+        window.location.pathname !== '/login' &&
+        !window.location.pathname.startsWith('/reset-password') &&
+        !window.location.pathname.startsWith('/kyc')
+      ) {
+        window.history.replaceState({ unauth: true }, '', '/login');
+      }
+      return;
+    }
+
+    // Authenticated state: resolve active route
+    let activeRoute = currentRouteRef.current;
+    const currentPath = window.location.pathname;
+
+    if (currentPath !== '/login' && currentPath !== '/') {
+      const mapped = pathToRoute(currentPath, isSuperAdmin);
+      if (mapped && mapped !== activeRoute) {
+        activeRoute = mapped;
+        setCurrentRoute(mapped);
+        sessionStorage.setItem('nexus_current_route', mapped);
+      }
+    } else if (isSuperAdmin && activeRoute === 'dashboard') {
+      activeRoute = 'admin-dashboard';
+      setCurrentRoute('admin-dashboard');
+      sessionStorage.setItem('nexus_current_route', 'admin-dashboard');
+    }
+
+    const targetPath = routeToPath(activeRoute, isSuperAdmin);
+
+    // CRITICAL: Ensure there is always a deep anti-exit trap buffer in history
+    // so pressing the browser Back button can NEVER escape to the Edge new tab!
+    const isArmed = sessionStorage.getItem('nexus_has_armed_trap') === 'true';
+    if (!isArmed || !window.history.state || !window.history.state.auth || window.history.state.isTrap || !window.history.state.index) {
+      window.history.replaceState(
+        { auth: true, route: activeRoute, index: 0, isTrap: true },
+        '',
+        targetPath
+      );
+      window.history.pushState(
+        { auth: true, route: activeRoute, index: 0, isTrap: true },
+        '',
+        targetPath
+      );
+      window.history.pushState(
+        { auth: true, route: activeRoute, index: 1 },
+        '',
+        targetPath
+      );
+      currentIndexRef.current = 1;
+      sessionStorage.setItem('nexus_has_armed_trap', 'true');
+    }
+  }, [isAuthenticated, isSuperAdmin]);
+
+  // Ensure trap is also reinforced on first user interaction for Chromium gesture activation
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const armOnInteraction = () => {
+      const currentPath = routeToPath(currentRouteRef.current, isSuperAdminRef.current);
+      if (!window.history.state || window.history.state.index === undefined || window.history.state.isTrap) {
+        window.history.replaceState({ auth: true, route: currentRouteRef.current, index: 0, isTrap: true }, '', currentPath);
+        window.history.pushState({ auth: true, route: currentRouteRef.current, index: 0, isTrap: true }, '', currentPath);
+        window.history.pushState({ auth: true, route: currentRouteRef.current, index: 1 }, '', currentPath);
+        currentIndexRef.current = 1;
+      }
+      sessionStorage.setItem('nexus_has_armed_trap', 'true');
+    };
+    window.addEventListener('click', armOnInteraction, { once: true, capture: true });
+    window.addEventListener('keydown', armOnInteraction, { once: true, capture: true });
+    return () => {
+      window.removeEventListener('click', armOnInteraction, { capture: true });
+      window.removeEventListener('keydown', armOnInteraction, { capture: true });
+    };
+  }, [isAuthenticated]);
+
+  // Handle browser Back / Forward events
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      // 1. If unauthenticated, ensure user stays on /login
+      if (!isAuthenticatedRef.current) {
+        if (window.location.pathname !== '/login') {
+          window.history.replaceState({ unauth: true }, '', '/login');
+        }
+        return;
+      }
+
+      // 2. User is authenticated:
+      const state = event.state;
+
+      // Trap Back button if it attempts to leave authenticated application,
+      // lands on trap entry, has no state, or returns to /login
+      if (!state || !state.auth || state.isTrap || !state.index || state.index <= 0 || window.location.pathname === '/login') {
+        const currentPath = routeToPath(currentRouteRef.current, isSuperAdminRef.current);
+        // Immediately replenish the anti-exit trap buffer at current location
+        window.history.pushState(
+          { auth: true, route: currentRouteRef.current, index: 0, isTrap: true },
+          '',
+          currentPath
+        );
+        window.history.pushState(
+          { auth: true, route: currentRouteRef.current, index: 1 },
+          '',
+          currentPath
+        );
+        currentIndexRef.current = 1;
+        return;
+      }
+
+      // 3. Normal in-app internal navigation (Back / Forward between pages)
+      if (state.route) {
+        currentIndexRef.current = state.index || 1;
+        setCurrentRoute(state.route);
+        setNavExtraState(state.extraState || null);
+        sessionStorage.setItem('nexus_current_route', state.route);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   // Handle route change
   const navigate = (route: string, extraState?: any) => {
     setCurrentRoute(route);
     setNavExtraState(extraState || null);
     sessionStorage.setItem('nexus_current_route', route);
+
+    const nextIndex = (currentIndexRef.current || 1) + 1;
+    currentIndexRef.current = nextIndex;
+
+    const targetPath = routeToPath(route, isSuperAdmin);
+    window.history.pushState(
+      { auth: true, route, extraState: extraState || null, index: nextIndex },
+      '',
+      targetPath
+    );
   };
 
   const handleOpenQuickCreate = (type: 'lead' | 'followup' | 'deal' | 'visit' | 'consultation') => {

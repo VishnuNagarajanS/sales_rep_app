@@ -331,12 +331,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     sessionStorage.removeItem('nexus_current_user');
     sessionStorage.removeItem('nexus_current_tenant');
     sessionStorage.removeItem('nexus_current_route');
+    sessionStorage.removeItem('nexus_has_armed_trap');
     localStorage.removeItem('nexus_auth_token');
     localStorage.removeItem('nexus_current_user');
     localStorage.removeItem('nexus_current_tenant');
     setLoginError(null);
     setUser(null);
     setTenant(null);
+    try {
+      window.history.replaceState({ unauth: true }, '', '/login');
+    } catch {}
   };
 
   return (
