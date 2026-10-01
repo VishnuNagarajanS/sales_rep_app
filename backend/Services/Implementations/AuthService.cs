@@ -62,10 +62,13 @@ public class AuthService : IAuthService
                     Code = "irm",
                     Permissions = new List<string>
                     {
-                        "leads.view", "leads.create",
+                        "leads.view", "leads.create", "leads.update",
+                        "followups.view", "followups.create", "followups.update",
                         "investors.view", "investors.create", "investors.update",
                         "consultations.view", "consultations.create", "consultations.update",
                         "opportunities.view", "opportunities.create", "opportunities.update",
+                        "deals.view", "deals.create", "deals.update",
+                        "kyc.view", "kyc.approve",
                         "calls.make", "calls.receive", "calls.view",
                         "reports.view", "chat.view", "chat.send"
                     }

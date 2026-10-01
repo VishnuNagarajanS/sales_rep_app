@@ -355,27 +355,31 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       setAllFollowups(pendingFus);
       setCustomers(updatedCustomers || []);
 
-      const assignmentFilter = isGhlAdmin ? 'unassigned' : 'all';
-      const res = await apiClient.get<any>(`/sales-executive/leads?page=1&pageSize=200&assignment=${assignmentFilter}`);
-      if (res.success && res.data && res.data.items) {
-        const apiLeads = res.data.items.map((item: any) => ({
-          ...item,
-          id: String(item.id),
-          assignedAgentId: item.assignedAgentId ? String(item.assignedAgentId) : undefined,
-          customFields: item.customFields || {}
-        }));
-        setLeads(apiLeads);
-        setSelectedLead(prev => {
-          if (!prev) return null;
-          const found = apiLeads.find((l: any) => l.id === prev.id);
-          if (!found || (isExec && MOVED_LEAD_STATUSES.includes(found.status)) || found.status === 'Junk') {
-            setIsDetailDrawerOpen(false);
-            setIsEditDrawerOpen(false);
-            return null;
-          }
-          return found;
-        });
+      let loadedLeads: Lead[] = [];
+      if (isGhlAdmin) {
+        const res = await apiClient.get<any>('/sales-executive/leads?page=1&pageSize=200&assignment=unassigned');
+        if (res.success && res.data && res.data.items) {
+          loadedLeads = res.data.items.map((item: any) => ({
+            ...item,
+            id: String(item.id),
+            assignedAgentId: item.assignedAgentId ? String(item.assignedAgentId) : undefined,
+            customFields: item.customFields || {}
+          }));
+        }
+      } else {
+        loadedLeads = await getLeads(tenant?.id);
       }
+      setLeads(loadedLeads);
+      setSelectedLead(prev => {
+        if (!prev) return null;
+        const found = loadedLeads.find((l: any) => l.id === prev.id);
+        if (!found || (isExec && MOVED_LEAD_STATUSES.includes(found.status)) || found.status === 'Junk') {
+          setIsDetailDrawerOpen(false);
+          setIsEditDrawerOpen(false);
+          return null;
+        }
+        return found;
+      });
     } catch (err) {
       console.error('Failed to load leads from API', err);
     }
@@ -473,6 +477,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   };
 
   const filteredLeads = scopedLeads.filter(lead => {
+    if (assignedLeadIds.has(lead.id)) return false;
     if (isGhlSalesExec && lead.status !== 'Callback') {
       const leadPhoneDigits = (lead.phone || '').replace(/\D/g, '').slice(-10);
       const hasPendingFollowup = ghlPendingFollowups.some(f => {

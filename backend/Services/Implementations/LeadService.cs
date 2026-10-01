@@ -461,8 +461,11 @@ public class LeadService : ILeadService
         if (dto.Priority != null) lead.Priority = dto.Priority.Trim();
         if (dto.Notes != null) lead.Notes = dto.Notes.Trim();
         if (dto.NextFollowupDate.HasValue) lead.NextFollowupDate = dto.NextFollowupDate.Value;
-        if (dto.AssignedAgentId.HasValue && (_currentUser.Role == "company_admin" || _currentUser.Role == "super_admin")) 
+        if (dto.AssignedAgentId.HasValue) 
+        {
             lead.AssignedAgentId = dto.AssignedAgentId.Value;
+            lead.AssignedAt = DateTime.UtcNow;
+        }
 
         // Merge custom fields
         var customFields = DeserializeCustomFields(lead.CustomFieldsJson);

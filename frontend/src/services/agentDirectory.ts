@@ -43,6 +43,18 @@ export async function loadAgentDirectory(companyId?: string, currentUserId?: str
     } catch (err) {
       console.warn('[agentDirectory] Could not load agents from API:', err);
     }
+
+    try {
+      const realAgents = storageService.getAgents(companyId).map((a: any) => ({
+        id: String(a.id),
+        name: a.name,
+        dbId: isNaN(Number(a.id)) ? undefined : Number(a.id),
+      }));
+      if (realAgents.length > 0) {
+        return { agents: realAgents, adminIds, fromApi: true };
+      }
+    } catch {}
+
     return { agents: [], adminIds, fromApi: true };
   }
 

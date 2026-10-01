@@ -229,9 +229,13 @@ using (var scope = app.Services.CreateScope())
                         role.Permissions = allPerms.ToList();
                     else if (role.Code == "irm")
                         role.Permissions = new List<string> {
-                            "leads.view","leads.create","investors.view","investors.create","investors.update",
+                            "leads.view","leads.create","leads.update",
+                            "followups.view","followups.create","followups.update",
+                            "investors.view","investors.create","investors.update",
                             "consultations.view","consultations.create","consultations.update",
                             "opportunities.view","opportunities.create","opportunities.update",
+                            "deals.view","deals.create","deals.update",
+                            "kyc.view","kyc.approve",
                             "calls.make","calls.receive","calls.view","reports.view","chat.view","chat.send"
                         };
                     else // sales_executive

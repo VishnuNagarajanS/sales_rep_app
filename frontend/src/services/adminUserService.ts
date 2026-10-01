@@ -1,5 +1,6 @@
 import { apiClient } from './apiClient';
 import { User } from '../types';
+import { storageService } from './storageService';
 
 interface ApiResponse<T> {
   data: T;
@@ -57,7 +58,11 @@ export const adminUserService = {
   getUsers: async (companyId: string): Promise<User[]> => {
     const res = await apiClient.get<ApiResponse<AdminUserDto[]>>(`/AdminUsers?companyId=${companyId}`);
     if (!res.success) throw new Error(res.message);
-    return (res.data || []).map(mapDtoToUser);
+    const users = (res.data || []).map(mapDtoToUser);
+    try {
+      storageService.setUsers(users);
+    } catch {}
+    return users;
   },
 
   getUserById: async (id: string, companyId: string): Promise<User> => {

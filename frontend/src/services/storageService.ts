@@ -26,8 +26,11 @@ import {
   RoutingAttempt,
   CustomFieldDefinition,
   ProductService,
+  IrmProfile,
 } from '../types';
 import { DEFAULT_TENANTS } from '../constants/defaultTenants';
+import { isMockMode } from '../config/environment';
+import { mockStorageAdapter } from '../mock/runtime/mockStorageAdapter';
 import {
   INITIAL_CUSTOM_FIELD_DEFINITIONS,
   INITIAL_INVESTORS,
@@ -97,11 +100,42 @@ class StorageService {
 
   // Users
   getUsers(companySlug?: string): User[] {
-    const users = this.get<User[]>('users', []);
-    return companySlug ? users.filter(u => u.companySlug === companySlug) : users;
+    if (isMockMode()) {
+      const users = mockStorageAdapter.getUsers();
+      return companySlug ? users.filter(u => u.companySlug === companySlug || (u as any).companyId === companySlug) : users;
+    }
+    let users = this.get<User[]>('users', []);
+    if (!users || users.length === 0) {
+      try {
+        const raw = localStorage.getItem('nexus_dev_users');
+        if (raw) users = JSON.parse(raw);
+      } catch {}
+    }
+    return companySlug ? users.filter(u => u.companySlug === companySlug || (u as any).companyId === companySlug) : users;
+  }
+
+  setUsers(users: User[]): void {
+    if (isMockMode()) {
+      mockStorageAdapter.saveUsers(users);
+    } else {
+      this.set('users', users);
+      try {
+        localStorage.setItem('nexus_dev_users', JSON.stringify(users));
+      } catch {}
+    }
+    window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 
   saveUser(user: User): void {
+    if (isMockMode()) {
+      const users = mockStorageAdapter.getUsers();
+      const index = users.findIndex(u => u.id === user.id);
+      if (index >= 0) users[index] = user;
+      else users.push(user);
+      mockStorageAdapter.saveUsers(users);
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+      return;
+    }
     const users = this.getUsers();
     const index = users.findIndex(u => u.id === user.id);
     if (index >= 0) {
@@ -110,11 +144,23 @@ class StorageService {
       users.push(user);
     }
     this.set('users', users);
+    try {
+      localStorage.setItem('nexus_dev_users', JSON.stringify(users));
+    } catch {}
   }
 
   deleteUser(id: string): void {
+    if (isMockMode()) {
+      const users = mockStorageAdapter.getUsers().filter(u => u.id !== id);
+      mockStorageAdapter.saveUsers(users);
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+      return;
+    }
     const users = this.getUsers().filter(u => u.id !== id);
     this.set('users', users);
+    try {
+      localStorage.setItem('nexus_dev_users', JSON.stringify(users));
+    } catch {}
   }
 
   // Leads (Defaults to empty [] - real-time data only)
@@ -955,13 +1001,45 @@ class StorageService {
   }
 
   // Used by InCallBar, CustomersPage, FollowupsPage, AdminKanbanBoard.
-  // (Were missing after the app merge -> TypeError -> white screen)
-  getAgents(_companyId?: string) {
-    return MOCK_AGENTS;
+  getAgents(companyId?: string): Array<{ id: number | string; name: string; email?: string; role?: string }> {
+    if (isMockMode()) {
+      return mockStorageAdapter.getAgents();
+    }
+    const users = this.getUsers(companyId);
+    const agents = users
+      .filter(u => u.role?.code === 'sales_executive' || u.role?.name?.toLowerCase().includes('sales'))
+      .map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role?.name || 'Sales Executive' }));
+    if (agents.length > 0) return agents;
+    return [
+      { id: '3', name: 'Naveen', role: 'Sales Executive', email: 'naveen@ghlindiaventures.com' },
+      { id: '28', name: 'Test_Sales', role: 'Sales Executive', email: 'test_sales@ghlindiaventures.com' },
+      { id: '29', name: 'Test_sales_2', role: 'Sales Executive', email: 'test_sales_2@ghlindiaventures.com' },
+    ];
   }
 
-  getIrms(_companyId?: string) {
-    return MOCK_IRMS;
+  getIrms(companyId?: string): IrmProfile[] {
+    if (isMockMode()) {
+      return mockStorageAdapter.getIrms();
+    }
+    const users = this.getUsers(companyId);
+    const irms = users
+      .filter(u => u.role?.code === 'irm' || u.role?.name?.toLowerCase().includes('irm') || u.role?.name?.toLowerCase().includes('investor'))
+      .map(u => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        phone: u.phone,
+        experience: '5 Years',
+        experienceYears: 5,
+        experienceLevel: 'Experienced' as const,
+        performance: 95,
+        status: 'Available' as const,
+      }));
+    if (irms.length > 0) return irms;
+    return [
+      { id: '5', name: 'Dhinakaran', email: 'dhinakaran@ghlindiaventures.com', phone: '+91 98110 77889', experience: '5 Years', experienceYears: 5, experienceLevel: 'Experienced' as const, performance: 95, status: 'Available' as const },
+      { id: '30', name: 'Test_IRM', email: 'test_irm@ghlindiaventures.com', phone: '+91 98110 77890', experience: '3 Years', experienceYears: 3, experienceLevel: 'Mid-Level' as const, performance: 90, status: 'Available' as const },
+    ];
   }
 
   getInitialCustomers() {
