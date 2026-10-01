@@ -1,4 +1,5 @@
 using backend.DTOs.Common;
+using backend.Helpers;
 using backend.DTOs.Irm;
 using backend.Models.Entities;
 using backend.Models.Enums;
@@ -80,12 +81,34 @@ public class InvestorService : IInvestorService
     {
         var irmUser = await _userRepo.GetByIdAsync(irmId, ct);
 
+        // ── Duplicate check: phone (last 10 digits, normalized) and email (case-insensitive, trimmed) ──
+        var normalizedPhone = NormalizePhone(dto.Phone);
+        var normalizedEmail = (dto.Email ?? string.Empty).Trim().ToLowerInvariant();
+
+        var allInvestors = await _investorRepo.GetAllAsync(companyId, null, null, null, ct);
+
+        foreach (var existing in allInvestors)
+        {
+            var existingPhone = NormalizePhone(existing.Phone);
+            var existingEmail = (existing.Email ?? string.Empty).Trim().ToLowerInvariant();
+
+            bool phoneMatch = !string.IsNullOrWhiteSpace(normalizedPhone) && normalizedPhone == existingPhone;
+            bool emailMatch = !string.IsNullOrWhiteSpace(normalizedEmail) && normalizedEmail == existingEmail;
+
+            if (phoneMatch || emailMatch)
+            {
+                var dupField = phoneMatch ? $"phone {existing.Phone}" : $"email {existing.Email}";
+                return ApiResponse<InvestorDto>.ErrorResponse(
+                    $"A record with this {dupField} already exists: \"{existing.Name}\" (ID: {existing.Id}). Please update the existing record instead of creating a duplicate.");
+            }
+        }
+
         var investor = new Investor
         {
             CompanyId = companyId,
-            Name = dto.Name,
-            Phone = dto.Phone,
-            Email = dto.Email,
+            Name = dto.Name.Trim(),
+            Phone = dto.Phone?.Trim() ?? string.Empty,
+            Email = dto.Email?.Trim() ?? string.Empty,
             Status = InvestorStatus.Lead,
             InvestmentCapacity = dto.InvestmentCapacity,
             PreferredAssetClass = dto.PreferredAssetClass,
@@ -102,6 +125,17 @@ public class InvestorService : IInvestorService
         return ApiResponse<InvestorDto>.SuccessResponse(MapToDto(created), "Investor created successfully");
     }
 
+    /// <summary>
+    /// Normalizes a phone number to its last 10 digits for comparison.
+    /// Strips all non-digit characters and returns the trailing 10 digits.
+    /// </summary>
+    private static string NormalizePhone(string? phone)
+    {
+        if (string.IsNullOrWhiteSpace(phone)) return string.Empty;
+        var digits = new string(phone.Where(char.IsDigit).ToArray());
+        return digits.Length >= 10 ? digits[^10..] : digits;
+    }
+
     public async Task<ApiResponse<InvestorDto>> UpdateAsync(int id, int companyId, UpdateInvestorDto dto, CancellationToken ct = default)
     {
         var investor = await _investorRepo.GetByIdAsync(id, companyId, ct);
@@ -111,8 +145,8 @@ public class InvestorService : IInvestorService
         if (!string.IsNullOrWhiteSpace(dto.Name)) investor.Name = dto.Name;
         if (!string.IsNullOrWhiteSpace(dto.Phone)) investor.Phone = dto.Phone;
         if (!string.IsNullOrWhiteSpace(dto.Email)) investor.Email = dto.Email;
-        if (!string.IsNullOrWhiteSpace(dto.InvestmentCapacity)) investor.InvestmentCapacity = dto.InvestmentCapacity;
-        if (!string.IsNullOrWhiteSpace(dto.PreferredAssetClass)) investor.PreferredAssetClass = dto.PreferredAssetClass;
+        if (dto.InvestmentCapacity != null) investor.InvestmentCapacity = OptionalFieldNormalizer.Normalize(dto.InvestmentCapacity) ?? string.Empty;
+        if (dto.PreferredAssetClass != null) investor.PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass) ?? string.Empty;
         if (dto.RiskTolerance != null) investor.RiskTolerance = dto.RiskTolerance;
         if (dto.InvestmentMandate != null) investor.InvestmentMandate = dto.InvestmentMandate;
         if (dto.CommittedAum != null) investor.CommittedAum = dto.CommittedAum;

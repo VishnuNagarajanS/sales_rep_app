@@ -29,13 +29,11 @@ public class FollowupConfiguration : IEntityTypeConfiguration<Followup>
             .IsRequired();
 
         builder.Property(f => f.Priority)
-            .HasMaxLength(50)
-            .HasDefaultValue("Medium");
+            .HasMaxLength(50);
 
         builder.Property(f => f.Status)
             .HasConversion<string>()
-            .HasMaxLength(50)
-            .HasDefaultValue(FollowupStatus.Pending);
+            .HasMaxLength(50);
 
         builder.Property(f => f.CreatedAt)
             .HasDefaultValueSql("NOW()");

@@ -17,11 +17,9 @@ public static class ServiceExtensions
     public static IServiceCollection AddApplicationServices(this IServiceCollection services, IConfiguration configuration)
     {
         // 1. Database Context
-        var useInMemory = configuration.GetValue<bool>("UseInMemoryDatabase", false)
-                          || string.IsNullOrEmpty(configuration.GetConnectionString("DefaultConnection"))
-                          || configuration.GetConnectionString("DefaultConnection")!.Equals("InMemory", StringComparison.OrdinalIgnoreCase);
-
         var connectionString = configuration.GetConnectionString("DefaultConnection");
+        var hasValidConnectionString = !string.IsNullOrWhiteSpace(connectionString) && !connectionString.Equals("InMemory", StringComparison.OrdinalIgnoreCase);
+        var useInMemory = configuration.GetValue<bool>("UseInMemoryDatabase", !hasValidConnectionString) || !hasValidConnectionString;
 
         services.AddDbContext<ApplicationDbContext>(options =>
         {
@@ -37,6 +35,7 @@ public static class ServiceExtensions
 
         // 2. Options pattern
         services.Configure<JwtSettings>(configuration.GetSection(JwtSettings.SectionName));
+        services.Configure<SmtpSettings>(configuration.GetSection(SmtpSettings.SectionName));
 
         // 3. Repositories
         services.AddScoped<IUserRepository, UserRepository>();
@@ -48,9 +47,14 @@ public static class ServiceExtensions
         services.AddScoped<IFollowupRepository, FollowupRepository>();
         services.AddScoped<IInvestorCallRepository, InvestorCallRepository>();
 
+        // Memory Cache for real-time OTP and session states
+        services.AddMemoryCache();
+
         // 4. Services
         services.AddScoped<IJwtService, JwtService>();
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IEmailService, EmailService>();
+        services.AddScoped<IOtpService, OtpService>();
         services.AddScoped<IInvestorService, InvestorService>();
         services.AddScoped<IKycService, KycService>();
         services.AddScoped<IConsultationService, ConsultationService>();

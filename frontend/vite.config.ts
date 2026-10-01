@@ -5,6 +5,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     allowedHosts: ['rocky-irritant-pointless.ngrok-free.dev'],
+    watch: {
+      usePolling: true,
+      interval: 300,
+    },
     proxy: {
       '/api/chat': {
         target: 'http://localhost:4000',

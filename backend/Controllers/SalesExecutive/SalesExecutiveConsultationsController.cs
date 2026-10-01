@@ -74,7 +74,11 @@ public class SalesExecutiveConsultationsController : ControllerBase
 
         var result = await _consultationService.ScheduleConsultationAsync(dto, ct);
         if (!result.Success)
+        {
+            if (result.Message.StartsWith("Unauthorized"))
+                return Unauthorized(result);
             return BadRequest(result);
+        }
 
         return CreatedAtAction(nameof(GetConsultationById), new { id = result.Data!.Id }, result);
     }

@@ -25,25 +25,35 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
 
     public async Task<ApiResponse<CallRecordDto>> LogAsync(LogCallDto request, CancellationToken cancellationToken)
     {
-        var record = new CallRecord { CompanyId = currentUser.CompanyId ?? 1, AgentId = currentUser.UserId ?? 1, ContactName = request.ContactName, ContactPhone = request.ContactPhone, Direction = request.Direction.ToLowerInvariant(), Duration = request.Duration, Disposition = request.Disposition, Notes = request.Notes, LeadId = request.LeadId, CustomerId = request.CustomerId };
+        if (!currentUser.UserId.HasValue || currentUser.UserId.Value <= 0)
+            return ApiResponse<CallRecordDto>.FailureResult("Unauthorized: User ID is missing.");
+        if (!currentUser.CompanyId.HasValue || currentUser.CompanyId.Value <= 0)
+            return ApiResponse<CallRecordDto>.FailureResult("Unauthorized: Company ID is missing.");
+
+        var record = new CallRecord { CompanyId = currentUser.CompanyId.Value, AgentId = currentUser.UserId.Value, ContactName = request.ContactName, ContactPhone = request.ContactPhone, Direction = request.Direction.ToLowerInvariant(), Duration = request.Duration, Disposition = request.Disposition, Notes = request.Notes, LeadId = request.LeadId, CustomerId = request.CustomerId };
         context.Set<CallRecord>().Add(record); await context.SaveChangesAsync(cancellationToken);
         return ApiResponse<CallRecordDto>.SuccessResult(Map(record), "Call logged");
     }
 
     public async Task<ApiResponse<CallRecordDto>> ProcessDispositionAsync(CallDispositionDto request, CancellationToken cancellationToken)
     {
-        CallRecord? record = request.CallId.HasValue ? await context.Set<CallRecord>().FirstOrDefaultAsync(x => x.Id == request.CallId && x.CompanyId == currentUser.CompanyId && x.AgentId == currentUser.UserId, cancellationToken) : null;
+        if (!currentUser.UserId.HasValue || currentUser.UserId.Value <= 0)
+            return ApiResponse<CallRecordDto>.FailureResult("Unauthorized: User ID is missing.");
+        if (!currentUser.CompanyId.HasValue || currentUser.CompanyId.Value <= 0)
+            return ApiResponse<CallRecordDto>.FailureResult("Unauthorized: Company ID is missing.");
+
+        CallRecord? record = request.CallId.HasValue ? await context.Set<CallRecord>().FirstOrDefaultAsync(x => x.Id == request.CallId && x.CompanyId == currentUser.CompanyId.Value && x.AgentId == currentUser.UserId.Value, cancellationToken) : null;
         if (record == null)
         {
-            record = new CallRecord { CompanyId = currentUser.CompanyId ?? 1, AgentId = currentUser.UserId ?? 1, ContactName = request.ContactName, ContactPhone = request.ContactPhone, Direction = request.Direction.ToLowerInvariant(), Duration = request.Duration, LeadId = request.LeadId, CustomerId = request.CustomerId };
+            record = new CallRecord { CompanyId = currentUser.CompanyId.Value, AgentId = currentUser.UserId.Value, ContactName = request.ContactName, ContactPhone = request.ContactPhone, Direction = request.Direction.ToLowerInvariant(), Duration = request.Duration, LeadId = request.LeadId, CustomerId = request.CustomerId };
             context.Set<CallRecord>().Add(record);
         }
         record.Disposition = request.Disposition; record.Notes = request.Notes;
         if (request.LeadId.HasValue)
         {
-            var lead = await context.Set<Lead>().FirstOrDefaultAsync(x => x.Id == request.LeadId && x.CompanyId == currentUser.CompanyId && x.AssignedAgentId == currentUser.UserId, cancellationToken);
+            var lead = await context.Set<Lead>().FirstOrDefaultAsync(x => x.Id == request.LeadId && x.CompanyId == currentUser.CompanyId.Value && x.AssignedAgentId == currentUser.UserId.Value, cancellationToken);
             if (lead != null && request.Disposition is "Interested" or "Not Interested" or "Wrong Number") lead.Status = request.Disposition == "Wrong Number" ? "Junk" : request.Disposition;
-            if (lead != null && request.Disposition is "Follow-up Required" or "Call Back") context.Set<Followup>().Add(new Followup { CompanyId = currentUser.CompanyId ?? 1, AssignedAgentId = currentUser.UserId ?? 1, LeadId = lead.Id, ContactId = lead.Id.ToString(), ContactType = "lead", ContactName = lead.Name, ContactPhone = lead.Phone, ScheduledAt = request.FollowupAt ?? DateTime.UtcNow.AddDays(1), Notes = request.Notes ?? string.Empty });
+            if (lead != null && request.Disposition is "Follow-up Required" or "Call Back") context.Set<Followup>().Add(new Followup { CompanyId = currentUser.CompanyId.Value, AssignedAgentId = currentUser.UserId.Value, LeadId = lead.Id, ContactId = lead.Id.ToString(), ContactType = "lead", ContactName = lead.Name, ContactPhone = lead.Phone, ScheduledAt = request.FollowupAt ?? DateTime.UtcNow.AddDays(1), Notes = request.Notes ?? string.Empty });
         }
         await context.SaveChangesAsync(cancellationToken);
         return ApiResponse<CallRecordDto>.SuccessResult(Map(record), "Disposition processed");

@@ -289,6 +289,24 @@
   box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
 }
 
+.ckyc-otp-box.ckyc-otp-error {
+  border-color: var(--ckyc-error);
+  background-color: var(--ckyc-error-bg);
+}
+
+.ckyc-otp-box.ckyc-otp-error:focus {
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+}
+
+.ckyc-spin {
+  animation: ckyc-spin-keyframes 1s linear infinite;
+}
+
+@keyframes ckyc-spin-keyframes {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .ckyc-resend-link {
   font-size: 13px;
   color: var(--ckyc-primary-dark);
@@ -298,6 +316,16 @@
   border: none;
   padding: 0;
   text-decoration: underline;
+}
+
+.ckyc-resend-link:hover:not(:disabled) {
+  color: var(--ckyc-primary);
+}
+
+.ckyc-resend-link:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  text-decoration: none;
 }
 
 /* ── Screen 4: Wizard 5-Steps ── */
@@ -368,6 +396,32 @@
 .ckyc-step-node.active .ckyc-step-title {
   color: var(--ckyc-primary-dark);
   font-weight: 700;
+}
+
+.ckyc-step-node.error .ckyc-step-circle {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #ffffff;
+}
+
+.ckyc-step-node.error .ckyc-step-title {
+  color: #dc2626;
+}
+
+.ckyc-field-error {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ckyc-error);
+  font-size: 12px;
+  font-weight: 500;
+  margin-top: 3px;
+  animation: ckyc-fade-in 0.15s ease;
+}
+
+@keyframes ckyc-fade-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* ── Form Inputs ── */
@@ -522,6 +576,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+  position: relative;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+@keyframes ckyc-scan {
+  0% { top: 5%; }
+  100% { top: 92%; }
 }
 
 .ckyc-tips-list {

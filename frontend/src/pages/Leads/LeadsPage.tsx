@@ -28,8 +28,7 @@ const CAPACITY_OPTIONS = [
   '₹1 Cr – ₹5 Cr',
   '₹5 Cr – ₹10 Cr',
   '₹10 Cr – ₹25 Cr',
-  '₹25 Cr+',
-  'Not sure yet — help me decide'
+  '₹25 Cr+'
 ];
 import { MOCK_AGENTS } from '../../mock_data/mockData';
 export { MOCK_AGENTS };
@@ -43,22 +42,51 @@ export const LeadsPage: React.FC = () => {
 
   const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk'];
 
-  // Role-based scoping: Sales Executives and IRMs see only their own leads.
-  // Managers / Admins / Super Admins see the full company lead list (no filter).
-  // Inactive / moved leads (Interested, Follow-up Required, Not Interested, Junk, Converted) are excluded from active Leads.
+  // Role-based scoping:
+  // - Sales Executives see only their own leads, excluding moved/converted leads.
+  // - IRM sees their directly assigned leads PLUS all qualified 'Interested' leads handed over by Sales Execs.
+  // - Managers / Admins / Super Admins see the full company lead list.
   const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
   const isLeadScopedUser = roleCode === 'sales_executive' || roleCode === 'irm';
   const isIrm = roleCode === 'irm';
   const currentTenantId = tenant?.id || tenant?.slug;
-  const tenantLeads = leads.filter(l => !l.companyId || l.companyId === currentTenantId || l.companyId === tenant?.id || l.companyId === tenant?.slug);
-  const scopedLeads = (isLeadScopedUser
-    ? tenantLeads.filter(l =>
-      (l.assignedAgentId && l.assignedAgentId === user?.id) ||
-      (l.assignedAgentName && l.assignedAgentName === user?.name)
-    )
-    : tenantLeads
-  ).filter(l => !MOVED_LEAD_STATUSES.includes(l.status));
+  const tenantLeads = leads.filter(l => !l.companyId || isTenantMatch(l.companyId, currentTenantId));
+
+  const scopedLeads = useMemo(() => {
+    if (isExec) {
+      return tenantLeads
+        .filter(l =>
+          (l.assignedAgentId && String(l.assignedAgentId) === String(user?.id)) ||
+          (l.assignedAgentName && l.assignedAgentName === user?.name)
+        )
+        .filter(l => !MOVED_LEAD_STATUSES.includes(l.status));
+    }
+
+    if (isIrm) {
+      // IRM My Leads: ONLY leads that are 'Interested' AND assigned to THIS IRM
+      // (e.g. Sales Exec Naveen hands a lead to IRM Dhinakaran -> only Dhinakaran sees it).
+      // Leads of other IRMs, or still owned by a Sales Executive, are never shown.
+      const raw = tenantLeads.filter(l => {
+        if (l.status !== 'Interested') return false;
+        if (l.assignedAgentId) return String(l.assignedAgentId) === String(user?.id);
+        // Legacy rows without an agent id: fall back to the exact name
+        return !!l.assignedAgentName && l.assignedAgentName === user?.name;
+      });
+      // Deduplicate by phone to prevent double-entries from different IDs
+      const seen = new Set<string>();
+      return raw.filter(l => {
+        const phone = (l.phone || '').replace(/\D/g, '').slice(-10);
+        const key = phone || l.id;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
+
+    return tenantLeads.filter(l => !MOVED_LEAD_STATUSES.includes(l.status));
+  }, [tenantLeads, isExec, isIrm, user?.id, user?.name]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
@@ -184,7 +212,7 @@ export const LeadsPage: React.FC = () => {
   const currentAssetClass =
     formData.customFields?.assetClass ||
     formData.customFields?.preferredAssetClass ||
-    'AIF';
+    '';
 
   const handleAssetClassChange = (newAssetClass: string) => {
     setFormData(prev => ({
@@ -205,7 +233,7 @@ export const LeadsPage: React.FC = () => {
     setSelectedLead(prev => {
       if (!prev) return null;
       const found = updated.find(l => l.id === prev.id);
-      if (!found || MOVED_LEAD_STATUSES.includes(found.status)) {
+      if (!found || (isExec && MOVED_LEAD_STATUSES.includes(found.status)) || found.status === 'Junk') {
         setIsDetailDrawerOpen(false);
         setIsEditDrawerOpen(false);
         return null;
@@ -283,9 +311,6 @@ export const LeadsPage: React.FC = () => {
     if (filterRange === 'Contact for Co-Invest Details') {
       return nCap.includes('co-invest') || nCap.includes('contact');
     }
-    if (filterRange === 'Not sure yet — help me decide') {
-      return nCap.includes('not sure') || nCap.includes('help');
-    }
 
     return false;
   };
@@ -335,6 +360,15 @@ export const LeadsPage: React.FC = () => {
     selectedLeadIds.forEach(id => {
       newAssigned.add(id);
       const lead = leads.find(l => l.id === id);
+      if (lead) {
+        const updatedLead: Lead = {
+          ...lead,
+          assignedAgentId: String(assignSelectedAgent.id),
+          assignedAgentName: assignSelectedAgent.name,
+        };
+        apiSaveLead(updatedLead).catch(console.error);
+        storageService.saveLead(updatedLead);
+      }
       newRecords.push({
         leadId: id,
         leadName: lead?.name || 'Unknown Lead',
@@ -398,6 +432,13 @@ export const LeadsPage: React.FC = () => {
       agentLeads.forEach(l => {
         newAssigned.add(l.id);
         count++;
+        const updatedLead: Lead = {
+          ...l,
+          assignedAgentId: agent ? String(agent.id) : agentIdStr,
+          assignedAgentName: agent?.name || 'Agent',
+        };
+        apiSaveLead(updatedLead).catch(console.error);
+        storageService.saveLead(updatedLead);
         newRecords.push({
           leadId: l.id,
           leadName: l.name,
@@ -437,7 +478,8 @@ export const LeadsPage: React.FC = () => {
       email: '',
       location: '',
       source: 'Website Inbound',
-      status: 'New',
+      // IRM directly-added leads start as 'Interested' so they appear in IRM My Leads
+      status: isIrm ? 'Interested' : 'New',
       priority: 'Medium',
       assignedAgentId: defaultAgentId,
       assignedAgentName: defaultAgentName,
@@ -445,7 +487,7 @@ export const LeadsPage: React.FC = () => {
       notes: '',
       customFields: tenant?.slug === 'jamin'
         ? { budgetRange: '₹45L - ₹65L', preferredLocation: 'Devanahalli North', readyToRegister: 'Immediate' }
-        : { investmentCapacity: '', assetClass: 'AIF', preferredAssetClass: 'AIF', horizon: '3-5 Years' },
+        : { investmentCapacity: '', assetClass: '', preferredAssetClass: '', horizon: '3-5 Years' },
     });
     setIsEditDrawerOpen(true);
   };
@@ -455,14 +497,23 @@ export const LeadsPage: React.FC = () => {
     setIsEditDrawerOpen(true);
   };
 
-  const handleSaveLead = (e: React.FormEvent) => {
+  const handleSaveLead = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.phone) return;
+    if (!formData.name || !formData.phone) {
+      showToast('Please provide both contact name and phone number.');
+      return;
+    }
+
+    const cleanPhone = (formData.phone || '').replace(/\D/g, '');
+    if (cleanPhone.length < 10) {
+      showToast('Please enter a valid phone number with at least 10 digits.');
+      return;
+    }
 
     // Pull real agent ID and name at save-time to prevent stale/fallback placeholder IDs from leaking
     const resolvedAgentId = (isLeadScopedUser && user?.id)
-      ? user.id
-      : (formData.assignedAgentId && formData.assignedAgentId !== 'usr-exec' ? formData.assignedAgentId : (user?.id || 'usr-exec'));
+      ? String(user.id)
+      : (formData.assignedAgentId && formData.assignedAgentId !== 'usr-exec' ? String(formData.assignedAgentId) : String(user?.id || 'usr-exec'));
     const resolvedAgentName = (isLeadScopedUser && user?.name)
       ? user.name
       : (formData.assignedAgentName && formData.assignedAgentName !== 'Agent' ? formData.assignedAgentName : (user?.name || 'Agent'));
@@ -474,15 +525,32 @@ export const LeadsPage: React.FC = () => {
     let isUpdated = isExistingById;
 
     if (!isExistingById) {
-      const existingMatch = leads.find(l => l.phone === formData.phone && (!targetCompanyId || l.companyId === targetCompanyId));
+      const normNewPhone = cleanPhone.slice(-10);
+      const normNewEmail = (formData.email || '').trim().toLowerCase();
+
+      const existingMatch = leads.find(l => {
+        if (!targetCompanyId || isTenantMatch(l.companyId, targetCompanyId)) {
+          const normLPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+          const normLEmail = (l.email || '').trim().toLowerCase();
+          const phoneMatch = normNewPhone && normLPhone && normNewPhone === normLPhone;
+          const emailMatch = normNewEmail && normLEmail && normNewEmail === normLEmail;
+          return phoneMatch || emailMatch;
+        }
+        return false;
+      });
       if (existingMatch) {
+        if (existingMatch.assignedAgentId && String(existingMatch.assignedAgentId) !== String(resolvedAgentId)) {
+          showToast(`⚠️ Lead already exists for "${existingMatch.name}" and is currently assigned to ${existingMatch.assignedAgentName || 'another agent'}.`);
+          return;
+        }
+        showToast(`Duplicate found: "${existingMatch.name}" already exists. Updating existing record.`);
         isUpdated = true;
         leadToSave = {
           ...existingMatch,
           ...formData,
           id: existingMatch.id, // Preserve existing ID
           companyId: existingMatch.companyId || targetCompanyId,
-          status: formData.status || existingMatch.status || 'New',
+          status: isIrm ? 'Interested' : (formData.status || existingMatch.status || 'New'),
           assignedAgentId: resolvedAgentId || existingMatch.assignedAgentId,
           assignedAgentName: resolvedAgentName || existingMatch.assignedAgentName,
           customFields: {
@@ -493,7 +561,8 @@ export const LeadsPage: React.FC = () => {
       } else {
         leadToSave = {
           ...formData,
-          status: formData.status || 'New',
+          // IRM-created leads are always 'Interested' so they show in IRM My Leads
+          status: isIrm ? 'Interested' : (formData.status || 'New'),
           assignedAgentId: resolvedAgentId,
           assignedAgentName: resolvedAgentName,
           companyId: targetCompanyId,
@@ -503,20 +572,35 @@ export const LeadsPage: React.FC = () => {
     } else {
       leadToSave = {
         ...formData,
-        status: formData.status || 'New',
+        status: isIrm ? 'Interested' : (formData.status || 'New'),
         assignedAgentId: resolvedAgentId,
         assignedAgentName: resolvedAgentName,
         companyId: targetCompanyId,
       } as Lead;
     }
 
-    apiSaveLead(leadToSave).catch(console.error);
-    setIsEditDrawerOpen(false);
+    try {
+      await apiSaveLead(leadToSave);
+      await loadData();
+      showToast(isUpdated ? 'Lead updated successfully.' : 'New lead created successfully.');
+      setIsEditDrawerOpen(false);
+    } catch (err: any) {
+      console.error('[LeadsPage] Failed to save lead:', err);
+      showToast(`⚠️ ${err.message || 'Failed to save lead record.'}`);
+    }
   };
 
-  const handleDeleteLead = (lead: Lead) => {
+  const handleDeleteLead = async (lead: Lead) => {
     if (confirm(`Delete lead ${lead.name}?`)) {
-      apiSaveLead({ ...lead, status: 'Junk' }).catch(console.error); // soft-delete via status
+      try {
+        await apiSaveLead({ ...lead, status: 'Junk' });
+      } catch (err) {
+        console.error('Failed to update lead status:', err);
+      }
+      storageService.deleteLead(lead.id);
+      setLeads(prev => prev.filter(l => l.id !== lead.id));
+      window.dispatchEvent(new CustomEvent('nexus_storage_updated'));
+      showToast(`Lead ${lead.name} deleted`);
     }
   };
 
@@ -616,6 +700,13 @@ export const LeadsPage: React.FC = () => {
     const companyId = tenant?.id || 't-ghl-01';
     const promises: Promise<any>[] = [];
 
+    // Build a dedup set from the current leads so we can detect duplicates quickly
+    const normalizePhone = (ph: string) => (ph || '').replace(/\D/g, '').slice(-10);
+    const normalizeEmail = (em: string) => (em || '').trim().toLowerCase();
+
+    const existingPhones = new Set(leads.map(l => normalizePhone(l.phone)).filter(Boolean));
+    const existingEmails = new Set(leads.map(l => normalizeEmail(l.email)).filter(Boolean));
+
     parsedRows.forEach((row, index) => {
       const nameVal = row[columnMap['name']];
       const phoneVal = row[columnMap['phone']];
@@ -629,6 +720,19 @@ export const LeadsPage: React.FC = () => {
       let priorityVal = 'Medium';
       if (['Low', 'Medium', 'High', 'Urgent'].includes(String(rawPriority))) priorityVal = rawPriority;
 
+      // ── Duplicate check ──────────────────────────────────────────────────────
+      const normPhone = normalizePhone(phoneVal);
+      const normEmail = normalizeEmail(emailVal);
+      if ((normPhone && existingPhones.has(normPhone)) || (normEmail && existingEmails.has(normEmail))) {
+        console.info(`[CSV Import] Skipping duplicate: ${nameVal} — phone ${phoneVal} or email ${emailVal} already exists`);
+        skipCount++;
+        return;
+      }
+      // Register the new values so later rows in the same batch don't duplicate each other
+      if (normPhone) existingPhones.add(normPhone);
+      if (normEmail) existingEmails.add(normEmail);
+      // ─────────────────────────────────────────────────────────────────────────
+
       const newLead: Lead = {
         id: `lead-${Date.now()}-${index}`,
         companyId,
@@ -638,7 +742,7 @@ export const LeadsPage: React.FC = () => {
         location: locationVal,
         source: sourceVal,
         priority: priorityVal as any,
-        status: 'New',
+        status: isIrm ? 'Interested' : 'New',
         assignedAgentId: user?.id || 'usr-exec',
         assignedAgentName: user?.name || 'Agent',
         createdAt: new Date().toISOString().split('T')[0],
@@ -652,6 +756,7 @@ export const LeadsPage: React.FC = () => {
     setImportResults({ success: successCount, skipped: skipCount });
     loadData();
   };
+
 
   const resetImportState = () => {
     setImportFile(null);
@@ -814,12 +919,13 @@ export const LeadsPage: React.FC = () => {
       icon: <Edit size={14} className="leads-action-icon" />,
       onClick: l => handleOpenEdit(l),
     },
-    {
+    // IRM role cannot delete leads — leads are DB-driven and deleted from admin
+    ...(!isIrm ? [{
       label: 'Delete Lead',
       icon: <Trash2 size={14} color="#ef4444" className="leads-action-icon" />,
       danger: true,
-      onClick: l => handleDeleteLead(l),
-    },
+      onClick: (l: Lead) => handleDeleteLead(l),
+    }] : []),
   ];
 
   return (
@@ -1286,6 +1392,7 @@ export const LeadsPage: React.FC = () => {
                       value={currentAssetClass}
                       onChange={e => handleAssetClassChange(e.target.value)}
                     >
+                      <option value="">--</option>
                       <option value="AIF">AIF</option>
                       <option value="CO-AIF">CO-AIF</option>
                     </select>

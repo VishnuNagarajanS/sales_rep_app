@@ -1,4 +1,5 @@
 using System.Text.Json;
+using backend.Helpers;
 using backend.Authentication.Interfaces;
 using backend.Data;
 using backend.DTOs.Common;
@@ -57,7 +58,7 @@ public class LeadService : ILeadService
             query = query.Where(l => l.CompanyId == effectiveCompanyId.Value);
         }
 
-        if (role == "sales_executive" && agentId.HasValue)
+        if ((role == "sales_executive" || role == "irm") && agentId.HasValue)
         {
             query = query.Where(l => l.AssignedAgentId == agentId.Value);
         }
@@ -83,7 +84,7 @@ public class LeadService : ILeadService
             query = query.Where(l => l.CompanyId == companyId.Value);
         }
 
-        if (role == "sales_executive" && agentId.HasValue)
+        if ((role == "sales_executive" || role == "irm") && agentId.HasValue)
         {
             query = query.Where(l => l.AssignedAgentId == agentId.Value);
         }
@@ -163,26 +164,110 @@ public class LeadService : ILeadService
 
     public async Task<ApiResponse<LeadResponseDto>> CreateLeadAsync(CreateLeadDto dto, CancellationToken ct = default)
     {
-        var agentId = _currentUser.UserId ?? 1;
-        var companyId = dto.CompanyId ?? _currentUser.CompanyId ?? 1;
+        var agentId = _currentUser.UserId;
+        if (!agentId.HasValue || agentId.Value <= 0)
+            return ApiResponse<LeadResponseDto>.FailureResult("Unauthorized: User ID is missing.");
+
+        var companyId = dto.CompanyId ?? _currentUser.CompanyId;
+        if (!companyId.HasValue || companyId.Value <= 0)
+            return ApiResponse<LeadResponseDto>.FailureResult("Unauthorized: Company ID is missing.");
 
         // Build Custom Fields Dictionary for GHL
         var customFields = dto.AdditionalCustomFields ?? new Dictionary<string, string>();
-        if (!string.IsNullOrWhiteSpace(dto.InvestmentCapacity)) customFields["investmentCapacity"] = dto.InvestmentCapacity;
-        if (!string.IsNullOrWhiteSpace(dto.AssetClass)) customFields["assetClass"] = dto.AssetClass;
-        if (!string.IsNullOrWhiteSpace(dto.PreferredAssetClass)) customFields["preferredAssetClass"] = dto.PreferredAssetClass;
+        
+        var cap = OptionalFieldNormalizer.Normalize(dto.InvestmentCapacity);
+        if (cap != null) customFields["investmentCapacity"] = cap;
+
+        var rawAsset = dto.AssetClass ?? dto.PreferredAssetClass;
+        var rawPref = dto.PreferredAssetClass ?? dto.AssetClass;
+        var normAsset = OptionalFieldNormalizer.Normalize(rawAsset);
+        var normPref = OptionalFieldNormalizer.Normalize(rawPref);
+        
+        if (normAsset != null) customFields["assetClass"] = normAsset;
+        if (normPref != null) customFields["preferredAssetClass"] = normPref;
+
         if (!string.IsNullOrWhiteSpace(dto.Horizon)) customFields["horizon"] = dto.Horizon;
+
+        // Canonical Customer Duplicate Check: check normalized phone (last 10 digits) and normalized email
+        var phoneDigits = new string((dto.Phone ?? string.Empty).Where(char.IsDigit).ToArray());
+        var last10 = phoneDigits.Length >= 10 ? phoneDigits[^10..] : null;
+        var cleanEmail = dto.Email?.Trim().ToLowerInvariant() ?? string.Empty;
+
+        var targetAgentId = (dto.AssignedAgentId.HasValue && dto.AssignedAgentId.Value > 0)
+            ? dto.AssignedAgentId.Value
+            : agentId.Value;
+
+        var role = _currentUser.Role;
+
+        var companyLeads = await _context.Leads
+            .Include(l => l.AssignedAgent)
+            .Where(l => l.CompanyId == companyId.Value)
+            .ToListAsync(ct);
+
+        var existingLead = companyLeads.FirstOrDefault(l =>
+        {
+            if (!string.IsNullOrEmpty(cleanEmail) && !string.IsNullOrEmpty(l.Email) && l.Email.Trim().ToLowerInvariant() == cleanEmail)
+                return true;
+
+            if (last10 != null && !string.IsNullOrEmpty(l.Phone))
+            {
+                var lDigits = new string(l.Phone.Where(char.IsDigit).ToArray());
+                var lL10 = lDigits.Length >= 10 ? lDigits[^10..] : null;
+                if (lL10 != null && lL10 == last10) return true;
+            }
+            return false;
+        });
+
+        if (existingLead != null)
+        {
+            // If already assigned to the current user (e.g. IRM), update and reuse the canonical record
+            if (existingLead.AssignedAgentId == targetAgentId)
+            {
+                if (!string.IsNullOrWhiteSpace(dto.Name)) existingLead.Name = dto.Name.Trim();
+                if (!string.IsNullOrWhiteSpace(dto.Location)) existingLead.Location = dto.Location.Trim();
+                if (!string.IsNullOrWhiteSpace(dto.Notes)) existingLead.Notes = dto.Notes.Trim();
+                if (!string.IsNullOrWhiteSpace(dto.Priority)) existingLead.Priority = dto.Priority.Trim();
+                if (role == "irm")
+                {
+                    existingLead.Status = "Interested";
+                }
+                else if (!string.IsNullOrWhiteSpace(dto.Status))
+                {
+                    existingLead.Status = dto.Status.Trim();
+                }
+
+                if (customFields.Count > 0)
+                {
+                    var existingFields = DeserializeCustomFields(existingLead.CustomFieldsJson);
+                    foreach (var kvp in customFields) existingFields[kvp.Key] = kvp.Value;
+                    existingLead.CustomFieldsJson = JsonSerializer.Serialize(existingFields);
+                }
+
+                existingLead.UpdatedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync(ct);
+
+                return ApiResponse<LeadResponseDto>.SuccessResult(MapToDto(existingLead), "Existing lead updated and ready in your active list.");
+            }
+
+            var assignedTo = existingLead.AssignedAgent?.Name ?? "another agent";
+            return ApiResponse<LeadResponseDto>.FailureResult(
+                $"A lead already exists with this contact information: {existingLead.Name} ({existingLead.Phone} / {existingLead.Email}), currently assigned to {assignedTo}.",
+                new List<string> { "Duplicate contact information" });
+        }
+
+        var defaultStatus = role == "irm" ? "Interested" : "New";
+        var finalStatus = string.IsNullOrWhiteSpace(dto.Status) ? defaultStatus : (role == "irm" && dto.Status.Trim() == "New" ? "Interested" : dto.Status.Trim());
 
         var lead = new Lead
         {
-            CompanyId = companyId,
-            AssignedAgentId = agentId,
+            CompanyId = companyId.Value,
+            AssignedAgentId = targetAgentId,
             Name = dto.Name.Trim(),
             Phone = dto.Phone.Trim(),
             Email = dto.Email?.Trim() ?? string.Empty,
             Location = dto.Location?.Trim() ?? string.Empty,
             Source = string.IsNullOrWhiteSpace(dto.Source) ? "Website Inbound" : dto.Source.Trim(),
-            Status = "New",
+            Status = finalStatus,
             Priority = string.IsNullOrWhiteSpace(dto.Priority) ? "Medium" : dto.Priority.Trim(),
             Notes = dto.Notes?.Trim() ?? string.Empty,
             CustomFieldsJson = customFields.Count > 0 ? JsonSerializer.Serialize(customFields) : null,
@@ -213,12 +298,29 @@ public class LeadService : ILeadService
         if (dto.Priority != null) lead.Priority = dto.Priority.Trim();
         if (dto.Notes != null) lead.Notes = dto.Notes.Trim();
         if (dto.NextFollowupDate.HasValue) lead.NextFollowupDate = dto.NextFollowupDate.Value;
+        if (dto.AssignedAgentId.HasValue) lead.AssignedAgentId = dto.AssignedAgentId.Value;
 
         // Merge custom fields
         var customFields = DeserializeCustomFields(lead.CustomFieldsJson);
-        if (dto.InvestmentCapacity != null) customFields["investmentCapacity"] = dto.InvestmentCapacity;
-        if (dto.AssetClass != null) customFields["assetClass"] = dto.AssetClass;
-        if (dto.PreferredAssetClass != null) customFields["preferredAssetClass"] = dto.PreferredAssetClass;
+        
+        if (dto.InvestmentCapacity != null)
+        {
+            var cap = OptionalFieldNormalizer.Normalize(dto.InvestmentCapacity);
+            if (cap == null) customFields.Remove("investmentCapacity");
+            else customFields["investmentCapacity"] = cap;
+        }
+        
+        if (dto.AssetClass != null || dto.PreferredAssetClass != null)
+        {
+            var rawAsset = dto.AssetClass ?? dto.PreferredAssetClass;
+            var rawPref = dto.PreferredAssetClass ?? dto.AssetClass;
+            var normAsset = OptionalFieldNormalizer.Normalize(rawAsset);
+            var normPref = OptionalFieldNormalizer.Normalize(rawPref);
+            
+            if (normAsset == null) customFields.Remove("assetClass"); else customFields["assetClass"] = normAsset;
+            if (normPref == null) customFields.Remove("preferredAssetClass"); else customFields["preferredAssetClass"] = normPref;
+        }
+        
         if (dto.Horizon != null) customFields["horizon"] = dto.Horizon;
         if (dto.DispositionReason != null) customFields["dispositionReason"] = dto.DispositionReason;
         if (dto.AdditionalCustomFields != null)
@@ -253,7 +355,7 @@ public class LeadService : ILeadService
             customer = new Customer
             {
                 CompanyId = companyId,
-                AssignedAgentId = agentId,
+                AssignedAgentId = agentId ?? 1,
                 Name = lead.Name,
                 Phone = lead.Phone,
                 Email = lead.Email,
@@ -353,7 +455,7 @@ public class LeadService : ILeadService
         var freshFollowup = new Followup
         {
             CompanyId = lead.CompanyId,
-            AssignedAgentId = lead.AssignedAgentId,
+            AssignedAgentId = lead.AssignedAgentId ?? 1,
             ContactId = lead.Id.ToString(),
             ContactType = "lead",
             ContactName = lead.Name,

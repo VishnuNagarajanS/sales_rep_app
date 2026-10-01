@@ -22,6 +22,9 @@ public class InvestorKyc
     public string InvestorName { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
+    public string? FatherName { get; set; }
+    public string? DateOfBirth { get; set; }
+    public string? NameAsPerPan { get; set; }
     public string Gender { get; set; } = string.Empty;          // Male | Female | Other
     public string InvestorType { get; set; } = string.Empty;   // Individual | HUF | Corporate | NRI
     public string ResidentType { get; set; } = string.Empty;   // Resident | Non-Resident
@@ -56,16 +59,29 @@ public class InvestorKyc
     public string? PhotoUrl { get; set; }
     public string? SignatureUrl { get; set; }
 
-    // Review
+    // Review & Verification
     public string? ReviewRemarks { get; set; }
     public int? ReviewedByIrmId { get; set; }
     public DateTime? ReviewedAt { get; set; }
     public DateTime? SubmittedAt { get; set; }
 
+    public string? VerifiedBy { get; set; }
+    public DateTime? VerifiedAt { get; set; }
+    public string? Remarks { get; set; }
+    public string? FlaggedSectionsJson { get; set; }
+
+    /// <summary>
+    /// JSON blob storing per-section IRM review drafts: { aadhaar: { status, reason }, pan: { ... }, bank: { ... } }
+    /// Written by PATCH /api/irm/kyc/{id}/verification. Informational only; does not alter KycStatus.
+    /// </summary>
+    public string? SectionVerificationsJson { get; set; }
+
     // Public KYC link (for customer self-fill)
     public string? KycLinkToken { get; set; }
     public DateTime? KycLinkExpiresAt { get; set; }
     public bool KycLinkSent { get; set; } = false;
+    /// <summary>Timestamp of the most recent successful KYC link dispatch (or resend).</summary>
+    public DateTime? KycLinkSentAt { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }

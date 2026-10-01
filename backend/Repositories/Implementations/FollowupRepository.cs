@@ -14,7 +14,7 @@ public class FollowupRepository : IFollowupRepository
     public async Task<List<Followup>> GetAllAsync(int companyId, int? assignedToId, string? role, string? status, CancellationToken ct = default)
     {
         var query = _db.Followups.Where(f => f.CompanyId == companyId);
-        if (assignedToId.HasValue) query = query.Where(f => f.AssignedToId == assignedToId);
+        if (assignedToId.HasValue) query = query.Where(f => f.AssignedAgentId == assignedToId);
         if (!string.IsNullOrEmpty(role)) query = query.Where(f => f.AssignedToRole == role);
         if (!string.IsNullOrEmpty(status)) query = query.Where(f => f.Status.ToString() == status);
         return await query.OrderByDescending(f => f.ScheduledAt).ToListAsync(ct);

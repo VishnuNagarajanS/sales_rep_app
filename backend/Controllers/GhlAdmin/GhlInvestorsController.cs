@@ -1,4 +1,5 @@
 using backend.Authentication.Interfaces;
+using backend.Helpers;
 using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.GhlInvestors;
@@ -110,19 +111,24 @@ public class GhlInvestorsController : ControllerBase
     public async Task<ActionResult<ApiResponse<GhlInvestorResponseDto>>> CreateInvestor(
         [FromBody] CreateGhlInvestorDto dto, CancellationToken ct)
     {
-        var agentId = _currentUser.UserId ?? 1;
-        var companyId = _currentUser.CompanyId ?? 1;
+        var agentId = _currentUser.UserId;
+        if (!agentId.HasValue || agentId.Value <= 0)
+            return Unauthorized(ApiResponse<GhlInvestorResponseDto>.FailureResult("Unauthorized: User ID is missing."));
+
+        var companyId = _currentUser.CompanyId;
+        if (!companyId.HasValue || companyId.Value <= 0)
+            return Unauthorized(ApiResponse<GhlInvestorResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
 
         var investor = new GhlInvestor
         {
-            CompanyId = companyId,
-            AssignedAgentId = agentId,
+            CompanyId = companyId.Value,
+            AssignedAgentId = agentId.Value,
             Name = dto.Name.Trim(),
             Phone = dto.Phone.Trim(),
             Email = dto.Email?.Trim() ?? string.Empty,
             Status = string.IsNullOrWhiteSpace(dto.Status) ? "Lead" : dto.Status.Trim(),
-            InvestmentCapacity = dto.InvestmentCapacity.Trim(),
-            PreferredAssetClass = dto.PreferredAssetClass.Trim(),
+            InvestmentCapacity = OptionalFieldNormalizer.Normalize(dto.InvestmentCapacity) ?? string.Empty,
+            PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass) ?? string.Empty,
             ReferralSource = dto.ReferralSource?.Trim(),
             CommittedAUM = dto.CommittedAUM?.Trim(),
             InvestmentMandate = dto.InvestmentMandate?.Trim(),
@@ -155,8 +161,8 @@ public class GhlInvestorsController : ControllerBase
         if (dto.Phone != null) investor.Phone = dto.Phone.Trim();
         if (dto.Email != null) investor.Email = dto.Email.Trim();
         if (dto.Status != null) investor.Status = dto.Status.Trim();
-        if (dto.InvestmentCapacity != null) investor.InvestmentCapacity = dto.InvestmentCapacity.Trim();
-        if (dto.PreferredAssetClass != null) investor.PreferredAssetClass = dto.PreferredAssetClass.Trim();
+        if (dto.InvestmentCapacity != null) investor.InvestmentCapacity = OptionalFieldNormalizer.Normalize(dto.InvestmentCapacity) ?? string.Empty;
+        if (dto.PreferredAssetClass != null) investor.PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass) ?? string.Empty;
         if (dto.ReferralSource != null) investor.ReferralSource = dto.ReferralSource.Trim();
         if (dto.CommittedAUM != null) investor.CommittedAUM = dto.CommittedAUM.Trim();
         if (dto.InvestmentMandate != null) investor.InvestmentMandate = dto.InvestmentMandate.Trim();

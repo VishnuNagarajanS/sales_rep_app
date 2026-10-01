@@ -87,10 +87,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
         .catch(() => { });
     };
     updateFollowups();
-    window.addEventListener('nexus_storage_updated', updateFollowups);
+    let timeoutId: any;
+    const handleDebouncedUpdate = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        updateFollowups();
+      }, 300);
+    };
+    window.addEventListener('nexus_storage_updated', handleDebouncedUpdate);
     return () => {
       mounted = false;
-      window.removeEventListener('nexus_storage_updated', updateFollowups);
+      clearTimeout(timeoutId);
+      window.removeEventListener('nexus_storage_updated', handleDebouncedUpdate);
     };
   }, [tenant?.id, isGhlSalesExec, user?.id, user?.name]);
 

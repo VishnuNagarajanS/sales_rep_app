@@ -27,6 +27,7 @@ import {
   saveFollowup as apiSaveFollowup,
   getDeals,
   getLeads,
+  saveLead as apiSaveLead,
 } from '../../services/ghlApiService';
 import { StatusChip } from '../../components/common/StatusChip';
 import { DocumentUploader } from '../../components/common/DocumentUploader';
@@ -354,6 +355,45 @@ export const CustomersPage: React.FC = () => {
     }
   };
 
+  /**
+   * When a Sales Executive assigns a customer to an IRM, the matching lead is handed over too:
+   * it stays 'Interested' and becomes assigned to that IRM, so it shows ONLY in that IRM's "My Leads".
+   */
+  const handoverLeadsToIrm = async (pairs: { customer: Customer; irmId: string; irmName: string }[]) => {
+    if (pairs.length === 0) return;
+    const digits = (p?: string) => (p || '').replace(/\D/g, '').slice(-10);
+    let allLeads: Lead[] = [];
+    try {
+      allLeads = await getLeads(tenant?.id);
+    } catch {
+      allLeads = storageService.getLeads(tenant?.id) || [];
+    }
+    for (const { customer, irmId, irmName } of pairs) {
+      const lead = allLeads.find(l =>
+        (digits(l.phone) && digits(l.phone) === digits(customer.phone)) ||
+        (!!l.email && !!customer.email && l.email.toLowerCase() === customer.email.toLowerCase())
+      );
+      if (!lead) continue;
+      const previousOwner = lead.assignedAgentName || user?.name || '';
+      const handedOver: Lead = {
+        ...lead,
+        status: 'Interested',
+        assignedAgentId: irmId,
+        assignedAgentName: irmName,
+        customFields: {
+          ...(lead.customFields || {}),
+          qualifiedByAgentName: (lead.customFields as any)?.qualifiedByAgentName || previousOwner,
+          assignedIrmAt: new Date().toISOString(),
+        },
+      };
+      storageService.saveLead(handedOver);
+      if (!isMockMode()) {
+        await apiSaveLead(handedOver).catch(console.error);
+      }
+    }
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  };
+
   const handleConfirmManualAssignment = async () => {
     const selectedIrm = irms.find((i: IrmProfile) => i.id === selectedIrmId) || MOCK_IRMS.find((i: IrmProfile) => i.id === selectedIrmId);
     if (!selectedIrm) return;
@@ -361,6 +401,7 @@ export const CustomersPage: React.FC = () => {
     let assignedCount = 0;
     const allLatest = (storageService.getCustomers ? storageService.getCustomers(tenant?.id) : customers) || customers;
     const toUpdate: Customer[] = [];
+    const toHandover: { customer: Customer; irmId: string; irmName: string }[] = [];
 
     selectedCustomerIds.forEach(cid => {
       const cust = allLatest.find((c: Customer) => c.id === cid) || customers.find((c: Customer) => c.id === cid);
@@ -373,6 +414,7 @@ export const CustomersPage: React.FC = () => {
           notes: `${cust.notes ? cust.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Assigned to IRM: ${selectedIrm.name} by ${user?.name || 'Sales Executive'}`,
         };
         toUpdate.push(updated);
+        toHandover.push({ customer: updated, irmId: selectedIrm.id, irmName: selectedIrm.name });
         storageService.saveCustomer?.(updated);
         assignedCount++;
       }
@@ -383,6 +425,7 @@ export const CustomersPage: React.FC = () => {
         await apiSaveCustomer(u).catch(console.error);
       }
     }
+    await handoverLeadsToIrm(toHandover);
 
     setIsManualModalOpen(false);
     setIsAssignMode(false);
@@ -395,6 +438,7 @@ export const CustomersPage: React.FC = () => {
     let assignedCount = 0;
     const allLatest = (storageService.getCustomers ? storageService.getCustomers(tenant?.id) : customers) || customers;
     const toUpdate: Customer[] = [];
+    const toHandover: { customer: Customer; irmId: string; irmName: string }[] = [];
 
     autoRecommendations.forEach(rec => {
       const cust = allLatest.find((c: Customer) => c.id === rec.customerId) || customers.find((c: Customer) => c.id === rec.customerId);
@@ -407,6 +451,7 @@ export const CustomersPage: React.FC = () => {
           notes: `${cust.notes ? cust.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Auto-assigned to IRM: ${rec.recommendedIrmName} (${rec.matchReason})`,
         };
         toUpdate.push(updated);
+        toHandover.push({ customer: updated, irmId: rec.recommendedIrmId, irmName: rec.recommendedIrmName });
         storageService.saveCustomer?.(updated);
         assignedCount++;
       }
@@ -417,6 +462,7 @@ export const CustomersPage: React.FC = () => {
         await apiSaveCustomer(u).catch(console.error);
       }
     }
+    await handoverLeadsToIrm(toHandover);
 
     setIsAutoPreviewModalOpen(false);
     setIsAssignMode(false);

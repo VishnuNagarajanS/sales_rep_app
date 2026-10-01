@@ -1,6 +1,7 @@
 import { assertMockMode } from './mockModeGuard';
 import { MOCK_STORAGE_KEYS } from '../shared/mockStorageKeys';
 import { runMockBootstrap } from './mockBootstrap';
+import { CustomerKycStatus } from '../../services/kycService';
 import {
   Tenant,
   User,
@@ -255,5 +256,37 @@ export const mockStorageAdapter = {
   },
   getIrms(): IrmProfile[] {
     return MOCK_IRMS;
+  },
+
+  // KYC Records per deal
+  getKycRecords(): Record<string, { status: CustomerKycStatus; kycStatus: 'Pending' | 'Wrong' | 'Verified'; verifiedBy?: string; verifiedAt?: string; remarks?: string; flaggedSections?: string[] }> {
+    assertMockMode('mockStorageAdapter.getKycRecords()');
+    try {
+      const raw = localStorage.getItem(MOCK_STORAGE_KEYS.KYC_RECORDS);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  },
+  saveKycRecord(dealId: string, record: { status: CustomerKycStatus; kycStatus: 'Pending' | 'Wrong' | 'Verified'; verifiedBy?: string; verifiedAt?: string; remarks?: string; flaggedSections?: string[] }): void {
+    assertMockMode('mockStorageAdapter.saveKycRecord()');
+    try {
+      const all = this.getKycRecords();
+      all[dealId] = record;
+      localStorage.setItem(MOCK_STORAGE_KEYS.KYC_RECORDS, JSON.stringify(all));
+    } catch (e) {
+      console.error('Failed to save KYC record to mock storage:', e);
+    }
+  },
+  getCustomerKycStatus(dealId: string, currentStatus?: string): CustomerKycStatus {
+    const records = this.getKycRecords();
+    if (records[dealId]?.status) {
+      return records[dealId].status;
+    }
+    if (currentStatus === 'completed') return 'Verified';
+    if (currentStatus as CustomerKycStatus) return currentStatus as CustomerKycStatus;
+    if (dealId === 'deal-ghl-01') return 'Submitted';
+    if (dealId === 'deal-ghl-02') return 'Submitted';
+    return 'Submitted';
   },
 };

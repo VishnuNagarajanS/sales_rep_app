@@ -50,6 +50,7 @@ public class LeadConfiguration : IEntityTypeConfiguration<Lead>
         builder.HasOne(l => l.AssignedAgent)
             .WithMany()
             .HasForeignKey(l => l.AssignedAgentId)
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

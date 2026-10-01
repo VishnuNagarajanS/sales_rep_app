@@ -25,6 +25,8 @@ import {
   getDeals,
   saveDeal as apiSaveDeal,
   addDealActivity as apiAddDealActivity,
+  saveInvestor as apiSaveInvestor,
+  persistDeal,
 } from '../../services/ghlApiService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
@@ -144,23 +146,24 @@ export const OpportunitiesPage: React.FC = () => {
         return fresh || prev;
       });
     } catch {
-      setOpps(storageService.getOpportunities(tenant?.id));
-      setInvestors(storageService.getInvestors(tenant?.id));
-      const latestDeals = storageService.getDeals(tenant?.id);
-      setDeals(latestDeals);
-      setDetailDeal(prev => {
-        if (!prev) return null;
-        const fresh = latestDeals.find(d => d.id === prev.id);
-        return fresh || prev;
-      });
+      // Stop trusting stale cache in non-mock mode
     }
   };
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
+    let timeoutId: any;
+    const handleUpdate = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        loadData();
+      }, 300);
+    };
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+    return () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
+    };
   }, [tenant?.id]);
 
   // ── Role-based scoping ────────────────────────────────────────────────────
@@ -364,7 +367,13 @@ export const OpportunitiesPage: React.FC = () => {
       ...deal,
       investorType: type,
     };
-    storageService.saveDeal(updatedDeal);
+    try {
+      await persistDeal(updatedDeal);
+    } catch (e) {
+      console.error("Error saving deal:", e);
+      showToast("Failed to update investor structure");
+      return;
+    }
 
     const activity: DealActivity = {
       id: `act-${Date.now()}`,
@@ -379,7 +388,6 @@ export const OpportunitiesPage: React.FC = () => {
     storageService.addDealActivity(activity);
 
     if (!isMockMode()) {
-      await apiSaveDeal(updatedDeal).catch(console.error);
       await apiAddDealActivity(activity).catch(console.error);
     }
 
@@ -388,13 +396,21 @@ export const OpportunitiesPage: React.FC = () => {
   };
 
   const handleAdvanceToConverted = async (deal: Deal) => {
+    // 1. Update deal to 'converted' stage in DB
     const updatedDeal: Deal = {
       ...deal,
       stage: 'converted',
       stageEnteredAt: new Date().toISOString(),
     };
-    storageService.saveDeal(updatedDeal);
+    try {
+      await persistDeal(updatedDeal);
+    } catch (err) {
+      console.warn('[OpportunitiesPage] API saveDeal (convert) failed:', err);
+      showToast('Failed to update deal stage');
+      return;
+    }
 
+    // 2. Log activity
     const activity: DealActivity = {
       id: `act-${Date.now()}`,
       dealId: deal.id,
@@ -402,20 +418,46 @@ export const OpportunitiesPage: React.FC = () => {
       type: 'stage_change',
       fromStage: 'investment_opportunity',
       toStage: 'converted',
-      text: 'Investment Opportunity → Converted (Mandate Signed & Capital Transferred)',
+      text: `Investment Opportunity → Investor 360 (Investment Amount: ₹${(deal.value || 0).toLocaleString('en-IN')})`,
       loggedByName: user?.name || 'IRM User',
       loggedByRole: 'IRM',
       timestamp: new Date().toISOString(),
     };
-    storageService.addDealActivity(activity);
+    try {
+      await apiAddDealActivity(activity);
+    } catch (err) {
+      console.warn('[OpportunitiesPage] API addDealActivity failed:', err);
+      storageService.addDealActivity(activity);
+    }
 
-    if (!isMockMode()) {
-      await apiSaveDeal(updatedDeal).catch(console.error);
-      await apiAddDealActivity(activity).catch(console.error);
+    // 3. Create Investor record in DB (moves to Investors 360)
+    const newInvestor: Investor = {
+      id: `inv-${Date.now()}`,
+      companyId: tenant?.id || '',
+      name: deal.customerName,
+      phone: deal.phone || '',
+      email: deal.email || '',
+      status: 'Active Investor',
+      investmentCapacity: deal.investmentRange || '',
+      preferredAssetClass: deal.preferredAssetClass || deal.investorType || 'AIF',
+      assignedAgentId: deal.assignedAgentId || user?.id || '',
+      assignedAgentName: deal.assignedAgentName || user?.name || '',
+      referralSource: 'IRM Pipeline',
+      notes: `Converted from Investment Opportunity. Investment Amount: ₹${(deal.value || 0).toLocaleString('en-IN')}`,
+      committedAUM: String(deal.value || 0),
+      investmentMandate: deal.investorType || 'AIF',
+      riskTolerance: 'Moderate',
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      await apiSaveInvestor(newInvestor);
+    } catch (err) {
+      console.warn('[OpportunitiesPage] API saveInvestor failed, saving locally:', err);
+      storageService.saveInvestor(newInvestor);
     }
 
     loadData();
-    showToast(`Deal "${deal.customerName}" converted successfully!`);
+    showToast(`✓ ${deal.customerName} is now an Investor! Moved to Investors 360.`);
   };
 
   const getDealDaysInStage = (deal: Deal) => {
@@ -442,20 +484,25 @@ export const OpportunitiesPage: React.FC = () => {
     setShowConfirmDialog(false);
   };
 
-  const handleEditAmount = () => {
+  const handleEditAmount = async () => {
     if (!detailDeal) return;
     const updatedDeal: Deal = {
       ...detailDeal,
       investmentAmountConfirmed: false,
     };
-    storageService.saveDeal(updatedDeal);
+    try {
+      await persistDeal(updatedDeal);
+    } catch (e) {
+      console.error("Error saving deal:", e);
+      showToast('Failed to update deal');
+    }
     setDetailDeal(updatedDeal);
     setIsEditingAmount(true);
     setAmountInput(detailDeal.value ? String(detailDeal.value) : '');
     loadData();
   };
 
-  const handleConfirmAmount = () => {
+  const handleConfirmAmount = async () => {
     if (!detailDeal) return;
     const numericAmount = parseFloat(amountInput) || 0;
     const updatedDeal: Deal = {
@@ -463,26 +510,38 @@ export const OpportunitiesPage: React.FC = () => {
       value: numericAmount,
       investmentAmountConfirmed: true,
     };
-    storageService.saveDeal(updatedDeal);
+
+    // Save investment amount confirmed to DB
+    try {
+      await persistDeal(updatedDeal);
+    } catch (err) {
+      console.warn('[OpportunitiesPage] API saveDeal (amount confirm) failed:', err);
+      showToast('Failed to save investment amount');
+      return;
+    }
+
     setDetailDeal(updatedDeal);
     setIsEditingAmount(false);
     setShowConfirmDialog(false);
     loadData();
-    showToast(`Investment amount confirmed for "${detailDeal.customerName}"`);
+    showToast(`✓ Investment amount ₹${numericAmount.toLocaleString('en-IN')} confirmed for "${detailDeal.customerName}"`);
   };
 
   const getDealKycStatus = (deal: Deal): 'Pending' | 'Partially Completed' | 'Completed' => {
+    // 1. Prefer DB-sourced status (persists across refresh)
+    if (deal.kycStatus === 'Completed') return 'Completed';
+    if (deal.kycStatus === 'Partially Completed') return 'Partially Completed';
+    if (deal.kycStatus === 'Pending') return 'Pending';
+
+    // 2. Fallback: check localStorage (set when customer submits KYC form)
     const rawStatus = localStorage.getItem(`nexus_kyc_status_${deal.id}`);
     if (rawStatus === 'Completed' || rawStatus === 'Submitted for Review' || rawStatus === 'SEBI KYC Validated') {
       return 'Completed';
     }
-    if (rawStatus === 'Partially Completed') {
-      return 'Partially Completed';
-    }
-    if (rawStatus === 'Pending') {
-      return 'Pending';
-    }
+    if (rawStatus === 'Partially Completed') return 'Partially Completed';
+    if (rawStatus === 'Pending') return 'Pending';
 
+    // 3. Fallback: check localStorage KYC form data completeness
     const savedDataStr = localStorage.getItem(`nexus_kyc_data_${deal.id}`);
     if (savedDataStr) {
       try {
@@ -510,9 +569,8 @@ export const OpportunitiesPage: React.FC = () => {
       } catch { }
     }
 
-    if ((deal as any).kycValidated === true) {
-      return 'Completed';
-    }
+    // 4. Fallback: kycValidated flag on deal object
+    if ((deal as any).kycValidated === true) return 'Completed';
 
     return 'Pending';
   };

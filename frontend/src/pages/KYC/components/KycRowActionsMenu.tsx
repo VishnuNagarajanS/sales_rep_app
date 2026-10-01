@@ -10,6 +10,7 @@ import {
   FileCheck,
   Phone,
   ArrowRight,
+  UserCheck,
 } from 'lucide-react';
 import { Deal } from '../../../types';
 import './KycLinkComponents.css';
@@ -20,6 +21,7 @@ interface KycRowActionsMenuProps {
   onShowToast: (msg: string) => void;
   onViewProfile?: (deal: Deal) => void;
   onEditKyc?: (deal: Deal) => void;
+  onAssistedKyc?: (deal: Deal) => void;
   onCallInvestor?: (deal: Deal) => void;
   onAdvanceStage?: (deal: Deal) => void;
 }
@@ -30,6 +32,7 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
   onShowToast,
   onViewProfile,
   onEditKyc,
+  onAssistedKyc,
   onCallInvestor,
   onAdvanceStage,
 }) => {
@@ -216,6 +219,23 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
             >
               <Eye size={14} color="#06b6d4" />
               <span>View Full Profile</span>
+            </button>
+          )}
+
+          {onAssistedKyc && (
+            <button
+              type="button"
+              className="kyc-link-menu-item"
+              role="menuitem"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsOpen(false);
+                onAssistedKyc(deal);
+              }}
+              style={{ color: '#7c3aed', fontWeight: 600 }}
+            >
+              <UserCheck size={14} color="#7c3aed" />
+              <span>Fill KYC on Behalf (Assisted)</span>
             </button>
           )}
 

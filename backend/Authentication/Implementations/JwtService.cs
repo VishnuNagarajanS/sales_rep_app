@@ -41,6 +41,14 @@ public class JwtService : IJwtService
             claims.Add(new Claim("companyId", user.CompanyId.Value.ToString()));
         }
 
+        if (user.Role?.Permissions != null)
+        {
+            foreach (var perm in user.Role.Permissions)
+            {
+                claims.Add(new Claim("permission", perm));
+            }
+        }
+
         if (!string.IsNullOrEmpty(user.Company?.Slug))
         {
             claims.Add(new Claim("company_slug", user.Company.Slug));

@@ -28,8 +28,8 @@ import {
   CustomFieldDefinition,
   ProductService,
   IrmProfile,
+  AdminKanbanCard,
 } from '../types';
-import { AdminKanbanCard } from '../types/kanban';
 import { isMockMode } from '../config/environment';
 
 export interface MockStorageAdapter {
@@ -39,11 +39,8 @@ export interface MockStorageAdapter {
   saveRoles: (roles: Role[]) => void;
   getUsers: (tenantId?: string) => User[];
   saveUsers: (users: User[]) => void;
-  saveUser: (user: User) => void;
-  deleteUser: (id: string) => void;
   getLeads: (companyId?: string) => Lead[];
   saveLeads: (leads: Lead[]) => void;
-  deleteLead: (id: string) => void;
   getCustomers: (companyId?: string) => Customer[];
   saveCustomers: (customers: Customer[]) => void;
   getDeals: (companyId?: string) => Deal[];
@@ -52,7 +49,6 @@ export interface MockStorageAdapter {
   saveCalls: (calls: CallRecord[]) => void;
   getFollowups: (companyId?: string) => Followup[];
   saveFollowups: (followups: Followup[]) => void;
-  deleteFollowup: (id: string) => void;
   getProjects: (companyId?: string) => PropertyProject[];
   saveProjects: (projects: PropertyProject[]) => void;
   getPlots: () => Plot[];
@@ -86,11 +82,8 @@ const defaultMockStorageAdapter: MockStorageAdapter = {
   saveRoles: () => {},
   getUsers: (): User[] => [],
   saveUsers: () => {},
-  saveUser: () => {},
-  deleteUser: () => {},
   getLeads: (): Lead[] => [],
   saveLeads: () => {},
-  deleteLead: () => {},
   getCustomers: (): Customer[] => [],
   saveCustomers: () => {},
   getDeals: (): Deal[] => [],
@@ -99,7 +92,6 @@ const defaultMockStorageAdapter: MockStorageAdapter = {
   saveCalls: () => {},
   getFollowups: (): Followup[] => [],
   saveFollowups: () => {},
-  deleteFollowup: () => {},
   getProjects: (): PropertyProject[] => [],
   saveProjects: () => {},
   getPlots: (): Plot[] => [],
@@ -298,6 +290,16 @@ class StorageService {
     this.setDev('leads', leads);
   }
 
+  saveLeads(leads: Lead[]): void {
+    if (isMockMode()) {
+      mockStorageAdapter.saveLeads(leads);
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+      return;
+    }
+    this.setDev('leads', leads);
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  }
+
   deleteLead(id: string): void {
     if (isMockMode()) {
       const leads = mockStorageAdapter.getLeads().filter(l => l.id !== id);
@@ -307,6 +309,7 @@ class StorageService {
     }
     const leads = this.getLeads().filter(l => l.id !== id);
     this.setDev('leads', leads);
+    window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 
   cleanupDuplicateLeads(companyId?: string): { removedCount: number } {

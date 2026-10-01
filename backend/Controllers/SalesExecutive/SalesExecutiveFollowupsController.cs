@@ -71,7 +71,11 @@ public class SalesExecutiveFollowupsController : ControllerBase
 
         var result = await _followupService.CreateFollowupAsync(dto, ct);
         if (!result.Success)
+        {
+            if (result.Message.StartsWith("Unauthorized"))
+                return Unauthorized(result);
             return BadRequest(result);
+        }
 
         return CreatedAtAction(nameof(GetFollowupById), new { id = result.Data!.Id }, result);
     }

@@ -1,4 +1,5 @@
 using backend.Authentication.Interfaces;
+using backend.Helpers;
 using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.GhlDeals;
@@ -43,7 +44,7 @@ public class GhlDealsController : ControllerBase
         if (companyId.HasValue)
             query = query.Where(d => d.CompanyId == companyId.Value);
 
-        if (role == "sales_executive" && agentId.HasValue)
+        if ((role == "sales_executive" || role == "irm") && agentId.HasValue)
             query = query.Where(d => d.AssignedAgentId == agentId.Value);
 
         return query;
@@ -103,13 +104,51 @@ public class GhlDealsController : ControllerBase
     public async Task<ActionResult<ApiResponse<GhlDealResponseDto>>> CreateDeal(
         [FromBody] CreateGhlDealDto dto, CancellationToken ct)
     {
-        var agentId = _currentUser.UserId ?? 1;
-        var companyId = _currentUser.CompanyId ?? 1;
+        var agentId = _currentUser.UserId;
+        if (!agentId.HasValue || agentId.Value <= 0)
+            return Unauthorized(ApiResponse<GhlDealResponseDto>.FailureResult("Unauthorized: User ID is missing."));
+
+        var companyId = _currentUser.CompanyId;
+        if (!companyId.HasValue || companyId.Value <= 0)
+            return Unauthorized(ApiResponse<GhlDealResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
+
+        // Deduplication & canonical deal reuse:
+        // If a deal already exists for this customer in this company, update it instead of creating duplicates
+        GhlDeal? existingDeal = null;
+        if (dto.CustomerId.HasValue && dto.CustomerId.Value > 0)
+        {
+            existingDeal = await _db.GhlDeals.FirstOrDefaultAsync(d =>
+                d.CompanyId == companyId.Value &&
+                d.CustomerId == dto.CustomerId.Value, ct);
+        }
+        if (existingDeal == null && !string.IsNullOrWhiteSpace(dto.CustomerName))
+        {
+            var custNameLower = dto.CustomerName.Trim().ToLower();
+            existingDeal = await _db.GhlDeals.FirstOrDefaultAsync(d =>
+                d.CompanyId == companyId.Value &&
+                d.CustomerName.ToLower() == custNameLower, ct);
+        }
+
+        if (existingDeal != null)
+        {
+            existingDeal.Stage = string.IsNullOrWhiteSpace(dto.Stage) ? existingDeal.Stage : dto.Stage.Trim();
+            if (dto.Value > 0) existingDeal.Value = dto.Value;
+            if (!string.IsNullOrWhiteSpace(dto.Notes)) existingDeal.Notes = dto.Notes.Trim();
+            if (dto.InvestmentRange != null) existingDeal.InvestmentRange = OptionalFieldNormalizer.Normalize(dto.InvestmentRange);
+            if (dto.PreferredAssetClass != null) existingDeal.PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass);
+            if (agentId.HasValue && agentId.Value > 0) existingDeal.AssignedAgentId = agentId.Value;
+            existingDeal.StageEnteredAt = DateTime.UtcNow;
+
+            await _db.SaveChangesAsync(ct);
+            await _db.Entry(existingDeal).Reference(d => d.AssignedAgent).LoadAsync(ct);
+
+            return Ok(ApiResponse<GhlDealResponseDto>.SuccessResult(MapToDto(existingDeal), "Deal updated."));
+        }
 
         var deal = new GhlDeal
         {
-            CompanyId = companyId,
-            AssignedAgentId = agentId,
+            CompanyId = companyId.Value,
+            AssignedAgentId = agentId.Value,
             Title = dto.Title.Trim(),
             CustomerId = (dto.CustomerId.HasValue && dto.CustomerId.Value > 0) ? dto.CustomerId.Value : null,
             CustomerName = dto.CustomerName.Trim(),
@@ -118,8 +157,8 @@ public class GhlDealsController : ControllerBase
             ExpectedCloseDate = dto.ExpectedCloseDate.Trim(),
             Notes = dto.Notes.Trim(),
             InvestorType = dto.InvestorType,
-            InvestmentRange = dto.InvestmentRange,
-            PreferredAssetClass = dto.PreferredAssetClass,
+            InvestmentRange = OptionalFieldNormalizer.Normalize(dto.InvestmentRange),
+            PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass),
             Priority = string.IsNullOrWhiteSpace(dto.Priority) ? "Medium" : dto.Priority.Trim(),
             StageEnteredAt = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow,
@@ -152,10 +191,12 @@ public class GhlDealsController : ControllerBase
         if (dto.Notes != null) deal.Notes = dto.Notes.Trim();
         if (dto.LostReason != null) deal.LostReason = dto.LostReason.Trim();
         if (dto.InvestorType != null) deal.InvestorType = dto.InvestorType;
-        if (dto.InvestmentRange != null) deal.InvestmentRange = dto.InvestmentRange;
-        if (dto.PreferredAssetClass != null) deal.PreferredAssetClass = dto.PreferredAssetClass;
+        if (dto.InvestmentRange != null) deal.InvestmentRange = OptionalFieldNormalizer.Normalize(dto.InvestmentRange);
+        if (dto.PreferredAssetClass != null) deal.PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass);
         if (dto.Priority != null) deal.Priority = dto.Priority.Trim();
         if (dto.StageEnteredAt.HasValue) deal.StageEnteredAt = dto.StageEnteredAt.Value;
+        if (dto.InvestmentAmountConfirmed.HasValue) deal.InvestmentAmountConfirmed = dto.InvestmentAmountConfirmed.Value;
+        if (dto.KycStatus != null) deal.KycStatus = dto.KycStatus.Trim();
 
         deal.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
@@ -168,8 +209,13 @@ public class GhlDealsController : ControllerBase
     [Authorize(Roles = "company_admin,super_admin")]
     public async Task<ActionResult<ApiResponse<bool>>> DeleteDeal(int id, CancellationToken ct)
     {
+        var isSuperAdmin = _currentUser.Role == "super_admin";
         var deal = await _db.GhlDeals
+<<<<<<< HEAD
             .FirstOrDefaultAsync(d => d.Id == id && (!_currentUser.CompanyId.HasValue || d.CompanyId == _currentUser.CompanyId.Value), ct);
+=======
+            .FirstOrDefaultAsync(d => d.Id == id && (isSuperAdmin || d.CompanyId == _currentUser.CompanyId), ct);
+>>>>>>> origin/dhinakaran
 
         if (deal == null)
             return NotFound(ApiResponse<bool>.FailureResult("Deal not found."));
@@ -214,9 +260,13 @@ public class GhlDealsController : ControllerBase
     public async Task<ActionResult<ApiResponse<GhlDealActivityResponseDto>>> LogActivity(
         int id, [FromBody] LogGhlDealActivityDto dto, CancellationToken ct)
     {
+        var companyId = _currentUser.CompanyId;
+        if (!companyId.HasValue || companyId.Value <= 0)
+            return Unauthorized(ApiResponse<GhlDealActivityResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
+
         // Verify deal belongs to this company
         var dealExists = await _db.GhlDeals
-            .AnyAsync(d => d.Id == id && d.CompanyId == _currentUser.CompanyId, ct);
+            .AnyAsync(d => d.Id == id && d.CompanyId == companyId.Value, ct);
 
         if (!dealExists)
             return NotFound(ApiResponse<GhlDealActivityResponseDto>.FailureResult("Deal not found."));
@@ -224,7 +274,7 @@ public class GhlDealsController : ControllerBase
         var activity = new GhlDealActivity
         {
             DealId = id,
-            CompanyId = _currentUser.CompanyId ?? 1,
+            CompanyId = companyId.Value,
             Type = dto.Type.Trim(),
             Text = dto.Text.Trim(),
             FromStage = dto.FromStage,
@@ -278,5 +328,12 @@ public class GhlDealsController : ControllerBase
         StageEnteredAt = d.StageEnteredAt,
         CreatedAt = d.CreatedAt,
         UpdatedAt = d.UpdatedAt,
+        InvestmentAmountConfirmed = d.InvestmentAmountConfirmed,
+        KycStatus = d.KycStatus,
+        KycId = d.KycId,
+        VerifiedBy = d.VerifiedBy,
+        VerifiedAt = d.VerifiedAt,
+        Remarks = d.Remarks,
+        FlaggedSections = d.FlaggedSections,
     };
 }

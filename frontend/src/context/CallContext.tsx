@@ -340,17 +340,56 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         apiSaveCustomer(cust).catch(console.error);
 
         if (matchedLead) {
-          matchedLead.status = 'Converted';
-          matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Interested - Moved to Customer 360${notes ? `: ${notes}` : ''}`;
+          matchedLead.status = 'Interested';
+          matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Interested - Handed over to IRM${notes ? `: ${notes}` : ''}`;
+          if (!matchedLead.customFields) matchedLead.customFields = {};
+          matchedLead.customFields.qualifiedByAgentName = user.name;
+          matchedLead.customFields.qualifiedAt = new Date().toISOString();
+          matchedLead.customFields.transferredToIrm = 'true';
           apiSaveLead(matchedLead).catch(console.error);
+          storageService.saveLead(matchedLead);
+        } else if (lastCallRecord.contactPhone || lastCallRecord.contactName) {
+          const newInterestedLead: Lead = {
+            id: `lead-${Date.now()}`,
+            companyId: tenant.id,
+            name: lastCallRecord.contactName || 'Interested Prospect',
+            phone: lastCallRecord.contactPhone,
+            email: '',
+            location: '',
+            source: 'Phone Call',
+            status: 'Interested',
+            priority: 'High',
+            assignedAgentId: user.id,
+            assignedAgentName: user.name,
+            createdAt: new Date().toISOString().split('T')[0],
+            notes: notes ? `[Call Disposition - Interested]: ${notes}` : 'Interested prospect qualified via call',
+            customFields: {
+              qualifiedByAgentName: user.name,
+              qualifiedAt: new Date().toISOString(),
+              transferredToIrm: 'true',
+            },
+          };
+          apiSaveLead(newInterestedLead).catch(console.error);
+          storageService.saveLead(newInterestedLead);
         }
       }
 
-      // 2. Follow-up Required -> Move to Follow-up section, remove from active Leads
+      // 2. Follow-up Required -> Create or reuse follow-up record; move lead status to 'Follow-up Required'
       else if (disposition === 'Follow-up Required') {
         const followupScheduledAt = scheduleFollowup?.scheduledAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         const followupPriority = scheduleFollowup?.priority || 'High';
         const followupNotes = scheduleFollowup?.notes || (notes ? `Follow-up required: ${notes}` : `Follow-up required from call with ${lastCallRecord.contactName}`);
+
+        if (matchedLead) {
+          // Setting status to 'Follow-up Required' reliably moves it out of My Leads (Interested only) to Follow-up
+          // while preserving the row in the shared database leads table.
+          matchedLead.status = 'Follow-up Required';
+          matchedLead.nextFollowupDate = followupScheduledAt;
+          if (notes) {
+            matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Follow-up Required: ${notes}`;
+          }
+          apiSaveLead(matchedLead).catch(console.error);
+        }
 
         apiSaveFollowup({
           id: `flw-${Date.now()}`,
@@ -366,15 +405,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           assignedAgentId: matchedLead?.assignedAgentId || user.id,
           assignedAgentName: matchedLead?.assignedAgentName || user.name,
         }).catch(console.error);
-
-        if (matchedLead) {
-          matchedLead.status = 'Follow-up Required';
-          matchedLead.nextFollowupDate = followupScheduledAt;
-          if (notes) {
-            matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Follow-up Required: ${notes}`;
-          }
-          apiSaveLead(matchedLead).catch(console.error);
-        }
       }
 
       // 3. Call Back -> Keep in Leads section, update status to Callback
