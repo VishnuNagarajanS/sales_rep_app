@@ -1,4 +1,6 @@
 import React, { useRef, useState } from 'react';
+import { apiClient } from '../../services/apiClient';
+import { isMockMode } from '../../config/environment';
 import { Upload, CheckCircle2, AlertCircle } from 'lucide-react';
 import { DocumentItem } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -59,27 +61,46 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({
     setTimeout(() => setToast(null), 3500);
   };
 
-  const handleFile = (file: File) => {
+  const handleFile = async (file: File) => {
     try {
-      const doc: DocumentItem = {
-        id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        name: file.name,
-        size: formatFileSize(file.size),
-        type: file.type || 'application/octet-stream',
-        uploadedBy: user?.name || 'Unknown User',
-        uploadedAt: new Date().toLocaleDateString('en-IN', {
-          day: '2-digit',
-          month: 'short',
-          year: 'numeric',
-        }),
-        category: selectedCategory,
-        entityType,
-        entityId,
-      };
+      if (isMockMode()) {
+        const doc: DocumentItem = {
+          id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          name: file.name,
+          size: formatFileSize(file.size),
+          type: file.type || 'application/octet-stream',
+          uploadedBy: user?.name || 'Unknown User',
+          uploadedAt: new Date().toLocaleDateString('en-IN', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+          }),
+          category: selectedCategory,
+          entityType,
+          entityId,
+        };
 
-      saveStoredDocument(doc);
-      onUploaded?.(doc);
-      showToast('success', `"${file.name}" logged successfully.`);
+        saveStoredDocument(doc);
+        onUploaded?.(doc);
+        showToast('success', `"${file.name}" logged successfully.`);
+      } else {
+        const payload = {
+          name: file.name,
+          size: formatFileSize(file.size),
+          type: file.type || 'application/octet-stream',
+          category: selectedCategory,
+          entityType,
+          entityId
+        };
+        const res = await apiClient.post('/documents', payload);
+        if (res.success && res.data) {
+          onUploaded?.(res.data);
+          window.dispatchEvent(new Event('nexus_storage_updated'));
+          showToast('success', `"${file.name}" logged successfully.`);
+        } else {
+          showToast('error', 'Failed to log document. Please try again.');
+        }
+      }
     } catch {
       showToast('error', 'Failed to log document. Please try again.');
     }

@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { apiClient } from '../../services/apiClient';
+import { isMockMode } from '../../config/environment';
 import { FileText, FileImage, FileSpreadsheet, Trash2, File } from 'lucide-react';
 import { DocumentItem } from '../../types';
 import { EmptyState } from './EmptyState';
@@ -64,8 +66,19 @@ export const DocumentList: React.FC<DocumentListProps> = ({
 }) => {
   const [docs, setDocs] = useState<DocumentItem[]>([]);
 
-  const loadDocs = () => {
-    setDocs(getStoredDocuments(entityType, entityId));
+  const loadDocs = async () => {
+    if (isMockMode()) {
+      setDocs(getStoredDocuments(entityType, entityId));
+    } else {
+      try {
+        const res = await apiClient.get(`/documents?entityType=${entityType}&entityId=${entityId}`);
+        if (res.success && res.data) {
+          setDocs(res.data);
+        }
+      } catch (err) {
+        console.error('Failed to load documents', err);
+      }
+    }
   };
 
   useEffect(() => {
@@ -74,9 +87,20 @@ export const DocumentList: React.FC<DocumentListProps> = ({
     return () => window.removeEventListener('nexus_storage_updated', loadDocs);
   }, [entityType, entityId]);
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm('Remove this document record?')) {
-      deleteStoredDocument(id);
+      if (isMockMode()) {
+        deleteStoredDocument(id);
+      } else {
+        try {
+          const res = await apiClient.delete(`/documents/${id}`);
+          if (res.success) {
+            loadDocs();
+          }
+        } catch (err) {
+          console.error('Failed to delete document', err);
+        }
+      }
     }
   };
 
