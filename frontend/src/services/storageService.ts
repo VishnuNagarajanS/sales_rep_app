@@ -967,6 +967,10 @@ class StorageService {
   // Incoming Call Popup Position
   getPopupPosition(): PopupPosition {
     try {
+      const rawPos = localStorage.getItem('nexus_popup_pos');
+      if (rawPos && ['top-right', 'top-left', 'bottom-right', 'bottom-left'].includes(rawPos)) {
+        return rawPos as PopupPosition;
+      }
       const data = localStorage.getItem('nexus_popup_position');
       if (!data) return 'top-right';
       try {
@@ -975,7 +979,6 @@ class StorageService {
           return parsed as PopupPosition;
         }
       } catch {
-        // In case it was saved as a raw unquoted string
         if (['top-right', 'top-left', 'bottom-right', 'bottom-left'].includes(data)) {
           return data as PopupPosition;
         }
@@ -989,6 +992,7 @@ class StorageService {
   setPopupPosition(pos: PopupPosition): void {
     try {
       localStorage.setItem('nexus_popup_position', JSON.stringify(pos));
+      localStorage.setItem('nexus_popup_pos', pos);
       window.dispatchEvent(new Event('nexus_storage_updated'));
     } catch (e) {
       console.error('Failed to save popup position to localStorage', e);
@@ -997,6 +1001,10 @@ class StorageService {
 
   // Call Preferences (sound, desktop notifs, auto-busy, default followup time)
   getAdminCallSettings(): { allowSalesDecline: boolean; allowIrmDecline: boolean } {
+    try {
+      const raw = localStorage.getItem('nexus_admin_call_settings');
+      if (raw) return JSON.parse(raw);
+    } catch {}
     return this.get('admin_call_settings', {
       allowSalesDecline: true,
       allowIrmDecline: true,
@@ -1005,7 +1013,10 @@ class StorageService {
 
   setAdminCallSettings(settings: Partial<{ allowSalesDecline: boolean; allowIrmDecline: boolean }>): void {
     const existing = this.getAdminCallSettings();
-    this.set('admin_call_settings', { ...existing, ...settings });
+    const updated = { ...existing, ...settings };
+    this.set('admin_call_settings', updated);
+    localStorage.setItem('nexus_admin_call_settings', JSON.stringify(updated));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 
   getCallPreferences(): {
@@ -1014,6 +1025,10 @@ class StorageService {
     autoBusyEnabled: boolean;
     defaultFollowupTime: string;
   } {
+    try {
+      const raw = localStorage.getItem('nexus_call_prefs') || localStorage.getItem('nexus_call_preferences');
+      if (raw) return JSON.parse(raw);
+    } catch {}
     return this.get('call_preferences', {
       soundEnabled: true,
       desktopNotifEnabled: false,
@@ -1029,7 +1044,11 @@ class StorageService {
     defaultFollowupTime: string;
   }>): void {
     const existing = this.getCallPreferences();
-    this.set('call_preferences', { ...existing, ...prefs });
+    const updated = { ...existing, ...prefs };
+    this.set('call_preferences', updated);
+    localStorage.setItem('nexus_call_prefs', JSON.stringify(updated));
+    localStorage.setItem('nexus_call_preferences', JSON.stringify(updated));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 
   // Reset to clean real-time empty slate

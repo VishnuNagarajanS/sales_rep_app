@@ -4,6 +4,7 @@ import { isMockMode } from '../../config/environment';
 import { FileText, FileImage, FileSpreadsheet, Trash2, File, Share2, Mail, MessageSquare, Download } from 'lucide-react';
 import { DocumentItem } from '../../types';
 import { EmptyState } from './EmptyState';
+import { useAuth } from '../../context/AuthContext';
 import './DocumentList.css';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -17,12 +18,42 @@ interface DocumentListProps {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+export const saveStoredDocument = (doc: DocumentItem): void => {
+  try {
+    const raw = localStorage.getItem('nexus_documents');
+    const docs: DocumentItem[] = raw ? JSON.parse(raw) : [];
+    const index = docs.findIndex(d => d.id === doc.id);
+    if (index >= 0) {
+      docs[index] = doc;
+    } else {
+      docs.unshift(doc);
+    }
+    localStorage.setItem('nexus_documents', JSON.stringify(docs));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+  } catch {}
+};
+
+const isCompanyMatch = (id1?: string, id2?: string) => {
+  if (!id1 || !id2) return true;
+  if (id1 === id2) return true;
+  const ghlAliases = ['1', 'ghl', 't-ghl-01', 't-ghl-1'];
+  if (ghlAliases.includes(id1.toLowerCase()) && ghlAliases.includes(id2.toLowerCase())) return true;
+  const jaminAliases = ['2', 'jamin', 't-jamin-02', 't-jamin-2'];
+  if (jaminAliases.includes(id1.toLowerCase()) && jaminAliases.includes(id2.toLowerCase())) return true;
+  return false;
+};
+
 const getStoredDocuments = (entityType?: DocumentItem['entityType'], entityId?: string): DocumentItem[] => {
   try {
     const raw = localStorage.getItem('nexus_documents');
     const docs: DocumentItem[] = raw ? JSON.parse(raw) : [];
-    if (entityType && entityId) {
-      return docs.filter(d => d.entityType === entityType && d.entityId === entityId);
+    if (entityType) {
+      if (entityType === 'company') {
+        return docs.filter(d => d.entityType === 'company' && isCompanyMatch(d.entityId, entityId));
+      }
+      if (entityId) {
+        return docs.filter(d => d.entityType === entityType && d.entityId === entityId);
+      }
     }
     return docs;
   } catch {
@@ -64,6 +95,9 @@ export const DocumentList: React.FC<DocumentListProps> = ({
   entityId,
   canDelete = false,
 }) => {
+  const { user } = useAuth();
+  const isAdmin = user?.role?.code === 'company_admin' || user?.role?.code === 'super_admin';
+  const showDelete = canDelete || isAdmin;
   const [docs, setDocs] = useState<DocumentItem[]>([]);
 
   const loadDocs = async () => {
@@ -71,12 +105,23 @@ export const DocumentList: React.FC<DocumentListProps> = ({
       setDocs(getStoredDocuments(entityType, entityId));
     } else {
       try {
-        const res = await apiClient.get(`/documents?entityType=${entityType}&entityId=${entityId}`);
-        if (res.success && res.data) {
+        const res = await apiClient.get<any>(`/documents?entityType=${entityType}&entityId=${entityId}`);
+        if (res.success && Array.isArray(res.data) && res.data.length > 0) {
           setDocs(res.data);
+          // Sync to local cache so all components have access
+          res.data.forEach((d: DocumentItem) => saveStoredDocument(d));
+        } else {
+          // Fallback to local storage if API returned empty
+          const cached = getStoredDocuments(entityType, entityId);
+          if (cached.length > 0) {
+            setDocs(cached);
+          } else if (res.success && res.data) {
+            setDocs(res.data);
+          }
         }
       } catch (err) {
-        console.error('Failed to load documents', err);
+        console.error('Failed to load documents from API, falling back to cache:', err);
+        setDocs(getStoredDocuments(entityType, entityId));
       }
     }
   };
@@ -88,19 +133,20 @@ export const DocumentList: React.FC<DocumentListProps> = ({
   }, [entityType, entityId]);
 
   const handleDelete = async (id: string) => {
-    if (confirm('Remove this document record?')) {
-      if (isMockMode()) {
-        deleteStoredDocument(id);
-      } else {
+    if (window.confirm('Are you sure you want to remove this document?')) {
+      // Remove from browser storage cache
+      deleteStoredDocument(id);
+      
+      if (!isMockMode()) {
         try {
-          const res = await apiClient.delete(`/documents/${id}`);
-          if (res.success) {
-            loadDocs();
-          }
+          await apiClient.delete(`/documents/${id}`);
         } catch (err) {
-          console.error('Failed to delete document', err);
+          console.error('Failed to delete document from server', err);
         }
       }
+      
+      loadDocs();
+      window.dispatchEvent(new Event('nexus_storage_updated'));
     }
   };
 
@@ -178,10 +224,10 @@ export const DocumentList: React.FC<DocumentListProps> = ({
               </>
             )}
 
-            {canDelete && (
+            {showDelete && (
               <button
                 className="btn btn-ghost btn-sm btn-icon document-item-delete-btn"
-                title="Remove document record"
+                title="Remove document"
                 onClick={() => handleDelete(doc.id)}
               >
                 <Trash2 size={16} />

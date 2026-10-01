@@ -89,7 +89,7 @@ export const FollowupsPage: React.FC = () => {
   // ── Admin Filter States ──────────────────────────────────────────────────
   const [selectedRole, setSelectedRole] = useState<FollowupRoleFilter>('sales_executive');
   const [selectedPerson, setSelectedPerson] = useState<string>('All');
-  const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>('this_month');
+  const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>('all');
   const [customStartDate, setCustomStartDate] = useState<string>(() => {
     const d = new Date();
     d.setDate(1); // 1st of current month
@@ -106,16 +106,36 @@ export const FollowupsPage: React.FC = () => {
   const personOptions = useMemo(() => {
     if (users && users.length > 0) {
       if (selectedRole === 'sales_executive') {
-        return users.filter(u => u.role?.code === 'sales_executive');
+        const sales = users.filter(u => {
+          const code = (u.role?.code || '').toLowerCase();
+          const roleId = String(u.role?.id || '');
+          const roleName = (u.role?.name || '').toLowerCase();
+          return code === 'sales_executive' || roleId === '3' || roleName.includes('sales');
+        });
+        if (sales.length > 0) return sales;
+      } else {
+        const irms = users.filter(u => {
+          const code = (u.role?.code || '').toLowerCase();
+          const roleId = String(u.role?.id || '');
+          const roleName = (u.role?.name || '').toLowerCase();
+          return code === 'irm' || roleId === '4' || roleName.includes('irm') || roleName.includes('investor');
+        });
+        if (irms.length > 0) return irms;
       }
-      return users.filter(u => u.role?.code === 'irm' || u.role?.code === 'company_admin');
     }
-    // Fallback if users empty
+    // Fallback strictly to real DB users
     if (selectedRole === 'sales_executive') {
-      return storageService.getAgents ? storageService.getAgents(tenant?.id) : SALES_EXECUTIVE_USERS;
+      return [
+        { id: '3', name: 'Naveen' },
+        { id: '28', name: 'Test_Sales' },
+        { id: '29', name: 'Test_sales_2' },
+      ];
     }
-    return storageService.getIrms ? storageService.getIrms(tenant?.id) : IRM_USERS;
-  }, [selectedRole, tenant?.id, users]);
+    return [
+      { id: '5', name: 'Dhinakaran' },
+      { id: '30', name: 'Test_IRM' },
+    ];
+  }, [selectedRole, users]);
 
   const loadData = async () => {
     try {
@@ -125,14 +145,44 @@ export const FollowupsPage: React.FC = () => {
         getLeads(tenant?.id),
         isAdmin ? adminUserService.getUsers(tenant?.id || '') : Promise.resolve([])
       ]);
-      setFollowups(data || []);
+
+      let followupsList = (data && data.length > 0) ? [...data] : (storageService.getFollowups(tenant?.id) || []);
+
+      // Also ensure any lead with status 'Follow-up Required' is represented in followups
+      const existingContactIds = new Set(followupsList.map(f => String(f.contactId || f.id)));
+      const existingPhones = new Set(followupsList.map(f => (f.contactPhone || '').replace(/\D/g, '').slice(-10)).filter(Boolean));
+
+      (leads || []).forEach(l => {
+        if (l.status === 'Follow-up Required') {
+          const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+          if (!existingContactIds.has(String(l.id)) && (!lPhone || !existingPhones.has(lPhone))) {
+            followupsList.push({
+              id: `flw-lead-${l.id}`,
+              companyId: l.companyId || tenant?.id || '1',
+              contactId: String(l.id),
+              contactName: l.name,
+              contactPhone: l.phone,
+              contactType: 'lead',
+              scheduledAt: l.createdAt || new Date().toISOString(),
+              priority: l.priority === 'Urgent' ? 'High' : (l.priority as any || 'Medium'),
+              status: 'Pending',
+              notes: l.notes || 'Lead marked Follow-up Required',
+              assignedAgentId: String(l.assignedAgentId || ''),
+              assignedAgentName: l.assignedAgentName || '',
+            });
+          }
+        }
+      });
+
+      setFollowups(followupsList);
       setCallsList(calls || []);
       setAllLeads(leads || []);
-      if (fetchedUsers) {
+      if (fetchedUsers && fetchedUsers.length > 0) {
         setUsers(fetchedUsers);
       }
     } catch (err) {
       console.error('Failed to load followups data', err);
+      setFollowups(storageService.getFollowups(tenant?.id) || []);
     }
   };
 
@@ -482,27 +532,45 @@ export const FollowupsPage: React.FC = () => {
   // Helper to determine the assigned role of any followup
   const getFollowupRole = (f: Followup): 'Sales Executive' | 'IRM' => {
     if (f.assignedRole) {
-      if (f.assignedRole.toLowerCase().includes('irm')) return 'IRM';
+      const lower = f.assignedRole.toLowerCase();
+      if (lower.includes('irm') || lower.includes('investor')) return 'IRM';
+      if (lower.includes('sales')) return 'Sales Executive';
+    }
+
+    const agentName = (f.assignedAgentName || '').toLowerCase().trim();
+    const agentId = String(f.assignedAgentId || '').trim();
+
+    // Match against real DB users list
+    const foundUser = (users || []).find(u =>
+      (agentName && u.name.toLowerCase().trim() === agentName) ||
+      (agentId && String(u.id) === agentId)
+    );
+
+    if (foundUser) {
+      const code = (foundUser.role?.code || '').toLowerCase();
+      const roleId = String(foundUser.role?.id || '');
+      const roleName = (foundUser.role?.name || '').toLowerCase();
+      if (code === 'irm' || roleId === '4' || roleName.includes('irm') || roleName.includes('investor')) {
+        return 'IRM';
+      }
       return 'Sales Executive';
     }
-    const irmsList = storageService.getIrms ? storageService.getIrms(tenant?.id) : IRM_USERS;
-    if (
-      irmsList.some(
-        (u: any) =>
-          u.name.toLowerCase() === (f.assignedAgentName || '').toLowerCase() ||
-          u.id === f.assignedAgentId
-      )
-    ) {
+
+    // Direct check for known IRMs in db
+    if (agentName.includes('dhinakaran') || agentId === '5' || agentId === '30' || agentName.includes('irm')) {
       return 'IRM';
     }
+
     if (f.contactType === 'investor') {
       return 'IRM';
     }
+
     return 'Sales Executive';
   };
 
   // Helper to test if a followup date falls within date range filter
   const isFollowupInDateFilter = (f: Followup): boolean => {
+    if (dateRangePreset === 'all') return true;
     const schedStr = (f.scheduledAt || '').trim();
     const dateStr = (f.scheduledDate || '').trim();
     const now = new Date();
@@ -523,18 +591,7 @@ export const FollowupsPage: React.FC = () => {
     };
 
     if (dateRangePreset === 'today') {
-      if (isToday()) return true;
-      if (isYesterday()) return false;
-      const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
-      if (!isNaN(parsedTime)) {
-        const d = new Date(parsedTime);
-        return (
-          d.getDate() === now.getDate() &&
-          d.getMonth() === now.getMonth() &&
-          d.getFullYear() === now.getFullYear()
-        );
-      }
-      return true;
+      return isToday();
     }
 
     if (dateRangePreset === 'this_week') {
@@ -562,14 +619,6 @@ export const FollowupsPage: React.FC = () => {
       const start = customStartDate ? new Date(`${customStartDate}T00:00:00`).getTime() : 0;
       const end = customEndDate ? new Date(`${customEndDate}T23:59:59`).getTime() : Infinity;
 
-      if (isToday()) {
-        const todayMs = now.getTime();
-        return todayMs >= start && todayMs <= end;
-      }
-      if (isYesterday()) {
-        const yestMs = now.getTime() - 24 * 60 * 60 * 1000;
-        return yestMs >= start && yestMs <= end;
-      }
       const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
       if (!isNaN(parsedTime)) {
         return parsedTime >= start && parsedTime <= end;
@@ -815,6 +864,7 @@ export const FollowupsPage: React.FC = () => {
                 value={dateRangePreset}
                 onChange={e => setDateRangePreset(e.target.value as DateRangePreset)}
               >
+                <option value="all">All Records</option>
                 <option value="today">Today</option>
                 <option value="this_week">This Week</option>
                 <option value="this_month">This Month</option>

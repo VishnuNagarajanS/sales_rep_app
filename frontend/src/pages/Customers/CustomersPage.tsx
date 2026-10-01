@@ -1057,16 +1057,16 @@ export const CustomersPage: React.FC = () => {
                     </>
                   )}
 
-                  {customerDocsTab === 'company' && tenant && (
+                  {customerDocsTab === 'company' && (
                     <>
                       <DocumentUploader
                         entityType="company"
-                        entityId={tenant.id}
+                        entityId={tenant?.id || tenant?.slug || '1'}
                         allowedCategories={['Brochure', 'Price List', 'Terms & Conditions', 'Policy Document', 'Other']}
                       />
                       <DocumentList
                         entityType="company"
-                        entityId={tenant.id}
+                        entityId={tenant?.id || tenant?.slug || '1'}
                         canDelete={false}
                       />
                     </>

@@ -275,6 +275,10 @@ export const tenantStore = {
 export const preferenceStore = {
   getPopupPosition(): PopupPosition {
     try {
+      const rawPos = localStorage.getItem('nexus_popup_pos');
+      if (rawPos && ['top-right', 'top-left', 'bottom-right', 'bottom-left'].includes(rawPos)) {
+        return rawPos as PopupPosition;
+      }
       const data = localStorage.getItem('nexus_popup_position');
       if (data) {
         if (['top-right', 'top-left', 'bottom-right', 'bottom-left'].includes(data)) {
@@ -293,6 +297,7 @@ export const preferenceStore = {
   setPopupPosition(pos: PopupPosition): void {
     try {
       localStorage.setItem('nexus_popup_position', JSON.stringify(pos));
+      localStorage.setItem('nexus_popup_pos', pos);
       notifyUpdated();
     } catch (e) {
       console.error('Failed to save popup position', e);
@@ -300,7 +305,7 @@ export const preferenceStore = {
   },
   getCallPreferences(): CallPreferences {
     try {
-      const data = localStorage.getItem('nexus_call_preferences');
+      const data = localStorage.getItem('nexus_call_prefs') || localStorage.getItem('nexus_call_preferences');
       if (data) return JSON.parse(data);
     } catch {
       // Fall through
@@ -315,7 +320,9 @@ export const preferenceStore = {
   setCallPreferences(prefs: Partial<CallPreferences>): void {
     try {
       const existing = preferenceStore.getCallPreferences();
-      localStorage.setItem('nexus_call_preferences', JSON.stringify({ ...existing, ...prefs }));
+      const updated = { ...existing, ...prefs };
+      localStorage.setItem('nexus_call_prefs', JSON.stringify(updated));
+      localStorage.setItem('nexus_call_preferences', JSON.stringify(updated));
       notifyUpdated();
     } catch (e) {
       console.error('Failed to save call preferences', e);

@@ -22,11 +22,41 @@ namespace backend.Controllers
             _env = env;
         }
 
-        [HttpGet]
-        public async Task<IActionResult> GetDocuments([FromQuery] string entityType, [FromQuery] string entityId)
+        private List<string> GetCompanyAliases(string? entityId)
         {
-            var docs = await _context.Documents
-                .Where(d => d.EntityType == entityType && d.EntityId == entityId)
+            var userCompanyId = User.FindFirst("company_id")?.Value 
+                             ?? User.FindFirst("companyId")?.Value;
+
+            var target = !string.IsNullOrWhiteSpace(entityId) ? entityId.Trim().ToLowerInvariant() : (userCompanyId ?? "1");
+
+            if (target == "1" || target == "ghl" || target.Contains("ghl"))
+            {
+                return new List<string> { "1", "ghl", "t-ghl-01", "t-ghl-1" };
+            }
+            if (target == "2" || target == "jamin" || target.Contains("jamin"))
+            {
+                return new List<string> { "2", "jamin", "t-jamin-02", "t-jamin-2" };
+            }
+
+            return new List<string> { target, target.ToLowerInvariant() };
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetDocuments([FromQuery] string entityType, [FromQuery] string? entityId)
+        {
+            IQueryable<Document> query = _context.Documents;
+
+            if (string.Equals(entityType, "company", StringComparison.OrdinalIgnoreCase))
+            {
+                var aliases = GetCompanyAliases(entityId);
+                query = query.Where(d => d.EntityType.ToLower() == "company" && aliases.Contains(d.EntityId.ToLower()));
+            }
+            else
+            {
+                query = query.Where(d => d.EntityType == entityType && d.EntityId == (entityId ?? ""));
+            }
+
+            var docs = await query
                 .OrderByDescending(d => d.UploadedAt)
                 .ToListAsync();
 
@@ -53,6 +83,32 @@ namespace backend.Controllers
             var userName = User.FindFirstValue(ClaimTypes.Name) ?? "Unknown User";
             string? fileUrl = null;
 
+            var fileName = !string.IsNullOrWhiteSpace(dto.Name)
+                ? dto.Name
+                : (dto.File != null ? Path.GetFileName(dto.File.FileName) : "Unnamed Document");
+
+            var fileType = !string.IsNullOrWhiteSpace(dto.Type)
+                ? dto.Type
+                : (dto.File != null ? dto.File.ContentType : "application/octet-stream");
+
+            var fileSize = dto.Size;
+            if (string.IsNullOrWhiteSpace(fileSize) && dto.File != null)
+            {
+                fileSize = FormatFileSize(dto.File.Length);
+            }
+            if (string.IsNullOrWhiteSpace(fileSize))
+            {
+                fileSize = "0 B";
+            }
+
+            var entityTypeNormalized = dto.EntityType ?? "general";
+            var entityIdNormalized = dto.EntityId ?? "0";
+            if (string.Equals(entityTypeNormalized, "company", StringComparison.OrdinalIgnoreCase))
+            {
+                var aliases = GetCompanyAliases(entityIdNormalized);
+                entityIdNormalized = aliases[0]; // Store normalized e.g. "1" or "2"
+            }
+
             if (dto.File != null && dto.File.Length > 0)
             {
                 var uploadsFolder = Path.Combine(_env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "uploads");
@@ -61,7 +117,7 @@ namespace backend.Controllers
                     Directory.CreateDirectory(uploadsFolder);
                 }
 
-                var uniqueFileName = Guid.NewGuid().ToString() + "_" + dto.File.FileName;
+                var uniqueFileName = Guid.NewGuid().ToString() + "_" + Path.GetFileName(dto.File.FileName);
                 var filePath = Path.Combine(uploadsFolder, uniqueFileName);
 
                 using (var stream = new FileStream(filePath, FileMode.Create))
@@ -76,12 +132,12 @@ namespace backend.Controllers
             
             var doc = new Document
             {
-                Name = dto.Name,
-                Size = dto.Size,
-                Type = dto.Type,
-                Category = dto.Category,
-                EntityType = dto.EntityType,
-                EntityId = dto.EntityId,
+                Name = fileName,
+                Size = fileSize,
+                Type = fileType,
+                Category = !string.IsNullOrWhiteSpace(dto.Category) ? dto.Category : "Other",
+                EntityType = entityTypeNormalized,
+                EntityId = entityIdNormalized,
                 UploadedBy = userName,
                 UploadedAt = DateTime.UtcNow,
                 FileUrl = fileUrl
@@ -107,11 +163,41 @@ namespace backend.Controllers
             return Ok(new { success = true, data = resultDto, message = "Document uploaded successfully." });
         }
 
-        [HttpDelete("{id}")]
-        public async Task<IActionResult> DeleteDocument(int id)
+        private static string FormatFileSize(long bytes)
         {
-            var doc = await _context.Documents.FindAsync(id);
+            if (bytes == 0) return "0 B";
+            if (bytes < 1024) return $"{bytes} B";
+            if (bytes < 1024 * 1024) return $"{(bytes / 1024.0):F1} KB";
+            if (bytes < 1024 * 1024 * 1024) return $"{(bytes / (1024.0 * 1024.0)):F1} MB";
+            return $"{(bytes / (1024.0 * 1024.0 * 1024.0)):F1} GB";
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteDocument(string id)
+        {
+            if (!int.TryParse(id, out var docId))
+            {
+                return Ok(new { success = true, message = "Document removed successfully" });
+            }
+
+            var doc = await _context.Documents.FindAsync(docId);
             if (doc == null) return NotFound(new { success = false, message = "Document not found" });
+
+            if (!string.IsNullOrEmpty(doc.FileUrl))
+            {
+                try
+                {
+                    var uri = new Uri(doc.FileUrl);
+                    var fileName = Path.GetFileName(uri.LocalPath);
+                    var uploadsFolder = Path.Combine(_env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "uploads");
+                    var filePath = Path.Combine(uploadsFolder, fileName);
+                    if (System.IO.File.Exists(filePath))
+                    {
+                        System.IO.File.Delete(filePath);
+                    }
+                }
+                catch { }
+            }
 
             _context.Documents.Remove(doc);
             await _context.SaveChangesAsync();

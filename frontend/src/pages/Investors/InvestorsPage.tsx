@@ -606,16 +606,16 @@ export const InvestorsPage: React.FC = () => {
                     />
                   </div>
                 )}
-                {docsTab === 'company' && tenant && (
+                {docsTab === 'company' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                     <DocumentUploader
                       entityType="company"
-                      entityId={tenant.id}
+                      entityId={tenant?.id || tenant?.slug || '1'}
                       allowedCategories={['Brochure', 'Price List', 'Terms & Conditions', 'Policy Document', 'Other']}
                     />
                     <DocumentList
                       entityType="company"
-                      entityId={tenant.id}
+                      entityId={tenant?.id || tenant?.slug || '1'}
                       canDelete={false}
                     />
                   </div>

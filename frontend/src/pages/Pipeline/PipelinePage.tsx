@@ -17,7 +17,7 @@ import {
   FileText,
   MessageCircle,
 } from 'lucide-react';
-import { Deal, DealActivity, Lead, Followup } from '../../types';
+import { Deal, DealActivity, Lead, Followup, Investor, InvestmentOpportunity, Consultation } from '../../types';
 import { storageService } from '../../services/storageService';
 import { useAuth } from '../../context/AuthContext';
 import { useCan } from '../../components/common/Guards';
@@ -25,6 +25,9 @@ import {
   getDeals,
   getLeads,
   getFollowups,
+  getInvestors,
+  getOpportunities,
+  getConsultations,
   isTenantMatch,
   saveDeal as apiSaveDeal,
   addDealActivity as apiAddDealActivity,
@@ -66,6 +69,9 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   const [deals, setDeals] = useState<Deal[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [followups, setFollowups] = useState<Followup[]>([]);
+  const [investors, setInvestors] = useState<Investor[]>([]);
+  const [opportunities, setOpportunities] = useState<InvestmentOpportunity[]>([]);
+  const [consultations, setConsultations] = useState<Consultation[]>([]);
   const [selectedDealForLoss, setSelectedDealForLoss] = useState<Deal | null>(null);
   const [lossReason, setLossReason] = useState('Competitor Pricing');
   const [agentFilter, setAgentFilter] = useState('All');
@@ -185,15 +191,24 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     setDeals(latestDeals);
 
     try {
-      const [apiLeads, apiFollowups] = await Promise.all([
+      const [apiLeads, apiFollowups, apiInvs, apiOpps, apiCons] = await Promise.all([
         getLeads(tenant?.id),
         getFollowups(tenant?.id),
+        getInvestors(tenant?.id).catch(() => storageService.getInvestors(tenant?.id) || []),
+        getOpportunities(tenant?.id).catch(() => storageService.getOpportunities(tenant?.id) || []),
+        getConsultations(tenant?.id).catch(() => storageService.getConsultations(tenant?.id) || []),
       ]);
       setLeads(apiLeads || []);
       setFollowups(apiFollowups || []);
+      setInvestors(apiInvs || []);
+      setOpportunities(apiOpps || []);
+      setConsultations(apiCons || []);
     } catch {
       setLeads(storageService.getLeads(tenant?.id) || []);
       setFollowups(storageService.getFollowups(tenant?.id) || []);
+      setInvestors(storageService.getInvestors(tenant?.id) || []);
+      setOpportunities(storageService.getOpportunities(tenant?.id) || []);
+      setConsultations(storageService.getConsultations(tenant?.id) || []);
     }
 
     setIrmDetailDeal(prev => {
@@ -377,6 +392,9 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
         apiLeads={leads} 
         apiFollowups={followups} 
         apiDeals={deals}
+        apiInvestors={investors}
+        apiOpportunities={opportunities}
+        apiConsultations={consultations}
         onDataChange={loadData}
       />
     );

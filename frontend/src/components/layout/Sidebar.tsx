@@ -26,6 +26,7 @@ import {
   MessageSquare,
   User as UserIcon,
   UserCheck,
+  Clock,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
@@ -122,7 +123,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
       header: 'Sales',
       items: [
         { id: 'leads', label: 'Leads', icon: <Users size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
-        ...(isGhlAdmin ? [{ id: 'assigned-leads', label: 'Assigned Leads', icon: <UserCheck size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW }] : []),
+        ...(isGhlAdmin ? [
+          { id: 'assigned-leads', label: 'Assigned Leads', icon: <UserCheck size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
+          { id: 'pending-leads', label: 'Pending Leads', icon: <Clock size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW }
+        ] : []),
         { id: 'customers', label: 'Customers 360', icon: <Building2 size={18} />, feature: FEATURES.CUSTOMERS, permission: PERMISSIONS.CUSTOMERS_VIEW },
         { id: 'pipeline', label: 'Pipeline', icon: <Kanban size={18} />, feature: FEATURES.DEALS, permission: PERMISSIONS.DEALS_VIEW },
         { id: 'deals', label: 'Deals', icon: <Briefcase size={18} />, feature: FEATURES.DEALS, permission: PERMISSIONS.DEALS_VIEW },

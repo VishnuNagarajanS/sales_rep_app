@@ -18,12 +18,12 @@ namespace backend.DTOs.Documents
 
     public class CreateDocumentDto
     {
-        public string Name { get; set; } = null!;
-        public string Size { get; set; } = null!;
-        public string Type { get; set; } = null!;
-        public string Category { get; set; } = null!;
-        public string EntityType { get; set; } = null!;
-        public string EntityId { get; set; } = null!;
+        public string? Name { get; set; }
+        public string? Size { get; set; }
+        public string? Type { get; set; }
+        public string? Category { get; set; }
+        public string? EntityType { get; set; }
+        public string? EntityId { get; set; }
         public Microsoft.AspNetCore.Http.IFormFile? File { get; set; }
     }
 }

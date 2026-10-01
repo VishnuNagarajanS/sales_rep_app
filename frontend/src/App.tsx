@@ -40,6 +40,7 @@ import { InvestorsPage } from './pages/Investors/InvestorsPage';
 import { ConsultationsPage } from './pages/Consultations/ConsultationsPage';
 import { OpportunitiesPage } from './pages/InvestmentOpportunities/OpportunitiesPage';
 import { AssignedLeadsPage } from './pages/AssignedLeads/AssignedLeadsPage';
+import { PendingLeadsPage } from './pages/PendingLeads/PendingLeadsPage';
 import { KYCPage } from './pages/KYC/KYCPage';
 
 // Company Admin
@@ -351,6 +352,14 @@ export const App: React.FC = () => {
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
           {isGhlAdmin ? (
             <AssignedLeadsPage />
+          ) : (
+            <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+          )}
+        </ProtectedRoute>
+      ) : currentRoute === 'pending-leads' ? (
+        <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
+          {isGhlAdmin ? (
+            <PendingLeadsPage />
           ) : (
             <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
           )}

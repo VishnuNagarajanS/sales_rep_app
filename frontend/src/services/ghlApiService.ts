@@ -505,7 +505,8 @@ function mapFollowup(f: Record<string, any>): Followup {
     status: f.status ?? 'Pending',
     notes: f.notes ?? '',
     assignedAgentId: sid(f.assignedAgentId),
-    assignedAgentName: f.assignedAgentName ?? '',
+    assignedAgentName: f.assignedAgentName ?? f.assignedToName ?? '',
+    assignedRole: f.assignedRole ?? f.assignedToRole ?? undefined,
     completedAt: f.completedAt,
   };
 }
@@ -746,3 +747,58 @@ export async function saveConsultation(consultation: Consultation): Promise<Cons
   }
 }
 
+export interface IrmPipelineCardData {
+  id: number;
+  companyId: number;
+  investorId: number;
+  assignedIrmId: number;
+  assignedIrmName: string;
+  investorName: string;
+  investorPhone: string;
+  investorEmail: string;
+  stageId: string;
+  stageEnteredAt: string;
+  lastActionSnippet?: string;
+  lastActivityDate?: string;
+  priority: string;
+  value?: number;
+  investmentAmount?: string;
+  preferredAssetClass?: string;
+  activityLogsJson?: string;
+  createdAt: string;
+}
+
+export interface IrmPipelineBoardData {
+  stages: {
+    id: string;
+    name: string;
+    color: string;
+    cards: IrmPipelineCardData[];
+  }[];
+}
+
+export async function getIrmPipelineBoard(irmId?: number): Promise<IrmPipelineBoardData | null> {
+  try {
+    const res = await apiClient.get<ApiResponse<IrmPipelineBoardData>>(
+      `/irm/pipeline${irmId ? `?irmId=${irmId}` : ''}`
+    );
+    if (res.success && res.data) {
+      return res.data;
+    }
+  } catch (err) {
+    console.warn('[ghlApiService] getIrmPipelineBoard failed:', err);
+  }
+  return null;
+}
+
+export async function moveIrmPipelineCard(cardId: number, targetStageId: string): Promise<boolean> {
+  try {
+    const res = await apiClient.put<ApiResponse<any>>(`/irm/pipeline/${cardId}/move`, {
+      targetStageId,
+    });
+    return !!res.success;
+  } catch (err) {
+    console.warn('[ghlApiService] moveIrmPipelineCard failed:', err);
+    return false;
+  }
+}

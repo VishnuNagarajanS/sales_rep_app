@@ -45,7 +45,12 @@ class ApiClient {
     }
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: res.statusText }));
-      throw new Error(err.message || `HTTP Error ${res.status}`);
+      let errorMsg = err.message || err.title;
+      if (err.errors && typeof err.errors === 'object') {
+        const validationMsgs = Object.values(err.errors).flat().join('; ');
+        if (validationMsgs) errorMsg = validationMsgs;
+      }
+      throw new Error(errorMsg || `HTTP Error ${res.status}`);
     }
     return res.json();
   }
@@ -81,10 +86,10 @@ class ApiClient {
   }
 
   async postFormData<T>(endpoint: string, formData: FormData): Promise<T> {
-    const headers = this.getHeaders();
-    // Remove Content-Type so the browser sets it automatically with the boundary for multipart/form-data
-    if ('Content-Type' in headers) {
-      delete (headers as any)['Content-Type'];
+    const token = sessionStorage.getItem('nexus_auth_token') || localStorage.getItem('nexus_auth_token');
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
     }
     const res = await fetch(`${API_BASE_URL}${endpoint}`, {
       method: 'POST',

@@ -102,12 +102,34 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
   const isExec = roleCode === 'sales_executive';
   const isIrm = roleCode === 'irm';
 
+  const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk'];
+
+  // Unassigned leads for Admin (leads not yet assigned to any sales rep)
+  const unassignedLeads = leads.filter(l => 
+    !l.assignedAgentId || 
+    l.assignedAgentId === '0' || 
+    l.assignmentStatus === 'unassigned'
+  );
+
   const scopedLeads = isExec
     ? leads.filter(l =>
       (l.assignedAgentId && l.assignedAgentId === user?.id) ||
       (l.assignedAgentName && l.assignedAgentName === user?.name)
     )
-    : leads;
+    : unassignedLeads;
+
+  // Pending Leads: Leads assigned to agents that are still in initial leads stage (haven't moved to next step)
+  const allPendingLeads = leads.filter(l => 
+    (l.assignedAgentId && l.assignedAgentId !== '0' && l.assignmentStatus !== 'unassigned') &&
+    !MOVED_LEAD_STATUSES.includes(l.status)
+  );
+
+  const scopedPendingLeads = isExec
+    ? allPendingLeads.filter(l =>
+        (l.assignedAgentId && l.assignedAgentId === user?.id) ||
+        (l.assignedAgentName && l.assignedAgentName === user?.name)
+      )
+    : allPendingLeads;
 
   // IRM "My Leads" KPI — leads assigned to this IRM that the agent has marked Interested
   const myInterestedLeads = isIrm
@@ -248,7 +270,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
   // ── Task 3 & IRM — label helpers ─────────────────────────────────────────
   const label = {
     activeleads: isExec ? 'MY ACTIVE LEADS' : 'ACTIVE LEADS',
-    pendingfollowups: isExec ? 'MY PENDING FOLLOW-UPS' : 'PENDING FOLLOW-UPS',
+    pendingleads: isExec ? 'MY PENDING LEADS' : 'PENDING LEADS',
+    pendingfollowups: isExec ? 'MY FOLLOW-UPS' : 'FOLLOW-UPS',
     callslogged: isExec ? 'MY CALLS LOGGED' : 'CALLS LOGGED',
     pipelinevalue: isExec ? 'MY PIPELINE VALUE' : 'PIPELINE VALUE',
     myLeadsKpi: 'MY LEADS',
@@ -401,16 +424,32 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                 {scopedLeads.length}
               </div>
               <div className="dashboard-kpi-delta-positive">
-                <ArrowUpRight size={14} /> +{leadsThisWeek} this week
+                <ArrowUpRight size={14} /> {isExec ? `+${leadsThisWeek} this week` : `${unassignedLeads.length} unassigned leads`}
               </div>
             </div>
 
-            {/* Card 2: Follow-ups */}
+            {/* Card 2: Pending Leads */}
+            <div className="card card-hover dashboard-kpi-card" onClick={() => onNavigate('pending-leads')}>
+              <div className="dashboard-kpi-header">
+                <span className="dashboard-kpi-label">{label.pendingleads}</span>
+                <div className="dashboard-kpi-icon-box" style={{ backgroundColor: 'rgba(245, 158, 11, 0.12)', color: '#d97706' }}>
+                  <Clock size={18} />
+                </div>
+              </div>
+              <div className="dashboard-kpi-value">
+                {scopedPendingLeads.length}
+              </div>
+              <div className="dashboard-kpi-subtext" style={{ fontSize: 12, color: scopedPendingLeads.length > 0 ? '#d97706' : 'var(--text-muted)' }}>
+                {scopedPendingLeads.length > 0 ? 'Awaiting first action / call' : 'All leads in progress'}
+              </div>
+            </div>
+
+            {/* Card 3: Follow-ups */}
             <div className="card card-hover dashboard-kpi-card" onClick={() => onNavigate('followups')}>
               <div className="dashboard-kpi-header">
                 <span className="dashboard-kpi-label">{label.pendingfollowups}</span>
                 <div className="dashboard-kpi-icon-box followups">
-                  <Clock size={18} />
+                  <Calendar size={18} />
                 </div>
               </div>
               <div className="dashboard-kpi-value">
