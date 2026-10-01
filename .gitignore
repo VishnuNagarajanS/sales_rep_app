@@ -80,3 +80,5 @@ database/*.db-journal
 # File Uploads
 backend/uploads/*
 !backend/uploads/.gitkeep
+backend/wwwroot/uploads/*
+!backend/wwwroot/uploads/.gitkeep
