@@ -30,7 +30,6 @@ import {
 } from '../types';
 import { DEFAULT_TENANTS } from '../constants/defaultTenants';
 import { isMockMode } from '../config/environment';
-import { mockStorageAdapter } from '../mock/runtime/mockStorageAdapter';
 import {
   INITIAL_CUSTOM_FIELD_DEFINITIONS,
   INITIAL_INVESTORS,
@@ -42,6 +41,7 @@ import {
   INITIAL_CUSTOMERS,
   MOCK_AGENTS,
   MOCK_IRMS,
+  USERS,
 } from '../mock_data/mockData';
 import { ensureInitialAdminFollowups } from '../mock_data/adminFollowupsData';
 
@@ -100,42 +100,29 @@ class StorageService {
 
   // Users
   getUsers(companySlug?: string): User[] {
-    if (isMockMode()) {
-      const users = mockStorageAdapter.getUsers();
-      return companySlug ? users.filter(u => u.companySlug === companySlug || (u as any).companyId === companySlug) : users;
-    }
     let users = this.get<User[]>('users', []);
     if (!users || users.length === 0) {
-      try {
-        const raw = localStorage.getItem('nexus_dev_users');
-        if (raw) users = JSON.parse(raw);
-      } catch {}
+      if (isMockMode()) {
+        users = USERS;
+      } else {
+        try {
+          const raw = localStorage.getItem('nexus_dev_users');
+          if (raw) users = JSON.parse(raw);
+        } catch {}
+      }
     }
     return companySlug ? users.filter(u => u.companySlug === companySlug || (u as any).companyId === companySlug) : users;
   }
 
   setUsers(users: User[]): void {
-    if (isMockMode()) {
-      mockStorageAdapter.saveUsers(users);
-    } else {
-      this.set('users', users);
-      try {
-        localStorage.setItem('nexus_dev_users', JSON.stringify(users));
-      } catch {}
-    }
+    this.set('users', users);
+    try {
+      localStorage.setItem('nexus_dev_users', JSON.stringify(users));
+    } catch {}
     window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 
   saveUser(user: User): void {
-    if (isMockMode()) {
-      const users = mockStorageAdapter.getUsers();
-      const index = users.findIndex(u => u.id === user.id);
-      if (index >= 0) users[index] = user;
-      else users.push(user);
-      mockStorageAdapter.saveUsers(users);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const users = this.getUsers();
     const index = users.findIndex(u => u.id === user.id);
     if (index >= 0) {
@@ -150,12 +137,6 @@ class StorageService {
   }
 
   deleteUser(id: string): void {
-    if (isMockMode()) {
-      const users = mockStorageAdapter.getUsers().filter(u => u.id !== id);
-      mockStorageAdapter.saveUsers(users);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const users = this.getUsers().filter(u => u.id !== id);
     this.set('users', users);
     try {
@@ -1003,7 +984,7 @@ class StorageService {
   // Used by InCallBar, CustomersPage, FollowupsPage, AdminKanbanBoard.
   getAgents(companyId?: string): Array<{ id: number | string; name: string; email?: string; role?: string }> {
     if (isMockMode()) {
-      return mockStorageAdapter.getAgents();
+      return MOCK_AGENTS;
     }
     const users = this.getUsers(companyId);
     const agents = users
@@ -1019,7 +1000,7 @@ class StorageService {
 
   getIrms(companyId?: string): IrmProfile[] {
     if (isMockMode()) {
-      return mockStorageAdapter.getIrms();
+      return MOCK_IRMS;
     }
     const users = this.getUsers(companyId);
     const irms = users

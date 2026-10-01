@@ -1,6 +1,5 @@
 import { apiClient } from './apiClient';
 import { User } from '../types';
-import { storageService } from './storageService';
 
 interface ApiResponse<T> {
   data: T;
@@ -60,7 +59,9 @@ export const adminUserService = {
     if (!res.success) throw new Error(res.message);
     const users = (res.data || []).map(mapDtoToUser);
     try {
-      storageService.setUsers(users);
+      localStorage.setItem('nexus_dev_users', JSON.stringify(users));
+      localStorage.setItem('nexus_users', JSON.stringify(users));
+      window.dispatchEvent(new Event('nexus_storage_updated'));
     } catch {}
     return users;
   },
