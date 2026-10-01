@@ -41,6 +41,11 @@ public class IrmOpportunitiesController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateOpportunityDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<OpportunityDto>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM opportunity data."));
+        }
+
         var companyId = User.GetCompanyId();
         var irmId = User.GetUserId();
         var result = await _oppService.CreateAsync(companyId, irmId, dto, ct);
@@ -53,6 +58,11 @@ public class IrmOpportunitiesController : ControllerBase
     [HttpPost("{id:int}/pitch")]
     public async Task<IActionResult> Pitch(int id, [FromBody] PitchOpportunityDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<OpportunityPitchDto>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM opportunity data."));
+        }
+
         var companyId = User.GetCompanyId();
         var irmId = User.GetUserId();
         var result = await _oppService.PitchAsync(id, companyId, irmId, dto, ct);
@@ -65,6 +75,11 @@ public class IrmOpportunitiesController : ControllerBase
     [HttpPost("{id:int}/commit")]
     public async Task<IActionResult> Commit(int id, [FromBody] CommitOpportunityDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<OpportunityDto>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM opportunity data."));
+        }
+
         var companyId = User.GetCompanyId();
         var result = await _oppService.CommitAsync(id, companyId, dto, ct);
         if (!result.Success)

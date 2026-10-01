@@ -74,6 +74,13 @@ import { PERMISSIONS } from './constants/permissions';
 import './App.css';
 
 export const App: React.FC = () => {
+  useEffect(() => {
+    if (!isMockMode()) {
+      localStorage.removeItem('nexus_dev_deals');
+      localStorage.removeItem('nexus_dev_leads');
+    }
+  }, []);
+
   const { isAuthenticated, isSuperAdmin, tenant, user } = useAuth();
   const [currentRoute, setCurrentRoute] = useState<string>(() => {
     return sessionStorage.getItem('nexus_current_route') || 'dashboard';
@@ -116,7 +123,7 @@ export const App: React.FC = () => {
   const [quickEmail, setQuickEmail] = useState('');
   const [quickLocation, setQuickLocation] = useState('');
   const [quickSource, setQuickSource] = useState('Website Inbound');
-  const [quickAssetClass, setQuickAssetClass] = useState('AIF');
+  const [quickAssetClass, setQuickAssetClass] = useState('');
   const [quickInvestmentCapacity, setQuickInvestmentCapacity] = useState('');
   const [quickNotes, setQuickNotes] = useState('');
 
@@ -145,6 +152,16 @@ export const App: React.FC = () => {
     sessionStorage.setItem('nexus_current_route', route);
   };
 
+  useEffect(() => {
+    const handleCustomNav = (e: any) => {
+      if (e.detail) {
+        navigate(e.detail);
+      }
+    };
+    window.addEventListener('nexus_navigate', handleCustomNav);
+    return () => window.removeEventListener('nexus_navigate', handleCustomNav);
+  }, []);
+
   const handleOpenQuickCreate = (type: 'lead' | 'followup' | 'deal' | 'visit' | 'consultation') => {
     setQuickCreateType(type);
     setQuickName('');
@@ -152,8 +169,8 @@ export const App: React.FC = () => {
     setQuickEmail('');
     setQuickLocation('');
     setQuickSource('Website Inbound');
-    setQuickAssetClass('AIF');
-    setQuickInvestmentCapacity('₹1 Cr – ₹5 Cr');
+    setQuickAssetClass('');
+    setQuickInvestmentCapacity('');
     setQuickNotes('');
     setConsInvestorId('');
     setConsInvestorName('');
@@ -346,7 +363,7 @@ export const App: React.FC = () => {
         <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
       ) : currentRoute === 'leads' ? (
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
-          <LeadsPage />
+          <LeadsPage onNavigate={navigate} />
         </ProtectedRoute>
       ) : currentRoute === 'assigned-leads' ? (
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
@@ -558,6 +575,7 @@ export const App: React.FC = () => {
                         value={quickAssetClass}
                         onChange={e => setQuickAssetClass(e.target.value)}
                       >
+                        <option value="">--</option>
                         <option value="AIF">AIF</option>
                         <option value="CO-AIF">CO-AIF</option>
                       </select>
@@ -576,8 +594,7 @@ export const App: React.FC = () => {
                         '₹1 Cr – ₹5 Cr',
                         '₹5 Cr – ₹10 Cr',
                         '₹10 Cr – ₹25 Cr',
-                        '₹25 Cr+',
-                        'Not sure yet — help me decide'
+                        '₹25 Cr+'
                       ].map(o => (
                         <option key={o} value={o}>{o}</option>
                       ))}

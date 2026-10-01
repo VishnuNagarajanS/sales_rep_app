@@ -46,11 +46,15 @@ class ApiClient {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: res.statusText }));
       let errorMsg = err.message || err.title;
-      if (err.errors && typeof err.errors === 'object') {
+      if (err.errors && typeof err.errors === 'object' && !Array.isArray(err.errors)) {
         const validationMsgs = Object.values(err.errors).flat().join('; ');
         if (validationMsgs) errorMsg = validationMsgs;
       }
-      throw new Error(errorMsg || `HTTP Error ${res.status}`);
+      const error: any = new Error(errorMsg || `HTTP Error ${res.status}`);
+      error.errors = err.errors;
+      error.data = err.data;
+      error.response = err;
+      throw error;
     }
     return res.json();
   }

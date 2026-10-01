@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Kanban as KanbanIcon,
+  AlertCircle,
   CheckCircle,
   XCircle,
   Clock,
@@ -12,10 +13,6 @@ import {
   User,
   MapPin,
   TrendingUp,
-  Building2,
-  Calendar,
-  FileText,
-  MessageCircle,
 } from 'lucide-react';
 import { Deal, DealActivity, Lead, Followup, Investor, InvestmentOpportunity, Consultation } from '../../types';
 import { storageService } from '../../services/storageService';
@@ -30,11 +27,11 @@ import {
   getConsultations,
   isTenantMatch,
   saveDeal as apiSaveDeal,
-  addDealActivity as apiAddDealActivity,
-  getDealActivities as apiGetDealActivities,
   saveFollowup as apiSaveFollowup,
   saveLead as apiSaveLead,
+  persistDeal,
 } from '../../services/ghlApiService';
+import { isMockMode } from '../../config/environment';
 import { PIPELINE_STAGES } from '../../constants/pipelineStages';
 import { Modal } from '../../components/common/Modal';
 import { FilterBar } from '../../components/common/FilterBar';
@@ -66,6 +63,16 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   const isIrm = roleCode === 'irm';
   const isGhlIrm = isIrm && tenant?.slug === 'ghl';
 
+  const reqId = useRef(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
   const [deals, setDeals] = useState<Deal[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [followups, setFollowups] = useState<Followup[]>([]);
@@ -77,10 +84,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   const [agentFilter, setAgentFilter] = useState('All');
 
   // IRM-specific state
-  const [cardIndex, setCardIndex] = useState<Record<string, number>>({});
   const [irmDetailDeal, setIrmDetailDeal] = useState<Deal | null>(null);
-  const [activityType, setActivityType] = useState<'note' | 'call' | 'whatsapp' | 'meeting'>('note');
-  const [activityText, setActivityText] = useState('');
 
   // Role-based scoping: Sales Executives see only their own deals.
   // Managers / Admins / Super Admins see every deal in the company (no filter).
@@ -95,11 +99,12 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   const scopedLeads = isGhlIrm
     ? leads
         .filter(l => !l.companyId || isTenantMatch(l.companyId, tenant?.id))
+        // Same rule as IRM "My Leads": only 'Interested' leads assigned to THIS IRM
         .filter(l => l.status === 'Interested')
-        .filter(
-          l =>
-            (l.assignedAgentId && String(l.assignedAgentId) === String(user?.id)) ||
-            (l.assignedAgentName && l.assignedAgentName === user?.name)
+        .filter(l =>
+          l.assignedAgentId
+            ? String(l.assignedAgentId) === String(user?.id)
+            : !!l.assignedAgentName && l.assignedAgentName === user?.name
         )
     : [];
 
@@ -176,66 +181,76 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     .filter(Boolean)
     .map(name => ({ value: name, label: name }));
 
-  const [dealActivities, setDealActivities] = useState<DealActivity[]>([]);
-
   const loadData = async () => {
-    let latestDeals: Deal[] = [];
-    try {
-      latestDeals = await getDeals(tenant?.id);
-      if (!latestDeals || latestDeals.length === 0) {
-        latestDeals = storageService.getDeals(tenant?.id) || [];
+    const my = ++reqId.current;
+    if (isMockMode()) {
+      setIsLoading(true);
+      const latestDeals = storageService.getDeals(tenant?.id) || [];
+      const localLeads = storageService.getLeads(tenant?.id) || [];
+      const localFollowups = storageService.getFollowups(tenant?.id) || [];
+      const localInvs = storageService.getInvestors(tenant?.id) || [];
+      const localOpps = storageService.getOpportunities(tenant?.id) || [];
+      const localCons = storageService.getConsultations(tenant?.id) || [];
+      setDeals(latestDeals);
+      setLeads(localLeads);
+      setFollowups(localFollowups);
+      setInvestors(localInvs);
+      setOpportunities(localOpps);
+      setConsultations(localCons);
+      setIsLoading(false);
+      setLoadError(false);
+      setIrmDetailDeal(prev => {
+        if (!prev) return null;
+        return latestDeals.find(d => d.id === prev.id) || prev;
+      });
+    } else {
+      setIsLoading(true);
+      setLoadError(false);
+      try {
+        const [apiDeals, apiLeads, apiFollowups, apiInvs, apiOpps, apiCons] = await Promise.all([
+          getDeals(tenant?.id),
+          getLeads(tenant?.id),
+          getFollowups(tenant?.id),
+          getInvestors(tenant?.id).catch(() => storageService.getInvestors(tenant?.id) || []),
+          getOpportunities(tenant?.id).catch(() => storageService.getOpportunities(tenant?.id) || []),
+          getConsultations(tenant?.id).catch(() => storageService.getConsultations(tenant?.id) || []),
+        ]);
+        if (my !== reqId.current) return;
+        const dealsList = apiDeals || [];
+        setDeals(dealsList);
+        setLeads(apiLeads || []);
+        setFollowups(apiFollowups || []);
+        setInvestors(apiInvs || []);
+        setOpportunities(apiOpps || []);
+        setConsultations(apiCons || []);
+        setIsLoading(false);
+        setIrmDetailDeal(prev => {
+          if (!prev) return null;
+          return dealsList.find(d => d.id === prev.id) || prev;
+        });
+      } catch (err) {
+        if (my !== reqId.current) return;
+        console.error('[PipelinePage] Failed to load pipeline data:', err);
+        setLoadError(true);
+        setIsLoading(false);
       }
-    } catch {
-      latestDeals = storageService.getDeals(tenant?.id) || [];
     }
-    setDeals(latestDeals);
-
-    try {
-      const [apiLeads, apiFollowups, apiInvs, apiOpps, apiCons] = await Promise.all([
-        getLeads(tenant?.id),
-        getFollowups(tenant?.id),
-        getInvestors(tenant?.id).catch(() => storageService.getInvestors(tenant?.id) || []),
-        getOpportunities(tenant?.id).catch(() => storageService.getOpportunities(tenant?.id) || []),
-        getConsultations(tenant?.id).catch(() => storageService.getConsultations(tenant?.id) || []),
-      ]);
-      setLeads(apiLeads || []);
-      setFollowups(apiFollowups || []);
-      setInvestors(apiInvs || []);
-      setOpportunities(apiOpps || []);
-      setConsultations(apiCons || []);
-    } catch {
-      setLeads(storageService.getLeads(tenant?.id) || []);
-      setFollowups(storageService.getFollowups(tenant?.id) || []);
-      setInvestors(storageService.getInvestors(tenant?.id) || []);
-      setOpportunities(storageService.getOpportunities(tenant?.id) || []);
-      setConsultations(storageService.getConsultations(tenant?.id) || []);
-    }
-
-    setIrmDetailDeal(prev => {
-      if (!prev) return null;
-      return latestDeals.find(d => d.id === prev.id) || prev;
-    });
   };
 
   useEffect(() => {
-    if (!irmDetailDeal?.id) {
-      setDealActivities([]);
-      return;
-    }
-    let mounted = true;
-    apiGetDealActivities(irmDetailDeal.id)
-      .then(acts => {
-        if (mounted) setDealActivities(acts || []);
-      })
-      .catch(() => {});
-    return () => { mounted = false; };
-  }, [irmDetailDeal?.id, tenant?.id]);
-
-  useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
+    let timeoutId: any;
+    const handleUpdate = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        loadData();
+      }, 300);
+    };
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+    return () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
+    };
   }, [tenant?.id]);
 
   // Stages derived dynamically from current tenant slug!
@@ -259,93 +274,32 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
         stage: stages[newIndex].id,
         stageEnteredAt: new Date().toISOString(),
       };
-      storageService.saveDeal(updatedDeal);
-      apiSaveDeal(updatedDeal).catch(console.error);
+      persistDeal(updatedDeal).catch(e => {
+        console.error("Error saving deal:", e);
+        showToast("Failed to update deal stage");
+      });
     }
   };
 
-  const handleIrmMoveStage = async (targetStageId: string) => {
-    if (!irmDetailDeal || irmDetailDeal.stage === targetStageId) return;
-    const currentStage = stages.find(s => s.id === irmDetailDeal.stage);
-    const targetStage = stages.find(s => s.id === targetStageId);
-    const fromStageName = currentStage?.name || irmDetailDeal.stage;
-    const toStageName = targetStage?.name || targetStageId;
-
-    const updatedDeal: Deal = {
-      ...irmDetailDeal,
-      stage: targetStageId,
-      stageEnteredAt: new Date().toISOString(),
-    };
-    storageService.saveDeal(updatedDeal);
-    await apiSaveDeal(updatedDeal).catch(console.error);
-
-    const moveActivity: DealActivity = {
-      id: `act-${Date.now()}`,
-      dealId: irmDetailDeal.id,
-      companyId: tenant?.id || '',
-      type: 'stage_change',
-      fromStage: irmDetailDeal.stage,
-      toStage: targetStageId,
-      text: `${fromStageName} → ${toStageName}`,
-      loggedByName: user?.name || 'IRM User',
-      loggedByRole: 'IRM',
-      timestamp: new Date().toISOString(),
-    };
-    storageService.addDealActivity(moveActivity);
-    await apiAddDealActivity(moveActivity).catch(console.error);
-
-    if (irmDetailDeal.stage === 'followup') {
-      const f = followups.find(item => item.id === irmDetailDeal.id);
-      if (f) {
-        const completedF = { ...f, status: 'Completed' as const, completedAt: new Date().toISOString() };
-        apiSaveFollowup(completedF).catch(console.error);
-        storageService.saveFollowup(completedF);
-      }
-    } else if (irmDetailDeal.stage === 'leads') {
-      const l = leads.find(item => item.id === irmDetailDeal.id);
-      if (l) {
-        const movedL = { ...l, status: 'Follow-up Required' as any };
-        apiSaveLead(movedL).catch(console.error);
-        storageService.saveLead(movedL);
-      }
-    }
-
-    setIrmDetailDeal(updatedDeal);
-    setDealActivities(prev => [moveActivity, ...prev]);
-    loadData();
-  };
-
-  const handleLogActivity = () => {
-    if (!irmDetailDeal || !activityText.trim()) return;
-
-    const newActivity: DealActivity = {
-      id: `act-${Date.now()}`,
-      dealId: irmDetailDeal.id,
-      companyId: tenant?.id || '',
-      type: activityType,
-      text: activityText.trim(),
-      loggedByName: user?.name || 'IRM User',
-      loggedByRole: 'IRM',
-      timestamp: new Date().toISOString(),
-    };
-
-    storageService.addDealActivity(newActivity);
-    apiAddDealActivity(newActivity).catch(console.error);
-    setActivityText('');
-    setDealActivities(prev => [newActivity, ...prev]);
-    loadData();
-  };
-
-  const handleMarkWon = (deal: Deal) => {
+  const handleMarkWon = async (deal: Deal) => {
     const updated = { ...deal, stage: wonStageId, stageEnteredAt: new Date().toISOString() };
-    storageService.saveDeal(updated);
-    apiSaveDeal(updated).catch(console.error);
+    try {
+      await persistDeal(updated);
+    } catch (e) {
+      console.error("Error saving deal:", e);
+      showToast("Failed to mark deal as won");
+    }
     loadData();
   };
 
-  const handleConfirmLost = () => {
+  const handleConfirmLost = async () => {
     if (selectedDealForLoss) {
-      apiSaveDeal({ ...selectedDealForLoss, stage: 'lost', lostReason: lossReason, stageEnteredAt: new Date().toISOString() }).catch(console.error);
+      try {
+        await persistDeal({ ...selectedDealForLoss, stage: 'lost', lostReason: lossReason, stageEnteredAt: new Date().toISOString() });
+      } catch (e) {
+        console.error("Error saving deal:", e);
+        showToast("Failed to mark deal as lost");
+      }
       setSelectedDealForLoss(null);
     }
   };
@@ -365,25 +319,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     if (val >= 100000) return `₹${(val / 100000).toFixed(1)} L`;
     return `₹${val.toLocaleString('en-IN')}`;
   };
-
-  const formatActivityTime = (ts: string) => {
-    if (!ts) return '';
-    const d = new Date(ts);
-    if (isNaN(d.getTime())) {
-      return ts;
-    }
-    return d.toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-    });
-  };
-
-  const irmDealActivities = dealActivities.length > 0
-    ? dealActivities
-    : (irmDetailDeal ? storageService.getDealActivities(irmDetailDeal.id, tenant?.id) : []);
 
   if (isGhlAdmin) {
     return (
@@ -436,7 +371,41 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
         </div>
       </div>
 
+      {/* Inline Error Banner */}
+      {loadError && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '12px 16px',
+          margin: '0 24px 16px 24px',
+          borderRadius: 8,
+          backgroundColor: 'rgba(239, 68, 68, 0.1)',
+          border: '1px solid rgba(239, 68, 68, 0.25)',
+          color: '#ef4444',
+          fontSize: 13,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <AlertCircle size={16} />
+            <span>Failed to load pipeline data from server. Please check your connection or try again.</span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => loadData()}
+            style={{ borderColor: '#ef4444', color: '#ef4444' }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Kanban Board Horizontal Scrolling Container */}
+      {isLoading && scopedDeals.length === 0 && scopedLeads.length === 0 && scopedFollowups.length === 0 ? (
+        <div style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)' }}>
+          <p>Loading Sales Pipeline...</p>
+        </div>
+      ) : (
       <div className="pipeline-board-container">
         {stages.map((stage, sIdx) => {
           let stageDeals: Deal[];
@@ -492,9 +461,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                       No deals in this stage
                     </div>
                   ) : (
-                    (() => {
-                      const currIdx = Math.min(cardIndex[stage.id] || 0, Math.max(0, stageDeals.length - 1));
-                      const deal = stageDeals[currIdx];
+                    stageDeals.map(deal => {
                       const daysInStage = getDaysInStage(deal);
 
                       return (
@@ -555,53 +522,15 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                             </span>
                           </div>
 
-                          {/* Footer: Investment range + pagination */}
+                          {/* Footer: Investment range */}
                           <div className="irm-card-footer">
                             <span className="irm-card-investment-range">
                               {deal.investmentRange || formatCurrency(deal.value)}
                             </span>
-                            {stageDeals.length > 1 && (
-                              <div
-                                className="irm-card-pagination"
-                                onClick={e => e.stopPropagation()}
-                              >
-                                <span>{currIdx + 1}/{stageDeals.length}</span>
-                                <button
-                                  type="button"
-                                  className="irm-page-btn"
-                                  disabled={currIdx === 0}
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    setCardIndex(prev => ({
-                                      ...prev,
-                                      [stage.id]: Math.max(0, currIdx - 1),
-                                    }));
-                                  }}
-                                  title="Previous Deal"
-                                >
-                                  ‹
-                                </button>
-                                <button
-                                  type="button"
-                                  className="irm-page-btn"
-                                  disabled={currIdx >= stageDeals.length - 1}
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    setCardIndex(prev => ({
-                                      ...prev,
-                                      [stage.id]: Math.min(stageDeals.length - 1, currIdx + 1),
-                                    }));
-                                  }}
-                                  title="Next Deal"
-                                >
-                                  ›
-                                </button>
-                              </div>
-                            )}
                           </div>
                         </div>
                       );
-                    })()
+                    })
                   )
                 ) : (
                   stageDeals.length === 0 ? (
@@ -706,6 +635,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
           );
         })}
       </div>
+      )}
 
       {/* Lost Reason Modal */}
       <Modal
@@ -832,78 +762,31 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
               </div>
             </div>
 
-            {/* Move Stage Row */}
-            <div className="irm-stage-switcher">
-              <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                MOVE STAGE:
-              </div>
-              <div className="irm-stage-pills-row">
-                {stages.map(st => {
-                  const isCurrent = irmDetailDeal.stage === st.id;
-                  return (
-                    <button
-                      key={st.id}
-                      type="button"
-                      className={`irm-stage-pill ${isCurrent ? 'active' : ''}`}
-                      style={isCurrent ? { backgroundColor: st.color, borderColor: st.color } : {}}
-                      onClick={() => handleIrmMoveStage(st.id)}
-                    >
-                      {st.name}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Activity History & Stage Transitions */}
-            <div className="irm-activity-card">
-              <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 700 }}>
-                Activity History & Stage Transitions
-              </h4>
-              {irmDealActivities.length === 0 ? (
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '12px 0', textAlign: 'center' }}>
-                  No activity logged yet.
-                </div>
-              ) : (
-                <div className="irm-timeline">
-                  {irmDealActivities.map((act: DealActivity) => {
-                    const isStageChange = act.type === 'stage_change';
-                    return (
-                      <div key={act.id} className="irm-timeline-node">
-                        <div className="irm-timeline-icon">
-                          {act.type === 'call' && <Phone size={9} />}
-                          {act.type === 'whatsapp' && <MessageCircle size={9} />}
-                          {act.type === 'meeting' && <Calendar size={9} />}
-                          {act.type === 'stage_change' && <ChevronRight size={9} />}
-                          {act.type === 'note' && <FileText size={9} />}
-                        </div>
-                        <div className="irm-timeline-content">
-                          <div className="irm-timeline-header">
-                            <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
-                              {act.loggedByName}
-                            </span>
-                            <span className="irm-role-badge">{act.loggedByRole || 'IRM'}</span>
-                            <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text-muted)' }}>
-                              {formatActivityTime(act.timestamp)}
-                            </span>
-                          </div>
-                          {isStageChange && (
-                            <div className="irm-stage-change-pill">
-                              {act.text}
-                            </div>
-                          )}
-                          <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-                            {!isStageChange && act.text}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
           </div>
         </Modal>
+      )}
+
+      {toastMessage && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 24,
+            right: 24,
+            backgroundColor: '#059669',
+            color: '#fff',
+            padding: '12px 20px',
+            borderRadius: 8,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 14,
+            fontWeight: 600,
+          }}
+        >
+          <CheckCircle size={18} /> {toastMessage}
+        </div>
       )}
     </div>
   );

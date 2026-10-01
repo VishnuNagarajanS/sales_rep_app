@@ -30,6 +30,8 @@ public class UpdateGhlDealDto
     public string? PreferredAssetClass { get; set; }
     public string? Priority { get; set; }
     public DateTime? StageEnteredAt { get; set; }
+    public bool? InvestmentAmountConfirmed { get; set; }
+    public string? KycStatus { get; set; }
 }
 
 public class LogGhlDealActivityDto
@@ -66,6 +68,14 @@ public class GhlDealResponseDto
     public DateTime? StageEnteredAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
+    public bool InvestmentAmountConfirmed { get; set; }
+    public string? KycStatus { get; set; }
+    public int? KycId { get; set; }
+    public string? CustomerKycStatus { get; set; }
+    public string? VerifiedBy { get; set; }
+    public DateTime? VerifiedAt { get; set; }
+    public string? Remarks { get; set; }
+    public string? FlaggedSections { get; set; }
 }
 
 public class GhlDealActivityResponseDto

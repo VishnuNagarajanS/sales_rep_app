@@ -23,13 +23,26 @@ public class IrmFollowupsController : ControllerBase
     public async Task<IActionResult> GetAll([FromQuery] int? assignedToId, [FromQuery] string? status, CancellationToken ct)
     {
         var companyId = User.GetCompanyId();
-        var result = await _followupService.GetAllAsync(companyId, assignedToId, status, ct);
+        var role = User.GetUserRole()?.ToLowerInvariant();
+        int? effectiveAssignedToId = assignedToId;
+        if (role == "irm" || role == "sales_executive")
+        {
+            // Do not trust assignedToId supplied by client for scoped roles
+            effectiveAssignedToId = User.GetUserId();
+        }
+
+        var result = await _followupService.GetAllAsync(companyId, effectiveAssignedToId, status, ct);
         return Ok(result);
     }
 
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateFollowupDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<FollowupDto>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM follow-up data."));
+        }
+
         var companyId = User.GetCompanyId();
         var assignedToId = User.GetUserId();
         var role = User.GetUserRole();
@@ -43,7 +56,25 @@ public class IrmFollowupsController : ControllerBase
     [HttpPut("{id:int}/complete")]
     public async Task<IActionResult> Complete(int id, [FromBody] CompleteFollowupDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<FollowupDto>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM follow-up data."));
+        }
+
         var companyId = User.GetCompanyId();
+        var role = User.GetUserRole()?.ToLowerInvariant();
+        var userId = User.GetUserId();
+
+        // Enforce ownership check for scoped roles
+        if (role == "irm" || role == "sales_executive")
+        {
+            var existing = await _followupService.GetAllAsync(companyId, userId, null, ct);
+            if (!existing.Success || !existing.Data.Any(f => f.Id == id))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<FollowupDto>.ErrorResponse("Access denied: You can only complete follow-ups assigned to you."));
+            }
+        }
+
         var result = await _followupService.CompleteAsync(id, companyId, dto, ct);
         if (!result.Success)
             return BadRequest(result);
@@ -54,7 +85,25 @@ public class IrmFollowupsController : ControllerBase
     [HttpPut("{id:int}/reschedule")]
     public async Task<IActionResult> Reschedule(int id, [FromBody] RescheduleFollowupDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<FollowupDto>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM follow-up data."));
+        }
+
         var companyId = User.GetCompanyId();
+        var role = User.GetUserRole()?.ToLowerInvariant();
+        var userId = User.GetUserId();
+
+        // Enforce ownership check for scoped roles
+        if (role == "irm" || role == "sales_executive")
+        {
+            var existing = await _followupService.GetAllAsync(companyId, userId, null, ct);
+            if (!existing.Success || !existing.Data.Any(f => f.Id == id))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<FollowupDto>.ErrorResponse("Access denied: You can only reschedule follow-ups assigned to you."));
+            }
+        }
+
         var result = await _followupService.RescheduleAsync(id, companyId, dto, ct);
         if (!result.Success)
             return BadRequest(result);

@@ -53,11 +53,13 @@ export const InvestorsPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
 
-  // ── Role scoping ───────────────────────────────────────────────────────────
   const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
   const isIrm = roleCode === 'irm';
   const isGhlIrm = isIrm && tenant?.slug === 'ghl';
+  const isGhlAdmin =
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1') &&
+    ['company_admin', 'admin', 'super_admin', 'ghl_admin'].includes(roleCode as string);
 
   // ── Core data ─────────────────────────────────────────────────────────────
   const [investors, setInvestors] = useState<Investor[]>([]);
@@ -346,14 +348,15 @@ export const InvestorsPage: React.FC = () => {
       render: (inv: Investor) => <span style={{ fontSize: 12 }}>{inv.preferredAssetClass}</span>,
     } as Column<Investor>]),
     ...(isGhlIrm ? [{
-      key: 'investorType' as any,
-      header: 'Structure',
+      key: 'investmentAmount' as any,
+      header: 'Investment Amount',
+      sortable: true,
       render: (inv: Investor) => {
         const matchingDeal = convertedDeals.find(d => d.customerId === inv.id || d.customerName.toLowerCase() === inv.name.toLowerCase());
-        const type = matchingDeal?.investorType || 'AIF';
+        const amt = matchingDeal?.value || (inv.committedAUM && !isNaN(Number(inv.committedAUM)) && Number(inv.committedAUM) > 0 ? Number(inv.committedAUM) : null);
         return (
-          <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 4, background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
-            {type}
+          <span style={{ fontWeight: 700, color: amt ? '#059669' : 'var(--text-muted)', fontSize: 13 }}>
+            {amt ? `₹${amt.toLocaleString('en-IN')}` : '—'}
           </span>
         );
       },
@@ -386,11 +389,13 @@ export const InvestorsPage: React.FC = () => {
       label: 'Edit Investor',
       icon: <Edit2 size={14} color="var(--primary-600)" style={{ marginRight: 6 }} />,
       onClick: inv => openEditModal(inv),
+      hidden: () => isGhlAdmin,
     },
     {
       label: 'Delete Investor',
       icon: <Trash2 size={14} color="#dc2626" style={{ marginRight: 6 }} />,
       onClick: inv => handleDeleteInvestor(inv),
+      hidden: () => isGhlAdmin,
     },
   ];
 
@@ -435,19 +440,21 @@ export const InvestorsPage: React.FC = () => {
           >
             <Download size={15} /> Export CSV
           </button>
-          <button
-            id="investors-new-investor"
-            className="btn btn-primary"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              fontSize: 13,
-            }}
-            onClick={openNewModal}
-          >
-            <Plus size={15} /> New Investor
-          </button>
+          {!isGhlAdmin && (
+            <button
+              id="investors-new-investor"
+              className="btn btn-primary"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 13,
+              }}
+              onClick={openNewModal}
+            >
+              <Plus size={15} /> New Investor
+            </button>
+          )}
         </div>
       </div>
 
@@ -537,17 +544,15 @@ export const InvestorsPage: React.FC = () => {
                 </div>
                 {(() => {
                   const matchingDeal = convertedDeals.find(d => d.customerId === selectedInvestor.id || d.customerName.toLowerCase() === selectedInvestor.name.toLowerCase());
-                  if (matchingDeal?.investorType) {
-                    return (
-                      <div>
-                        <span style={{ color: 'var(--text-secondary)' }}>Investor Structure:</span>
-                        <div style={{ fontWeight: 800, color: 'var(--primary-600)', marginTop: 4 }}>
-                          {matchingDeal.investorType}
-                        </div>
+                  const amt = matchingDeal?.value || (selectedInvestor.committedAUM && !isNaN(Number(selectedInvestor.committedAUM)) && Number(selectedInvestor.committedAUM) > 0 ? Number(selectedInvestor.committedAUM) : null);
+                  return (
+                    <div>
+                      <span style={{ color: 'var(--text-secondary)' }}>Investment Amount:</span>
+                      <div style={{ fontWeight: 800, color: amt ? '#059669' : 'var(--text-muted)', marginTop: 4, fontSize: 15 }}>
+                        {amt ? `₹${amt.toLocaleString('en-IN')}` : '—'}
                       </div>
-                    );
-                  }
-                  return null;
+                    </div>
+                  );
                 })()}
               </div>
             </div>
@@ -588,35 +593,39 @@ export const InvestorsPage: React.FC = () => {
               <div style={{ padding: 20 }}>
                 {docsTab === 'investor' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    <DocumentUploader
-                      entityType="investor"
-                      entityId={selectedInvestor.id}
-                      allowedCategories={[
-                        'KYC',
-                        'Mandate Agreement',
-                        'Term Sheet',
-                        'PAN / Aadhar',
-                        'Other',
-                      ]}
-                    />
+                    {!isGhlAdmin && (
+                      <DocumentUploader
+                        entityType="investor"
+                        entityId={selectedInvestor.id}
+                        allowedCategories={[
+                          'KYC',
+                          'Mandate Agreement',
+                          'Term Sheet',
+                          'PAN / Aadhar',
+                          'Other',
+                        ]}
+                      />
+                    )}
                     <DocumentList
                       entityType="investor"
                       entityId={selectedInvestor.id}
-                      canDelete
+                      canDelete={!isGhlAdmin}
                     />
                   </div>
                 )}
                 {docsTab === 'company' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    <DocumentUploader
-                      entityType="company"
-                      entityId={tenant?.id || tenant?.slug || '1'}
-                      allowedCategories={['Brochure', 'Price List', 'Terms & Conditions', 'Policy Document', 'Other']}
-                    />
+                    {isGhlAdmin && (
+                      <DocumentUploader
+                        entityType="company"
+                        entityId={tenant?.id || tenant?.slug || '1'}
+                        allowedCategories={['Brochure', 'Price List', 'Terms & Conditions', 'Policy Document', 'Other']}
+                      />
+                    )}
                     <DocumentList
                       entityType="company"
                       entityId={tenant?.id || tenant?.slug || '1'}
-                      canDelete={false}
+                      canDelete={isGhlAdmin}
                     />
                   </div>
                 )}
@@ -628,7 +637,7 @@ export const InvestorsPage: React.FC = () => {
 
       {/* ── Create / Edit Investor Modal ─────────────────────────────────── */}
       <Modal
-        isOpen={isModalOpen}
+        isOpen={isModalOpen && !isGhlAdmin}
         onClose={closeModal}
         title={editingInvestor ? 'Edit Investor' : 'New Investor'}
         subtitle={

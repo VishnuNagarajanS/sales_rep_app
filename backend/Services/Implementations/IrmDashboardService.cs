@@ -33,7 +33,7 @@ public class IrmDashboardService : IIrmDashboardService
         var consultationsToday = await consQuery.CountAsync(ct);
 
         var followupQuery = _db.Followups.Where(f => f.CompanyId == companyId && f.Status == FollowupStatus.Pending);
-        if (irmId.HasValue) followupQuery = followupQuery.Where(f => f.AssignedToId == irmId);
+        if (irmId.HasValue) followupQuery = followupQuery.Where(f => f.AssignedAgentId == irmId);
         var pendingFollowups = await followupQuery.CountAsync(ct);
 
         var opportunitiesOpen = await _db.InvestmentOpportunities.CountAsync(o => o.CompanyId == companyId && o.IsActive, ct);

@@ -85,21 +85,22 @@ export function createMockKycReviewData(deal: any): KycReviewData {
   };
 }
 
-export function createMockCustomerKycStatus(dealId: string, currentStatus?: string): CustomerKycStatus {
+export function getMockCustomerKycStatus(dealId: string, currentStatus?: string): CustomerKycStatus {
+  // Use mock storage per deal
+  try {
+    const raw = localStorage.getItem('nexus_mock_kyc_records');
+    if (raw) {
+      const records = JSON.parse(raw);
+      if (records[dealId]?.status) return records[dealId].status;
+    }
+  } catch { }
+
   if (currentStatus === 'completed') return 'Verified';
-  const charCode = (dealId || '').split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-  const statuses: CustomerKycStatus[] = [
-    'Link Sent',
-    'In Progress',
-    'Submitted',
-    'Under Verification',
-    'Needs Correction',
-    'Pending',
-  ];
-  return statuses[charCode % statuses.length];
+  if (currentStatus) return currentStatus as CustomerKycStatus;
+  return 'Submitted';
 }
 
 export const mockKycProvider: MockKycProvider = {
   getReviewData: createMockKycReviewData,
-  getCustomerStatus: createMockCustomerKycStatus,
+  getCustomerStatus: getMockCustomerKycStatus,
 };

@@ -12,5 +12,7 @@ public interface IKycService
     Task<ApiResponse<KycDto>> ReviewKycAsync(int id, int companyId, KycReviewDto dto, CancellationToken ct = default);
     Task<ApiResponse<KycDto>> GetByTokenAsync(string token, CancellationToken ct = default);
     Task<ApiResponse<KycDto>> GetByEmailAsync(string email, int companyId, CancellationToken ct = default);
-    Task<ApiResponse<List<KycDto>>> GetAllAsync(int companyId, string? status, CancellationToken ct = default);
+    Task<ApiResponse<List<KycListDto>>> GetAllAsync(int companyId, string? status, CancellationToken ct = default);
+    Task<ApiResponse<List<KycListDto>>> GetAllAsync(int companyId, string? status, int? irmId, CancellationToken ct = default);
+    Task<ApiResponse<KycDto>> SaveAssistedKycAsync(int companyId, int irmId, SubmitKycDto dto, CancellationToken ct = default);
 }

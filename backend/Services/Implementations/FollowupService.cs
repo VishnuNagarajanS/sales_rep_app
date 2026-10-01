@@ -40,12 +40,35 @@ public class FollowupService : IFollowupService
             query = query.Where(f => f.CompanyId == companyId.Value);
         }
 
-        if (role == "sales_executive" && agentId.HasValue)
+        if ((role == "sales_executive" || role == "irm") && agentId.HasValue)
         {
             query = query.Where(f => f.AssignedAgentId == agentId.Value);
         }
 
         return query;
+    }
+
+    private bool IsGhlAdmin()
+    {
+        var role = (_currentUser.Role ?? string.Empty).ToLowerInvariant();
+        var companyId = _currentUser.CompanyId;
+        return (companyId == 1 || !companyId.HasValue) &&
+               (role == "admin" || role == "ghl_admin" || role == "company_admin" || role == "super_admin");
+    }
+
+    private static bool IsIrmFollowup(Followup f)
+    {
+        if (string.Equals(f.AssignedToRole, "irm", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (string.Equals(f.ContactType, "investor", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (f.InvestorId.HasValue && f.InvestorId.Value > 0)
+            return true;
+        if (f.AssignedAgent?.Role != null &&
+            (string.Equals(f.AssignedAgent.Role.Code, "irm", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(f.AssignedAgent.Role.Name, "IRM", StringComparison.OrdinalIgnoreCase)))
+            return true;
+        return false;
     }
 
     private async Task<Followup?> FindScopedFollowupAsync(int id, CancellationToken ct)
@@ -54,7 +77,10 @@ public class FollowupService : IFollowupService
         var agentId = _currentUser.UserId;
         var companyId = _currentUser.CompanyId;
 
-        var query = _context.Followups.Include(f => f.AssignedAgent).Where(f => f.Id == id);
+        var query = _context.Followups
+            .Include(f => f.AssignedAgent)
+            .ThenInclude(a => a.Role)
+            .Where(f => f.Id == id);
 
         if (role == "super_admin")
         {
@@ -66,7 +92,7 @@ public class FollowupService : IFollowupService
             query = query.Where(f => f.CompanyId == companyId.Value);
         }
 
-        if (role == "sales_executive" && agentId.HasValue)
+        if ((role == "sales_executive" || role == "irm") && agentId.HasValue)
         {
             query = query.Where(f => f.AssignedAgentId == agentId.Value);
         }
@@ -135,13 +161,64 @@ public class FollowupService : IFollowupService
 
     public async Task<ApiResponse<FollowupResponseDto>> CreateFollowupAsync(CreateFollowupDto dto, CancellationToken ct = default)
     {
-        var agentId = _currentUser.UserId ?? 1;
-        var companyId = _currentUser.CompanyId ?? 1;
+        if (IsGhlAdmin() && string.Equals(dto.ContactType, "investor", StringComparison.OrdinalIgnoreCase))
+        {
+            return ApiResponse<FollowupResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM follow-up data.");
+        }
+
+        var agentId = _currentUser.UserId;
+        if (!agentId.HasValue || agentId.Value <= 0)
+            return ApiResponse<FollowupResponseDto>.FailureResult("Unauthorized: User ID is missing.");
+
+        var companyId = _currentUser.CompanyId;
+        if (!companyId.HasValue || companyId.Value <= 0)
+            return ApiResponse<FollowupResponseDto>.FailureResult("Unauthorized: Company ID is missing.");
+
+        // Enforce at most one active pending Follow-up per canonical contact and company
+        var contactPhoneDigits = new string(dto.ContactPhone.Where(char.IsDigit).ToArray());
+        if (contactPhoneDigits.Length > 10) contactPhoneDigits = contactPhoneDigits[^10..];
+
+        var existingPending = await _context.Followups
+            .Include(f => f.AssignedAgent)
+            .ThenInclude(a => a.Role)
+            .FirstOrDefaultAsync(f =>
+                f.CompanyId == companyId.Value &&
+                f.Status == FollowupStatus.Pending &&
+                (f.ContactId == dto.ContactId.Trim() ||
+                 (!string.IsNullOrEmpty(contactPhoneDigits) && f.ContactPhone.Contains(contactPhoneDigits))), ct);
+
+        if (existingPending != null)
+        {
+            if (IsIrmFollowup(existingPending) && IsGhlAdmin())
+            {
+                return ApiResponse<FollowupResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM follow-up data.");
+            }
+
+            // Reuse and update the existing active pending follow-up (idempotency)
+            existingPending.ScheduledAt = dto.ScheduledAt;
+            if (!string.IsNullOrWhiteSpace(dto.Priority)) existingPending.Priority = dto.Priority.Trim();
+            if (!string.IsNullOrWhiteSpace(dto.Notes)) existingPending.Notes = dto.Notes.Trim();
+            existingPending.AssignedAgentId = agentId.Value;
+            existingPending.UpdatedAt = DateTime.UtcNow;
+
+            if (existingPending.ContactType == "lead" && int.TryParse(existingPending.ContactId, out var existingLeadId))
+            {
+                var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == existingLeadId && l.CompanyId == companyId, ct);
+                if (lead != null)
+                {
+                    lead.NextFollowupDate = existingPending.ScheduledAt;
+                }
+            }
+
+            await _context.SaveChangesAsync(ct);
+            await _context.Entry(existingPending).Reference(f => f.AssignedAgent).LoadAsync(ct);
+            return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(existingPending), "Existing pending follow-up updated.");
+        }
 
         var followup = new Followup
         {
-            CompanyId = companyId,
-            AssignedAgentId = agentId,
+            CompanyId = companyId.Value,
+            AssignedAgentId = agentId.Value,
             ContactId = dto.ContactId.Trim(),
             ContactType = string.IsNullOrWhiteSpace(dto.ContactType) ? "lead" : dto.ContactType.Trim().ToLower(),
             ContactName = dto.ContactName.Trim(),
@@ -178,6 +255,11 @@ public class FollowupService : IFollowupService
         if (followup == null)
             return ApiResponse<FollowupResponseDto>.FailureResult("Follow-up not found or access denied.");
 
+        if (IsIrmFollowup(followup) && IsGhlAdmin())
+        {
+            return ApiResponse<FollowupResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM follow-up data.");
+        }
+
         if (dto.ScheduledAt.HasValue) followup.ScheduledAt = dto.ScheduledAt.Value;
         if (!string.IsNullOrWhiteSpace(dto.Priority)) followup.Priority = dto.Priority.Trim();
         if (!string.IsNullOrWhiteSpace(dto.Status) && Enum.TryParse<FollowupStatus>(dto.Status, true, out var parsedSt))
@@ -199,6 +281,11 @@ public class FollowupService : IFollowupService
         if (followup == null)
             return ApiResponse<FollowupResponseDto>.FailureResult("Follow-up not found or access denied.");
 
+        if (IsIrmFollowup(followup) && IsGhlAdmin())
+        {
+            return ApiResponse<FollowupResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM follow-up data.");
+        }
+
         followup.Status = FollowupStatus.Completed;
         followup.CompletedAt = DateTime.UtcNow;
         followup.UpdatedAt = DateTime.UtcNow;
@@ -214,6 +301,11 @@ public class FollowupService : IFollowupService
         if (followup == null)
             return ApiResponse<bool>.FailureResult("Follow-up not found or access denied.");
 
+        if (IsIrmFollowup(followup) && IsGhlAdmin())
+        {
+            return ApiResponse<bool>.FailureResult("Access denied: GHL Admin has read-only access to IRM follow-up data.");
+        }
+
         _context.Followups.Remove(followup);
         await _context.SaveChangesAsync(ct);
 
@@ -228,6 +320,7 @@ public class FollowupService : IFollowupService
             CompanyId = f.CompanyId,
             AssignedAgentId = f.AssignedAgentId,
             AssignedAgentName = f.AssignedAgent?.Name,
+            AssignedAgentRole = f.AssignedAgent?.Role?.Name ?? f.AssignedToRole,
             ContactId = f.ContactId,
             ContactType = f.ContactType,
             ContactName = f.ContactName,

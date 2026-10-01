@@ -145,6 +145,10 @@ class StorageService {
     this.set('leads', leads);
   }
 
+  saveLeads(leads: Lead[]): void {
+    this.set('leads', leads);
+  }
+
   deleteLead(id: string): void {
     const leads = this.getLeads().filter(l => l.id !== id);
     this.set('leads', leads);

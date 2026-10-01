@@ -30,6 +30,11 @@ public class IrmPipelineController : ControllerBase
     [HttpPut("{cardId:int}/move")]
     public async Task<IActionResult> MoveStage(int cardId, [FromBody] MoveIrmStageDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<string>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM pipeline data."));
+        }
+
         var companyId = User.GetCompanyId();
         var irmId = User.GetUserId();
         var result = await _pipelineService.MoveStageAsync(cardId, companyId, irmId, dto, ct);
@@ -42,6 +47,11 @@ public class IrmPipelineController : ControllerBase
     [HttpPost("{cardId:int}/activity")]
     public async Task<IActionResult> LogActivity(int cardId, [FromBody] LogIrmActivityDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<string>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM pipeline data."));
+        }
+
         var companyId = User.GetCompanyId();
         var irmId = User.GetUserId();
         var result = await _pipelineService.LogActivityAsync(cardId, companyId, irmId, dto, ct);

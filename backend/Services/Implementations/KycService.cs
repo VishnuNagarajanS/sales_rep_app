@@ -104,15 +104,17 @@ public class KycService : IKycService
         {
             existing = new InvestorKyc
             {
-                InvestorId = investor!.Id,
+                InvestorId = investor?.Id ?? 0,
                 CompanyId = companyId,
                 IrmId = irmId,
                 InvestorName = investorName,
                 Phone = recipientPhone,
                 Email = recipientEmail,
-                Status = KycStatus.Draft,
+                // LinkSent: link dispatched, customer has NOT yet submitted
+                Status = KycStatus.LinkSent,
                 KycLinkToken = token,
                 KycLinkSent = true,
+                KycLinkSentAt = DateTime.UtcNow,
                 KycLinkExpiresAt = expiresAt,
                 CreatedAt = DateTime.UtcNow
             };
@@ -120,12 +122,17 @@ public class KycService : IKycService
         }
         else
         {
+            // Resend: refresh token, expiry, and sent timestamp. Keep existing submission data intact.
             existing.KycLinkToken = token;
             existing.KycLinkSent = true;
+            existing.KycLinkSentAt = DateTime.UtcNow;
             existing.KycLinkExpiresAt = expiresAt;
             if (!string.IsNullOrWhiteSpace(recipientEmail)) existing.Email = recipientEmail;
             if (!string.IsNullOrWhiteSpace(recipientPhone)) existing.Phone = recipientPhone;
             if (!string.IsNullOrWhiteSpace(investorName)) existing.InvestorName = investorName;
+            // Upgrade Draft to LinkSent; do NOT downgrade a record that is already submitted/reviewed
+            if (existing.Status == KycStatus.Draft)
+                existing.Status = KycStatus.LinkSent;
             await _kycRepo.UpdateAsync(existing, ct);
         }
 
@@ -148,7 +155,11 @@ public class KycService : IKycService
 
             deliveryStatus = emailSent 
                 ? $"Email delivered successfully to {recipientEmail} via Gmail SMTP" 
-                : $"Email dispatch simulated (To send real email, configure Gmail credentials in appsettings.json)";
+                : $"Email could not be sent: {_emailService.LastError ?? "unknown error"}";
+        }
+        else if (string.Equals(dto.Channel, "email", StringComparison.OrdinalIgnoreCase))
+        {
+            deliveryStatus = "Email not sent: no email address was found for this investor.";
         }
         else
         {
@@ -172,14 +183,14 @@ public class KycService : IKycService
         if (!string.IsNullOrWhiteSpace(dto.Token))
         {
             kyc = await _kycRepo.GetByTokenAsync(dto.Token, ct);
+            if (kyc == null)
+                return ApiResponse<KycDto>.ErrorResponse("Invalid or expired KYC token");
         }
-
-        if (kyc == null && dto.InvestorId > 0)
+        else if (dto.InvestorId > 0)
         {
             kyc = await _kycRepo.GetByInvestorIdAsync(dto.InvestorId, companyId, ct);
         }
-
-        if (kyc == null && !string.IsNullOrWhiteSpace(dto.Email))
+        else if (!string.IsNullOrWhiteSpace(dto.Email))
         {
             var all = await _kycRepo.GetAllAsync(companyId, null, ct);
             kyc = all.FirstOrDefault(k => string.Equals(k.Email, dto.Email, StringComparison.OrdinalIgnoreCase));
@@ -187,17 +198,24 @@ public class KycService : IKycService
 
         if (kyc == null)
         {
-            kyc = new InvestorKyc
-            {
-                InvestorId = dto.InvestorId,
-                CompanyId = companyId,
-                CreatedAt = DateTime.UtcNow
-            };
+            return ApiResponse<KycDto>.ErrorResponse("KYC record not found");
+        }
+
+        if (kyc.Status == KycStatus.Approved)
+        {
+            return ApiResponse<KycDto>.ErrorResponse("This KYC has already been verified and approved.");
+        }
+        if (kyc.SubmittedAt != null && kyc.Status == KycStatus.PendingReview)
+        {
+            return ApiResponse<KycDto>.ErrorResponse("You have already submitted your KYC. It is currently awaiting IRM verification.");
         }
 
         kyc.InvestorName = !string.IsNullOrWhiteSpace(dto.InvestorName) ? dto.InvestorName : kyc.InvestorName;
         kyc.Phone = !string.IsNullOrWhiteSpace(dto.Phone) ? dto.Phone : kyc.Phone;
         kyc.Email = !string.IsNullOrWhiteSpace(dto.Email) ? dto.Email : kyc.Email;
+        kyc.FatherName = dto.FatherName ?? kyc.FatherName;
+        kyc.DateOfBirth = dto.DateOfBirth ?? dto.Dob ?? kyc.DateOfBirth;
+        kyc.NameAsPerPan = dto.NameAsPerPan ?? kyc.NameAsPerPan;
         kyc.Gender = dto.Gender ?? kyc.Gender;
         kyc.InvestorType = dto.InvestorType ?? kyc.InvestorType;
         kyc.ResidentType = dto.ResidentType ?? kyc.ResidentType;
@@ -220,12 +238,28 @@ public class KycService : IKycService
         kyc.DpId = dto.DpId ?? kyc.DpId;
 
         kyc.NomineesJson = dto.NomineesJson ?? kyc.NomineesJson;
+
+        kyc.PanDocumentUrl = dto.PanDocumentUrl ?? kyc.PanDocumentUrl;
+        kyc.AadhaarDocumentUrl = dto.AadhaarDocumentUrl ?? kyc.AadhaarDocumentUrl;
+        kyc.BankChequeUrl = dto.BankChequeUrl ?? kyc.BankChequeUrl;
+        kyc.DematDocumentUrl = dto.DematDocumentUrl ?? kyc.DematDocumentUrl;
+        kyc.PhotoUrl = dto.PhotoUrl ?? kyc.PhotoUrl;
+        kyc.SignatureUrl = dto.SignatureUrl ?? kyc.SignatureUrl;
+
         kyc.UpdatedAt = DateTime.UtcNow;
 
         if (dto.IsFinalSubmit)
         {
             kyc.Status = KycStatus.PendingReview;
             kyc.SubmittedAt = DateTime.UtcNow;
+            kyc.VerifiedBy = null;
+            kyc.VerifiedAt = null;
+            kyc.Remarks = null;
+            kyc.ReviewRemarks = null;
+            kyc.FlaggedSectionsJson = null;
+            // Invalidate the link token after submission so it cannot be reused
+            kyc.KycLinkToken = null;
+            kyc.KycLinkExpiresAt = null;
         }
 
         if (kyc.Id == 0)
@@ -275,6 +309,12 @@ public class KycService : IKycService
         if (kyc == null)
             return ApiResponse<KycDto>.ErrorResponse("Invalid or expired KYC token");
 
+        if (kyc.Status == KycStatus.Approved)
+            return ApiResponse<KycDto>.ErrorResponse("This KYC has already been verified and approved.");
+
+        if (kyc.SubmittedAt != null && kyc.Status == KycStatus.PendingReview)
+            return ApiResponse<KycDto>.ErrorResponse("You have already submitted your KYC. It is currently awaiting IRM verification.");
+
         return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc));
     }
 
@@ -291,12 +331,185 @@ public class KycService : IKycService
         return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc));
     }
 
-    public async Task<ApiResponse<List<KycDto>>> GetAllAsync(int companyId, string? status, CancellationToken ct = default)
+    public Task<ApiResponse<List<KycListDto>>> GetAllAsync(int companyId, string? status, CancellationToken ct = default)
+        => GetAllAsync(companyId, status, null, ct);
+
+    public async Task<ApiResponse<List<KycListDto>>> GetAllAsync(int companyId, string? status, int? irmId, CancellationToken ct = default)
     {
-        var list = await _kycRepo.GetAllAsync(companyId, status, ct);
-        var dtos = list.Select(MapToDto).ToList();
-        return ApiResponse<List<KycDto>>.SuccessResponse(dtos);
+        var list = await _kycRepo.GetAllAsync(companyId, status, irmId, ct);
+        var dtos = list.Select(MapToListDto).ToList();
+        return ApiResponse<List<KycListDto>>.SuccessResponse(dtos);
     }
+
+    public async Task<ApiResponse<KycDto>> SaveAssistedKycAsync(int companyId, int irmId, SubmitKycDto dto, CancellationToken ct = default)
+    {
+        InvestorKyc? kyc = null;
+
+        if (dto.InvestorId > 0)
+        {
+            kyc = await _kycRepo.GetByInvestorIdAsync(dto.InvestorId, companyId, ct);
+        }
+        else if (!string.IsNullOrWhiteSpace(dto.Email))
+        {
+            var all = await _kycRepo.GetAllAsync(companyId, null, ct);
+            kyc = all.FirstOrDefault(k => string.Equals(k.Email, dto.Email, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (kyc == null && !string.IsNullOrWhiteSpace(dto.Phone))
+        {
+            var phoneDigits = new string(dto.Phone.Where(char.IsDigit).ToArray());
+            if (phoneDigits.Length >= 10)
+            {
+                var last10 = phoneDigits[^10..];
+                var all = await _kycRepo.GetAllAsync(companyId, null, ct);
+                kyc = all.FirstOrDefault(k => (k.Phone ?? string.Empty).Replace("-", string.Empty).Replace(" ", string.Empty).EndsWith(last10));
+            }
+        }
+
+        // Never overwrite an already Approved KYC
+        if (kyc != null && kyc.Status == KycStatus.Approved)
+        {
+            return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc), "KYC is already verified and approved.");
+        }
+
+        // Never downgrade an already submitted KYC when just saving a draft
+        if (kyc != null && kyc.SubmittedAt != null && kyc.Status == KycStatus.PendingReview && !dto.IsFinalSubmit)
+        {
+            return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc), "KYC is already submitted for review.");
+        }
+
+        if (kyc == null)
+        {
+            kyc = new InvestorKyc
+            {
+                InvestorId = dto.InvestorId,
+                CompanyId = companyId,
+                IrmId = irmId,
+                InvestorName = dto.InvestorName ?? string.Empty,
+                Phone = dto.Phone ?? string.Empty,
+                Email = dto.Email ?? string.Empty,
+                Status = dto.IsFinalSubmit ? KycStatus.PendingReview : KycStatus.Draft,
+                CreatedAt = DateTime.UtcNow
+            };
+        }
+        else
+        {
+            kyc.IrmId = irmId;
+            if (dto.IsFinalSubmit)
+            {
+                kyc.Status = KycStatus.PendingReview;
+            }
+            else if (kyc.Status != KycStatus.PendingReview && kyc.Status != KycStatus.Approved)
+            {
+                kyc.Status = KycStatus.Draft;
+            }
+        }
+
+        kyc.InvestorName = !string.IsNullOrWhiteSpace(dto.InvestorName) ? dto.InvestorName : kyc.InvestorName;
+        kyc.Phone = !string.IsNullOrWhiteSpace(dto.Phone) ? dto.Phone : kyc.Phone;
+        kyc.Email = !string.IsNullOrWhiteSpace(dto.Email) ? dto.Email : kyc.Email;
+        kyc.FatherName = dto.FatherName ?? kyc.FatherName;
+        kyc.DateOfBirth = dto.DateOfBirth ?? dto.Dob ?? kyc.DateOfBirth;
+        kyc.NameAsPerPan = dto.NameAsPerPan ?? kyc.NameAsPerPan;
+        kyc.Gender = dto.Gender ?? kyc.Gender;
+        kyc.InvestorType = dto.InvestorType ?? kyc.InvestorType;
+        kyc.ResidentType = dto.ResidentType ?? kyc.ResidentType;
+        kyc.Occupation = dto.Occupation ?? kyc.Occupation;
+
+        kyc.PanNumber = dto.PanNumber ?? kyc.PanNumber;
+        kyc.AadhaarNumber = dto.AadhaarNumber ?? kyc.AadhaarNumber;
+        kyc.AddressLine1 = dto.AddressLine1 ?? kyc.AddressLine1;
+        kyc.AddressLine2 = dto.AddressLine2 ?? kyc.AddressLine2;
+        kyc.City = dto.City ?? kyc.City;
+        kyc.State = dto.State ?? kyc.State;
+        kyc.Pincode = dto.Pincode ?? kyc.Pincode;
+        kyc.Country = dto.Country ?? kyc.Country;
+
+        kyc.BankName = dto.BankName ?? kyc.BankName;
+        kyc.AccountNumber = dto.AccountNumber ?? kyc.AccountNumber;
+        kyc.IfscCode = dto.IfscCode ?? kyc.IfscCode;
+        kyc.AccountType = dto.AccountType ?? kyc.AccountType;
+        kyc.DematAccountNumber = dto.DematAccountNumber ?? kyc.DematAccountNumber;
+        kyc.DpId = dto.DpId ?? kyc.DpId;
+
+        kyc.NomineesJson = dto.NomineesJson ?? kyc.NomineesJson;
+
+        kyc.PanDocumentUrl = dto.PanDocumentUrl ?? kyc.PanDocumentUrl;
+        kyc.AadhaarDocumentUrl = dto.AadhaarDocumentUrl ?? kyc.AadhaarDocumentUrl;
+        kyc.BankChequeUrl = dto.BankChequeUrl ?? kyc.BankChequeUrl;
+        kyc.DematDocumentUrl = dto.DematDocumentUrl ?? kyc.DematDocumentUrl;
+        kyc.PhotoUrl = dto.PhotoUrl ?? kyc.PhotoUrl;
+        kyc.SignatureUrl = dto.SignatureUrl ?? kyc.SignatureUrl;
+
+        kyc.UpdatedAt = DateTime.UtcNow;
+
+        if (dto.IsFinalSubmit)
+        {
+            kyc.SubmittedAt = DateTime.UtcNow;
+            kyc.VerifiedBy = null;
+            kyc.VerifiedAt = null;
+            kyc.Remarks = null;
+            kyc.ReviewRemarks = null;
+            kyc.FlaggedSectionsJson = null;
+            kyc.KycLinkToken = null;
+            kyc.KycLinkExpiresAt = null;
+        }
+
+        if (kyc.Id == 0)
+            await _kycRepo.CreateAsync(kyc, ct);
+        else
+            await _kycRepo.UpdateAsync(kyc, ct);
+
+        return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc), dto.IsFinalSubmit ? "Assisted KYC submitted for verification" : "Assisted KYC draft saved");
+    }
+
+    private static KycListDto MapToListDto(InvestorKyc k) => new()
+    {
+        Id = k.Id,
+        InvestorId = k.InvestorId,
+        CompanyId = k.CompanyId,
+        IrmId = k.IrmId,
+        Status = k.Status.ToString(),
+        InvestorName = k.InvestorName,
+        Phone = k.Phone,
+        Email = k.Email,
+        FatherName = k.FatherName,
+        DateOfBirth = k.DateOfBirth,
+        NameAsPerPan = k.NameAsPerPan,
+        Gender = k.Gender,
+        InvestorType = k.InvestorType,
+        ResidentType = k.ResidentType,
+        Occupation = k.Occupation,
+        PanNumber = k.PanNumber,
+        AadhaarNumber = k.AadhaarNumber,
+        AddressLine1 = k.AddressLine1,
+        AddressLine2 = k.AddressLine2,
+        City = k.City,
+        State = k.State,
+        Pincode = k.Pincode,
+        Country = k.Country,
+        BankName = k.BankName,
+        AccountNumber = k.AccountNumber,
+        IfscCode = k.IfscCode,
+        AccountType = k.AccountType,
+        DematAccountNumber = k.DematAccountNumber,
+        DpId = k.DpId,
+        NomineesJson = k.NomineesJson,
+        HasPanDocument = !string.IsNullOrWhiteSpace(k.PanDocumentUrl),
+        HasAadhaarDocument = !string.IsNullOrWhiteSpace(k.AadhaarDocumentUrl),
+        HasPhoto = !string.IsNullOrWhiteSpace(k.PhotoUrl),
+        ReviewRemarks = k.ReviewRemarks,
+        ReviewedAt = k.ReviewedAt,
+        VerifiedBy = k.VerifiedBy,
+        VerifiedAt = k.VerifiedAt,
+        Remarks = k.Remarks,
+        FlaggedSections = k.FlaggedSectionsJson,
+        KycLinkSent = k.KycLinkSent,
+        KycLinkSentAt = k.KycLinkSentAt,
+        SubmittedAt = k.SubmittedAt,
+        CreatedAt = k.CreatedAt,
+        UpdatedAt = k.UpdatedAt
+    };
 
     private static KycDto MapToDto(InvestorKyc k) => new()
     {
@@ -308,6 +521,9 @@ public class KycService : IKycService
         InvestorName = k.InvestorName,
         Phone = k.Phone,
         Email = k.Email,
+        FatherName = k.FatherName,
+        DateOfBirth = k.DateOfBirth,
+        NameAsPerPan = k.NameAsPerPan,
         Gender = k.Gender,
         InvestorType = k.InvestorType,
         ResidentType = k.ResidentType,
@@ -335,7 +551,13 @@ public class KycService : IKycService
         SignatureUrl = k.SignatureUrl,
         ReviewRemarks = k.ReviewRemarks,
         ReviewedAt = k.ReviewedAt,
+        VerifiedBy = k.VerifiedBy,
+        VerifiedAt = k.VerifiedAt,
+        Remarks = k.Remarks,
+        FlaggedSections = k.FlaggedSectionsJson,
         KycLinkSent = k.KycLinkSent,
+        KycLinkSentAt = k.KycLinkSentAt,
+        SubmittedAt = k.SubmittedAt,
         CreatedAt = k.CreatedAt,
         UpdatedAt = k.UpdatedAt
     };

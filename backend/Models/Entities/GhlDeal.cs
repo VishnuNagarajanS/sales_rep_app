@@ -63,4 +63,18 @@ public class GhlDeal
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
+
+    /// <summary>True once the IRM officer confirms the investment amount. Unlocks the Convert button.</summary>
+    public bool InvestmentAmountConfirmed { get; set; } = false;
+
+    /// <summary>KYC pipeline status: Pending | Partially Completed | Completed.</summary>
+    public string? KycStatus { get; set; }
+
+    /// <summary>Linked InvestorKyc record ID</summary>
+    public int? KycId { get; set; }
+
+    public string? VerifiedBy { get; set; }
+    public DateTime? VerifiedAt { get; set; }
+    public string? Remarks { get; set; }
+    public string? FlaggedSections { get; set; }
 }

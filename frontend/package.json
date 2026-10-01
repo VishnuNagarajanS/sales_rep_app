@@ -11,6 +11,7 @@
     "build:mock": "tsc -b && vite build --mode mock",
     "build:dev": "tsc -b && vite build --mode dev",
     "lint": "oxlint",
+    "test": "vitest run",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -22,6 +23,7 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^24.13.3",
     "@types/papaparse": "^5.5.2",
     "@types/react": "^19.2.18",
@@ -29,6 +31,7 @@
     "@vitejs/plugin-react": "^6.1.0",
     "oxlint": "^1.79.0",
     "typescript": "~6.0.2",
-    "vite": "^8.2.2"
+    "vite": "^8.2.2",
+    "vitest": "^5.0.2"
   }
 }

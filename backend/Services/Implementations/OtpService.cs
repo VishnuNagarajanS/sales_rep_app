@@ -50,66 +50,84 @@ public class OtpService : IOtpService
         if (!string.IsNullOrWhiteSpace(cleanToken))
         {
             kyc = await ResolveKycByTokenAsync(cleanToken, ct);
+            if (kyc == null && string.IsNullOrWhiteSpace(dto.Email))
+            {
+                return ApiResponse<SendKycOtpResponseDto>.ErrorResponse("Invalid or expired KYC token. Please check your link or contact your IRM.");
+            }
         }
 
+        // Always prioritize the email stored on the KYC record associated with the token
         var targetEmail = !string.IsNullOrWhiteSpace(kyc?.Email)
             ? kyc.Email.Trim()
-            : (cleanToken.Contains("dhina", StringComparison.OrdinalIgnoreCase) 
-                ? "antigravity01gemini@gmail.com" 
-                : (!string.IsNullOrWhiteSpace(dto.Email) ? dto.Email.Trim() : "antigravity01gemini@gmail.com"));
+            : (!string.IsNullOrWhiteSpace(dto.Email) ? dto.Email.Trim() : string.Empty);
 
-        var targetName = kyc?.InvestorName ?? (cleanToken.Contains("dhina", StringComparison.OrdinalIgnoreCase) ? "dhina" : "Investor");
+        if (string.IsNullOrWhiteSpace(targetEmail))
+        {
+            return ApiResponse<SendKycOtpResponseDto>.ErrorResponse(
+                "No registered email address is associated with this KYC request. Please contact your Relationship Manager.");
+        }
+
+        var targetName = !string.IsNullOrWhiteSpace(kyc?.InvestorName) ? kyc.InvestorName.Trim() : "Investor";
 
         var cacheKey = GetCacheKey(cleanToken, targetEmail);
-        _cache.TryGetValue(cacheKey, out CachedOtpEntry? existing);
-        if (existing == null)
-        {
-            _cache.TryGetValue($"kyc_email_otp_{targetEmail.ToLower()}", out existing);
-        }
 
-        string otpCode;
-        // If an OTP was already sent within the last 45 seconds, re-use it so rapid double-requests in dev mode stay identical
-        if (existing != null && !string.IsNullOrEmpty(existing.Otp) && (DateTime.UtcNow - existing.CreatedAt).TotalSeconds < 45)
-        {
-            otpCode = existing.Otp;
-            _logger.LogInformation("[KYC OTP RE-USED] Re-using recent OTP {Otp} for {Email} (requested within cooldown)", otpCode, targetEmail);
-        }
-        else
-        {
-            // 2. Generate 6-digit cryptographic OTP
-            otpCode = RandomNumberGenerator.GetInt32(100000, 1000000).ToString("D6");
-        }
+        // Issue a fresh valid 6-digit cryptographic OTP on every send/resend
+        var otpCode = RandomNumberGenerator.GetInt32(100000, 1000000).ToString("D6");
 
-        // 3. Cache OTP for 5 minutes with all recently issued valid OTPs
+        // Cache OTP for 5 minutes; invalidate previous OTPs so old codes cannot be re-used
         var entry = new CachedOtpEntry
         {
             Otp = otpCode,
             Email = targetEmail,
             Token = cleanToken,
-            FailedAttempts = existing?.FailedAttempts ?? 0,
+            FailedAttempts = 0,
             CreatedAt = DateTime.UtcNow,
-            ValidOtps = existing != null ? new List<string>(existing.ValidOtps) : new List<string>()
+            ValidOtps = new List<string> { otpCode }
         };
 
-        if (!entry.ValidOtps.Contains(otpCode))
+        _cache.Set(cacheKey, entry, TimeSpan.FromMinutes(5));
+        _cache.Set($"kyc_email_otp_{targetEmail.ToLowerInvariant()}", entry, TimeSpan.FromMinutes(5));
+
+        if (!string.IsNullOrEmpty(cleanToken))
         {
-            entry.ValidOtps.Add(otpCode);
+            _cache.Set($"kyc_token_otp_{cleanToken}", entry, TimeSpan.FromMinutes(5));
         }
 
-        _cache.Set(cacheKey, entry, TimeSpan.FromMinutes(5));
-        _cache.Set($"kyc_email_otp_{targetEmail.ToLower()}", entry, TimeSpan.FromMinutes(5));
+        if (kyc != null && !string.IsNullOrWhiteSpace(kyc.KycLinkToken))
+        {
+            _cache.Set($"kyc_token_otp_{kyc.KycLinkToken}", entry, TimeSpan.FromMinutes(5));
+        }
 
-        // 4. Dispatch Email via Gmail SMTP
-        _logger.LogInformation("==================================================");
-        _logger.LogInformation("[KYC OTP GENERATED] Recipient: {Email} | OTP: {Otp} (Valid: 5m)", targetEmail, otpCode);
-        _logger.LogInformation("==================================================");
+        // Also cache under token prefix without 'tok_' and slug so lookup is resilient
+        var subToken = cleanToken.StartsWith("tok_") ? cleanToken[4..] : cleanToken;
+        var tokenPrefix = subToken.Contains('_') ? subToken.Split('_')[0] : subToken;
+        if (!string.IsNullOrEmpty(tokenPrefix) && tokenPrefix != cleanToken)
+        {
+            _cache.Set($"kyc_token_otp_{tokenPrefix}", entry, TimeSpan.FromMinutes(5));
+            _cache.Set($"kyc_token_otp_tok_{tokenPrefix}", entry, TimeSpan.FromMinutes(5));
+        }
+
+        // 4. Dispatch Email via Gmail SMTP (OTP not logged at info level to prevent exposure)
+        _logger.LogInformation("[KYC OTP] Sending verification code to {Email}", targetEmail);
 
         var emailDelivered = await _emailService.SendKycOtpEmailAsync(targetEmail, targetName, otpCode, 5, ct);
 
         var masked = MaskEmail(targetEmail);
-        var message = emailDelivered 
-            ? $"6-digit verification code sent to {masked}" 
-            : $"Verification code generated for {masked} (Check server console for OTP)";
+
+        if (!emailDelivered)
+        {
+            _logger.LogWarning("[KYC OTP] Email delivery failed for {Email}: {Error}", targetEmail, _emailService.LastError);
+
+            // Invalidate cached entry since delivery failed
+            _cache.Remove(cacheKey);
+            _cache.Remove($"kyc_email_otp_{targetEmail.ToLowerInvariant()}");
+            if (!string.IsNullOrEmpty(cleanToken)) _cache.Remove($"kyc_token_otp_{cleanToken}");
+
+            return ApiResponse<SendKycOtpResponseDto>.ErrorResponse(
+                $"Failed to deliver verification code to {masked}. {_emailService.LastError ?? "Please verify your email provider settings or try again."}");
+        }
+
+        var message = $"6-digit verification code sent to {masked}";
 
         return ApiResponse<SendKycOtpResponseDto>.SuccessResponse(new SendKycOtpResponseDto
         {
@@ -131,21 +149,27 @@ public class OtpService : IOtpService
         CachedOtpEntry? entry = null;
         string activeKey = string.Empty;
 
+        // Primary: look up by token (most specific — matches the exact KYC request)
         if (!string.IsNullOrWhiteSpace(cleanToken))
         {
             activeKey = GetCacheKey(cleanToken, string.Empty);
             _cache.TryGetValue(activeKey, out entry);
+
+            if (entry == null)
+            {
+                var subToken = cleanToken.StartsWith("tok_") ? cleanToken[4..] : cleanToken;
+                var tokenPrefix = subToken.Contains('_') ? subToken.Split('_')[0] : subToken;
+                if (!string.IsNullOrEmpty(tokenPrefix))
+                {
+                    _cache.TryGetValue($"kyc_token_otp_{tokenPrefix}", out entry);
+                }
+            }
         }
 
+        // Fallback: look up by email if token key missed
         if (entry == null && !string.IsNullOrWhiteSpace(dto.Email))
         {
             activeKey = $"kyc_email_otp_{dto.Email.Trim().ToLower()}";
-            _cache.TryGetValue(activeKey, out entry);
-        }
-
-        if (entry == null && !string.IsNullOrWhiteSpace(cleanToken) && cleanToken.Contains("dhina", StringComparison.OrdinalIgnoreCase))
-        {
-            activeKey = "kyc_email_otp_antigravity01gemini@gmail.com";
             _cache.TryGetValue(activeKey, out entry);
         }
 
@@ -168,17 +192,35 @@ public class OtpService : IOtpService
         // Compare entered OTP
         if (isMatch)
         {
-            // Match success! Remove from cache so it cannot be re-used
+            // Match success! Remove all alias keys from cache so it cannot be re-used
             if (!string.IsNullOrEmpty(activeKey)) _cache.Remove(activeKey);
-            if (!string.IsNullOrEmpty(entry.Token)) _cache.Remove($"kyc_token_otp_{entry.Token}");
-            if (!string.IsNullOrEmpty(entry.Email)) _cache.Remove($"kyc_email_otp_{entry.Email.ToLower()}");
+            if (!string.IsNullOrEmpty(cleanToken))
+            {
+                _cache.Remove($"kyc_token_otp_{cleanToken}");
+                var subToken = cleanToken.StartsWith("tok_") ? cleanToken[4..] : cleanToken;
+                var tokenPrefix = subToken.Contains('_') ? subToken.Split('_')[0] : subToken;
+                if (!string.IsNullOrEmpty(tokenPrefix))
+                {
+                    _cache.Remove($"kyc_token_otp_{tokenPrefix}");
+                    _cache.Remove($"kyc_token_otp_tok_{tokenPrefix}");
+                }
+            }
+            if (!string.IsNullOrEmpty(entry.Token) && entry.Token != cleanToken)
+            {
+                _cache.Remove($"kyc_token_otp_{entry.Token}");
+            }
+            if (!string.IsNullOrEmpty(entry.Email))
+            {
+                _cache.Remove($"kyc_email_otp_{entry.Email.ToLowerInvariant()}");
+            }
 
-            _logger.LogInformation("[KYC OTP VERIFIED] Successfully verified identity for {Email} with OTP {Otp}", entry.Email, inputOtp);
+            _logger.LogInformation("[KYC OTP] Identity verified for {Email}", entry.Email);
 
             return Task.FromResult(ApiResponse<VerifyKycOtpResponseDto>.SuccessResponse(new VerifyKycOtpResponseDto
             {
                 Verified = true,
-                Message = "Identity verified successfully!"
+                Message = "Identity verified successfully!",
+                Email = entry.Email
             }, "Identity verified successfully!"));
         }
 
@@ -190,20 +232,7 @@ public class OtpService : IOtpService
 
     private async Task<InvestorKyc?> ResolveKycByTokenAsync(string token, CancellationToken ct)
     {
-        // 1. Direct match
-        var direct = await _kycRepo.GetByTokenAsync(token, ct);
-        if (direct != null) return direct;
-
-        // 2. Slug match (e.g. tok_36d49ac8_ramesh)
-        var allKycs = await _kycRepo.GetAllAsync(1, null, ct);
-        var subToken = token.Replace("tok_", "").Trim();
-        var match = allKycs.FirstOrDefault(k =>
-            k.KycLinkToken == token ||
-            (!string.IsNullOrEmpty(k.KycLinkToken) && subToken.StartsWith(k.KycLinkToken.Substring(0, Math.Min(8, k.KycLinkToken.Length)))) ||
-            (!string.IsNullOrEmpty(k.KycLinkToken) && token.Contains(k.KycLinkToken.Substring(0, Math.Min(8, k.KycLinkToken.Length))))
-        );
-
-        return match;
+        return await _kycRepo.GetByTokenAsync(token, ct);
     }
 
     private static string CleanToken(string? rawToken)

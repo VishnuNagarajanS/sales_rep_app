@@ -168,9 +168,14 @@ export const AssignedLeadsPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
+    let timeoutId: any;
+    const handleUpdate = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        loadData();
+      }, 300);
+    };
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    
     // Polling every 15 seconds while visible
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible' && !apiClient.isMockMode()) {
@@ -184,6 +189,7 @@ export const AssignedLeadsPage: React.FC = () => {
     window.addEventListener('focus', handleFocus);
 
     return () => {
+      clearTimeout(timeoutId);
       window.removeEventListener('nexus_storage_updated', handleUpdate);
       window.removeEventListener('focus', handleFocus);
       clearInterval(interval);

@@ -181,6 +181,13 @@ export interface Deal {
   investmentRange?: string; // e.g. "₹15 Cr – ₹25 Cr", display string shown in green
   investorType?: 'AIF' | 'Co-AIF';
   investmentAmountConfirmed?: boolean;
+  kycStatus?: string;
+  kycId?: number;
+  customerKycStatus?: string;
+  verifiedBy?: string;
+  verifiedAt?: string;
+  remarks?: string;
+  flaggedSections?: string[];
 }
 
 export interface DealActivity {
@@ -203,7 +210,8 @@ export type CallDisposition =
   | 'Call Back'
   | 'Wrong Number'
   | 'Converted'
-  | 'No Response';
+  | 'No Response'
+  | 'Skipped';
 
 export interface CallRecord {
   id: string;
@@ -214,6 +222,9 @@ export interface CallRecord {
   duration: number; // in seconds
   agentId: string;
   agentName: string;
+  agentRole?: string;
+  callerType?: 'Agent' | 'IRM';
+  connectVia?: 'Connect via Agent' | 'Connect via IRM';
   disposition: CallDisposition;
   timestamp: string;
   recordingUrl?: string;

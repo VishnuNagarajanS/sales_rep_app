@@ -48,6 +48,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
   // User menu
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
+
   // Sync notifications with tenant and user scoping
   useEffect(() => {
     const handleUpdate = () => {

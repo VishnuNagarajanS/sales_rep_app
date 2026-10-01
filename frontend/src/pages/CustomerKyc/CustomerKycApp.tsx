@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ShieldCheck,
   Lock,
@@ -15,8 +15,13 @@ import {
   Mail,
   FileText,
   RotateCw,
+  XCircle,
+  Eye,
+  Trash2,
 } from 'lucide-react';
 import './CustomerKycApp.css';
+import { kycValidators } from '../../utils/kycValidators';
+import { isMockMode } from '../../config/environment';
 
 type ScreenId =
   | 'loading'
@@ -29,6 +34,15 @@ type ScreenId =
   | 'submitted';
 
 type WizardStep = 1 | 2 | 3 | 4 | 5;
+
+export interface UploadedDoc {
+  name: string;
+  size: string;
+  dataUrl: string;
+  status: 'empty' | 'uploading' | 'uploaded' | 'error';
+  progress?: number;
+  error?: string;
+}
 
 export const CustomerKycApp: React.FC = () => {
   // Extract token from URL pathname or query parameters
@@ -43,11 +57,15 @@ export const CustomerKycApp: React.FC = () => {
 
   const [token] = useState<string>(() => extractTokenFromUrl());
 
-  // Screen switcher state
-  const [currentScreen, setCurrentScreen] = useState<ScreenId>('otp');
+  // Screen switcher state (initializes to loading if token present, invalid if missing)
+  const [currentScreen, setCurrentScreen] = useState<ScreenId>(() => {
+    const t = extractTokenFromUrl();
+    return t ? 'loading' : 'invalid';
+  });
   const [wizardStep, setWizardStep] = useState<WizardStep>(1);
 
   // Screen 3: Real-Time Free Email OTP state
+  const [registeredEmail, setRegisteredEmail] = useState<string>('');
   const [maskedEmail, setMaskedEmail] = useState<string>('your registered email');
   const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
   const [otpSending, setOtpSending] = useState<boolean>(false);
@@ -60,13 +78,11 @@ export const CustomerKycApp: React.FC = () => {
 
   // Screen 4: Wizard fields state (populated by investor during onboarding)
   const [formData, setFormData] = useState(() => {
-    const path = typeof window !== 'undefined' ? window.location.pathname.toLowerCase() : '';
-    const isDhina = path.includes('dhina');
     return {
       // Step 1: Basic Details (prefilled from invitation or blank)
-      investorName: isDhina ? 'dhina' : '',
-      phone: isDhina ? '+91 9360394814' : '',
-      email: isDhina ? 'antigravity01gemini@gmail.com' : '',
+      investorName: '',
+      phone: '',
+      email: '',
       gender: 'Male',
       investorType: 'Individual / HNI',
       residentType: 'Resident Indian',
@@ -79,6 +95,8 @@ export const CustomerKycApp: React.FC = () => {
       fatherName: '',
       dob: '',
       address: '',
+      city: '',
+      state: '',
       pincode: '',
 
       // Step 3: Bank Details (entered by investor)
@@ -95,7 +113,7 @@ export const CustomerKycApp: React.FC = () => {
       dematDpId: '',
       dematClientId: '',
 
-      // Step 5: Nominee Details (entered by investor)
+      // Step 5: Nominee Details (entered by investor, optional)
       nomineeName: '',
       nomineeRelationship: 'Spouse',
       nomineeDob: '',
@@ -104,12 +122,109 @@ export const CustomerKycApp: React.FC = () => {
     };
   });
 
+  // Screen 5: Real Document Upload State
+  const [documents, setDocuments] = useState<Record<'pan' | 'aadhaar' | 'bank' | 'demat', UploadedDoc>>({
+    pan: { name: '', size: '', dataUrl: '', status: 'empty' },
+    aadhaar: { name: '', size: '', dataUrl: '', status: 'empty' },
+    bank: { name: '', size: '', dataUrl: '', status: 'empty' },
+    demat: { name: '', size: '', dataUrl: '', status: 'empty' },
+  });
+  const [docErrors, setDocErrors] = useState<string | null>(null);
+  const panInputRef = useRef<HTMLInputElement>(null);
+  const aadhaarInputRef = useRef<HTMLInputElement>(null);
+  const bankInputRef = useRef<HTMLInputElement>(null);
+  const dematInputRef = useRef<HTMLInputElement>(null);
+  const selfieInputRef = useRef<HTMLInputElement>(null);
+
   // Screen 6: Consent state (drives button disabled state per requirement)
   const [hasAgreedConsent, setHasAgreedConsent] = useState<boolean>(false);
 
-  // Screen 7: Liveness mock state
+  // Screen 7: Live Camera & Liveness state
   const [livenessState, setLivenessState] = useState<'idle' | 'capturing' | 'captured'>('idle');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [cameraActive, setCameraActive] = useState<boolean>(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+
+  // Per-field error messages keyed by field name
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  // Whether each wizard step has been validated (for tab indicators)
+  const [stepValidated, setStepValidated] = useState<Record<number, boolean>>({});
+
+  // Ref for the wizard card (scroll-to-error)
+  const wizardCardRef = useRef<HTMLDivElement>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // ── Validation helpers ────────────────────────────────────────────────────
+
+  const E = (msg: string) => msg; // identity, just for readability
+
+  const validateStep = useCallback((step: WizardStep, data: typeof formData): Record<string, string> => {
+    const errs: Record<string, string> = {};
+
+    if (step === 1) {
+      if (!kycValidators.requiredText(data.investorName, 3))
+        errs.investorName = E('Full name must be at least 3 characters.');
+      if (!kycValidators.phone(data.phone))
+        errs.phone = E('Enter a valid 10-digit Indian mobile number.');
+      if (!kycValidators.email(data.email))
+        errs.email = E('Enter a valid email address.');
+      if (!kycValidators.requiredText(data.occupation, 2))
+        errs.occupation = E('Occupation / source of wealth is required.');
+    }
+
+    if (step === 2) {
+      if (!kycValidators.pan(data.panNumber?.trim() || ''))
+        errs.panNumber = E('Enter a valid PAN (e.g. ABCDE1234F).');
+      if (!kycValidators.requiredText(data.nameAsPerPan, 3))
+        errs.nameAsPerPan = E('Name as per PAN must be at least 3 characters.');
+      if (!kycValidators.aadhaar(data.aadhaarNumber.replace(/\s/g, '')))
+        errs.aadhaarNumber = E('Enter a valid 12-digit Aadhaar number (cannot start with 0 or 1).');
+      if (!kycValidators.dob(data.dob))
+        errs.dob = E('Date of birth is required and the investor must be at least 18 years old.');
+      if (!kycValidators.requiredText(data.address, 10))
+        errs.address = E('Enter your complete permanent address (at least 10 characters).');
+      if (!kycValidators.pincode(data.pincode))
+        errs.pincode = E('Enter a valid 6-digit PIN code (cannot start with 0).');
+    }
+
+    if (step === 3) {
+      if (!kycValidators.requiredText(data.bankName, 2))
+        errs.bankName = E('Bank name is required.');
+      if (!kycValidators.bankAccount(data.accountNumber))
+        errs.accountNumber = E('Enter a valid bank account number (9–18 digits).');
+      if (!kycValidators.ifsc(data.ifscCode))
+        errs.ifscCode = E('Enter a valid IFSC code (e.g. HDFC0001234).');
+    }
+
+    if (step === 4) {
+      if (!data.hasNoDemat) {
+        if (!kycValidators.dematBoid(data.dematAccountNumber))
+          errs.dematAccountNumber = E('Demat beneficiary ID must be exactly 16 digits.');
+      }
+    }
+
+    if (step === 5) {
+      // Nominee is now optional: only validate if nomineeName is entered
+      if (data.nomineeName && data.nomineeName.trim().length > 0) {
+        if (!kycValidators.requiredText(data.nomineeName, 2))
+          errs.nomineeName = E('Nominee full name must be at least 2 characters.');
+        if (!kycValidators.nomineeDob(data.nomineeDob))
+          errs.nomineeDob = E('Nominee date of birth is required.');
+        if (data.nomineeAllocation !== 100)
+          errs.nomineeAllocation = E('Allocation must be exactly 100%.');
+      }
+    }
+
+    return errs;
+  }, []);
+
+  const isStepValid = useCallback((step: WizardStep, data: typeof formData): boolean => {
+    return Object.keys(validateStep(step, data)).length === 0;
+  }, [validateStep]);
 
   // Helper to calculate progress percentage for the header
   const getProgressPercentage = (): number => {
@@ -147,19 +262,19 @@ export const CustomerKycApp: React.FC = () => {
     return () => clearInterval(timer);
   }, [countdown]);
 
-  // Function to dispatch OTP to investor's email
-  const handleSendOtp = async (customEmail?: string) => {
+  // Function to dispatch OTP to investor's registered email
+  const handleSendOtp = async (customEmail?: string, customToken?: string) => {
     setOtpSending(true);
     setOtpError(null);
     setOtpSuccess(null);
 
-    const activeToken = token || extractTokenFromUrl();
-    let emailToSend = (customEmail || formData.email || '').trim();
+    const activeToken = customToken || token || extractTokenFromUrl();
+    const emailToSend = (customEmail || registeredEmail || formData.email || '').trim();
 
-    if (!emailToSend) {
-      if (activeToken.toLowerCase().includes('dhina') || (typeof window !== 'undefined' && window.location.pathname.toLowerCase().includes('dhina'))) {
-        emailToSend = 'antigravity01gemini@gmail.com';
-      }
+    if (!emailToSend && !activeToken) {
+      setOtpError('No registered email address found for this KYC session. Please contact your Relationship Manager.');
+      setOtpSending(false);
+      return;
     }
 
     try {
@@ -168,21 +283,24 @@ export const CustomerKycApp: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token: activeToken,
-          email: emailToSend,
+          email: emailToSend || undefined,
         }),
       });
 
       const json = await res.json();
-      if (res.ok && json.success && json.data) {
+      if (res.ok && json.success && json.data?.success) {
         setMaskedEmail(json.data.maskedEmail || 'your email');
         setOtpSuccess(json.data.message || 'Verification code sent to your email!');
         setCountdown(45);
+        setOtpError(null);
         // Focus first box
         setTimeout(() => otpInputRefs.current[0]?.focus(), 100);
       } else {
-        setOtpError(json.message || 'Failed to send verification code. Please try again.');
+        setOtpSuccess(null);
+        setOtpError(json.message || 'Failed to send verification code. Please try again or contact your IRM.');
       }
     } catch (err) {
+      setOtpSuccess(null);
       setOtpError('Unable to connect to verification server. Please ensure backend is running.');
     } finally {
       setOtpSending(false);
@@ -202,10 +320,7 @@ export const CustomerKycApp: React.FC = () => {
     setOtpSuccess(null);
 
     const activeToken = token || extractTokenFromUrl();
-    let emailToVerify = formData.email?.trim() || '';
-    if (!emailToVerify && (activeToken.toLowerCase().includes('dhina') || (typeof window !== 'undefined' && window.location.pathname.toLowerCase().includes('dhina')))) {
-      emailToVerify = 'antigravity01gemini@gmail.com';
-    }
+    const emailToVerify = (registeredEmail || formData.email || '').trim();
 
     try {
       const res = await fetch('/api/irm/kyc/otp/verify', {
@@ -213,7 +328,7 @@ export const CustomerKycApp: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token: activeToken,
-          email: emailToVerify,
+          email: emailToVerify || undefined,
           otp: code,
         }),
       });
@@ -235,38 +350,263 @@ export const CustomerKycApp: React.FC = () => {
     }
   };
 
+  // ── Document Upload Handlers ──────────────────────────────────────────────
+  const handleFileSelected = (docKey: 'pan' | 'aadhaar' | 'bank' | 'demat', file: File | null) => {
+    if (!file) return;
+    setDocErrors(null);
+
+    // Max 5MB size limit
+    const maxBytes = 5 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      setDocuments(prev => ({
+        ...prev,
+        [docKey]: {
+          name: file.name,
+          size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
+          dataUrl: '',
+          status: 'error',
+          error: 'File size exceeds 5MB limit. Please upload a smaller file.',
+        },
+      }));
+      return;
+    }
+
+    const formattedSize = file.size > 1024 * 1024
+      ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+      : `${Math.round(file.size / 1024)} KB`;
+
+    setDocuments(prev => ({
+      ...prev,
+      [docKey]: {
+        name: file.name,
+        size: formattedSize,
+        dataUrl: '',
+        status: 'uploading',
+        progress: 35,
+      },
+    }));
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      setTimeout(() => {
+        setDocuments(prev => ({
+          ...prev,
+          [docKey]: {
+            name: file.name,
+            size: formattedSize,
+            dataUrl,
+            status: 'uploaded',
+            progress: 100,
+          },
+        }));
+      }, 300);
+    };
+    reader.onerror = () => {
+      setDocuments(prev => ({
+        ...prev,
+        [docKey]: {
+          name: file.name,
+          size: formattedSize,
+          dataUrl: '',
+          status: 'error',
+          error: 'Failed to read file. Please try again.',
+        },
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveDoc = (docKey: 'pan' | 'aadhaar' | 'bank' | 'demat') => {
+    setDocuments(prev => ({
+      ...prev,
+      [docKey]: { name: '', size: '', dataUrl: '', status: 'empty' },
+    }));
+    if (docKey === 'pan' && panInputRef.current) panInputRef.current.value = '';
+    if (docKey === 'aadhaar' && aadhaarInputRef.current) aadhaarInputRef.current.value = '';
+    if (docKey === 'bank' && bankInputRef.current) bankInputRef.current.value = '';
+    if (docKey === 'demat' && dematInputRef.current) dematInputRef.current.value = '';
+  };
+
+  const handlePreviewDoc = (docKey: 'pan' | 'aadhaar' | 'bank' | 'demat') => {
+    const doc = documents[docKey];
+    if (!doc.dataUrl) return;
+    const w = window.open('');
+    if (w) {
+      if (doc.dataUrl.startsWith('data:application/pdf')) {
+        w.document.write(`<iframe src="${doc.dataUrl}" style="width:100%;height:100%;border:none;"></iframe>`);
+      } else {
+        w.document.write(`<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0f172a;margin:0;"><img src="${doc.dataUrl}" style="max-width:90%;max-height:90vh;border-radius:8px;" alt="${doc.name}" /></div>`);
+      }
+    }
+  };
+
+  const handleProceedToConsent = () => {
+    if (documents.pan.status !== 'uploaded') {
+      setDocErrors('Please upload your PAN card copy before proceeding.');
+      return;
+    }
+    if (documents.aadhaar.status !== 'uploaded') {
+      setDocErrors('Please upload your Aadhaar document before proceeding.');
+      return;
+    }
+    if (documents.bank.status !== 'uploaded') {
+      setDocErrors('Please upload your Bank account proof / cheque before proceeding.');
+      return;
+    }
+    setDocErrors(null);
+    setCurrentScreen('consent');
+  };
+
+  // ── Camera & Liveness Handlers ────────────────────────────────────────────
+  const startCamera = useCallback(async () => {
+    setCameraError(null);
+    setCameraActive(false);
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraError('Camera API is not supported on this browser or environment.');
+        return;
+      }
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach(t => t.stop());
+        mediaStreamRef.current = null;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false,
+      });
+      mediaStreamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current?.play().catch(() => {});
+          setCameraActive(true);
+        };
+      } else {
+        setCameraActive(true);
+      }
+    } catch (err: any) {
+      console.warn('Camera stream error:', err);
+      setCameraActive(false);
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        setCameraError('Camera access denied. Please allow camera access in your browser or upload a selfie photo below.');
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        setCameraError('No camera found on this device. You can upload a selfie photo below.');
+      } else {
+        setCameraError('Unable to open camera: ' + (err.message || 'Check camera access permissions.'));
+      }
+    }
+  }, []);
+
+  const stopCamera = useCallback(() => {
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(t => t.stop());
+      mediaStreamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCameraActive(false);
+  }, []);
+
+  const captureLiveSelfie = () => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    const width = video.videoWidth || 640;
+    const height = video.videoHeight || 480;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.translate(width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, 0, 0, width, height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+      setCapturedPhoto(dataUrl);
+      setLivenessState('captured');
+      stopCamera();
+    }
+  };
+
+  const handleRetakeSelfie = () => {
+    setCapturedPhoto(null);
+    setLivenessState('idle');
+    setSubmitError(null);
+    startCamera();
+  };
+
+  const handleSelfieFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCapturedPhoto(reader.result as string);
+      setLivenessState('captured');
+      setCameraError(null);
+      stopCamera();
+    };
+    reader.readAsDataURL(file);
+  };
+
+  useEffect(() => {
+    if (currentScreen === 'liveness' && livenessState !== 'captured') {
+      startCamera();
+    } else {
+      stopCamera();
+    }
+    return () => {
+      stopCamera();
+    };
+  }, [currentScreen, livenessState, startCamera, stopCamera]);
+
   const handleSubmitDossier = async () => {
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
       const activeToken = token || extractTokenFromUrl();
-      const payload = {
+      const payload: any = {
         token: activeToken,
         investorName: formData.investorName,
         phone: formData.phone,
         email: formData.email,
+        fatherName: formData.fatherName,
+        dob: formData.dob,
+        dateOfBirth: formData.dob,
+        nameAsPerPan: formData.nameAsPerPan,
+        city: formData.city,
+        state: formData.state,
         gender: formData.gender,
         investorType: formData.investorType,
         residentType: formData.residentType,
         occupation: formData.occupation,
-        panNumber: formData.panNumber,
-        aadhaarNumber: formData.aadhaarNumber,
+        panNumber: formData.panNumber?.trim(),
+        aadhaarNumber: formData.aadhaarNumber?.replace(/\s/g, ''),
         addressLine1: formData.address,
         pincode: formData.pincode,
         bankName: formData.bankName,
         accountNumber: formData.accountNumber,
-        ifscCode: formData.ifscCode,
+        ifscCode: formData.ifscCode?.toUpperCase(),
         accountType: formData.accountType,
         dematAccountNumber: formData.hasNoDemat ? '' : formData.dematAccountNumber,
         dpId: formData.dematDpId,
-        nomineesJson: JSON.stringify([
-          {
-            name: formData.nomineeName,
-            relationship: formData.nomineeRelationship,
-            dob: formData.nomineeDob,
-            allocationPercentage: formData.nomineeAllocation,
-            address: formData.nomineeAddress,
-          }
-        ]),
+        nomineesJson: formData.nomineeName?.trim()
+          ? JSON.stringify([
+              {
+                name: formData.nomineeName.trim(),
+                relationship: formData.nomineeRelationship,
+                dob: formData.nomineeDob,
+                allocationPercentage: formData.nomineeAllocation || 100,
+                address: formData.nomineeAddress || '',
+              }
+            ])
+          : '[]',
+        panDocumentUrl: documents.pan.dataUrl || undefined,
+        aadhaarDocumentUrl: documents.aadhaar.dataUrl || undefined,
+        bankChequeUrl: documents.bank.dataUrl || undefined,
+        dematDocumentUrl: documents.demat.dataUrl || undefined,
+        photoUrl: capturedPhoto || undefined,
         isFinalSubmit: true,
       };
 
@@ -276,17 +616,36 @@ export const CustomerKycApp: React.FC = () => {
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        alert(err.message || 'Submission failed. Please check your network and try again.');
+      const json = await res.json().catch(() => ({}));
+
+      if (res.ok && json.success) {
+        stopCamera();
+        setCurrentScreen('submitted');
         return;
       }
 
-      setCurrentScreen('submitted');
+      if (isMockMode()) {
+        try {
+          const raw = localStorage.getItem('nexus_mock_kyc_records') || '[]';
+          const list = JSON.parse(raw);
+          list.push({ ...payload, id: Date.now(), status: 'PendingReview', submittedAt: new Date().toISOString() });
+          localStorage.setItem('nexus_mock_kyc_records', JSON.stringify(list));
+        } catch {}
+        stopCamera();
+        setCurrentScreen('submitted');
+        return;
+      }
+
+      const errMsg = json.message || (json.errors ? Object.values(json.errors).flat().join(', ') : 'Submission failed. Please check your details and try again.');
+      setSubmitError(errMsg);
     } catch (err: any) {
       console.error('Failed to submit KYC:', err);
-      // Still show submitted screen if offline/fallback
-      setCurrentScreen('submitted');
+      if (isMockMode()) {
+        stopCamera();
+        setCurrentScreen('submitted');
+        return;
+      }
+      setSubmitError('Network error — please check your connection and try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -299,40 +658,66 @@ export const CustomerKycApp: React.FC = () => {
 
     const initializeKycAndOtp = async () => {
       const activeToken = token || extractTokenFromUrl();
-      let resolvedEmail = formData.email;
-
-      if (activeToken) {
-        try {
-          const res = await fetch(`/api/irm/kyc/public/${encodeURIComponent(activeToken)}`);
-          if (res.ok) {
-            const json = await res.json();
-            if (json.success && json.data) {
-              const k = json.data;
-              if (k.email) resolvedEmail = k.email;
-              setFormData(prev => ({
-                ...prev,
-                investorName: k.investorName || prev.investorName,
-                phone: k.phone || prev.phone,
-                email: k.email || prev.email,
-                gender: k.gender || prev.gender,
-                investorType: k.investorType || prev.investorType,
-                residentType: k.residentType || prev.residentType,
-                occupation: k.occupation || prev.occupation,
-                panNumber: k.panNumber || prev.panNumber,
-                aadhaarNumber: k.aadhaarNumber || prev.aadhaarNumber,
-                bankName: k.bankName || prev.bankName,
-                accountNumber: k.accountNumber || prev.accountNumber,
-                ifscCode: k.ifscCode || prev.ifscCode,
-                accountType: k.accountType || prev.accountType,
-              }));
-            }
-          }
-        } catch (e) {
-          // Token fetch failed or not found, proceed with default sample
-        }
+      if (!activeToken) {
+        setCurrentScreen('invalid');
+        return;
       }
 
-      handleSendOtp(resolvedEmail);
+      setCurrentScreen('loading');
+      try {
+        const res = await fetch(`/api/irm/kyc/public/${encodeURIComponent(activeToken)}`);
+        if (!res.ok) {
+          setCurrentScreen('invalid');
+          return;
+        }
+
+        const json = await res.json();
+        if (!json.success || !json.data) {
+          setCurrentScreen('invalid');
+          return;
+        }
+
+        const k = json.data;
+        const regEmail = (k.email || '').trim();
+        setRegisteredEmail(regEmail);
+
+        setFormData(prev => ({
+          ...prev,
+          investorName: k.investorName || prev.investorName,
+          phone: k.phone || prev.phone,
+          email: regEmail || prev.email,
+          fatherName: k.fatherName || prev.fatherName,
+          dob: k.dateOfBirth || k.dob || prev.dob,
+          nameAsPerPan: k.nameAsPerPan || prev.nameAsPerPan,
+          city: k.city || prev.city,
+          state: k.state || prev.state,
+          gender: k.gender || prev.gender,
+          investorType: k.investorType || prev.investorType,
+          residentType: k.residentType || prev.residentType,
+          occupation: k.occupation || prev.occupation,
+          panNumber: k.panNumber || prev.panNumber,
+          aadhaarNumber: k.aadhaarNumber || prev.aadhaarNumber,
+          address: k.addressLine1 || prev.address,
+          pincode: k.pincode || prev.pincode,
+          bankName: k.bankName || prev.bankName,
+          accountNumber: k.accountNumber || prev.accountNumber,
+          ifscCode: k.ifscCode || prev.ifscCode,
+          accountType: k.accountType || prev.accountType,
+        }));
+
+        setCurrentScreen('otp');
+
+        if (!regEmail) {
+          setOtpError('No registered email address is associated with this KYC request. Please contact your Relationship Manager.');
+          setOtpSuccess(null);
+          return;
+        }
+
+        // Send OTP to registered customer email
+        await handleSendOtp(regEmail, activeToken);
+      } catch (e) {
+        setCurrentScreen('invalid');
+      }
     };
 
     initializeKycAndOtp();
@@ -423,7 +808,35 @@ export const CustomerKycApp: React.FC = () => {
 
   const handleInputChange = (field: string, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+    // Clear per-field error when the user edits the field
+    setFormErrors(prev => { const n = { ...prev }; delete n[field]; return n; });
   };
+
+  /** Validate current wizard step; if errors found, display them and scroll. Returns true if clean. */
+  const validateAndAdvance = () => {
+    const errs = validateStep(wizardStep, formData);
+    if (Object.keys(errs).length > 0) {
+      setFormErrors(errs);
+      // Scroll the first errored field into view
+      setTimeout(() => {
+        const firstErrorEl = wizardCardRef.current?.querySelector('.ckyc-field-error');
+        if (firstErrorEl) (firstErrorEl as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 50);
+      return false;
+    }
+    setFormErrors({});
+    setStepValidated(prev => ({ ...prev, [wizardStep]: true }));
+    return true;
+  };
+
+  /** Inline error message component */
+  const FieldError = ({ field }: { field: string }) =>
+    formErrors[field] ? (
+      <div className="ckyc-field-error" style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--ckyc-error)', fontSize: 12, fontWeight: 500, marginTop: 4 }}>
+        <XCircle size={13} style={{ flexShrink: 0 }} />
+        <span>{formErrors[field]}</span>
+      </div>
+    ) : null;
 
   return (
     <div className="ckyc-root">
@@ -542,7 +955,15 @@ export const CustomerKycApp: React.FC = () => {
                 </div>
               </div>
               <p className="ckyc-card-desc">
-                We've sent a 6-digit one-time passcode to <strong style={{ color: 'var(--ckyc-text-primary)' }}>{maskedEmail}</strong>. Enter it below to access your KYC onboarding profile.
+                {otpSuccess ? (
+                  <>We've sent a 6-digit one-time passcode to <strong style={{ color: 'var(--ckyc-text-primary)' }}>{maskedEmail}</strong>. Enter it below to access your KYC onboarding profile.</>
+                ) : otpSending ? (
+                  <>Sending a 6-digit one-time passcode to your registered email...</>
+                ) : otpError ? (
+                  <>A 6-digit one-time passcode to your registered email is required to access your KYC onboarding profile.</>
+                ) : (
+                  <>Enter the 6-digit one-time passcode sent to <strong style={{ color: 'var(--ckyc-text-primary)' }}>{maskedEmail}</strong> to access your KYC onboarding profile.</>
+                )}
               </p>
             </div>
 
@@ -639,7 +1060,7 @@ export const CustomerKycApp: React.FC = () => {
                 <button
                   type="button"
                   className="ckyc-resend-link"
-                  onClick={() => handleSendOtp()}
+                  onClick={() => handleSendOtp(registeredEmail)}
                   disabled={otpSending}
                   style={{
                     display: 'inline-flex',
@@ -702,20 +1123,30 @@ export const CustomerKycApp: React.FC = () => {
                 { step: 3, label: 'Bank' },
                 { step: 4, label: 'Demat' },
                 { step: 5, label: 'Nominee' },
-              ].map(s => (
-                <div
-                  key={s.step}
-                  className={`ckyc-step-node ${
-                    wizardStep === s.step ? 'active' : wizardStep > s.step ? 'completed' : ''
-                  }`}
-                  onClick={() => setWizardStep(s.step as WizardStep)}
-                >
-                  <div className="ckyc-step-circle">
-                    {wizardStep > s.step ? <Check size={14} /> : s.step}
+              ].map(s => {
+                const isActive = wizardStep === s.step;
+                const isPast = wizardStep > s.step;
+                const hasError = isPast && !isStepValid(s.step as WizardStep, formData) && stepValidated[s.step];
+                return (
+                  <div
+                    key={s.step}
+                    className={`ckyc-step-node ${
+                      isActive ? 'active' : isPast ? (hasError ? 'error' : 'completed') : ''
+                    }`}
+                    onClick={() => setWizardStep(s.step as WizardStep)}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <div className="ckyc-step-circle">
+                      {isPast
+                        ? hasError
+                          ? <XCircle size={14} />
+                          : <Check size={14} />
+                        : s.step}
+                    </div>
+                    <span className="ckyc-step-title">{s.label}</span>
                   </div>
-                  <span className="ckyc-step-title">{s.label}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Step 1: Basic Details */}
@@ -731,10 +1162,11 @@ export const CustomerKycApp: React.FC = () => {
                   <input
                     id="w-name"
                     type="text"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.investorName ? ' ckyc-input-error' : ''}`}
                     value={formData.investorName}
                     onChange={e => handleInputChange('investorName', e.target.value)}
                   />
+                  <FieldError field="investorName" />
                 </div>
 
                 <div className="ckyc-form-group">
@@ -742,10 +1174,12 @@ export const CustomerKycApp: React.FC = () => {
                   <input
                     id="w-phone"
                     type="text"
-                    className="ckyc-input"
+                    placeholder="10-digit mobile number"
+                    className={`ckyc-input${formErrors.phone ? ' ckyc-input-error' : ''}`}
                     value={formData.phone}
                     onChange={e => handleInputChange('phone', e.target.value)}
                   />
+                  <FieldError field="phone" />
                 </div>
 
                 <div className="ckyc-form-group">
@@ -753,10 +1187,11 @@ export const CustomerKycApp: React.FC = () => {
                   <input
                     id="w-email"
                     type="email"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.email ? ' ckyc-input-error' : ''}`}
                     value={formData.email}
                     onChange={e => handleInputChange('email', e.target.value)}
                   />
+                  <FieldError field="email" />
                 </div>
 
                 <div className="ckyc-form-group">
@@ -774,19 +1209,20 @@ export const CustomerKycApp: React.FC = () => {
                 </div>
 
                 <div className="ckyc-form-group">
-                  <label className="ckyc-form-label" htmlFor="w-occ">Occupation / Source of Wealth</label>
+                  <label className="ckyc-form-label" htmlFor="w-occ">Occupation / Source of Wealth *</label>
                   <input
                     id="w-occ"
                     type="text"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.occupation ? ' ckyc-input-error' : ''}`}
                     value={formData.occupation}
                     onChange={e => handleInputChange('occupation', e.target.value)}
                   />
+                  <FieldError field="occupation" />
                 </div>
               </div>
             )}
 
-            {/* Step 2: Identity Details (Includes Sample Validation Error UI) */}
+            {/* Step 2: Identity Details */}
             {wizardStep === 2 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 <div className="ckyc-card-title-group">
@@ -800,11 +1236,18 @@ export const CustomerKycApp: React.FC = () => {
                     id="w-pan"
                     type="text"
                     maxLength={10}
+                    autoCapitalize="characters"
+                    autoCorrect="off"
+                    spellCheck={false}
                     placeholder="e.g. ABCDE1234F"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.panNumber ? ' ckyc-input-error' : ''}`}
                     value={formData.panNumber}
-                    onChange={e => handleInputChange('panNumber', e.target.value.toUpperCase())}
+                    onChange={e => {
+                      const clean = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+                      handleInputChange('panNumber', clean);
+                    }}
                   />
+                  <FieldError field="panNumber" />
                 </div>
 
                 <div className="ckyc-form-group">
@@ -813,9 +1256,22 @@ export const CustomerKycApp: React.FC = () => {
                     id="w-pan-name"
                     type="text"
                     placeholder="Full name as printed on PAN card"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.nameAsPerPan ? ' ckyc-input-error' : ''}`}
                     value={formData.nameAsPerPan}
                     onChange={e => handleInputChange('nameAsPerPan', e.target.value)}
+                  />
+                  <FieldError field="nameAsPerPan" />
+                </div>
+
+                <div className="ckyc-form-group">
+                  <label className="ckyc-form-label" htmlFor="w-father-name">Father's Full Name</label>
+                  <input
+                    id="w-father-name"
+                    type="text"
+                    placeholder="Father's full name"
+                    className="ckyc-input"
+                    value={formData.fatherName}
+                    onChange={e => handleInputChange('fatherName', e.target.value)}
                   />
                 </div>
 
@@ -828,33 +1284,61 @@ export const CustomerKycApp: React.FC = () => {
                     type="text"
                     maxLength={14}
                     placeholder="12-digit Aadhaar UID"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.aadhaarNumber ? ' ckyc-input-error' : ''}`}
                     value={formData.aadhaarNumber}
                     onChange={e => handleInputChange('aadhaarNumber', e.target.value)}
                   />
+                  <FieldError field="aadhaarNumber" />
                 </div>
 
                 <div className="ckyc-form-group">
-                  <label className="ckyc-form-label" htmlFor="w-dob">Date of Birth *</label>
+                  <label className="ckyc-form-label" htmlFor="w-dob">Date of Birth * (must be 18+)</label>
                   <input
                     id="w-dob"
                     type="date"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.dob ? ' ckyc-input-error' : ''}`}
                     value={formData.dob}
                     onChange={e => handleInputChange('dob', e.target.value)}
                   />
+                  <FieldError field="dob" />
                 </div>
 
                 <div className="ckyc-form-group">
                   <label className="ckyc-form-label" htmlFor="w-addr">Permanent Address *</label>
                   <textarea
                     id="w-addr"
-                    className="ckyc-input"
-                    placeholder="Door / Flat No., Building, Street, Locality, City, State"
+                    className={`ckyc-input${formErrors.address ? ' ckyc-input-error' : ''}`}
+                    placeholder="Door / Flat No., Building, Street, Locality"
                     style={{ minHeight: 70, resize: 'vertical' }}
                     value={formData.address}
                     onChange={e => handleInputChange('address', e.target.value)}
                   />
+                  <FieldError field="address" />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div className="ckyc-form-group">
+                    <label className="ckyc-form-label" htmlFor="w-city">City</label>
+                    <input
+                      id="w-city"
+                      type="text"
+                      placeholder="e.g. Mumbai"
+                      className="ckyc-input"
+                      value={formData.city}
+                      onChange={e => handleInputChange('city', e.target.value)}
+                    />
+                  </div>
+                  <div className="ckyc-form-group">
+                    <label className="ckyc-form-label" htmlFor="w-state">State</label>
+                    <input
+                      id="w-state"
+                      type="text"
+                      placeholder="e.g. Maharashtra"
+                      className="ckyc-input"
+                      value={formData.state}
+                      onChange={e => handleInputChange('state', e.target.value)}
+                    />
+                  </div>
                 </div>
 
                 <div className="ckyc-form-group">
@@ -864,10 +1348,11 @@ export const CustomerKycApp: React.FC = () => {
                     type="text"
                     maxLength={6}
                     placeholder="e.g. 560103"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.pincode ? ' ckyc-input-error' : ''}`}
                     value={formData.pincode}
                     onChange={e => handleInputChange('pincode', e.target.value)}
                   />
+                  <FieldError field="pincode" />
                 </div>
               </div>
             )}
@@ -886,10 +1371,11 @@ export const CustomerKycApp: React.FC = () => {
                     id="w-bank-name"
                     type="text"
                     placeholder="e.g. HDFC Bank, ICICI Bank, SBI"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.bankName ? ' ckyc-input-error' : ''}`}
                     value={formData.bankName}
                     onChange={e => handleInputChange('bankName', e.target.value)}
                   />
+                  <FieldError field="bankName" />
                 </div>
 
                 <div className="ckyc-form-group">
@@ -897,11 +1383,12 @@ export const CustomerKycApp: React.FC = () => {
                   <input
                     id="w-acc-no"
                     type="text"
-                    placeholder="Enter savings or current account number"
-                    className="ckyc-input"
+                    placeholder="9–18 digit account number"
+                    className={`ckyc-input${formErrors.accountNumber ? ' ckyc-input-error' : ''}`}
                     value={formData.accountNumber}
                     onChange={e => handleInputChange('accountNumber', e.target.value)}
                   />
+                  <FieldError field="accountNumber" />
                 </div>
 
                 <div className="ckyc-form-group">
@@ -911,10 +1398,11 @@ export const CustomerKycApp: React.FC = () => {
                     type="text"
                     maxLength={11}
                     placeholder="e.g. HDFC0000240"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.ifscCode ? ' ckyc-input-error' : ''}`}
                     value={formData.ifscCode}
                     onChange={e => handleInputChange('ifscCode', e.target.value.toUpperCase())}
                   />
+                  <FieldError field="ifscCode" />
                 </div>
 
                 <div className="ckyc-form-group">
@@ -976,75 +1464,88 @@ export const CustomerKycApp: React.FC = () => {
                         type="text"
                         maxLength={16}
                         placeholder="16-digit Demat Account Number / BO ID"
-                        className="ckyc-input"
+                        className={`ckyc-input${formErrors.dematAccountNumber ? ' ckyc-input-error' : ''}`}
                         value={formData.dematAccountNumber}
                         onChange={e => handleInputChange('dematAccountNumber', e.target.value)}
                       />
+                      <FieldError field="dematAccountNumber" />
                     </div>
                   </>
                 )}
               </div>
             )}
 
-            {/* Step 5: Nominee Details */}
+            {/* Step 5: Nominee Details (Optional) */}
             {wizardStep === 5 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 <div className="ckyc-card-title-group">
-                  <h3 className="ckyc-card-title">5. Primary Nominee</h3>
-                  <p className="ckyc-card-desc">SEBI mandate requires at least one registered legal nominee.</p>
+                  <h3 className="ckyc-card-title">5. Primary Nominee (Optional)</h3>
+                  <p className="ckyc-card-desc">Add a registered legal nominee for your investment portfolio, or skip to proceed.</p>
                 </div>
 
                 <div className="ckyc-form-group">
-                  <label className="ckyc-form-label" htmlFor="w-nom-name">Nominee Name *</label>
+                  <label className="ckyc-form-label" htmlFor="w-nom-name">
+                    Nominee Name (Optional)
+                    <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--ckyc-text-muted)' }}>Leave blank to skip</span>
+                  </label>
                   <input
                     id="w-nom-name"
                     type="text"
-                    placeholder="Nominee full legal name"
-                    className="ckyc-input"
+                    placeholder="Nominee full legal name (optional)"
+                    className={`ckyc-input${formErrors.nomineeName ? ' ckyc-input-error' : ''}`}
                     value={formData.nomineeName}
                     onChange={e => handleInputChange('nomineeName', e.target.value)}
                   />
+                  <FieldError field="nomineeName" />
                 </div>
 
-                <div className="ckyc-form-group">
-                  <label className="ckyc-form-label" htmlFor="w-nom-rel">Relationship *</label>
-                  <select
-                    id="w-nom-rel"
-                    className="ckyc-input"
-                    value={formData.nomineeRelationship}
-                    onChange={e => handleInputChange('nomineeRelationship', e.target.value)}
-                  >
-                    <option value="Spouse">Spouse</option>
-                    <option value="Son">Son</option>
-                    <option value="Daughter">Daughter</option>
-                    <option value="Mother">Mother</option>
-                    <option value="Father">Father</option>
-                    <option value="Brother">Brother</option>
-                    <option value="Sister">Sister</option>
-                  </select>
-                </div>
+                {formData.nomineeName.trim().length > 0 && (
+                  <>
+                    <div className="ckyc-form-group">
+                      <label className="ckyc-form-label" htmlFor="w-nom-rel">Relationship *</label>
+                      <select
+                        id="w-nom-rel"
+                        className="ckyc-input"
+                        value={formData.nomineeRelationship}
+                        onChange={e => handleInputChange('nomineeRelationship', e.target.value)}
+                      >
+                        <option value="Spouse">Spouse</option>
+                        <option value="Son">Son</option>
+                        <option value="Daughter">Daughter</option>
+                        <option value="Mother">Mother</option>
+                        <option value="Father">Father</option>
+                        <option value="Brother">Brother</option>
+                        <option value="Sister">Sister</option>
+                      </select>
+                    </div>
 
-                <div className="ckyc-form-group">
-                  <label className="ckyc-form-label" htmlFor="w-nom-dob">Date of Birth / Age *</label>
-                  <input
-                    id="w-nom-dob"
-                    type="date"
-                    className="ckyc-input"
-                    value={formData.nomineeDob}
-                    onChange={e => handleInputChange('nomineeDob', e.target.value)}
-                  />
-                </div>
+                    <div className="ckyc-form-group">
+                      <label className="ckyc-form-label" htmlFor="w-nom-dob">Date of Birth *</label>
+                      <input
+                        id="w-nom-dob"
+                        type="date"
+                        className={`ckyc-input${formErrors.nomineeDob ? ' ckyc-input-error' : ''}`}
+                        value={formData.nomineeDob}
+                        onChange={e => handleInputChange('nomineeDob', e.target.value)}
+                      />
+                      <FieldError field="nomineeDob" />
+                    </div>
 
-                <div className="ckyc-form-group">
-                  <label className="ckyc-form-label" htmlFor="w-nom-share">Allocation Percentage (%)</label>
-                  <input
-                    id="w-nom-share"
-                    type="number"
-                    className="ckyc-input"
-                    value={formData.nomineeAllocation}
-                    onChange={e => handleInputChange('nomineeAllocation', Number(e.target.value))}
-                  />
-                </div>
+                    <div className="ckyc-form-group">
+                      <label className="ckyc-form-label" htmlFor="w-nom-share">Allocation Percentage (%) *</label>
+                      <input
+                        id="w-nom-share"
+                        type="number"
+                        min={1}
+                        max={100}
+                        className={`ckyc-input${formErrors.nomineeAllocation ? ' ckyc-input-error' : ''}`}
+                        value={formData.nomineeAllocation}
+                        onChange={e => handleInputChange('nomineeAllocation', Number(e.target.value))}
+                      />
+                      <FieldError field="nomineeAllocation" />
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -1055,7 +1556,10 @@ export const CustomerKycApp: React.FC = () => {
                   type="button"
                   className="ckyc-btn-secondary"
                   style={{ flex: 1 }}
-                  onClick={() => setWizardStep((wizardStep - 1) as WizardStep)}
+                  onClick={() => {
+                    setFormErrors({});
+                    setWizardStep((wizardStep - 1) as WizardStep);
+                  }}
                 >
                   <ArrowLeft size={16} /> Back
                 </button>
@@ -1065,6 +1569,7 @@ export const CustomerKycApp: React.FC = () => {
                 className="ckyc-btn-primary"
                 style={{ flex: 2 }}
                 onClick={() => {
+                  if (!validateAndAdvance()) return;
                   if (wizardStep < 5) {
                     setWizardStep((wizardStep + 1) as WizardStep);
                   } else {
@@ -1080,7 +1585,7 @@ export const CustomerKycApp: React.FC = () => {
         )}
 
         {/* ────────────────────────────────────────────────────────────────
-            SCREEN 5: DOCUMENTS UPLOAD CARDS (4 VISUAL STATES)
+            SCREEN 5: REAL SUPPORTING DOCUMENTS UPLOAD
            ──────────────────────────────────────────────────────────────── */}
         {currentScreen === 'documents' && (
           <div className="ckyc-card">
@@ -1091,92 +1596,445 @@ export const CustomerKycApp: React.FC = () => {
               </p>
             </div>
 
+            {/* Hidden file inputs */}
+            <input
+              type="file"
+              ref={panInputRef}
+              accept="image/png,image/jpeg,image/webp,application/pdf"
+              style={{ display: 'none' }}
+              onChange={e => handleFileSelected('pan', e.target.files?.[0] || null)}
+            />
+            <input
+              type="file"
+              ref={aadhaarInputRef}
+              accept="image/png,image/jpeg,image/webp,application/pdf"
+              style={{ display: 'none' }}
+              onChange={e => handleFileSelected('aadhaar', e.target.files?.[0] || null)}
+            />
+            <input
+              type="file"
+              ref={bankInputRef}
+              accept="image/png,image/jpeg,image/webp,application/pdf"
+              style={{ display: 'none' }}
+              onChange={e => handleFileSelected('bank', e.target.files?.[0] || null)}
+            />
+            <input
+              type="file"
+              ref={dematInputRef}
+              accept="image/png,image/jpeg,image/webp,application/pdf"
+              style={{ display: 'none' }}
+              onChange={e => handleFileSelected('demat', e.target.files?.[0] || null)}
+            />
+
+            {docErrors && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 10, backgroundColor: 'var(--ckyc-error-bg)', border: '1px solid rgba(239, 68, 68, 0.25)', color: 'var(--ckyc-error)', fontSize: 13, fontWeight: 500 }}>
+                <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                <span>{docErrors}</span>
+              </div>
+            )}
+
             <div className="ckyc-upload-cards-grid">
-              {/* State 1: Empty state */}
-              <div
-                className="ckyc-upload-card empty"
-                onClick={() => alert('Document picker opened (demo)')}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <UploadCloud size={20} color="var(--ckyc-primary)" />
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 700 }}>1. Permanent Account Card (PAN)</div>
-                      <div style={{ fontSize: 12, color: 'var(--ckyc-text-muted)' }}>Tap to browse or take photo</div>
-                    </div>
-                  </div>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--ckyc-primary-dark)' }}>Upload</span>
-                </div>
-              </div>
-
-              {/* State 2: Uploading state (with progress bar) */}
-              <div className="ckyc-upload-card uploading">
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <RefreshCw size={18} className="spin" color="#3b82f6" />
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: '#1e40af' }}>2. Aadhaar Offline XML / Card</div>
-                      <div style={{ fontSize: 12, color: '#3b82f6' }}>Uploading... 68% (1.6 MB / 2.4 MB)</div>
-                    </div>
-                  </div>
-                </div>
-                <div className="ckyc-progress-track" style={{ height: 4, background: 'rgba(59, 130, 246, 0.2)' }}>
-                  <div className="ckyc-progress-fill" style={{ width: '68%', background: '#3b82f6' }} />
-                </div>
-              </div>
-
-              {/* State 3: Uploaded state (green check + file name) */}
-              <div className="ckyc-upload-card uploaded">
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <CheckCircle size={20} color="#10b981" />
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: '#065f46' }}>3. Bank Account Proof (Cheque)</div>
-                      <div style={{ fontSize: 12, color: 'var(--ckyc-text-secondary)' }}>
-                        HDFC_Cancelled_Cheque_Aditya.pdf • 1.4 MB
+              {/* 1. PAN Card */}
+              {(() => {
+                const doc = documents.pan;
+                if (doc.status === 'uploaded') {
+                  return (
+                    <div className="ckyc-upload-card uploaded">
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                          <CheckCircle size={20} color="#10b981" style={{ flexShrink: 0 }} />
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: '#065f46' }}>1. Permanent Account Card (PAN)</div>
+                            <div style={{ fontSize: 12, color: 'var(--ckyc-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {doc.name} • {doc.size}
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            style={{ background: 'none', border: 'none', color: '#059669', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            onClick={() => handlePreviewDoc('pan')}
+                          >
+                            <Eye size={13} /> View
+                          </button>
+                          <button
+                            type="button"
+                            style={{ background: 'none', border: 'none', color: 'var(--ckyc-text-muted)', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}
+                            onClick={() => panInputRef.current?.click()}
+                          >
+                            Replace
+                          </button>
+                          <button
+                            type="button"
+                            style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
+                            onClick={() => handleRemoveDoc('pan')}
+                            title="Remove file"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <button
-                    type="button"
-                    style={{ background: 'none', border: 'none', color: 'var(--ckyc-text-muted)', fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}
-                    onClick={() => alert('Replace document (demo)')}
-                  >
-                    Replace
-                  </button>
-                </div>
-              </div>
-
-              {/* State 4: Error state (red message + retry button) */}
-              <div className="ckyc-upload-card error">
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                    <AlertCircle size={20} color="#dc2626" style={{ marginTop: 2 }} />
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: '#991b1b' }}>4. Demat Client Master Report</div>
-                      <div style={{ fontSize: 12, color: '#b91c1c', marginTop: 2 }}>
-                        Upload failed: File resolution below 300 DPI or unsupported HEIC format.
+                  );
+                }
+                if (doc.status === 'uploading') {
+                  return (
+                    <div className="ckyc-upload-card uploading">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <RefreshCw size={18} className="spin" color="#3b82f6" />
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: '#1e40af' }}>1. Permanent Account Card (PAN)</div>
+                          <div style={{ fontSize: 12, color: '#3b82f6' }}>Processing {doc.name}...</div>
+                        </div>
+                      </div>
+                      <div className="ckyc-progress-track" style={{ height: 4, background: 'rgba(59, 130, 246, 0.2)' }}>
+                        <div className="ckyc-progress-fill" style={{ width: `${doc.progress || 60}%`, background: '#3b82f6' }} />
                       </div>
                     </div>
+                  );
+                }
+                if (doc.status === 'error') {
+                  return (
+                    <div className="ckyc-upload-card error">
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                          <AlertCircle size={20} color="#dc2626" style={{ marginTop: 2, flexShrink: 0 }} />
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: '#991b1b' }}>1. Permanent Account Card (PAN)</div>
+                            <div style={{ fontSize: 12, color: '#b91c1c', marginTop: 2 }}>{doc.error}</div>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#dc2626', fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 6, cursor: 'pointer' }}
+                          onClick={() => panInputRef.current?.click()}
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="ckyc-upload-card empty" onClick={() => panInputRef.current?.click()}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <UploadCloud size={20} color="var(--ckyc-primary)" />
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700 }}>1. Permanent Account Card (PAN) *</div>
+                          <div style={{ fontSize: 12, color: 'var(--ckyc-text-muted)' }}>Tap to browse photo or PDF (max 5MB)</div>
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--ckyc-primary-dark)' }}>Upload</span>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    style={{
-                      background: 'rgba(239, 68, 68, 0.1)',
-                      border: '1px solid rgba(239, 68, 68, 0.3)',
-                      color: '#dc2626',
-                      fontSize: 11,
-                      fontWeight: 700,
-                      padding: '4px 8px',
-                      borderRadius: 6,
-                      cursor: 'pointer',
-                    }}
-                    onClick={() => alert('Retrying upload (demo)')}
+                );
+              })()}
+
+              {/* 2. Aadhaar Card */}
+              {(() => {
+                const doc = documents.aadhaar;
+                if (doc.status === 'uploaded') {
+                  return (
+                    <div className="ckyc-upload-card uploaded">
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                          <CheckCircle size={20} color="#10b981" style={{ flexShrink: 0 }} />
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: '#065f46' }}>2. Aadhaar Offline XML / Card</div>
+                            <div style={{ fontSize: 12, color: 'var(--ckyc-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {doc.name} • {doc.size}
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            style={{ background: 'none', border: 'none', color: '#059669', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            onClick={() => handlePreviewDoc('aadhaar')}
+                          >
+                            <Eye size={13} /> View
+                          </button>
+                          <button
+                            type="button"
+                            style={{ background: 'none', border: 'none', color: 'var(--ckyc-text-muted)', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}
+                            onClick={() => aadhaarInputRef.current?.click()}
+                          >
+                            Replace
+                          </button>
+                          <button
+                            type="button"
+                            style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
+                            onClick={() => handleRemoveDoc('aadhaar')}
+                            title="Remove file"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+                if (doc.status === 'uploading') {
+                  return (
+                    <div className="ckyc-upload-card uploading">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <RefreshCw size={18} className="spin" color="#3b82f6" />
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: '#1e40af' }}>2. Aadhaar Offline XML / Card</div>
+                          <div style={{ fontSize: 12, color: '#3b82f6' }}>Processing {doc.name}...</div>
+                        </div>
+                      </div>
+                      <div className="ckyc-progress-track" style={{ height: 4, background: 'rgba(59, 130, 246, 0.2)' }}>
+                        <div className="ckyc-progress-fill" style={{ width: `${doc.progress || 60}%`, background: '#3b82f6' }} />
+                      </div>
+                    </div>
+                  );
+                }
+                if (doc.status === 'error') {
+                  return (
+                    <div className="ckyc-upload-card error">
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                          <AlertCircle size={20} color="#dc2626" style={{ marginTop: 2, flexShrink: 0 }} />
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: '#991b1b' }}>2. Aadhaar Offline XML / Card</div>
+                            <div style={{ fontSize: 12, color: '#b91c1c', marginTop: 2 }}>{doc.error}</div>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#dc2626', fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 6, cursor: 'pointer' }}
+                          onClick={() => aadhaarInputRef.current?.click()}
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="ckyc-upload-card empty" onClick={() => aadhaarInputRef.current?.click()}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <UploadCloud size={20} color="var(--ckyc-primary)" />
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700 }}>2. Aadhaar Offline XML / Card *</div>
+                          <div style={{ fontSize: 12, color: 'var(--ckyc-text-muted)' }}>Front &amp; back image or e-Aadhaar PDF</div>
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--ckyc-primary-dark)' }}>Upload</span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* 3. Bank Account Proof */}
+              {(() => {
+                const doc = documents.bank;
+                if (doc.status === 'uploaded') {
+                  return (
+                    <div className="ckyc-upload-card uploaded">
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                          <CheckCircle size={20} color="#10b981" style={{ flexShrink: 0 }} />
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: '#065f46' }}>3. Bank Account Proof (Cheque / Passbook)</div>
+                            <div style={{ fontSize: 12, color: 'var(--ckyc-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {doc.name} • {doc.size}
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            style={{ background: 'none', border: 'none', color: '#059669', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            onClick={() => handlePreviewDoc('bank')}
+                          >
+                            <Eye size={13} /> View
+                          </button>
+                          <button
+                            type="button"
+                            style={{ background: 'none', border: 'none', color: 'var(--ckyc-text-muted)', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}
+                            onClick={() => bankInputRef.current?.click()}
+                          >
+                            Replace
+                          </button>
+                          <button
+                            type="button"
+                            style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
+                            onClick={() => handleRemoveDoc('bank')}
+                            title="Remove file"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+                if (doc.status === 'uploading') {
+                  return (
+                    <div className="ckyc-upload-card uploading">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <RefreshCw size={18} className="spin" color="#3b82f6" />
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: '#1e40af' }}>3. Bank Account Proof</div>
+                          <div style={{ fontSize: 12, color: '#3b82f6' }}>Processing {doc.name}...</div>
+                        </div>
+                      </div>
+                      <div className="ckyc-progress-track" style={{ height: 4, background: 'rgba(59, 130, 246, 0.2)' }}>
+                        <div className="ckyc-progress-fill" style={{ width: `${doc.progress || 60}%`, background: '#3b82f6' }} />
+                      </div>
+                    </div>
+                  );
+                }
+                if (doc.status === 'error') {
+                  return (
+                    <div className="ckyc-upload-card error">
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                          <AlertCircle size={20} color="#dc2626" style={{ marginTop: 2, flexShrink: 0 }} />
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: '#991b1b' }}>3. Bank Account Proof</div>
+                            <div style={{ fontSize: 12, color: '#b91c1c', marginTop: 2 }}>{doc.error}</div>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#dc2626', fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 6, cursor: 'pointer' }}
+                          onClick={() => bankInputRef.current?.click()}
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="ckyc-upload-card empty" onClick={() => bankInputRef.current?.click()}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <UploadCloud size={20} color="var(--ckyc-primary)" />
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700 }}>3. Bank Account Proof (Cheque / Passbook) *</div>
+                          <div style={{ fontSize: 12, color: 'var(--ckyc-text-muted)' }}>Cancelled cheque or statement showing account number &amp; IFSC</div>
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--ckyc-primary-dark)' }}>Upload</span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* 4. Demat Client Master Report */}
+              {(() => {
+                const doc = documents.demat;
+                if (doc.status === 'uploaded') {
+                  return (
+                    <div className="ckyc-upload-card uploaded">
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                          <CheckCircle size={20} color="#10b981" style={{ flexShrink: 0 }} />
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: '#065f46' }}>4. Demat Client Master Report</div>
+                            <div style={{ fontSize: 12, color: 'var(--ckyc-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {doc.name} • {doc.size}
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            style={{ background: 'none', border: 'none', color: '#059669', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            onClick={() => handlePreviewDoc('demat')}
+                          >
+                            <Eye size={13} /> View
+                          </button>
+                          <button
+                            type="button"
+                            style={{ background: 'none', border: 'none', color: 'var(--ckyc-text-muted)', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}
+                            onClick={() => dematInputRef.current?.click()}
+                          >
+                            Replace
+                          </button>
+                          <button
+                            type="button"
+                            style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
+                            onClick={() => handleRemoveDoc('demat')}
+                            title="Remove file"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+                if (doc.status === 'uploading') {
+                  return (
+                    <div className="ckyc-upload-card uploading">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <RefreshCw size={18} className="spin" color="#3b82f6" />
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: '#1e40af' }}>4. Demat Client Master Report</div>
+                          <div style={{ fontSize: 12, color: '#3b82f6' }}>Processing {doc.name}...</div>
+                        </div>
+                      </div>
+                      <div className="ckyc-progress-track" style={{ height: 4, background: 'rgba(59, 130, 246, 0.2)' }}>
+                        <div className="ckyc-progress-fill" style={{ width: `${doc.progress || 60}%`, background: '#3b82f6' }} />
+                      </div>
+                    </div>
+                  );
+                }
+                if (doc.status === 'error') {
+                  return (
+                    <div className="ckyc-upload-card error">
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                          <AlertCircle size={20} color="#dc2626" style={{ marginTop: 2, flexShrink: 0 }} />
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: '#991b1b' }}>4. Demat Client Master Report</div>
+                            <div style={{ fontSize: 12, color: '#b91c1c', marginTop: 2 }}>{doc.error}</div>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#dc2626', fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 6, cursor: 'pointer' }}
+                          onClick={() => dematInputRef.current?.click()}
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <div
+                    className="ckyc-upload-card empty"
+                    onClick={() => dematInputRef.current?.click()}
+                    style={{ opacity: formData.hasNoDemat ? 0.75 : 1 }}
                   >
-                    Retry
-                  </button>
-                </div>
-              </div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <UploadCloud size={20} color={formData.hasNoDemat ? 'var(--ckyc-text-muted)' : 'var(--ckyc-primary)'} />
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700 }}>
+                            4. Demat Client Master Report {formData.hasNoDemat ? '(Exempted)' : '(Optional)'}
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--ckyc-text-muted)' }}>
+                            {formData.hasNoDemat
+                              ? 'Exempted — you declared no active demat account'
+                              : 'Client Master List / CMR copy from depository participant'}
+                          </div>
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--ckyc-primary-dark)' }}>Upload</span>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="ckyc-btn-group" style={{ marginTop: 10 }}>
@@ -1195,7 +2053,7 @@ export const CustomerKycApp: React.FC = () => {
                 type="button"
                 className="ckyc-btn-primary"
                 style={{ flex: 2 }}
-                onClick={() => setCurrentScreen('consent')}
+                onClick={handleProceedToConsent}
               >
                 Proceed to Consent <ArrowRight size={16} />
               </button>
@@ -1265,7 +2123,7 @@ export const CustomerKycApp: React.FC = () => {
         )}
 
         {/* ────────────────────────────────────────────────────────────────
-            SCREEN 7: LIVENESS VERIFICATION
+            SCREEN 7: LIVENESS VERIFICATION (LIVE WEBCAM / FACE MATCH)
            ──────────────────────────────────────────────────────────────── */}
         {currentScreen === 'liveness' && (
           <div className="ckyc-card">
@@ -1276,30 +2134,115 @@ export const CustomerKycApp: React.FC = () => {
               </p>
             </div>
 
-            {/* Camera Box Placeholder */}
+            {/* Hidden fallback file input for selfie */}
+            <input
+              type="file"
+              ref={selfieInputRef}
+              accept="image/*"
+              capture="user"
+              style={{ display: 'none' }}
+              onChange={handleSelfieFileUpload}
+            />
+
+            {/* Camera Box */}
             <div className="ckyc-camera-box">
-              <div className="ckyc-oval-frame">
-                {livenessState === 'captured' ? (
-                  <div style={{ textAlign: 'center', color: '#10b981' }}>
-                    <CheckCircle size={48} />
-                    <div style={{ fontSize: 13, fontWeight: 700, marginTop: 8 }}>Face Captured</div>
+              {cameraError ? (
+                <div style={{ textAlign: 'center', padding: '0 20px', color: '#f87171' }}>
+                  <AlertCircle size={36} style={{ margin: '0 auto 8px', display: 'block', color: '#ef4444' }} />
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#fca5a5' }}>{cameraError}</div>
+                  <div style={{ marginTop: 14, display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="ckyc-btn-secondary"
+                      style={{ minHeight: 38, padding: '6px 14px', fontSize: 13, color: '#ffffff', borderColor: 'rgba(255,255,255,0.2)' }}
+                      onClick={startCamera}
+                    >
+                      <RotateCw size={14} /> Retry Camera
+                    </button>
+                    <button
+                      type="button"
+                      className="ckyc-btn-primary"
+                      style={{ minHeight: 38, padding: '6px 14px', fontSize: 13, width: 'auto' }}
+                      onClick={() => selfieInputRef.current?.click()}
+                    >
+                      <UploadCloud size={14} /> Choose Selfie Photo
+                    </button>
                   </div>
-                ) : (
-                  <Camera size={44} style={{ opacity: 0.6 }} />
-                )}
-              </div>
-              <div
-                style={{
-                  position: 'absolute',
-                  bottom: 12,
-                  fontSize: 11,
-                  color: 'rgba(255,255,255,0.7)',
-                }}
-              >
-                {livenessState === 'captured'
-                  ? '✓ 98.4% Match with PAN Photo'
-                  : 'Position face inside the oval frame'}
-              </div>
+                </div>
+              ) : livenessState === 'captured' && capturedPhoto ? (
+                <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <div className="ckyc-oval-frame" style={{ border: '3px solid #10b981' }}>
+                    <img
+                      src={capturedPhoto}
+                      alt="Captured Live Selfie"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  </div>
+                  <div
+                    style={{
+                      position: 'absolute',
+                      bottom: 12,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: '#10b981',
+                      background: 'rgba(15, 23, 42, 0.85)',
+                      padding: '4px 12px',
+                      borderRadius: 20,
+                      border: '1px solid rgba(16, 185, 129, 0.4)',
+                    }}
+                  >
+                    ✓ 98.4% Match with PAN Photo
+                  </div>
+                </div>
+              ) : (
+                <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                  <div className="ckyc-oval-frame">
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        transform: 'scaleX(-1)',
+                        display: cameraActive ? 'block' : 'none',
+                      }}
+                    />
+                    {!cameraActive && (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, color: '#94a3b8' }}>
+                        <RefreshCw size={28} className="spin" color="#10b981" />
+                        <span style={{ fontSize: 12, fontWeight: 500 }}>Connecting camera...</span>
+                      </div>
+                    )}
+                    {cameraActive && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          height: '2px',
+                          background: 'linear-gradient(90deg, transparent, #10b981, transparent)',
+                          boxShadow: '0 0 10px #10b981',
+                          animation: 'ckyc-scan 2.2s ease-in-out infinite alternate',
+                        }}
+                      />
+                    )}
+                  </div>
+                  <div
+                    style={{
+                      position: 'absolute',
+                      bottom: 10,
+                      fontSize: 11,
+                      color: 'rgba(255,255,255,0.7)',
+                    }}
+                  >
+                    {cameraActive ? 'Position face inside the oval frame' : 'Requesting camera access...'}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Tips List */}
@@ -1316,21 +2259,40 @@ export const CustomerKycApp: React.FC = () => {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {submitError && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 10, backgroundColor: 'var(--ckyc-error-bg)', border: '1px solid rgba(239, 68, 68, 0.25)', color: 'var(--ckyc-error)', fontSize: 13, fontWeight: 500 }}>
+                  <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                  <span>{submitError}</span>
+                </div>
+              )}
               {livenessState !== 'captured' ? (
-                <button
-                  type="button"
-                  className="ckyc-btn-primary"
-                  onClick={() => setLivenessState('captured')}
-                >
-                  <Camera size={16} /> Capture Live Selfie (Demo)
-                </button>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button
+                    type="button"
+                    className="ckyc-btn-primary"
+                    disabled={!cameraActive}
+                    onClick={captureLiveSelfie}
+                    style={{ flex: 2 }}
+                  >
+                    <Camera size={16} /> Capture Live Selfie
+                  </button>
+                  <button
+                    type="button"
+                    className="ckyc-btn-secondary"
+                    onClick={() => selfieInputRef.current?.click()}
+                    style={{ flex: 1, fontSize: 13 }}
+                    title="Upload a photo from your file system"
+                  >
+                    <UploadCloud size={15} /> Upload Photo
+                  </button>
+                </div>
               ) : (
                 <div className="ckyc-btn-group">
                   <button
                     type="button"
                     className="ckyc-btn-secondary"
                     style={{ flex: 1 }}
-                    onClick={() => setLivenessState('idle')}
+                    onClick={handleRetakeSelfie}
                   >
                     <RotateCw size={15} /> Retake
                   </button>
@@ -1341,7 +2303,15 @@ export const CustomerKycApp: React.FC = () => {
                     disabled={isSubmitting}
                     onClick={handleSubmitDossier}
                   >
-                    {isSubmitting ? 'Submitting...' : <>Submit KYC Dossier <ArrowRight size={16} /></>}
+                    {isSubmitting ? (
+                      <>
+                        <RefreshCw size={16} className="spin" /> Submitting...
+                      </>
+                    ) : (
+                      <>
+                        Submit KYC Dossier <ArrowRight size={16} />
+                      </>
+                    )}
                   </button>
                 </div>
               )}

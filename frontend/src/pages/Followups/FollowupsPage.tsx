@@ -21,8 +21,10 @@ import {
   saveFollowup as apiSaveFollowup,
   getCalls,
   getLeads,
+  getDeals,
   saveDeal as apiSaveDeal,
   saveLead as apiSaveLead,
+  saveCustomer as apiSaveCustomer,
   isTenantMatch,
 } from '../../services/ghlApiService';
 import { StatusChip } from '../../components/common/StatusChip';
@@ -57,14 +59,16 @@ export const FollowupsPage: React.FC = () => {
 
   // IRM Custom Preferences state
   const [isEditingPref, setIsEditingPref] = useState<boolean>(false);
-  const [prefAssetClass, setPrefAssetClass] = useState<string>('CO-AIF');
-  const [prefHorizon, setPrefHorizon] = useState<string>('3-5 Years');
+  const [prefAssetClass, setPrefAssetClass] = useState<string>('');
+  const [prefHorizon, setPrefHorizon] = useState<string>('');
   const [isPrefConfirmed, setIsPrefConfirmed] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // IRM Investment Capacity state
   const [isEditingCapacity, setIsEditingCapacity] = useState<boolean>(false);
   const [capacityValue, setCapacityValue] = useState<string>('');
+  const [investmentAmountValue, setInvestmentAmountValue] = useState<string>('');
+  const [isEditingAmount, setIsEditingAmount] = useState<boolean>(false);
   const INVESTMENT_CAPACITY_OPTIONS = ['₹1 Cr – ₹5 Cr', '₹5 Cr – ₹10 Cr', '₹10 Cr – ₹25 Cr', '₹25 Cr+'];
 
   const showToast = (msg: string) => {
@@ -220,36 +224,28 @@ export const FollowupsPage: React.FC = () => {
       } catch {}
     }
 
-    const rawAssetClass =
-      savedLocal?.preferredAssetClass ||
-      (l?.customFields?.irmPreferencesConfirmed ? l?.customFields?.preferredAssetClass : null) ||
-      (c?.customFields?.irmPreferencesConfirmed ? c?.customFields?.preferredAssetClass : null) ||
-      l?.customFields?.preferredAssetClass ||
-      c?.customFields?.preferredAssetClass;
-
-    const existingAssetClass =
-      rawAssetClass === 'AIF' || rawAssetClass === 'CO-AIF'
-        ? rawAssetClass
-        : 'CO-AIF';
-
-    const existingHorizon =
-      savedLocal?.horizon ||
-      (l?.customFields?.irmPreferencesConfirmed ? (l?.customFields?.horizon || l?.customFields?.investmentHorizon) : null) ||
-      (c?.customFields?.irmPreferencesConfirmed ? (c?.customFields?.horizon || c?.customFields?.investmentHorizon) : null) ||
-      l?.customFields?.horizon ||
-      l?.customFields?.investmentHorizon ||
-      c?.customFields?.horizon ||
-      c?.customFields?.investmentHorizon ||
-      '3-5 Years';
-
     const isConfirmed =
       savedLocal?.confirmed === true ||
       l?.customFields?.irmPreferencesConfirmed === true ||
       c?.customFields?.irmPreferencesConfirmed === true ||
       false;
 
-    setPrefAssetClass(existingAssetClass);
-    setPrefHorizon(existingHorizon);
+    const savedAssetClass =
+      (isConfirmed && savedLocal?.preferredAssetClass) ||
+      (l?.customFields?.irmPreferencesConfirmed && l?.customFields?.preferredAssetClass) ||
+      (c?.customFields?.irmPreferencesConfirmed && c?.customFields?.preferredAssetClass) ||
+      (isConfirmed ? (l?.customFields?.preferredAssetClass || c?.customFields?.preferredAssetClass) : null) ||
+      '';
+
+    const savedHorizon =
+      (isConfirmed && savedLocal?.horizon) ||
+      (l?.customFields?.irmPreferencesConfirmed && (l?.customFields?.horizon || l?.customFields?.investmentHorizon)) ||
+      (c?.customFields?.irmPreferencesConfirmed && (c?.customFields?.horizon || c?.customFields?.investmentHorizon)) ||
+      (isConfirmed ? (l?.customFields?.horizon || l?.customFields?.investmentHorizon || c?.customFields?.horizon || c?.customFields?.investmentHorizon) : null) ||
+      '';
+
+    setPrefAssetClass(savedAssetClass);
+    setPrefHorizon(savedHorizon);
     setIsPrefConfirmed(isConfirmed);
     setIsEditingPref(false);
 
@@ -264,6 +260,20 @@ export const FollowupsPage: React.FC = () => {
       '';
     setCapacityValue(existingCapacity);
     setIsEditingCapacity(false);
+
+    const allDeals = storageService.getDeals(tenant?.id) || [];
+    const existingDeal = allDeals.find((d: Deal) =>
+      (d.phone && d.phone.replace(/\D/g, '').slice(-10) === fDigits) ||
+      (drawerFollowup?.contactId && (d.customerId === drawerFollowup.contactId || d.id === drawerFollowup.contactId))
+    );
+    const existingAmount =
+      l?.customFields?.investmentAmount ||
+      c?.customFields?.investmentAmount ||
+      (drawerFollowup as any)?.investmentAmount ||
+      (existingDeal?.value ? String(existingDeal.value) : '') ||
+      '';
+    setInvestmentAmountValue(existingAmount ? String(existingAmount) : '');
+    setIsEditingAmount(false);
   }, [drawerFollowup?.id, drawerFollowup?.contactPhone, drawerFollowup?.contactId, tenant?.id]);
 
   const handleTogglePrefCheckbox = (checked: boolean, matchingLead: Lead | null, matchingCustomer: Customer | null) => {
@@ -272,6 +282,8 @@ export const FollowupsPage: React.FC = () => {
     } else {
       setIsEditingPref(false);
       setIsPrefConfirmed(false);
+      setPrefAssetClass('');
+      setPrefHorizon('');
 
       if (!drawerFollowup) return;
       const fDigits = (drawerFollowup.contactPhone || '').replace(/\D/g, '').slice(-10);
@@ -282,6 +294,9 @@ export const FollowupsPage: React.FC = () => {
           ...matchingLead,
           customFields: {
             ...(matchingLead.customFields || {}),
+            preferredAssetClass: '',
+            horizon: '',
+            investmentHorizon: '',
             irmPreferencesConfirmed: false,
           },
         });
@@ -292,6 +307,9 @@ export const FollowupsPage: React.FC = () => {
           ...matchingCustomer,
           customFields: {
             ...(matchingCustomer.customFields || {}),
+            preferredAssetClass: '',
+            horizon: '',
+            investmentHorizon: '',
             irmPreferencesConfirmed: false,
           },
         });
@@ -301,8 +319,8 @@ export const FollowupsPage: React.FC = () => {
         localStorage.setItem(
           `nexus_irm_pref_${contactKey}`,
           JSON.stringify({
-            preferredAssetClass: prefAssetClass,
-            horizon: prefHorizon,
+            preferredAssetClass: '',
+            horizon: '',
             confirmed: false,
           })
         );
@@ -338,8 +356,74 @@ export const FollowupsPage: React.FC = () => {
     setIsEditingCapacity(false);
   };
 
+  const handleSaveInvestmentAmount = async (matchingLead: Lead | null, matchingCustomer: Customer | null) => {
+    if (!drawerFollowup) return;
+    const num = parseFloat(investmentAmountValue.replace(/,/g, '').trim()) || 0;
+    const cleanStr = num > 0 ? String(num) : '';
+
+    if (matchingLead) {
+      const updatedLead: Lead = {
+        ...matchingLead,
+        customFields: {
+          ...(matchingLead.customFields || {}),
+          investmentAmount: cleanStr,
+        },
+      };
+      try {
+        await apiSaveLead(updatedLead);
+      } catch {
+        storageService.saveLead(updatedLead);
+      }
+    }
+    if (matchingCustomer) {
+      const updatedCust: Customer = {
+        ...matchingCustomer,
+        customFields: {
+          ...(matchingCustomer.customFields || {}),
+          investmentAmount: cleanStr,
+        },
+      };
+      try {
+        await apiSaveCustomer(updatedCust);
+      } catch {
+        storageService.saveCustomer(updatedCust);
+      }
+    }
+
+    const fDigits = (drawerFollowup.contactPhone || '').replace(/\D/g, '').slice(-10);
+    const resolvedContactId = drawerFollowup.contactId || matchingLead?.id || matchingCustomer?.id;
+    const allDeals = storageService.getDeals(tenant?.id) || [];
+    const existingDeal = allDeals.find((deal: Deal) =>
+      (resolvedContactId && (deal.customerId === resolvedContactId || deal.id === resolvedContactId)) ||
+      (drawerFollowup.contactPhone && deal.phone === drawerFollowup.contactPhone) ||
+      (fDigits && deal.phone && deal.phone.replace(/\D/g, '').slice(-10) === fDigits)
+    );
+    if (existingDeal) {
+      const updatedDeal: Deal = {
+        ...existingDeal,
+        value: num,
+      };
+      try {
+        await apiSaveDeal(updatedDeal);
+      } catch {
+        storageService.saveDeal(updatedDeal);
+      }
+    }
+
+    (drawerFollowup as any).investmentAmount = cleanStr;
+
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+    showToast('Investment Amount updated successfully');
+    setIsEditingAmount(false);
+  };
+
   const handleSavePreferences = (matchingLead: Lead | null, matchingCustomer: Customer | null) => {
     if (!drawerFollowup) return;
+    if (!prefAssetClass && !prefHorizon) {
+      showToast('Please select Preferred Asset Class or Investment Horizon before confirming');
+      return;
+    }
+
     const fDigits = (drawerFollowup.contactPhone || '').replace(/\D/g, '').slice(-10);
     const contactKey = drawerFollowup.contactId || fDigits;
 
@@ -423,10 +507,15 @@ export const FollowupsPage: React.FC = () => {
       matchingCustomer?.customFields?.investmentCapacity ||
       matchingCustomer?.customFields?.totalAUMCommitted ||
       (drawerFollowup as any)?.investmentCapacity ||
-      '₹10 Lakh to ₹1 Cr';
+      '';   // No hardcoded default — only use what the contact actually provided
 
-    // 1. Create or update deal in stage 'qualified_investor' — save to DB first, fallback to localStorage
-    const allDeals = storageService.getDeals(tenant?.id) || [];
+    // 1. Create or update deal in stage 'qualified_investor' — fetch from API first, fallback to localStorage
+    let allDeals: Deal[] = [];
+    try {
+      allDeals = await getDeals(tenant?.id);
+    } catch {
+      allDeals = storageService.getDeals(tenant?.id) || [];
+    }
     const existingDeal = allDeals.find(d =>
       (d.customerId && d.customerId === resolvedContactId) ||
       (d.phone && fDigits && (d.phone || '').replace(/\D/g, '').slice(-10) === fDigits)
@@ -443,15 +532,19 @@ export const FollowupsPage: React.FC = () => {
       location: contactLocation && contactLocation !== '—' ? contactLocation : undefined,
       stage: 'qualified_investor',
       stageEnteredAt: new Date().toISOString(),
-      value: 20000000,
+      value: (investmentAmountValue && parseFloat(investmentAmountValue.replace(/,/g, '')) > 0)
+        ? parseFloat(investmentAmountValue.replace(/,/g, ''))
+        : (existingDeal?.value ?? 0),
       expectedCloseDate: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
-      assignedAgentId: user?.id || drawerFollowup.assignedAgentId || 'usr-ghl-irm',
-      assignedAgentName: user?.name || drawerFollowup.assignedAgentName || 'Rohan Varma',
-      notes: `Ready for KYC. Moved from Follow-ups by IRM (${user?.name || 'Rohan Varma'}).`,
-      createdAt: new Date().toISOString().slice(0, 10),
+      assignedAgentId: user?.id || drawerFollowup.assignedAgentId || '',
+      assignedAgentName: user?.name || drawerFollowup.assignedAgentName || '',
+      notes: `Ready for KYC. Moved from Follow-ups by IRM (${user?.name || ''}).`,
+      createdAt: existingDeal?.createdAt || new Date().toISOString().slice(0, 10),
       priority: drawerFollowup.priority || 'High',
-      preferredAssetClass: prefAssetClass || 'CO-AIF',
-      investmentRange: investmentCapacity,
+      // Only set preferredAssetClass if IRM has confirmed it; do not default to 'CO-AIF'
+      ...(prefAssetClass && isPrefConfirmed ? { preferredAssetClass: prefAssetClass } : {}),
+      // Only set investmentRange if actually provided; do not default
+      ...(investmentCapacity ? { investmentRange: investmentCapacity } : {}),
     };
 
     // Save deal to DB (API) — this persists stage='qualified_investor' in Neon
@@ -485,10 +578,12 @@ export const FollowupsPage: React.FC = () => {
         status: 'Qualified' as Lead['status'],
         customFields: {
           ...(matchingLead.customFields || {}),
-          preferredAssetClass: prefAssetClass,
-          horizon: prefHorizon,
-          investmentHorizon: prefHorizon,
-          irmPreferencesConfirmed: true,
+          ...(prefAssetClass && isPrefConfirmed ? { preferredAssetClass: prefAssetClass } : {}),
+          ...(prefHorizon && isPrefConfirmed ? { horizon: prefHorizon, investmentHorizon: prefHorizon } : {}),
+          investmentAmount: (investmentAmountValue && parseFloat(investmentAmountValue.replace(/,/g, '')) > 0)
+            ? investmentAmountValue.replace(/,/g, '').trim()
+            : undefined,
+          irmPreferencesConfirmed: Boolean(isPrefConfirmed),
           movedToKycAt: new Date().toISOString(),
         },
       };
@@ -555,9 +650,18 @@ export const FollowupsPage: React.FC = () => {
       }
       return 'Sales Executive';
     }
-
-    // Direct check for known IRMs in db
+    // Direct check for known IRMs in db or storage
     if (agentName.includes('dhinakaran') || agentId === '5' || agentId === '30' || agentName.includes('irm')) {
+      return 'IRM';
+    }
+    const irmsList = storageService.getIrms ? storageService.getIrms(tenant?.id) : [];
+    if (
+      irmsList.some(
+        (u: any) =>
+          (u.name && u.name.toLowerCase() === agentName) ||
+          String(u.id) === agentId
+      )
+    ) {
       return 'IRM';
     }
 
@@ -658,44 +762,24 @@ export const FollowupsPage: React.FC = () => {
         (f.assignedAgentName && f.assignedAgentName === user?.name)
     );
   } else if (isIrm) {
-    // IRM Follow-up Required: show ALL pending followups for this tenant
-    // Matches linked lead 'Follow-up Required' status, direct assignment, or tenant match
-    const leadMap = new Map<string, Lead>();
-    allLeads.forEach(l => leadMap.set(l.id, l));
+    // IRM: Only show pending follow-ups assigned to THIS authenticated IRM
     scopedFollowups = followups.filter(f => {
       if (f.status !== 'Pending') return false;
       if (f.companyId && tenant?.id && !isTenantMatch(f.companyId, tenant.id)) return false;
-      // Directly assigned to IRM agent
-      if ((f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
-          (f.assignedAgentName && f.assignedAgentName === user?.name)) {
-        return true;
-      }
-      // Linked lead has Follow-up Required status
-      if (f.contactId) {
-        const linked = leadMap.get(f.contactId);
-        if (linked && linked.status === 'Follow-up Required') return true;
-      }
-      // Phone match fallback
-      const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-      if (fPhone) {
-        const matched = allLeads.find(l => {
-          const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
-          return lPhone === fPhone && l.status === 'Follow-up Required';
-        });
-        if (matched) return true;
-      }
-      return true;
+      return (
+        (f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
+        (f.assignedAgentName && f.assignedAgentName === user?.name)
+      );
     });
   } else {
     scopedFollowups = followups;
   }
 
-  // Safely deduplicate display rows
+  // Safely deduplicate display rows for all roles so at most one active pending follow-up is rendered per contact
   let processedFollowups = scopedFollowups;
-  if (isGhlSalesExec || isAdmin) {
-    try {
-      const seen = new Map<string, Followup>();
-      const deduped: Followup[] = [];
+  try {
+    const seen = new Map<string, Followup>();
+    const deduped: Followup[] = [];
 
       for (const f of scopedFollowups) {
         if (f.status !== 'Pending') {
@@ -720,7 +804,6 @@ export const FollowupsPage: React.FC = () => {
       console.error('Error deduping followups list:', err);
       processedFollowups = scopedFollowups;
     }
-  }
 
   const getCallCountForFollowup = (f: Followup): number => {
     const fPhoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
@@ -1053,15 +1136,17 @@ export const FollowupsPage: React.FC = () => {
                 </div>
 
                 <div className="followup-actions-right">
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    onClick={e => {
-                      e.stopPropagation();
-                      setRescheduleItem(f);
-                    }}
-                  >
-                    Reschedule
-                  </button>
+                  {!(isGhlAdmin && fRole === 'IRM') && (
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={e => {
+                        e.stopPropagation();
+                        setRescheduleItem(f);
+                      }}
+                    >
+                      Reschedule
+                    </button>
+                  )}
                   <button
                     className="btn btn-call btn-sm"
                     onClick={e => {
@@ -1121,7 +1206,7 @@ export const FollowupsPage: React.FC = () => {
           title={drawerFollowup?.contactName || 'Contact Profile'}
           subtitle={
             isAdmin
-              ? `Phone: ${drawerFollowup?.contactPhone || '—'} • Assigned to: ${
+              ? `Phone: ${drawerFollowup?.contactPhone || '—'} • Assigned: ${
                   drawerFollowup?.assignedAgentName || 'Unassigned'
                 } (${drawerFollowupRole})`
               : drawerFollowup?.contactPhone
@@ -1132,8 +1217,8 @@ export const FollowupsPage: React.FC = () => {
           footer={
             drawerFollowup && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: isExec ? 'flex-end' : 'space-between', width: '100%', gap: 10 }}>
-                {/* Ready for KYC button (Hidden for Sales Executive, available for IRM / Admins) */}
-                {!isExec && (
+                {/* Ready for KYC button (Hidden for Sales Executive and GHL Admin, available for IRM) */}
+                {!isExec && !isGhlAdmin && (
                   <button
                     type="button"
                     className="btn btn-primary"
@@ -1156,15 +1241,17 @@ export const FollowupsPage: React.FC = () => {
 
                 {/* Right side buttons */}
                 <div style={{ display: 'flex', gap: 10, marginLeft: isExec ? 'auto' : undefined }}>
-                  <button
-                    className="btn btn-secondary"
-                    onClick={() => {
-                      setRescheduleItem(drawerFollowup);
-                      setDrawerFollowup(null);
-                    }}
-                  >
-                    Reschedule
-                  </button>
+                  {!(isGhlAdmin && drawerFollowupRole === 'IRM') && (
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        setRescheduleItem(drawerFollowup);
+                        setDrawerFollowup(null);
+                      }}
+                    >
+                      Reschedule
+                    </button>
+                  )}
                   <button
                     className="btn btn-call"
                     onClick={() => {
@@ -1324,7 +1411,7 @@ export const FollowupsPage: React.FC = () => {
                 {!isAdmin && (
                   <div className="lead-quick-banner">
                     <div className="lead-assigned-note" style={{ fontSize: 13, marginTop: 0 }}>
-                      Assigned to <strong>{assignedAgent}</strong>
+                      Assigned: <strong>{assignedAgent}</strong>
                       {drawerFollowupRole && (
                         <span
                           style={{
@@ -1441,6 +1528,68 @@ export const FollowupsPage: React.FC = () => {
                         </div>
                       )}
                     </div>
+
+                    {/* ── Investment Amount (Separate from Capacity & Asset Class) ── */}
+                    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-color)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span className="lead-detail-label">Investment Amount:</span>
+                        {isIrm && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm btn-icon"
+                            title={isEditingAmount ? 'Cancel edit' : 'Edit Investment Amount'}
+                            style={{ width: 28, height: 28 }}
+                            onClick={() => setIsEditingAmount(prev => !prev)}
+                          >
+                            <Pencil size={13} />
+                          </button>
+                        )}
+                      </div>
+                      {isEditingAmount ? (
+                        <div style={{ marginTop: 6 }}>
+                          <input
+                            type="number"
+                            className="form-input"
+                            placeholder="e.g. 5000000"
+                            value={investmentAmountValue}
+                            onChange={e => setInvestmentAmountValue(e.target.value)}
+                            style={{ width: '100%', fontSize: 13, height: 36 }}
+                          />
+                          <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => setIsEditingAmount(false)}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                              onClick={() => handleSaveInvestmentAmount(matchingLead, matchingCustomer)}
+                            >
+                              <CheckCircle size={14} /> Save
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          className="lead-detail-value"
+                          style={{
+                            marginTop: 4,
+                            fontSize: 16,
+                            fontWeight: 700,
+                            color: investmentAmountValue && parseFloat(investmentAmountValue) > 0 ? '#059669' : 'var(--text-muted)',
+                            letterSpacing: '0.01em',
+                          }}
+                        >
+                          {investmentAmountValue && parseFloat(investmentAmountValue) > 0
+                            ? `₹${parseFloat(investmentAmountValue).toLocaleString('en-IN')}`
+                            : '—'}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -1451,18 +1600,19 @@ export const FollowupsPage: React.FC = () => {
                       <h4 className="lead-custom-title" style={{ margin: 0 }}>
                         {tenant?.name || 'GHL India Ventures'} Custom Attributes
                       </h4>
-                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', fontWeight: 600, color: 'var(--text-primary)' }}>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: isGhlAdmin ? 'default' : 'pointer', fontWeight: 600, color: 'var(--text-primary)' }}>
                         <input
                           type="checkbox"
-                          checked={isPrefConfirmed || isEditingPref}
+                          checked={Boolean(isPrefConfirmed)}
+                          disabled={isGhlAdmin}
                           onChange={e => handleTogglePrefCheckbox(e.target.checked, matchingLead, matchingCustomer)}
-                          style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--primary-600)' }}
+                          style={{ width: 16, height: 16, cursor: isGhlAdmin ? 'not-allowed' : 'pointer', accentColor: 'var(--primary-600)' }}
                         />
-                        <span>Set by IRM</span>
+                        <span>Set by IRM {isGhlAdmin && '(Read-only)'}</span>
                       </label>
                     </div>
 
-                    {isEditingPref ? (
+                    {!isGhlAdmin && isEditingPref ? (
                       <div>
                         <div className="lead-detail-grid" style={{ gap: 14 }}>
                           <div>
@@ -1475,6 +1625,7 @@ export const FollowupsPage: React.FC = () => {
                               onChange={e => setPrefAssetClass(e.target.value)}
                               style={{ width: '100%', fontSize: 13, height: 36 }}
                             >
+                              <option value="">— Select Asset Class —</option>
                               <option value="CO-AIF">CO-AIF</option>
                               <option value="AIF">AIF</option>
                             </select>
@@ -1489,6 +1640,7 @@ export const FollowupsPage: React.FC = () => {
                               onChange={e => setPrefHorizon(e.target.value)}
                               style={{ width: '100%', fontSize: 13, height: 36 }}
                             >
+                              <option value="">— Select Horizon —</option>
                               <option value="1-2 Years">1-2 Years</option>
                               <option value="3-5 Years">3-5 Years</option>
                               <option value="5-7 Years">5-7 Years</option>
@@ -1499,15 +1651,19 @@ export const FollowupsPage: React.FC = () => {
                         </div>
 
                         <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                          {isPrefConfirmed && (
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => setIsEditingPref(false)}
-                            >
-                              Cancel
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => {
+                              setIsEditingPref(false);
+                              if (!isPrefConfirmed) {
+                                setPrefAssetClass('');
+                                setPrefHorizon('');
+                              }
+                            }}
+                          >
+                            Cancel
+                          </button>
                           <button
                             type="button"
                             className="btn btn-primary btn-sm"
@@ -1518,35 +1674,52 @@ export const FollowupsPage: React.FC = () => {
                           </button>
                         </div>
                       </div>
-                    ) : isPrefConfirmed ? (
+                    ) : (
                       <div>
                         <div className="lead-detail-grid">
                           <div>
                             <span className="lead-custom-label">Preferred Asset Class:</span>
-                            <div className="lead-custom-value">{prefAssetClass}</div>
+                            <div
+                              className="lead-custom-value"
+                              style={{
+                                color: isPrefConfirmed && prefAssetClass ? 'var(--text-primary)' : 'var(--text-muted)',
+                              }}
+                            >
+                              {isPrefConfirmed && prefAssetClass ? prefAssetClass : '—'}
+                            </div>
                           </div>
                           <div>
                             <span className="lead-custom-label">Investment Horizon:</span>
-                            <div className="lead-custom-value">{prefHorizon}</div>
+                            <div
+                              className="lead-custom-value"
+                              style={{
+                                color: isPrefConfirmed && prefHorizon ? 'var(--text-primary)' : 'var(--text-muted)',
+                              }}
+                            >
+                              {isPrefConfirmed && prefHorizon ? prefHorizon : '—'}
+                            </div>
                           </div>
                         </div>
-                        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
-                            <CheckCircle size={13} /> Confirmed by IRM — Visible in other modules
+
+                        {isPrefConfirmed ? (
+                          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
+                              <CheckCircle size={13} /> Confirmed by IRM — Visible in other modules
+                            </div>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              style={{ fontSize: 11, padding: '3px 8px', height: 'auto' }}
+                              onClick={() => setIsEditingPref(true)}
+                            >
+                              Edit
+                            </button>
                           </div>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            style={{ fontSize: 11, padding: '3px 8px', height: 'auto' }}
-                            onClick={() => setIsEditingPref(true)}
-                          >
-                            Edit
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{ padding: '12px 14px', background: 'var(--bg-surface)', borderRadius: 6, fontSize: 12, color: 'var(--text-muted)' }}>
-                        Preferred Asset Class and Investment Horizon have not been set by IRM yet. Check <strong>"Set by IRM"</strong> above to configure and confirm them.
+                        ) : (
+                          <div style={{ marginTop: 10, padding: '10px 12px', background: 'var(--bg-surface)', borderRadius: 6, fontSize: 11.5, color: 'var(--text-muted)' }}>
+                            Preferred Asset Class and Investment Horizon have not been set by IRM yet. Check <strong>"Set by IRM"</strong> above to configure and confirm them.
+                          </div>
+                        )}
                       </div>
                     )}
 

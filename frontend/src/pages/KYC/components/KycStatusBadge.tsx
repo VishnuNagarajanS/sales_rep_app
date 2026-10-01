@@ -8,6 +8,8 @@ import {
   ShieldCheck,
   XCircle,
   AlertTriangle,
+  CheckCircle2,
+  UserCheck,
 } from 'lucide-react';
 import './KycLinkComponents.css';
 
@@ -18,8 +20,12 @@ export type CustomerKycStatus =
   | 'Submitted'
   | 'Under Verification'
   | 'Verified'
+  | 'Completed'
   | 'Rejected'
-  | 'Needs Correction';
+  | 'Needs Correction'
+  | 'Wrong'
+  | 'Assisted Draft'
+  | 'Assisted KYC – Submitted for Verification';
 
 interface KycStatusBadgeProps {
   status: CustomerKycStatus;
@@ -27,6 +33,43 @@ interface KycStatusBadgeProps {
 
 export const KycStatusBadge: React.FC<KycStatusBadgeProps> = ({ status }) => {
   switch (status) {
+    case 'Assisted Draft':
+      return (
+        <span
+          className="kyc-link-badge"
+          style={{
+            background: 'rgba(245, 158, 11, 0.12)',
+            color: '#d97706',
+            borderColor: 'rgba(245, 158, 11, 0.35)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            fontWeight: 600,
+          }}
+          title="Assisted KYC draft is saved and incomplete — can be resumed at any time"
+        >
+          <Clock size={11} />
+          Assisted Draft
+        </span>
+      );
+    case 'Assisted KYC – Submitted for Verification':
+      return (
+        <span
+          className="kyc-link-badge"
+          style={{
+            background: 'rgba(124, 58, 237, 0.12)',
+            color: '#7c3aed',
+            borderColor: 'rgba(124, 58, 237, 0.3)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            fontWeight: 600,
+          }}
+        >
+          <UserCheck size={11} />
+          Assisted KYC – Submitted for Verification
+        </span>
+      );
     case 'Pending':
       return (
         <span className="kyc-link-badge kyc-link-badge-pending">
@@ -62,6 +105,13 @@ export const KycStatusBadge: React.FC<KycStatusBadgeProps> = ({ status }) => {
           Under Verification
         </span>
       );
+    case 'Completed':
+      return (
+        <span className="kyc-link-badge kyc-link-badge-verified">
+          <CheckCircle2 size={11} />
+          Completed
+        </span>
+      );
     case 'Verified':
       return (
         <span className="kyc-link-badge kyc-link-badge-verified">
@@ -70,10 +120,11 @@ export const KycStatusBadge: React.FC<KycStatusBadgeProps> = ({ status }) => {
         </span>
       );
     case 'Rejected':
+    case 'Wrong':
       return (
         <span className="kyc-link-badge kyc-link-badge-rejected">
           <XCircle size={11} />
-          Rejected
+          {status}
         </span>
       );
     case 'Needs Correction':

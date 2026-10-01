@@ -29,6 +29,7 @@ export const MOCK_STORAGE_KEYS = {
   PRESENCE: `${MOCK_STORAGE_PREFIX}presence`,
   PRODUCTS_SERVICES: `${MOCK_STORAGE_PREFIX}products_services`,
   ADMIN_KANBAN_CARDS: `${MOCK_STORAGE_PREFIX}admin_kanban_cards`,
+  KYC_RECORDS: `${MOCK_STORAGE_PREFIX}kyc_records`,
   CHAT_CONVERSATIONS: `${MOCK_STORAGE_PREFIX}chat_conversations`,
   CHAT_PRESENCE: `${MOCK_STORAGE_PREFIX}chat_presence`,
   CHAT_TYPING: `${MOCK_STORAGE_PREFIX}chat_typing`,

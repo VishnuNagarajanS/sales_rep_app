@@ -66,6 +66,7 @@ interface CallContextType {
     scheduleFollowup?: { scheduledAt: string; priority: 'Low' | 'Medium' | 'High'; notes: string },
     reason?: string
   ) => void;
+  skipDispositionWithReason: (reason: string, notes?: string) => Promise<void>;
   closeDispositionModal: () => void;
 }
 
@@ -264,6 +265,10 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     reason?: string
   ) => {
     if (lastCallRecord && tenant && user) {
+      let finalNotes = notes || lastCallRecord.quickNotes || '';
+      if (reason?.trim()) {
+        finalNotes = finalNotes ? `${finalNotes}\n[Reason]: ${reason.trim()}` : `[Reason]: ${reason.trim()}`;
+      }
       const callRecord: CallRecord = {
         id: lastCallRecord.id,
         companyId: tenant.id,
@@ -275,9 +280,9 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         agentName: user.name,
         disposition,
         timestamp: new Date().toISOString(),
-        recordingUrl: 'https://cdn.nexusplatform.io/recordings/sample.mp3',
-        transcription: `Automated Call Transcript: Agent ${user.name} connected with ${lastCallRecord.contactName}. Call disposition marked as ${disposition}.`,
-        notes: notes || lastCallRecord.quickNotes || undefined,
+        recordingUrl: undefined,
+        transcription: undefined,
+        notes: finalNotes || undefined,
         reason: reason || undefined,
       };
 
@@ -374,11 +379,22 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      // 2. Follow-up Required -> Move to Follow-up section, remove from active Leads
+      // 2. Follow-up Required -> Create or reuse follow-up record; move lead status to 'Follow-up Required'
       else if (disposition === 'Follow-up Required') {
         const followupScheduledAt = scheduleFollowup?.scheduledAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         const followupPriority = scheduleFollowup?.priority || 'High';
         const followupNotes = scheduleFollowup?.notes || (notes ? `Follow-up required: ${notes}` : `Follow-up required from call with ${lastCallRecord.contactName}`);
+
+        if (matchedLead) {
+          // Setting status to 'Follow-up Required' reliably moves it out of My Leads (Interested only) to Follow-up
+          // while preserving the row in the shared database leads table.
+          matchedLead.status = 'Follow-up Required';
+          matchedLead.nextFollowupDate = followupScheduledAt;
+          if (notes) {
+            matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Follow-up Required: ${notes}`;
+          }
+          apiSaveLead(matchedLead).catch(console.error);
+        }
 
         apiSaveFollowup({
           id: `flw-${Date.now()}`,
@@ -394,15 +410,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           assignedAgentId: matchedLead?.assignedAgentId || user.id,
           assignedAgentName: matchedLead?.assignedAgentName || user.name,
         }).catch(console.error);
-
-        if (matchedLead) {
-          matchedLead.status = 'Follow-up Required';
-          matchedLead.nextFollowupDate = followupScheduledAt;
-          if (notes) {
-            matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Follow-up Required: ${notes}`;
-          }
-          apiSaveLead(matchedLead).catch(console.error);
-        }
       }
 
       // 3. Call Back -> Keep in Leads section, update status to Callback
@@ -510,10 +517,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      // 6. No Response -> Keep in Leads section, update status to No Response
+      // 6. No Response -> Keep in Leads section, update status to No Response, create scheduled follow-up
       else if (disposition === 'No Response') {
         if (matchedLead) {
           matchedLead.status = 'No Response';
+          if (scheduleFollowup?.scheduledAt) {
+            matchedLead.nextFollowupDate = scheduleFollowup.scheduledAt;
+          }
           if (notes) {
             matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] No Response: ${notes}`;
           }
@@ -536,6 +546,23 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             customFields: {},
           };
           apiSaveLead(newLead).catch(console.error);
+        }
+
+        if (scheduleFollowup) {
+          apiSaveFollowup({
+            id: `flw-${Date.now()}`,
+            companyId: tenant.id,
+            contactId: matchedLead?.id || lastCallRecord.matchedRecord?.id || 'contact-new',
+            contactName: lastCallRecord.contactName,
+            contactPhone: lastCallRecord.contactPhone,
+            contactType: lastCallRecord.matchedRecord?.type === 'customer' ? 'customer' : 'lead',
+            scheduledAt: scheduleFollowup.scheduledAt,
+            priority: scheduleFollowup.priority,
+            status: 'Pending',
+            notes: scheduleFollowup.notes || (notes ? `Follow-up from No Response: ${notes}` : `Follow-up required for ${lastCallRecord.contactName}`),
+            assignedAgentId: user.id,
+            assignedAgentName: user.name,
+          }).catch(console.error);
         }
       }
 
@@ -595,6 +622,70 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAvailability(prev => prev === 'Busy' ? 'Available' : prev);
   };
 
+  const skipDispositionWithReason = async (reason: string, notes?: string) => {
+    if (lastCallRecord && tenant && user) {
+      const trimmedReason = reason.trim();
+      const combinedNotes = notes?.trim()
+        ? `${notes.trim()}\n[Skip Reason]: ${trimmedReason}`
+        : `[Skip Reason]: ${trimmedReason}`;
+
+      const callRecord: CallRecord = {
+        id: lastCallRecord.id,
+        companyId: tenant.id,
+        contactName: lastCallRecord.contactName,
+        contactPhone: lastCallRecord.contactPhone,
+        direction: lastCallRecord.direction,
+        duration: lastCallRecord.duration,
+        agentId: user.id,
+        agentName: user.name,
+        disposition: 'Skipped',
+        timestamp: new Date().toISOString(),
+        recordingUrl: undefined,
+        transcription: undefined,
+        notes: combinedNotes,
+        reason: trimmedReason,
+        leadId: lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : undefined,
+        customerId: lastCallRecord.matchedRecord?.type === 'customer' ? lastCallRecord.matchedRecord.id : undefined,
+      };
+
+      try {
+        await apiLogCall(callRecord);
+      } catch (err) {
+        console.error('Error logging skipped call:', err);
+      }
+
+      // Record activity on matched lead
+      const leadId = lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : null;
+      const allLeads = leads.length > 0 ? leads : (tenant ? storageService.getLeads(tenant.id) : []);
+      const normalize = (p: string) => (p || '').replace(/\D/g, '').slice(-10);
+      const callPhoneDigits = normalize(lastCallRecord.contactPhone);
+      const matchedLead = leadId
+        ? allLeads.find((l: Lead) => l.id === leadId)
+        : allLeads.find((l: Lead) =>
+            (callPhoneDigits && normalize(l.phone) === callPhoneDigits) ||
+            (l.name && l.name.toLowerCase() === lastCallRecord.contactName.toLowerCase())
+          );
+
+      if (matchedLead) {
+        const durM = Math.floor(lastCallRecord.duration / 60);
+        const durS = lastCallRecord.duration % 60;
+        const entry = `[${new Date().toLocaleDateString()}] Call (${durM}m ${durS}s) - Wrap-up Skipped. Reason: ${trimmedReason}${notes?.trim() ? ` • Notes: ${notes.trim()}` : ''}`;
+        matchedLead.notes = matchedLead.notes ? `${matchedLead.notes}\n\n${entry}` : entry;
+        if (!matchedLead.customFields) matchedLead.customFields = {};
+        matchedLead.customFields.lastCallDisposition = 'Skipped';
+        matchedLead.customFields.lastCallSkipReason = trimmedReason;
+        apiSaveLead(matchedLead).catch(console.error);
+        storageService.saveLead(matchedLead);
+      }
+
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+    }
+
+    setShowDispositionModal(false);
+    setLastCallRecord(null);
+    setAvailability(prev => prev === 'Busy' ? 'Available' : prev);
+  };
+
   const closeDispositionModal = () => {
     setShowDispositionModal(false);
     setLastCallRecord(null);
@@ -621,6 +712,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setMeetingLink,
         setQuickNotes,
         saveDisposition,
+        skipDispositionWithReason,
         closeDispositionModal,
       }}
     >

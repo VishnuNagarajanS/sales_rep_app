@@ -101,12 +101,13 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   });
 
   const isIrmCall = (c: any) =>
-    (c.notes || '').startsWith('Connected to IRM:') ||
-    (c.agentId || '').toLowerCase().includes('irm') ||
-    (c.agentName || '').toLowerCase().includes('irm') ||
-    ['Rohan Varma', 'Arun Kumar', 'Ananya Mehta', 'Rohan Mehta', 'Priya Nair', 'Karthik Sundaram'].some(n =>
-      (c.agentName || '').toLowerCase().includes(n.toLowerCase())
-    );
+    c.callerType === 'IRM' ||
+    c.connectVia === 'Connect via IRM' ||
+    c.source === 'irm' ||
+    (c.agentRole || '').toLowerCase() === 'irm' ||
+    (c.notes || '').includes('Connect via IRM') ||
+    (c.notes || '').includes('Connected to IRM') ||
+    (c.agentId || '').toString().toLowerCase().includes('irm');
 
   const agentCalls = selectedCalls.filter(c => !isIrmCall(c));
   const irmCalls = selectedCalls.filter(c => isIrmCall(c));
@@ -559,11 +560,22 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                     </div>
                   )}
 
-                  {/* Reason (from Call Wrap-up & Disposition) */}
-                  {(c as any).reason && (
-                    <div style={{ fontSize: 12, marginTop: 6, backgroundColor: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)', padding: '5px 10px', borderRadius: 5 }}>
-                      <strong style={{ color: 'var(--text-secondary)' }}>Reason:</strong>{' '}
-                      <span style={{ color: 'var(--text-primary)' }}>{(c as any).reason}</span>
+                  {/* Reason (from Call Wrap-up & Disposition or Skip) */}
+                  {(c.reason || (c as any).reason) && (
+                    <div
+                      style={{
+                        fontSize: 12,
+                        marginTop: 6,
+                        backgroundColor: c.disposition === 'Skipped' ? 'rgba(245,158,11,0.08)' : 'rgba(239,68,68,0.06)',
+                        border: `1px solid ${c.disposition === 'Skipped' ? 'rgba(245,158,11,0.25)' : 'rgba(239,68,68,0.15)'}`,
+                        padding: '6px 10px',
+                        borderRadius: 6,
+                      }}
+                    >
+                      <strong style={{ color: c.disposition === 'Skipped' ? '#d97706' : 'var(--text-secondary)' }}>
+                        {c.disposition === 'Skipped' ? 'Skip Reason:' : 'Reason:'}
+                      </strong>{' '}
+                      <span style={{ color: 'var(--text-primary)' }}>{c.reason || (c as any).reason}</span>
                     </div>
                   )}
 

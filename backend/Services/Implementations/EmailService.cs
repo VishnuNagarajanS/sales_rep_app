@@ -13,6 +13,8 @@ public class EmailService : IEmailService
 
     private SmtpSettings Settings => _optionsMonitor.CurrentValue;
 
+    public string? LastError { get; private set; }
+
     public EmailService(IOptionsMonitor<SmtpSettings> optionsMonitor, ILogger<EmailService> logger)
     {
         _optionsMonitor = optionsMonitor;
@@ -217,9 +219,12 @@ public class EmailService : IEmailService
         string htmlBody,
         CancellationToken ct = default)
     {
+        LastError = null;
+
         if (string.IsNullOrWhiteSpace(toEmail))
         {
             _logger.LogWarning("Email sending skipped: recipient email is empty.");
+            LastError = "No recipient email address was provided.";
             return false;
         }
 
@@ -238,6 +243,7 @@ public class EmailService : IEmailService
         if (string.IsNullOrWhiteSpace(effectiveUsername) || string.IsNullOrWhiteSpace(effectivePassword))
         {
             _logger.LogWarning("Real-time email sending simulated: SmtpSettings:Username or Password is not set in appsettings.json. Simulated dispatch to {Recipient}.", toEmail);
+            LastError = "The server has no SMTP username/password configured (SmtpSettings:Username / SmtpSettings:Password).";
             return false;
         }
 
@@ -273,6 +279,14 @@ public class EmailService : IEmailService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to deliver email to {Recipient} via {Host}:{Port} (User: {User})", toEmail, cfg.Host, cfg.Port, effectiveUsername);
+            var raw = ex.Message ?? string.Empty;
+            var looksLikeAuth = raw.Contains("5.7.", StringComparison.OrdinalIgnoreCase)
+                || raw.Contains("535", StringComparison.OrdinalIgnoreCase)
+                || raw.Contains("Authentication", StringComparison.OrdinalIgnoreCase)
+                || raw.Contains("Username and Password not accepted", StringComparison.OrdinalIgnoreCase);
+            LastError = looksLikeAuth
+                ? "Gmail rejected the login. Check SmtpSettings:Username and use a valid 16-character Google App Password (2-Step Verification must be ON)."
+                : $"SMTP error ({ex.GetType().Name}): {raw}";
             return false;
         }
     }

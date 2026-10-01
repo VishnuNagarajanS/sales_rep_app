@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
+import { getFollowups } from '../../services/ghlApiService';
 import { FEATURES } from '../../constants/features';
 import { PERMISSIONS } from '../../constants/permissions';
 import './Sidebar.css';
@@ -66,11 +67,41 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
   const isIrm = user?.role?.code === 'irm';
   const isGhlIrm = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.name === 'GHL India Ventures' || user?.companySlug === 'ghl' || user?.companyName === 'GHL India Ventures') && isIrm;
 
-  const pendingFollowupsCount = isGhlSalesExec
-    ? (storageService.getFollowups(tenant?.id) || []).filter(
-      f => f.status === 'Pending' && (f.assignedAgentId === user?.id || f.assignedAgentName === user?.name)
-    ).length
-    : 0;
+  const [pendingFollowupsCount, setPendingFollowupsCount] = useState(0);
+
+  useEffect(() => {
+    if (!isGhlSalesExec || !tenant?.id) {
+      setPendingFollowupsCount(0);
+      return;
+    }
+    let mounted = true;
+    const updateFollowups = () => {
+      getFollowups(tenant.id)
+        .then(followups => {
+          if (mounted) {
+            const count = (followups || []).filter(
+              f => f.status === 'Pending' && (f.assignedAgentId === user?.id || f.assignedAgentName === user?.name)
+            ).length;
+            setPendingFollowupsCount(count);
+          }
+        })
+        .catch(() => { });
+    };
+    updateFollowups();
+    let timeoutId: any;
+    const handleDebouncedUpdate = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        updateFollowups();
+      }, 300);
+    };
+    window.addEventListener('nexus_storage_updated', handleDebouncedUpdate);
+    return () => {
+      mounted = false;
+      clearTimeout(timeoutId);
+      window.removeEventListener('nexus_storage_updated', handleDebouncedUpdate);
+    };
+  }, [tenant?.id, isGhlSalesExec, user?.id, user?.name]);
 
   const companyId = (user?.companyId as string | undefined) ?? tenant?.id ?? '';
   const [unreadChatCount, setUnreadChatCount] = useState(0);

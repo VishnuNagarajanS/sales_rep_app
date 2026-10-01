@@ -26,6 +26,7 @@ import {
   saveDeal as apiSaveDeal,
   addDealActivity as apiAddDealActivity,
   saveInvestor as apiSaveInvestor,
+  persistDeal,
 } from '../../services/ghlApiService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
@@ -79,11 +80,13 @@ export const OpportunitiesPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
 
-  // ── Role scoping ──────────────────────────────────────────────────────────
   const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
   const isIrm = roleCode === 'irm';
   const isGhlIrm = isIrm && tenant?.slug === 'ghl';
+  const isGhlAdmin =
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1') &&
+    ['company_admin', 'admin', 'super_admin', 'ghl_admin'].includes(roleCode as string);
 
   // ── Core data ─────────────────────────────────────────────────────────────
   const [opps, setOpps] = useState<InvestmentOpportunity[]>([]);
@@ -145,23 +148,24 @@ export const OpportunitiesPage: React.FC = () => {
         return fresh || prev;
       });
     } catch {
-      setOpps(storageService.getOpportunities(tenant?.id));
-      setInvestors(storageService.getInvestors(tenant?.id));
-      const latestDeals = storageService.getDeals(tenant?.id);
-      setDeals(latestDeals);
-      setDetailDeal(prev => {
-        if (!prev) return null;
-        const fresh = latestDeals.find(d => d.id === prev.id);
-        return fresh || prev;
-      });
+      // Stop trusting stale cache in non-mock mode
     }
   };
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
+    let timeoutId: any;
+    const handleUpdate = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        loadData();
+      }, 300);
+    };
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+    return () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
+    };
   }, [tenant?.id]);
 
   // ── Role-based scoping ────────────────────────────────────────────────────
@@ -344,16 +348,19 @@ export const OpportunitiesPage: React.FC = () => {
       label: 'Edit',
       icon: <Edit2 size={14} color="var(--primary-600)" style={{ marginRight: 6 }} />,
       onClick: o => openEditModal(o),
+      hidden: () => isGhlAdmin,
     },
     {
       label: 'Move Stage',
       icon: <ArrowRight size={14} style={{ marginRight: 6 }} />,
       onClick: o => openStageModal(o),
+      hidden: () => isGhlAdmin,
     },
     {
       label: 'Delete',
       icon: <Trash2 size={14} color="#dc2626" style={{ marginRight: 6 }} />,
       onClick: o => handleDeleteOpp(o),
+      hidden: () => isGhlAdmin,
     },
   ];
 
@@ -365,7 +372,13 @@ export const OpportunitiesPage: React.FC = () => {
       ...deal,
       investorType: type,
     };
-    storageService.saveDeal(updatedDeal);
+    try {
+      await persistDeal(updatedDeal);
+    } catch (e) {
+      console.error("Error saving deal:", e);
+      showToast("Failed to update investor structure");
+      return;
+    }
 
     const activity: DealActivity = {
       id: `act-${Date.now()}`,
@@ -380,7 +393,6 @@ export const OpportunitiesPage: React.FC = () => {
     storageService.addDealActivity(activity);
 
     if (!isMockMode()) {
-      await apiSaveDeal(updatedDeal).catch(console.error);
       await apiAddDealActivity(activity).catch(console.error);
     }
 
@@ -396,10 +408,11 @@ export const OpportunitiesPage: React.FC = () => {
       stageEnteredAt: new Date().toISOString(),
     };
     try {
-      await apiSaveDeal(updatedDeal);
+      await persistDeal(updatedDeal);
     } catch (err) {
       console.warn('[OpportunitiesPage] API saveDeal (convert) failed:', err);
-      storageService.saveDeal(updatedDeal);
+      showToast('Failed to update deal stage');
+      return;
     }
 
     // 2. Log activity
@@ -476,13 +489,18 @@ export const OpportunitiesPage: React.FC = () => {
     setShowConfirmDialog(false);
   };
 
-  const handleEditAmount = () => {
+  const handleEditAmount = async () => {
     if (!detailDeal) return;
     const updatedDeal: Deal = {
       ...detailDeal,
       investmentAmountConfirmed: false,
     };
-    storageService.saveDeal(updatedDeal);
+    try {
+      await persistDeal(updatedDeal);
+    } catch (e) {
+      console.error("Error saving deal:", e);
+      showToast('Failed to update deal');
+    }
     setDetailDeal(updatedDeal);
     setIsEditingAmount(true);
     setAmountInput(detailDeal.value ? String(detailDeal.value) : '');
@@ -498,12 +516,13 @@ export const OpportunitiesPage: React.FC = () => {
       investmentAmountConfirmed: true,
     };
 
-    // Save investment amount to DB
+    // Save investment amount confirmed to DB
     try {
-      await apiSaveDeal(updatedDeal);
+      await persistDeal(updatedDeal);
     } catch (err) {
       console.warn('[OpportunitiesPage] API saveDeal (amount confirm) failed:', err);
-      storageService.saveDeal(updatedDeal);
+      showToast('Failed to save investment amount');
+      return;
     }
 
     setDetailDeal(updatedDeal);
@@ -514,17 +533,20 @@ export const OpportunitiesPage: React.FC = () => {
   };
 
   const getDealKycStatus = (deal: Deal): 'Pending' | 'Partially Completed' | 'Completed' => {
+    // 1. Prefer DB-sourced status (persists across refresh)
+    if (deal.kycStatus === 'Completed') return 'Completed';
+    if (deal.kycStatus === 'Partially Completed') return 'Partially Completed';
+    if (deal.kycStatus === 'Pending') return 'Pending';
+
+    // 2. Fallback: check localStorage (set when customer submits KYC form)
     const rawStatus = localStorage.getItem(`nexus_kyc_status_${deal.id}`);
     if (rawStatus === 'Completed' || rawStatus === 'Submitted for Review' || rawStatus === 'SEBI KYC Validated') {
       return 'Completed';
     }
-    if (rawStatus === 'Partially Completed') {
-      return 'Partially Completed';
-    }
-    if (rawStatus === 'Pending') {
-      return 'Pending';
-    }
+    if (rawStatus === 'Partially Completed') return 'Partially Completed';
+    if (rawStatus === 'Pending') return 'Pending';
 
+    // 3. Fallback: check localStorage KYC form data completeness
     const savedDataStr = localStorage.getItem(`nexus_kyc_data_${deal.id}`);
     if (savedDataStr) {
       try {
@@ -552,9 +574,8 @@ export const OpportunitiesPage: React.FC = () => {
       } catch { }
     }
 
-    if ((deal as any).kycValidated === true) {
-      return 'Completed';
-    }
+    // 4. Fallback: kycValidated flag on deal object
+    if ((deal as any).kycValidated === true) return 'Completed';
 
     return 'Pending';
   };
@@ -769,7 +790,7 @@ export const OpportunitiesPage: React.FC = () => {
           </p>
         </div>
 
-        {!isGhlIrm && (
+        {!isGhlIrm && !isGhlAdmin && (
           <button
             id="opps-new-opportunity"
             className="btn btn-primary"
@@ -798,7 +819,7 @@ export const OpportunitiesPage: React.FC = () => {
           data={filteredOpps}
           keyExtractor={o => o.id}
           rowActions={rowActions}
-          onRowClick={o => openEditModal(o)}
+          onRowClick={isGhlAdmin ? undefined : o => openEditModal(o)}
           searchPlaceholder="Search opportunities by asset title or investor..."
           filtersNode={
             <FilterBar
@@ -829,7 +850,7 @@ export const OpportunitiesPage: React.FC = () => {
 
       {/* ── Create / Edit Opportunity Modal ──────────────────────────────── */}
       <Modal
-        isOpen={isModalOpen}
+        isOpen={isModalOpen && !isGhlAdmin}
         onClose={closeModal}
         title={editingOpp ? 'Edit Opportunity' : 'New Investment Opportunity'}
         subtitle={

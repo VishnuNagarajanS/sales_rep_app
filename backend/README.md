@@ -308,6 +308,14 @@ Prevents account enumeration by returning the exact same generic error message r
    ```bash
    dotnet ef database update
    ```
+
+### After Pulling New Code
+Whenever you pull new code or a new migration file appears in `backend/Migrations/`, always run:
+```bash
+dotnet ef database update
+```
+The backend startup checks will log a warning banner if any migrations are pending.
+
 4. Run the API:
    ```bash
    dotnet run --launch-profile http

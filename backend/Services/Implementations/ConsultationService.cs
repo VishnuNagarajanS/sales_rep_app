@@ -138,15 +138,20 @@ public class ConsultationService : IConsultationService
     public async Task<ApiResponse<ConsultationResponseDto>> ScheduleConsultationAsync(
         ScheduleConsultationDto dto, CancellationToken ct = default)
     {
-        var consultantId = _currentUser.UserId ?? 1;
-        var companyId = _currentUser.CompanyId ?? 1;
+        var consultantId = _currentUser.UserId;
+        if (!consultantId.HasValue || consultantId.Value <= 0)
+            return ApiResponse<ConsultationResponseDto>.FailureResult("Unauthorized: User ID is missing.");
+
+        var companyId = _currentUser.CompanyId;
+        if (!companyId.HasValue || companyId.Value <= 0)
+            return ApiResponse<ConsultationResponseDto>.FailureResult("Unauthorized: Company ID is missing.");
 
         int.TryParse(dto.InvestorId, out var investorId);
 
         var consultation = new Consultation
         {
-            CompanyId = companyId,
-            ConsultantId = consultantId,
+            CompanyId = companyId.Value,
+            ConsultantId = consultantId.Value,
             InvestorId = investorId,
             InvestorName = dto.InvestorName.Trim(),
             InvestorPhone = dto.InvestorPhone.Trim(),

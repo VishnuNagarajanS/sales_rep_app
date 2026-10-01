@@ -30,6 +30,27 @@ public class IrmFollowupService : IIrmFollowupService
     {
         var user = await _userRepo.GetByIdAsync(assignedToId, ct);
 
+        // Deduplication & idempotency check
+        var allCompanyFollowups = await _followupRepo.GetAllAsync(companyId, null, null, null, ct);
+        var fDigits = (dto.ContactPhone ?? string.Empty).Replace(" ", "").Replace("-", "");
+        if (fDigits.Length > 10) fDigits = fDigits[^10..];
+
+        var existingPending = allCompanyFollowups.FirstOrDefault(f =>
+            f.Status == FollowupStatus.Pending &&
+            ((!string.IsNullOrEmpty(dto.ContactId) && f.ContactId == dto.ContactId) ||
+             (!string.IsNullOrEmpty(fDigits) && f.ContactPhone != null && f.ContactPhone.Contains(fDigits))));
+
+        if (existingPending != null)
+        {
+            existingPending.ScheduledAt = dto.ScheduledAt;
+            existingPending.Agenda = dto.Agenda;
+            existingPending.AssignedToId = assignedToId;
+            existingPending.AssignedToName = user?.Name ?? string.Empty;
+            existingPending.AssignedToRole = assignedToRole;
+            var updatedExisting = await _followupRepo.UpdateAsync(existingPending, ct);
+            return ApiResponse<FollowupDto>.SuccessResponse(MapToDto(updatedExisting), "Existing pending follow-up updated.");
+        }
+
         string? investorName = null;
         if (dto.InvestorId.HasValue)
         {

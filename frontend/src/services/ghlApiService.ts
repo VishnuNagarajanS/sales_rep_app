@@ -20,6 +20,7 @@
 
 import { apiClient } from './apiClient';
 import { storageService } from './storageService';
+import { isMockMode } from '../config/environment';
 import type {
   Deal,
   DealActivity,
@@ -79,7 +80,16 @@ async function fetchAll<T>(path: string, params: Record<string, string> = {}): P
   const qs = new URLSearchParams({ pageSize: '200', ...params }).toString();
   const res: ApiResponse<PagedResult<T>> = await apiClient.get(`${path}?${qs}`);
   if (!res.success || !res.data) return [];
-  return res.data.items;
+  const items = res.data.items;
+  const seen = new Set();
+  const deduped = items.filter((item: any) => {
+    const id = item.id;
+    if (id === undefined || id === null) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+  return deduped;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -110,6 +120,8 @@ function mapDeal(d: Record<string, any>): Deal {
     phone: d.phone,
     email: d.email,
     location: d.location,
+    investmentAmountConfirmed: Boolean(d.investmentAmountConfirmed),
+    kycStatus: d.kycStatus,
   };
 }
 
@@ -152,11 +164,22 @@ export async function saveDeal(deal: Deal): Promise<Deal> {
       preferredAssetClass: deal.preferredAssetClass,
       priority: deal.priority,
       stageEnteredAt: deal.stageEnteredAt,
+      investmentAmountConfirmed: deal.investmentAmountConfirmed ?? false,
+      kycStatus: (deal as any).kycStatus,
     };
     const res: ApiResponse<any> = await apiClient.put(`/ghl/deals/${nid(deal.id)}`, payload);
     if (!res.success || !res.data) throw new Error(res.message);
     window.dispatchEvent(new Event('nexus_storage_updated'));
     return mapDeal(res.data);
+  }
+}
+
+export async function persistDeal(deal: Deal): Promise<Deal> {
+  if (isMockMode()) {
+    storageService.saveDeal(deal);
+    return deal;
+  } else {
+    return await saveDeal(deal);
   }
 }
 
@@ -397,7 +420,7 @@ function mapLead(l: Record<string, any>): Lead {
     source: l.source ?? '',
     status: l.status ?? 'New',
     priority: l.priority ?? 'Medium',
-    assignedAgentId: sid(l.assignedAgentId),
+    assignedAgentId: l.assignedAgentId != null && l.assignedAgentId !== '' ? sid(l.assignedAgentId) : '',
     assignedAgentName: l.assignedAgentName ?? '',
     nextFollowupDate: l.nextFollowupDate,
     createdAt: l.createdAt ?? new Date().toISOString(),
@@ -407,19 +430,11 @@ function mapLead(l: Record<string, any>): Lead {
 }
 
 export async function getLeads(companyId?: string): Promise<Lead[]> {
-  try {
-    const raw = await fetchAll<any>('/sales-executive/leads');
-    if (raw && raw.length > 0) {
-      const apiLeads = raw.map(mapLead);
-      const localLeads = storageService.getLeads(companyId);
-      const apiIds = new Set(apiLeads.map(l => l.id));
-      const unsynced = localLeads.filter((l: Lead) => !apiIds.has(l.id));
-      return [...apiLeads, ...unsynced];
-    }
-  } catch (err) {
-    console.warn('[ghlApiService] Failed to fetch leads from API, falling back to local storage:', err);
+  if (isMockMode()) {
+    return storageService.getLeads(companyId);
   }
-  return storageService.getLeads(companyId);
+  const raw = await fetchAll<any>('/sales-executive/leads');
+  return raw.map(mapLead);
 }
 
 export async function saveLead(lead: Lead): Promise<Lead> {
@@ -437,6 +452,7 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         status: lead.status || 'New',
         priority: lead.priority,
         notes: lead.notes,
+        assignedAgentId: nid(lead.assignedAgentId) || undefined,
         companyId: nid(lead.companyId) || 1,
         investmentCapacity: customFields['Investment Capacity'] ?? customFields['investmentCapacity'],
         assetClass: customFields['Asset Class'] ?? customFields['assetClass'],
@@ -450,6 +466,7 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         window.dispatchEvent(new Event('nexus_storage_updated'));
         return saved;
       }
+      throw new Error(res?.message || 'Failed to create lead');
     } else {
       const payload: Record<string, any> = {
         name: lead.name,
@@ -477,15 +494,12 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         window.dispatchEvent(new Event('nexus_storage_updated'));
         return saved;
       }
+      throw new Error(res?.message || 'Failed to update lead');
     }
-  } catch (err) {
-    console.warn('[ghlApiService] API lead save failed, persisting locally:', err);
+  } catch (err: any) {
+    console.error('[ghlApiService] API lead save failed:', err);
+    throw err;
   }
-
-  // Fallback / mirror to storageService
-  storageService.saveLead(lead);
-  window.dispatchEvent(new Event('nexus_storage_updated'));
-  return lead;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -506,7 +520,7 @@ function mapFollowup(f: Record<string, any>): Followup {
     notes: f.notes ?? '',
     assignedAgentId: sid(f.assignedAgentId),
     assignedAgentName: f.assignedAgentName ?? f.assignedToName ?? '',
-    assignedRole: f.assignedRole ?? f.assignedToRole ?? undefined,
+    assignedRole: f.assignedRole ?? f.assignedToRole ?? f.assignedAgentRole ?? undefined,
     completedAt: f.completedAt,
   };
 }
@@ -641,6 +655,41 @@ export async function saveCustomer(customer: Customer): Promise<Customer> {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function mapCallRecord(c: Record<string, any>): CallRecord {
+  const notes = c.notes;
+  let reason = c.reason;
+  if (!reason && notes) {
+    const match = notes.match(/(?:\[(?:Skip Reason|Reason)\]:\s*|(?:Skip Reason|Reason):\s*)([^\n]+)/i);
+    if (match) {
+      reason = match[1].trim();
+    }
+  }
+
+  // Determine categorization from backend attributes or stored source markers
+  const roleCode = (c.agentRole || c.callerType || '').toLowerCase();
+  const sourceCode = (c.source || '').toLowerCase();
+  const notesStr = notes || '';
+  const isIrm =
+    roleCode === 'irm' ||
+    sourceCode === 'irm' ||
+    c.connectVia === 'Connect via IRM' ||
+    notesStr.includes('Connect via IRM') ||
+    notesStr.includes('Connected to IRM') ||
+    notesStr.includes('[Source: irm]');
+
+  const callerType: 'Agent' | 'IRM' = isIrm ? 'IRM' : 'Agent';
+  const connectVia: 'Connect via Agent' | 'Connect via IRM' = isIrm ? 'Connect via IRM' : 'Connect via Agent';
+  const agentRole = isIrm ? 'IRM' : 'Agent';
+
+  // Only assign recordingUrl and transcription if real and not placeholder/mock
+  const recordingUrl = (c.recordingUrl && typeof c.recordingUrl === 'string' && !c.recordingUrl.includes('sample.mp3'))
+    ? c.recordingUrl
+    : undefined;
+
+  const rawTranscript = c.transcript || c.transcription;
+  const transcription = (rawTranscript && typeof rawTranscript === 'string' && !rawTranscript.startsWith('Automated Call Transcript: Agent'))
+    ? rawTranscript
+    : undefined;
+
   return {
     id: sid(c.id),
     companyId: sid(c.companyId),
@@ -650,9 +699,16 @@ function mapCallRecord(c: Record<string, any>): CallRecord {
     duration: c.duration ?? 0,
     agentId: sid(c.agentId),
     agentName: c.agentName ?? '',
+    agentRole: agentRole,
+    callerType: callerType,
+    connectVia: connectVia,
+    source: isIrm ? 'irm' : (c.source || 'agent'),
     disposition: c.disposition ?? 'No Response',
     timestamp: c.timestamp ?? new Date().toISOString(),
-    notes: c.notes,
+    notes: notes,
+    reason: reason,
+    recordingUrl: recordingUrl,
+    transcription: transcription,
     leadId: c.leadId ? sid(c.leadId) : undefined,
     customerId: c.customerId ? sid(c.customerId) : undefined,
   };
@@ -677,6 +733,85 @@ export async function logCall(call: CallRecord): Promise<CallRecord> {
   const res: ApiResponse<any> = await apiClient.post('/sales-executive/calls', payload);
   if (!res.success || !res.data) throw new Error(res.message);
   window.dispatchEvent(new Event('nexus_storage_updated'));
+  return mapCallRecord(res.data);
+}
+
+export interface SendCustomerMessagePayload {
+  recipientEmail?: string;
+  recipientPhone?: string;
+  recipientName: string;
+  message: string;
+  channel?: string;
+  leadId?: number;
+  customerId?: number;
+  dealId?: number;
+}
+
+export interface SendCustomerMessageResult {
+  success: boolean;
+  delivered: boolean;
+  channel: string;
+  recipient?: string;
+  message: string;
+  deliveryResult: string;
+  sentAt: string;
+  sentByName: string;
+  sentByRole: string;
+}
+
+export async function sendCustomerMessage(
+  payload: SendCustomerMessagePayload
+): Promise<SendCustomerMessageResult> {
+  const res: ApiResponse<SendCustomerMessageResult> = await apiClient.post(
+    '/sales-executive/calls/send-customer-message',
+    payload
+  );
+  if (res && res.data) {
+    return res.data;
+  }
+  return {
+    success: false,
+    delivered: false,
+    channel: payload.channel || 'email',
+    recipient: payload.recipientEmail || payload.recipientPhone,
+    message: payload.message,
+    deliveryResult: res?.message || 'Failed to dispatch customer message',
+    sentAt: new Date().toISOString(),
+    sentByName: '',
+    sentByRole: '',
+  };
+}
+
+export interface MessagingChannelStatus {
+  channel: 'email' | 'sms' | 'whatsapp';
+  name: string;
+  configured: boolean;
+  provider: string;
+  statusMessage: string;
+}
+
+export async function getMessagingChannels(): Promise<MessagingChannelStatus[]> {
+  try {
+    const res: ApiResponse<MessagingChannelStatus[]> = await apiClient.get(
+      '/sales-executive/calls/messaging-channels'
+    );
+    if (res && res.data) {
+      return res.data;
+    }
+  } catch (err) {
+    console.error('Failed to fetch messaging channels from backend', err);
+  }
+  return [
+    { channel: 'email', name: 'Email', configured: true, provider: 'SMTP (smtp.gmail.com)', statusMessage: 'Active and configured via Gmail SMTP.' },
+    { channel: 'sms', name: 'SMS', configured: false, provider: 'None', statusMessage: 'No SMS gateway provider (e.g., Twilio / AWS SNS) is configured on the backend server.' },
+    { channel: 'whatsapp', name: 'WhatsApp', configured: false, provider: 'None', statusMessage: 'No WhatsApp Business API provider is configured on the backend server.' },
+  ];
+}
+
+export async function getCallById(id: string | number): Promise<CallRecord> {
+  const numericId = typeof id === 'string' ? parseInt(id.replace(/\D/g, ''), 10) : id;
+  const res: ApiResponse<any> = await apiClient.get(`/sales-executive/calls/${numericId || id}`);
+  if (!res.success || !res.data) throw new Error(res.message || 'Call record not found');
   return mapCallRecord(res.data);
 }
 
