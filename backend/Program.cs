@@ -113,7 +113,8 @@ using (var scope = app.Services.CreateScope())
             var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
             logger.LogWarning(ex, "Database schema sync for roles skipped: {Message}", ex.Message);
         }
-    }
+        try
+        {
             var sql = @"
                 DO $$
                 BEGIN
