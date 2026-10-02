@@ -321,20 +321,25 @@ const GhlIrmKycView: React.FC = () => {
     // If the API already populated all three contact fields, nothing to do
     if (d.phone && d.email && d.location) return d;
 
-    // Prefer ID-based match; fall back to normalised-phone match; name match avoided (ambiguous)
+    // Prefer ID-based match; fall back to normalised-phone match; then name match
     const custIdStr = d.customerId ? String(d.customerId) : null;
     const dealPhoneDigits = (d.phone || '').replace(/\D/g, '').slice(-10);
+    const dealNameLower = (d.customerName || '').trim().toLowerCase();
 
     const matchCust = customersList.find(c => {
       if (custIdStr && String(c.id) === custIdStr) return true;
       const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
-      return Boolean(cDigits && dealPhoneDigits && cDigits === dealPhoneDigits);
+      if (cDigits && dealPhoneDigits && cDigits === dealPhoneDigits) return true;
+      if (dealNameLower && c.name && c.name.trim().toLowerCase() === dealNameLower) return true;
+      return false;
     });
 
     const matchLead = !matchCust ? leadsList.find(l => {
       if (custIdStr && String(l.id) === custIdStr) return true;
       const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
-      return Boolean(lDigits && dealPhoneDigits && lDigits === dealPhoneDigits);
+      if (lDigits && dealPhoneDigits && lDigits === dealPhoneDigits) return true;
+      if (dealNameLower && l.name && l.name.trim().toLowerCase() === dealNameLower) return true;
+      return false;
     }) : null;
 
     return {

@@ -230,6 +230,10 @@ public class LeadService : ILeadService
             Customer? existingCustomer = null;
             Followup? matchingPendingFollowup = null;
             List<Followup> companyFollowups = new();
+            InvestorKyc? matchingKyc = null;
+            GhlDeal? matchingKycDeal = null;
+            IrmPipelineCard? matchingKycCard = null;
+            List<GhlDeal> companyDeals = new();
 
             if (hasIdentifier)
             {
@@ -264,21 +268,161 @@ public class LeadService : ILeadService
 
                     return false;
                 });
+
+                // Fetch tenant-scoped KYC records
+                var companyKycs = await _context.InvestorKycs
+                    .Include(k => k.Irm)
+                    .Where(k => k.CompanyId == companyId.Value)
+                    .ToListAsync(ct);
+
+                matchingKyc = companyKycs.FirstOrDefault(k =>
+                {
+                    var kPhone = NormalizePhone(k.Phone);
+                    if (normPhone != null && kPhone != null && kPhone == normPhone) return true;
+                    var kEmail = NormalizeEmail(k.Email);
+                    if (normEmail != null && kEmail != null && kEmail == normEmail) return true;
+                    return false;
+                });
+
+                // Fetch tenant-scoped deals
+                companyDeals = await _context.GhlDeals
+                    .Include(d => d.AssignedAgent)
+                    .Include(d => d.Customer)
+                    .Where(d => d.CompanyId == companyId.Value)
+                    .ToListAsync(ct);
+
+                matchingKycDeal = companyDeals.FirstOrDefault(d =>
+                {
+                    var isKycStage = d.Stage == "qualified_investor" || d.KycId != null || !string.IsNullOrWhiteSpace(d.KycStatus);
+                    if (!isKycStage) return false;
+
+                    if (existingCustomer != null && d.CustomerId == existingCustomer.Id) return true;
+                    if (existingLead != null && d.CustomerId == existingLead.Id) return true;
+
+                    if (d.Customer != null)
+                    {
+                        if (normPhone != null && d.Customer.NormalizedPhone == normPhone) return true;
+                        if (normEmail != null && d.Customer.NormalizedEmail == normEmail) return true;
+                    }
+
+                    return false;
+                });
+
+                // Fetch tenant-scoped IRM pipeline cards in qualified_investor stage
+                var companyCards = await _context.IrmPipelineCards
+                    .Include(c => c.AssignedIrm)
+                    .Where(c => c.CompanyId == companyId.Value && c.StageId == "qualified_investor")
+                    .ToListAsync(ct);
+
+                matchingKycCard = companyCards.FirstOrDefault(c =>
+                {
+                    var cPhone = NormalizePhone(c.InvestorPhone);
+                    if (normPhone != null && cPhone != null && cPhone == normPhone) return true;
+                    var cEmail = NormalizeEmail(c.InvestorEmail);
+                    if (normEmail != null && cEmail != null && cEmail == normEmail) return true;
+                    return false;
+                });
             }
 
-            // Detect if the contact already exists in Follow-up
+            // 1. Authoritative Stage Detection: Check if contact is currently in KYC
+            var isLeadInKyc = existingLead != null && (
+                existingLead.Status == "Qualified" ||
+                (existingLead.CustomFieldsJson != null && existingLead.CustomFieldsJson.Contains("\"movedToKycAt\""))
+            );
+
+            var isContactInKyc = matchingKyc != null || matchingKycDeal != null || matchingKycCard != null || isLeadInKyc;
+
+            if (isContactInKyc)
+            {
+                // Synchronize stale lead status if it was previously set to Follow-up Required
+                if (existingLead != null && existingLead.Status == "Follow-up Required")
+                {
+                    existingLead.Status = "Qualified";
+                    existingLead.UpdatedAt = DateTime.UtcNow;
+                    await _context.SaveChangesAsync(ct);
+                }
+
+                var contactName = matchingKyc?.InvestorName
+                    ?? matchingKycDeal?.CustomerName
+                    ?? existingCustomer?.Name
+                    ?? existingLead?.Name
+                    ?? matchingKycCard?.InvestorName
+                    ?? dto.Name;
+
+                var assignedAgentName = matchingKyc?.Irm?.Name
+                    ?? matchingKycDeal?.AssignedAgent?.Name
+                    ?? existingCustomer?.AssignedAgent?.Name
+                    ?? existingLead?.AssignedAgent?.Name
+                    ?? matchingKycCard?.AssignedIrmName
+                    ?? "an assigned agent";
+
+                var assignedAgentId = matchingKyc?.IrmId
+                    ?? matchingKycDeal?.AssignedAgentId
+                    ?? existingCustomer?.AssignedAgentId
+                    ?? existingLead?.AssignedAgentId
+                    ?? matchingKycCard?.AssignedIrmId
+                    ?? 0;
+
+                var contactType = existingCustomer != null ? "customer" : "lead";
+                var contactId = existingCustomer != null
+                    ? existingCustomer.Id.ToString()
+                    : (existingLead?.Id.ToString() ?? matchingKycDeal?.CustomerId?.ToString() ?? matchingKyc?.InvestorId.ToString() ?? "");
+                var contactPhone = existingCustomer?.Phone ?? existingLead?.Phone ?? matchingKyc?.Phone ?? matchingKycDeal?.Customer?.Phone ?? dto.Phone;
+                var contactEmail = existingCustomer?.Email ?? existingLead?.Email ?? matchingKyc?.Email ?? matchingKycDeal?.Customer?.Email ?? dto.Email ?? string.Empty;
+
+                var kycId = matchingKyc?.Id.ToString() ?? matchingKycDeal?.KycId?.ToString() ?? "";
+                var dealId = matchingKycDeal?.Id.ToString() ?? "";
+
+                var failureMsg = $"Customer \"{contactName}\" already exists in KYC Onboarding (assigned to {assignedAgentName}).";
+                var failureErrors = new List<string>
+                {
+                    "DUPLICATE_IN_KYC",
+                    "STAGE:KYC",
+                    $"CONTACT_ID:{contactId}",
+                    $"CONTACT_TYPE:{contactType}",
+                    $"CONTACT_NAME:{contactName}",
+                    $"CONTACT_PHONE:{contactPhone}",
+                    $"CONTACT_EMAIL:{contactEmail}",
+                    $"ASSIGNED_AGENT:{assignedAgentName}",
+                    $"ASSIGNED_AGENT_ID:{assignedAgentId}",
+                    $"KYC_ID:{kycId}",
+                    $"DEAL_ID:{dealId}"
+                };
+
+                var failResult = ApiResponse<LeadResponseDto>.FailureResult(failureMsg, failureErrors);
+                if (existingLead != null)
+                {
+                    failResult.Data = MapToDto(existingLead);
+                }
+                return failResult;
+            }
+
+            // 2. Authoritative Stage Detection: Check if contact is genuinely in Follow-up
+            // (Do not infer stage merely because a follow-up task exists for an investor/customer in another stage)
+            var matchingFollowupDeal = companyDeals.FirstOrDefault(d =>
+            {
+                if (d.Stage != "followup") return false;
+                if (existingCustomer != null && d.CustomerId == existingCustomer.Id) return true;
+                if (existingLead != null && d.CustomerId == existingLead.Id) return true;
+                if (d.Customer != null)
+                {
+                    if (normPhone != null && d.Customer.NormalizedPhone == normPhone) return true;
+                    if (normEmail != null && d.Customer.NormalizedEmail == normEmail) return true;
+                }
+                return false;
+            });
+
             var isLeadInFollowup = existingLead != null && (
                 existingLead.Status == "Follow-up Required" ||
-                (matchingPendingFollowup != null && matchingPendingFollowup.ContactType == "lead" && matchingPendingFollowup.ContactId == existingLead.Id.ToString()) ||
-                (existingLead.NextFollowupDate.HasValue && existingLead.NextFollowupDate.Value > DateTime.UtcNow.AddDays(-30))
+                (matchingPendingFollowup != null && matchingPendingFollowup.ContactType == "lead" && matchingPendingFollowup.ContactId == existingLead.Id.ToString())
             );
 
             var isCustomerInFollowup = existingCustomer != null && (
-                matchingPendingFollowup != null ||
+                (matchingPendingFollowup != null && matchingPendingFollowup.ContactType == "customer" && matchingPendingFollowup.ContactId == existingCustomer.Id.ToString()) ||
                 companyFollowups.Any(f => f.ContactType == "customer" && f.ContactId == existingCustomer.Id.ToString())
             );
 
-            var existsInFollowup = isLeadInFollowup || isCustomerInFollowup || matchingPendingFollowup != null;
+            var existsInFollowup = isLeadInFollowup || isCustomerInFollowup || matchingFollowupDeal != null || (existingCustomer == null && matchingPendingFollowup != null);
 
             if (existsInFollowup)
             {

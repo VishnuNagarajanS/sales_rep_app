@@ -105,6 +105,7 @@ public class GhlDealsController : ControllerBase
             .ToListAsync(ct);
 
         var items = entities.Select(MapToDto).ToList();
+        await PopulateContactDetailsAsync(items, entities, ct);
 
         return Ok(ApiResponse<PagedResult<GhlDealResponseDto>>.SuccessResult(
             PagedResult<GhlDealResponseDto>.Create(items, total, page, pageSize),
@@ -120,7 +121,10 @@ public class GhlDealsController : ControllerBase
         if (deal == null)
             return NotFound(ApiResponse<GhlDealResponseDto>.FailureResult("Deal not found."));
 
-        return Ok(ApiResponse<GhlDealResponseDto>.SuccessResult(MapToDto(deal)));
+        var dto = MapToDto(deal);
+        await PopulateContactDetailsAsync(new List<GhlDealResponseDto> { dto }, new List<GhlDeal> { deal }, ct);
+
+        return Ok(ApiResponse<GhlDealResponseDto>.SuccessResult(dto));
     }
 
     // ── POST /api/ghl/deals ───────────────────────────────────────────────────
@@ -184,7 +188,10 @@ public class GhlDealsController : ControllerBase
             await _db.SaveChangesAsync(ct);
             await _db.Entry(existingDeal).Reference(d => d.AssignedAgent).LoadAsync(ct);
 
-            return Ok(ApiResponse<GhlDealResponseDto>.SuccessResult(MapToDto(existingDeal), "Deal updated."));
+            var existingDto = MapToDto(existingDeal);
+            await PopulateContactDetailsAsync(new List<GhlDealResponseDto> { existingDto }, new List<GhlDeal> { existingDeal }, ct);
+
+            return Ok(ApiResponse<GhlDealResponseDto>.SuccessResult(existingDto, "Deal updated."));
         }
 
         var deal = new GhlDeal
@@ -210,8 +217,11 @@ public class GhlDealsController : ControllerBase
         await _db.SaveChangesAsync(ct);
         await _db.Entry(deal).Reference(d => d.AssignedAgent).LoadAsync(ct);
 
+        var newDto = MapToDto(deal);
+        await PopulateContactDetailsAsync(new List<GhlDealResponseDto> { newDto }, new List<GhlDeal> { deal }, ct);
+
         return CreatedAtAction(nameof(GetDeal), new { id = deal.Id },
-            ApiResponse<GhlDealResponseDto>.SuccessResult(MapToDto(deal), "Deal created."));
+            ApiResponse<GhlDealResponseDto>.SuccessResult(newDto, "Deal created."));
     }
 
     // ── PUT /api/ghl/deals/{id} ───────────────────────────────────────────────
@@ -222,6 +232,7 @@ public class GhlDealsController : ControllerBase
         var deal = await _db.GhlDeals
             .Include(d => d.AssignedAgent)
             .ThenInclude(a => a.Role)
+            .Include(d => d.Customer)
             .FirstOrDefaultAsync(d => d.Id == id && d.CompanyId == _currentUser.CompanyId, ct);
 
         if (deal == null)
@@ -250,7 +261,10 @@ public class GhlDealsController : ControllerBase
         deal.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
 
-        return Ok(ApiResponse<GhlDealResponseDto>.SuccessResult(MapToDto(deal), "Deal updated."));
+        var updateDto = MapToDto(deal);
+        await PopulateContactDetailsAsync(new List<GhlDealResponseDto> { updateDto }, new List<GhlDeal> { deal }, ct);
+
+        return Ok(ApiResponse<GhlDealResponseDto>.SuccessResult(updateDto, "Deal updated."));
     }
 
     // ── DELETE /api/ghl/deals/{id} ────────────────────────────────────────────
@@ -401,4 +415,123 @@ public class GhlDealsController : ControllerBase
         Email = (!string.IsNullOrWhiteSpace(d.Customer?.Email) ? d.Customer.Email : null),
         Location = (!string.IsNullOrWhiteSpace(d.Customer?.Location) ? d.Customer.Location : null),
     };
+
+    private async Task PopulateContactDetailsAsync(
+        List<GhlDealResponseDto> dtos,
+        List<GhlDeal> deals,
+        CancellationToken ct)
+    {
+        var unresolved = dtos
+            .Zip(deals, (dto, deal) => new { Dto = dto, Deal = deal })
+            .Where(x => string.IsNullOrWhiteSpace(x.Dto.Phone) || string.IsNullOrWhiteSpace(x.Dto.Email) || string.IsNullOrWhiteSpace(x.Dto.Location))
+            .ToList();
+
+        if (!unresolved.Any()) return;
+
+        var companyId = _currentUser.CompanyId;
+        var candidateIds = unresolved
+            .Where(x => x.Deal.CustomerId.HasValue && x.Deal.CustomerId.Value > 0)
+            .Select(x => x.Deal.CustomerId!.Value)
+            .Distinct()
+            .ToList();
+
+        var candidateNames = unresolved
+            .Where(x => !string.IsNullOrWhiteSpace(x.Deal.CustomerName))
+            .Select(x => x.Deal.CustomerName.Trim().ToLower())
+            .Distinct()
+            .ToList();
+
+        // 1. Check Leads table (for deals originating from leads)
+        var leadsQuery = _db.Leads.AsNoTracking();
+        if (companyId.HasValue && companyId.Value > 0)
+            leadsQuery = leadsQuery.Where(l => l.CompanyId == companyId.Value);
+
+        var matchingLeads = await leadsQuery
+            .Where(l => candidateIds.Contains(l.Id) || candidateNames.Contains(l.Name.ToLower()))
+            .ToListAsync(ct);
+
+        var leadsById = matchingLeads.ToDictionary(l => l.Id);
+        var leadsByName = matchingLeads
+            .GroupBy(l => l.Name.Trim().ToLower())
+            .ToDictionary(g => g.Key, g => g.First());
+
+        // 2. Check Customers table by name (for deals where CustomerId wasn't set or was a lead ID)
+        var customersQuery = _db.Customers.AsNoTracking();
+        if (companyId.HasValue && companyId.Value > 0)
+            customersQuery = customersQuery.Where(c => c.CompanyId == companyId.Value);
+
+        var matchingCustomers = await customersQuery
+            .Where(c => candidateNames.Contains(c.Name.ToLower()))
+            .ToListAsync(ct);
+
+        var customersByName = matchingCustomers
+            .GroupBy(c => c.Name.Trim().ToLower())
+            .ToDictionary(g => g.Key, g => g.First());
+
+        // 3. Check Investors table (for deals linked to HNW investors)
+        var investorsQuery = _db.Investors.AsNoTracking();
+        if (companyId.HasValue && companyId.Value > 0)
+            investorsQuery = investorsQuery.Where(i => i.CompanyId == companyId.Value);
+
+        var matchingInvestors = await investorsQuery
+            .Where(i => candidateIds.Contains(i.Id) || candidateNames.Contains(i.Name.ToLower()))
+            .ToListAsync(ct);
+
+        var investorsById = matchingInvestors.ToDictionary(i => i.Id);
+        var investorsByName = matchingInvestors
+            .GroupBy(i => i.Name.Trim().ToLower())
+            .ToDictionary(g => g.Key, g => g.First());
+
+        foreach (var item in unresolved)
+        {
+            var deal = item.Deal;
+            var dto = item.Dto;
+            var nameKey = deal.CustomerName.Trim().ToLower();
+
+            // Match Lead: ID first, then Name
+            Lead? matchedLead = null;
+            if (deal.CustomerId.HasValue && leadsById.TryGetValue(deal.CustomerId.Value, out var lById))
+                matchedLead = lById;
+            else if (!string.IsNullOrWhiteSpace(nameKey) && leadsByName.TryGetValue(nameKey, out var lByName))
+                matchedLead = lByName;
+
+            // Match Customer: Name
+            Customer? matchedCust = null;
+            if (!string.IsNullOrWhiteSpace(nameKey) && customersByName.TryGetValue(nameKey, out var cByName))
+                matchedCust = cByName;
+
+            // Match Investor: ID first, then Name
+            Investor? matchedInv = null;
+            if (deal.CustomerId.HasValue && investorsById.TryGetValue(deal.CustomerId.Value, out var iById))
+                matchedInv = iById;
+            else if (!string.IsNullOrWhiteSpace(nameKey) && investorsByName.TryGetValue(nameKey, out var iByName))
+                matchedInv = iByName;
+
+            // Fallback order: Customer -> Lead -> Investor
+            if (string.IsNullOrWhiteSpace(dto.Phone))
+            {
+                dto.Phone = !string.IsNullOrWhiteSpace(matchedLead?.Phone)
+                    ? matchedLead.Phone
+                    : (!string.IsNullOrWhiteSpace(matchedCust?.Phone)
+                        ? matchedCust.Phone
+                        : matchedInv?.Phone);
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.Email))
+            {
+                dto.Email = !string.IsNullOrWhiteSpace(matchedLead?.Email)
+                    ? matchedLead.Email
+                    : (!string.IsNullOrWhiteSpace(matchedCust?.Email)
+                        ? matchedCust.Email
+                        : matchedInv?.Email);
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.Location))
+            {
+                dto.Location = !string.IsNullOrWhiteSpace(matchedLead?.Location)
+                    ? matchedLead.Location
+                    : matchedCust?.Location;
+            }
+        }
+    }
 }
