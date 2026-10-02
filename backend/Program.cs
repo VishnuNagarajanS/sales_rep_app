@@ -129,6 +129,7 @@ using (var scope = app.Services.CreateScope())
                     END IF;
 
                     ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ContactType"" character varying(50) NOT NULL DEFAULT 'lead';
+                    ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ContactEmail"" character varying(255) NULL;
                     ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Priority"" character varying(50) NOT NULL DEFAULT 'Medium';
                     ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
                     ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Agenda"" text NULL;

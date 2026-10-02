@@ -67,6 +67,11 @@ public class KycDto
     public DateTime? KycLinkSentAt { get; set; }
     public DateTime? SubmittedAt { get; set; }
 
+    public bool IsAssisted { get; set; }
+    public int? AssistedByUserId { get; set; }
+    public bool CustomerConsentObtained { get; set; }
+    public DateTime? CustomerConsentTimestamp { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
 }
@@ -127,6 +132,9 @@ public class KycListDto
     public bool KycLinkSent { get; set; }
     public DateTime? KycLinkSentAt { get; set; }
     public DateTime? SubmittedAt { get; set; }
+
+    public bool IsAssisted { get; set; }
+    public bool CustomerConsentObtained { get; set; }
 
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
@@ -201,6 +209,21 @@ public class SubmitKycDto
 
     // Whether this is a final submit (true) or a draft save (false)
     public bool IsFinalSubmit { get; set; } = false;
+
+    // Assisted KYC Details & Customer Consent Audit
+    public bool CustomerConsentObtained { get; set; } = false;
+    public DateTime? CustomerConsentTimestamp { get; set; }
+    public string? CustomerConsentDetails { get; set; }
+}
+
+public class PublicKycDto
+{
+    public string InvestorName { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string Phone { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public bool IsExpired { get; set; }
+    public DateTime? ExpiresAt { get; set; }
 }
 
 public class KycReviewDto

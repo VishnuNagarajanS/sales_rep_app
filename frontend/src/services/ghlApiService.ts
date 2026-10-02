@@ -534,6 +534,12 @@ export async function saveFollowup(followup: Followup): Promise<Followup> {
   const isNew =
     !followup.id || followup.id.startsWith('flw-') || followup.id.startsWith('fu-') || followup.id.startsWith('f-');
 
+  if (isMockMode()) {
+    storageService.saveFollowup(followup);
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+    return followup;
+  }
+
   try {
     if (isNew) {
       const payload = {
@@ -541,6 +547,7 @@ export async function saveFollowup(followup: Followup): Promise<Followup> {
         contactType: followup.contactType || 'lead',
         contactName: followup.contactName,
         contactPhone: followup.contactPhone,
+        contactEmail: (followup as any).contactEmail || (followup as any).email || undefined,
         scheduledAt: followup.scheduledAt,
         priority: followup.priority,
         notes: followup.notes,
@@ -555,6 +562,7 @@ export async function saveFollowup(followup: Followup): Promise<Followup> {
         window.dispatchEvent(new Event('nexus_storage_updated'));
         return saved;
       }
+      throw new Error(res?.message || 'Failed to create follow-up on server');
     } else {
       const payload = {
         scheduledAt: followup.scheduledAt,
@@ -572,14 +580,12 @@ export async function saveFollowup(followup: Followup): Promise<Followup> {
         window.dispatchEvent(new Event('nexus_storage_updated'));
         return saved;
       }
+      throw new Error(res?.message || 'Failed to update follow-up on server');
     }
-  } catch (err) {
-    console.warn('[ghlApiService] API saveFollowup failed, saving locally:', err);
+  } catch (err: any) {
+    console.error('[ghlApiService] API saveFollowup failed:', err);
+    throw err;
   }
-
-  storageService.saveFollowup(followup);
-  window.dispatchEvent(new Event('nexus_storage_updated'));
-  return followup;
 }
 
 export async function completeFollowup(followupId: string): Promise<void> {

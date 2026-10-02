@@ -111,6 +111,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     assignedAgentName: string;
   }
   const [duplicateCustomerModal, setDuplicateCustomerModal] = useState<DuplicateCustomerModalData | null>(null);
+  const [formErrorMessage, setFormErrorMessage] = useState<string | null>(null);
 
   const agentsList = useMemo(() => storageService.getAgents(tenant?.id), [tenant?.id]);
 
@@ -573,11 +574,13 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         ? { budgetRange: '₹45L - ₹65L', preferredLocation: 'Devanahalli North', readyToRegister: 'Immediate' }
         : { investmentCapacity: '', assetClass: '', preferredAssetClass: '', horizon: '3-5 Years' },
     });
+    setFormErrorMessage(null);
     setIsEditDrawerOpen(true);
   };
 
   const handleOpenEdit = (lead: Lead) => {
     setFormData({ ...lead });
+    setFormErrorMessage(null);
     setIsEditDrawerOpen(true);
   };
 
@@ -618,14 +621,19 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
   const handleSaveLead = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormErrorMessage(null);
     if (!formData.name || !formData.phone) {
-      showToast('Please provide both contact name and phone number.');
+      const msg = 'Please provide both contact name and phone number.';
+      setFormErrorMessage(msg);
+      showToast(msg);
       return;
     }
 
     const cleanPhone = (formData.phone || '').replace(/\D/g, '');
     if (cleanPhone.length < 10) {
-      showToast('Please enter a valid phone number with at least 10 digits.');
+      const msg = 'Please enter a valid phone number with at least 10 digits.';
+      setFormErrorMessage(msg);
+      showToast(msg);
       return;
     }
 
@@ -780,6 +788,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       await apiSaveLead(leadToSave);
       await loadData();
       showToast(isUpdated ? 'Lead updated successfully.' : 'New lead created successfully.');
+      setFormErrorMessage(null);
       setIsEditDrawerOpen(false);
     } catch (err: any) {
       console.error('[LeadsPage] Failed to save lead:', err);
@@ -817,7 +826,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
           assignedAgentName: cAgent,
         });
       } else {
-        showToast(`⚠️ ${errMsg || 'Failed to save lead record.'}`);
+        const displayErr = errMsg || 'Failed to save lead record. Please check the entered values and try again.';
+        setFormErrorMessage(displayErr);
+        showToast(`⚠️ ${displayErr}`);
       }
     }
   };
@@ -932,12 +943,20 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     const companyId = tenant?.id || 't-ghl-01';
     const promises: Promise<any>[] = [];
 
-    // Build a dedup set from the current leads so we can detect duplicates quickly
+    // Build a dedup set from current leads AND customers so we detect duplicates across both
     const normalizePhone = (ph: string) => (ph || '').replace(/\D/g, '').slice(-10);
     const normalizeEmail = (em: string) => (em || '').trim().toLowerCase();
 
     const existingPhones = new Set(leads.map(l => normalizePhone(l.phone)).filter(Boolean));
     const existingEmails = new Set(leads.map(l => normalizeEmail(l.email)).filter(Boolean));
+
+    const existingCompanyCustomers = storageService.getCustomers(tenant?.id) || [];
+    existingCompanyCustomers.forEach((c: any) => {
+      const cPh = normalizePhone(c.phone);
+      if (cPh) existingPhones.add(cPh);
+      const cEm = normalizeEmail(c.email);
+      if (cEm) existingEmails.add(cEm);
+    });
 
     parsedRows.forEach((row, index) => {
       const nameVal = row[columnMap['name']];
@@ -1342,7 +1361,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                 {/* ── Quick Info Banner (Assigned Agent) ── */}
                 <div className="lead-quick-banner">
                   <div className="lead-assigned-note">
-                    Assigned to <strong>{selectedLead.assignedAgentName}</strong>
+                    Assigned : <strong>{selectedLead.assignedAgentName}</strong>
                   </div>
                 </div>
 
@@ -1664,6 +1683,22 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
               placeholder="Client background, key objections, time horizon..."
             />
           </div>
+
+          {formErrorMessage && (
+            <div style={{
+              margin: '14px 0',
+              padding: '10px 14px',
+              borderRadius: 6,
+              backgroundColor: 'rgba(239,68,68,0.08)',
+              border: '1px solid rgba(239,68,68,0.25)',
+              color: '#dc2626',
+              fontSize: 13,
+              lineHeight: 1.5,
+              fontWeight: 500
+            }}>
+              ⚠️ {formErrorMessage}
+            </div>
+          )}
 
           <div className="lead-form-footer-actions">
             <button

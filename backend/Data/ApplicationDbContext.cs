@@ -47,6 +47,8 @@ public class ApplicationDbContext : DbContext
     public DbSet<OpportunityPitch> OpportunityPitches => Set<OpportunityPitch>();
     public DbSet<InvestorCall> InvestorCalls => Set<InvestorCall>();
     public DbSet<IrmPipelineCard> IrmPipelineCards => Set<IrmPipelineCard>();
+    public DbSet<KycOtpVerification> KycOtpVerifications => Set<KycOtpVerification>();
+    public DbSet<IrmCoverageAssignment> IrmCoverageAssignments => Set<IrmCoverageAssignment>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -259,6 +259,8 @@ export interface Followup {
   contactId: string;
   contactName: string;
   contactPhone: string;
+  contactEmail?: string;
+  email?: string;
   contactType: 'lead' | 'customer' | 'investor';
   scheduledAt: string;
   priority: 'Low' | 'Medium' | 'High';

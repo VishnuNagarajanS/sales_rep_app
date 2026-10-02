@@ -37,6 +37,10 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
         builder.Property(c => c.CreatedAt)
             .HasDefaultValueSql("NOW()");
 
+        // Enforce database-level duplicate protection within the same tenant/company
+        builder.HasIndex(c => new { c.CompanyId, c.Phone })
+            .IsUnique();
+
         // Relationships
         builder.HasOne(c => c.Company)
             .WithMany()

@@ -174,18 +174,24 @@ public class FollowupService : IFollowupService
         if (!companyId.HasValue || companyId.Value <= 0)
             return ApiResponse<FollowupResponseDto>.FailureResult("Unauthorized: Company ID is missing.");
 
-        // Enforce at most one active pending Follow-up per canonical contact and company
+        // Only collapse repeated submissions (same contact and same schedule within 15 minutes, or identical notes within 2 minutes)
+        // Do NOT collapse legitimate separate tasks with different details or schedules
         var contactPhoneDigits = new string(dto.ContactPhone.Where(char.IsDigit).ToArray());
         if (contactPhoneDigits.Length > 10) contactPhoneDigits = contactPhoneDigits[^10..];
 
-        var existingPending = await _context.Followups
+        var existingPendingList = await _context.Followups
             .Include(f => f.AssignedAgent)
             .ThenInclude(a => a.Role)
-            .FirstOrDefaultAsync(f =>
+            .Where(f =>
                 f.CompanyId == companyId.Value &&
                 f.Status == FollowupStatus.Pending &&
                 (f.ContactId == dto.ContactId.Trim() ||
-                 (!string.IsNullOrEmpty(contactPhoneDigits) && f.ContactPhone.Contains(contactPhoneDigits))), ct);
+                 (!string.IsNullOrEmpty(contactPhoneDigits) && f.ContactPhone.Contains(contactPhoneDigits))))
+            .ToListAsync(ct);
+
+        var existingPending = existingPendingList.FirstOrDefault(f =>
+            Math.Abs((f.ScheduledAt - dto.ScheduledAt).TotalMinutes) <= 15 ||
+            (!string.IsNullOrEmpty(dto.Notes) && f.Notes == dto.Notes.Trim() && (DateTime.UtcNow - f.CreatedAt).TotalMinutes <= 2));
 
         if (existingPending != null)
         {
@@ -198,6 +204,7 @@ public class FollowupService : IFollowupService
             existingPending.ScheduledAt = dto.ScheduledAt;
             if (!string.IsNullOrWhiteSpace(dto.Priority)) existingPending.Priority = dto.Priority.Trim();
             if (!string.IsNullOrWhiteSpace(dto.Notes)) existingPending.Notes = dto.Notes.Trim();
+            if (!string.IsNullOrWhiteSpace(dto.ContactEmail)) existingPending.ContactEmail = dto.ContactEmail.Trim();
             existingPending.AssignedAgentId = agentId.Value;
             existingPending.UpdatedAt = DateTime.UtcNow;
 
@@ -215,6 +222,21 @@ public class FollowupService : IFollowupService
             return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(existingPending), "Existing pending follow-up updated.");
         }
 
+        string? resolvedEmail = dto.ContactEmail?.Trim();
+        if (string.IsNullOrEmpty(resolvedEmail))
+        {
+            if (dto.ContactType == "lead" && int.TryParse(dto.ContactId, out var parsedLeadId))
+            {
+                var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == parsedLeadId && l.CompanyId == companyId.Value, ct);
+                resolvedEmail = lead?.Email;
+            }
+            else if (int.TryParse(dto.ContactId, out var parsedCustId))
+            {
+                var cust = await _context.Customers.FirstOrDefaultAsync(c => c.Id == parsedCustId && c.CompanyId == companyId.Value, ct);
+                resolvedEmail = cust?.Email;
+            }
+        }
+
         var followup = new Followup
         {
             CompanyId = companyId.Value,
@@ -223,6 +245,7 @@ public class FollowupService : IFollowupService
             ContactType = string.IsNullOrWhiteSpace(dto.ContactType) ? "lead" : dto.ContactType.Trim().ToLower(),
             ContactName = dto.ContactName.Trim(),
             ContactPhone = dto.ContactPhone.Trim(),
+            ContactEmail = resolvedEmail,
             ScheduledAt = dto.ScheduledAt,
             Priority = string.IsNullOrWhiteSpace(dto.Priority) ? "Medium" : dto.Priority.Trim(),
             Status = FollowupStatus.Pending,
@@ -325,6 +348,7 @@ public class FollowupService : IFollowupService
             ContactType = f.ContactType,
             ContactName = f.ContactName,
             ContactPhone = f.ContactPhone,
+            ContactEmail = f.ContactEmail,
             ScheduledAt = f.ScheduledAt,
             Priority = f.Priority,
             Status = f.Status.ToString(),

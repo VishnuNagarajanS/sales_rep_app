@@ -44,39 +44,36 @@ public class LeadService : ILeadService
 
     private IQueryable<Lead> GetScopedLeadsQuery(LeadFilterDto? filter = null)
     {
-        var role = _currentUser.Role;
+        var role = (_currentUser.Role ?? string.Empty).ToLowerInvariant();
         var agentId = _currentUser.UserId;
         var companyId = _currentUser.CompanyId;
 
-        int? requestedCompanyId = null;
-        if (filter != null && filter.CompanyId.HasValue)
-        {
-            requestedCompanyId = filter.CompanyId.Value;
-        }
-        else if (!string.IsNullOrWhiteSpace(filter?.CompanySlug))
-        {
-            var slug = filter.CompanySlug.Trim().ToLowerInvariant();
-            if (slug == "ghl" || slug == "1" || slug == "t-ghl-01") requestedCompanyId = 1;
-            else if (slug == "jamin" || slug == "2" || slug == "t-jamin-02") requestedCompanyId = 2;
-        }
+        // Do not trust tenant/company ID supplied by the browser when authenticated claims determine it
+        int? effectiveCompanyId = (companyId.HasValue && companyId.Value > 0)
+            ? companyId.Value
+            : (role == "super_admin" ? (filter?.CompanyId ?? (filter?.CompanySlug == "jamin" || filter?.CompanySlug == "2" ? 2 : 1)) : null);
 
         var query = _context.Leads.AsNoTracking().Include(l => l.AssignedAgent).AsQueryable();
 
         if (role == "super_admin")
         {
-            var targetCompanyId = requestedCompanyId ?? companyId;
-            if (targetCompanyId.HasValue)
-                query = query.Where(l => l.CompanyId == targetCompanyId.Value);
+            if (effectiveCompanyId.HasValue)
+                query = query.Where(l => l.CompanyId == effectiveCompanyId.Value);
             return query;
         }
 
-        var effectiveCompanyId = companyId ?? requestedCompanyId;
         if (effectiveCompanyId.HasValue)
         {
             query = query.Where(l => l.CompanyId == effectiveCompanyId.Value);
         }
 
-        if ((role == "sales_executive" || role == "irm") && agentId.HasValue)
+        if (role == "irm" && agentId.HasValue)
+        {
+            // In IRM My Leads, show a lead only when its status is exactly Interested,
+            // its assigned agent ID matches the logged-in IRM, and company matches
+            query = query.Where(l => l.AssignedAgentId == agentId.Value && l.Status == "Interested");
+        }
+        else if (role == "sales_executive" && agentId.HasValue)
         {
             query = query.Where(l => l.AssignedAgentId == agentId.Value);
         }
@@ -438,8 +435,57 @@ public class LeadService : ILeadService
             return ApiResponse<LeadResponseDto>.FailureResult("Lead not found or access denied.");
 
         if (dto.Name != null) lead.Name = dto.Name.Trim();
-        if (dto.Phone != null) lead.Phone = dto.Phone.Trim();
-        if (dto.Email != null) lead.Email = dto.Email.Trim();
+
+        // Duplicate protection on update: normalize phone/email and check against customers and other leads in tenant
+        if (dto.Phone != null || dto.Email != null)
+        {
+            var candidatePhone = dto.Phone != null ? dto.Phone.Trim() : lead.Phone;
+            var candidateEmail = dto.Email != null ? dto.Email.Trim() : lead.Email;
+            var newNormPhone = NormalizePhone(candidatePhone);
+            var newNormEmail = NormalizeEmail(candidateEmail);
+
+            var companyCustomers = await _context.Customers
+                .Where(c => c.CompanyId == lead.CompanyId)
+                .ToListAsync(ct);
+
+            var existingCustomer = companyCustomers.FirstOrDefault(c =>
+            {
+                var cEmail = NormalizeEmail(c.Email);
+                if (newNormEmail != null && cEmail != null && cEmail == newNormEmail) return true;
+                var cPhone = NormalizePhone(c.Phone);
+                if (newNormPhone != null && cPhone != null && cPhone == newNormPhone) return true;
+                return false;
+            });
+
+            if (existingCustomer != null)
+            {
+                return ApiResponse<LeadResponseDto>.FailureResult(
+                    $"Cannot update lead: A customer already exists with this contact information: {existingCustomer.Name} ({existingCustomer.Phone} / {existingCustomer.Email}).");
+            }
+
+            var otherLeads = await _context.Leads
+                .Where(l => l.CompanyId == lead.CompanyId && l.Id != lead.Id)
+                .ToListAsync(ct);
+
+            var existingOtherLead = otherLeads.FirstOrDefault(l =>
+            {
+                var lEmail = NormalizeEmail(l.Email);
+                if (newNormEmail != null && lEmail != null && lEmail == newNormEmail) return true;
+                var lPhone = NormalizePhone(l.Phone);
+                if (newNormPhone != null && lPhone != null && lPhone == newNormPhone) return true;
+                return false;
+            });
+
+            if (existingOtherLead != null)
+            {
+                return ApiResponse<LeadResponseDto>.FailureResult(
+                    $"Cannot update lead: Another lead already exists with this contact information: {existingOtherLead.Name} ({existingOtherLead.Phone} / {existingOtherLead.Email}).");
+            }
+
+            if (dto.Phone != null) lead.Phone = dto.Phone.Trim();
+            if (dto.Email != null) lead.Email = dto.Email.Trim();
+        }
+
         if (dto.Location != null) lead.Location = dto.Location.Trim();
         if (dto.Source != null) lead.Source = dto.Source.Trim();
         if (dto.Status != null) lead.Status = dto.Status.Trim();
@@ -494,9 +540,22 @@ public class LeadService : ILeadService
         var agentId = lead.AssignedAgentId;
         var companyId = lead.CompanyId;
 
-        // Check if customer already exists with this phone
-        var customer = await _context.Customers
-            .FirstOrDefaultAsync(c => c.Phone == lead.Phone && c.CompanyId == companyId, ct);
+        // Check if customer already exists with normalized phone or email in this tenant
+        var leadNormPhone = NormalizePhone(lead.Phone);
+        var leadNormEmail = NormalizeEmail(lead.Email);
+
+        var companyCustomers = await _context.Customers
+            .Where(c => c.CompanyId == companyId)
+            .ToListAsync(ct);
+
+        var customer = companyCustomers.FirstOrDefault(c =>
+        {
+            var cPhone = NormalizePhone(c.Phone);
+            if (leadNormPhone != null && cPhone != null && cPhone == leadNormPhone) return true;
+            var cEmail = NormalizeEmail(c.Email);
+            if (leadNormEmail != null && cEmail != null && cEmail == leadNormEmail) return true;
+            return false;
+        });
 
         if (customer == null)
         {

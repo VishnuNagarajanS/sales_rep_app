@@ -4,6 +4,7 @@ using backend.DTOs.Irm;
 using backend.Extensions;
 using backend.Models.Entities;
 using backend.Models.Enums;
+using backend.Services.Implementations;
 using backend.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -148,21 +149,23 @@ public class IrmKycController : ControllerBase
             return BadRequest(ApiResponse<KycDto>.ErrorResponse("Token is required"));
 
         var rawToken = dto.Token.Trim();
-        var subToken = rawToken.StartsWith("tok_") ? rawToken[4..] : rawToken;
-        var tokenPrefix = subToken.Contains('_') ? subToken.Split('_')[0] : subToken;
+        var hash = KycService.HashToken(rawToken);
 
         var kyc = await _db.InvestorKycs.FirstOrDefaultAsync(k =>
-            k.KycLinkToken == rawToken ||
-            (k.KycLinkToken != null && tokenPrefix.Length >= 8 && k.KycLinkToken.StartsWith(tokenPrefix)), ct);
+            (k.KycLinkToken == rawToken || (k.KycTokenHash != null && k.KycTokenHash == hash)), ct);
 
-        if (kyc == null)
-            return BadRequest(ApiResponse<KycDto>.ErrorResponse("Invalid or expired KYC token"));
-
-        if (kyc.KycLinkExpiresAt.HasValue && kyc.KycLinkExpiresAt.Value <= DateTime.UtcNow)
+        if (kyc == null || kyc.IsRevoked || (kyc.KycLinkExpiresAt.HasValue && kyc.KycLinkExpiresAt.Value <= DateTime.UtcNow))
             return BadRequest(ApiResponse<KycDto>.ErrorResponse("Invalid or expired KYC token"));
 
         if (kyc.Status == KycStatus.Approved || (kyc.SubmittedAt != null && kyc.Status == KycStatus.PendingReview))
             return BadRequest(ApiResponse<KycDto>.ErrorResponse("This KYC link has already been used"));
+
+        // Server-side OTP verification check before accepting submission
+        var isOtpVerified = await _otpService.HasVerifiedOtpAsync(rawToken, kyc.Email, ct);
+        if (!isOtpVerified)
+        {
+            return BadRequest(ApiResponse<KycDto>.ErrorResponse("Email OTP verification is required before submitting KYC. Please verify your OTP code."));
+        }
 
         // Derive companyId from the KYC record found by the token, not a hardcoded 1
         var companyId = kyc.CompanyId;
@@ -175,6 +178,9 @@ public class IrmKycController : ControllerBase
         var result = await _kycService.SubmitKycAsync(companyId, dto, ct);
         if (!result.Success)
             return BadRequest(result);
+
+        // Invalidate OTP on successful submission so it cannot be reused
+        await _otpService.InvalidateOtpAsync(rawToken, kyc.Email, ct);
 
         return Ok(result);
     }

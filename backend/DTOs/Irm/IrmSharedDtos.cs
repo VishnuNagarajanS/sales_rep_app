@@ -13,6 +13,8 @@ public class FollowupDto
     public string AssignedToRole { get; set; } = string.Empty;
     public string ContactName { get; set; } = string.Empty;
     public string ContactPhone { get; set; } = string.Empty;
+    public string? ContactEmail { get; set; }
+    public string? Email => ContactEmail;
     public string? ContactId { get; set; }
     public DateTime ScheduledAt { get; set; }
     public string Status { get; set; } = string.Empty;
@@ -28,6 +30,7 @@ public class CreateFollowupDto
     public int? InvestorId { get; set; }
     public string ContactName { get; set; } = string.Empty;
     public string ContactPhone { get; set; } = string.Empty;
+    public string? ContactEmail { get; set; }
     public string? ContactId { get; set; }
     public DateTime ScheduledAt { get; set; }
     public string? Agenda { get; set; }

@@ -689,35 +689,33 @@ export const FollowupsPage: React.FC = () => {
     scopedFollowups = followups;
   }
 
-  // Safely deduplicate display rows for all roles so at most one active pending follow-up is rendered per contact
+  // Safely deduplicate display rows for all roles: only collapse repeated submissions (same contact and schedule within 15 min)
+  // Do NOT collapse legitimate separate tasks with different details or schedules
   let processedFollowups = scopedFollowups;
   try {
     const seen = new Map<string, Followup>();
     const deduped: Followup[] = [];
 
-      for (const f of scopedFollowups) {
-        if (f.status !== 'Pending') {
-          deduped.push(f);
-          continue;
-        }
-        const phoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-        const key =
-          f.contactId && f.contactId !== 'contact-new'
-            ? `id:${f.contactId}`
-            : phoneDigits
-            ? `phone:${phoneDigits}`
-            : `raw:${f.id}`;
-
-        if (!seen.has(key)) {
-          seen.set(key, f);
-          deduped.push(f);
-        }
+    for (const f of scopedFollowups) {
+      if (f.status !== 'Pending') {
+        deduped.push(f);
+        continue;
       }
-      processedFollowups = deduped;
-    } catch (err) {
-      console.error('Error deduping followups list:', err);
-      processedFollowups = scopedFollowups;
+      const phoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+      const contactIdentifier = (f.contactId && f.contactId !== 'contact-new') ? f.contactId : phoneDigits;
+      const schedInterval = f.scheduledAt ? Math.floor(new Date(f.scheduledAt).getTime() / (15 * 60 * 1000)) : (f.scheduledDate || 'no-date');
+      const key = contactIdentifier ? `${contactIdentifier}_${schedInterval}` : `raw:${f.id}`;
+
+      if (!seen.has(key)) {
+        seen.set(key, f);
+        deduped.push(f);
+      }
     }
+    processedFollowups = deduped;
+  } catch (err) {
+    console.error('Error deduping followups list:', err);
+    processedFollowups = scopedFollowups;
+  }
 
   const getCallCountForFollowup = (f: Followup): number => {
     const fPhoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
@@ -1086,7 +1084,7 @@ export const FollowupsPage: React.FC = () => {
           title={drawerFollowup?.contactName || 'Contact Profile'}
           subtitle={
             isAdmin
-              ? `Phone: ${drawerFollowup?.contactPhone || '—'} • Assigned: ${
+              ? `Phone: ${drawerFollowup?.contactPhone || '—'} • Assigned : ${
                   drawerFollowup?.assignedAgentName || 'Unassigned'
                 } (${drawerFollowupRole})`
               : drawerFollowup?.contactPhone
@@ -1178,7 +1176,7 @@ export const FollowupsPage: React.FC = () => {
               matchingCustomer?.assignedAgentName ||
               'Unassigned';
 
-            const contactEmail = matchingLead?.email || matchingCustomer?.email || (drawerFollowup as any).email || '—';
+            const contactEmail = (drawerFollowup as any).contactEmail || (drawerFollowup as any).email || matchingLead?.email || matchingCustomer?.email || '—';
             const contactLocation = matchingLead?.location || matchingCustomer?.location || (drawerFollowup as any).location || '—';
             const contactSource = matchingLead?.source || (drawerFollowup as any).source || 'Follow-up Task';
 
@@ -1291,7 +1289,7 @@ export const FollowupsPage: React.FC = () => {
                 {!isAdmin && (
                   <div className="lead-quick-banner">
                     <div className="lead-assigned-note" style={{ fontSize: 13, marginTop: 0 }}>
-                      Assigned: <strong>{assignedAgent}</strong>
+                      Assigned : <strong>{assignedAgent}</strong>
                       {drawerFollowupRole && (
                         <span
                           style={{

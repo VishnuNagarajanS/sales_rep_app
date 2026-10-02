@@ -1,6 +1,6 @@
 const { Client } = require('pg');
 const client = new Client({
-  connectionString: 'postgresql://neondb_owner:npg_wIWrXLJV9fF3@ep-sparkling-leaf-b3evey2y.c-4.ap-southeast-1.aws.neon.tech/neondb?sslmode=require'
+  connectionString: process.env.DATABASE_URL || process.env.DefaultConnection || 'Host=localhost;Database=neondb'
 });
 client.connect().then(async () => {
   const res = await client.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;");

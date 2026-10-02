@@ -393,15 +393,17 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (notes) {
             matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Follow-up Required: ${notes}`;
           }
-          apiSaveLead(matchedLead).catch(console.error);
+          await apiSaveLead(matchedLead);
+          storageService.saveLead(matchedLead);
         }
 
-        apiSaveFollowup({
+        await apiSaveFollowup({
           id: `flw-${Date.now()}`,
           companyId: tenant.id,
           contactId: matchedLead?.id || lastCallRecord.matchedRecord?.id || `contact-${Date.now()}`,
           contactName: lastCallRecord.contactName,
           contactPhone: lastCallRecord.contactPhone,
+          contactEmail: (matchedLead as any)?.email || (lastCallRecord.matchedRecord as any)?.email || undefined,
           contactType: 'lead',
           scheduledAt: followupScheduledAt,
           priority: followupPriority,
@@ -409,7 +411,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           notes: followupNotes,
           assignedAgentId: matchedLead?.assignedAgentId || user.id,
           assignedAgentName: matchedLead?.assignedAgentName || user.name,
-        }).catch(console.error);
+        });
       }
 
       // 3. Call Back -> Keep in Leads section, update status to Callback
