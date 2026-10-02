@@ -12,6 +12,7 @@ public class UpdateLeadDto
     public string? Notes { get; set; }
 
     public string? InvestmentCapacity { get; set; }
+    public string? InvestmentAmount { get; set; }
     public string? AssetClass { get; set; }
     public string? PreferredAssetClass { get; set; }
     public string? Horizon { get; set; }

@@ -286,7 +286,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         reason: reason || undefined,
       };
 
-      apiLogCall(callRecord).catch(console.error);
+      await apiLogCall(callRecord);
 
       // Locate matched lead if any
       const leadId = lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : null;
@@ -342,7 +342,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             cust.customFields = { ...cust.customFields, ...matchedLead.customFields };
           }
         }
-        apiSaveCustomer(cust).catch(console.error);
+        await apiSaveCustomer(cust);
 
         if (matchedLead) {
           matchedLead.status = 'Interested';
@@ -351,7 +351,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           matchedLead.customFields.qualifiedByAgentName = user.name;
           matchedLead.customFields.qualifiedAt = new Date().toISOString();
           matchedLead.customFields.transferredToIrm = 'true';
-          apiSaveLead(matchedLead).catch(console.error);
+          await apiSaveLead(matchedLead);
           storageService.saveLead(matchedLead);
         } else if (lastCallRecord.contactPhone || lastCallRecord.contactName) {
           const newInterestedLead: Lead = {
@@ -374,7 +374,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
               transferredToIrm: 'true',
             },
           };
-          apiSaveLead(newInterestedLead).catch(console.error);
+          await apiSaveLead(newInterestedLead);
           storageService.saveLead(newInterestedLead);
         }
       }
@@ -424,7 +424,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (notes) {
             matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Call Back: ${notes}`;
           }
-          apiSaveLead(matchedLead).catch(console.error);
+          await apiSaveLead(matchedLead);
         } else {
           const newLead: Lead = {
             id: `lead-${Date.now()}`,
@@ -442,11 +442,11 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: notes || '',
             customFields: {},
           };
-          apiSaveLead(newLead).catch(console.error);
+          await apiSaveLead(newLead);
         }
 
         if (scheduleFollowup) {
-          apiSaveFollowup({
+          await apiSaveFollowup({
             id: `flw-${Date.now()}`,
             companyId: tenant.id,
             contactId: matchedLead?.id || lastCallRecord.matchedRecord?.id || 'contact-new',
@@ -459,7 +459,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: scheduleFollowup.notes || (notes ? `Callback reminder: ${notes}` : `Callback reminder for ${lastCallRecord.contactName}`),
             assignedAgentId: user.id,
             assignedAgentName: user.name,
-          }).catch(console.error);
+          });
         }
       }
 
@@ -469,7 +469,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (matchedLead) {
           matchedLead.status = 'Not Interested';
           matchedLead.customFields = { ...matchedLead.customFields, dispositionReason: reasonText };
-          apiSaveLead(matchedLead).catch(console.error);
+          await apiSaveLead(matchedLead);
         } else {
           const newLead: Lead = {
             id: `lead-${Date.now()}`,
@@ -487,7 +487,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: '',
             customFields: { dispositionReason: reasonText },
           };
-          apiSaveLead(newLead).catch(console.error);
+          await apiSaveLead(newLead);
         }
       }
 
@@ -497,7 +497,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (matchedLead) {
           matchedLead.status = 'Junk';
           matchedLead.customFields = { ...matchedLead.customFields, dispositionReason: reasonText };
-          apiSaveLead(matchedLead).catch(console.error);
+          await apiSaveLead(matchedLead);
         } else {
           const newLead: Lead = {
             id: `lead-${Date.now()}`,
@@ -515,7 +515,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: '',
             customFields: { dispositionReason: reasonText },
           };
-          apiSaveLead(newLead).catch(console.error);
+          await apiSaveLead(newLead);
         }
       }
 
@@ -529,7 +529,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (notes) {
             matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] No Response: ${notes}`;
           }
-          apiSaveLead(matchedLead).catch(console.error);
+          await apiSaveLead(matchedLead);
         } else {
           const newLead: Lead = {
             id: `lead-${Date.now()}`,
@@ -547,11 +547,11 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: notes || '',
             customFields: {},
           };
-          apiSaveLead(newLead).catch(console.error);
+          await apiSaveLead(newLead);
         }
 
         if (scheduleFollowup) {
-          apiSaveFollowup({
+          await apiSaveFollowup({
             id: `flw-${Date.now()}`,
             companyId: tenant.id,
             contactId: matchedLead?.id || lastCallRecord.matchedRecord?.id || 'contact-new',
@@ -564,7 +564,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: scheduleFollowup.notes || (notes ? `Follow-up from No Response: ${notes}` : `Follow-up required for ${lastCallRecord.contactName}`),
             assignedAgentId: user.id,
             assignedAgentName: user.name,
-          }).catch(console.error);
+          });
         }
       }
 
@@ -591,7 +591,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
               notes: `Converted from lead. Original notes: ${matchedLead.notes || ''}`,
               customFields: matchedLead.customFields,
             };
-            apiSaveCustomer(cust).catch(console.error);
+            await apiSaveCustomer(cust);
           }
 
           const newDeal: Deal = {
@@ -608,13 +608,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: `Deal initiated upon converting lead ${matchedLead.name}. ${notes ? `Call notes: ${notes}` : ''}`,
             createdAt: new Date().toISOString().split('T')[0],
           };
-          apiSaveDeal(newDeal).catch(console.error);
+          await apiSaveDeal(newDeal);
 
           matchedLead.status = 'Converted';
           if (notes) {
             matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Converted: ${notes}`;
           }
-          apiSaveLead(matchedLead).catch(console.error);
+          await apiSaveLead(matchedLead);
         }
       }
     }
@@ -650,11 +650,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         customerId: lastCallRecord.matchedRecord?.type === 'customer' ? lastCallRecord.matchedRecord.id : undefined,
       };
 
-      try {
-        await apiLogCall(callRecord);
-      } catch (err) {
-        console.error('Error logging skipped call:', err);
-      }
+      await apiLogCall(callRecord);
 
       // Record activity on matched lead
       const leadId = lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : null;
@@ -676,7 +672,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (!matchedLead.customFields) matchedLead.customFields = {};
         matchedLead.customFields.lastCallDisposition = 'Skipped';
         matchedLead.customFields.lastCallSkipReason = trimmedReason;
-        apiSaveLead(matchedLead).catch(console.error);
+        await apiSaveLead(matchedLead);
         storageService.saveLead(matchedLead);
       }
 

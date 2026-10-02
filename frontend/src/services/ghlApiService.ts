@@ -455,9 +455,11 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         assignedAgentId: nid(lead.assignedAgentId) || undefined,
         companyId: nid(lead.companyId) || 1,
         investmentCapacity: customFields['Investment Capacity'] ?? customFields['investmentCapacity'],
+        investmentAmount: (lead as any).investmentAmount ?? customFields['Investment Amount'] ?? customFields['investmentAmount'],
         assetClass: customFields['Asset Class'] ?? customFields['assetClass'],
         preferredAssetClass: customFields['Preferred Asset Class'] ?? customFields['preferredAssetClass'],
         horizon: customFields['Horizon'] ?? customFields['horizon'],
+        additionalCustomFields: customFields,
       };
       const res: ApiResponse<any> = await apiClient.post('/sales-executive/leads', payload);
       if (res && res.success && res.data) {
@@ -480,9 +482,11 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         nextFollowupDate: lead.nextFollowupDate,
         assignedAgentId: nid(lead.assignedAgentId) || undefined,
         investmentCapacity: customFields['Investment Capacity'] ?? customFields['investmentCapacity'],
+        investmentAmount: (lead as any).investmentAmount ?? customFields['Investment Amount'] ?? customFields['investmentAmount'],
         assetClass: customFields['Asset Class'] ?? customFields['assetClass'],
         preferredAssetClass: customFields['Preferred Asset Class'] ?? customFields['preferredAssetClass'],
         horizon: customFields['Horizon'] ?? customFields['horizon'],
+        additionalCustomFields: customFields,
       };
       const res: ApiResponse<any> = await apiClient.put(
         `/sales-executive/leads/${nid(lead.id)}`,
@@ -628,13 +632,15 @@ export async function saveCustomer(customer: Customer): Promise<Customer> {
     customer.id.startsWith('cust-') ||
     customer.id.startsWith('c-');
 
-  const payload = {
+  const payload: Record<string, any> = {
     name: customer.name,
     phone: customer.phone,
     email: customer.email,
     location: customer.location,
     status: customer.status,
     notes: customer.notes,
+    totalValue: customer.totalValue,
+    customFields: customer.customFields,
   };
 
   if (isNew) {

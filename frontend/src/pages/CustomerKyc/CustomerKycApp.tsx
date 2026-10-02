@@ -271,8 +271,8 @@ export const CustomerKycApp: React.FC = () => {
     const activeToken = customToken || token || extractTokenFromUrl();
     const emailToSend = (customEmail || registeredEmail || formData.email || '').trim();
 
-    if (!emailToSend && !activeToken) {
-      setOtpError('No registered email address found for this KYC session. Please contact your Relationship Manager.');
+    if (!emailToSend || !activeToken) {
+      setOtpError('Both KYC token and registered email address are required to send a verification code.');
       setOtpSending(false);
       return;
     }
@@ -283,7 +283,7 @@ export const CustomerKycApp: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token: activeToken,
-          email: emailToSend || undefined,
+          email: emailToSend,
         }),
       });
 
@@ -322,13 +322,19 @@ export const CustomerKycApp: React.FC = () => {
     const activeToken = token || extractTokenFromUrl();
     const emailToVerify = (registeredEmail || formData.email || '').trim();
 
+    if (!activeToken || !emailToVerify) {
+      setOtpError('Both active KYC token and registered email address are required for verification.');
+      setOtpVerifying(false);
+      return;
+    }
+
     try {
       const res = await fetch('/api/irm/kyc/otp/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token: activeToken,
-          email: emailToVerify || undefined,
+          email: emailToVerify,
           otp: code,
         }),
       });
@@ -624,27 +630,10 @@ export const CustomerKycApp: React.FC = () => {
         return;
       }
 
-      if (isMockMode()) {
-        try {
-          const raw = localStorage.getItem('nexus_mock_kyc_records') || '[]';
-          const list = JSON.parse(raw);
-          list.push({ ...payload, id: Date.now(), status: 'PendingReview', submittedAt: new Date().toISOString() });
-          localStorage.setItem('nexus_mock_kyc_records', JSON.stringify(list));
-        } catch {}
-        stopCamera();
-        setCurrentScreen('submitted');
-        return;
-      }
-
       const errMsg = json.message || (json.errors ? Object.values(json.errors).flat().join(', ') : 'Submission failed. Please check your details and try again.');
       setSubmitError(errMsg);
     } catch (err: any) {
       console.error('Failed to submit KYC:', err);
-      if (isMockMode()) {
-        stopCamera();
-        setCurrentScreen('submitted');
-        return;
-      }
       setSubmitError('Network error — please check your connection and try again.');
     } finally {
       setIsSubmitting(false);

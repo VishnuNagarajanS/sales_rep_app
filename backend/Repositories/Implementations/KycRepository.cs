@@ -42,10 +42,13 @@ public class KycRepository : IKycRepository
         if (string.IsNullOrWhiteSpace(token)) return null;
         var cleanToken = token.Trim();
         var subToken = cleanToken.StartsWith("tok_") ? cleanToken[4..] : cleanToken;
+        var tokenHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(cleanToken))).ToLowerInvariant();
+        var subTokenHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(subToken))).ToLowerInvariant();
 
         return await _db.InvestorKycs.FirstOrDefaultAsync(k =>
             !k.IsRevoked &&
-            (k.KycLinkToken == cleanToken || k.KycLinkToken == subToken || (k.KycLinkToken != null && ("tok_" + k.KycLinkToken) == cleanToken)) &&
+            (k.KycLinkToken == cleanToken || k.KycLinkToken == subToken || (k.KycLinkToken != null && ("tok_" + k.KycLinkToken) == cleanToken) ||
+             (k.KycTokenHash != null && (k.KycTokenHash == tokenHash || k.KycTokenHash == subTokenHash))) &&
             (!k.KycLinkExpiresAt.HasValue || k.KycLinkExpiresAt.Value > DateTime.UtcNow), ct);
     }
 

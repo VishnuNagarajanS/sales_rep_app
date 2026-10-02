@@ -23,6 +23,15 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
         builder.Property(c => c.Email)
             .HasMaxLength(255);
 
+        builder.Property(c => c.NormalizedPhone)
+            .HasMaxLength(20);
+
+        builder.Property(c => c.NormalizedEmail)
+            .HasMaxLength(255);
+
+        builder.Property(c => c.IsDuplicate)
+            .HasDefaultValue(false);
+
         builder.Property(c => c.Location)
             .HasMaxLength(255);
 
@@ -37,8 +46,13 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
         builder.Property(c => c.CreatedAt)
             .HasDefaultValueSql("NOW()");
 
-        // Enforce database-level duplicate protection within the same tenant/company
-        builder.HasIndex(c => new { c.CompanyId, c.Phone })
+        // Tenant-scoped filtered unique indexes on normalized identifiers (safe when existing duplicates exist)
+        builder.HasIndex(c => new { c.CompanyId, c.NormalizedPhone })
+            .HasFilter("\"IsDuplicate\" = false AND \"NormalizedPhone\" IS NOT NULL AND \"NormalizedPhone\" <> ''")
+            .IsUnique();
+
+        builder.HasIndex(c => new { c.CompanyId, c.NormalizedEmail })
+            .HasFilter("\"IsDuplicate\" = false AND \"NormalizedEmail\" IS NOT NULL AND \"NormalizedEmail\" <> ''")
             .IsUnique();
 
         // Relationships

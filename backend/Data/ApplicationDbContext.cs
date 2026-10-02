@@ -50,6 +50,39 @@ public class ApplicationDbContext : DbContext
     public DbSet<KycOtpVerification> KycOtpVerifications => Set<KycOtpVerification>();
     public DbSet<IrmCoverageAssignment> IrmCoverageAssignments => Set<IrmCoverageAssignment>();
 
+    public override int SaveChanges()
+    {
+        NormalizeContacts();
+        return base.SaveChanges();
+    }
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        NormalizeContacts();
+        return base.SaveChangesAsync(cancellationToken);
+    }
+
+    private void NormalizeContacts()
+    {
+        foreach (var entry in ChangeTracker.Entries<Lead>())
+        {
+            if (entry.State == EntityState.Added || entry.State == EntityState.Modified)
+            {
+                entry.Entity.NormalizedPhone = ContactNormalizer.NormalizePhone(entry.Entity.Phone);
+                entry.Entity.NormalizedEmail = ContactNormalizer.NormalizeEmail(entry.Entity.Email);
+            }
+        }
+
+        foreach (var entry in ChangeTracker.Entries<Customer>())
+        {
+            if (entry.State == EntityState.Added || entry.State == EntityState.Modified)
+            {
+                entry.Entity.NormalizedPhone = ContactNormalizer.NormalizePhone(entry.Entity.Phone);
+                entry.Entity.NormalizedEmail = ContactNormalizer.NormalizeEmail(entry.Entity.Email);
+            }
+        }
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

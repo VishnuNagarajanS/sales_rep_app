@@ -501,8 +501,34 @@ public class KycService : IKycService
         kyc.IsAssisted = true;
         kyc.AssistedByUserId = irmId;
         kyc.CustomerConsentObtained = dto.CustomerConsentObtained;
-        kyc.CustomerConsentTimestamp = dto.CustomerConsentTimestamp ?? DateTime.UtcNow;
-        kyc.CustomerConsentDetails = dto.CustomerConsentDetails ?? "Customer verbal and electronic consent obtained during assisted KYC session.";
+        kyc.CustomerConsentTimestamp = dto.CustomerConsentObtained
+            ? (dto.CustomerConsentTimestamp ?? DateTime.UtcNow)
+            : null;
+        kyc.CustomerConsentDetails = dto.CustomerConsentObtained
+            ? (!string.IsNullOrWhiteSpace(dto.CustomerConsentDetails) ? dto.CustomerConsentDetails.Trim() : "Customer verbal and electronic consent confirmed during assisted KYC session.")
+            : null;
+
+        // Reject assisted KYC submissions unless customer consent is confirmed
+        if (dto.IsFinalSubmit && !dto.CustomerConsentObtained)
+        {
+            var rejectAudit = new AuditLog
+            {
+                CompanyId = companyId,
+                Action = "ASSISTED_KYC_SUBMIT_REJECTED",
+                EntityType = "InvestorKyc",
+                EntityId = kyc.Id != 0 ? kyc.Id.ToString() : (dto.InvestorId > 0 ? dto.InvestorId.ToString() : "0"),
+                Details = $"Assisted KYC submission rejected: Customer consent was not confirmed by IRM ID {irmId} for investor '{kyc.InvestorName}'.",
+                ActorName = $"IRM (ID: {irmId})",
+                Timestamp = DateTime.UtcNow,
+                Module = "KYC_ASSISTED",
+                Status = "failed"
+            };
+            _db.AuditLogs.Add(rejectAudit);
+            await _db.SaveChangesAsync(ct);
+
+            return ApiResponse<KycDto>.ErrorResponse(
+                "Assisted KYC submission rejected: Confirmed customer consent is required before submission. Please obtain and confirm customer consent.");
+        }
 
         if (dto.IsFinalSubmit)
         {
@@ -521,14 +547,14 @@ public class KycService : IKycService
         else
             await _kycRepo.UpdateAsync(kyc, ct);
 
-        // Record immutable backend audit log
+        // Record immutable backend audit log retaining full consent and submission details
         var audit = new AuditLog
         {
             CompanyId = companyId,
             Action = dto.IsFinalSubmit ? "ASSISTED_KYC_SUBMIT" : "ASSISTED_KYC_DRAFT",
             EntityType = "InvestorKyc",
             EntityId = kyc.Id.ToString(),
-            Details = $"Assisted KYC {(dto.IsFinalSubmit ? "submitted for verification" : "draft saved")} by IRM ID {irmId} for investor '{kyc.InvestorName}' (Consent: {kyc.CustomerConsentObtained}, Timestamp: {kyc.CustomerConsentTimestamp:O})",
+            Details = $"Assisted KYC {(dto.IsFinalSubmit ? "submitted for verification" : "draft saved")} by IRM ID {irmId} for investor '{kyc.InvestorName}' (Consent: {kyc.CustomerConsentObtained}, Timestamp: {kyc.CustomerConsentTimestamp:O}, Details: {kyc.CustomerConsentDetails})",
             ActorName = $"IRM (ID: {irmId})",
             Timestamp = DateTime.UtcNow,
             Module = "KYC_ASSISTED",

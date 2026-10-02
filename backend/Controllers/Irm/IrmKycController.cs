@@ -223,6 +223,12 @@ public class IrmKycController : ControllerBase
         if (userId <= 0)
             return Unauthorized();
 
+        if (!dto.CustomerConsentObtained)
+        {
+            return BadRequest(ApiResponse<KycDto>.ErrorResponse(
+                "Customer consent is required before submitting assisted KYC. Please obtain and confirm customer consent."));
+        }
+
         dto.IsFinalSubmit = true;
         var result = await _kycService.SaveAssistedKycAsync(companyId, userId, dto, ct);
         if (!result.Success)

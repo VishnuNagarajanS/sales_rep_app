@@ -15,6 +15,7 @@ public class CreateLeadDto
 
     // GHL Custom Fields
     public string? InvestmentCapacity { get; set; } // e.g. "₹1 Cr – ₹5 Cr"
+    public string? InvestmentAmount { get; set; } // e.g. "5000000"
     public string? AssetClass { get; set; } // e.g. "AIF", "CO-AIF"
     public string? PreferredAssetClass { get; set; }
     public string? Horizon { get; set; } // e.g. "3-5 Years"

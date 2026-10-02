@@ -202,6 +202,7 @@ public class LeadService : ILeadService
         if (normPref != null) customFields["preferredAssetClass"] = normPref;
 
         if (!string.IsNullOrWhiteSpace(dto.Horizon)) customFields["horizon"] = dto.Horizon;
+        if (!string.IsNullOrWhiteSpace(dto.InvestmentAmount)) customFields["investmentAmount"] = dto.InvestmentAmount.Trim();
 
         // Canonical Customer Duplicate Check: check normalized phone (last 10 digits) and normalized email
         var normPhone = NormalizePhone(dto.Phone);
@@ -232,37 +233,21 @@ public class LeadService : ILeadService
 
             if (hasIdentifier)
             {
-                var companyLeads = await _context.Leads
+                existingLead = await _context.Leads
                     .Include(l => l.AssignedAgent)
-                    .Where(l => l.CompanyId == companyId.Value)
-                    .ToListAsync(ct);
+                    .FirstOrDefaultAsync(l =>
+                        l.CompanyId == companyId.Value &&
+                        !l.IsDuplicate &&
+                        ((normEmail != null && l.NormalizedEmail == normEmail) ||
+                         (normPhone != null && l.NormalizedPhone == normPhone)), ct);
 
-                existingLead = companyLeads.FirstOrDefault(l =>
-                {
-                    var lEmail = NormalizeEmail(l.Email);
-                    if (normEmail != null && lEmail != null && lEmail == normEmail) return true;
-
-                    var lPhone = NormalizePhone(l.Phone);
-                    if (normPhone != null && lPhone != null && lPhone == normPhone) return true;
-
-                    return false;
-                });
-
-                var companyCustomers = await _context.Customers
+                existingCustomer = await _context.Customers
                     .Include(c => c.AssignedAgent)
-                    .Where(c => c.CompanyId == companyId.Value)
-                    .ToListAsync(ct);
-
-                existingCustomer = companyCustomers.FirstOrDefault(c =>
-                {
-                    var cEmail = NormalizeEmail(c.Email);
-                    if (normEmail != null && cEmail != null && cEmail == normEmail) return true;
-
-                    var cPhone = NormalizePhone(c.Phone);
-                    if (normPhone != null && cPhone != null && cPhone == normPhone) return true;
-
-                    return false;
-                });
+                    .FirstOrDefaultAsync(c =>
+                        c.CompanyId == companyId.Value &&
+                        !c.IsDuplicate &&
+                        ((normEmail != null && c.NormalizedEmail == normEmail) ||
+                         (normPhone != null && c.NormalizedPhone == normPhone)), ct);
 
                 companyFollowups = await _context.Followups
                     .Include(f => f.AssignedAgent)
@@ -444,46 +429,42 @@ public class LeadService : ILeadService
             var newNormPhone = NormalizePhone(candidatePhone);
             var newNormEmail = NormalizeEmail(candidateEmail);
 
-            var companyCustomers = await _context.Customers
-                .Where(c => c.CompanyId == lead.CompanyId)
-                .ToListAsync(ct);
-
-            var existingCustomer = companyCustomers.FirstOrDefault(c =>
+            if (newNormPhone != null || newNormEmail != null)
             {
-                var cEmail = NormalizeEmail(c.Email);
-                if (newNormEmail != null && cEmail != null && cEmail == newNormEmail) return true;
-                var cPhone = NormalizePhone(c.Phone);
-                if (newNormPhone != null && cPhone != null && cPhone == newNormPhone) return true;
-                return false;
-            });
+                var existingCustomer = await _context.Customers
+                    .Include(c => c.AssignedAgent)
+                    .FirstOrDefaultAsync(c =>
+                        c.CompanyId == lead.CompanyId &&
+                        !c.IsDuplicate &&
+                        ((newNormPhone != null && c.NormalizedPhone == newNormPhone) ||
+                         (newNormEmail != null && c.NormalizedEmail == newNormEmail)), ct);
 
-            if (existingCustomer != null)
-            {
-                return ApiResponse<LeadResponseDto>.FailureResult(
-                    $"Cannot update lead: A customer already exists with this contact information: {existingCustomer.Name} ({existingCustomer.Phone} / {existingCustomer.Email}).");
-            }
+                if (existingCustomer != null)
+                {
+                    return ApiResponse<LeadResponseDto>.FailureResult(
+                        $"Cannot update lead: A customer already exists with this contact information: {existingCustomer.Name} ({existingCustomer.Phone} / {existingCustomer.Email}).");
+                }
 
-            var otherLeads = await _context.Leads
-                .Where(l => l.CompanyId == lead.CompanyId && l.Id != lead.Id)
-                .ToListAsync(ct);
+                var existingOtherLead = await _context.Leads
+                    .Include(l => l.AssignedAgent)
+                    .FirstOrDefaultAsync(l =>
+                        l.CompanyId == lead.CompanyId &&
+                        l.Id != lead.Id &&
+                        !l.IsDuplicate &&
+                        ((newNormPhone != null && l.NormalizedPhone == newNormPhone) ||
+                         (newNormEmail != null && l.NormalizedEmail == newNormEmail)), ct);
 
-            var existingOtherLead = otherLeads.FirstOrDefault(l =>
-            {
-                var lEmail = NormalizeEmail(l.Email);
-                if (newNormEmail != null && lEmail != null && lEmail == newNormEmail) return true;
-                var lPhone = NormalizePhone(l.Phone);
-                if (newNormPhone != null && lPhone != null && lPhone == newNormPhone) return true;
-                return false;
-            });
-
-            if (existingOtherLead != null)
-            {
-                return ApiResponse<LeadResponseDto>.FailureResult(
-                    $"Cannot update lead: Another lead already exists with this contact information: {existingOtherLead.Name} ({existingOtherLead.Phone} / {existingOtherLead.Email}).");
+                if (existingOtherLead != null)
+                {
+                    return ApiResponse<LeadResponseDto>.FailureResult(
+                        $"Cannot update lead: Another lead already exists with this contact information: {existingOtherLead.Name} ({existingOtherLead.Phone} / {existingOtherLead.Email}).");
+                }
             }
 
             if (dto.Phone != null) lead.Phone = dto.Phone.Trim();
             if (dto.Email != null) lead.Email = dto.Email.Trim();
+            lead.NormalizedPhone = newNormPhone;
+            lead.NormalizedEmail = newNormEmail;
         }
 
         if (dto.Location != null) lead.Location = dto.Location.Trim();
@@ -502,6 +483,14 @@ public class LeadService : ILeadService
             var cap = OptionalFieldNormalizer.Normalize(dto.InvestmentCapacity);
             if (cap == null) customFields.Remove("investmentCapacity");
             else customFields["investmentCapacity"] = cap;
+        }
+
+        if (dto.InvestmentAmount != null)
+        {
+            if (string.IsNullOrWhiteSpace(dto.InvestmentAmount))
+                customFields.Remove("investmentAmount");
+            else
+                customFields["investmentAmount"] = dto.InvestmentAmount.Trim();
         }
         
         if (dto.AssetClass != null || dto.PreferredAssetClass != null)
@@ -544,18 +533,15 @@ public class LeadService : ILeadService
         var leadNormPhone = NormalizePhone(lead.Phone);
         var leadNormEmail = NormalizeEmail(lead.Email);
 
-        var companyCustomers = await _context.Customers
-            .Where(c => c.CompanyId == companyId)
-            .ToListAsync(ct);
-
-        var customer = companyCustomers.FirstOrDefault(c =>
+        Customer? customer = null;
+        if (leadNormPhone != null || leadNormEmail != null)
         {
-            var cPhone = NormalizePhone(c.Phone);
-            if (leadNormPhone != null && cPhone != null && cPhone == leadNormPhone) return true;
-            var cEmail = NormalizeEmail(c.Email);
-            if (leadNormEmail != null && cEmail != null && cEmail == leadNormEmail) return true;
-            return false;
-        });
+            customer = await _context.Customers.FirstOrDefaultAsync(c =>
+                c.CompanyId == companyId &&
+                !c.IsDuplicate &&
+                ((leadNormPhone != null && c.NormalizedPhone == leadNormPhone) ||
+                 (leadNormEmail != null && c.NormalizedEmail == leadNormEmail)), ct);
+        }
 
         if (customer == null)
         {
@@ -566,6 +552,9 @@ public class LeadService : ILeadService
                 Name = lead.Name,
                 Phone = lead.Phone,
                 Email = lead.Email,
+                NormalizedPhone = leadNormPhone,
+                NormalizedEmail = leadNormEmail,
+                IsDuplicate = false,
                 Location = lead.Location,
                 Status = "Active",
                 TotalValue = dto.DealValue ?? 0,

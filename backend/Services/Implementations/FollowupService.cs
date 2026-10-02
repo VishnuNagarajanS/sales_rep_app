@@ -174,24 +174,22 @@ public class FollowupService : IFollowupService
         if (!companyId.HasValue || companyId.Value <= 0)
             return ApiResponse<FollowupResponseDto>.FailureResult("Unauthorized: Company ID is missing.");
 
-        // Only collapse repeated submissions (same contact and same schedule within 15 minutes, or identical notes within 2 minutes)
-        // Do NOT collapse legitimate separate tasks with different details or schedules
-        var contactPhoneDigits = new string(dto.ContactPhone.Where(char.IsDigit).ToArray());
-        if (contactPhoneDigits.Length > 10) contactPhoneDigits = contactPhoneDigits[^10..];
+        // Do not merge legitimate separate follow-up tasks merely because they belong to the same customer or have nearby schedules.
+        // Only deduplicate exact rapid resubmissions (exact same contact ID, exact same scheduled time, and identical notes created within 60 seconds)
+        var cleanContactId = dto.ContactId.Trim();
+        var cleanNotes = (dto.Notes ?? string.Empty).Trim();
 
-        var existingPendingList = await _context.Followups
+        var existingPending = await _context.Followups
             .Include(f => f.AssignedAgent)
             .ThenInclude(a => a.Role)
             .Where(f =>
                 f.CompanyId == companyId.Value &&
                 f.Status == FollowupStatus.Pending &&
-                (f.ContactId == dto.ContactId.Trim() ||
-                 (!string.IsNullOrEmpty(contactPhoneDigits) && f.ContactPhone.Contains(contactPhoneDigits))))
-            .ToListAsync(ct);
-
-        var existingPending = existingPendingList.FirstOrDefault(f =>
-            Math.Abs((f.ScheduledAt - dto.ScheduledAt).TotalMinutes) <= 15 ||
-            (!string.IsNullOrEmpty(dto.Notes) && f.Notes == dto.Notes.Trim() && (DateTime.UtcNow - f.CreatedAt).TotalMinutes <= 2));
+                f.ContactId == cleanContactId &&
+                f.ScheduledAt == dto.ScheduledAt &&
+                f.Notes == cleanNotes &&
+                f.CreatedAt >= DateTime.UtcNow.AddSeconds(-60))
+            .FirstOrDefaultAsync(ct);
 
         if (existingPending != null)
         {

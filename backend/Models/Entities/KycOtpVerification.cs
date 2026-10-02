@@ -10,6 +10,7 @@ public class KycOtpVerification
     public string TokenHash { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public string OtpHash { get; set; } = string.Empty;
+    public string Salt { get; set; } = string.Empty;
     public int FailedAttempts { get; set; } = 0;
     public int ResendCount { get; set; } = 0;
     public DateTime ExpiresAt { get; set; }

@@ -1308,6 +1308,8 @@ export const DispositionModal: React.FC = () => {
     setIsSubmitting(true);
     try {
       await skipDispositionWithReason(skipReason.trim(), notes.trim());
+    } catch (err: any) {
+      setSkipError(err.message || 'Failed to save skip reason. Please try again.');
     } finally {
       setIsSubmitting(false);
     }

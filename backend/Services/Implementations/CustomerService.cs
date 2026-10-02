@@ -4,6 +4,7 @@ using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.Customers;
 using backend.DTOs.Followups;
+using backend.Helpers;
 using backend.Models.Entities;
 using backend.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
@@ -186,21 +187,43 @@ public class CustomerService : ICustomerService
         if (!companyId.HasValue || companyId.Value <= 0)
             return ApiResponse<CustomerResponseDto>.FailureResult("Unauthorized: Company ID is missing.");
 
-        // Canonical Customer Duplicate Check
-        var phoneDigits = new string(dto.Phone.Where(char.IsDigit).ToArray());
-        if (phoneDigits.Length > 10) phoneDigits = phoneDigits[^10..];
-        var cleanEmail = dto.Email?.Trim().ToLowerInvariant() ?? string.Empty;
+        // Tenant-scoped normalized duplicate check across customers AND leads
+        var normPhone = ContactNormalizer.NormalizePhone(dto.Phone);
+        var normEmail = ContactNormalizer.NormalizeEmail(dto.Email);
 
-        var existingCust = await _context.Customers.FirstOrDefaultAsync(c =>
-            c.CompanyId == companyId.Value &&
-            ((!string.IsNullOrEmpty(phoneDigits) && c.Phone.Contains(phoneDigits)) ||
-             (!string.IsNullOrEmpty(cleanEmail) && c.Email.ToLower() == cleanEmail)), ct);
-
-        if (existingCust != null)
+        if (normPhone != null || normEmail != null)
         {
-            return ApiResponse<CustomerResponseDto>.FailureResult(
-                $"A customer already exists with this contact information: {existingCust.Name} ({existingCust.Phone} / {existingCust.Email}).",
-                new List<string> { "Duplicate contact information" });
+            var existingCust = await _context.Customers
+                .Include(c => c.AssignedAgent)
+                .FirstOrDefaultAsync(c =>
+                    c.CompanyId == companyId.Value &&
+                    !c.IsDuplicate &&
+                    ((normPhone != null && c.NormalizedPhone == normPhone) ||
+                     (normEmail != null && c.NormalizedEmail == normEmail)), ct);
+
+            if (existingCust != null)
+            {
+                var assignedTo = existingCust.AssignedAgent?.Name ?? "another agent";
+                return ApiResponse<CustomerResponseDto>.FailureResult(
+                    $"A customer already exists with this contact information: {existingCust.Name} ({existingCust.Phone} / {existingCust.Email}), assigned to {assignedTo}.",
+                    new List<string> { "DUPLICATE_CUSTOMER", $"CONTACT_ID:{existingCust.Id}" });
+            }
+
+            var existingLead = await _context.Leads
+                .Include(l => l.AssignedAgent)
+                .FirstOrDefaultAsync(l =>
+                    l.CompanyId == companyId.Value &&
+                    !l.IsDuplicate &&
+                    ((normPhone != null && l.NormalizedPhone == normPhone) ||
+                     (normEmail != null && l.NormalizedEmail == normEmail)), ct);
+
+            if (existingLead != null)
+            {
+                var assignedTo = existingLead.AssignedAgent?.Name ?? "another agent";
+                return ApiResponse<CustomerResponseDto>.FailureResult(
+                    $"A lead already exists with this contact information: {existingLead.Name} ({existingLead.Phone} / {existingLead.Email}), assigned to {assignedTo}.",
+                    new List<string> { "DUPLICATE_LEAD", $"CONTACT_ID:{existingLead.Id}" });
+            }
         }
 
         var customer = new Customer
@@ -210,6 +233,9 @@ public class CustomerService : ICustomerService
             Name = dto.Name.Trim(),
             Phone = dto.Phone.Trim(),
             Email = dto.Email?.Trim() ?? string.Empty,
+            NormalizedPhone = normPhone,
+            NormalizedEmail = normEmail,
+            IsDuplicate = false,
             Location = dto.Location?.Trim() ?? string.Empty,
             Status = string.IsNullOrWhiteSpace(dto.Status) ? "Active" : dto.Status.Trim(),
             TotalValue = dto.TotalValue ?? 0,
@@ -232,9 +258,52 @@ public class CustomerService : ICustomerService
         if (customer == null)
             return ApiResponse<CustomerResponseDto>.FailureResult("Customer not found or access denied.");
 
+        if (dto.Phone != null || dto.Email != null)
+        {
+            var candidatePhone = dto.Phone != null ? dto.Phone.Trim() : customer.Phone;
+            var candidateEmail = dto.Email != null ? dto.Email.Trim() : customer.Email;
+            var newNormPhone = ContactNormalizer.NormalizePhone(candidatePhone);
+            var newNormEmail = ContactNormalizer.NormalizeEmail(candidateEmail);
+
+            if (newNormPhone != null || newNormEmail != null)
+            {
+                var existingOtherCust = await _context.Customers
+                    .Include(c => c.AssignedAgent)
+                    .FirstOrDefaultAsync(c =>
+                        c.CompanyId == customer.CompanyId &&
+                        c.Id != customer.Id &&
+                        !c.IsDuplicate &&
+                        ((newNormPhone != null && c.NormalizedPhone == newNormPhone) ||
+                         (newNormEmail != null && c.NormalizedEmail == newNormEmail)), ct);
+
+                if (existingOtherCust != null)
+                {
+                    return ApiResponse<CustomerResponseDto>.FailureResult(
+                        $"Cannot update customer: Another customer already exists with this contact information: {existingOtherCust.Name} ({existingOtherCust.Phone} / {existingOtherCust.Email}).");
+                }
+
+                var existingLead = await _context.Leads
+                    .Include(l => l.AssignedAgent)
+                    .FirstOrDefaultAsync(l =>
+                        l.CompanyId == customer.CompanyId &&
+                        !l.IsDuplicate &&
+                        ((newNormPhone != null && l.NormalizedPhone == newNormPhone) ||
+                         (newNormEmail != null && l.NormalizedEmail == newNormEmail)), ct);
+
+                if (existingLead != null)
+                {
+                    return ApiResponse<CustomerResponseDto>.FailureResult(
+                        $"Cannot update customer: A lead already exists with this contact information: {existingLead.Name} ({existingLead.Phone} / {existingLead.Email}).");
+                }
+            }
+
+            if (dto.Phone != null) customer.Phone = dto.Phone.Trim();
+            if (dto.Email != null) customer.Email = dto.Email.Trim();
+            customer.NormalizedPhone = newNormPhone;
+            customer.NormalizedEmail = newNormEmail;
+        }
+
         if (dto.Name != null) customer.Name = dto.Name.Trim();
-        if (dto.Phone != null) customer.Phone = dto.Phone.Trim();
-        if (dto.Email != null) customer.Email = dto.Email.Trim();
         if (dto.Location != null) customer.Location = dto.Location.Trim();
         if (dto.Status != null) customer.Status = dto.Status.Trim();
         if (dto.TotalValue.HasValue) customer.TotalValue = dto.TotalValue.Value;

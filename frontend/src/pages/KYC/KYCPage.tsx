@@ -1019,7 +1019,7 @@ const GhlIrmKycView: React.FC = () => {
         aadhaarDocumentUrl: data.aadhaarDoc?.name || null,
         bankChequeUrl: data.bankProofDoc?.name || null,
         dematDocumentUrl: data.hasNoDemat ? null : (data.dematDoc?.name || null),
-        customerConsentObtained: true,
+        customerConsentObtained: Boolean(customerConsentChecked),
         customerConsentTimestamp: new Date().toISOString(),
         customerConsentDetails: "Customer verbal and electronic consent obtained during assisted KYC session.",
         isFinalSubmit: true,
@@ -1603,6 +1603,16 @@ const GhlIrmKycView: React.FC = () => {
     }
     if (!selectedDeal) return;
 
+    // Await server submission first; never report success if backend save fails
+    if (!isMockMode() && user) {
+      try {
+        await submitBackendAssistedKyc(selectedDeal, formData);
+      } catch (err: any) {
+        showToast(`⚠️ Failed to submit assisted KYC: ${err.message || 'Server error'}`);
+        return;
+      }
+    }
+
     const investorName = formData.investorName.trim();
     const dealId = selectedDeal.id;
     const nowIso = new Date().toISOString();
@@ -1716,16 +1726,6 @@ const GhlIrmKycView: React.FC = () => {
       await persistDeal(updatedDeal);
     } catch (e) {
       console.warn('Error saving deal:', e);
-    }
-
-    // 5. Submit to backend if available
-    if (!isMockMode() && user) {
-      try {
-        await submitBackendAssistedKyc(selectedDeal, formData);
-      } catch (err: any) {
-        showToast(`⚠️ Failed to submit assisted KYC: ${err.message || 'Server error'}`);
-        return;
-      }
     }
 
     setIsAssistedReviewModalOpen(false);
