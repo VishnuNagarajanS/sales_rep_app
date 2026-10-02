@@ -4,10 +4,24 @@ import ReactDOM from 'react-dom';
 export type PopupPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 
 const getPopupPosition = (): PopupPosition => {
-  const pos = (localStorage.getItem('nexus_popup_pos') || localStorage.getItem('nexus_popup_position')) as PopupPosition;
-  if (['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(pos)) {
-    return pos;
-  }
+  try {
+    const rawPos = localStorage.getItem('nexus_popup_pos');
+    if (rawPos && ['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(rawPos)) {
+      return rawPos as PopupPosition;
+    }
+    const rawData = localStorage.getItem('nexus_popup_position');
+    if (rawData) {
+      if (['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(rawData)) {
+        return rawData as PopupPosition;
+      }
+      try {
+        const parsed = JSON.parse(rawData);
+        if (['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(parsed)) {
+          return parsed as PopupPosition;
+        }
+      } catch {}
+    }
+  } catch {}
   return 'top-right';
 };
 
@@ -1038,16 +1052,16 @@ export const InCallBar: React.FC = () => {
         )}
 
         {/* Company Resources tab — always available regardless of matched record */}
-        {docsTab === 'company' && tenant && (
+        {docsTab === 'company' && (
           <>
             <DocumentUploader
               entityType="company"
-              entityId={tenant.id}
+              entityId={tenant?.id || tenant?.slug || '1'}
               allowedCategories={['Brochure', 'Price List', 'Terms & Conditions', 'Policy Document', 'Other']}
             />
             <DocumentList
               entityType="company"
-              entityId={tenant.id}
+              entityId={tenant?.id || tenant?.slug || '1'}
               canDelete={false}
             />
           </>

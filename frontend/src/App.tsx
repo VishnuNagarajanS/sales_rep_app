@@ -40,6 +40,7 @@ import { InvestorsPage } from './pages/Investors/InvestorsPage';
 import { ConsultationsPage } from './pages/Consultations/ConsultationsPage';
 import { OpportunitiesPage } from './pages/InvestmentOpportunities/OpportunitiesPage';
 import { AssignedLeadsPage } from './pages/AssignedLeads/AssignedLeadsPage';
+import { PendingLeadsPage } from './pages/PendingLeads/PendingLeadsPage';
 import { KYCPage } from './pages/KYC/KYCPage';
 
 // Company Admin
@@ -55,12 +56,11 @@ import { PlatformRolesPage } from './pages/Admin/Roles/PlatformRolesPage';
 import { PlatformFeaturesPage } from './pages/Admin/Features/PlatformFeaturesPage';
 import { PlatformCallConfigPage } from './pages/Admin/CallConfig/PlatformCallConfigPage';
 import { PlatformAuditPage } from './pages/Admin/Audit/PlatformAuditPage';
-import { PlatformSystemPage } from './pages/Admin/System/PlatformSystemPage';
 
 import { ProtectedRoute } from './components/common/Guards';
 import { Modal } from './components/common/Modal';
-import { Investor, Customer } from './types';
 import { storageService } from './services/storageService';
+import { Investor, Customer } from './types';
 import {
   saveLead as apiSaveLead,
   saveFollowup as apiSaveFollowup,
@@ -118,16 +118,6 @@ export const App: React.FC = () => {
     'lead' | 'followup' | 'deal' | 'visit' | 'consultation' | null
   >(null);
 
-  const [investors, setInvestors] = useState<Investor[]>([]);
-  const [tenantCustomers, setTenantCustomers] = useState<Customer[]>([]);
-
-  useEffect(() => {
-    if (tenant?.id) {
-      apiGetInvestors(tenant.id).then(setInvestors).catch(() => {});
-      apiGetCustomers(tenant.id).then(setTenantCustomers).catch(() => {});
-    }
-  }, [tenant?.id, quickCreateType]);
-
   const [quickName, setQuickName] = useState('');
   const [quickPhone, setQuickPhone] = useState('+91 ');
   const [quickEmail, setQuickEmail] = useState('');
@@ -155,12 +145,10 @@ export const App: React.FC = () => {
   const [dealCustomerMode, setDealCustomerMode] = useState<'existing' | 'new'>('existing');
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [newCustomerName, setNewCustomerName] = useState('');
-  const [navExtraState, setNavExtraState] = useState<any>(null);
 
   // Handle route change
-  const navigate = (route: string, extraState?: any) => {
+  const navigate = (route: string) => {
     setCurrentRoute(route);
-    setNavExtraState(extraState || null);
     sessionStorage.setItem('nexus_current_route', route);
   };
 
@@ -193,11 +181,12 @@ export const App: React.FC = () => {
     setConsAgenda('Commercial REIT yield analysis & pass-through taxation discussion.');
     setConsOutcome('');
     setScheduledDate(new Date(Date.now() + 86400000).toISOString().split('T')[0]);
-    setScheduledTime('11:00');
+    setScheduledTime(storageService.getCallPreferences().defaultFollowupTime);
     // Reset deal-specific state; pre-select first available customer
     setDealCustomerMode('existing');
     setNewCustomerName('');
-    setSelectedCustomerId(tenantCustomers[0]?.id || '');
+    const existingCustomers = storageService.getCustomers(tenant?.id);
+    setSelectedCustomerId(existingCustomers[0]?.id || '');
   };
 
   const handleSaveQuickCreate = (e: React.FormEvent) => {
@@ -205,7 +194,7 @@ export const App: React.FC = () => {
     if (!quickName) return;
 
     if (quickCreateType === 'lead') {
-      const newLead = {
+      storageService.saveLead({
         id: `lead-${Date.now()}`,
         companyId: tenant?.id || 't-ghl-01',
         name: quickName,
@@ -213,8 +202,8 @@ export const App: React.FC = () => {
         email: quickEmail,
         location: quickLocation,
         source: quickSource,
-        status: 'New' as const,
-        priority: 'Medium' as const,
+        status: 'New',
+        priority: 'Medium',
         assignedAgentId: user?.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec'),
         assignedAgentName: user?.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer'),
         createdAt: new Date().toISOString().split('T')[0],
@@ -224,32 +213,30 @@ export const App: React.FC = () => {
           preferredAssetClass: quickAssetClass,
           investmentCapacity: quickInvestmentCapacity,
         },
-      };
-      apiSaveLead(newLead).catch(console.error);
+      });
 
     } else if (quickCreateType === 'followup') {
       const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
-      const newFlw = {
+      storageService.saveFollowup({
         id: `flw-${Date.now()}`,
         companyId: tenant?.id || 't-ghl-01',
         contactId: `contact-${Date.now()}`,
         contactName: quickName,
         contactPhone: quickPhone,
-        contactType: 'lead' as const,
+        contactType: 'lead',
         scheduledAt: combinedDateTime,
         scheduledDate,
         scheduledTime,
-        priority: 'High' as const,
-        status: 'Pending' as const,
+        priority: 'High',
+        status: 'Pending',
         notes: quickNotes,
         assignedAgentId: user?.id || 'usr-exec',
         assignedAgentName: user?.name || 'Agent',
-      };
-      apiSaveFollowup(newFlw).catch(console.error);
+      });
 
     } else if (quickCreateType === 'consultation') {
       // Task 1 — Schedule Consultation
-      const newCons = {
+      storageService.saveConsultation({
         id: `cons-${Date.now()}`,
         companyId: tenant?.id || 't-ghl-01',
         investorId: consInvestorId || `investor-${Date.now()}`,
@@ -261,13 +248,25 @@ export const App: React.FC = () => {
         status: consStatus,
         agenda: consAgenda.trim(),
         outcomeNotes: consOutcome.trim() || undefined,
-      };
-      apiSaveConsultation(newCons).catch(console.error);
+      });
 
     } else if (quickCreateType === 'visit') {
       // Task 2 — Schedule Site Visit
-      // Handled via local events
-      window.dispatchEvent(new Event('nexus_storage_updated'));
+      const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
+      storageService.saveSiteVisit({
+        id: `visit-${Date.now()}`,
+        companyId: tenant?.id || 't-jamin-02',
+        customerId: `cust-${Date.now()}`,
+        customerName: quickName,
+        customerPhone: quickPhone,
+        projectId: 'proj-01',
+        projectName: 'Greenfield Meadows Phase 2',
+        scheduledAt: combinedDateTime,
+        assignedAgentId: user?.id || 'usr-exec',
+        assignedAgentName: user?.name || 'Agent',
+        status: 'Scheduled',
+        outcomeNotes: quickNotes,
+      });
 
     } else if (quickCreateType === 'deal') {
       // Task 4 — Deal linked to real customer
@@ -276,7 +275,8 @@ export const App: React.FC = () => {
 
       if (dealCustomerMode === 'existing' && selectedCustomerId) {
         // Link to the chosen existing customer
-        const existing = tenantCustomers.find(c => c.id === selectedCustomerId);
+        const existing = storageService.getCustomers(tenant?.id)
+          .find(c => c.id === selectedCustomerId);
         resolvedCustomerId = existing?.id || selectedCustomerId;
         resolvedCustomerName = existing?.name || 'Customer';
       } else {
@@ -284,13 +284,13 @@ export const App: React.FC = () => {
         if (!newCustomerName) return;
         resolvedCustomerId = `cust-${Date.now()}`;
         resolvedCustomerName = newCustomerName;
-        const newCust = {
+        storageService.saveCustomer({
           id: resolvedCustomerId,
           companyId: tenant?.id || 't-ghl-01',
           name: resolvedCustomerName,
           phone: quickPhone,
           email: '',
-          status: 'Active' as const,
+          status: 'Active',
           assignedAgentId: user?.id || 'usr-exec',
           assignedAgentName: user?.name || 'Agent',
           location: 'Bengaluru',
@@ -300,11 +300,10 @@ export const App: React.FC = () => {
           createdAt: new Date().toISOString().split('T')[0],
           notes: '',
           customFields: {},
-        };
-        apiSaveCustomer(newCust).catch(console.error);
+        });
       }
 
-      const newDeal = {
+      storageService.saveDeal({
         id: `deal-${Date.now()}`,
         companyId: tenant?.id || 't-ghl-01',
         title: quickName,
@@ -317,8 +316,7 @@ export const App: React.FC = () => {
         assignedAgentName: user?.name || 'Agent',
         notes: quickNotes,
         createdAt: new Date().toISOString().split('T')[0],
-      };
-      apiSaveDeal(newDeal).catch(console.error);
+      });
     }
 
     setQuickCreateType(null);
@@ -336,10 +334,7 @@ export const App: React.FC = () => {
         {currentRoute === 'admin-dashboard' || currentRoute === 'dashboard' ? (
           <PlatformDashboardPage onNavigate={navigate} />
         ) : currentRoute === 'admin-companies' ? (
-          <CompaniesPage
-            initialOpenWizard={Boolean(navExtraState?.openWizard)}
-            selectedTenantId={navExtraState?.selectedTenantId}
-          />
+          <CompaniesPage />
         ) : currentRoute === 'admin-users' ? (
           <PlatformUsersPage />
         ) : currentRoute === 'admin-roles' ? (
@@ -350,8 +345,6 @@ export const App: React.FC = () => {
           <PlatformCallConfigPage />
         ) : currentRoute === 'admin-audit' ? (
           <PlatformAuditPage />
-        ) : currentRoute === 'admin-system' ? (
-          <PlatformSystemPage />
         ) : (
           <PlatformDashboardPage onNavigate={navigate} />
         )}
@@ -376,6 +369,14 @@ export const App: React.FC = () => {
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
           {isGhlAdmin ? (
             <AssignedLeadsPage />
+          ) : (
+            <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+          )}
+        </ProtectedRoute>
+      ) : currentRoute === 'pending-leads' ? (
+        <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
+          {isGhlAdmin ? (
+            <PendingLeadsPage />
           ) : (
             <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
           )}
@@ -618,6 +619,7 @@ export const App: React.FC = () => {
             <>
               {/* ── CONSULTATION: Full form matching Schedule Consultation ── */}
               {(() => {
+                const investors = storageService.getInvestors(tenant?.id);
                 return (
                   <>
                     <div className="form-group">

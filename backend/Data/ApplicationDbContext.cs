@@ -14,7 +14,9 @@ public class ApplicationDbContext : DbContext
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<Document> Documents => Set<Document>();
     public DbSet<Lead> Leads => Set<Lead>();
+    public DbSet<LeadAssignmentHistory> LeadAssignmentHistories => Set<LeadAssignmentHistory>();
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<Followup> Followups => Set<Followup>();
     public DbSet<Consultation> Consultations => Set<Consultation>();
@@ -99,9 +101,9 @@ public class ApplicationDbContext : DbContext
         // 1. Roles (Integer IDs 1, 2, 3, 4, 5)
         var superAdminRoleId = 1;
         var companyAdminRoleId = 2;
-        var salesManagerRoleId = 3;
-        var salesExecutiveRoleId = 4;
-        var irmRoleId = 5;
+        var salesExecutiveRoleId = 3;
+        var irmRoleId = 4;
+        var salesManagerRoleId = 5;
 
         modelBuilder.Entity<Role>().HasData(
             new Role

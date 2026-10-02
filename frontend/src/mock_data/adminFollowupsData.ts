@@ -105,7 +105,7 @@ export const INITIAL_ADMIN_FOLLOWUPS: Followup[] = [
     assignedRole: 'Sales Executive',
   },
 
-  // ── Dhinakaran (IRM) ───────────────────────────────────────────────────────
+  // ── Rohan Varma (IRM) ───────────────────────────────────────────────────────
   {
     id: 'flw-irm-rv-01',
     companyId: 't-ghl-01',
@@ -118,7 +118,7 @@ export const INITIAL_ADMIN_FOLLOWUPS: Followup[] = [
     status: 'Pending',
     notes: 'Institutional pool follow-up: discuss ₹15 Cr Cat II AIF Commercial Real Estate commitment & term sheet.',
     assignedAgentId: 'usr-ghl-irm',
-    assignedAgentName: 'Dhinakaran',
+    assignedAgentName: 'Rohan Varma',
     assignedRole: 'IRM',
   },
   {
@@ -133,7 +133,7 @@ export const INITIAL_ADMIN_FOLLOWUPS: Followup[] = [
     status: 'Pending',
     notes: 'Private wealth consultation follow-up: send audited fund IRR sheets and waterfall distribution model.',
     assignedAgentId: 'usr-ghl-irm',
-    assignedAgentName: 'Dhinakaran',
+    assignedAgentName: 'Rohan Varma',
     assignedRole: 'IRM',
   },
   {
@@ -148,7 +148,7 @@ export const INITIAL_ADMIN_FOLLOWUPS: Followup[] = [
     status: 'Pending',
     notes: 'Overdue IRM task: SEBI accredited investor compliance documentation and KYC verification for ₹10 Cr pool.',
     assignedAgentId: 'usr-ghl-irm',
-    assignedAgentName: 'Dhinakaran',
+    assignedAgentName: 'Rohan Varma',
     assignedRole: 'IRM',
   },
 

@@ -111,6 +111,14 @@ public class LeadService : ILeadService
     {
         var query = GetScopedLeadsQuery(filter);
 
+        if (_currentUser.Role == "company_admin" || _currentUser.Role == "super_admin")
+        {
+            if (string.Equals(filter.Assignment, "unassigned", StringComparison.OrdinalIgnoreCase))
+                query = query.Where(l => l.AssignedAgentId == null);
+            else if (string.Equals(filter.Assignment, "assigned", StringComparison.OrdinalIgnoreCase))
+                query = query.Where(l => l.AssignedAgentId != null);
+        }
+
         if (string.Equals(filter.Status, "all", StringComparison.OrdinalIgnoreCase))
         {
             // All leads
@@ -179,13 +187,20 @@ public class LeadService : ILeadService
 
     public async Task<ApiResponse<LeadResponseDto>> CreateLeadAsync(CreateLeadDto dto, CancellationToken ct = default)
     {
-        var agentId = _currentUser.UserId;
-        if (!agentId.HasValue || agentId.Value <= 0)
-            return ApiResponse<LeadResponseDto>.FailureResult("Unauthorized: User ID is missing.");
+        int? agentId = null;
+        DateTime? assignedAt = null;
+        if (_currentUser.Role == "sales_executive" || _currentUser.Role == "irm")
+        {
+            agentId = _currentUser.UserId;
+            assignedAt = DateTime.UtcNow;
+        }
+        else if (dto.AssignedAgentId.HasValue && dto.AssignedAgentId.Value > 0)
+        {
+            agentId = dto.AssignedAgentId.Value;
+            assignedAt = DateTime.UtcNow;
+        }
 
-        var companyId = dto.CompanyId ?? _currentUser.CompanyId;
-        if (!companyId.HasValue || companyId.Value <= 0)
-            return ApiResponse<LeadResponseDto>.FailureResult("Unauthorized: Company ID is missing.");
+        var companyId = dto.CompanyId ?? _currentUser.CompanyId ?? 1;
 
         // Build Custom Fields Dictionary for GHL
         var customFields = dto.AdditionalCustomFields ?? new Dictionary<string, string>();
@@ -210,13 +225,13 @@ public class LeadService : ILeadService
         var hasIdentifier = normPhone != null || normEmail != null;
 
         var targetAgentId = (dto.AssignedAgentId.HasValue && dto.AssignedAgentId.Value > 0)
-            ? dto.AssignedAgentId.Value
-            : agentId.Value;
+            ? dto.AssignedAgentId
+            : agentId;
 
         var role = _currentUser.Role;
 
         // Concurrency lock to prevent race conditions when two simultaneous requests create the same contact
-        var lockKey = hasIdentifier ? $"{companyId.Value}:{normPhone ?? normEmail}" : null;
+        var lockKey = hasIdentifier ? $"{companyId}:{normPhone ?? normEmail}" : null;
         SemaphoreSlim? semaphore = null;
         if (lockKey != null)
         {
@@ -237,25 +252,41 @@ public class LeadService : ILeadService
 
             if (hasIdentifier)
             {
-                existingLead = await _context.Leads
+                var companyLeads = await _context.Leads
                     .Include(l => l.AssignedAgent)
-                    .FirstOrDefaultAsync(l =>
-                        l.CompanyId == companyId.Value &&
-                        !l.IsDuplicate &&
-                        ((normEmail != null && l.NormalizedEmail == normEmail) ||
-                         (normPhone != null && l.NormalizedPhone == normPhone)), ct);
+                    .Where(l => l.CompanyId == companyId && !l.IsDuplicate)
+                    .ToListAsync(ct);
 
-                existingCustomer = await _context.Customers
+                existingLead = companyLeads.FirstOrDefault(l =>
+                {
+                    var lPhone = NormalizePhone(l.NormalizedPhone) ?? NormalizePhone(l.Phone);
+                    if (normPhone != null && lPhone != null && lPhone == normPhone) return true;
+
+                    var lEmail = NormalizeEmail(l.NormalizedEmail) ?? NormalizeEmail(l.Email);
+                    if (normEmail != null && lEmail != null && lEmail == normEmail) return true;
+
+                    return false;
+                });
+
+                var companyCustomers = await _context.Customers
                     .Include(c => c.AssignedAgent)
-                    .FirstOrDefaultAsync(c =>
-                        c.CompanyId == companyId.Value &&
-                        !c.IsDuplicate &&
-                        ((normEmail != null && c.NormalizedEmail == normEmail) ||
-                         (normPhone != null && c.NormalizedPhone == normPhone)), ct);
+                    .Where(c => c.CompanyId == companyId && !c.IsDuplicate)
+                    .ToListAsync(ct);
+
+                existingCustomer = companyCustomers.FirstOrDefault(c =>
+                {
+                    var cPhone = NormalizePhone(c.NormalizedPhone) ?? NormalizePhone(c.Phone);
+                    if (normPhone != null && cPhone != null && cPhone == normPhone) return true;
+
+                    var cEmail = NormalizeEmail(c.NormalizedEmail) ?? NormalizeEmail(c.Email);
+                    if (normEmail != null && cEmail != null && cEmail == normEmail) return true;
+
+                    return false;
+                });
 
                 companyFollowups = await _context.Followups
                     .Include(f => f.AssignedAgent)
-                    .Where(f => f.CompanyId == companyId.Value && f.Status == FollowupStatus.Pending)
+                    .Where(f => f.CompanyId == companyId && f.Status == FollowupStatus.Pending)
                     .ToListAsync(ct);
 
                 matchingPendingFollowup = companyFollowups.FirstOrDefault(f =>
@@ -272,7 +303,7 @@ public class LeadService : ILeadService
                 // Fetch tenant-scoped KYC records
                 var companyKycs = await _context.InvestorKycs
                     .Include(k => k.Irm)
-                    .Where(k => k.CompanyId == companyId.Value)
+                    .Where(k => k.CompanyId == companyId)
                     .ToListAsync(ct);
 
                 matchingKyc = companyKycs.FirstOrDefault(k =>
@@ -288,7 +319,7 @@ public class LeadService : ILeadService
                 companyDeals = await _context.GhlDeals
                     .Include(d => d.AssignedAgent)
                     .Include(d => d.Customer)
-                    .Where(d => d.CompanyId == companyId.Value)
+                    .Where(d => d.CompanyId == companyId)
                     .ToListAsync(ct);
 
                 matchingKycDeal = companyDeals.FirstOrDefault(d =>
@@ -311,7 +342,7 @@ public class LeadService : ILeadService
                 // Fetch tenant-scoped IRM pipeline cards in qualified_investor stage
                 var companyCards = await _context.IrmPipelineCards
                     .Include(c => c.AssignedIrm)
-                    .Where(c => c.CompanyId == companyId.Value && c.StageId == "qualified_investor")
+                    .Where(c => c.CompanyId == companyId && c.StageId == "qualified_investor")
                     .ToListAsync(ct);
 
                 matchingKycCard = companyCards.FirstOrDefault(c =>
@@ -526,7 +557,7 @@ public class LeadService : ILeadService
 
             var lead = new Lead
             {
-                CompanyId = companyId.Value,
+                CompanyId = companyId,
                 AssignedAgentId = targetAgentId,
                 Name = dto.Name.Trim(),
                 Phone = dto.Phone.Trim(),
@@ -617,7 +648,11 @@ public class LeadService : ILeadService
         if (dto.Priority != null) lead.Priority = dto.Priority.Trim();
         if (dto.Notes != null) lead.Notes = dto.Notes.Trim();
         if (dto.NextFollowupDate.HasValue) lead.NextFollowupDate = dto.NextFollowupDate.Value;
-        if (dto.AssignedAgentId.HasValue) lead.AssignedAgentId = dto.AssignedAgentId.Value;
+        if (dto.AssignedAgentId.HasValue) 
+        {
+            lead.AssignedAgentId = dto.AssignedAgentId.Value;
+            lead.AssignedAt = DateTime.UtcNow;
+        }
 
         // Merge custom fields
         var customFields = DeserializeCustomFields(lead.CustomFieldsJson);
@@ -692,7 +727,7 @@ public class LeadService : ILeadService
             customer = new Customer
             {
                 CompanyId = companyId,
-                AssignedAgentId = agentId ?? 1,
+                AssignedAgentId = agentId ?? _currentUser.UserId ?? 1,
                 Name = lead.Name,
                 Phone = lead.Phone,
                 Email = lead.Email,
@@ -795,7 +830,7 @@ public class LeadService : ILeadService
         var freshFollowup = new Followup
         {
             CompanyId = lead.CompanyId,
-            AssignedAgentId = lead.AssignedAgentId ?? 1,
+            AssignedAgentId = lead.AssignedAgentId ?? _currentUser.UserId ?? 1,
             ContactId = lead.Id.ToString(),
             ContactType = "lead",
             ContactName = lead.Name,
@@ -822,6 +857,7 @@ public class LeadService : ILeadService
             CompanyId = lead.CompanyId,
             AssignedAgentId = lead.AssignedAgentId,
             AssignedAgentName = lead.AssignedAgent?.Name,
+            AssignedAt = lead.AssignedAt,
             Name = lead.Name,
             Phone = lead.Phone,
             Email = lead.Email,
@@ -849,4 +885,16 @@ public class LeadService : ILeadService
             return new Dictionary<string, string>();
         }
     }
+
+    public async Task<ApiResponse<object>> DeleteLeadAsync(int id, CancellationToken ct = default)
+    {
+        var lead = await FindScopedLeadAsync(id, ct);
+        if (lead == null) return ApiResponse<object>.FailureResult("Lead not found or access denied.");
+
+        _context.Leads.Remove(lead);
+        await _context.SaveChangesAsync(ct);
+
+        return ApiResponse<object>.SuccessResult(new object(), "Lead deleted successfully.");
+    }
 }
+

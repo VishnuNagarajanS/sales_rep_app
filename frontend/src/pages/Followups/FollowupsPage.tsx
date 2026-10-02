@@ -33,6 +33,8 @@ import { Drawer } from '../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
 type FollowupRoleFilter = 'sales_executive' | 'irm';
 import { DateRangePreset } from '../../types/kanban';
+import { adminUserService } from '../../services/adminUserService';
+import { User as UserModel } from '../../types';
 import './FollowupsPage.css';
 import '../Leads/LeadsPage.css';
 
@@ -43,6 +45,7 @@ export const FollowupsPage: React.FC = () => {
   const [followups, setFollowups] = useState<Followup[]>([]);
   const [callsList, setCallsList] = useState<CallRecord[]>([]);
   const [allLeads, setAllLeads] = useState<Lead[]>([]);
+  const [users, setUsers] = useState<UserModel[]>([]);
   const [activeTab, setActiveTab] = useState<'all' | 'due' | 'overdue'>('all');
   const [rescheduleItem, setRescheduleItem] = useState<Followup | null>(null);
   const [newDate, setNewDate] = useState('');
@@ -86,7 +89,7 @@ export const FollowupsPage: React.FC = () => {
   // ── Admin Filter States ──────────────────────────────────────────────────
   const [selectedRole, setSelectedRole] = useState<FollowupRoleFilter>('sales_executive');
   const [selectedPerson, setSelectedPerson] = useState<string>('All');
-  const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>('this_month');
+  const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>('all');
   const [customStartDate, setCustomStartDate] = useState<string>(() => {
     const d = new Date();
     d.setDate(1); // 1st of current month
@@ -101,23 +104,89 @@ export const FollowupsPage: React.FC = () => {
   };
 
   const personOptions = useMemo(() => {
-    if (selectedRole === 'sales_executive') {
-      return storageService.getAgents(tenant?.id);
+    if (users && users.length > 0) {
+      if (selectedRole === 'sales_executive') {
+        const sales = users.filter(u => {
+          const code = (u.role?.code || '').toLowerCase();
+          const roleId = String(u.role?.id || '');
+          const roleName = (u.role?.name || '').toLowerCase();
+          return code === 'sales_executive' || roleId === '3' || roleName.includes('sales');
+        });
+        if (sales.length > 0) return sales;
+      } else {
+        const irms = users.filter(u => {
+          const code = (u.role?.code || '').toLowerCase();
+          const roleId = String(u.role?.id || '');
+          const roleName = (u.role?.name || '').toLowerCase();
+          return code === 'irm' || roleId === '4' || roleName.includes('irm') || roleName.includes('investor');
+        });
+        if (irms.length > 0) return irms;
+      }
     }
-  }, [selectedRole, tenant?.id]);
+    if (selectedRole === 'sales_executive') {
+      const storageAgents = storageService.getAgents(tenant?.id);
+      if (storageAgents && storageAgents.length > 0) return storageAgents;
+    }
+    // Fallback strictly to real DB users
+    if (selectedRole === 'sales_executive') {
+      return [
+        { id: '3', name: 'Naveen' },
+        { id: '28', name: 'Test_Sales' },
+        { id: '29', name: 'Test_sales_2' },
+      ];
+    }
+    return [
+      { id: '5', name: 'Dhinakaran' },
+      { id: '30', name: 'Test_IRM' },
+    ];
+  }, [selectedRole, users]);
 
   const loadData = async () => {
     try {
-      const [data, calls, leads] = await Promise.all([
+      const [data, calls, leads, fetchedUsers] = await Promise.all([
         getFollowups(tenant?.id),
         getCalls(tenant?.id),
         getLeads(tenant?.id),
+        isAdmin ? adminUserService.getUsers(tenant?.id || '') : Promise.resolve([])
       ]);
-      setFollowups(data || []);
+
+      let followupsList = (data && data.length > 0) ? [...data] : (storageService.getFollowups(tenant?.id) || []);
+
+      // Also ensure any lead with status 'Follow-up Required' is represented in followups
+      const existingContactIds = new Set(followupsList.map(f => String(f.contactId || f.id)));
+      const existingPhones = new Set(followupsList.map(f => (f.contactPhone || '').replace(/\D/g, '').slice(-10)).filter(Boolean));
+
+      (leads || []).forEach(l => {
+        if (l.status === 'Follow-up Required') {
+          const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+          if (!existingContactIds.has(String(l.id)) && (!lPhone || !existingPhones.has(lPhone))) {
+            followupsList.push({
+              id: `flw-lead-${l.id}`,
+              companyId: l.companyId || tenant?.id || '1',
+              contactId: String(l.id),
+              contactName: l.name,
+              contactPhone: l.phone,
+              contactType: 'lead',
+              scheduledAt: l.createdAt || new Date().toISOString(),
+              priority: l.priority === 'Urgent' ? 'High' : (l.priority as any || 'Medium'),
+              status: 'Pending',
+              notes: l.notes || 'Lead marked Follow-up Required',
+              assignedAgentId: String(l.assignedAgentId || ''),
+              assignedAgentName: l.assignedAgentName || '',
+            });
+          }
+        }
+      });
+
+      setFollowups(followupsList);
       setCallsList(calls || []);
       setAllLeads(leads || []);
+      if (fetchedUsers && fetchedUsers.length > 0) {
+        setUsers(fetchedUsers);
+      }
     } catch (err) {
       console.error('Failed to load followups data', err);
+      setFollowups(storageService.getFollowups(tenant?.id) || []);
     }
   };
 
@@ -587,54 +656,79 @@ export const FollowupsPage: React.FC = () => {
   // Helper to determine the assigned role of any followup
   const getFollowupRole = (f: Followup): 'Sales Executive' | 'IRM' => {
     if (f.assignedRole) {
-      if (f.assignedRole.toLowerCase().includes('irm')) return 'IRM';
+      const lower = f.assignedRole.toLowerCase();
+      if (lower.includes('irm') || lower.includes('investor')) return 'IRM';
+      if (lower.includes('sales')) return 'Sales Executive';
+    }
+
+    const agentName = (f.assignedAgentName || '').toLowerCase().trim();
+    const agentId = String(f.assignedAgentId || '').trim();
+
+    // Match against real DB users list
+    const foundUser = (users || []).find(u =>
+      (agentName && u.name.toLowerCase().trim() === agentName) ||
+      (agentId && String(u.id) === agentId)
+    );
+
+    if (foundUser) {
+      const code = (foundUser.role?.code || '').toLowerCase();
+      const roleId = String(foundUser.role?.id || '');
+      const roleName = (foundUser.role?.name || '').toLowerCase();
+      if (code === 'irm' || roleId === '4' || roleName.includes('irm') || roleName.includes('investor')) {
+        return 'IRM';
+      }
       return 'Sales Executive';
     }
-    if ((f.assignedAgentName || '').toLowerCase().includes('dhinakaran')) {
+    // Direct check for known IRMs in db or storage
+    if (agentName.includes('dhinakaran') || agentId === '5' || agentId === '30' || agentName.includes('irm')) {
       return 'IRM';
     }
-    const irmsList = storageService.getIrms(tenant?.id);
+    const irmsList = storageService.getIrms ? storageService.getIrms(tenant?.id) : [];
     if (
       irmsList.some(
         (u: any) =>
-          u.name.toLowerCase() === (f.assignedAgentName || '').toLowerCase() ||
-          u.id === f.assignedAgentId
+          (u.name && u.name.toLowerCase() === agentName) ||
+          String(u.id) === agentId
       )
     ) {
       return 'IRM';
     }
+
     if (f.contactType === 'investor') {
       return 'IRM';
     }
+
     return 'Sales Executive';
   };
 
   // Helper to test if a followup date falls within date range filter
   const isFollowupInDateFilter = (f: Followup): boolean => {
+    if (dateRangePreset === 'all') return true;
     const schedStr = (f.scheduledAt || '').trim();
     const dateStr = (f.scheduledDate || '').trim();
     const now = new Date();
 
-    const isToday = schedStr.toLowerCase().includes('today');
-    const isYesterday = schedStr.toLowerCase().includes('yesterday');
+    const isToday = () => {
+      const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
+      if (isNaN(parsedTime)) return schedStr.toLowerCase().includes('today');
+      const d = new Date(parsedTime);
+      return d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    };
+    
+    const isYesterday = () => {
+      const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
+      if (isNaN(parsedTime)) return schedStr.toLowerCase().includes('yesterday');
+      const d = new Date(parsedTime);
+      const yest = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      return d.getDate() === yest.getDate() && d.getMonth() === yest.getMonth() && d.getFullYear() === yest.getFullYear();
+    };
 
     if (dateRangePreset === 'today') {
-      if (isToday) return true;
-      if (isYesterday) return false;
-      const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
-      if (!isNaN(parsedTime)) {
-        const d = new Date(parsedTime);
-        return (
-          d.getDate() === now.getDate() &&
-          d.getMonth() === now.getMonth() &&
-          d.getFullYear() === now.getFullYear()
-        );
-      }
-      return true;
+      return isToday();
     }
 
     if (dateRangePreset === 'this_week') {
-      if (isToday || isYesterday) return true;
+      if (isToday() || isYesterday()) return true;
       const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
       if (!isNaN(parsedTime)) {
         const sevenDaysAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
@@ -644,7 +738,7 @@ export const FollowupsPage: React.FC = () => {
     }
 
     if (dateRangePreset === 'this_month') {
-      if (isToday || isYesterday) return true;
+      if (isToday() || isYesterday()) return true;
       const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
       if (!isNaN(parsedTime)) {
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
@@ -658,14 +752,6 @@ export const FollowupsPage: React.FC = () => {
       const start = customStartDate ? new Date(`${customStartDate}T00:00:00`).getTime() : 0;
       const end = customEndDate ? new Date(`${customEndDate}T23:59:59`).getTime() : Infinity;
 
-      if (isToday) {
-        const todayMs = now.getTime();
-        return todayMs >= start && todayMs <= end;
-      }
-      if (isYesterday) {
-        const yestMs = now.getTime() - 24 * 60 * 60 * 1000;
-        return yestMs >= start && yestMs <= end;
-      }
       const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
       if (!isNaN(parsedTime)) {
         return parsedTime >= start && parsedTime <= end;
@@ -785,11 +871,28 @@ export const FollowupsPage: React.FC = () => {
   const activePendingFollowups = processedFollowups.filter(f => f.status === 'Pending');
 
   const filteredFollowups = processedFollowups.filter(f => {
+    const schedStr = (f.scheduledAt || '').trim();
+    const dateStr = (f.scheduledDate || '').trim();
+    const now = new Date();
+    
+    const isToday = () => {
+      const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
+      if (isNaN(parsedTime)) return schedStr.toLowerCase().includes('today');
+      const d = new Date(parsedTime);
+      return d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    };
+
+    const isOverdueFunc = () => {
+      const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
+      if (isNaN(parsedTime)) return schedStr.toLowerCase().includes('yesterday');
+      return parsedTime < new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    };
+
     if (activeTab === 'due') {
-      return f.status === 'Pending' && (f.scheduledAt || '').toLowerCase().includes('today');
+      return f.status === 'Pending' && isToday();
     }
     if (activeTab === 'overdue') {
-      return f.status === 'Pending' && (f.scheduledAt || '').toLowerCase().includes('yesterday');
+      return f.status === 'Pending' && isOverdueFunc() && !isToday();
     }
     return f.status === 'Pending';
   });
@@ -863,6 +966,7 @@ export const FollowupsPage: React.FC = () => {
                 value={dateRangePreset}
                 onChange={e => setDateRangePreset(e.target.value as DateRangePreset)}
               >
+                <option value="all">All Records</option>
                 <option value="today">Today</option>
                 <option value="this_week">This Week</option>
                 <option value="this_month">This Month</option>
@@ -968,8 +1072,24 @@ export const FollowupsPage: React.FC = () => {
           </div>
         ) : (
           filteredFollowups.map(f => {
-            const isOverdue =
-              f.status === 'Pending' && (f.scheduledAt || '').toLowerCase().includes('yesterday');
+            const schedStr = (f.scheduledAt || '').trim();
+            const dateStr = (f.scheduledDate || '').trim();
+            const now = new Date();
+            
+            const isOverdueFunc = () => {
+              const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
+              if (isNaN(parsedTime)) return schedStr.toLowerCase().includes('yesterday');
+              return parsedTime < new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+            };
+
+            const isTodayFunc = () => {
+              const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
+              if (isNaN(parsedTime)) return schedStr.toLowerCase().includes('today');
+              const d = new Date(parsedTime);
+              return d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+            };
+
+            const isOverdue = f.status === 'Pending' && isOverdueFunc() && !isTodayFunc();
             const callCount = getCallCountForFollowup(f);
             const fRole = getFollowupRole(f);
 

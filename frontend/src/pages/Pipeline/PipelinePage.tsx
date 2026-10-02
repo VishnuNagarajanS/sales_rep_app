@@ -14,7 +14,7 @@ import {
   MapPin,
   TrendingUp,
 } from 'lucide-react';
-import { Deal, Lead, Followup } from '../../types';
+import { Deal, DealActivity, Lead, Followup, Investor, InvestmentOpportunity, Consultation } from '../../types';
 import { storageService } from '../../services/storageService';
 import { useAuth } from '../../context/AuthContext';
 import { useCan } from '../../components/common/Guards';
@@ -22,6 +22,9 @@ import {
   getDeals,
   getLeads,
   getFollowups,
+  getInvestors,
+  getOpportunities,
+  getConsultations,
   isTenantMatch,
   saveDeal as apiSaveDeal,
   saveFollowup as apiSaveFollowup,
@@ -73,6 +76,9 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   const [deals, setDeals] = useState<Deal[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [followups, setFollowups] = useState<Followup[]>([]);
+  const [investors, setInvestors] = useState<Investor[]>([]);
+  const [opportunities, setOpportunities] = useState<InvestmentOpportunity[]>([]);
+  const [consultations, setConsultations] = useState<Consultation[]>([]);
   const [selectedDealForLoss, setSelectedDealForLoss] = useState<Deal | null>(null);
   const [lossReason, setLossReason] = useState('Competitor Pricing');
   const [agentFilter, setAgentFilter] = useState('All');
@@ -182,9 +188,15 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       const latestDeals = storageService.getDeals(tenant?.id) || [];
       const localLeads = storageService.getLeads(tenant?.id) || [];
       const localFollowups = storageService.getFollowups(tenant?.id) || [];
+      const localInvs = storageService.getInvestors(tenant?.id) || [];
+      const localOpps = storageService.getOpportunities(tenant?.id) || [];
+      const localCons = storageService.getConsultations(tenant?.id) || [];
       setDeals(latestDeals);
       setLeads(localLeads);
       setFollowups(localFollowups);
+      setInvestors(localInvs);
+      setOpportunities(localOpps);
+      setConsultations(localCons);
       setIsLoading(false);
       setLoadError(false);
       setIrmDetailDeal(prev => {
@@ -195,16 +207,22 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       setIsLoading(true);
       setLoadError(false);
       try {
-        const [apiDeals, apiLeads, apiFollowups] = await Promise.all([
+        const [apiDeals, apiLeads, apiFollowups, apiInvs, apiOpps, apiCons] = await Promise.all([
           getDeals(tenant?.id),
           getLeads(tenant?.id),
           getFollowups(tenant?.id),
+          getInvestors(tenant?.id).catch(() => storageService.getInvestors(tenant?.id) || []),
+          getOpportunities(tenant?.id).catch(() => storageService.getOpportunities(tenant?.id) || []),
+          getConsultations(tenant?.id).catch(() => storageService.getConsultations(tenant?.id) || []),
         ]);
         if (my !== reqId.current) return;
         const dealsList = apiDeals || [];
         setDeals(dealsList);
         setLeads(apiLeads || []);
         setFollowups(apiFollowups || []);
+        setInvestors(apiInvs || []);
+        setOpportunities(apiOpps || []);
+        setConsultations(apiCons || []);
         setIsLoading(false);
         setIrmDetailDeal(prev => {
           if (!prev) return null;
@@ -303,7 +321,18 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   };
 
   if (isGhlAdmin) {
-    return <AdminKanbanBoard onOpenQuickCreate={onOpenQuickCreate} />;
+    return (
+      <AdminKanbanBoard 
+        onOpenQuickCreate={onOpenQuickCreate} 
+        apiLeads={leads} 
+        apiFollowups={followups} 
+        apiDeals={deals}
+        apiInvestors={investors}
+        apiOpportunities={opportunities}
+        apiConsultations={consultations}
+        onDataChange={loadData}
+      />
+    );
   }
 
   return (

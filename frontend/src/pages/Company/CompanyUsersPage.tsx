@@ -15,51 +15,13 @@ import {
   Check,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { storageService } from '../../services/storageService';
+import { SYSTEM_ROLES } from '../../constants/roles';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { User, RoleCode } from '../../types';
-import { SYSTEM_ROLES } from '../../constants/roles';
 import './CompanyUsersPage.css';
-
-const getStoredUsers = (tenantSlug?: string, tenantId?: string): User[] => {
-  try {
-    const raw = localStorage.getItem('nexus_users');
-    const all: User[] = raw ? JSON.parse(raw) : [];
-    return all.filter(u => {
-      if (tenantId && u.companyId === tenantId) return true;
-      if (tenantSlug && u.companySlug === tenantSlug) return true;
-      return false;
-    });
-  } catch {
-    return [];
-  }
-};
-
-const saveStoredUser = (user: User) => {
-  try {
-    const raw = localStorage.getItem('nexus_users');
-    const all: User[] = raw ? JSON.parse(raw) : [];
-    const idx = all.findIndex(u => u.id === user.id);
-    if (idx >= 0) all[idx] = user;
-    else all.push(user);
-    localStorage.setItem('nexus_users', JSON.stringify(all));
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-    window.dispatchEvent(new Event('nexus_admin_updated'));
-  } catch { }
-};
-
-const deleteStoredUser = (userId: string) => {
-  try {
-    const raw = localStorage.getItem('nexus_users');
-    const all: User[] = raw ? JSON.parse(raw) : [];
-    const filtered = all.filter(u => u.id !== userId);
-    localStorage.setItem('nexus_users', JSON.stringify(filtered));
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-    window.dispatchEvent(new Event('nexus_admin_updated'));
-  } catch { }
-};
+import { adminUserService } from '../../services/adminUserService';
 
 const addStoredAuditLog = (log: any) => {
   try {
@@ -69,21 +31,26 @@ const addStoredAuditLog = (log: any) => {
     localStorage.setItem('nexus_audit_logs', JSON.stringify(all));
     window.dispatchEvent(new Event('nexus_storage_updated'));
     window.dispatchEvent(new Event('nexus_admin_updated'));
-  } catch { }
+  } catch {}
 };
 
 export const CompanyUsersPage: React.FC = () => {
   const { tenant, user } = useAuth();
-  const [usersList, setUsersList] = useState<User[]>(() =>
-    getStoredUsers(tenant?.slug, tenant?.id),
-  );
+  const [usersList, setUsersList] = useState<User[]>([]);
 
   // ── Filters ───────────────────────────────────────────────────────────────
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
-  const loadData = () => {
-    setUsersList(getStoredUsers(tenant?.slug, tenant?.id));
+  const loadData = async () => {
+    if (!tenant?.id) return;
+    try {
+      const data = await adminUserService.getUsers(tenant.id);
+      setUsersList(data);
+    } catch (err) {
+      console.error('Failed to load users', err);
+      showToast('error', 'Failed to load users from backend.');
+    }
   };
 
   useEffect(() => {
@@ -94,7 +61,7 @@ export const CompanyUsersPage: React.FC = () => {
       window.removeEventListener('nexus_storage_updated', loadData);
       window.removeEventListener('nexus_admin_updated', loadData);
     };
-  }, [tenant?.slug, tenant?.id]);
+  }, [tenant?.id]);
 
   // ── Toast feedback ────────────────────────────────────────────────────────
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -103,12 +70,11 @@ export const CompanyUsersPage: React.FC = () => {
     setTimeout(() => setToast(null), 3500);
   };
 
-  // ── Assignable Tenant Roles ──────────────────────────────────────────────
-  const assignableRoles = React.useMemo(() => {
-    return storageService.getRoles().filter(
-      r => r.code !== 'super_admin' && r.code !== 'company_admin'
-    );
-  }, []);
+  // ── Assignable Company Roles (Strictly Sales Executive & IRM) ──────────────
+  const assignableRoles = [
+    SYSTEM_ROLES.sales_executive,
+    SYSTEM_ROLES.irm,
+  ].filter(Boolean);
 
   // ── Add / Invite User Modal State ─────────────────────────────────────────
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
@@ -129,6 +95,11 @@ export const CompanyUsersPage: React.FC = () => {
   const [editDesignation, setEditDesignation] = useState('');
   const [editRoleCode, setEditRoleCode] = useState<RoleCode>('sales_executive');
 
+  const [transferModalOpen, setTransferModalOpen] = useState(false);
+  const [transferFromUser, setTransferFromUser] = useState<User | null>(null);
+  const [transferTargetRole, setTransferTargetRole] = useState<any | null>(null);
+  const [selectedTransferUserId, setSelectedTransferUserId] = useState<string>('');
+
   // ── Reset Password Modal State ────────────────────────────────────────────
   const [resettingUser, setResettingUser] = useState<User | null>(null);
   const [tempPassword, setTempPassword] = useState('');
@@ -148,7 +119,7 @@ export const CompanyUsersPage: React.FC = () => {
     setIsInviteModalOpen(true);
   };
 
-  const handleCreateOrInvite = (e: React.FormEvent) => {
+  const handleCreateOrInvite = async (e: React.FormEvent) => {
     e.preventDefault();
     setInviteError(null);
 
@@ -185,7 +156,16 @@ export const CompanyUsersPage: React.FC = () => {
       lastLogin: isInstant ? 'Pending First Login' : 'Never',
     };
 
-    saveStoredUser(newUser);
+    try {
+      await adminUserService.createUser({
+        ...newUser,
+        password: tempPass
+      });
+      loadData();
+    } catch (err: any) {
+      setInviteError(err.message || 'Failed to create user on backend.');
+      return;
+    }
 
     // Audit log
     addStoredAuditLog({
@@ -219,11 +199,19 @@ export const CompanyUsersPage: React.FC = () => {
     setEditRoleCode(u.role.code);
   };
 
-  const handleSaveEditUser = () => {
+  const handleSaveEditUser = async () => {
     if (!editingUser) return;
 
     const updatedRole = SYSTEM_ROLES[editRoleCode] || editingUser.role;
     const oldRole = editingUser.role;
+
+    // Mandate transfer if role changes from Sales Exec to IRM or vice versa
+    if (oldRole.code !== updatedRole.code && (oldRole.code === 'sales_executive' || oldRole.code === 'irm')) {
+      setTransferFromUser(editingUser);
+      setTransferTargetRole(updatedRole);
+      setTransferModalOpen(true);
+      return;
+    }
 
     const updated: User = {
       ...editingUser,
@@ -233,7 +221,13 @@ export const CompanyUsersPage: React.FC = () => {
       role: updatedRole,
     };
 
-    saveStoredUser(updated);
+    try {
+      await adminUserService.updateUser(updated.id, updated);
+      loadData();
+    } catch (err) {
+      showToast('error', 'Failed to update profile.');
+      return;
+    }
 
     addStoredAuditLog({
       id: `aud-${Date.now()}`,
@@ -252,6 +246,20 @@ export const CompanyUsersPage: React.FC = () => {
 
     showToast('success', `Updated profile for ${updated.name}.`);
     setEditingUser(null);
+  };
+
+  const handleTransferAndSave = async () => {
+    if (!transferFromUser || !selectedTransferUserId || !transferTargetRole) return;
+    try {
+      await adminUserService.transferRole(transferFromUser.id, parseInt(selectedTransferUserId), transferTargetRole.code);
+      showToast('success', `Transferred pipeline and updated role for ${transferFromUser.name}.`);
+      setTransferModalOpen(false);
+      setTransferFromUser(null);
+      setEditingUser(null);
+      loadData();
+    } catch (err) {
+      showToast('error', 'Failed to transfer data and update role.');
+    }
   };
 
   // ── Password Reset Handlers ───────────────────────────────────────────────
@@ -298,10 +306,16 @@ export const CompanyUsersPage: React.FC = () => {
     showToast('success', `Invitation email resent to ${u.email}.`);
   };
 
-  const handleRevokeInvite = (u: User) => {
+  const handleRevokeInvite = async (u: User) => {
     if (!window.confirm(`Revoke pending invitation for ${u.name} (${u.email})?`)) return;
 
-    deleteStoredUser(u.id);
+    try {
+      await adminUserService.deleteUser(u.id, tenant?.id || '');
+      loadData();
+    } catch (err) {
+      showToast('error', 'Failed to revoke invite.');
+      return;
+    }
 
     addStoredAuditLog({
       id: `aud-${Date.now()}`,
@@ -318,10 +332,16 @@ export const CompanyUsersPage: React.FC = () => {
     showToast('success', `Invitation for ${u.name} has been revoked.`);
   };
 
-  const handleDeactivateUser = (u: User) => {
+  const handleDeactivateUser = async (u: User) => {
     if (!window.confirm(`Deactivate account for ${u.name}? They will lose active system access.`)) return;
 
-    saveStoredUser({ ...u, status: 'Disabled' });
+    try {
+      await adminUserService.updateUser(u.id, { ...u, status: 'Disabled' });
+      loadData();
+    } catch (err) {
+      showToast('error', 'Failed to deactivate user.');
+      return;
+    }
 
     addStoredAuditLog({
       id: `aud-${Date.now()}`,
@@ -338,8 +358,14 @@ export const CompanyUsersPage: React.FC = () => {
     showToast('success', `User account for ${u.name} has been deactivated.`);
   };
 
-  const handleReactivateUser = (u: User) => {
-    saveStoredUser({ ...u, status: 'Active' });
+  const handleReactivateUser = async (u: User) => {
+    try {
+      await adminUserService.updateUser(u.id, { ...u, status: 'Active' });
+      loadData();
+    } catch (err) {
+      showToast('error', 'Failed to reactivate user.');
+      return;
+    }
 
     addStoredAuditLog({
       id: `aud-${Date.now()}`,
@@ -356,10 +382,16 @@ export const CompanyUsersPage: React.FC = () => {
     showToast('success', `User account for ${u.name} reactivated.`);
   };
 
-  const handleDeleteUser = (u: User) => {
+  const handleDeleteUser = async (u: User) => {
     if (!window.confirm(`Permanently remove ${u.name} (${u.email}) from ${tenant?.name}? This cannot be undone.`)) return;
 
-    deleteStoredUser(u.id);
+    try {
+      await adminUserService.deleteUser(u.id, tenant?.id || '');
+      loadData();
+    } catch (err) {
+      showToast('error', 'Failed to delete user.');
+      return;
+    }
 
     addStoredAuditLog({
       id: `aud-${Date.now()}`,
@@ -376,31 +408,12 @@ export const CompanyUsersPage: React.FC = () => {
     showToast('success', `User ${u.name} permanently removed.`);
   };
 
-  // ── Roles Summary & Expand State ─────────────────────────────────────────
-  const [expandedRoleCode, setExpandedRoleCode] = useState<string | null>(null);
-
-  const roleSummary = React.useMemo(() => {
-    const groups: Record<string, { roleCode: string; roleName: string; total: number; active: number }> = {};
-    usersList.forEach(u => {
-      if (u.role.code === 'company_admin' || u.role.code === 'super_admin') return;
-      if (!groups[u.role.code]) {
-        groups[u.role.code] = { roleCode: u.role.code, roleName: u.role.name, total: 0, active: 0 };
-      }
-      groups[u.role.code].total += 1;
-      if (u.status === 'Active') groups[u.role.code].active += 1;
-    });
-    return Object.values(groups);
-  }, [usersList]);
-
-  const usersByRoleCode = React.useMemo(() => {
-    const groups: Record<string, User[]> = {};
-    usersList.forEach(u => {
-      if (u.role.code === 'company_admin' || u.role.code === 'super_admin') return; // admins never shown here
-      if (!groups[u.role.code]) groups[u.role.code] = [];
-      groups[u.role.code].push(u);
-    });
-    return groups;
-  }, [usersList]);
+  // ── Filtered Dataset ──────────────────────────────────────────────────────
+  const filteredUsersList = usersList.filter(u => {
+    if (roleFilter !== 'all' && u.role.code !== roleFilter) return false;
+    if (statusFilter !== 'all' && u.status !== statusFilter) return false;
+    return true;
+  });
 
   // ── Table Columns ─────────────────────────────────────────────────────────
   const columns: Column<User>[] = [
@@ -525,42 +538,6 @@ export const CompanyUsersPage: React.FC = () => {
         </button>
       </div>
 
-      {/* ── Roles summary ───────────────────────────────────────────────── */}
-      <div className="company-users-role-summary">
-        <h3 className="company-users-role-summary-title">Roles</h3>
-        <div className="company-users-role-cards">
-          {roleSummary.map(r => (
-            <div
-              key={r.roleCode}
-              className={`card company-users-role-card${expandedRoleCode === r.roleCode ? ' is-expanded' : ''}`}
-              onClick={() => setExpandedRoleCode(prev => (prev === r.roleCode ? null : r.roleCode))}
-            >
-              <div className="company-users-role-card-title">{r.roleName}</div>
-              <div className="company-users-role-card-stat">
-                <span className="company-users-role-card-label">Total Count of Employees</span>
-                <span className="company-users-role-card-value">{r.total}</span>
-              </div>
-              <div className="company-users-role-card-stat">
-                <span className="company-users-role-card-label">Active</span>
-                <span className="company-users-role-card-value">{r.active} / {r.total}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {expandedRoleCode && (
-          <div className="company-users-role-detail">
-            <DataTable
-              columns={columns}
-              data={usersByRoleCode[expandedRoleCode] || []}
-              keyExtractor={u => u.id}
-              rowActions={rowActions}
-              searchPlaceholder="Search users by name or email..."
-            />
-          </div>
-        )}
-      </div>
-
       {/* ── Fixed-position Toast (top-center) ────────────────────────────── */}
       {toast && (
         <>
@@ -582,8 +559,9 @@ export const CompanyUsersPage: React.FC = () => {
               gap: 8,
               padding: '10px 18px',
               borderRadius: 'var(--radius-md)',
-              border: `1px solid ${toast.type === 'success' ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'
-                }`,
+              border: `1px solid ${
+                toast.type === 'success' ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'
+              }`,
               backgroundColor:
                 toast.type === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
               backdropFilter: 'blur(6px)',
@@ -604,7 +582,61 @@ export const CompanyUsersPage: React.FC = () => {
         </>
       )}
 
-      {/* ── Invite Modal ─────────────────────────────────────────────────── */}
+      {/* ── Filter Bar ───────────────────────────────────────────────────── */}
+      <div className="company-users-filter-bar">
+        <div className="company-users-filter-item">
+          <label className="company-users-filter-label">Filter by Role:</label>
+          <select
+            className="form-select company-users-filter-select"
+            value={roleFilter}
+            onChange={e => setRoleFilter(e.target.value)}
+          >
+            <option value="all">All Roles</option>
+            <option value="sales_executive">Sales Executive</option>
+            <option value="irm">Institutional Relationship Manager (IRM)</option>
+            <option value="company_admin">Company Admin</option>
+          </select>
+        </div>
+
+        <div className="company-users-filter-item">
+          <label className="company-users-filter-label">Filter by Status:</label>
+          <select
+            className="form-select company-users-filter-select"
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+          >
+            <option value="all">All Statuses</option>
+            <option value="Active">Active</option>
+            <option value="Invited">Invited</option>
+            <option value="Disabled">Disabled</option>
+          </select>
+        </div>
+
+        {(roleFilter !== 'all' || statusFilter !== 'all') && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => {
+              setRoleFilter('all');
+              setStatusFilter('all');
+            }}
+            style={{ alignSelf: 'flex-end', height: '36px' }}
+          >
+            Reset Filters
+          </button>
+        )}
+      </div>
+
+      {/* ── Data Table ───────────────────────────────────────────────────── */}
+      <DataTable
+        columns={columns}
+        data={filteredUsersList}
+        keyExtractor={u => u.id}
+        rowActions={rowActions}
+        searchPlaceholder="Search team members by name, email, or designation..."
+      />
+
+      {/* ── Add / Invite Member Modal ────────────────────────────────────── */}
       <Modal
         isOpen={isInviteModalOpen}
         onClose={() => setIsInviteModalOpen(false)}
@@ -889,6 +921,60 @@ export const CompanyUsersPage: React.FC = () => {
             </p>
           </div>
         )}
+      </Modal>
+
+
+
+      {/* ── Transfer Desk Modal ────────────────────────────────────────────── */}
+      <Modal
+        isOpen={transferModalOpen}
+        onClose={() => setTransferModalOpen(false)}
+        title="Transfer Desk"
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setTransferModalOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleTransferAndSave}
+              disabled={!selectedTransferUserId}
+            >
+              Transfer & Change Role
+            </button>
+          </>
+        }
+      >
+        <div className="company-user-form">
+          <div style={{ backgroundColor: '#fff3cd', color: '#856404', padding: '12px', borderRadius: '8px', marginBottom: '16px' }}>
+            <strong>Action Required:</strong> {transferFromUser?.name} is changing roles from 
+            <strong> {transferFromUser?.role.name}</strong> to <strong>{transferTargetRole?.name}</strong>.
+            You must reassign their active pipeline (Leads and Follow-ups) to another agent before proceeding.
+          </div>
+          
+          <div className="form-group">
+            <label className="form-label">Transfer pipeline to:</label>
+            <select
+              className="form-select"
+              value={selectedTransferUserId}
+              onChange={e => setSelectedTransferUserId(e.target.value)}
+            >
+              <option value="">Select a new agent...</option>
+              {usersList
+                .filter(u => u.role.code === transferFromUser?.role.code && u.id !== transferFromUser?.id && u.status === 'Active')
+                .map(u => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({u.email})
+                  </option>
+                ))}
+            </select>
+          </div>
+        </div>
       </Modal>
     </div>
   );

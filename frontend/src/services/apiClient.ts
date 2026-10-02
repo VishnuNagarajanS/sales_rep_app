@@ -13,9 +13,15 @@ export interface PagedResult<T = any> {
   totalPages: number;
 }
 
+import { isMockMode as envIsMockMode } from '../config/environment';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 class ApiClient {
+  isMockMode(): boolean {
+    return envIsMockMode();
+  }
+
   private getHeaders(): HeadersInit {
     const token = sessionStorage.getItem('nexus_auth_token') || localStorage.getItem('nexus_auth_token');
     return {
@@ -39,7 +45,12 @@ class ApiClient {
     }
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: res.statusText }));
-      const error: any = new Error(err.message || `HTTP Error ${res.status}`);
+      let errorMsg = err.message || err.title;
+      if (err.errors && typeof err.errors === 'object' && !Array.isArray(err.errors)) {
+        const validationMsgs = Object.values(err.errors).flat().join('; ');
+        if (validationMsgs) errorMsg = validationMsgs;
+      }
+      const error: any = new Error(errorMsg || `HTTP Error ${res.status}`);
       error.errors = err.errors;
       error.data = err.data;
       error.response = err;
@@ -74,6 +85,20 @@ class ApiClient {
       method: 'POST',
       headers: this.getHeaders(),
       body: body ? JSON.stringify(body) : undefined,
+    });
+    return this.handleResponse<T>(res);
+  }
+
+  async postFormData<T>(endpoint: string, formData: FormData): Promise<T> {
+    const token = sessionStorage.getItem('nexus_auth_token') || localStorage.getItem('nexus_auth_token');
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+      method: 'POST',
+      headers: headers,
+      body: formData,
     });
     return this.handleResponse<T>(res);
   }

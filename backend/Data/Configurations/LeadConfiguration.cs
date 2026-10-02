@@ -70,5 +70,14 @@ public class LeadConfiguration : IEntityTypeConfiguration<Lead>
             .HasForeignKey(l => l.AssignedAgentId)
             .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(l => l.AssignedBy)
+            .WithMany()
+            .HasForeignKey(l => l.AssignedById)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasIndex(l => new { l.CompanyId, l.AssignedAgentId });
+        
+        builder.UseXminAsConcurrencyToken();
     }
 }

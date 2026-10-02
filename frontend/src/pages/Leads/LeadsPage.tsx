@@ -18,6 +18,14 @@ import {
 import { Lead, Customer, Deal, Followup } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
+import { apiClient } from '../../services/apiClient';
+import { storageService } from '../../services/storageService';
+import {
+  AssignableAgent,
+  loadAgentDirectory,
+  isLeadAssigned,
+  persistLeadAssignment,
+} from '../../services/agentDirectory';
 import {
   getLeads,
   getDeals,
@@ -35,7 +43,6 @@ import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
-import { storageService } from '../../services/storageService';
 import './LeadsPage.css';
 
 export const normalizePhone = (phone?: string): string | null => {
@@ -60,6 +67,8 @@ const CAPACITY_OPTIONS = [
   '₹25 Cr+'
 ];
 
+const MOCK_AGENTS = storageService.getMockAgents();
+export { MOCK_AGENTS };
 
 interface LeadsPageProps {
   onNavigate?: (route: string) => void;
@@ -132,10 +141,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
   const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk'];
 
-  // Role-based scoping:
-  // - Sales Executives see only their own leads, excluding moved/converted leads.
-  // - IRM sees their directly assigned leads PLUS all qualified 'Interested' leads handed over by Sales Execs.
-  // - Managers / Admins / Super Admins see the full company lead list.
+  // Role-based scoping: Sales Executives and IRMs see only their own leads.
+  // Managers / Admins / Super Admins see the full company lead list (no filter).
+  // Inactive / moved leads (Interested, Follow-up Required, Not Interested, Junk, Converted) are excluded from active Leads.
   const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
   const isLeadScopedUser = roleCode === 'sales_executive' || roleCode === 'irm';
@@ -173,7 +181,6 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         return true;
       });
     }
-
 
     return tenantLeads.filter(l => !MOVED_LEAD_STATUSES.includes(l.status));
   }, [tenantLeads, isExec, isIrm, user?.id, user?.name]);
@@ -277,13 +284,13 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [assignStep, setAssignStep] = useState<'pick-agent' | 'confirm'>('pick-agent');
-  const [assignSelectedAgent, setAssignSelectedAgent] = useState<{ id: number | string; name: string } | null>(null);
+  const [assignSelectedAgent, setAssignSelectedAgent] = useState<AssignableAgent | null>(null);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [aiDistribution, setAiDistribution] = useState<Record<string, Lead[]>>({});
   const [isAiEditMode, setIsAiEditMode] = useState(false);
   const [assignedLeadIds, setAssignedLeadIds] = useState<Set<string>>(new Set());
   const [agentAssignments, setAgentAssignments] = useState<
-    Array<{ leadId: string; leadName: string; agentId: number | string; agentName: string; assignedAt: string }>
+    Array<{ leadId: string; leadName: string; agentId: number; agentName: string; assignedAt: string }>
   >(() => {
     try {
       const saved = sessionStorage.getItem('ghl_mock_agent_assignments');
@@ -293,6 +300,25 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     }
   });
   const [toast, setToast] = useState<string | null>(null);
+
+  // Real sales agents (from DB) + admin ids. A lead still owned by an admin = UNASSIGNED.
+  const [agents, setAgents] = useState<AssignableAgent[]>([]);
+  const [agentsFromApi, setAgentsFromApi] = useState(true);
+  const [adminIds, setAdminIds] = useState<Set<string>>(
+    new Set(user?.id ? [String(user.id)] : [])
+  );
+
+  useEffect(() => {
+    if (!isGhlAdmin) return;
+    let cancelled = false;
+    loadAgentDirectory(tenant?.id, user?.id).then(dir => {
+      if (cancelled) return;
+      setAgents(dir.agents);
+      setAdminIds(dir.adminIds);
+      setAgentsFromApi(dir.fromApi);
+    });
+    return () => { cancelled = true; };
+  }, [tenant?.id, user?.id, isGhlAdmin]);
 
   // Form state
   const [formData, setFormData] = useState<Partial<Lead>>({});
@@ -315,26 +341,56 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     }));
   };
 
-  const [ghlPendingFollowups, setGhlPendingFollowups] = useState<any[]>([]);
-
   const loadData = async () => {
+    if (apiClient.isMockMode()) {
+      const updated = storageService.getLeads(tenant?.id);
+      setLeads(updated);
+      const allFus = storageService.getFollowups ? storageService.getFollowups(tenant?.id) : [];
+      const pendingFus = (allFus || []).filter((f: any) => f.status === 'Pending');
+      setAllFollowups(pendingFus);
+      setCustomers(storageService.getCustomers ? storageService.getCustomers(tenant?.id) : []);
+      setSelectedLead(prev => {
+        if (!prev) return null;
+        const found = updated.find(l => l.id === prev.id);
+        if (!found || (isExec && MOVED_LEAD_STATUSES.includes(found.status)) || found.status === 'Junk') {
+          setIsDetailDrawerOpen(false);
+          setIsEditDrawerOpen(false);
+          return null;
+        }
+        return found;
+      });
+      return;
+    }
+
     try {
-      const [updatedLeads, updatedFollowups, updatedCustomers, updatedDeals] = await Promise.all([
-        getLeads(tenant?.id),
+      const [updatedFollowups, updatedCustomers, updatedDeals] = await Promise.all([
         getFollowups(tenant?.id).catch(() => []),
         getCustomers(tenant?.id).catch(() => []),
         getDeals(tenant?.id).catch(() => []),
       ]);
-      setLeads(updatedLeads);
       const pendingFus = (updatedFollowups || []).filter((f: any) => f.status === 'Pending');
       setAllFollowups(pendingFus);
-      setGhlPendingFollowups(pendingFus);
       setCustomers(updatedCustomers || []);
       setDeals(updatedDeals || []);
 
+      let loadedLeads: Lead[] = [];
+      if (isGhlAdmin) {
+        const res = await apiClient.get<any>('/sales-executive/leads?page=1&pageSize=200&assignment=unassigned');
+        if (res.success && res.data && res.data.items) {
+          loadedLeads = res.data.items.map((item: any) => ({
+            ...item,
+            id: String(item.id),
+            assignedAgentId: item.assignedAgentId ? String(item.assignedAgentId) : undefined,
+            customFields: item.customFields || {}
+          }));
+        }
+      } else {
+        loadedLeads = await getLeads(tenant?.id);
+      }
+      setLeads(loadedLeads);
       setSelectedLead(prev => {
         if (!prev) return null;
-        const found = updatedLeads.find(l => l.id === prev.id);
+        const found = loadedLeads.find((l: any) => l.id === prev.id);
         if (!found || (isExec && MOVED_LEAD_STATUSES.includes(found.status)) || found.status === 'Junk') {
           setIsDetailDrawerOpen(false);
           setIsEditDrawerOpen(false);
@@ -343,18 +399,39 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         return found;
       });
     } catch (err) {
-      console.error('Failed to load leads page data', err);
+      console.error('Failed to load leads from API', err);
     }
   };
 
-  const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
-
   useEffect(() => {
+    storageService.cleanupDuplicateLeads(tenant?.id);
     loadData();
     const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
-  }, [tenant?.id]);
+    
+    // Polling every 15 seconds while visible
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible' && !apiClient.isMockMode()) {
+        loadData();
+      }
+    }, 15000);
+    
+    const handleFocus = () => {
+      if (!apiClient.isMockMode()) loadData();
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
+      window.removeEventListener('focus', handleFocus);
+      clearInterval(interval);
+    };
+  }, [tenant?.id, isGhlAdmin]);
+
+  const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
+  const ghlPendingFollowups = isGhlSalesExec
+    ? (storageService.getFollowups(tenant?.id) || []).filter(f => f.status === 'Pending')
+    : [];
 
   const matchCapacity = (lead: Lead, filterRange: string): boolean => {
     if (!filterRange || filterRange === 'All') return true;
@@ -455,111 +532,124 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     setTimeout(() => setToast(null), 3500);
   };
 
-  const handleManualAssignConfirm = () => {
+  // Saves assignments to the backend (real agents) and mirrors them locally.
+  const assignLeads = async (pairs: Array<{ lead: Lead; agent: AssignableAgent }>): Promise<number> => {
+    const results = await Promise.allSettled(pairs.map(p => persistLeadAssignment(p.lead, p.agent)));
+    const failed = results.filter(r => r.status === 'rejected') as PromiseRejectedResult[];
+    if (failed.length > 0) {
+      console.error('[Lead assignment] failed', failed.map(f => f.reason));
+      alert(`${failed.length} lead(s) could not be assigned: ${failed[0].reason?.message || 'Unknown error'}`);
+    }
+    return results.length - failed.length;
+  };
+
+  const handleManualAssignConfirm = async () => {
     if (!assignSelectedAgent) return;
-    const newAssigned = new Set(assignedLeadIds);
-    const newRecords: Array<{ leadId: string; leadName: string; agentId: number | string; agentName: string; assignedAt: string }> = [];
-    selectedLeadIds.forEach(id => {
-      newAssigned.add(id);
-      const lead = leads.find(l => l.id === id);
-      if (lead) {
-        const updatedLead: Lead = {
-          ...lead,
-          assignedAgentId: String(assignSelectedAgent.id),
-          assignedAgentName: assignSelectedAgent.name,
-        };
-        apiSaveLead(updatedLead).catch(console.error);
-        storageService.saveLead(updatedLead);
+    const agent = assignSelectedAgent;
+    const leadIds = Array.from(selectedLeadIds).map(id => id.replace('db-', ''));
+    let realAssigned = 0;
+
+    if (apiClient.isMockMode()) {
+      const pairs = leadIds.map(id => leads.find(l => l.id === id)).filter((l): l is Lead => !!l).map(lead => ({ lead, agent }));
+      await assignLeads(pairs);
+    } else {
+      try {
+        const res = await apiClient.post<any>('/ghl/leads/assign', {
+          leadIds: leadIds.map(id => parseInt(id, 10)),
+          agentId: agent.dbId
+        });
+        realAssigned = res?.data?.assigned ?? 0;
+        const skipped = res?.data?.skipped || [];
+        if (skipped.length > 0) alert(`${skipped.length} lead(s) skipped: ${skipped[0].reason}`);
+      } catch (err: any) {
+        console.error('Manual assign failed', err);
+        alert(`Manual assign failed: ${err.message || 'Unknown error'}`);
+        return;
       }
-      newRecords.push({
-        leadId: id,
-        leadName: lead?.name || 'Unknown Lead',
-        agentId: assignSelectedAgent.id,
-        agentName: assignSelectedAgent.name,
-        assignedAt: new Date().toISOString(),
-      });
-    });
-    setAssignedLeadIds(newAssigned);
-    setAgentAssignments(prev => {
-      const updated = [...prev, ...newRecords];
-      try { sessionStorage.setItem('ghl_mock_agent_assignments', JSON.stringify(updated)); } catch { }
-      (window as any).__ghlAssignments = updated;
-      return updated;
-    });
-    console.log('[GHL Admin Leads Assignment - Manual]', newRecords);
-    const count = selectedLeadIds.size;
+    }
+
+    const okCount = apiClient.isMockMode() ? leadIds.length : realAssigned;
     setSelectedLeadIds(new Set());
     setIsAssignModalOpen(false);
     setAssignStep('pick-agent');
     setAssignSelectedAgent(null);
-    showToast(`✓ ${count} lead${count !== 1 ? 's' : ''} assigned to ${assignSelectedAgent.name}`);
+    loadData();
+    if (okCount > 0) {
+      showToast(`✓ ${okCount} lead${okCount !== 1 ? 's' : ''} assigned to ${agent.name}${agentsFromApi ? '' : ' (local only – no real agents found)'}`);
+    }
   };
 
   const handleOpenAiSuggestion = () => {
+    if (agents.length === 0) {
+      showToast('No sales agents available to assign to.');
+      return;
+    }
     const pool = filteredLeads;
     const dist: Record<string, Lead[]> = {};
-    agentsList.forEach((a: any) => { dist[String(a.id)] = []; });
-    if (agentsList.length > 0) {
-      pool.forEach((lead, i) => {
-        const agent = agentsList[i % agentsList.length];
-        dist[String(agent.id)].push(lead);
-      });
-    }
+    agents.forEach(a => { dist[a.id] = []; });
+    pool.forEach((lead, i) => {
+      const agent = agents[i % agents.length];
+      dist[agent.id].push(lead);
+    });
     setAiDistribution(dist);
     setIsAiEditMode(false);
     setIsAiModalOpen(true);
   };
 
-  const handleAiMoveLead = (leadId: string, fromAgentId: number | string, direction: 'left' | 'right') => {
-    const agentIds = agentsList.map((a: any) => String(a.id));
-    const fromIdx = agentIds.indexOf(String(fromAgentId));
+  const handleAiMoveLead = (leadId: string, fromAgentId: string, direction: 'left' | 'right') => {
+    const agentIds = agents.map(a => a.id);
+    const fromIdx = agentIds.indexOf(fromAgentId);
     const toIdx = direction === 'left' ? fromIdx - 1 : fromIdx + 1;
     if (toIdx < 0 || toIdx >= agentIds.length) return;
     const toAgentId = agentIds[toIdx];
     setAiDistribution(prev => {
-      const fromLeads = [...(prev[String(fromAgentId)] || [])].filter(l => l.id !== leadId);
-      const movedLead = (prev[String(fromAgentId)] || []).find(l => l.id === leadId);
+      const fromLeads = [...(prev[fromAgentId] || [])].filter(l => l.id !== leadId);
+      const movedLead = (prev[fromAgentId] || []).find(l => l.id === leadId);
       if (!movedLead) return prev;
       const toLeads = [...(prev[toAgentId] || []), movedLead];
-      return { ...prev, [String(fromAgentId)]: fromLeads, [toAgentId]: toLeads };
+      return { ...prev, [fromAgentId]: fromLeads, [toAgentId]: toLeads };
     });
   };
 
-  const handleAiConfirm = () => {
-    const newAssigned = new Set(assignedLeadIds);
-    const newRecords: Array<{ leadId: string; leadName: string; agentId: number | string; agentName: string; assignedAt: string }> = [];
-    let count = 0;
-    Object.entries(aiDistribution).forEach(([agentIdStr, agentLeads]) => {
-      const agent = agentsList.find((a: any) => String(a.id) === agentIdStr);
-      agentLeads.forEach(l => {
-        newAssigned.add(l.id);
-        count++;
-        const updatedLead: Lead = {
-          ...l,
-          assignedAgentId: agent ? String(agent.id) : agentIdStr,
-          assignedAgentName: agent?.name || 'Agent',
-        };
-        apiSaveLead(updatedLead).catch(console.error);
-        storageService.saveLead(updatedLead);
-        newRecords.push({
-          leadId: l.id,
-          leadName: l.name,
-          agentId: agent ? agent.id : agentIdStr,
-          agentName: agent?.name || 'Agent',
-          assignedAt: new Date().toISOString(),
-        });
+  const handleAiConfirm = async () => {
+    let okCount = 0;
+    
+    if (apiClient.isMockMode()) {
+      const pairs: Array<{ lead: Lead; agent: AssignableAgent }> = [];
+      Object.entries(aiDistribution).forEach(([agentId, agentLeads]) => {
+        const agent = agents.find(a => a.id === agentId);
+        if (!agent) return;
+        agentLeads.forEach(lead => pairs.push({ lead, agent }));
       });
-    });
-    setAssignedLeadIds(newAssigned);
-    setAgentAssignments(prev => {
-      const updated = [...prev, ...newRecords];
-      try { sessionStorage.setItem('ghl_mock_agent_assignments', JSON.stringify(updated)); } catch { }
-      (window as any).__ghlAssignments = updated;
-      return updated;
-    });
-    console.log('[GHL Admin Leads Assignment - AI Round Robin]', newRecords);
+      okCount = await assignLeads(pairs);
+    } else {
+      // Send exactly the distribution the admin previewed/edited: one assign call per agent.
+      try {
+        let skippedCount = 0;
+        for (const [agentId, agentLeads] of Object.entries(aiDistribution)) {
+          const agent = agents.find(a => a.id === agentId);
+          if (!agent?.dbId || agentLeads.length === 0) continue;
+          const res = await apiClient.post<any>('/ghl/leads/assign', {
+            leadIds: agentLeads.map(l => parseInt(l.id.replace('db-', ''), 10)),
+            agentId: agent.dbId
+          });
+          okCount += res?.data?.assigned ?? 0;
+          skippedCount += (res?.data?.skipped || []).length;
+        }
+        if (skippedCount > 0) alert(`${skippedCount} lead(s) were skipped (already assigned).`);
+      } catch (err: any) {
+        console.error('Auto assign failed', err);
+        alert(`Auto assign failed: ${err.message || 'Unknown error'}`);
+        loadData();
+        return;
+      }
+    }
+
     setIsAiModalOpen(false);
-    showToast(`✓ ${count} lead${count !== 1 ? 's' : ''} assigned via AI Suggestion`);
+    loadData();
+    if (okCount > 0) {
+      showToast(`✓ ${okCount} lead${okCount !== 1 ? 's' : ''} assigned via AI Suggestion`);
+    }
   };
 
   const handleOpenCreate = () => {
@@ -568,20 +658,17 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       return;
     }
     const defaultAgentId = user.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec');
-    const defaultAgentName = user.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Naveen');
-
-    const targetCompany = tenant?.id || (tenant?.slug === 'jamin' ? 't-jamin-02' : 't-ghl-01');
+    const defaultAgentName = user.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer');
 
     setFormData({
       id: `lead-${Date.now()}`,
-      companyId: targetCompany,
+      companyId: tenant?.id || 't-ghl-01',
       name: '',
       phone: '+91 ',
       email: '',
       location: '',
       source: 'Website Inbound',
-      // IRM directly-added leads start as 'Interested' so they appear in IRM My Leads
-      status: isIrm ? 'Interested' : 'New',
+      status: 'New',
       priority: 'Medium',
       assignedAgentId: defaultAgentId,
       assignedAgentName: defaultAgentName,
@@ -657,14 +744,14 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
     // Pull real agent ID and name at save-time to prevent stale/fallback placeholder IDs from leaking
     const resolvedAgentId = (isLeadScopedUser && user?.id)
-      ? String(user.id)
-      : (formData.assignedAgentId && formData.assignedAgentId !== 'usr-exec' ? String(formData.assignedAgentId) : String(user?.id || 'usr-exec'));
+      ? user.id
+      : (formData.assignedAgentId && formData.assignedAgentId !== 'usr-exec' ? formData.assignedAgentId : (user?.id || 'usr-exec'));
     const resolvedAgentName = (isLeadScopedUser && user?.name)
       ? user.name
       : (formData.assignedAgentName && formData.assignedAgentName !== 'Agent' ? formData.assignedAgentName : (user?.name || 'Agent'));
 
     const isExistingById = leads.some(l => l.id === formData.id);
-    const targetCompanyId = formData.companyId || tenant?.id || (tenant?.slug === 'jamin' ? 't-jamin-02' : 't-ghl-01');
+    const targetCompanyId = formData.companyId || tenant?.id || 't-ghl-01';
 
     let leadToSave: Lead;
     let isUpdated = isExistingById;
@@ -849,6 +936,20 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
     try {
       await apiSaveLead(leadToSave);
+
+      storageService.addAuditLog({
+        id: `aud-${Date.now()}`,
+        timestamp: 'Just now',
+        actorName: user?.name || resolvedAgentName,
+        actorEmail: user?.email || 'agent@nexus.io',
+        action: isUpdated ? 'LEAD_UPDATED' : 'LEAD_CREATED',
+        entityType: 'Lead',
+        entityId: leadToSave.id,
+        companyId: tenant?.id,
+        companyName: tenant?.name,
+        details: `Lead record ${leadToSave.name} (${leadToSave.phone}) saved.`,
+      });
+
       await loadData();
       showToast(isUpdated ? 'Lead updated successfully.' : 'New lead created successfully.');
       setFormErrorMessage(null);
@@ -926,14 +1027,20 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   const handleDeleteLead = async (lead: Lead) => {
     if (confirm(`Delete lead ${lead.name}?`)) {
       try {
-        await apiSaveLead({ ...lead, status: 'Junk' });
-      } catch (err) {
-        console.error('Failed to update lead status:', err);
+        if (lead.id.toString().startsWith('db-')) {
+          const dbId = lead.id.toString().replace('db-', '');
+          await apiClient.delete(`/sales-executive/leads/${dbId}`);
+        } else {
+          await apiSaveLead({ ...lead, status: 'Junk' }).catch(() => {});
+        }
+      } catch (err: any) {
+        console.error('Failed to delete lead from DB', err);
       }
       storageService.deleteLead(lead.id);
       setLeads(prev => prev.filter(l => l.id !== lead.id));
       window.dispatchEvent(new CustomEvent('nexus_storage_updated'));
       showToast(`Lead ${lead.name} deleted`);
+      loadData();
     }
   };
 
@@ -947,7 +1054,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     setIsConvertModalOpen(true);
   };
 
-  const handleConfirmConvert = async () => {
+  const handleConfirmConvert = () => {
     if (!selectedLead || !tenant) return;
 
     // 1. Create Customer
@@ -968,15 +1075,15 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       notes: `Converted from lead. Original notes: ${selectedLead.notes}`,
       customFields: selectedLead.customFields,
     };
-    const savedCustomer = await apiSaveCustomer(newCustomer).catch(() => newCustomer);
+    storageService.saveCustomer(newCustomer);
 
-    // 2. Create Opportunity (maps to Deal/Investment Opportunity in GHL)
+    // 2. Create Deal
     const newDeal: Deal = {
       id: `deal-${Date.now()}`,
       companyId: tenant.id,
       title: convertDealTitle,
-      customerId: savedCustomer.id,
-      customerName: savedCustomer.name,
+      customerId: newCustomer.id,
+      customerName: newCustomer.name,
       stage: tenant.slug === 'jamin' ? 'site_visit' : 'consultation',
       value: convertDealValue,
       expectedCloseDate: 'Within 30 Days',
@@ -985,10 +1092,10 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       notes: `Deal initiated upon converting lead ${selectedLead.name}.`,
       createdAt: new Date().toISOString().split('T')[0],
     };
-    await apiSaveOpportunity({ id: newDeal.id, companyId: newDeal.companyId, investorId: savedCustomer.id, investorName: savedCustomer.name, title: newDeal.title, stage: 'Enquiry', targetAmount: convertDealValue, committedAmount: 0, assignedAgentId: selectedLead.assignedAgentId || '', assignedAgentName: selectedLead.assignedAgentName || '', expectedCloseDate: 'Within 30 Days', notes: newDeal.notes || '' }).catch(console.error);
+    storageService.saveDeal(newDeal);
 
     // 3. Mark Lead as Converted
-    await apiSaveLead({ ...selectedLead, status: 'Converted' }).catch(console.error);
+    storageService.saveLead({ ...selectedLead, status: 'Converted' });
 
     setIsConvertModalOpen(false);
     setIsDetailDrawerOpen(false);
@@ -1027,11 +1134,11 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     if (file) handleFileSelect(file);
   };
 
-  const handleImportLeads = async () => {
+  const handleImportLeads = () => {
     let successCount = 0;
     let skipCount = 0;
+    let updatedCount = 0;
     const companyId = tenant?.id || 't-ghl-01';
-    const promises: Promise<any>[] = [];
 
     // Build a dedup set from current leads AND customers so we detect duplicates across both
     const normalizePhone = (ph: string) => (ph || '').replace(/\D/g, '').slice(-10);
@@ -1052,14 +1159,36 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       const nameVal = row[columnMap['name']];
       const phoneVal = row[columnMap['phone']];
 
-      if (!nameVal || !phoneVal) { skipCount++; return; }
+      if (!nameVal || !phoneVal) {
+        skipCount++;
+        return;
+      }
 
       const emailVal = row[columnMap['email']] || '';
       const locationVal = row[columnMap['location']] || '';
       const sourceVal = row[columnMap['source']] || 'CSV Import';
       const rawPriority = row[columnMap['priority']];
       let priorityVal = 'Medium';
-      if (['Low', 'Medium', 'High', 'Urgent'].includes(String(rawPriority))) priorityVal = rawPriority;
+      if (['Low', 'Medium', 'High', 'Urgent'].includes(String(rawPriority))) {
+        priorityVal = rawPriority;
+      }
+
+      // Check for existing lead by phone in this company
+      const existingMatch = storageService.findLeadByPhone(phoneVal, companyId);
+      if (existingMatch) {
+        const updatedLead: Lead = {
+          ...existingMatch,
+          name: nameVal || existingMatch.name,
+          email: emailVal || existingMatch.email,
+          location: locationVal || existingMatch.location,
+          source: sourceVal || existingMatch.source,
+          priority: (priorityVal as any) || existingMatch.priority,
+        };
+        storageService.saveLead(updatedLead);
+        updatedCount++;
+        successCount++;
+        return;
+      }
 
       // ── Duplicate check ──────────────────────────────────────────────────────
       const normPhone = normalizePhone(phoneVal);
@@ -1090,10 +1219,24 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         notes: '',
         customFields: {}
       };
-      promises.push(apiSaveLead(newLead).then(() => { successCount++; }).catch(() => { skipCount++; }));
+
+      storageService.saveLead(newLead);
+      successCount++;
     });
 
-    await Promise.all(promises);
+    storageService.addAuditLog({
+      id: `aud-${Date.now()}`,
+      timestamp: 'Just now',
+      actorName: user?.name || 'Agent',
+      actorEmail: user?.email || 'agent@nexus.io',
+      action: 'LEADS_BULK_IMPORTED',
+      entityType: 'Lead',
+      entityId: `batch-${Date.now()}`,
+      companyId: tenant?.id,
+      companyName: tenant?.name,
+      details: `Bulk imported ${successCount} leads (${updatedCount} updated, ${successCount - updatedCount} created), skipped ${skipCount}.`,
+    });
+
     setImportResults({ success: successCount, skipped: skipCount });
     loadData();
   };
@@ -1260,13 +1403,12 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       icon: <Edit size={14} className="leads-action-icon" />,
       onClick: l => handleOpenEdit(l),
     },
-    // IRM role cannot delete leads — leads are DB-driven and deleted from admin
-    ...(!isIrm ? [{
+    {
       label: 'Delete Lead',
       icon: <Trash2 size={14} color="#ef4444" className="leads-action-icon" />,
       danger: true,
-      onClick: (l: Lead) => handleDeleteLead(l),
-    }] : []),
+      onClick: l => handleDeleteLead(l),
+    },
   ];
 
   return (
@@ -1544,11 +1686,11 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                   (() => {
                     const activeDefs = storageService
                       .getCustomFieldDefinitions(tenant?.id)
-                      .filter((d: any) => d.active !== false && (d.module === 'leads' || !d.module))
-                      .filter((d: any) => !(isExec && (d.fieldKey === 'assetClass' || d.fieldKey === 'preferredAssetClass')))
-                      .sort((a: any, b: any) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+                      .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
+                      .filter(d => !(isExec && (d.fieldKey === 'assetClass' || d.fieldKey === 'preferredAssetClass')))
+                      .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
                     const rows = activeDefs
-                      .map((def: any) => {
+                      .map(def => {
                         const key = def.fieldKey || def.id;
                         const val = selectedLead.customFields?.[key];
                         if (val === undefined || val === null || val === '') return null;
@@ -1560,7 +1702,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                       <div className="card lead-custom-card">
                         <h4 className="lead-custom-title">{tenant?.name} Custom Attributes</h4>
                         <div className="lead-detail-grid">
-                          {rows.map((item: any) => (
+                          {rows.map(item => (
                             <div key={item!.id}>
                               <span className="lead-custom-label">{item!.label}:</span>
                               <div className="lead-custom-value">{item!.value}</div>
@@ -2050,7 +2192,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
               <>
                 <p className="assign-modal-sub">Select an agent to assign the {selectedLeadIds.size} selected lead{selectedLeadIds.size !== 1 ? 's' : ''} to:</p>
                 <div className="assign-agent-list">
-                  {agentsList.map((agent: any) => (
+                  {agents.map(agent => (
                     <label key={agent.id} className={`assign-agent-row${assignSelectedAgent?.id === agent.id ? ' selected' : ''}`}>
                       <input
                         type="radio"
@@ -2103,7 +2245,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
               <div>
                 <h3 className="assign-modal-title">✦ AI Suggestion — Round Robin</h3>
                 <p className="assign-modal-sub" style={{ margin: '2px 0 0' }}>
-                  {Object.values(aiDistribution).flat().length} leads distributed across {agentsList.length} agents
+                  {Object.values(aiDistribution).flat().length} leads distributed across {agents.length} agents
                 </p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -2118,8 +2260,8 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
             </div>
 
             <div className="ai-dist-grid">
-              {agentsList.map((agent: any, agentIdx: number) => {
-                const agentLeads = aiDistribution[String(agent.id)] || [];
+              {agents.map((agent, agentIdx) => {
+                const agentLeads = aiDistribution[agent.id] || [];
                 return (
                   <div key={agent.id} className="ai-dist-col">
                     <div className="ai-dist-col-header">
@@ -2145,7 +2287,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                                 >◀</button>
                                 <button
                                   className="ai-move-btn"
-                                  disabled={agentIdx === agentsList.length - 1}
+                                  disabled={agentIdx === agents.length - 1}
                                   onClick={() => handleAiMoveLead(lead.id, agent.id, 'right')}
                                   title="Move right"
                                 >▶</button>
@@ -2556,3 +2698,4 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     </div>
   );
 };
+

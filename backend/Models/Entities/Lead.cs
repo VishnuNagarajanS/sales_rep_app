@@ -9,6 +9,11 @@ public class Lead
 
     public int? AssignedAgentId { get; set; }
     public User? AssignedAgent { get; set; }
+    public DateTime? AssignedAt { get; set; }
+    public int? AssignedById { get; set; }
+    public User? AssignedBy { get; set; }
+    
+
 
     public string Name { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
