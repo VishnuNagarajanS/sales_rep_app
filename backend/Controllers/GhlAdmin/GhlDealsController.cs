@@ -58,6 +58,7 @@ public class GhlDealsController : ControllerBase
     {
         var query = _db.GhlDeals.AsNoTracking()
             .Include(d => d.AssignedAgent)
+            .Include(d => d.Customer)   // needed to resolve Phone / Email / Location
             .AsQueryable();
 
         var companyId = _currentUser.CompanyId;
@@ -394,5 +395,10 @@ public class GhlDealsController : ControllerBase
         VerifiedAt = d.VerifiedAt,
         Remarks = d.Remarks,
         FlaggedSections = d.FlaggedSections,
+        // Resolve contact details from the authoritative Customer record first,
+        // then fall back to any denormalised contact data on the deal itself.
+        Phone = (!string.IsNullOrWhiteSpace(d.Customer?.Phone) ? d.Customer.Phone : null),
+        Email = (!string.IsNullOrWhiteSpace(d.Customer?.Email) ? d.Customer.Email : null),
+        Location = (!string.IsNullOrWhiteSpace(d.Customer?.Location) ? d.Customer.Location : null),
     };
 }

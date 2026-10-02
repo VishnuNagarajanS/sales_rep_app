@@ -318,18 +318,30 @@ const GhlIrmKycView: React.FC = () => {
   const [validationErrorSummary, setValidationErrorSummary] = useState<string | null>(null);
 
   const enrichDealWithContact = (d: Deal, leadsList: Lead[], customersList: Customer[]): Deal => {
-    if (d.phone && d.email) return d;
-    const matchLead = leadsList.find(
-      l => (d.customerId && l.id === d.customerId) || (l.name && d.customerName && l.name.toLowerCase() === d.customerName.toLowerCase())
-    );
-    const matchCust = customersList.find(
-      c => (d.customerId && c.id === d.customerId) || (c.name && d.customerName && c.name.toLowerCase() === d.customerName.toLowerCase())
-    );
+    // If the API already populated all three contact fields, nothing to do
+    if (d.phone && d.email && d.location) return d;
+
+    // Prefer ID-based match; fall back to normalised-phone match; name match avoided (ambiguous)
+    const custIdStr = d.customerId ? String(d.customerId) : null;
+    const dealPhoneDigits = (d.phone || '').replace(/\D/g, '').slice(-10);
+
+    const matchCust = customersList.find(c => {
+      if (custIdStr && String(c.id) === custIdStr) return true;
+      const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
+      return Boolean(cDigits && dealPhoneDigits && cDigits === dealPhoneDigits);
+    });
+
+    const matchLead = !matchCust ? leadsList.find(l => {
+      if (custIdStr && String(l.id) === custIdStr) return true;
+      const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+      return Boolean(lDigits && dealPhoneDigits && lDigits === dealPhoneDigits);
+    }) : null;
+
     return {
       ...d,
-      phone: d.phone || matchLead?.phone || matchCust?.phone || '',
-      email: d.email || matchLead?.email || matchCust?.email || '',
-      location: d.location || matchLead?.location || matchCust?.location || '',
+      phone: d.phone || matchCust?.phone || matchLead?.phone || '',
+      email: d.email || matchCust?.email || matchLead?.email || '',
+      location: d.location || matchCust?.location || matchLead?.location || '',
     };
   };
 
