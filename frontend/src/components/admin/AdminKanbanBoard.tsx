@@ -112,8 +112,6 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({
         }
         if (salesMap.size === 0) {
           salesMap.set('naveen', { id: '3', name: 'Naveen' });
-          salesMap.set('test_sales', { id: '28', name: 'Test_Sales' });
-          salesMap.set('test_sales_2', { id: '29', name: 'Test_sales_2' });
         }
 
         setIrmUsers(Array.from(irmMap.values()));
@@ -122,13 +120,10 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({
         console.warn('Could not fetch DB users for Kanban person dropdown:', e);
         if (mounted) {
           setIrmUsers([
-            { id: '5', name: 'Dhinakaran' },
-            { id: '30', name: 'Test_IRM' }
+            { id: '5', name: 'Dhinakaran' }
           ]);
           setSalesUsers([
-            { id: '3', name: 'Naveen' },
-            { id: '28', name: 'Test_Sales' },
-            { id: '29', name: 'Test_sales_2' }
+            { id: '3', name: 'Naveen' }
           ]);
         }
       }

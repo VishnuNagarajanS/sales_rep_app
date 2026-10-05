@@ -263,9 +263,59 @@ public class AdminUserService : IAdminUserService
         if (user == null)
             return ApiResponse<bool>.FailureResult("User not found.");
 
-        _context.Users.Remove(user);
-        await _context.SaveChangesAsync(cancellationToken);
+        using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            // 1. Reassign customers to active company admin/agent
+            var fallbackUser = await _context.Users
+                .Where(u => u.CompanyId == companyId && u.Id != userId && u.Status == backend.Models.Enums.UserStatus.Active)
+                .OrderBy(u => u.RoleId == 2 ? 0 : 1) // Prefer Company Admin
+                .FirstOrDefaultAsync(cancellationToken);
 
-        return ApiResponse<bool>.SuccessResult(true, "User deleted successfully.");
+            var customers = await _context.Customers
+                .Where(c => c.CompanyId == companyId && c.AssignedAgentId == userId)
+                .ToListAsync(cancellationToken);
+            if (fallbackUser != null)
+            {
+                foreach (var c in customers)
+                {
+                    c.AssignedAgentId = fallbackUser.Id;
+                }
+            }
+
+            // 2. Unlink assigned leads
+            var leads = await _context.Leads
+                .Where(l => l.CompanyId == companyId && l.AssignedAgentId == userId)
+                .ToListAsync(cancellationToken);
+            foreach (var l in leads)
+            {
+                l.AssignedAgentId = null;
+            }
+
+            // 3. Remove pending followups for this user
+            var followups = await _context.Followups
+                .Where(f => f.CompanyId == companyId && f.AssignedAgentId == userId)
+                .ToListAsync(cancellationToken);
+            _context.Followups.RemoveRange(followups);
+
+            // 4. Clean up lead assignment history references
+            var historyRecords = await _context.LeadAssignmentHistories
+                .Where(h => h.FromAgentId == userId || h.ToAgentId == userId || h.AssignedById == userId)
+                .ToListAsync(cancellationToken);
+            _context.LeadAssignmentHistories.RemoveRange(historyRecords);
+
+            // 5. Remove user
+            _context.Users.Remove(user);
+
+            await _context.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            return ApiResponse<bool>.SuccessResult(true, "User deleted successfully.");
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return ApiResponse<bool>.FailureResult($"Failed to delete user: {ex.Message}");
+        }
     }
 }

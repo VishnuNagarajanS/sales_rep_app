@@ -131,13 +131,10 @@ export const FollowupsPage: React.FC = () => {
     if (selectedRole === 'sales_executive') {
       return [
         { id: '3', name: 'Naveen' },
-        { id: '28', name: 'Test_Sales' },
-        { id: '29', name: 'Test_sales_2' },
       ];
     }
     return [
       { id: '5', name: 'Dhinakaran' },
-      { id: '30', name: 'Test_IRM' },
     ];
   }, [selectedRole, users]);
 

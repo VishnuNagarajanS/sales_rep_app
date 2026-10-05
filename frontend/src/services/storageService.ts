@@ -1020,8 +1020,6 @@ class StorageService {
     if (agents.length > 0) return agents;
     return [
       { id: '3', name: 'Naveen', role: 'Sales Executive', email: 'naveen@ghlindiaventures.com' },
-      { id: '28', name: 'Test_Sales', role: 'Sales Executive', email: 'test_sales@ghlindiaventures.com' },
-      { id: '29', name: 'Test_sales_2', role: 'Sales Executive', email: 'test_sales_2@ghlindiaventures.com' },
     ];
   }
 
