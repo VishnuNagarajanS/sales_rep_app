@@ -89,6 +89,8 @@ export const InvestorsPage: React.FC = () => {
 
   // ── Data loading ──────────────────────────────────────────────────────────
   const loadData = async () => {
+    // Load investors and deals from the backend; fall back to localStorage
+    // only on a complete network failure.
     try {
       const [apiInvestors, apiDeals] = await Promise.all([
         getInvestors(tenant?.id),
@@ -100,10 +102,26 @@ export const InvestorsPage: React.FC = () => {
       setInvestors(storageService.getInvestors(tenant?.id));
       setDeals(storageService.getDeals(tenant?.id));
     }
-    setAllCalls(storageService.getCalls(tenant?.id));
-    setAllConsultations(storageService.getConsultations(tenant?.id));
-    setAllOpportunities(storageService.getOpportunities(tenant?.id));
-    setAllFollowups(storageService.getFollowups(tenant?.id));
+    // Load linked activity data from the real API so IDs agree with
+    // the backend investor IDs, not with stale localStorage entries.
+    try {
+      const [apiCalls, apiConsultations, apiOpportunities, apiFollowups] = await Promise.all([
+        getCalls(tenant?.id),
+        getConsultations(tenant?.id),
+        getOpportunities(tenant?.id),
+        getFollowups(tenant?.id),
+      ]);
+      setAllCalls(apiCalls || []);
+      setAllConsultations(apiConsultations || []);
+      setAllOpportunities(apiOpportunities || []);
+      setAllFollowups(apiFollowups || []);
+    } catch {
+      // Graceful degradation — activity tabs will show empty if API is unreachable
+      setAllCalls([]);
+      setAllConsultations([]);
+      setAllOpportunities([]);
+      setAllFollowups([]);
+    }
   };
 
   useEffect(() => {
@@ -119,46 +137,19 @@ export const InvestorsPage: React.FC = () => {
   }, [selectedInvestor?.id]);
 
   // ── Role-based scoping ────────────────────────────────────────────────────
-  // For IRM on GHL: show ONLY investors who completed the full pipeline with a deal at stage === 'converted'
-  // sales_executive sees only their own investors; managers/admins see all
+  // Investor records come directly from the backend (GhlInvestorsController).
+  // The backend already scopes by assigned IRM for irm role via ScopedQuery().
+  // Do NOT synthesize fake investor objects from deal records — they carry
+  // invented IDs, hardcoded asset classes, and invented statuses.
   const convertedDeals = deals.filter(d => d.stage === 'converted');
-  const convertedCustomerIds = new Set(convertedDeals.map(d => d.customerId));
-  const convertedCustomerNames = new Set(convertedDeals.map(d => d.customerName.toLowerCase()));
 
-  const scopedInvestors = isGhlIrm
-    ? [
-      ...investors.filter(inv =>
-        convertedCustomerIds.has(inv.id) ||
-        convertedCustomerNames.has(inv.name.toLowerCase())
-      ),
-      ...convertedDeals
-        .filter(d => !investors.some(inv => inv.id === d.customerId || inv.name.toLowerCase() === d.customerName.toLowerCase()))
-        .map((d): Investor => ({
-          id: d.customerId || `inv-${d.id}`,
-          companyId: d.companyId,
-          name: d.customerName,
-          phone: d.phone || '',
-          email: d.email || '',
-          status: 'Active Investor',
-          investmentCapacity: d.investmentRange || (d.value >= 10000000 ? `₹${(d.value / 10000000).toFixed(2)} Cr` : `₹${d.value}`),
-          preferredAssetClass: d.preferredAssetClass || 'Commercial Pre-Leased',
-          assignedAgentId: d.assignedAgentId,
-          assignedAgentName: d.assignedAgentName,
-          referralSource: 'Pipeline Mandate Converted',
-          createdAt: d.createdAt,
-          committedAUM: d.investmentRange || (d.value >= 10000000 ? `₹${(d.value / 10000000).toFixed(2)} Cr` : `₹${d.value}`),
-          notes: d.notes,
-          investmentMandate: '',
-          riskTolerance: undefined,
-        }))
-    ]
-    : isExec
-      ? investors.filter(
+  const scopedInvestors = isExec
+    ? investors.filter(
         inv =>
           (inv.assignedAgentId && inv.assignedAgentId === user?.id) ||
           (inv.assignedAgentName && inv.assignedAgentName === user?.name),
       )
-      : investors;
+    : investors; // IRM, Admin, Super Admin: backend already scopes for the role
 
   // ── Filter options ────────────────────────────────────────────────────────
   const assetClassOptions = Array.from(new Set(scopedInvestors.map(inv => inv.preferredAssetClass)))
@@ -248,7 +239,7 @@ export const InvestorsPage: React.FC = () => {
     if (formErrors[key]) setFormErrors(prev => ({ ...prev, [key]: undefined }));
   };
 
-  const handleSaveInvestor = () => {
+  const handleSaveInvestor = async () => {
     const errors: Partial<Record<keyof InvestorForm, string>> = {};
     if (!form.name.trim()) errors.name = 'Name is required.';
     if (!form.phone.trim()) errors.phone = 'Phone is required.';
@@ -258,7 +249,9 @@ export const InvestorsPage: React.FC = () => {
     }
 
     const now = new Date().toISOString().split('T')[0];
-    const investor: Investor = {
+    // Use editingInvestor.id for updates; for new records pass a temporary
+    // client-side id — the API will return the real backend ID which we use.
+    const investorPayload: Investor = {
       id: editingInvestor ? editingInvestor.id : `inv-${Date.now()}`,
       companyId: tenant?.id ?? '',
       name: form.name.trim(),
@@ -266,6 +259,8 @@ export const InvestorsPage: React.FC = () => {
       email: form.email.trim(),
       status: form.status,
       investmentCapacity: form.investmentCapacity.trim(),
+      // Only persist an asset class if the IRM actually provided one;
+      // do not default to any value.
       preferredAssetClass: form.preferredAssetClass.trim(),
       assignedAgentId: form.assignedAgentId.trim() || (user?.id ?? ''),
       assignedAgentName: form.assignedAgentName.trim() || (user?.name ?? ''),
@@ -277,9 +272,17 @@ export const InvestorsPage: React.FC = () => {
       ...(form.riskTolerance ? { riskTolerance: form.riskTolerance as Investor['riskTolerance'] } : {}),
     };
 
-    apiSaveInvestor(investor).catch(console.error);
     closeModal();
-    setSelectedInvestor(investor);
+    try {
+      // Await the API call so the returned record carries the real backend ID.
+      const saved = await apiSaveInvestor(investorPayload);
+      // Reload the full list so stage counts and ownership stay in sync.
+      await loadData();
+      // Select the real saved record (with backend ID), not the local placeholder.
+      setSelectedInvestor(saved);
+    } catch (err: any) {
+      console.error('[InvestorsPage] Failed to save investor:', err);
+    }
   };
 
   // ── CSV Export ────────────────────────────────────────────────────────────
@@ -510,7 +513,7 @@ export const InvestorsPage: React.FC = () => {
         isOpen={!!selectedInvestor}
         onClose={() => setSelectedInvestor(null)}
         title={selectedInvestor?.name || 'Investor Overview'}
-        subtitle={isExec ? undefined : `Mandate: ${selectedInvestor?.preferredAssetClass ?? ''}`}
+        subtitle={isExec || !selectedInvestor?.preferredAssetClass ? undefined : `Mandate: ${selectedInvestor.preferredAssetClass}`}
         width={720}
       >
         {selectedInvestor && (
@@ -562,7 +565,7 @@ export const InvestorsPage: React.FC = () => {
                 Advisory Portfolio Notes
               </h4>
               <p className="investor-notes-text">
-                {selectedInvestor.notes || 'Institutional investor evaluation completed.'}
+                {selectedInvestor.notes || '—'}
               </p>
             </div>
 
