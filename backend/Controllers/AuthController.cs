@@ -116,5 +116,13 @@ public class AuthController : ControllerBase
 
     [HttpGet("me")]
     [Authorize]
-    public async Task<IActionResult> Me(CancellationToken cancellationToken) => Ok(await _authService.GetCurrentUserAsync(cancellationToken));
+    public async Task<IActionResult> Me(CancellationToken cancellationToken)
+    {
+        var result = await _authService.GetCurrentUserAsync(cancellationToken);
+        if (!result.Success)
+        {
+            return Unauthorized(result);
+        }
+        return Ok(result);
+    }
 }

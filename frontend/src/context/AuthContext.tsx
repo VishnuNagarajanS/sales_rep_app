@@ -74,7 +74,7 @@ interface AuthContextType {
   isSuperAdmin: boolean;
   loginError: string | null;
   login: (email: string, password?: string, roleCode?: RoleCode, tenantSlug?: TenantSlug) => Promise<boolean>;
-  logout: () => void;
+  logout: (reason?: string) => void;
   switchPersona: (roleCode: RoleCode, tenantSlug?: TenantSlug) => void;
   setUser: (user: User | null) => void;
   setTenant: (tenant: Tenant | null) => void;
@@ -364,7 +364,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return true;
   };
 
-  const logout = () => {
+  const logout = (reason?: string) => {
     sessionStorage.removeItem('nexus_auth_token');
     sessionStorage.removeItem('nexus_current_user');
     sessionStorage.removeItem('nexus_current_tenant');
@@ -373,7 +373,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem('nexus_auth_token');
     localStorage.removeItem('nexus_current_user');
     localStorage.removeItem('nexus_current_tenant');
-    setLoginError(null);
+    setLoginError(reason || null);
     setUser(null);
     setTenant(null);
     try {
@@ -385,20 +385,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   userRef.current = user;
 
   const lastRevalidationRef = useRef<number>(0);
+  const isRevalidatingRef = useRef<boolean>(false);
 
   const revalidateSession = async () => {
-    if (!userRef.current || isMockMode()) return;
+    if (!userRef.current || isMockMode() || isRevalidatingRef.current) return;
     const token = sessionStorage.getItem('nexus_auth_token') || localStorage.getItem('nexus_auth_token');
     if (!token || isJwtExpired(token)) {
       logout();
       return;
     }
+    isRevalidatingRef.current = true;
     try {
       const res: any = await apiClient.get('/auth/me');
       if (res && res.success && res.data) {
         // Backend returns ApiResponse<LoginResponseDto> which is { user: UserDto, tenant: TenantDto }
         const userData: User | null = res.data.user || (res.data.id ? res.data : null);
         const tenantData: Tenant | null = res.data.tenant || null;
+
+        // Check if user status is suspended/disabled from the response
+        if (userData?.status && userData.status.toLowerCase() !== 'active') {
+          logout('Your account has been suspended by an administrator.');
+          return;
+        }
 
         if (userData) {
           if (userData.role?.code && SYSTEM_ROLES[userData.role.code]) {
@@ -426,10 +434,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch {
       // 401 triggers nexus_auth_unauthorized automatically via apiClient
+    } finally {
+      isRevalidatingRef.current = false;
     }
   };
 
   useEffect(() => {
+    const checkSuspensionAndLogout = (payload: { userId?: string; email?: string }) => {
+      const currentUser = userRef.current;
+      if (!currentUser) return;
+      const matchId = payload.userId && String(currentUser.id) === String(payload.userId);
+      const matchEmail =
+        payload.email && currentUser.email && currentUser.email.toLowerCase() === payload.email.toLowerCase();
+      if (matchId || matchEmail) {
+        logout('Your account has been suspended by an administrator.');
+      }
+    };
+
+    let bc: BroadcastChannel | null = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        bc = new BroadcastChannel('nexus_auth_channel');
+        bc.onmessage = (event) => {
+          if (event.data?.type === 'ACCOUNT_SUSPENDED') {
+            checkSuspensionAndLogout(event.data);
+          }
+        };
+      }
+    } catch {}
+
     const handleStorageEvent = (e: StorageEvent) => {
       // Multi-tab synchronization
       if (e.key === 'nexus_auth_token') {
@@ -461,17 +494,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             } catch {}
           }
         }
+      } else if (e.key === 'nexus_account_suspended' && e.newValue) {
+        try {
+          const payload = JSON.parse(e.newValue);
+          checkSuspensionAndLogout(payload);
+        } catch {}
       }
     };
 
     const handleUnauthorized = () => {
-      logout();
+      logout('Your account has been suspended by an administrator.');
     };
 
     const handleRevalidate = () => {
       if (!userRef.current) return;
       const now = Date.now();
-      if (now - lastRevalidationRef.current < 15000) return;
+      if (now - lastRevalidationRef.current < 5000) return;
       lastRevalidationRef.current = now;
       revalidateSession();
     };
@@ -487,7 +525,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     window.addEventListener('focus', handleRevalidate);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
+    // Initial session revalidation on mount (e.g. for offline sessions)
+    if (userRef.current && !isMockMode()) {
+      revalidateSession();
+    }
+
+    // Active session status heartbeat (checks backend every 2s while user is logged in)
+    const intervalId = setInterval(() => {
+      if (userRef.current && !isMockMode()) {
+        revalidateSession();
+      }
+    }, 2000);
+
     return () => {
+      clearInterval(intervalId);
+      try {
+        bc?.close();
+      } catch {}
       window.removeEventListener('storage', handleStorageEvent);
       window.removeEventListener('nexus_auth_unauthorized', handleUnauthorized);
       window.removeEventListener('focus', handleRevalidate);

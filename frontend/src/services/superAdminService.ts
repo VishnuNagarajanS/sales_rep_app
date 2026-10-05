@@ -589,6 +589,17 @@ class SuperAdminService {
     if (!res || !res.data) {
       throw new Error(res?.message || 'Failed to update user profile in database.');
     }
+    if (updates.status === 'Disabled') {
+      const suspensionEvent = { userId: String(id), email: updates.email, timestamp: Date.now() };
+      localStorage.setItem('nexus_account_suspended', JSON.stringify(suspensionEvent));
+      try {
+        if (typeof BroadcastChannel !== 'undefined') {
+          const bc = new BroadcastChannel('nexus_auth_channel');
+          bc.postMessage({ type: 'ACCOUNT_SUSPENDED', ...suspensionEvent });
+          bc.close();
+        }
+      } catch {}
+    }
     await this.fetchUsersFromApi();
     notifyAdminStorageUpdated();
     return res.data;

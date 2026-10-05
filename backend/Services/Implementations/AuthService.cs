@@ -198,7 +198,7 @@ public class AuthService : IAuthService
     public async Task<ApiResponse<LoginResponseDto>> GetCurrentUserAsync(CancellationToken cancellationToken = default)
     {
         var user = await _context.Users.Include(x => x.Role).Include(x => x.Company).FirstOrDefaultAsync(x => x.Id == _currentUser.UserId, cancellationToken);
-        if (user == null) return ApiResponse<LoginResponseDto>.FailureResult("User profile not found.");
+        if (user == null || user.Status != UserStatus.Active) return ApiResponse<LoginResponseDto>.FailureResult("Your account has been suspended or is inactive.");
         return ApiResponse<LoginResponseDto>.SuccessResult(new LoginResponseDto { User = MapToUserDto(user), Tenant = user.Company == null ? null : MapToTenantDto(user.Company) }, "Current user loaded");
     }
 

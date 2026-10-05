@@ -262,8 +262,8 @@ public class LeadService : ILeadService
         {
             CompanyId = companyId.Value,
             AssignedAgentId = targetAgentId,
-            Name = dto.Name.Trim(),
-            Phone = dto.Phone.Trim(),
+            Name = dto.Name?.Trim() ?? string.Empty,
+            Phone = dto.Phone?.Trim() ?? string.Empty,
             Email = dto.Email?.Trim() ?? string.Empty,
             Location = dto.Location?.Trim() ?? string.Empty,
             Source = string.IsNullOrWhiteSpace(dto.Source) ? "Website Inbound" : dto.Source.Trim(),

@@ -75,7 +75,7 @@ export const SalesLayout: React.FC<SalesLayoutProps> = ({
           if (!active) return null;
           return (
             <div className={`platform-broadcast-banner priority-${active.priority}`}>
-              <span>📢 <strong>{active.title}:</strong> {active.message}</span>
+              <span>📢<strong>{active.title}:</strong> {active.message}</span>
             </div>
           );
         })()}
@@ -114,13 +114,12 @@ export const SalesLayout: React.FC<SalesLayoutProps> = ({
 
         {/* Dynamic Page Content */}
         <main
-          className={`page-scrollable ${
-            currentRoute === 'chat'
-              ? 'page-chat-layout'
-              : currentRoute === 'assigned-leads'
+          className={`page-scrollable ${currentRoute === 'chat'
+            ? 'page-chat-layout'
+            : currentRoute === 'assigned-leads'
               ? 'page-static-layout'
               : ''
-          }`}
+            }`}
         >
           {children}
         </main>

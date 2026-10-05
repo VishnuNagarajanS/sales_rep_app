@@ -169,16 +169,16 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
 
   const primaryTrunkHealth = carrierSettings.primaryTrunkHealth || (
     !carrierSettings.primaryCarrier ? 'offline' :
-    carrierSettings.status === 'Inactive' ? 'offline' :
-    carrierSettings.status === 'Degraded' || carrierSettings.testStatus === 'Degraded' ? 'degraded' :
-    'online'
+      carrierSettings.status === 'Inactive' ? 'offline' :
+        carrierSettings.status === 'Degraded' || carrierSettings.testStatus === 'Degraded' ? 'degraded' :
+          'online'
   );
 
   const failoverTrunkHealth = carrierSettings.failoverTrunkHealth || (
     !carrierSettings.secondaryCarrier ? 'offline' :
-    !carrierSettings.emergencyRoutingEnabled ? 'degraded' :
-    carrierSettings.status === 'Inactive' ? 'offline' :
-    'online'
+      !carrierSettings.emergencyRoutingEnabled ? 'degraded' :
+        carrierSettings.status === 'Inactive' ? 'offline' :
+          'online'
   );
 
   const speechToTextHealth = carrierSettings.speechToTextHealth || (
@@ -391,7 +391,7 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
         <div className="carrier-bar-col">
           <div className={`carrier-bar-indicator ${databasePoolHealth}`}>●</div>
           <div>
-            <div className="carrier-bar-title">Active Database Pool</div>
+            <div className="carrier-bar-title">Active Pool</div>
             <div className="carrier-bar-desc">
               {diagnostics.dbPoolActive} / {diagnostics.dbPoolMax} Connections ({Math.round(diagnostics.dbLatencyMs)}ms)
             </div>
@@ -450,74 +450,74 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
                     const tenantUsersCount = users.filter(u => String(u.companyId) === String(t.id) || u.companyName === t.name).length;
                     const isSuspended = t.status === 'Suspended';
                     return (
-                    <tr key={t.id} className="platform-matrix-tbody-tr">
-                      <td className="platform-matrix-td-name">
-                        <div className="tenant-name-row">
-                          <span
-                            className="tenant-avatar-badge"
-                            style={{ backgroundColor: t.brandColor || '#8b5cf6' }}
-                          >
-                            {t.name.slice(0, 2).toUpperCase()}
-                          </span>
-                          <div>
-                            <div className="platform-matrix-tenant-name">{t.name}</div>
-                            <div className="platform-matrix-tenant-id">
-                              Slug: <code>{t.slug}</code> • ID: {t.id}
+                      <tr key={t.id} className="platform-matrix-tbody-tr">
+                        <td className="platform-matrix-td-name">
+                          <div className="tenant-name-row">
+                            <span
+                              className="tenant-avatar-badge"
+                              style={{ backgroundColor: t.brandColor || '#8b5cf6' }}
+                            >
+                              {t.name.slice(0, 2).toUpperCase()}
+                            </span>
+                            <div>
+                              <div className="platform-matrix-tenant-name">{t.name}</div>
+                              <div className="platform-matrix-tenant-id">
+                                Slug: <code>{t.slug}</code> • ID: {t.id}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </td>
+                        </td>
 
-                      <td className="platform-matrix-td-tagline">
-                        <div className="tenant-plan-title">
-                          {t.subscriptionPlan || 'Enterprise Suite'}
-                        </div>
-                        <div className="tenant-industry-sub">{t.industry || 'Commercial Sales'}</div>
-                      </td>
+                        <td className="platform-matrix-td-tagline">
+                          <div className="tenant-plan-title">
+                            {t.subscriptionPlan || 'Enterprise Suite'}
+                          </div>
+                          <div className="tenant-industry-sub">{t.industry || 'Commercial Sales'}</div>
+                        </td>
 
-                      <td className="platform-matrix-td-center">
-                        <span className="user-count-chip">
-                          <Users size={12} /> {tenantUsersCount}
-                        </span>
-                      </td>
+                        <td className="platform-matrix-td-center">
+                          <span className="user-count-chip">
+                            <Users size={12} /> {tenantUsersCount}
+                          </span>
+                        </td>
 
-                      <td className="platform-matrix-td-center platform-matrix-did">
-                        {(() => {
-                          const mappedDid = dids.find(d => String(d.tenantId) === String(t.id) || d.tenantSlug === t.slug);
-                          return <code>{mappedDid ? mappedDid.phoneNumber : 'Unassigned'}</code>;
-                        })()}
-                      </td>
+                        <td className="platform-matrix-td-center platform-matrix-did">
+                          {(() => {
+                            const mappedDid = dids.find(d => String(d.tenantId) === String(t.id) || d.tenantSlug === t.slug);
+                            return <code>{mappedDid ? mappedDid.phoneNumber : 'Unassigned'}</code>;
+                          })()}
+                        </td>
 
-                      <td className="platform-matrix-td-center">
-                        <span className={`status-pill ${t.status?.toLowerCase() || 'active'}`}>
-                          {t.status || 'Active'}
-                        </span>
-                      </td>
+                        <td className="platform-matrix-td-center">
+                          <span className={`status-pill ${t.status?.toLowerCase() || 'active'}`}>
+                            {t.status || 'Active'}
+                          </span>
+                        </td>
 
-                      <td className="platform-matrix-td-action">
-                        <div className="action-button-group">
-                          <button
-                            className="btn btn-secondary btn-xs action-btn-support"
-                            title="Drill in to inspect tenant CRM in read-only support mode"
-                            onClick={() => {
-                              sessionStorage.setItem('nexus_support_mode_active', 'true');
-                              sessionStorage.setItem('nexus_support_company_name', t.name);
-                              switchPersona('company_admin', t.slug);
-                            }}
-                          >
-                            <ExternalLink size={12} /> View as Company
-                          </button>
-                          <button
-                            className="btn btn-ghost btn-xs action-btn-manage"
-                            onClick={() => onNavigate('admin-companies', { selectedTenantId: t.id })}
-                          >
-                            Manage
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                }))}
+                        <td className="platform-matrix-td-action">
+                          <div className="action-button-group">
+                            <button
+                              className="btn btn-secondary btn-xs action-btn-support"
+                              title="Drill in to inspect tenant CRM in read-only support mode"
+                              onClick={() => {
+                                sessionStorage.setItem('nexus_support_mode_active', 'true');
+                                sessionStorage.setItem('nexus_support_company_name', t.name);
+                                switchPersona('company_admin', t.slug);
+                              }}
+                            >
+                              <ExternalLink size={12} /> View as Company
+                            </button>
+                            <button
+                              className="btn btn-ghost btn-xs action-btn-manage"
+                              onClick={() => onNavigate('admin-companies', { selectedTenantId: t.id })}
+                            >
+                              Manage
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }))}
               </tbody>
             </table>
           </div>

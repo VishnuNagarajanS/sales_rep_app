@@ -125,7 +125,7 @@ export const PlatformSystemPage: React.FC = () => {
       }
     } catch (err: any) {
       console.error('Failed to load system data from API:', err);
-      setErrorMsg(err.message || 'Failed to connect to backend server or database.');
+      setErrorMsg(err.message || 'Failed to connect to server.');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -181,7 +181,7 @@ export const PlatformSystemPage: React.FC = () => {
       const updated = await superAdminService.updateGlobalConfigApi(configForm);
       setGlobalConfig(updated);
       setConfigForm(updated);
-      showSuccess('Global platform configuration saved and persisted to database.');
+      showSuccess('Global platform configuration saved and persisted.');
     } catch (err: any) {
       alert(err.message || 'Failed to update global configuration');
     } finally {
@@ -206,7 +206,7 @@ export const PlatformSystemPage: React.FC = () => {
       setIsAnnModalOpen(false);
       setAnnTitle('');
       setAnnMessage('');
-      showSuccess('Broadcast announcement published to database.');
+      showSuccess('Broadcast announcement published.');
     } catch (err: any) {
       alert(err.message || 'Failed to publish announcement');
     } finally {
@@ -235,7 +235,7 @@ export const PlatformSystemPage: React.FC = () => {
       try {
         await superAdminService.deleteAnnouncementApi(id);
         setAnnouncements(prev => prev.filter(a => a.id !== id));
-        showSuccess('Broadcast announcement deleted from database.');
+        showSuccess('Broadcast announcement deleted.');
       } catch (err: any) {
         alert(err.message || 'Failed to delete announcement');
       } finally {
@@ -273,13 +273,13 @@ export const PlatformSystemPage: React.FC = () => {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      showSuccess('Platform database backup snapshot exported successfully.');
+      showSuccess('Platform backup snapshot exported successfully.');
 
       // Refresh diagnostics so LastBackupAt reflects this backup immediately
       const freshDiag = await superAdminService.fetchSystemDiagnosticsFromApi();
       setDiagnostics(freshDiag);
     } catch (err: any) {
-      alert(err.message || 'Failed to export platform backup from database');
+      alert(err.message || 'Failed to export platform backup');
     } finally {
       setIsExporting(false);
     }
@@ -305,7 +305,7 @@ export const PlatformSystemPage: React.FC = () => {
           </div>
           <h1 className="page-main-title">System Health, Diagnostics & Global Config</h1>
           <p className="page-main-desc">
-            Live database diagnostics, runtime vitals telemetry, external dependency probes, and persistent global platform configurations.
+            Live diagnostics, runtime vitals telemetry, external dependency probes, and persistent global platform configurations.
           </p>
         </div>
 
@@ -550,7 +550,7 @@ export const PlatformSystemPage: React.FC = () => {
                   </div>
 
                   <div className="telemetry-item-box">
-                    <span className="telemetry-item-label">Last Database Backup</span>
+                    <span className="telemetry-item-label">Last Backup</span>
                     <span className="telemetry-item-value" style={{ fontSize: '13px' }}>
                       {diagnostics.lastBackupAt ? new Date(diagnostics.lastBackupAt).toLocaleDateString() : 'No Backup Stored'}
                     </span>
@@ -613,10 +613,10 @@ export const PlatformSystemPage: React.FC = () => {
                     check.status === 'Healthy'
                       ? 'healthy'
                       : check.status === 'Degraded'
-                      ? 'degraded'
-                      : check.status === 'Not Configured'
-                      ? 'not-configured'
-                      : 'unhealthy';
+                        ? 'degraded'
+                        : check.status === 'Not Configured'
+                          ? 'not-configured'
+                          : 'unhealthy';
 
                   return (
                     <div key={check.name} className="health-card">
@@ -673,7 +673,7 @@ export const PlatformSystemPage: React.FC = () => {
                   <Sliders size={18} color="#38bdf8" /> Live Global Platform Configuration
                 </h3>
                 <p className="announcements-desc">
-                  Edit platform policies, timeouts, storage quotas, and security boundaries. Changes persist directly into the database PlatformSettings table and take effect immediately.
+                  Edit platform policies, timeouts, storage quotas, and security boundaries. Changes persist directly into the PlatformSettings table and take effect immediately.
                 </p>
               </div>
 
@@ -909,7 +909,7 @@ export const PlatformSystemPage: React.FC = () => {
                   <div>
                     <h3 className="announcements-title">Fleet Broadcast Announcements</h3>
                     <p className="announcements-desc">
-                      Global notification banners stored in database and displayed persistently across tenant workspaces.
+                      Global notification banners stored and displayed persistently across tenant workspaces.
                     </p>
                   </div>
                   <button
@@ -936,7 +936,7 @@ export const PlatformSystemPage: React.FC = () => {
                       {announcements.length === 0 ? (
                         <tr>
                           <td colSpan={6} className="no-ann-cell">
-                            No active broadcast announcements found in database.
+                            No active broadcast announcements.
                           </td>
                         </tr>
                       ) : (
@@ -958,8 +958,8 @@ export const PlatformSystemPage: React.FC = () => {
                                 {ann.targetAudience === 'all'
                                   ? 'All Users & Reps'
                                   : ann.targetAudience === 'tenant_admins'
-                                  ? 'Company Admins Only'
-                                  : 'Frontline Reps'}
+                                    ? 'Company Admins Only'
+                                    : 'Frontline Reps'}
                               </span>
                             </td>
 

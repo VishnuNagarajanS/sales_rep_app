@@ -246,6 +246,17 @@ export const PlatformUsersPage: React.FC = () => {
     try {
       const nextStatus = u.status === 'Active' ? 'Disabled' : 'Active';
       await superAdminService.toggleUserStatusApi(u.id, nextStatus);
+      if (nextStatus === 'Disabled') {
+        const suspensionEvent = { userId: String(u.id), email: u.email, timestamp: Date.now() };
+        localStorage.setItem('nexus_account_suspended', JSON.stringify(suspensionEvent));
+        try {
+          if (typeof BroadcastChannel !== 'undefined') {
+            const bc = new BroadcastChannel('nexus_auth_channel');
+            bc.postMessage({ type: 'ACCOUNT_SUSPENDED', ...suspensionEvent });
+            bc.close();
+          }
+        } catch {}
+      }
       showFeedback(`User status for ${u.name} set to ${nextStatus}.`);
       await applyFilters();
     } catch (err: any) {

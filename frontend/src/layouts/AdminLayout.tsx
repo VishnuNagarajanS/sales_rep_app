@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Sidebar } from '../components/layout/Sidebar';
 import { TopBar } from '../components/layout/TopBar';
 import { superAdminService } from '../services/superAdminService';
-import { BroadcastAnnouncement } from '../types';
+import { BroadcastAnnouncement, SystemDiagnostics } from '../types';
 import { NetworkStatusBanner } from '../components/common/NetworkStatusBanner';
 import './AdminLayout.css';
 
@@ -19,14 +19,28 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
 }) => {
   const [announcements, setAnnouncements] = useState<BroadcastAnnouncement[]>([]);
   const [maintenance, setMaintenance] = useState(() => superAdminService.getMaintenanceMode());
+  const [diagnostics, setDiagnostics] = useState<SystemDiagnostics | null>(null);
 
   const loadBannerData = async () => {
-    setMaintenance(superAdminService.getMaintenanceMode());
+    try {
+      const liveMaint = await superAdminService.fetchMaintenanceModeFromApi();
+      setMaintenance(liveMaint);
+    } catch {
+      setMaintenance(superAdminService.getMaintenanceMode());
+    }
+
     try {
       const live = await superAdminService.fetchAnnouncementsFromApi();
       setAnnouncements(live);
     } catch {
       setAnnouncements(superAdminService.getAnnouncements());
+    }
+
+    try {
+      const liveDiag = await superAdminService.fetchSystemDiagnosticsFromApi();
+      setDiagnostics(liveDiag);
+    } catch {
+      setDiagnostics(null);
     }
   };
 
@@ -49,15 +63,21 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
         <TopBar onNavigate={onNavigate} onOpenQuickCreate={() => { }} />
 
         {/* Global Environment Banner */}
-        {/* <div className="admin-platform-banner">
-          <span>⚡ PLATFORM OPERATOR CONSOLE — SYSTEM-WIDE GOVERNANCE & MULTI-TENANT PROVISIONING</span>
+        <div className="admin-platform-banner">
+          <span>⚡</span>
           <div className="admin-status-cluster">
             {maintenance.enabled && (
               <span className="maintenance-active-tag">● MAINTENANCE LOCK ACTIVE</span>
             )}
-            <span className="admin-platform-status">API v2.4 • System Health: 99.98%</span>
+            {diagnostics && (
+              <span className="admin-platform-status">
+                System Health: {typeof diagnostics.systemUptimePercentage === 'number'
+                  ? `${diagnostics.systemUptimePercentage}%`
+                  : diagnostics.apiStatus}
+              </span>
+            )}
           </div>
-        </div> */}
+        </div>
 
         {/* Global Broadcast Announcement Banner (if active) */}
         {activeAnnouncement && (

@@ -310,7 +310,7 @@ export const PlatformCallConfigPage: React.FC = () => {
                 <tr>
                   <td colSpan={7} style={{ textAlign: 'center', padding: '32px', color: '#94a3b8' }}>
                     <Activity size={16} className="animate-spin" style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: '8px' }} />
-                    Loading virtual DIDs from database...
+                    Loading virtual DIDs...
                   </td>
                 </tr>
               ) : dids.length === 0 ? (
@@ -321,72 +321,72 @@ export const PlatformCallConfigPage: React.FC = () => {
                 </tr>
               ) : (
                 dids.map(d => (
-                <tr key={d.id} className="did-row">
-                  <td>
-                    <div className="did-phone-cell">
-                      <PhoneCall size={14} color="#38bdf8" />
-                      <code className="did-number-text">{d.phoneNumber}</code>
-                    </div>
-                  </td>
+                  <tr key={d.id} className="did-row">
+                    <td>
+                      <div className="did-phone-cell">
+                        <PhoneCall size={14} color="#38bdf8" />
+                        <code className="did-number-text">{d.phoneNumber}</code>
+                      </div>
+                    </td>
 
-                  <td>
-                    <div className="did-tenant-cell">
-                      <Building2 size={13} color="#94a3b8" />
-                      <span className="did-tenant-name">{d.tenantName}</span>
-                    </div>
-                  </td>
+                    <td>
+                      <div className="did-tenant-cell">
+                        <Building2 size={13} color="#94a3b8" />
+                        <span className="did-tenant-name">{d.tenantName}</span>
+                      </div>
+                    </td>
 
-                  <td>
-                    <div className="did-queue-cell">
-                      <span className="routing-strategy-tag">{d.routingStrategy}</span>
-                      <span className="queue-name-sub">{d.queueName}</span>
-                    </div>
-                  </td>
+                    <td>
+                      <div className="did-queue-cell">
+                        <span className="routing-strategy-tag">{d.routingStrategy}</span>
+                        <span className="queue-name-sub">{d.queueName}</span>
+                      </div>
+                    </td>
 
-                  <td>
-                    <span className="channels-pill">{d.channelsCount} SIP Trunks</span>
-                  </td>
+                    <td>
+                      <span className="channels-pill">{d.channelsCount} SIP Trunks</span>
+                    </td>
 
-                  <td>
-                    <div className="ai-features-cell">
-                      {d.enableAiWhisper && (
-                        <span className="ai-tag">
-                          <Sparkles size={11} /> Whisper AI
-                        </span>
-                      )}
-                      {d.enableRecording && <span className="rec-tag">● Rec</span>}
-                    </div>
-                  </td>
+                    <td>
+                      <div className="ai-features-cell">
+                        {d.enableAiWhisper && (
+                          <span className="ai-tag">
+                            <Sparkles size={11} /> Whisper AI
+                          </span>
+                        )}
+                        {d.enableRecording && <span className="rec-tag">● Rec</span>}
+                      </div>
+                    </td>
 
-                  <td>
-                    <span className={`did-status-pill ${d.status.toLowerCase()}`}>
-                      ● {d.status}
-                    </span>
-                  </td>
+                    <td>
+                      <span className={`did-status-pill ${d.status.toLowerCase()}`}>
+                        ● {d.status}
+                      </span>
+                    </td>
 
-                  <td style={{ textAlign: 'right' }}>
-                    <div className="did-actions-group">
-                      <button
-                        className="action-btn"
-                        title="Edit DID Configuration"
-                        onClick={() => handleOpenEditDid(d)}
-                      >
-                        <Edit2 size={13} />
-                      </button>
-                      <button
-                        className="action-btn text-danger"
-                        title="Release Number"
-                        disabled={isActionInProgress}
-                        onClick={() => handleDeleteDid(d)}
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
+                    <td style={{ textAlign: 'right' }}>
+                      <div className="did-actions-group">
+                        <button
+                          className="action-btn"
+                          title="Edit DID Configuration"
+                          onClick={() => handleOpenEditDid(d)}
+                        >
+                          <Edit2 size={13} />
+                        </button>
+                        <button
+                          className="action-btn text-danger"
+                          title="Release Number"
+                          disabled={isActionInProgress}
+                          onClick={() => handleDeleteDid(d)}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
           </table>
         </div>
       </div>

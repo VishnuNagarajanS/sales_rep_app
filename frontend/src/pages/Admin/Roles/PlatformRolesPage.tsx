@@ -470,9 +470,9 @@ export const PlatformRolesPage: React.FC = () => {
         .map(r => superAdminService.updateRoleApi(r.id, { permissions: r.permissions }));
       await Promise.all(updates);
       setHasUnsavedMatrixChanges(false);
-      showFeedback('Matrix permissions committed and synchronized successfully to database.');
+      showFeedback('Matrix permissions committed and synchronized successfully.');
     } catch (err: any) {
-      showFeedback(err?.message || 'Failed to persist matrix permissions to database.', 'error');
+      showFeedback(err?.message || 'Failed to persist matrix permissions.', 'error');
     } finally {
       setIsSavingMatrix(false);
     }
@@ -556,7 +556,7 @@ export const PlatformRolesPage: React.FC = () => {
             </button>
           )}
 
-          <button className="btn btn-secondary btn-icon-only" onClick={loadData} title="Refresh from database">
+          <button className="btn btn-secondary btn-icon-only" onClick={loadData} title="Refresh">
             <RefreshCw size={15} className={isLoading ? 'animate-spin' : ''} />
           </button>
         </div>
@@ -575,7 +575,7 @@ export const PlatformRolesPage: React.FC = () => {
         <div className="card roles-stat-card">
           <div className="stat-label">Total Platform Roles</div>
           <div className="stat-value text-blue">{stats.total}</div>
-          <div className="stat-footnote">Active in database</div>
+          <div className="stat-footnote">Active Roles</div>
         </div>
 
         <div className="card roles-stat-card">
@@ -669,7 +669,7 @@ export const PlatformRolesPage: React.FC = () => {
                   {isLoading && roleList.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="table-empty-td">
-                        <RefreshCw size={18} className="animate-spin" /> Loading roles from database...
+                        <RefreshCw size={18} className="animate-spin" /> Loading roles...
                       </td>
                     </tr>
                   ) : filteredRoles.length === 0 ? (

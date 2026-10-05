@@ -495,7 +495,7 @@ public class PlatformSystemController : ControllerBase
         double telephonyDropRate = totalCalls > 0 ? Math.Round((double)failedCalls / totalCalls * 100, 2) : 0.0;
 
         // 7. Telephony Carrier Trunk Status
-        var carrier = await _context.CarrierSettings.AsNoTracking().FirstOrDefaultAsync(ct);
+        var carrier = await _context.CarrierSettings.AsNoTracking().OrderBy(c => c.Id).FirstOrDefaultAsync(ct);
 
         var lastAudit = await _context.AuditLogs
             .OrderByDescending(a => a.Timestamp)
@@ -523,7 +523,7 @@ public class PlatformSystemController : ControllerBase
         {
             activeDbConnections = await _context.Database
                 .SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM pg_stat_activity WHERE datname = current_database() AND state = 'active'")
-                .FirstOrDefaultAsync(ct);
+                .SingleOrDefaultAsync(ct);
             if (activeDbConnections <= 0) activeDbConnections = 1;
         }
         catch
@@ -609,7 +609,7 @@ public class PlatformSystemController : ControllerBase
                     }
                     activeConnections = await _context.Database
                         .SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM pg_stat_activity WHERE datname = current_database() AND state = 'active'")
-                        .FirstOrDefaultAsync(ct);
+                        .SingleOrDefaultAsync(ct);
                     if (activeConnections <= 0) activeConnections = 1;
                 }
                 catch { }
@@ -731,7 +731,7 @@ public class PlatformSystemController : ControllerBase
         var roles = await _context.Roles.AsNoTracking().ToListAsync(ct);
         var packages = await _context.SubscriptionPackages.AsNoTracking().ToListAsync(ct);
         var dids = await _context.TenantDidMappings.AsNoTracking().ToListAsync(ct);
-        var carrier = await _context.CarrierSettings.AsNoTracking().FirstOrDefaultAsync(ct);
+        var carrier = await _context.CarrierSettings.AsNoTracking().OrderBy(c => c.Id).FirstOrDefaultAsync(ct);
         var announcements = await _context.BroadcastAnnouncements.AsNoTracking().ToListAsync(ct);
         var settings = await _context.PlatformSettings.AsNoTracking().ToListAsync(ct);
 
@@ -912,7 +912,7 @@ public class PlatformSystemController : ControllerBase
                     }
                     activeConn = await _context.Database
                         .SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM pg_stat_activity WHERE datname = current_database() AND state = 'active'")
-                        .FirstOrDefaultAsync(ct);
+                        .SingleOrDefaultAsync(ct);
                     if (activeConn <= 0) activeConn = 1;
                 }
                 catch { }
@@ -1067,7 +1067,7 @@ public class PlatformSystemController : ControllerBase
         });
 
         // 6. Telephony Carrier Trunk
-        var carrier = await _context.CarrierSettings.AsNoTracking().FirstOrDefaultAsync(ct);
+        var carrier = await _context.CarrierSettings.AsNoTracking().OrderBy(c => c.Id).FirstOrDefaultAsync(ct);
         checks.Add(new SystemHealthCheckItemDto
         {
             Name = "Telephony Gateway & SIP Carrier",
@@ -1137,7 +1137,7 @@ public class PlatformSystemController : ControllerBase
         var setting = await _context.PlatformSettings.AsNoTracking()
             .FirstOrDefaultAsync(s => s.Key == "global_platform_config", ct);
 
-        var carrier = await _context.CarrierSettings.AsNoTracking().FirstOrDefaultAsync(ct);
+        var carrier = await _context.CarrierSettings.AsNoTracking().OrderBy(c => c.Id).FirstOrDefaultAsync(ct);
 
         GlobalConfigDto config;
         if (setting != null && !string.IsNullOrWhiteSpace(setting.Value))
@@ -1231,7 +1231,7 @@ public class PlatformSystemController : ControllerBase
         if (req.RecordingRetentionDays.HasValue && req.RecordingRetentionDays.Value > 0)
         {
             current.RecordingRetentionDays = req.RecordingRetentionDays.Value;
-            var carrier = await _context.CarrierSettings.FirstOrDefaultAsync(ct);
+            var carrier = await _context.CarrierSettings.OrderBy(c => c.Id).FirstOrDefaultAsync(ct);
             if (carrier != null)
             {
                 carrier.RecordingRetentionDays = req.RecordingRetentionDays.Value;
