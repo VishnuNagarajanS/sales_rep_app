@@ -111,13 +111,40 @@ class StorageService {
         } catch {}
       }
     }
+    // Sanitize: strictly map any legacy sales_manager to sales_executive
+    users = (users || []).map(u => {
+      if ((u.role?.code as string) === 'sales_manager' || (u.role?.name && u.role.name.toLowerCase().includes('manager') && !u.role.name.toLowerCase().includes('irm') && !u.role.name.toLowerCase().includes('investor'))) {
+        return {
+          ...u,
+          role: {
+            ...u.role,
+            code: 'sales_executive' as const,
+            name: 'Sales Executive'
+          }
+        };
+      }
+      return u;
+    });
     return companySlug ? users.filter(u => u.companySlug === companySlug || (u as any).companyId === companySlug) : users;
   }
 
   setUsers(users: User[]): void {
-    this.set('users', users);
+    const sanitized = (users || []).map(u => {
+      if ((u.role?.code as string) === 'sales_manager' || (u.role?.name && u.role.name.toLowerCase().includes('manager') && !u.role.name.toLowerCase().includes('irm') && !u.role.name.toLowerCase().includes('investor'))) {
+        return {
+          ...u,
+          role: {
+            ...u.role,
+            code: 'sales_executive' as const,
+            name: 'Sales Executive'
+          }
+        };
+      }
+      return u;
+    });
+    this.set('users', sanitized);
     try {
-      localStorage.setItem('nexus_dev_users', JSON.stringify(users));
+      localStorage.setItem('nexus_dev_users', JSON.stringify(sanitized));
     } catch {}
     window.dispatchEvent(new Event('nexus_storage_updated'));
   }

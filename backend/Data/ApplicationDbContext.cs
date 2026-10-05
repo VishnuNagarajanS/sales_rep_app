@@ -63,12 +63,11 @@ public class ApplicationDbContext : DbContext
 
     private static void SeedData(ModelBuilder modelBuilder)
     {
-        // 1. Roles (Integer IDs 1, 2, 3, 4, 5)
+        // 1. Roles (Integer IDs 1, 2, 3, 4 - Strictly 4 Roles)
         var superAdminRoleId = 1;
         var companyAdminRoleId = 2;
         var salesExecutiveRoleId = 3;
         var irmRoleId = 4;
-        var salesManagerRoleId = 5;
 
         modelBuilder.Entity<Role>().HasData(
             new Role
@@ -109,24 +108,6 @@ public class ApplicationDbContext : DbContext
                     "reports.view", "reports.export",
                     "users.view", "users.manage", "roles.view", "settings.view", "settings.update", "audit.view",
                     "kyc.verify"
-                },
-                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-            },
-            new Role
-            {
-                Id = salesManagerRoleId,
-                Name = "Sales Manager",
-                Code = "sales_manager",
-                Permissions = new List<string>
-                {
-                    "leads.view", "leads.create", "leads.update", "leads.assign", "leads.export", "leads.convert",
-                    "customers.view", "customers.create", "customers.update",
-                    "deals.view", "deals.create", "deals.update",
-                    "calls.make", "calls.receive", "calls.view", "calls.recordings.play",
-                    "followups.view", "followups.create", "followups.update",
-                    "properties.view", "properties.update", "site_visits.view", "site_visits.create", "bookings.view", "bookings.create",
-                    "investors.view", "investors.create", "consultations.view", "consultations.create", "opportunities.view", "opportunities.create",
-                    "reports.view", "reports.export", "users.view"
                 },
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },

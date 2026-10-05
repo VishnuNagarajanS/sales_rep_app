@@ -26,16 +26,25 @@ const mapDtoToUser = (dto: AdminUserDto): User => {
   if (dto.status === 1) statusStr = 'Invited';
   if (dto.status === 2) statusStr = 'Disabled';
 
-  // Use roleCode directly from backend (authoritative), fall back to name-based detection
-  let roleCode = dto.roleCode || 'sales_executive';
-  if (!dto.roleCode) {
-    if (dto.roleName?.toLowerCase().includes('admin')) {
-      roleCode = 'company_admin';
-    } else if (dto.roleName?.toLowerCase().includes('manager')) {
-      roleCode = 'sales_manager';
-    } else if (dto.roleName?.toLowerCase().includes('irm') || dto.roleName?.toLowerCase().includes('institutional')) {
-      roleCode = 'irm';
-    }
+  // Strictly map to the 4 system roles: super_admin, company_admin, irm, sales_executive
+  let roleCode: 'super_admin' | 'company_admin' | 'irm' | 'sales_executive' = 'sales_executive';
+  let roleName = dto.roleName || 'Sales Executive';
+  const rawCode = (dto.roleCode || '').toLowerCase();
+  const rawName = (dto.roleName || '').toLowerCase();
+
+  if (rawCode === 'super_admin' || rawName.includes('super admin')) {
+    roleCode = 'super_admin';
+    roleName = 'Super Admin';
+  } else if (rawCode === 'company_admin' || rawName.includes('admin')) {
+    roleCode = 'company_admin';
+    roleName = 'Company Admin';
+  } else if (rawCode === 'irm' || rawName.includes('irm') || rawName.includes('institutional')) {
+    roleCode = 'irm';
+    roleName = 'IRM';
+  } else {
+    // Anyone else (including any legacy sales_manager) is strictly Sales Executive
+    roleCode = 'sales_executive';
+    roleName = 'Sales Executive';
   }
 
   return {
@@ -43,9 +52,11 @@ const mapDtoToUser = (dto: AdminUserDto): User => {
     name: dto.name,
     email: dto.email,
     phone: dto.phone || '',
-    role: { id: (dto.roleId || 0).toString(), permissions: [],
-      code: roleCode as any,
-      name: dto.roleName || 'Unknown Role'
+    role: {
+      id: (dto.roleId || (roleCode === 'company_admin' ? 2 : roleCode === 'irm' ? 4 : roleCode === 'super_admin' ? 1 : 3)).toString(),
+      permissions: [],
+      code: roleCode,
+      name: roleName
     },
     status: statusStr,
     lastLogin: dto.lastLoginAt,
@@ -72,11 +83,11 @@ export const adminUserService = {
     return mapDtoToUser(res.data);
   },
 
-    createUser: async (userData: any): Promise<User> => {
+  createUser: async (userData: any): Promise<User> => {
     let roleId = 3;
-    if (userData.role.code === 'company_admin') roleId = 2;
-    else if (userData.role.code === 'sales_manager') roleId = 5;
-    else if (userData.role.code === 'irm') roleId = 4;
+    if (userData.role?.code === 'company_admin') roleId = 2;
+    else if (userData.role?.code === 'irm') roleId = 4;
+    else roleId = 3;
 
     const payload = {
       name: userData.name,
@@ -93,9 +104,9 @@ export const adminUserService = {
 
   updateUser: async (id: string, userData: any): Promise<User> => {
     let roleId = 3;
-    if (userData.role.code === 'company_admin') roleId = 2;
-    else if (userData.role.code === 'sales_manager') roleId = 5;
-    else if (userData.role.code === 'irm') roleId = 4;
+    if (userData.role?.code === 'company_admin') roleId = 2;
+    else if (userData.role?.code === 'irm') roleId = 4;
+    else roleId = 3;
 
     const payload = {
       name: userData.name,
@@ -111,8 +122,8 @@ export const adminUserService = {
   transferRole: async (id: string, newUserId: number, newRoleCode: string): Promise<User> => {
     let roleId = 3;
     if (newRoleCode === 'company_admin') roleId = 2;
-    else if (newRoleCode === 'sales_manager') roleId = 5;
     else if (newRoleCode === 'irm') roleId = 4;
+    else roleId = 3;
 
     const res = await apiClient.post<ApiResponse<AdminUserDto>>(`/AdminUsers/${id}/transfer-role`, {
       newUserId,

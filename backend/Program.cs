@@ -202,6 +202,38 @@ using (var scope = app.Services.CreateScope())
             Console.WriteLine($"[Tenant Feature Patch Warning] {ex.Message}");
         }
 
+        // Patch: remove sales_manager role and migrate any users with sales_manager to sales_executive
+        try
+        {
+            var salesManagerRole = db.Roles.FirstOrDefault(r => r.Code == "sales_manager" || r.Id == 5);
+            var salesExecutiveRole = db.Roles.FirstOrDefault(r => r.Code == "sales_executive" || r.Id == 3);
+
+            if (salesExecutiveRole != null)
+            {
+                var managerUsers = db.Users.Where(u => u.RoleId == 5 || (salesManagerRole != null && u.RoleId == salesManagerRole.Id)).ToList();
+                if (managerUsers.Any())
+                {
+                    foreach (var u in managerUsers)
+                    {
+                        u.RoleId = salesExecutiveRole.Id;
+                        Console.WriteLine($"[Role Migration] Migrated user '{u.Email}' (ID: {u.Id}) from sales_manager to sales_executive.");
+                    }
+                    db.SaveChanges();
+                }
+
+                if (salesManagerRole != null)
+                {
+                    db.Roles.Remove(salesManagerRole);
+                    db.SaveChanges();
+                    Console.WriteLine("[Role Migration] Removed obsolete 'sales_manager' role from database.");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Role Migration Warning] {ex.Message}");
+        }
+
         // Patch: ensure roles have Permissions populated
         try
         {
