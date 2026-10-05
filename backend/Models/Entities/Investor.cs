@@ -27,6 +27,11 @@ public class Investor
     public User? AssignedIrm { get; set; }
     public string AssignedIrmName { get; set; } = string.Empty;
 
+    public int? HandoverId { get; set; }
+    public WorkHandover? Handover { get; set; }
+    public int? OriginalOwnerId { get; set; }
+    public User? OriginalOwner { get; set; }
+
     public string Notes { get; set; } = string.Empty;
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

@@ -13,7 +13,10 @@ public class ConsultationRepository : IConsultationRepository
 
     public async Task<List<Consultation>> GetAllAsync(int companyId, int? consultantId, string? status, DateTime? from, DateTime? to, CancellationToken ct = default)
     {
-        var query = _db.Consultations.Where(c => c.CompanyId == companyId);
+        var query = _db.Consultations
+            .Include(c => c.Handover)
+            .Include(c => c.OriginalOwner)
+            .Where(c => c.CompanyId == companyId);
         if (consultantId.HasValue) query = query.Where(c => c.ConsultantId == consultantId);
         if (!string.IsNullOrEmpty(status)) query = query.Where(c => c.Status.ToString() == status);
         if (from.HasValue) query = query.Where(c => c.ScheduledAt >= from);
@@ -22,7 +25,10 @@ public class ConsultationRepository : IConsultationRepository
     }
 
     public async Task<Consultation?> GetByIdAsync(int id, int companyId, CancellationToken ct = default)
-        => await _db.Consultations.FirstOrDefaultAsync(c => c.Id == id && c.CompanyId == companyId, ct);
+        => await _db.Consultations
+            .Include(c => c.Handover)
+            .Include(c => c.OriginalOwner)
+            .FirstOrDefaultAsync(c => c.Id == id && c.CompanyId == companyId, ct);
 
     public async Task<Consultation> CreateAsync(Consultation consultation, CancellationToken ct = default)
     {
@@ -47,6 +53,8 @@ public class ConsultationRepository : IConsultationRepository
 
     public async Task<List<Consultation>> GetByInvestorIdAsync(int investorId, int companyId, CancellationToken ct = default)
         => await _db.Consultations
+            .Include(c => c.Handover)
+            .Include(c => c.OriginalOwner)
             .Where(c => c.InvestorId == investorId && c.CompanyId == companyId)
             .OrderByDescending(c => c.ScheduledAt).ToListAsync(ct);
 }

@@ -145,6 +145,10 @@ export interface Lead {
   slaStatus?: 'on_track' | 'at_risk' | 'breached';
   createdBy?: string;
   updatedBy?: string;
+  handoverId?: number;
+  handedOverFromName?: string;
+  handoverPlannedEnd?: string;
+  originalOwnerId?: number;
 }
 
 export interface Customer {
@@ -175,6 +179,10 @@ export interface Customer {
   assignedIrmId?: string;
   assignedIrmName?: string;
   assignedIrmAt?: string;
+  handoverId?: number;
+  handedOverFromName?: string;
+  handoverPlannedEnd?: string;
+  originalOwnerId?: number;
 }
 
 export interface IrmProfile {
@@ -219,6 +227,10 @@ export interface Deal {
   verifiedAt?: string;
   remarks?: string;
   flaggedSections?: string[];
+  handoverId?: number;
+  handedOverFromName?: string;
+  handoverPlannedEnd?: string;
+  originalOwnerId?: number;
 }
 
 export interface DealActivity {
@@ -307,6 +319,10 @@ export interface Followup {
   completedAt?: string;
   relatedCallId?: string;
   statusReason?: string;
+  handoverId?: number;
+  handedOverFromName?: string;
+  handoverPlannedEnd?: string;
+  originalOwnerId?: number;
 }
 
 export interface PropertyProject {
@@ -390,6 +406,10 @@ export interface Investor {
   committedAUM?: string;
   investmentMandate?: string;
   riskTolerance?: 'Conservative' | 'Moderate' | 'Aggressive';
+  handoverId?: number;
+  handedOverFromName?: string;
+  handoverPlannedEnd?: string;
+  originalOwnerId?: number;
 }
 
 export interface Consultation {
@@ -405,6 +425,10 @@ export interface Consultation {
   agenda: string;
   outcomeNotes?: string;
   referredByAgentName?: string;
+  handoverId?: number;
+  handedOverFromName?: string;
+  handoverPlannedEnd?: string;
+  originalOwnerId?: number;
 }
 
 export interface InvestmentOpportunity {
@@ -416,10 +440,13 @@ export interface InvestmentOpportunity {
   stage: 'Enquiry' | 'Contacted' | 'Consultation' | 'Qualified' | 'Opportunity' | 'Committed' | 'Closed Won' | 'Closed Lost';
   targetAmount: number;
   committedAmount: number;
-  assignedAgentId: string;
   assignedAgentName: string;
   expectedCloseDate: string;
   notes: string;
+  handoverId?: number;
+  handedOverFromName?: string;
+  handoverPlannedEnd?: string;
+  originalOwnerId?: number;
 }
 
 export interface AuditLog {

@@ -18,6 +18,8 @@ public class KycRepository : IKycRepository
     {
         var query = _db.InvestorKycs
             .Include(k => k.Investor)
+            .Include(k => k.Handover)
+            .Include(k => k.OriginalOwner)
             .Where(k => k.CompanyId == companyId);
 
         if (irmId.HasValue && irmId.Value > 0)
@@ -32,10 +34,16 @@ public class KycRepository : IKycRepository
     }
 
     public async Task<InvestorKyc?> GetByIdAsync(int id, int companyId, CancellationToken ct = default)
-        => await _db.InvestorKycs.FirstOrDefaultAsync(k => k.Id == id && k.CompanyId == companyId, ct);
+        => await _db.InvestorKycs
+            .Include(k => k.Handover)
+            .Include(k => k.OriginalOwner)
+            .FirstOrDefaultAsync(k => k.Id == id && k.CompanyId == companyId, ct);
 
     public async Task<InvestorKyc?> GetByInvestorIdAsync(int investorId, int companyId, CancellationToken ct = default)
-        => await _db.InvestorKycs.FirstOrDefaultAsync(k => k.InvestorId == investorId && k.CompanyId == companyId, ct);
+        => await _db.InvestorKycs
+            .Include(k => k.Handover)
+            .Include(k => k.OriginalOwner)
+            .FirstOrDefaultAsync(k => k.InvestorId == investorId && k.CompanyId == companyId, ct);
 
     public async Task<InvestorKyc?> GetByTokenAsync(string token, CancellationToken ct = default)
     {

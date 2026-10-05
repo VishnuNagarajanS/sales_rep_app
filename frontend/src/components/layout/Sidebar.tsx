@@ -202,6 +202,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
       header: 'Administration',
       items: [
         { id: 'company-users', label: 'Users', icon: <Users size={18} />, feature: FEATURES.USERS, permission: PERMISSIONS.USERS_VIEW },
+        ...(isGhlAdmin ? [
+          { id: 'work-handover', label: 'Work Handover', icon: <UserCheck size={18} />, feature: FEATURES.USERS, permission: PERMISSIONS.USERS_VIEW }
+        ] : []),
         { id: 'company-settings', label: 'Company Settings', icon: <Settings size={18} />, feature: FEATURES.COMPANY_SETTINGS, permission: PERMISSIONS.SETTINGS_VIEW },
         { id: 'company-audit', label: 'Audit Logs', icon: <FileCheck size={18} />, feature: FEATURES.AUDIT_LOGS, permission: PERMISSIONS.AUDIT_VIEW },
       ],

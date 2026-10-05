@@ -23,6 +23,10 @@ public class FollowupDto
     public DateTime CreatedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public DateTime? RescheduledTo { get; set; }
+    public int? HandoverId { get; set; }
+    public string? HandedOverFromName { get; set; }
+    public DateTime? HandoverPlannedEnd { get; set; }
+    public int? OriginalOwnerId { get; set; }
 }
 
 public class CreateFollowupDto
@@ -69,6 +73,11 @@ public class IrmPipelineCardDto
     public string? PreferredAssetClass { get; set; }
     public string? ActivityLogsJson { get; set; }
     public DateTime CreatedAt { get; set; }
+
+    public int? HandoverId { get; set; }
+    public string? HandedOverFromName { get; set; }
+    public DateTime? HandoverPlannedEnd { get; set; }
+    public int? OriginalOwnerId { get; set; }
 }
 
 public class IrmPipelineBoardDto

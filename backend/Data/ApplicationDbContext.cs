@@ -58,6 +58,8 @@ public class ApplicationDbContext : DbContext
     public DbSet<IrmPipelineCard> IrmPipelineCards => Set<IrmPipelineCard>();
     public DbSet<KycOtpVerification> KycOtpVerifications => Set<KycOtpVerification>();
     public DbSet<IrmCoverageAssignment> IrmCoverageAssignments => Set<IrmCoverageAssignment>();
+    public DbSet<WorkHandover> WorkHandovers => Set<WorkHandover>();
+    public DbSet<WorkHandoverItem> WorkHandoverItems => Set<WorkHandoverItem>();
 
     public override int SaveChanges()
     {
@@ -98,6 +100,58 @@ public class ApplicationDbContext : DbContext
 
         // Apply entity configurations
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
+
+        // Handover relationships on entities
+        modelBuilder.Entity<Lead>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<Customer>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<Followup>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<GhlDeal>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<GhlInvestor>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<GhlInvestmentOpportunity>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<Consultation>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<Investor>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<InvestorKyc>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<IrmPipelineCard>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
 
         // Seed initial roles, tenants, and demo users
         SeedData(modelBuilder);

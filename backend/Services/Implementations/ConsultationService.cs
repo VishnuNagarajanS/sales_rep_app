@@ -41,7 +41,11 @@ public class ConsultationService : IConsultationService
         var consultantId = _currentUser.UserId;
         var companyId = _currentUser.CompanyId;
 
-        var query = _context.Consultations.AsNoTracking().Include(c => c.Consultant).AsQueryable();
+        var query = _context.Consultations.AsNoTracking()
+            .Include(c => c.Consultant)
+            .Include(c => c.OriginalOwner)
+            .Include(c => c.Handover)
+            .AsQueryable();
 
         if (role == "super_admin")
         {
@@ -228,10 +232,26 @@ public class ConsultationService : IConsultationService
             Status = ConsultationStatus.Scheduled,
             Agenda = dto.Agenda,
             ReferredByAgentName = dto.ReferredByAgentName,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            HandoverId = investor?.HandoverId,
+            OriginalOwnerId = investor?.OriginalOwnerId
         };
 
         var created = await _consultationRepo.CreateAsync(consultation, ct);
+
+        if (investor?.HandoverId != null)
+        {
+            _context.WorkHandoverItems.Add(new WorkHandoverItem
+            {
+                HandoverId = investor.HandoverId.Value,
+                EntityType = "Consultation",
+                EntityId = created.Id,
+                Origin = "created_during_coverage",
+                CreatedAt = DateTime.UtcNow
+            });
+            await _context.SaveChangesAsync(ct);
+        }
+
         return ApiResponse<ConsultationDto>.SuccessResponse(MapToIrmDto(created), "Consultation scheduled successfully");
     }
 
@@ -309,7 +329,11 @@ public class ConsultationService : IConsultationService
             Agenda = c.Agenda,
             OutcomeNotes = c.OutcomeNotes ?? string.Empty,
             CreatedAt = c.CreatedAt,
-            UpdatedAt = c.UpdatedAt
+            UpdatedAt = c.UpdatedAt,
+            HandoverId = c.HandoverId,
+            HandedOverFromName = c.OriginalOwner?.Name,
+            HandoverPlannedEnd = c.Handover?.PlannedEndAt,
+            OriginalOwnerId = c.OriginalOwnerId
         };
     }
 
@@ -328,6 +352,10 @@ public class ConsultationService : IConsultationService
         OutcomeNotes = c.OutcomeNotes,
         ReferredByAgentName = c.ReferredByAgentName,
         CreatedAt = c.CreatedAt,
-        UpdatedAt = c.UpdatedAt
+        UpdatedAt = c.UpdatedAt,
+        HandoverId = c.HandoverId,
+        HandedOverFromName = c.OriginalOwner?.Name,
+        HandoverPlannedEnd = c.Handover?.PlannedEndAt,
+        OriginalOwnerId = c.OriginalOwnerId
     };
 }

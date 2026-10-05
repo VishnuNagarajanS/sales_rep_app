@@ -138,9 +138,23 @@ public class KycService : IKycService
                 KycLinkSent = true,
                 KycLinkSentAt = DateTime.UtcNow,
                 KycLinkExpiresAt = expiresAt,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                HandoverId = investor?.HandoverId,
+                OriginalOwnerId = investor?.OriginalOwnerId
             };
             await _kycRepo.CreateAsync(existing, ct);
+
+            if (investor?.HandoverId != null)
+            {
+                _db.WorkHandoverItems.Add(new WorkHandoverItem
+                {
+                    HandoverId = investor.HandoverId.Value,
+                    EntityType = "InvestorKyc",
+                    EntityId = existing.Id,
+                    Origin = "created_during_coverage"
+                });
+                await _db.SaveChangesAsync(ct);
+            }
         }
         else
         {
@@ -435,6 +449,18 @@ public class KycService : IKycService
 
         if (kyc == null)
         {
+            int? inheritedHandoverId = null;
+            int? inheritedOriginalOwnerId = null;
+            if (dto.InvestorId > 0)
+            {
+                var inv = await _investorRepo.GetByIdAsync(dto.InvestorId, companyId, ct);
+                if (inv != null)
+                {
+                    inheritedHandoverId = inv.HandoverId;
+                    inheritedOriginalOwnerId = inv.OriginalOwnerId;
+                }
+            }
+
             kyc = new InvestorKyc
             {
                 InvestorId = dto.InvestorId,
@@ -444,7 +470,9 @@ public class KycService : IKycService
                 Phone = dto.Phone ?? string.Empty,
                 Email = dto.Email ?? string.Empty,
                 Status = dto.IsFinalSubmit ? KycStatus.PendingReview : KycStatus.Draft,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                HandoverId = inheritedHandoverId,
+                OriginalOwnerId = inheritedOriginalOwnerId
             };
         }
         else
@@ -542,10 +570,23 @@ public class KycService : IKycService
             kyc.KycLinkExpiresAt = null;
         }
 
-        if (kyc.Id == 0)
+        bool isNew = kyc.Id == 0;
+        if (isNew)
             await _kycRepo.CreateAsync(kyc, ct);
         else
             await _kycRepo.UpdateAsync(kyc, ct);
+
+        if (isNew && kyc.HandoverId.HasValue)
+        {
+            _db.WorkHandoverItems.Add(new WorkHandoverItem
+            {
+                HandoverId = kyc.HandoverId.Value,
+                EntityType = "InvestorKyc",
+                EntityId = kyc.Id,
+                Origin = "created_during_coverage"
+            });
+            await _db.SaveChangesAsync(ct);
+        }
 
         // Record immutable backend audit log retaining full consent and submission details
         var audit = new AuditLog
@@ -613,7 +654,11 @@ public class KycService : IKycService
         IsAssisted = k.IsAssisted,
         CustomerConsentObtained = k.CustomerConsentObtained,
         CreatedAt = k.CreatedAt,
-        UpdatedAt = k.UpdatedAt
+        UpdatedAt = k.UpdatedAt,
+        HandoverId = k.HandoverId,
+        HandedOverFromName = k.OriginalOwner?.Name,
+        HandoverPlannedEnd = k.Handover?.PlannedEndAt,
+        OriginalOwnerId = k.OriginalOwnerId
     };
 
     private static KycDto MapToDto(InvestorKyc k) => new()
@@ -668,6 +713,10 @@ public class KycService : IKycService
         CustomerConsentObtained = k.CustomerConsentObtained,
         CustomerConsentTimestamp = k.CustomerConsentTimestamp,
         CreatedAt = k.CreatedAt,
-        UpdatedAt = k.UpdatedAt
+        UpdatedAt = k.UpdatedAt,
+        HandoverId = k.HandoverId,
+        HandedOverFromName = k.OriginalOwner?.Name,
+        HandoverPlannedEnd = k.Handover?.PlannedEndAt,
+        OriginalOwnerId = k.OriginalOwnerId
     };
 }

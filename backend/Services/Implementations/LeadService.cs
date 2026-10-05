@@ -56,6 +56,8 @@ public class LeadService : ILeadService
         var query = _context.Leads.AsNoTracking()
             .Include(l => l.AssignedAgent)
                 .ThenInclude(u => u!.Role)
+            .Include(l => l.OriginalOwner)
+            .Include(l => l.Handover)
             .AsQueryable();
 
         if (role == "super_admin")
@@ -732,8 +734,10 @@ public class LeadService : ILeadService
                  (leadNormEmail != null && c.NormalizedEmail == leadNormEmail)), ct);
         }
 
+        bool isNewCustomer = false;
         if (customer == null)
         {
+            isNewCustomer = true;
             customer = new Customer
             {
                 CompanyId = companyId,
@@ -750,7 +754,9 @@ public class LeadService : ILeadService
                 Notes = dto.Notes ?? lead.Notes,
                 CustomFieldsJson = lead.CustomFieldsJson,
                 LastContactedAt = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                HandoverId = lead.HandoverId,
+                OriginalOwnerId = lead.OriginalOwnerId
             };
             _context.Customers.Add(customer);
         }
@@ -767,6 +773,18 @@ public class LeadService : ILeadService
         lead.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(ct);
+
+        if (isNewCustomer && customer.HandoverId.HasValue)
+        {
+            _context.WorkHandoverItems.Add(new WorkHandoverItem
+            {
+                HandoverId = customer.HandoverId.Value,
+                EntityType = "Customer",
+                EntityId = customer.Id,
+                Origin = "created_during_coverage"
+            });
+            await _context.SaveChangesAsync(ct);
+        }
 
         return ApiResponse<object>.SuccessResult(new
         {
@@ -879,7 +897,11 @@ public class LeadService : ILeadService
             CustomFields = DeserializeCustomFields(lead.CustomFieldsJson),
             NextFollowupDate = lead.NextFollowupDate,
             CreatedAt = lead.CreatedAt,
-            UpdatedAt = lead.UpdatedAt
+            UpdatedAt = lead.UpdatedAt,
+            HandoverId = lead.HandoverId,
+            HandedOverFromName = lead.OriginalOwner?.Name,
+            HandoverPlannedEnd = lead.Handover?.PlannedEndAt,
+            OriginalOwnerId = lead.OriginalOwnerId
         };
     }
 

@@ -74,6 +74,10 @@ public static class ServiceExtensions
         services.AddScoped<IIrmPipelineService, IrmPipelineService>();
         services.AddScoped<IKycService, KycService>();
         services.AddScoped<IOpportunityService, OpportunityService>();
+        services.AddScoped<IWorkHandoverService, WorkHandoverService>();
+
+        // Background job: notify admins when a handover's PlannedEndAt has passed (never auto-reverts)
+        services.AddHostedService<backend.Services.BackgroundJobs.HandoverDueDateCheckerService>();
 
         services.AddDev1Services();
 

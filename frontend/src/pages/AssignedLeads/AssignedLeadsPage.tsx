@@ -27,7 +27,11 @@ import { Modal } from '../../components/common/Modal';
 import { getAuthHeaders } from '../../utils/authHeaders';
 import './AssignedLeadsPage.css';
 
-export const AssignedLeadsPage: React.FC = () => {
+interface AssignedLeadsPageProps {
+  onNavigate?: (route: string) => void;
+}
+
+export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate }) => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
 
@@ -578,11 +582,15 @@ export const AssignedLeadsPage: React.FC = () => {
               className="btn btn-secondary"
               style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}
               onClick={() => {
-                setIsCoverageModalOpen(true);
-                loadActiveCoverages();
+                if (onNavigate) {
+                  onNavigate('work-handover');
+                } else {
+                  window.history.pushState({}, '', '/handover');
+                  window.dispatchEvent(new PopStateEvent('popstate'));
+                }
               }}
             >
-              <Users size={15} /> IRM Coverage &amp; Reassignment
+              <Users size={15} /> Work Handover (Coverage)
             </button>
           </div>
         )}

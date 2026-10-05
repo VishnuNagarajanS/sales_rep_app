@@ -59,6 +59,8 @@ public class GhlDealsController : ControllerBase
         var query = _db.GhlDeals.AsNoTracking()
             .Include(d => d.AssignedAgent)
             .Include(d => d.Customer)   // needed to resolve Phone / Email / Location
+            .Include(d => d.OriginalOwner)
+            .Include(d => d.Handover)
             .AsQueryable();
 
         var companyId = _currentUser.CompanyId;
@@ -194,6 +196,28 @@ public class GhlDealsController : ControllerBase
             return Ok(ApiResponse<GhlDealResponseDto>.SuccessResult(existingDto, "Deal updated."));
         }
 
+        int? inheritedHandoverId = null;
+        int? inheritedOriginalOwnerId = null;
+
+        if (dto.CustomerId.HasValue && dto.CustomerId.Value > 0)
+        {
+            var parentCust = await _db.Customers.AsNoTracking().FirstOrDefaultAsync(c => c.Id == dto.CustomerId.Value, ct);
+            if (parentCust?.HandoverId != null)
+            {
+                inheritedHandoverId = parentCust.HandoverId;
+                inheritedOriginalOwnerId = parentCust.OriginalOwnerId;
+            }
+            else
+            {
+                var parentLead = await _db.Leads.AsNoTracking().FirstOrDefaultAsync(l => l.Id == dto.CustomerId.Value, ct);
+                if (parentLead?.HandoverId != null)
+                {
+                    inheritedHandoverId = parentLead.HandoverId;
+                    inheritedOriginalOwnerId = parentLead.OriginalOwnerId;
+                }
+            }
+        }
+
         var deal = new GhlDeal
         {
             CompanyId = companyId.Value,
@@ -211,11 +235,31 @@ public class GhlDealsController : ControllerBase
             Priority = string.IsNullOrWhiteSpace(dto.Priority) ? "Medium" : dto.Priority.Trim(),
             StageEnteredAt = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow,
+            HandoverId = inheritedHandoverId,
+            OriginalOwnerId = inheritedOriginalOwnerId
         };
 
         _db.GhlDeals.Add(deal);
         await _db.SaveChangesAsync(ct);
+
+        if (inheritedHandoverId.HasValue)
+        {
+            _db.WorkHandoverItems.Add(new WorkHandoverItem
+            {
+                HandoverId = inheritedHandoverId.Value,
+                EntityType = "GhlDeal",
+                EntityId = deal.Id,
+                Origin = "created_during_coverage",
+                CreatedAt = DateTime.UtcNow
+            });
+            await _db.SaveChangesAsync(ct);
+        }
+
         await _db.Entry(deal).Reference(d => d.AssignedAgent).LoadAsync(ct);
+        if (deal.OriginalOwnerId.HasValue)
+            await _db.Entry(deal).Reference(d => d.OriginalOwner).LoadAsync(ct);
+        if (deal.HandoverId.HasValue)
+            await _db.Entry(deal).Reference(d => d.Handover).LoadAsync(ct);
 
         var newDto = MapToDto(deal);
         await PopulateContactDetailsAsync(new List<GhlDealResponseDto> { newDto }, new List<GhlDeal> { deal }, ct);
@@ -414,6 +458,10 @@ public class GhlDealsController : ControllerBase
         Phone = (!string.IsNullOrWhiteSpace(d.Customer?.Phone) ? d.Customer.Phone : null),
         Email = (!string.IsNullOrWhiteSpace(d.Customer?.Email) ? d.Customer.Email : null),
         Location = (!string.IsNullOrWhiteSpace(d.Customer?.Location) ? d.Customer.Location : null),
+        HandoverId = d.HandoverId,
+        HandedOverFromName = d.OriginalOwner?.Name,
+        HandoverPlannedEnd = d.Handover?.PlannedEndAt,
+        OriginalOwnerId = d.OriginalOwnerId,
     };
 
     private async Task PopulateContactDetailsAsync(

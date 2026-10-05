@@ -530,6 +530,9 @@ function mapFollowup(f: Record<string, any>): Followup {
 }
 
 export async function getFollowups(companyId?: string): Promise<Followup[]> {
+  if (isMockMode()) {
+    return storageService.getFollowups(companyId);
+  }
   const raw = await fetchAll<any>('/sales-executive/followups');
   return raw.map(mapFollowup);
 }
@@ -727,6 +730,9 @@ function mapCallRecord(c: Record<string, any>): CallRecord {
 }
 
 export async function getCalls(companyId?: string): Promise<CallRecord[]> {
+  if (isMockMode()) {
+    return storageService.getCalls(companyId);
+  }
   const raw = await fetchAll<any>('/sales-executive/calls');
   return raw.map(mapCallRecord);
 }

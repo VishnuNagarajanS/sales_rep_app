@@ -13,16 +13,25 @@ public class IrmPipelineRepository : IIrmPipelineRepository
 
     public async Task<List<IrmPipelineCard>> GetAllAsync(int companyId, int? irmId, CancellationToken ct = default)
     {
-        var query = _db.IrmPipelineCards.Where(c => c.CompanyId == companyId);
+        var query = _db.IrmPipelineCards
+            .Include(c => c.OriginalOwner)
+            .Include(c => c.Handover)
+            .Where(c => c.CompanyId == companyId);
         if (irmId.HasValue) query = query.Where(c => c.AssignedIrmId == irmId);
         return await query.OrderByDescending(c => c.StageEnteredAt).ToListAsync(ct);
     }
 
     public async Task<IrmPipelineCard?> GetByIdAsync(int id, int companyId, CancellationToken ct = default)
-        => await _db.IrmPipelineCards.FirstOrDefaultAsync(c => c.Id == id && c.CompanyId == companyId, ct);
+        => await _db.IrmPipelineCards
+            .Include(c => c.OriginalOwner)
+            .Include(c => c.Handover)
+            .FirstOrDefaultAsync(c => c.Id == id && c.CompanyId == companyId, ct);
 
     public async Task<IrmPipelineCard?> GetByInvestorIdAsync(int investorId, int companyId, CancellationToken ct = default)
-        => await _db.IrmPipelineCards.FirstOrDefaultAsync(c => c.InvestorId == investorId && c.CompanyId == companyId, ct);
+        => await _db.IrmPipelineCards
+            .Include(c => c.OriginalOwner)
+            .Include(c => c.Handover)
+            .FirstOrDefaultAsync(c => c.InvestorId == investorId && c.CompanyId == companyId, ct);
 
     public async Task<IrmPipelineCard> CreateAsync(IrmPipelineCard card, CancellationToken ct = default)
     {

@@ -19,6 +19,11 @@ public class GhlInvestmentOpportunity
     public int AssignedAgentId { get; set; }
     public User? AssignedAgent { get; set; }
 
+    public int? HandoverId { get; set; }
+    public WorkHandover? Handover { get; set; }
+    public int? OriginalOwnerId { get; set; }
+    public User? OriginalOwner { get; set; }
+
     /// <summary>Opportunity title / fund name (e.g. "AIF Category II – Fund IV").</summary>
     public string Title { get; set; } = string.Empty;
 

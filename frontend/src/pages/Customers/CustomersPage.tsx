@@ -94,6 +94,16 @@ export const CustomersPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('All');
   const [agentFilter, setAgentFilter] = useState('All');
   const [assignmentFilter, setAssignmentFilter] = useState<'All' | 'Assigned' | 'Unassigned'>('All');
+  const [handoverFilter, setHandoverFilter] = useState('Mine');
+
+  const handoverOptions = useMemo(() => {
+    const names = Array.from(new Set(scopedCustomers.map(c => c.handedOverFromName).filter(Boolean)));
+    if (names.length === 0) return [];
+    return [
+      { value: 'Mine', label: 'Mine' },
+      ...names.map(name => ({ value: `Handover_${name}`, label: `Handed over from ${name}` }))
+    ];
+  }, [scopedCustomers]);
 
   // Assignment mode state (Sales Executive only)
   const [isAssignMode, setIsAssignMode] = useState(false);
@@ -164,7 +174,11 @@ export const CustomersPage: React.FC = () => {
     loadData();
     const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+    window.addEventListener('nexus_handover_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
+      window.removeEventListener('nexus_handover_updated', handleUpdate);
+    };
   }, [tenant?.id]);
 
   const agentOptions = Array.from(new Set(scopedCustomers.map(c => c.assignedAgentName)))
@@ -177,6 +191,13 @@ export const CustomersPage: React.FC = () => {
     if (canAssignToIRM) {
       if (assignmentFilter === 'Assigned' && !(c.assignedIrmName || c.assignedIrmId)) return false;
       if (assignmentFilter === 'Unassigned' && (c.assignedIrmName || c.assignedIrmId)) return false;
+    }
+    if (handoverOptions.length > 0) {
+      if (handoverFilter === 'Mine' && c.handoverId) return false;
+      if (handoverFilter !== 'Mine' && handoverFilter !== 'All') {
+        const name = handoverFilter.replace('Handover_', '');
+        if (c.handedOverFromName !== name) return false;
+      }
     }
     return true;
   });
@@ -809,6 +830,25 @@ export const CustomersPage: React.FC = () => {
                 Filters:
               </span>
 
+              {/* Handover Filter */}
+              {handoverOptions.length > 0 && (
+                <div className="customers-filter-group">
+                  <label htmlFor="filter-customer-handover" className="customers-filter-tag">
+                    View:
+                  </label>
+                  <select
+                    id="filter-customer-handover"
+                    className={`form-select customers-filter-select ${handoverFilter !== 'Mine' ? 'is-filtered' : ''}`}
+                    value={handoverFilter}
+                    onChange={e => setHandoverFilter(e.target.value)}
+                  >
+                    {handoverOptions.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {/* Status Filter */}
               <div className="customers-filter-group">
                 <label
@@ -913,6 +953,22 @@ export const CustomersPage: React.FC = () => {
                         <div className="customer-list-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {c.name}
                         </div>
+                        {c.handedOverFromName && (
+                          <span
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 600,
+                              padding: '2px 6px',
+                              borderRadius: 6,
+                              background: 'rgba(99, 102, 241, 0.15)',
+                              color: '#818cf8',
+                              border: '1px solid rgba(99, 102, 241, 0.3)',
+                            }}
+                            title={`Handed over from ${c.handedOverFromName}`}
+                          >
+                            Covering for {c.handedOverFromName}
+                          </span>
+                        )}
                       </div>
                       <StatusChip status={c.status} size="sm" />
                     </div>

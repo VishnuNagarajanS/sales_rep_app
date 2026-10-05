@@ -83,6 +83,11 @@ public class GhlDealResponseDto
     public string? Email { get; set; }
     /// <summary>Location resolved from the linked Customer record.</summary>
     public string? Location { get; set; }
+
+    public int? HandoverId { get; set; }
+    public string? HandedOverFromName { get; set; }
+    public DateTime? HandoverPlannedEnd { get; set; }
+    public int? OriginalOwnerId { get; set; }
 }
 
 public class GhlDealActivityResponseDto

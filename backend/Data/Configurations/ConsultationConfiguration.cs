@@ -22,8 +22,6 @@ public class ConsultationConfiguration : IEntityTypeConfiguration<Consultation>
             .IsRequired();
 
         builder.Property(c => c.Status)
-            .HasConversion<string>()
-            .HasMaxLength(50)
             .HasDefaultValue(ConsultationStatus.Scheduled);
 
         builder.Property(c => c.CreatedAt)

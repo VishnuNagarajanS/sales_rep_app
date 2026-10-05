@@ -12,8 +12,11 @@ public class Lead
     public DateTime? AssignedAt { get; set; }
     public int? AssignedById { get; set; }
     public User? AssignedBy { get; set; }
-    
 
+    public int? HandoverId { get; set; }
+    public WorkHandover? Handover { get; set; }
+    public int? OriginalOwnerId { get; set; }
+    public User? OriginalOwner { get; set; }
 
     public string Name { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;

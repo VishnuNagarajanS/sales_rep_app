@@ -78,7 +78,7 @@ namespace backend.Migrations
 
                     b.HasIndex("CompanyId");
 
-                    b.ToTable("AuditLogs", (string)null);
+                    b.ToTable("AuditLogs");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.BroadcastAnnouncement", b =>
@@ -158,7 +158,6 @@ namespace backend.Migrations
                             TargetAudience = "all",
                             Title = "Platform Infrastructure Upgrade"
                         });
-                    b.ToTable("AuditLogs");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.CallRecord", b =>
@@ -359,6 +358,9 @@ namespace backend.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("NOW()");
 
+                    b.Property<int?>("HandoverId")
+                        .HasColumnType("integer");
+
                     b.Property<int>("InvestorId")
                         .HasColumnType("integer");
 
@@ -372,6 +374,9 @@ namespace backend.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
+                    b.Property<int?>("OriginalOwnerId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("OutcomeNotes")
                         .HasColumnType("text");
 
@@ -381,12 +386,10 @@ namespace backend.Migrations
                     b.Property<DateTime>("ScheduledAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("Status")
-                        .IsRequired()
+                    b.Property<int>("Status")
                         .ValueGeneratedOnAdd()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasDefaultValue("Scheduled");
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -397,7 +400,11 @@ namespace backend.Migrations
 
                     b.HasIndex("ConsultantId");
 
+                    b.HasIndex("HandoverId");
+
                     b.HasIndex("InvestorId");
+
+                    b.HasIndex("OriginalOwnerId");
 
                     b.ToTable("consultations", (string)null);
                 });
@@ -429,6 +436,9 @@ namespace backend.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
+                    b.Property<int?>("HandoverId")
+                        .HasColumnType("integer");
+
                     b.Property<bool>("IsDuplicate")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
@@ -459,6 +469,9 @@ namespace backend.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int?>("OriginalOwnerId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Phone")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -482,6 +495,10 @@ namespace backend.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("AssignedAgentId");
+
+                    b.HasIndex("HandoverId");
+
+                    b.HasIndex("OriginalOwnerId");
 
                     b.HasIndex("CompanyId", "NormalizedEmail")
                         .IsUnique()
@@ -590,7 +607,7 @@ namespace backend.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ExecutiveProfiles", (string)null);
+                    b.ToTable("ExecutiveProfiles");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.Followup", b =>
@@ -653,6 +670,9 @@ namespace backend.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("NOW()");
 
+                    b.Property<int?>("HandoverId")
+                        .HasColumnType("integer");
+
                     b.Property<int?>("InvestorId")
                         .HasColumnType("integer");
 
@@ -663,6 +683,9 @@ namespace backend.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int?>("OriginalOwnerId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("OutcomeNotes")
                         .HasColumnType("text");
 
@@ -670,9 +693,6 @@ namespace backend.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
-
-                    b.Property<DateTime?>("RescheduledTo")
-                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("RescheduledTo")
                         .HasColumnType("timestamp with time zone");
@@ -694,7 +714,11 @@ namespace backend.Migrations
 
                     b.HasIndex("CompanyId");
 
+                    b.HasIndex("HandoverId");
+
                     b.HasIndex("InvestorId");
+
+                    b.HasIndex("OriginalOwnerId");
 
                     b.ToTable("followups", (string)null);
                 });
@@ -730,6 +754,9 @@ namespace backend.Migrations
                     b.Property<string>("FlaggedSections")
                         .HasColumnType("text");
 
+                    b.Property<int?>("HandoverId")
+                        .HasColumnType("integer");
+
                     b.Property<bool>("InvestmentAmountConfirmed")
                         .HasColumnType("boolean");
 
@@ -751,6 +778,9 @@ namespace backend.Migrations
                     b.Property<string>("Notes")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int?>("OriginalOwnerId")
+                        .HasColumnType("integer");
 
                     b.Property<string>("PreferredAssetClass")
                         .HasColumnType("text");
@@ -793,7 +823,10 @@ namespace backend.Migrations
 
                     b.HasIndex("CustomerId");
 
-                    b.ToTable("GhlDeals", (string)null);
+                    b.HasIndex("HandoverId");
+
+                    b.HasIndex("OriginalOwnerId");
+
                     b.ToTable("GhlDeals");
                 });
 
@@ -845,7 +878,6 @@ namespace backend.Migrations
 
                     b.HasIndex("DealId");
 
-                    b.ToTable("GhlDealActivities", (string)null);
                     b.ToTable("GhlDealActivities");
                 });
 
@@ -873,12 +905,18 @@ namespace backend.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int?>("HandoverId")
+                        .HasColumnType("integer");
+
                     b.Property<int>("InvestorId")
                         .HasColumnType("integer");
 
                     b.Property<string>("Notes")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int?>("OriginalOwnerId")
+                        .HasColumnType("integer");
 
                     b.Property<string>("Stage")
                         .IsRequired()
@@ -900,9 +938,12 @@ namespace backend.Migrations
 
                     b.HasIndex("CompanyId");
 
+                    b.HasIndex("HandoverId");
+
                     b.HasIndex("InvestorId");
 
-                    b.ToTable("GhlInvestmentOpportunities", (string)null);
+                    b.HasIndex("OriginalOwnerId");
+
                     b.ToTable("GhlInvestmentOpportunities");
                 });
 
@@ -930,6 +971,9 @@ namespace backend.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int?>("HandoverId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("InvestmentCapacity")
                         .IsRequired()
                         .HasColumnType("text");
@@ -944,6 +988,9 @@ namespace backend.Migrations
                     b.Property<string>("Notes")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int?>("OriginalOwnerId")
+                        .HasColumnType("integer");
 
                     b.Property<string>("Phone")
                         .IsRequired()
@@ -972,7 +1019,10 @@ namespace backend.Migrations
 
                     b.HasIndex("CompanyId");
 
-                    b.ToTable("GhlInvestors", (string)null);
+                    b.HasIndex("HandoverId");
+
+                    b.HasIndex("OriginalOwnerId");
+
                     b.ToTable("GhlInvestors");
                 });
 
@@ -1046,7 +1096,6 @@ namespace backend.Migrations
 
                     b.HasIndex("CreatedByIrmId");
 
-                    b.ToTable("InvestmentOpportunities", (string)null);
                     b.ToTable("InvestmentOpportunities");
 
                     b.HasData(
@@ -1097,6 +1146,9 @@ namespace backend.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int?>("HandoverId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("InvestmentCapacity")
                         .IsRequired()
                         .HasColumnType("text");
@@ -1111,6 +1163,9 @@ namespace backend.Migrations
                     b.Property<string>("Notes")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int?>("OriginalOwnerId")
+                        .HasColumnType("integer");
 
                     b.Property<string>("Phone")
                         .IsRequired()
@@ -1138,7 +1193,10 @@ namespace backend.Migrations
 
                     b.HasIndex("CompanyId");
 
-                    b.ToTable("Investors", (string)null);
+                    b.HasIndex("HandoverId");
+
+                    b.HasIndex("OriginalOwnerId");
+
                     b.ToTable("Investors");
 
                     b.HasData(
@@ -1235,7 +1293,6 @@ namespace backend.Migrations
 
                     b.HasIndex("IrmId");
 
-                    b.ToTable("InvestorCalls", (string)null);
                     b.ToTable("InvestorCalls");
                 });
 
@@ -1321,6 +1378,9 @@ namespace backend.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int?>("HandoverId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("IfscCode")
                         .HasColumnType("text");
 
@@ -1350,9 +1410,6 @@ namespace backend.Migrations
                     b.Property<bool>("KycLinkSent")
                         .HasColumnType("boolean");
 
-                    b.Property<string>("KycLinkToken")
-                        .HasColumnType("text");
-
                     b.Property<DateTime?>("KycLinkSentAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1370,6 +1427,9 @@ namespace backend.Migrations
 
                     b.Property<string>("Occupation")
                         .HasColumnType("text");
+
+                    b.Property<int?>("OriginalOwnerId")
+                        .HasColumnType("integer");
 
                     b.Property<string>("PanDocumentUrl")
                         .HasColumnType("text");
@@ -1434,11 +1494,14 @@ namespace backend.Migrations
 
                     b.HasIndex("CompanyId");
 
+                    b.HasIndex("HandoverId");
+
                     b.HasIndex("InvestorId");
 
                     b.HasIndex("IrmId");
 
-                    b.ToTable("InvestorKycs", (string)null);
+                    b.HasIndex("OriginalOwnerId");
+
                     b.ToTable("InvestorKycs");
                 });
 
@@ -1522,6 +1585,9 @@ namespace backend.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int?>("HandoverId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("InvestmentAmount")
                         .HasColumnType("text");
 
@@ -1545,6 +1611,9 @@ namespace backend.Migrations
 
                     b.Property<DateTime?>("LastActivityDate")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("OriginalOwnerId")
+                        .HasColumnType("integer");
 
                     b.Property<string>("PreferredAssetClass")
                         .HasColumnType("text");
@@ -1572,9 +1641,12 @@ namespace backend.Migrations
 
                     b.HasIndex("CompanyId");
 
+                    b.HasIndex("HandoverId");
+
                     b.HasIndex("InvestorId");
 
-                    b.ToTable("IrmPipelineCards", (string)null);
+                    b.HasIndex("OriginalOwnerId");
+
                     b.ToTable("IrmPipelineCards");
 
                     b.HasData(
@@ -1711,6 +1783,9 @@ namespace backend.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
+                    b.Property<int?>("HandoverId")
+                        .HasColumnType("integer");
+
                     b.Property<bool>("IsDuplicate")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
@@ -1740,6 +1815,9 @@ namespace backend.Migrations
                     b.Property<string>("Notes")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int?>("OriginalOwnerId")
+                        .HasColumnType("integer");
 
                     b.Property<string>("Phone")
                         .IsRequired()
@@ -1778,7 +1856,13 @@ namespace backend.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AssignedAgentId");
+
                     b.HasIndex("AssignedById");
+
+                    b.HasIndex("HandoverId");
+
+                    b.HasIndex("OriginalOwnerId");
 
                     b.HasIndex("CompanyId", "AssignedAgentId");
 
@@ -1868,53 +1952,7 @@ namespace backend.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Notifications", (string)null);
-                });
-
-            modelBuilder.Entity("backend.Models.Entities.OpportunityPitch", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("CommitmentNotes")
-                        .HasColumnType("text");
-
-                    b.Property<decimal?>("CommittedAmount")
-                        .HasColumnType("numeric");
-
-                    b.Property<DateTime?>("CommittedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("InvestorId")
-                        .HasColumnType("integer");
-
-                    b.Property<bool>("IsCommitted")
-                        .HasColumnType("boolean");
-
-                    b.Property<int>("OpportunityId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("PitchNotes")
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("PitchedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("PitchedByIrmId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("InvestorId");
-
-                    b.HasIndex("OpportunityId");
-
-                    b.HasIndex("PitchedByIrmId");
-
-                    b.ToTable("OpportunityPitches", (string)null);
+                    b.ToTable("Notifications");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.OpportunityPitch", b =>
@@ -1989,7 +2027,7 @@ namespace backend.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("PasswordResetTokens", (string)null);
+                    b.ToTable("PasswordResetTokens");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.PlatformSetting", b =>
@@ -2686,6 +2724,127 @@ namespace backend.Migrations
                         });
                 });
 
+            modelBuilder.Entity("backend.Models.Entities.WorkHandover", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CoveringUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("EndedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("EndedById")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("OriginalUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("OverdueNotifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("PlannedEndAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("ReturnSummaryJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("RoleCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime>("StartedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<int>("StartedById")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("active");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CoveringUserId");
+
+                    b.HasIndex("EndedById");
+
+                    b.HasIndex("OriginalUserId");
+
+                    b.HasIndex("StartedById");
+
+                    b.HasIndex("CompanyId", "CoveringUserId", "Status");
+
+                    b.HasIndex("CompanyId", "OriginalUserId", "Status");
+
+                    b.HasIndex("CompanyId", "RoleCode", "Status");
+
+                    b.ToTable("work_handovers", (string)null);
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.WorkHandoverItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<int>("EntityId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int>("HandoverId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("included_at_start");
+
+                    b.Property<string>("ReturnOutcome")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime?>("ReturnedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HandoverId", "EntityType", "EntityId");
+
+                    b.ToTable("work_handover_items", (string)null);
+                });
+
             modelBuilder.Entity("backend.Models.Entities.AuditLog", b =>
                 {
                     b.HasOne("backend.Models.Entities.Tenant", "Company")
@@ -2748,17 +2907,31 @@ namespace backend.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("backend.Models.Entities.WorkHandover", "Handover")
+                        .WithMany()
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("backend.Models.Entities.Investor", "Investor")
                         .WithMany("Consultations")
                         .HasForeignKey("InvestorId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("backend.Models.Entities.User", "OriginalOwner")
+                        .WithMany()
+                        .HasForeignKey("OriginalOwnerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Company");
 
                     b.Navigation("Consultant");
 
+                    b.Navigation("Handover");
+
                     b.Navigation("Investor");
+
+                    b.Navigation("OriginalOwner");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.Customer", b =>
@@ -2775,9 +2948,23 @@ namespace backend.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("backend.Models.Entities.WorkHandover", "Handover")
+                        .WithMany()
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("backend.Models.Entities.User", "OriginalOwner")
+                        .WithMany()
+                        .HasForeignKey("OriginalOwnerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("AssignedAgent");
 
                     b.Navigation("Company");
+
+                    b.Navigation("Handover");
+
+                    b.Navigation("OriginalOwner");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.Followup", b =>
@@ -2794,16 +2981,30 @@ namespace backend.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("backend.Models.Entities.WorkHandover", "Handover")
+                        .WithMany()
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("backend.Models.Entities.Investor", "Investor")
                         .WithMany("Followups")
                         .HasForeignKey("InvestorId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("backend.Models.Entities.User", "OriginalOwner")
+                        .WithMany()
+                        .HasForeignKey("OriginalOwnerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("AssignedAgent");
 
                     b.Navigation("Company");
 
+                    b.Navigation("Handover");
+
                     b.Navigation("Investor");
+
+                    b.Navigation("OriginalOwner");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.GhlDeal", b =>
@@ -2824,11 +3025,25 @@ namespace backend.Migrations
                         .WithMany()
                         .HasForeignKey("CustomerId");
 
+                    b.HasOne("backend.Models.Entities.WorkHandover", "Handover")
+                        .WithMany()
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("backend.Models.Entities.User", "OriginalOwner")
+                        .WithMany()
+                        .HasForeignKey("OriginalOwnerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("AssignedAgent");
 
                     b.Navigation("Company");
 
                     b.Navigation("Customer");
+
+                    b.Navigation("Handover");
+
+                    b.Navigation("OriginalOwner");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.GhlDealActivity", b =>
@@ -2864,17 +3079,31 @@ namespace backend.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("backend.Models.Entities.WorkHandover", "Handover")
+                        .WithMany()
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("backend.Models.Entities.GhlInvestor", "Investor")
                         .WithMany()
                         .HasForeignKey("InvestorId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("backend.Models.Entities.User", "OriginalOwner")
+                        .WithMany()
+                        .HasForeignKey("OriginalOwnerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("AssignedAgent");
 
                     b.Navigation("Company");
 
+                    b.Navigation("Handover");
+
                     b.Navigation("Investor");
+
+                    b.Navigation("OriginalOwner");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.GhlInvestor", b =>
@@ -2891,9 +3120,23 @@ namespace backend.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("backend.Models.Entities.WorkHandover", "Handover")
+                        .WithMany()
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("backend.Models.Entities.User", "OriginalOwner")
+                        .WithMany()
+                        .HasForeignKey("OriginalOwnerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("AssignedAgent");
 
                     b.Navigation("Company");
+
+                    b.Navigation("Handover");
+
+                    b.Navigation("OriginalOwner");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.InvestmentOpportunity", b =>
@@ -2927,9 +3170,23 @@ namespace backend.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("backend.Models.Entities.WorkHandover", "Handover")
+                        .WithMany()
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("backend.Models.Entities.User", "OriginalOwner")
+                        .WithMany()
+                        .HasForeignKey("OriginalOwnerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("AssignedIrm");
 
                     b.Navigation("Company");
+
+                    b.Navigation("Handover");
+
+                    b.Navigation("OriginalOwner");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.InvestorCall", b =>
@@ -2967,6 +3224,11 @@ namespace backend.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("backend.Models.Entities.WorkHandover", "Handover")
+                        .WithMany()
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("backend.Models.Entities.Investor", "Investor")
                         .WithMany("KycRecords")
                         .HasForeignKey("InvestorId")
@@ -2977,11 +3239,20 @@ namespace backend.Migrations
                         .WithMany()
                         .HasForeignKey("IrmId");
 
+                    b.HasOne("backend.Models.Entities.User", "OriginalOwner")
+                        .WithMany()
+                        .HasForeignKey("OriginalOwnerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Company");
+
+                    b.Navigation("Handover");
 
                     b.Navigation("Investor");
 
                     b.Navigation("Irm");
+
+                    b.Navigation("OriginalOwner");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.IrmCoverageAssignment", b =>
@@ -3025,17 +3296,31 @@ namespace backend.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("backend.Models.Entities.WorkHandover", "Handover")
+                        .WithMany()
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("backend.Models.Entities.Investor", "Investor")
                         .WithMany()
                         .HasForeignKey("InvestorId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("backend.Models.Entities.User", "OriginalOwner")
+                        .WithMany()
+                        .HasForeignKey("OriginalOwnerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("AssignedIrm");
 
                     b.Navigation("Company");
 
+                    b.Navigation("Handover");
+
                     b.Navigation("Investor");
+
+                    b.Navigation("OriginalOwner");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.KycOtpVerification", b =>
@@ -3047,216 +3332,13 @@ namespace backend.Migrations
                     b.Navigation("InvestorKyc");
                 });
 
-            modelBuilder.Entity("backend.Models.Entities.GhlDeal", b =>
-                {
-                    b.HasOne("backend.Models.Entities.User", "AssignedAgent")
-                        .WithMany()
-                        .HasForeignKey("AssignedAgentId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.Tenant", "Company")
-                        .WithMany()
-                        .HasForeignKey("CompanyId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.Customer", "Customer")
-                        .WithMany()
-                        .HasForeignKey("CustomerId");
-
-                    b.Navigation("AssignedAgent");
-
-                    b.Navigation("Company");
-
-                    b.Navigation("Customer");
-                });
-
-            modelBuilder.Entity("backend.Models.Entities.GhlDealActivity", b =>
-                {
-                    b.HasOne("backend.Models.Entities.Tenant", "Company")
-                        .WithMany()
-                        .HasForeignKey("CompanyId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.GhlDeal", "Deal")
-                        .WithMany()
-                        .HasForeignKey("DealId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Company");
-
-                    b.Navigation("Deal");
-                });
-
-            modelBuilder.Entity("backend.Models.Entities.GhlInvestmentOpportunity", b =>
-                {
-                    b.HasOne("backend.Models.Entities.User", "AssignedAgent")
-                        .WithMany()
-                        .HasForeignKey("AssignedAgentId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.Tenant", "Company")
-                        .WithMany()
-                        .HasForeignKey("CompanyId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.GhlInvestor", "Investor")
-                        .WithMany()
-                        .HasForeignKey("InvestorId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("AssignedAgent");
-
-                    b.Navigation("Company");
-
-                    b.Navigation("Investor");
-                });
-
-            modelBuilder.Entity("backend.Models.Entities.GhlInvestor", b =>
-                {
-                    b.HasOne("backend.Models.Entities.User", "AssignedAgent")
-                        .WithMany()
-                        .HasForeignKey("AssignedAgentId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.Tenant", "Company")
-                        .WithMany()
-                        .HasForeignKey("CompanyId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("AssignedAgent");
-
-                    b.Navigation("Company");
-                });
-
-            modelBuilder.Entity("backend.Models.Entities.InvestmentOpportunity", b =>
-                {
-                    b.HasOne("backend.Models.Entities.Tenant", "Company")
-                        .WithMany()
-                        .HasForeignKey("CompanyId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.User", "CreatedByIrm")
-                        .WithMany()
-                        .HasForeignKey("CreatedByIrmId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Company");
-
-                    b.Navigation("CreatedByIrm");
-                });
-
-            modelBuilder.Entity("backend.Models.Entities.Investor", b =>
-                {
-                    b.HasOne("backend.Models.Entities.User", "AssignedIrm")
-                        .WithMany()
-                        .HasForeignKey("AssignedIrmId");
-
-                    b.HasOne("backend.Models.Entities.Tenant", "Company")
-                        .WithMany()
-                        .HasForeignKey("CompanyId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("AssignedIrm");
-
-                    b.Navigation("Company");
-                });
-
-            modelBuilder.Entity("backend.Models.Entities.InvestorCall", b =>
-                {
-                    b.HasOne("backend.Models.Entities.Tenant", "Company")
-                        .WithMany()
-                        .HasForeignKey("CompanyId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.Investor", "Investor")
-                        .WithMany("Calls")
-                        .HasForeignKey("InvestorId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.User", "Irm")
-                        .WithMany()
-                        .HasForeignKey("IrmId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Company");
-
-                    b.Navigation("Investor");
-
-                    b.Navigation("Irm");
-                });
-
-            modelBuilder.Entity("backend.Models.Entities.InvestorKyc", b =>
-                {
-                    b.HasOne("backend.Models.Entities.Tenant", "Company")
-                        .WithMany()
-                        .HasForeignKey("CompanyId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.Investor", "Investor")
-                        .WithMany("KycRecords")
-                        .HasForeignKey("InvestorId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.User", "Irm")
-                        .WithMany()
-                        .HasForeignKey("IrmId");
-
-                    b.Navigation("Company");
-
-                    b.Navigation("Investor");
-
-                    b.Navigation("Irm");
-                });
-
-            modelBuilder.Entity("backend.Models.Entities.IrmPipelineCard", b =>
-                {
-                    b.HasOne("backend.Models.Entities.User", "AssignedIrm")
-                        .WithMany()
-                        .HasForeignKey("AssignedIrmId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.Tenant", "Company")
-                        .WithMany()
-                        .HasForeignKey("CompanyId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.Investor", "Investor")
-                        .WithMany()
-                        .HasForeignKey("InvestorId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("AssignedIrm");
-                    b.Navigation("Company");
-
-                    b.Navigation("Investor");
-                });
-
             modelBuilder.Entity("backend.Models.Entities.Lead", b =>
                 {
                     b.HasOne("backend.Models.Entities.User", "AssignedAgent")
                         .WithMany()
                         .HasForeignKey("AssignedAgentId")
                         .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("backend.Models.Entities.User", "AssignedBy")
                         .WithMany()
                         .HasForeignKey("AssignedById")
@@ -3268,11 +3350,25 @@ namespace backend.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("backend.Models.Entities.WorkHandover", "Handover")
+                        .WithMany()
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("backend.Models.Entities.User", "OriginalOwner")
+                        .WithMany()
+                        .HasForeignKey("OriginalOwnerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("AssignedAgent");
 
                     b.Navigation("AssignedBy");
 
                     b.Navigation("Company");
+
+                    b.Navigation("Handover");
+
+                    b.Navigation("OriginalOwner");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.LeadAssignmentHistory", b =>
@@ -3364,6 +3460,59 @@ namespace backend.Migrations
                     b.Navigation("Role");
                 });
 
+            modelBuilder.Entity("backend.Models.Entities.WorkHandover", b =>
+                {
+                    b.HasOne("backend.Models.Entities.Tenant", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("backend.Models.Entities.User", "CoveringUser")
+                        .WithMany()
+                        .HasForeignKey("CoveringUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("backend.Models.Entities.User", "EndedBy")
+                        .WithMany()
+                        .HasForeignKey("EndedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("backend.Models.Entities.User", "OriginalUser")
+                        .WithMany()
+                        .HasForeignKey("OriginalUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("backend.Models.Entities.User", "StartedBy")
+                        .WithMany()
+                        .HasForeignKey("StartedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("CoveringUser");
+
+                    b.Navigation("EndedBy");
+
+                    b.Navigation("OriginalUser");
+
+                    b.Navigation("StartedBy");
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.WorkHandoverItem", b =>
+                {
+                    b.HasOne("backend.Models.Entities.WorkHandover", "Handover")
+                        .WithMany("Items")
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Handover");
+                });
+
             modelBuilder.Entity("backend.Models.Entities.InvestmentOpportunity", b =>
                 {
                     b.Navigation("Pitches");
@@ -3390,6 +3539,11 @@ namespace backend.Migrations
                     b.Navigation("DidMappings");
 
                     b.Navigation("Users");
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.WorkHandover", b =>
+                {
+                    b.Navigation("Items");
                 });
 #pragma warning restore 612, 618
         }

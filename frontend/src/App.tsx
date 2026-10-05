@@ -29,6 +29,8 @@ export const routeToPath = (route: string, isSuperAdmin: boolean): string => {
         return '/dashboard';
       case 'company-users':
         return '/users';
+      case 'work-handover':
+        return '/handover';
       case 'company-settings':
         return '/settings';
       case 'company-audit':
@@ -69,6 +71,9 @@ export const pathToRoute = (pathname: string, isSuperAdmin: boolean): string => 
     switch (cleanPath) {
       case '/users':
         return 'company-users';
+      case '/handover':
+      case '/work-handover':
+        return 'work-handover';
       case '/settings':
         return 'company-settings';
       case '/audit':
@@ -126,6 +131,7 @@ import { KYCPage } from './pages/KYC/KYCPage';
 
 // Company Admin
 import { CompanyUsersPage } from './pages/Company/CompanyUsersPage';
+import { WorkHandoverPage } from './pages/Company/WorkHandoverPage';
 import { CompanySettingsPage } from './pages/Company/CompanySettingsPage';
 import { CompanyAuditPage } from './pages/Company/CompanyAuditPage';
 
@@ -611,7 +617,7 @@ export const App: React.FC = () => {
       ) : currentRoute === 'assigned-leads' ? (
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
           {isGhlAdmin ? (
-            <AssignedLeadsPage />
+            <AssignedLeadsPage onNavigate={navigate} />
           ) : (
             <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
           )}
@@ -709,6 +715,10 @@ export const App: React.FC = () => {
       ) : currentRoute === 'company-users' ? (
         <ProtectedRoute permission={PERMISSIONS.USERS_VIEW}>
           <CompanyUsersPage />
+        </ProtectedRoute>
+      ) : currentRoute === 'work-handover' ? (
+        <ProtectedRoute permission={PERMISSIONS.USERS_VIEW}>
+          <WorkHandoverPage />
         </ProtectedRoute>
       ) : currentRoute === 'company-settings' ? (
         <ProtectedRoute permission={PERMISSIONS.SETTINGS_VIEW}>

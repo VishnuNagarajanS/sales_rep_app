@@ -203,9 +203,19 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   const [statusFilter, setStatusFilter] = useState('All');
   const [capacityFilter, setCapacityFilter] = useState('All');
   const [agentFilter, setAgentFilter] = useState('All');
+  const [handoverFilter, setHandoverFilter] = useState('Mine');
   const [datePreset, setDatePreset] = useState<string>('all');
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
+
+  const handoverOptions = useMemo(() => {
+    const names = Array.from(new Set(scopedLeads.map(l => l.handedOverFromName).filter(Boolean)));
+    if (names.length === 0) return [];
+    return [
+      { value: 'Mine', label: 'Mine' },
+      ...names.map(name => ({ value: `Handover_${name}`, label: `Handed over from ${name}` }))
+    ];
+  }, [scopedLeads]);
 
   const agentOptions = useMemo(() => {
     return Array.from(
@@ -408,6 +418,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     loadData();
     const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
+    window.addEventListener('nexus_handover_updated', handleUpdate);
     
     // Polling every 15 seconds while visible
     const interval = setInterval(() => {
@@ -423,6 +434,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
     return () => {
       window.removeEventListener('nexus_storage_updated', handleUpdate);
+      window.removeEventListener('nexus_handover_updated', handleUpdate);
       window.removeEventListener('focus', handleFocus);
       clearInterval(interval);
     };
@@ -522,6 +534,14 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         : formatDateYMD(new Date(rawDate));
       if (dateFrom && dateStr < dateFrom) return false;
       if (dateTo && dateStr > dateTo) return false;
+    }
+
+    if (handoverOptions.length > 0) {
+      if (handoverFilter === 'Mine' && lead.handoverId) return false;
+      if (handoverFilter !== 'Mine' && handoverFilter !== 'All') {
+        const name = handoverFilter.replace('Handover_', '');
+        if (lead.handedOverFromName !== name) return false;
+      }
     }
 
     return true;
@@ -1340,7 +1360,25 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       sortable: true,
       render: l => (
         <div>
-          <div className="lead-name-primary">{l.name}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span className="lead-name-primary">{l.name}</span>
+            {l.handedOverFromName && (
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  padding: '2px 6px',
+                  borderRadius: 6,
+                  background: 'rgba(99, 102, 241, 0.15)',
+                  color: '#818cf8',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                }}
+                title={`Handed over from ${l.handedOverFromName}${l.handoverPlannedEnd ? ` until ${new Date(l.handoverPlannedEnd).toLocaleDateString()}` : ''}`}
+              >
+                Covering for {l.handedOverFromName}
+              </span>
+            )}
+          </div>
           <div className="lead-name-sub">{l.phone}</div>
         </div>
       ),
@@ -1460,6 +1498,13 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
           <div className="leads-toolbar">
             <FilterBar
               filters={[
+                ...(handoverOptions.length > 0 ? [{
+                  key: 'handover',
+                  label: 'View',
+                  value: handoverFilter,
+                  onChange: setHandoverFilter,
+                  options: handoverOptions
+                }] : []),
                 ...(isGhlAdmin ? [] : [{
                   key: 'status',
                   label: 'Status',
@@ -1498,6 +1543,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                 setStatusFilter('All');
                 setAgentFilter('All');
                 setCapacityFilter('All');
+                setHandoverFilter('Mine');
                 setDatePreset('all');
                 setDateFrom('');
                 setDateTo('');
