@@ -20,12 +20,12 @@ function relTime(iso: string) {
 
 function convDisplayName(conv: ChatConversation, meId: string): string {
   if (conv.type === 'group') return conv.name || 'Group';
-  const other = conv.members.find(m => m.id !== meId);
+  const other = conv.members.find(m => String(m.id) !== String(meId));
   return other?.name || 'Direct Message';
 }
 
 function convOtherMember(conv: ChatConversation, meId: string): ChatMember | undefined {
-  return conv.members.find(m => m.id !== meId);
+  return conv.members.find(m => String(m.id) !== String(meId));
 }
 
 interface Props {

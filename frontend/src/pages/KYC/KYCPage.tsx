@@ -39,7 +39,6 @@ import {
   getLeads,
   getCustomers,
 } from '../../services/ghlApiService';
-import { isMockMode } from '../../config/environment';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { Modal } from '../../components/common/Modal';
@@ -308,36 +307,22 @@ const GhlIrmKycView: React.FC = () => {
   };
 
   const loadData = async () => {
-    if (isMockMode()) {
-      const allDeals = storageService.getDeals(tenant?.id) || [];
-      const localLeads = storageService.getLeads(tenant?.id) || [];
-      const localCustomers = storageService.getCustomers(tenant?.id) || [];
-      const enriched = allDeals.map(d => enrichDealWithContact(d, localLeads, localCustomers));
+    try {
+      const [allDeals, apiLeads, apiCustomers] = await Promise.all([
+        getDeals(tenant?.id),
+        getLeads(tenant?.id),
+        getCustomers(tenant?.id),
+      ]);
+      const leadsList = apiLeads || [];
+      const customersList = apiCustomers || [];
+      const enriched = (allDeals || []).map(d => enrichDealWithContact(d, leadsList, customersList));
       setDeals(enriched.filter(d => d.stage === 'qualified_investor'));
-      setLeads(localLeads);
-      setCustomers(localCustomers);
-    } else {
-      try {
-        const [allDeals, apiLeads, apiCustomers] = await Promise.all([
-          getDeals(tenant?.id),
-          getLeads(tenant?.id),
-          getCustomers(tenant?.id),
-        ]);
-        const leadsList = apiLeads || [];
-        const customersList = apiCustomers || [];
-        const enriched = (allDeals || []).map(d => enrichDealWithContact(d, leadsList, customersList));
-        setDeals(enriched.filter(d => d.stage === 'qualified_investor'));
-        setLeads(leadsList);
-        setCustomers(customersList);
-      } catch {
-        const allDeals = storageService.getDeals(tenant?.id) || [];
-        const localLeads = storageService.getLeads(tenant?.id) || [];
-        const localCustomers = storageService.getCustomers(tenant?.id) || [];
-        const enriched = allDeals.map(d => enrichDealWithContact(d, localLeads, localCustomers));
-        setDeals(enriched.filter(d => d.stage === 'qualified_investor'));
-        setLeads(localLeads);
-        setCustomers(localCustomers);
-      }
+      setLeads(leadsList);
+      setCustomers(customersList);
+    } catch {
+      setDeals([]);
+      setLeads([]);
+      setCustomers([]);
     }
 
     fetch('/api/irm/kyc/all')

@@ -50,6 +50,7 @@ public class JaminPlotConfiguration : IEntityTypeConfiguration<JaminPlot>
         // Indexes
         builder.HasIndex(p => new { p.CompanyId, p.ProjectId, p.Status });
         builder.HasIndex(p => new { p.ProjectId, p.PlotNumber }).IsUnique();
+        builder.HasIndex(p => p.HeldByCustomerId);
 
         // Relationships
         builder.HasOne(p => p.Company)
@@ -61,5 +62,10 @@ public class JaminPlotConfiguration : IEntityTypeConfiguration<JaminPlot>
             .WithMany(pr => pr.Plots)
             .HasForeignKey(p => p.ProjectId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(p => p.HeldByCustomer)
+            .WithMany()
+            .HasForeignKey(p => p.HeldByCustomerId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }

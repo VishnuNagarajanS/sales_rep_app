@@ -665,10 +665,10 @@ class SuperAdminService {
 
     // Service-level rule: Super Admin can ONLY provision Company Admin for tenant organizations.
     // Operational roles (Sales Executive and IRM) are reserved for Company Admin creation.
-    let resolvedRole = userData.role;
+    let resolvedRole: Role = userData.role || SYSTEM_ROLES.company_admin;
     if (userData.companyId) {
       resolvedRole = SYSTEM_ROLES.company_admin;
-    } else if (!resolvedRole) {
+    } else if (!userData.role) {
       resolvedRole = SYSTEM_ROLES.super_admin;
     }
 

@@ -55,6 +55,7 @@ public class JaminBookingConfiguration : IEntityTypeConfiguration<JaminBooking>
         builder.HasIndex(b => new { b.CompanyId, b.Status });
         builder.HasIndex(b => b.CustomerPhone);
         builder.HasIndex(b => b.CustomerId);
+        builder.HasIndex(b => b.LeadId);
 
         // Relationships
         builder.HasOne(b => b.Company)
@@ -65,6 +66,11 @@ public class JaminBookingConfiguration : IEntityTypeConfiguration<JaminBooking>
         builder.HasOne(b => b.Customer)
             .WithMany()
             .HasForeignKey(b => b.CustomerId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(b => b.Lead)
+            .WithMany()
+            .HasForeignKey(b => b.LeadId)
             .OnDelete(DeleteBehavior.SetNull);
 
         builder.HasOne(b => b.Project)

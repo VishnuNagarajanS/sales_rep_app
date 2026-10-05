@@ -7,7 +7,7 @@ public class Lead
     public int CompanyId { get; set; }
     public Tenant? Company { get; set; }
 
-    public int AssignedAgentId { get; set; } = 1;
+    public int? AssignedAgentId { get; set; }
     public User? AssignedAgent { get; set; }
     public string? AssignedAgentName { get; set; }
 
@@ -31,6 +31,7 @@ public class Lead
     public string? AnythingWeShouldKnow { get; set; }
     public string? WhatAreYouLookingFor { get; set; }
     public string? BudgetRange { get; set; }
+    public string? ReadyToRegister { get; set; }
     public string? InvestmentCapacity { get; set; }
     public string? AssetClass { get; set; }
     public string? Horizon { get; set; }

@@ -3,7 +3,6 @@ import { useAuth } from './context/AuthContext';
 import { AuthLayout } from './layouts/AuthLayout';
 import { SalesLayout } from './layouts/SalesLayout';
 import { AdminLayout } from './layouts/AdminLayout';
-import { isMockMode } from './config/environment';
 
 // Sales Core Pages
 import { DashboardPage } from './pages/Dashboard/DashboardPage';
@@ -133,19 +132,14 @@ export const App: React.FC = () => {
   });
 
   const roleCode = user?.role?.code;
+  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2' || user?.companySlug === 'jamin';
   const isGhlAdmin =
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
 
-  useEffect(() => {
-    if (isMockMode()) {
-      import('./mock/runtime/mockBootstrap').then(({ runMockBootstrap }) => {
-        runMockBootstrap();
-      });
-    }
-  }, []);
 
-  // Set default route for IRM user
+
+  // Set default route for IRM user or redirect invalid routes
   useEffect(() => {
     if (user?.role?.code === 'irm') {
       const savedRoute = sessionStorage.getItem('nexus_current_route');
@@ -153,11 +147,11 @@ export const App: React.FC = () => {
         setCurrentRoute('dashboard');
         sessionStorage.setItem('nexus_current_route', 'dashboard');
       }
-    } else if (user?.role?.code === 'sales_executive' && currentRoute === 'kyc') {
+    } else if ((user?.role?.code === 'sales_executive' || isJamin) && currentRoute === 'kyc') {
       setCurrentRoute('dashboard');
       sessionStorage.setItem('nexus_current_route', 'dashboard');
     }
-  }, [user?.role?.code, currentRoute]);
+  }, [user?.role?.code, currentRoute, isJamin]);
 
   // Handle route change and synchronize browser URL bar & history
   const navigate = (route: string) => {
@@ -277,14 +271,14 @@ export const App: React.FC = () => {
         notes: quickNotes,
         customFields: tenant?.slug === 'jamin'
           ? {
-              budgetRange: quickBudgetRange,
-              preferredLocation: quickPreferredLocation,
-            }
+            budgetRange: quickBudgetRange,
+            preferredLocation: quickPreferredLocation,
+          }
           : {
-              assetClass: quickAssetClass,
-              preferredAssetClass: quickAssetClass,
-              investmentCapacity: quickInvestmentCapacity,
-            },
+            assetClass: quickAssetClass,
+            preferredAssetClass: quickAssetClass,
+            investmentCapacity: quickInvestmentCapacity,
+          },
       });
 
     } else if (quickCreateType === 'followup') {
@@ -484,7 +478,7 @@ export const App: React.FC = () => {
           <BookingsPage />
         </ProtectedRoute>
       ) : currentRoute === 'kyc' ? (
-        user?.role?.code === 'sales_executive' ? (
+        user?.role?.code === 'sales_executive' || isJamin ? (
           <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
         ) : (
           <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>

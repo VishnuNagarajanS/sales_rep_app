@@ -27,7 +27,7 @@
 
 .assigned-leads-page .lead-assigned-agent-val {
   font-weight: 600;
-  color: var(--primary-600, #dc2626);
+  color: var(--text-primary);
   font-size: 13px;
   display: inline-flex;
   align-items: center;

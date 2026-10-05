@@ -43,7 +43,7 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
         {
             var lead = await context.Set<Lead>().FirstOrDefaultAsync(x => x.Id == request.LeadId && x.CompanyId == currentUser.CompanyId && x.AssignedAgentId == currentUser.UserId, cancellationToken);
             if (lead != null && request.Disposition is "Interested" or "Not Interested" or "Wrong Number") lead.Status = request.Disposition == "Wrong Number" ? "Junk" : request.Disposition;
-            if (lead != null && request.Disposition is "Follow-up Required" or "Call Back") context.Set<Followup>().Add(new Followup { CompanyId = currentUser.CompanyId ?? 1, AssignedAgentId = currentUser.UserId ?? 1, LeadId = lead.Id, ContactId = lead.Id.ToString(), ContactType = "lead", ContactName = lead.Name, ContactPhone = lead.Phone, ScheduledAt = request.FollowupAt ?? DateTime.UtcNow.AddDays(1), Notes = request.Notes ?? string.Empty });
+            if (lead != null && request.Disposition is "Follow-up Required" or "Call Back") context.Set<Followup>().Add(new Followup { CompanyId = currentUser.CompanyId ?? lead.CompanyId, AssignedAgentId = currentUser.UserId ?? lead.AssignedAgentId, LeadId = lead.Id, ContactId = lead.Id.ToString(), ContactType = "lead", ContactName = lead.Name, ContactPhone = lead.Phone, ScheduledAt = request.FollowupAt ?? DateTime.UtcNow.AddDays(1), Notes = request.Notes ?? string.Empty });
         }
         await context.SaveChangesAsync(cancellationToken);
         return ApiResponse<CallRecordDto>.SuccessResult(Map(record), "Disposition processed");

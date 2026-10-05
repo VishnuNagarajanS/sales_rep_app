@@ -4,7 +4,7 @@ public class FollowupResponseDto
 {
     public int Id { get; set; }
     public int CompanyId { get; set; }
-    public int AssignedAgentId { get; set; }
+    public int? AssignedAgentId { get; set; }
     public string? AssignedAgentName { get; set; }
     public string ContactId { get; set; } = string.Empty;
     public string ContactType { get; set; } = string.Empty;

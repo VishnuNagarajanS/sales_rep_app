@@ -6,7 +6,6 @@ import {
   PriorityLevel,
   DateRangePreset,
 } from '../types/kanban';
-import { isMockMode } from '../config/environment';
 
 export type {
   AdminKanbanCard,
@@ -101,17 +100,6 @@ const formatDateSnippet = (iso: string) => {
 
 export const adminKanbanService = {
   getCards(): AdminKanbanCard[] {
-    if (isMockMode()) {
-      try {
-        const raw = localStorage.getItem('nexus_mock_admin_kanban_cards');
-        if (raw) return JSON.parse(raw);
-      } catch (e) {
-        console.error('Failed to load mock kanban cards:', e);
-      }
-      return [];
-    }
-
-    // Dev mode: isolated dev key, strictly no mock cards
     try {
       const data = localStorage.getItem(DEV_KANBAN_STORAGE_KEY);
       if (data) {
@@ -124,9 +112,8 @@ export const adminKanbanService = {
   },
 
   saveCards(cards: AdminKanbanCard[]): void {
-    const key = isMockMode() ? 'nexus_mock_admin_kanban_cards' : DEV_KANBAN_STORAGE_KEY;
     try {
-      localStorage.setItem(key, JSON.stringify(cards));
+      localStorage.setItem(DEV_KANBAN_STORAGE_KEY, JSON.stringify(cards));
       window.dispatchEvent(new Event('nexus_admin_kanban_updated'));
     } catch (e) {
       console.error('Failed to save admin kanban cards:', e);

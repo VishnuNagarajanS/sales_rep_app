@@ -8,6 +8,10 @@ import { EmptyState } from '../../components/common/EmptyState';
 import { Lead, Deal, CallRecord, SiteVisit, Booking, Consultation, InvestmentOpportunity, Followup, Customer } from '../../types';
 import './ReportsPage.css';
 
+import { jaminApiService } from '../../services/jaminApiService';
+import { storageService } from '../../services/storageService';
+import { isTenantMatch } from '../../services/ghlApiService';
+
 export const ReportsPage: React.FC = () => {
   const { tenant, user, enabledFeatures } = useAuth();
   const [period, setPeriod] = useState<'week' | 'month' | 'quarter'>('month');
@@ -24,7 +28,29 @@ export const ReportsPage: React.FC = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
 
   const loadData = async () => {
-    if (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') {
+    if (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2') {
+      try {
+        const [liveLeads, liveVisits, liveBookings] = await Promise.all([
+          jaminApiService.getLeads(true),
+          jaminApiService.getSiteVisits(),
+          jaminApiService.getBookings(),
+        ]);
+        setLeads(liveLeads || []);
+        setSiteVisits(liveVisits || []);
+        setBookings(liveBookings || []);
+        setDeals([]);
+        setConsultations([]);
+        setOpportunities([]);
+        const allCalls: CallRecord[] = storageService.getCalls ? storageService.getCalls(tenant?.id) : [];
+        setCalls(allCalls.filter(c => isTenantMatch(c.companyId || (c as any).tenantId, tenant?.id)));
+        const allFlw: Followup[] = storageService.getFollowups ? storageService.getFollowups(tenant?.id) : [];
+        setFollowups(allFlw.filter(f => isTenantMatch(f.companyId, tenant?.id)));
+        const allCust: Customer[] = storageService.getCustomers ? storageService.getCustomers(tenant?.id) : [];
+        setCustomers(allCust.filter(c => isTenantMatch(c.companyId, tenant?.id)));
+      } catch (err) {
+        console.error('Failed to load Jamin report data', err);
+      }
+    } else if (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') {
       try {
         const [l, d, c, cs, opp, flw, cust] = await Promise.all([
           getLeads(tenant?.id),
@@ -45,15 +71,15 @@ export const ReportsPage: React.FC = () => {
       } catch {}
     } else {
       try {
-        setLeads(JSON.parse(localStorage.getItem('nexus_leads') || '[]'));
-        setDeals(JSON.parse(localStorage.getItem('nexus_deals') || '[]'));
-        setCalls(JSON.parse(localStorage.getItem('nexus_calls') || '[]'));
-        setSiteVisits(JSON.parse(localStorage.getItem('nexus_site_visits') || '[]'));
-        setBookings(JSON.parse(localStorage.getItem('nexus_bookings') || '[]'));
-        setConsultations(JSON.parse(localStorage.getItem('nexus_consultations') || '[]'));
-        setOpportunities(JSON.parse(localStorage.getItem('nexus_opportunities') || '[]'));
-        setFollowups(JSON.parse(localStorage.getItem('nexus_followups') || '[]'));
-        setCustomers(JSON.parse(localStorage.getItem('nexus_customers') || '[]'));
+        setLeads(storageService.getLeads ? storageService.getLeads(tenant?.id) : []);
+        setDeals(storageService.getDeals ? storageService.getDeals(tenant?.id) : []);
+        setCalls(storageService.getCalls ? storageService.getCalls(tenant?.id) : []);
+        setSiteVisits(storageService.getSiteVisits ? storageService.getSiteVisits(tenant?.id) : []);
+        setBookings(storageService.getBookings ? storageService.getBookings(tenant?.id) : []);
+        setConsultations(storageService.getConsultations ? storageService.getConsultations(tenant?.id) : []);
+        setOpportunities(storageService.getOpportunities ? storageService.getOpportunities(tenant?.id) : []);
+        setFollowups(storageService.getFollowups ? storageService.getFollowups(tenant?.id) : []);
+        setCustomers(storageService.getCustomers ? storageService.getCustomers(tenant?.id) : []);
       } catch {}
     }
   };

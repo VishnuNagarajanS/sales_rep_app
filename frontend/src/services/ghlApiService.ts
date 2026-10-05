@@ -397,9 +397,12 @@ function mapLead(l: Record<string, any>): Lead {
     source: l.source ?? '',
     status: l.status ?? 'New',
     priority: l.priority ?? 'Medium',
-    assignedAgentId: sid(l.assignedAgentId),
-    assignedAgentName: l.assignedAgentName ?? '',
+    assignedAgentId: l.assignedAgentId ? sid(l.assignedAgentId) : undefined,
+    assignedAgentName: l.assignedAgentName || (l.assignedAgent?.name) || 'Unassigned',
     nextFollowupDate: l.nextFollowupDate,
+    targetDevelopment: l.targetDevelopment,
+    budgetRange: l.budgetRange,
+    readyToRegister: l.readyToRegister,
     createdAt: l.createdAt ?? new Date().toISOString(),
     notes: l.notes ?? '',
     customFields: l.customFields ?? {},
@@ -408,18 +411,15 @@ function mapLead(l: Record<string, any>): Lead {
 
 export async function getLeads(companyId?: string): Promise<Lead[]> {
   try {
-    const raw = await fetchAll<any>('/sales-executive/leads');
-    if (raw && raw.length > 0) {
-      const apiLeads = raw.map(mapLead);
-      const localLeads = storageService.getLeads(companyId);
-      const apiIds = new Set(apiLeads.map(l => l.id));
-      const unsynced = localLeads.filter((l: Lead) => !apiIds.has(l.id));
-      return [...apiLeads, ...unsynced];
+    const tenantNum = (companyId && (companyId === '2' || companyId.includes('jamin'))) ? '2' : '1';
+    const res = await apiClient.get<any>(`/leads?tenantId=${tenantNum}`);
+    if (res && res.success && Array.isArray(res.data)) {
+      return res.data.map(mapLead);
     }
   } catch (err) {
-    console.warn('[ghlApiService] Failed to fetch leads from API, falling back to local storage:', err);
+    console.warn('[ghlApiService] Failed to fetch leads from API:', err);
   }
-  return storageService.getLeads(companyId);
+  return [];
 }
 
 export async function saveLead(lead: Lead): Promise<Lead> {

@@ -33,7 +33,6 @@ const getCallPreferences = (): CallPreferences => {
     return DEFAULT_CALL_PREFS;
   }
 };
-import { MOCK_AGENTS, MOCK_IRMS } from '../../mock_data/mockData';
 
 import {
   Phone,
@@ -270,12 +269,12 @@ export const InCallBar: React.FC = () => {
 
   const connectOptions = isIrm
     ? (() => {
-        const base = storageService.getAgents(tenant?.id).map((a: { id: string | number; name: string }) => ({ name: a.name, status: 'Available' as const }));
-        if (!previousAgentName) return base;
-        // Move the previously-assigned agent to the top of the list as the default
-        const rest = base.filter((a: { name: string }) => a.name !== previousAgentName);
-        return [{ name: previousAgentName, status: 'Available' as const, isPrevious: true }, ...rest];
-      })()
+      const base = storageService.getAgents(tenant?.id).map((a: { id: string | number; name: string }) => ({ name: a.name, status: 'Available' as const }));
+      if (!previousAgentName) return base;
+      // Move the previously-assigned agent to the top of the list as the default
+      const rest = base.filter((a: { name: string }) => a.name !== previousAgentName);
+      return [{ name: previousAgentName, status: 'Available' as const, isPrevious: true }, ...rest];
+    })()
     : storageService.getIrms(tenant?.id);
 
   const filteredConnectOptions = connectOptions.filter((o: any) =>

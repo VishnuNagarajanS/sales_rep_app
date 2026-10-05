@@ -29,19 +29,7 @@ import {
   ProductService,
 } from '../types';
 import { DEFAULT_TENANTS } from '../constants/defaultTenants';
-import {
-  INITIAL_CUSTOM_FIELD_DEFINITIONS,
-  INITIAL_INVESTORS,
-  INITIAL_CONSULTATIONS,
-  INITIAL_OPPORTUNITIES,
-  INITIAL_NOTIFICATIONS,
-  INITIAL_DEAL_ACTIVITIES,
-  INITIAL_CALLS,
-  INITIAL_CUSTOMERS,
-  MOCK_AGENTS,
-  MOCK_IRMS,
-} from '../mock_data/mockData';
-import { ensureInitialAdminFollowups } from '../mock_data/adminFollowupsData';
+
 
 export type PopupPosition = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
 
@@ -137,8 +125,18 @@ class StorageService {
 
   // Leads (Defaults to empty [] - real-time data only)
   getLeads(companyId?: string): Lead[] {
-    const leads = this.get<Lead[]>('leads', []);
-    return companyId ? leads.filter(l => l.companyId === companyId) : leads;
+    let leads = this.get<Lead[]>('leads', []);
+    if (leads.length === 0) {
+      leads = this.get<Lead[]>('nexus_leads', []);
+    }
+    if (!companyId) return leads;
+    return leads.filter(l => {
+      if (!l.companyId) return true;
+      if (l.companyId === companyId) return true;
+      if ((companyId === 't-ghl-01' || companyId === '1') && (l.companyId === 't-ghl-01' || l.companyId === '1')) return true;
+      if ((companyId === 't-jamin-02' || companyId === '2') && (l.companyId === 't-jamin-02' || l.companyId === '2')) return true;
+      return false;
+    });
   }
 
   findLeadByPhone(phone: string, companyId?: string): Lead | undefined {
@@ -284,24 +282,21 @@ class StorageService {
 
   // Deal Activities
   getDealActivities(dealId: string, companyId?: string): DealActivity[] {
-    const activities = this.get<DealActivity[]>('deal_activities', INITIAL_DEAL_ACTIVITIES);
+    const activities = this.get<DealActivity[]>('deal_activities', []);
     return activities.filter(a => a.dealId === dealId && (!companyId || a.companyId === companyId));
   }
 
   addDealActivity(activity: DealActivity): void {
-    const activities = this.get<DealActivity[]>('deal_activities', INITIAL_DEAL_ACTIVITIES);
+    const activities = this.get<DealActivity[]>('deal_activities', []);
     activities.unshift(activity);
     this.set('deal_activities', activities);
     window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 
-  // Calls (Seeds from INITIAL_CALLS; real calls are prepended via addCall)
+  // Calls (Defaults to empty [] - real calls are prepended via addCall)
   getCalls(companyId?: string): CallRecord[] {
     const stored = this.get<CallRecord[]>('calls', []);
-    // Merge: keep stored calls first, then append any INITIAL_CALLS not already present
-    const storedIds = new Set(stored.map(c => c.id));
-    const merged = [...stored, ...INITIAL_CALLS.filter(c => !storedIds.has(c.id))];
-    return companyId ? merged.filter(c => c.companyId === companyId) : merged;
+    return companyId ? stored.filter(c => c.companyId === companyId) : stored;
   }
 
   addCall(call: CallRecord): void {
@@ -312,40 +307,14 @@ class StorageService {
 
   getFollowups(companyId?: string): Followup[] {
     const raw = this.get<Followup[]>('followups', []) || [];
-    const { list, modified } = ensureInitialAdminFollowups(raw);
-    let notesCleaned = false;
-    const sanitizedList = list.map(f => {
-      if (f.notes && (/via leads 360/i.test(f.notes) || /scheduled via leads/i.test(f.notes))) {
-        notesCleaned = true;
-        let cleaned = f.notes;
-        if (/follow-up\s+whatsapp\s+scheduled/i.test(cleaned)) {
-          cleaned = 'WhatsApp follow-up on property inquiry';
-        } else if (/follow-up\s+call\s+scheduled/i.test(cleaned)) {
-          cleaned = 'Phone call follow-up on property inquiry';
-        } else if (/follow-up\s+meeting\s+scheduled/i.test(cleaned)) {
-          cleaned = 'Meeting follow-up on property inquiry';
-        } else {
-          cleaned = cleaned
-            .replace(/\s*\(?via Leads\s*360\)?/gi, '')
-            .replace(/\s*scheduled via Leads\s*360/gi, '')
-            .trim();
-        }
-        return {
-          ...f,
-          notes: cleaned || 'Follow-up on property inquiry',
-        };
-      }
-      return f;
+    if (!companyId) return raw;
+    const isGhl = companyId === '1' || (companyId as any) === 1 || companyId === 't-ghl-01';
+    const isJamin = companyId === '2' || (companyId as any) === 2 || companyId === 't-jamin-02';
+    return raw.filter((f: Followup) => {
+      if (isGhl) return f.companyId === 't-ghl-01' || f.companyId === '1' || (f.companyId as any) === 1;
+      if (isJamin) return f.companyId === 't-jamin-02' || f.companyId === '2' || (f.companyId as any) === 2 || !f.companyId;
+      return f.companyId === companyId;
     });
-
-    if (modified || notesCleaned) {
-      try {
-        localStorage.setItem('nexus_followups', JSON.stringify(sanitizedList));
-      } catch (e) {
-        console.error('Failed to seed admin followups', e);
-      }
-    }
-    return companyId ? sanitizedList.filter(f => f.companyId === companyId) : sanitizedList;
   }
 
   cleanupGhlPendingFollowups(companyId?: string): void {
@@ -534,19 +503,9 @@ class StorageService {
     this.set('bookings', bookings);
   }
 
-  // Investors (Defaults to INITIAL_INVESTORS)
+  // Investors (Defaults to empty [])
   getInvestors(companyId?: string): Investor[] {
-    let investors = this.get<Investor[]>('investors', INITIAL_INVESTORS);
-    if (!investors || investors.length === 0) {
-      investors = INITIAL_INVESTORS;
-    } else {
-      const existingIds = new Set(investors.map(i => i.id));
-      const missing = INITIAL_INVESTORS.filter(i => !existingIds.has(i.id));
-      if (missing.length > 0) {
-        investors = [...investors, ...missing];
-        this.set('investors', investors);
-      }
-    }
+    const investors = this.get<Investor[]>('investors', []);
     return companyId ? investors.filter(i => i.companyId === companyId) : investors;
   }
 
@@ -566,19 +525,9 @@ class StorageService {
     this.set('investors', investors);
   }
 
-  // Consultations (Defaults to INITIAL_CONSULTATIONS)
+  // Consultations (Defaults to empty [])
   getConsultations(companyId?: string): Consultation[] {
-    let consultations = this.get<Consultation[]>('consultations', INITIAL_CONSULTATIONS);
-    if (!consultations || consultations.length === 0) {
-      consultations = INITIAL_CONSULTATIONS;
-    } else {
-      const existingIds = new Set(consultations.map(c => c.id));
-      const missing = INITIAL_CONSULTATIONS.filter(c => !existingIds.has(c.id));
-      if (missing.length > 0) {
-        consultations = [...consultations, ...missing];
-        this.set('consultations', consultations);
-      }
-    }
+    const consultations = this.get<Consultation[]>('consultations', []);
     return companyId ? consultations.filter(c => c.companyId === companyId) : consultations;
   }
 
@@ -598,19 +547,9 @@ class StorageService {
     this.set('consultations', consultations);
   }
 
-  // Opportunities (Defaults to INITIAL_OPPORTUNITIES)
+  // Opportunities (Defaults to empty [])
   getOpportunities(companyId?: string): InvestmentOpportunity[] {
-    let opps = this.get<InvestmentOpportunity[]>('opportunities', INITIAL_OPPORTUNITIES);
-    if (!opps || opps.length === 0) {
-      opps = INITIAL_OPPORTUNITIES;
-    } else {
-      const existingIds = new Set(opps.map(o => o.id));
-      const missing = INITIAL_OPPORTUNITIES.filter(o => !existingIds.has(o.id));
-      if (missing.length > 0) {
-        opps = [...opps, ...missing];
-        this.set('opportunities', opps);
-      }
-    }
+    const opps = this.get<InvestmentOpportunity[]>('opportunities', []);
     return companyId ? opps.filter(o => o.companyId === companyId) : opps;
   }
 
@@ -638,24 +577,20 @@ class StorageService {
   }
 
   addAuditLog(log: AuditLog): void {
-    const logs = this.getAuditLogs();
-    logs.unshift(log);
+    const logs = this.get<AuditLog[]>('audit_logs', []);
+    const entry: AuditLog = {
+      ...log,
+      id: log.id || `aud-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      timestamp: log.timestamp && log.timestamp !== 'Just now' ? log.timestamp : new Date().toISOString(),
+    };
+    logs.unshift(entry);
     this.set('audit_logs', logs);
   }
 
   // Notifications (Multi-tenant scoped with strict cross-tenant isolation)
   getNotifications(companyId?: string, userId?: string, userRoleCode?: string): NotificationItem[] {
     let raw = this.get<NotificationItem[]>('notifications', []);
-
-    // Seed defaults if empty
-    if (raw.length === 0) {
-      raw = INITIAL_NOTIFICATIONS;
-      try {
-        localStorage.setItem('nexus_notifications', JSON.stringify(raw));
-      } catch (e) {
-        console.error('Failed to seed initial notifications', e);
-      }
-    }
+    raw = raw.filter(n => !n.id.startsWith('notif-0') && !n.id.startsWith('notif-jam-') && !n.message.includes('Manjunath Swamy') && !n.message.includes('Rathore'));
 
     // Auto-migrate any legacy items lacking tenant information (default to GHL)
     let migrated = false;
@@ -684,19 +619,19 @@ class StorageService {
     // 1. Strict Tenant Filtering
     if (!companyId) return cleanList;
 
-    const targetCompanyId = companyId.toLowerCase();
-    const isGhlTarget = targetCompanyId === 't-ghl-01' || targetCompanyId === 'ghl';
-    const isJaminTarget = targetCompanyId === 't-jamin-02' || targetCompanyId === 'jamin';
+    const targetCompanyId = String(companyId).toLowerCase();
+    const isGhlTarget = targetCompanyId === 't-ghl-01' || targetCompanyId === 'ghl' || targetCompanyId === '1';
+    const isJaminTarget = targetCompanyId === 't-jamin-02' || targetCompanyId === 'jamin' || targetCompanyId === '2';
 
     const tenantScoped = cleanList.filter(n => {
       const nCompId = (n.companyId || '').toLowerCase();
       const nSlug = (n.companySlug || '').toLowerCase();
 
       if (isGhlTarget) {
-        return nCompId === 't-ghl-01' || nSlug === 'ghl';
+        return nCompId === 't-ghl-01' || nSlug === 'ghl' || nCompId === '1';
       }
       if (isJaminTarget) {
-        return nCompId === 't-jamin-02' || nSlug === 'jamin';
+        return nCompId === 't-jamin-02' || nSlug === 'jamin' || nCompId === '2';
       }
       return nCompId === targetCompanyId || nSlug === targetCompanyId;
     });
@@ -918,14 +853,14 @@ class StorageService {
 
   // Custom Field Definitions
   getCustomFieldDefinitions(companyId?: string): CustomFieldDefinition[] {
-    const definitions = this.get<CustomFieldDefinition[]>('custom_field_definitions', INITIAL_CUSTOM_FIELD_DEFINITIONS);
+    const definitions = this.get<CustomFieldDefinition[]>('custom_field_definitions', []);
     if (!companyId) return definitions;
+    const isGhl = companyId === 'ghl' || companyId === 't-ghl-01' || companyId === '1';
+    const isJamin = companyId === 'jamin' || companyId === 't-jamin-02' || companyId === '2';
     return definitions.filter(d =>
       d.companyId === companyId ||
-      (companyId === 'ghl' && d.companyId === 't-ghl-01') ||
-      (companyId === 't-ghl-01' && d.companyId === 'ghl') ||
-      (companyId === 'jamin' && d.companyId === 't-jamin-02') ||
-      (companyId === 't-jamin-02' && d.companyId === 'jamin')
+      (isGhl && (d.companyId === 't-ghl-01' || d.companyId === 'ghl' || d.companyId === '1')) ||
+      (isJamin && (d.companyId === 't-jamin-02' || d.companyId === 'jamin' || d.companyId === '2'))
     );
   }
 
@@ -959,55 +894,38 @@ class StorageService {
 
 
 
-  // Optional: Explicitly populate demo mock data from separate mock_data folder
+  // Optional: Explicitly populate demo mock data (disabled)
   async loadMockDataFromSeparateFolder(): Promise<void> {
-    const mock = await import('../mock_data/mockData');
-    this.set('leads', mock.INITIAL_LEADS);
-    this.set('customers', mock.INITIAL_CUSTOMERS);
-    this.set('deals', mock.INITIAL_DEALS);
-    this.set('calls', mock.INITIAL_CALLS);
-    this.set('followups', mock.INITIAL_FOLLOWUPS);
-    this.set('projects', mock.INITIAL_PROJECTS);
-    this.set('plots', mock.INITIAL_PLOTS);
-    this.set('site_visits', mock.INITIAL_SITE_VISITS);
-    this.set('bookings', mock.INITIAL_BOOKINGS);
-    this.set('investors', mock.INITIAL_INVESTORS);
-    this.set('consultations', mock.INITIAL_CONSULTATIONS);
-    this.set('opportunities', mock.INITIAL_OPPORTUNITIES);
-    this.set('audit_logs', mock.INITIAL_AUDIT_LOGS);
-    this.set('notifications', mock.INITIAL_NOTIFICATIONS);
-    this.set('users', mock.USERS);
-    this.set('tenants', Object.values(mock.TENANTS));
-    this.set('custom_field_definitions', mock.INITIAL_CUSTOM_FIELD_DEFINITIONS);
-    this.set('deal_activities', mock.INITIAL_DEAL_ACTIVITIES);
-    window.dispatchEvent(new Event('nexus_storage_updated'));
+    // Mock data removed - all data loaded directly from backend API
   }
 
-  // Proxy methods for remaining mock data usage
-  getAgents(tenantId?: string) {
-    return MOCK_AGENTS;
+  // Proxy methods for remaining agent usage
+  getAgents(tenantId?: string): User[] {
+    const users = this.getUsers();
+    const agents = users.filter(u => u.role?.code === 'sales_executive' || u.role?.code === 'sales_manager' || u.role?.code === 'irm');
+    return agents.length > 0 ? agents : users;
   }
 
   getIrms(tenantId?: string): IrmProfile[] {
-    return MOCK_IRMS;
+    return [] as IrmProfile[];
   }
 
   getMockAgents() {
-    return MOCK_AGENTS;
+    return this.getAgents();
   }
 
   getMockIrms() {
-    return MOCK_IRMS;
+    return [];
   }
 
   getInitialCustomers() {
-    return INITIAL_CUSTOMERS;
+    return [];
   }
 
   // Incoming Call Popup Position
   getPopupPosition(): PopupPosition {
     try {
-      const data = localStorage.getItem('nexus_popup_position');
+      const data = localStorage.getItem('nexus_popup_position') || localStorage.getItem('nexus_popup_pos');
       if (!data) return 'top-right';
       try {
         const parsed = JSON.parse(data);
@@ -1029,6 +947,7 @@ class StorageService {
   setPopupPosition(pos: PopupPosition): void {
     try {
       localStorage.setItem('nexus_popup_position', JSON.stringify(pos));
+      localStorage.setItem('nexus_popup_pos', pos);
       window.dispatchEvent(new Event('nexus_storage_updated'));
     } catch (e) {
       console.error('Failed to save popup position to localStorage', e);
@@ -1080,13 +999,3 @@ class StorageService {
 }
 
 export const storageService = new StorageService();
-
-let _mockStorageAdapter: any = null;
-export function registerMockStorageAdapter(adapter: any): void {
-  _mockStorageAdapter = adapter;
-}
-
-let _mockBootstrapRunner: any = null;
-export function registerMockBootstrapRunner(runner: any): void {
-  _mockBootstrapRunner = runner;
-}

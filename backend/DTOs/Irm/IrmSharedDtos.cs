@@ -8,7 +8,7 @@ public class FollowupDto
     public int CompanyId { get; set; }
     public int? InvestorId { get; set; }
     public string? InvestorName { get; set; }
-    public int AssignedToId { get; set; }
+    public int? AssignedToId { get; set; }
     public string AssignedToName { get; set; } = string.Empty;
     public string AssignedToRole { get; set; } = string.Empty;
     public string ContactName { get; set; } = string.Empty;

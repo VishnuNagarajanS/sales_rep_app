@@ -16,26 +16,22 @@ import {
 import { NotificationItem, User as UserType } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { Modal } from '../../components/common/Modal';
+import { storageService } from '../../services/storageService';
+import { isTenantMatch } from '../../services/ghlApiService';
+import { adminUserService } from '../../services/adminUserService';
 import './NotificationsPage.css';
-
-const getStoredUsers = (tenantSlug?: string): UserType[] => {
-  try {
-    const raw = localStorage.getItem('nexus_users');
-    const users = raw ? JSON.parse(raw) : [];
-    return tenantSlug ? users.filter((u: any) => u.companySlug === tenantSlug) : users;
-  } catch {
-    return [];
-  }
-};
 
 const getStoredNotifications = (tenantId?: string, userId?: string, roleCode?: string): NotificationItem[] => {
   try {
+    if (storageService.getNotifications) {
+      return storageService.getNotifications(tenantId, userId, roleCode);
+    }
     const raw = localStorage.getItem('nexus_notifications');
     const all = raw ? JSON.parse(raw) : [];
     return all.filter((n: any) => {
-      if (n.tenantId && tenantId && n.tenantId !== tenantId) return false;
-      if (n.recipientUserId && userId && n.recipientUserId !== userId) return false;
-      if (n.recipientRoleCode && roleCode && n.recipientRoleCode !== roleCode) return false;
+      if (tenantId && !isTenantMatch(n.companyId || n.tenantId, tenantId)) return false;
+      if (n.recipientUserId && userId && n.recipientUserId !== userId && n.recipientUserId !== 'all') return false;
+      if (n.recipientRoleCode && roleCode && n.recipientRoleCode !== roleCode && n.recipientRoleCode !== 'all') return false;
       return true;
     });
   } catch {
@@ -91,6 +87,7 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
     roleCode === 'super_admin';
 
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [tenantUsers, setTenantUsers] = useState<UserType[]>([]);
   const [activeTab, setActiveTab] = useState<'all' | 'unread' | 'urgent' | 'sent'>('all');
 
   // Modal State
@@ -103,10 +100,13 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
   const [actionLink, setActionLink] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Load tenant users for recipient dropdown
-  const tenantUsers: UserType[] = useMemo(() => {
-    return getStoredUsers(tenant?.slug) || [];
-  }, [tenant?.slug]);
+  // Load live backend users for recipient dropdown
+  useEffect(() => {
+    if (!tenant?.id) return;
+    adminUserService.getUsers(tenant.id)
+      .then(users => setTenantUsers(users || []))
+      .catch(err => console.error('Failed to load company users for notifications:', err));
+  }, [tenant?.id]);
 
   const loadData = () => {
     setNotifications(getStoredNotifications(tenant?.id, user?.id, user?.role?.code));
@@ -136,6 +136,7 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
   // Helper to get descriptive recipient label
   const getRecipientLabel = (val: string): string => {
     if (val === 'all') return `All Users in ${tenant?.name || 'Company'}`;
+    if (val === 'role:sales_manager') return 'All Sales Managers';
     if (val === 'role:sales_executive') return 'All Sales Executives';
     if (val === 'role:irm') return 'All IRMs (Investor Relations)';
     const foundUser = tenantUsers.find(u => u.id === val);
@@ -379,6 +380,7 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
               >
                 <optgroup label="Broad Audience">
                   <option value="all">📢 All Users in {tenant?.name} (Broadcast)</option>
+                  <option value="role:sales_manager">👔 All Sales Managers in {tenant?.name}</option>
                   <option value="role:sales_executive">👥 All Sales Executives in {tenant?.name}</option>
                   {tenant?.slug === 'ghl' && (
                     <option value="role:irm">💼 All IRMs (Investor Relations)</option>

@@ -23,6 +23,8 @@ export const BookingsPage: React.FC = () => {
   // Form State
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [selectedPlotId, setSelectedPlotId] = useState<string>('');
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
+  const [selectedLeadId, setSelectedLeadId] = useState<string>('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [tokenAmountPaid, setTokenAmountPaid] = useState<number>(100000);
@@ -57,6 +59,8 @@ export const BookingsPage: React.FC = () => {
   const handleProjectSelect = (projId: string) => {
     setSelectedProjectId(projId);
     setSelectedPlotId('');
+    setSelectedCustomerId('');
+    setSelectedLeadId('');
     setTotalPlotPrice(0);
   };
 
@@ -66,6 +70,9 @@ export const BookingsPage: React.FC = () => {
     const chosenPlot = plots.find(p => String(p.id) === String(plotId));
     if (chosenPlot) {
       setTotalPlotPrice(chosenPlot.price || chosenPlot.totalPrice || 0);
+      if (chosenPlot.heldByCustomerId) {
+        setSelectedCustomerId(String(chosenPlot.heldByCustomerId));
+      }
       if (chosenPlot.heldByCustomerName && !customerName) {
         setCustomerName(chosenPlot.heldByCustomerName);
       }
@@ -88,6 +95,8 @@ export const BookingsPage: React.FC = () => {
     setSubmitting(true);
     try {
       const payload = {
+        customerId: selectedCustomerId ? parseInt(selectedCustomerId, 10) : (selectedPlt?.heldByCustomerId ? parseInt(String(selectedPlt.heldByCustomerId), 10) : undefined),
+        leadId: selectedLeadId ? parseInt(selectedLeadId, 10) : undefined,
         projectId: selectedProjectId ? parseInt(selectedProjectId, 10) : undefined,
         plotId: selectedPlotId ? parseInt(selectedPlotId, 10) : undefined,
         projectName: selectedProj?.name || '',
@@ -109,6 +118,8 @@ export const BookingsPage: React.FC = () => {
         setCustomerPhone('');
         setSelectedProjectId('');
         setSelectedPlotId('');
+        setSelectedCustomerId('');
+        setSelectedLeadId('');
         setTokenAmountPaid(100000);
         setTotalPlotPrice(0);
         setPaymentTerms('20% on Agreement, 80% on Registration / Bank Loan');

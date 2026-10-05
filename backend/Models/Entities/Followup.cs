@@ -10,18 +10,18 @@ public class Followup
     public int CompanyId { get; set; }
     public Tenant? Company { get; set; }
 
-    public int AssignedAgentId { get; set; }
+    public int? AssignedAgentId { get; set; }
     public User? AssignedAgent { get; set; }
 
     [NotMapped]
-    public int UserId
+    public int? UserId
     {
         get => AssignedAgentId;
         set => AssignedAgentId = value;
     }
 
     [NotMapped]
-    public int AssignedToId
+    public int? AssignedToId
     {
         get => AssignedAgentId;
         set => AssignedAgentId = value;

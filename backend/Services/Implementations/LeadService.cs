@@ -163,7 +163,8 @@ public class LeadService : ILeadService
 
     public async Task<ApiResponse<LeadResponseDto>> CreateLeadAsync(CreateLeadDto dto, CancellationToken ct = default)
     {
-        var agentId = _currentUser.UserId ?? 1;
+        // Unassigned leads should stay null and never default to admin
+        var agentId = dto.AssignedAgentId;
         var companyId = dto.CompanyId ?? _currentUser.CompanyId ?? 1;
 
         // Build Custom Fields Dictionary for GHL
@@ -185,6 +186,9 @@ public class LeadService : ILeadService
             Status = string.IsNullOrWhiteSpace(dto.Status) ? "New" : dto.Status.Trim(),
             Priority = string.IsNullOrWhiteSpace(dto.Priority) ? "Medium" : dto.Priority.Trim(),
             Notes = dto.Notes?.Trim() ?? string.Empty,
+            TargetDevelopment = dto.TargetDevelopment?.Trim(),
+            BudgetRange = dto.BudgetRange?.Trim(),
+            ReadyToRegister = dto.ReadyToRegister?.Trim(),
             CustomFieldsJson = customFields.Count > 0 ? JsonSerializer.Serialize(customFields) : null,
             CreatedAt = DateTime.UtcNow
         };
@@ -212,6 +216,9 @@ public class LeadService : ILeadService
         if (dto.Status != null) lead.Status = dto.Status.Trim();
         if (dto.Priority != null) lead.Priority = dto.Priority.Trim();
         if (dto.Notes != null) lead.Notes = dto.Notes.Trim();
+        if (dto.TargetDevelopment != null) lead.TargetDevelopment = dto.TargetDevelopment.Trim();
+        if (dto.BudgetRange != null) lead.BudgetRange = dto.BudgetRange.Trim();
+        if (dto.ReadyToRegister != null) lead.ReadyToRegister = dto.ReadyToRegister.Trim();
         if (dto.NextFollowupDate.HasValue) lead.NextFollowupDate = dto.NextFollowupDate.Value;
         if (dto.AssignedAgentId.HasValue) lead.AssignedAgentId = dto.AssignedAgentId.Value;
 
@@ -254,7 +261,7 @@ public class LeadService : ILeadService
             customer = new Customer
             {
                 CompanyId = companyId,
-                AssignedAgentId = agentId,
+                AssignedAgentId = lead.AssignedAgentId,
                 Name = lead.Name,
                 Phone = lead.Phone,
                 Email = lead.Email,
@@ -375,6 +382,11 @@ public class LeadService : ILeadService
 
     private static LeadResponseDto MapToDto(Lead lead)
     {
+        var customFieldsDict = DeserializeCustomFields(lead.CustomFieldsJson);
+        if (!string.IsNullOrEmpty(lead.ReadyToRegister)) customFieldsDict["readyToRegister"] = lead.ReadyToRegister;
+        if (!string.IsNullOrEmpty(lead.BudgetRange)) customFieldsDict["budgetRange"] = lead.BudgetRange;
+        if (!string.IsNullOrEmpty(lead.TargetDevelopment)) customFieldsDict["targetDevelopment"] = lead.TargetDevelopment;
+
         return new LeadResponseDto
         {
             Id = lead.Id,
@@ -389,7 +401,14 @@ public class LeadService : ILeadService
             Status = lead.Status,
             Priority = lead.Priority,
             Notes = lead.Notes,
-            CustomFields = DeserializeCustomFields(lead.CustomFieldsJson),
+            TargetDevelopment = lead.TargetDevelopment,
+            BudgetRange = lead.BudgetRange,
+            ReadyToRegister = lead.ReadyToRegister,
+            PreferredVisitDate = lead.PreferredVisitDate,
+            PreferredTimeSlot = lead.PreferredTimeSlot,
+            AnythingWeShouldKnow = lead.AnythingWeShouldKnow,
+            WhatAreYouLookingFor = lead.WhatAreYouLookingFor,
+            CustomFields = customFieldsDict,
             NextFollowupDate = lead.NextFollowupDate,
             CreatedAt = lead.CreatedAt,
             UpdatedAt = lead.UpdatedAt
@@ -417,7 +436,7 @@ public class LeadService : ILeadService
         _context.Leads.Remove(lead);
         await _context.SaveChangesAsync(ct);
 
-        return ApiResponse<object>.SuccessResult(null, "Lead deleted successfully.");
+        return ApiResponse<object>.SuccessResult(true, "Lead deleted successfully.");
     }
 }
 

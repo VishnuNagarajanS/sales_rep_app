@@ -192,7 +192,7 @@ export const MessageThread: React.FC<Props> = ({
     }
   };
 
-  const otherMember = conversation.type === 'dm' ? conversation.members.find(m => m.id !== me.id) : null;
+  const otherMember = conversation.type === 'dm' ? conversation.members.find(m => String(m.id) !== String(me.id)) : null;
 
   return (
     <>

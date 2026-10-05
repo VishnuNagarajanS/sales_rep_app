@@ -15,3 +15,15 @@ public class AuditLogResponseDto
     public string? Module { get; set; }
     public string Status { get; set; } = string.Empty;
 }
+
+public class CreateAuditLogRequestDto
+{
+    public string ActorName { get; set; } = string.Empty;
+    public string ActorEmail { get; set; } = string.Empty;
+    public string Action { get; set; } = string.Empty;
+    public string EntityType { get; set; } = string.Empty;
+    public string EntityId { get; set; } = string.Empty;
+    public string Details { get; set; } = string.Empty;
+    public string? Module { get; set; }
+    public string Status { get; set; } = "success";
+}

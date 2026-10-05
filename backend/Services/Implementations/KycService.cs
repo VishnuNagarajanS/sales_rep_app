@@ -104,7 +104,7 @@ public class KycService : IKycService
         {
             existing = new InvestorKyc
             {
-                InvestorId = investor.Id,
+                InvestorId = investor?.Id ?? 0,
                 CompanyId = companyId,
                 IrmId = irmId,
                 InvestorName = investorName,

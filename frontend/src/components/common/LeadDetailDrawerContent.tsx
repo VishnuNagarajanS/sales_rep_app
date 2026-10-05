@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Phone,
   FileText,
@@ -9,6 +9,11 @@ import {
   Calendar,
   Clock,
   CheckCircle2,
+  Activity,
+  History,
+  ShieldAlert,
+  User,
+  MapPin,
 } from 'lucide-react';
 import { CallDisposition, Consultation, SiteVisit } from '../../types';
 import { storageService } from '../../services/storageService';
@@ -67,6 +72,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   const [callTab, setCallTab] = useState<'agent' | 'irm'>('agent');
   const [isPreviousConsultationsOpen, setIsPreviousConsultationsOpen] = useState(true);
   const [isSiteVisitsOpen, setIsSiteVisitsOpen] = useState(true);
+  const [isActivityOpen, setIsActivityOpen] = useState(true);
   const [, setSiteVisitsVersion] = useState(0);
 
   useEffect(() => {
@@ -82,6 +88,21 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
       const fPhone = (contactPhone || '').replace(/\D/g, '').slice(-10);
       return lPhone && fPhone && lPhone === fPhone;
     }) || null;
+  })();
+
+  // ── Lead Activity & Audit History Lookup ──────────────────────────────────
+  const leadAuditLogs = (() => {
+    const allLogs = storageService.getAuditLogs(tenantId) || [];
+    const targetLeadId = selectedLead?.id || contactId;
+    const phoneDigits = (selectedLead?.phone || contactPhone || '').replace(/\D/g, '').slice(-10);
+    const targetName = (selectedLead?.name || contactName || '').toLowerCase();
+
+    return allLogs.filter(l => {
+      if (targetLeadId && (l.entityId === targetLeadId || l.entityId === String(targetLeadId))) return true;
+      if (l.details && phoneDigits && l.details.includes(phoneDigits)) return true;
+      if (l.details && targetName && l.details.toLowerCase().includes(targetName)) return true;
+      return false;
+    });
   })();
 
   // ── Site Visits lookup (Jamin Bazaar) ──────────────────────────────────────
@@ -125,10 +146,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   const isIrmCall = (c: any) =>
     (c.notes || '').startsWith('Connected to IRM:') ||
     (c.agentId || '').toLowerCase().includes('irm') ||
-    (c.agentName || '').toLowerCase().includes('irm') ||
-    ['Rohan Varma', 'Arun Kumar', 'Ananya Mehta', 'Rohan Mehta', 'Priya Nair', 'Karthik Sundaram'].some(n =>
-      (c.agentName || '').toLowerCase().includes(n.toLowerCase())
-    );
+    (c.agentName || '').toLowerCase().includes('irm');
 
   const agentCalls = selectedCalls.filter(c => !isIrmCall(c));
   const irmCalls = selectedCalls.filter(c => isIrmCall(c));
@@ -153,6 +171,132 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
     const s = sec % 60;
     return m > 0 ? `${m}m ${s}s` : `${s}s`;
   };
+
+  // ── Unified Activity & Audit Timeline ──────────────────────────────────────
+  const unifiedTimelineEvents = useMemo(() => {
+    const events: Array<{
+      id: string;
+      timestamp: string;
+      action: string;
+      actor: string;
+      details: string;
+      type: 'intake' | 'assignment' | 'call' | 'site_visit' | 'followup' | 'audit';
+      badgeColor: string;
+      badgeBg: string;
+      dotColor: string;
+    }> = [];
+
+    // 1. Lead Intake / Creation
+    if (selectedLead?.createdAt) {
+      events.push({
+        id: `intake-${selectedLead.id}`,
+        timestamp: selectedLead.createdAt,
+        action: 'LEAD_INTAKE',
+        actor: selectedLead.source || 'Website Inbound',
+        details: `Lead registered via ${selectedLead.source || 'Inbound'}${selectedLead.targetDevelopment ? ` for project ${selectedLead.targetDevelopment}` : ''}${selectedLead.location ? ` in ${selectedLead.location}` : ''}. Status: ${selectedLead.status || 'New'}, Priority: ${selectedLead.priority || 'Medium'}.`,
+        type: 'intake',
+        badgeColor: '#0284c7',
+        badgeBg: '#e0f2fe',
+        dotColor: '#0284c7',
+      });
+    }
+
+    // 2. Initial / Current Agent Assignment
+    if (selectedLead?.assignedAgentName && selectedLead.assignedAgentName !== 'Unassigned') {
+      events.push({
+        id: `assign-${selectedLead.id}`,
+        timestamp: (selectedLead as any).assignedAt || selectedLead.createdAt || new Date().toISOString(),
+        action: 'LEAD_ASSIGNED',
+        actor: selectedLead.assignedAgentName,
+        details: `Assigned to ${selectedLead.assignedAgentName} for follow-up and communication.`,
+        type: 'assignment',
+        badgeColor: '#7c3aed',
+        badgeBg: '#ede9fe',
+        dotColor: '#7c3aed',
+      });
+    }
+
+    // 3. Logged Calls
+    selectedCalls.forEach(c => {
+      events.push({
+        id: `call-${c.id}`,
+        timestamp: c.timestamp,
+        action: `${c.direction.toUpperCase()}_CALL`,
+        actor: c.agentName || 'Agent',
+        details: `${c.direction === 'inbound' ? 'Inbound' : 'Outbound'} call (${formatDuration(c.duration)}) • Outcome: ${c.disposition}${c.notes ? ` • Note: ${c.notes}` : ''}`,
+        type: 'call',
+        badgeColor: '#059669',
+        badgeBg: '#d1fae5',
+        dotColor: '#10b981',
+      });
+    });
+
+    // 4. Site Visits
+    leadSiteVisits.forEach(sv => {
+      events.push({
+        id: `visit-${sv.id}`,
+        timestamp: sv.scheduledAt || (sv as any).createdAt || selectedLead?.createdAt || new Date().toISOString(),
+        action: `SITE_VISIT_${(sv.status || 'SCHEDULED').toUpperCase()}`,
+        actor: sv.assignedAgentName || 'Host Agent',
+        details: `Site visit for ${sv.projectName || 'Project Layout'}${sv.plotNumber ? ` (${sv.plotNumber})` : ''} • Status: ${sv.status}${sv.visitorNote ? ` • Visitor Note: "${sv.visitorNote}"` : ''}${sv.outcomeNotes ? ` • Outcome: "${sv.outcomeNotes}"` : ''}`,
+        type: 'site_visit',
+        badgeColor: '#d97706',
+        badgeBg: '#fef3c7',
+        dotColor: '#f59e0b',
+      });
+    });
+
+    // 5. Follow-ups
+    const fPhoneDigits = (selectedLead?.phone || contactPhone || '').replace(/\D/g, '').slice(-10);
+    const leadFollowups = (storageService.getFollowups(tenantId) || []).filter(f => {
+      if (contactId && contactId !== 'contact-new' && f.contactId === contactId) return true;
+      const fwPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+      return Boolean(fwPhone && fPhoneDigits && fwPhone === fPhoneDigits);
+    });
+
+    leadFollowups.forEach(f => {
+      events.push({
+        id: `fu-${f.id}`,
+        timestamp: f.scheduledAt || (f as any).createdAt || selectedLead?.createdAt || new Date().toISOString(),
+        action: `FOLLOWUP_${(f.status || 'SCHEDULED').toUpperCase()}`,
+        actor: f.assignedToName || f.assignedAgentName || 'Agent',
+        details: `Follow-up (${f.priority || 'Medium'} priority) • Status: ${f.status}${f.notes ? ` • Notes: "${f.notes}"` : ''}${f.completedAt ? ` • Completed at: ${new Date(f.completedAt).toLocaleString()}` : ''}`,
+        type: 'followup',
+        badgeColor: f.status === 'Completed' ? '#059669' : '#2563eb',
+        badgeBg: f.status === 'Completed' ? '#d1fae5' : '#dbeafe',
+        dotColor: f.status === 'Completed' ? '#10b981' : '#3b82f6',
+      });
+    });
+
+    // 6. Audit Logs
+    leadAuditLogs.forEach(l => {
+      events.push({
+        id: `audit-${l.id}`,
+        timestamp: l.timestamp,
+        action: l.action,
+        actor: l.actorName || l.actorEmail || 'Admin',
+        details: l.details || `Action recorded for this lead.`,
+        type: 'audit',
+        badgeColor: l.action.includes('DELETE') ? '#b91c1c' : l.action.includes('CREATE') ? '#15803d' : '#4338ca',
+        badgeBg: l.action.includes('DELETE') ? '#fee2e2' : l.action.includes('CREATE') ? '#dcfce7' : '#e0e7ff',
+        dotColor: l.action.includes('DELETE') ? '#ef4444' : l.action.includes('CREATE') ? '#10b981' : '#6366f1',
+      });
+    });
+
+    // Deduplicate by ID and sort descending by timestamp
+    const seen = new Set<string>();
+    const unique = events.filter(e => {
+      if (seen.has(e.id)) return false;
+      seen.add(e.id);
+      return true;
+    });
+
+    return unique.sort((a, b) => {
+      const ta = new Date(a.timestamp).getTime();
+      const tb = new Date(b.timestamp).getTime();
+      return (isNaN(tb) ? 0 : tb) - (isNaN(ta) ? 0 : ta);
+    });
+  }, [selectedLead, selectedCalls, leadSiteVisits, leadAuditLogs, contactPhone, contactId, tenantId]);
 
   // ── Customer Notes (from form/source) vs Agent Reason (from disposition) ───
   const customerNotes = (() => {
@@ -290,6 +434,14 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                   <div style={{ fontWeight: 600 }}>{selectedLead.customFields?.budgetRange || (selectedLead as any).budgetRange}</div>
                 </div>
               )}
+              {(selectedLead.customFields?.readyToRegister || (selectedLead as any).readyToRegister) && (
+                <div>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>READY TO REGISTER</span>
+                  <div style={{ fontWeight: 600, color: '#059669' }}>
+                    {selectedLead.customFields?.readyToRegister || (selectedLead as any).readyToRegister}
+                  </div>
+                </div>
+              )}
               {((selectedLead as any).preferredVisitDate || (selectedLead as any).preferredTimeSlot) && (
                 <div>
                   <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>PREFERRED VISIT</span>
@@ -399,23 +551,57 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                 </div>
               )}
 
-              {/* Custom Fields */}
+              {/* Custom Fields - Only show distinct non-empty custom attributes not already displayed in standard fields */}
               {(() => {
+                const knownStandardKeys = new Set([
+                  'name',
+                  'phone',
+                  'email',
+                  'location',
+                  'preferredLocation',
+                  'source',
+                  'status',
+                  'priority',
+                  'targetDevelopment',
+                  'project',
+                  'preferredProject',
+                  'budgetRange',
+                  'budget',
+                  'plotBudgetRange',
+                  'readyToRegister',
+                  'preferredVisitDate',
+                  'preferredTimeSlot',
+                  'preferredLanguage',
+                  'preferredContactTime',
+                  'dispositionReason',
+                  'customerNotes',
+                  'notes',
+                  'leadScore',
+                  'message',
+                  'userMessage',
+                ]);
+
                 const activeDefs = storageService
                   .getCustomFieldDefinitions(tenantId)
                   .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
                   .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
 
-                const rows = activeDefs
-                  .map(def => {
-                    const key = def.fieldKey || def.id;
-                    if (key === 'dispositionReason' || key === 'customerNotes') return null;
-                    if (isSalesExecutive && key === 'preferredAssetClass') return null;
-                    const val = selectedLead.customFields?.[key];
-                    if (val === undefined || val === null || val === '') return null;
-                    return { id: def.id, label: def.label || key.replace(/([A-Z])/g, ' $1'), value: String(val) };
-                  })
-                  .filter(Boolean);
+                const rows: Array<{ id: string; label: string; value: string }> = [];
+
+                activeDefs.forEach(def => {
+                  const key = def.fieldKey || def.id;
+                  if (knownStandardKeys.has(key)) return;
+                  if (isSalesExecutive && key === 'preferredAssetClass') return;
+
+                  const rawVal = selectedLead.customFields?.[key] ?? (selectedLead as any)[key];
+                  if (rawVal !== undefined && rawVal !== null && String(rawVal).trim() !== '' && String(rawVal).trim() !== '—') {
+                    rows.push({
+                      id: def.id,
+                      label: def.label || key.replace(/([A-Z])/g, ' $1'),
+                      value: String(rawVal),
+                    });
+                  }
+                });
 
                 if (rows.length === 0) return null;
 
@@ -424,9 +610,9 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                     <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>CUSTOM ATTRIBUTES</span>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
                       {rows.map(item => (
-                        <div key={item!.id} style={{ backgroundColor: 'var(--bg-surface-hover)', padding: '6px 10px', borderRadius: 6 }}>
-                          <span style={{ fontSize: 10, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{item!.label}</span>
-                          <div style={{ fontWeight: 600 }}>{item!.value}</div>
+                        <div key={item.id} style={{ backgroundColor: 'var(--bg-surface-hover)', padding: '6px 10px', borderRadius: 6 }}>
+                          <span style={{ fontSize: 10, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{item.label}</span>
+                          <div style={{ fontWeight: 600 }}>{item.value}</div>
                         </div>
                       ))}
                     </div>
@@ -651,7 +837,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                   </div>
 
                   <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8 }}>
-                    Host Agent: <strong>{sv.assignedAgentName || 'Pooja Hegde'}</strong>
+                    Host Agent: <strong>{sv.assignedAgentName || 'Agent'}</strong>
                   </div>
                 </div>
               ))}
@@ -786,6 +972,153 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                   </div>
                 );
               })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Activity & Audit History Timeline (Jamin Only) ───────────────────────────── */}
+      {(!sectionsOnly || sectionsOnly.includes('details')) && !isGhl && (
+        <div className="card">
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              cursor: 'pointer',
+              marginBottom: isActivityOpen ? 12 : 0,
+            }}
+            onClick={() => setIsActivityOpen(prev => !prev)}
+          >
+            <h4
+              style={{
+                fontSize: 15,
+                fontWeight: 700,
+                margin: 0,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <History size={16} color="var(--primary-600)" /> Activity & Audit Timeline ({unifiedTimelineEvents.length})
+            </h4>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              style={{ padding: '2px 6px' }}
+              onClick={e => {
+                e.stopPropagation();
+                setIsActivityOpen(prev => !prev);
+              }}
+            >
+              {isActivityOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </button>
+          </div>
+
+          {isActivityOpen && (
+            <div>
+              {unifiedTimelineEvents.length === 0 ? (
+                <div
+                  style={{
+                    padding: '16px',
+                    backgroundColor: 'var(--bg-surface-hover)',
+                    borderRadius: 8,
+                    color: 'var(--text-muted)',
+                    fontSize: 13,
+                    textAlign: 'center',
+                  }}
+                >
+                  No activities or audits recorded for this lead yet.
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    position: 'relative',
+                    paddingLeft: 18,
+                    borderLeft: '2px solid var(--border-base)',
+                    gap: 14,
+                    marginLeft: 6,
+                  }}
+                >
+                  {unifiedTimelineEvents.map((ev, idx) => {
+                    let formattedTime = ev.timestamp || '';
+                    if (formattedTime) {
+                      const d = new Date(formattedTime);
+                      if (!isNaN(d.getTime())) {
+                        formattedTime = d.toLocaleString('en-IN', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          hour12: true,
+                        });
+                      }
+                    }
+
+                    return (
+                      <div
+                        key={ev.id || idx}
+                        style={{
+                          position: 'relative',
+                          backgroundColor: 'var(--bg-surface)',
+                          border: '1px solid var(--border-base)',
+                          borderRadius: 'var(--radius-md)',
+                          padding: '10px 14px',
+                        }}
+                      >
+                        {/* Timeline dot */}
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: -25,
+                            top: 14,
+                            width: 12,
+                            height: 12,
+                            borderRadius: '50%',
+                            backgroundColor: ev.dotColor || 'var(--primary-600)',
+                            border: '2px solid #ffffff',
+                            boxShadow: '0 0 0 2px var(--border-base)',
+                          }}
+                        />
+
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                padding: '2px 6px',
+                                borderRadius: 4,
+                                backgroundColor: ev.badgeBg || '#e0e7ff',
+                                color: ev.badgeColor || '#4338ca',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.04em',
+                              }}
+                            >
+                              {ev.action.replace(/_/g, ' ')}
+                            </span>
+                            <span style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              <User size={11} /> <strong>{ev.actor || 'System'}</strong>
+                            </span>
+                          </div>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>
+                            {formattedTime}
+                          </span>
+                        </div>
+
+                        {ev.details && (
+                          <div style={{ fontSize: 12, color: 'var(--text-primary)', marginTop: 6, lineHeight: 1.45 }}>
+                            {ev.details}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>

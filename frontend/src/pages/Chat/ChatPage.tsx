@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { MessageSquare, Phone, Video, ArrowLeft } from 'lucide-react';
-import { ChatConversation, ChatMember } from '../../types';
+import { adminUserService } from '../../services/adminUserService';
+import { ChatConversation, ChatMember, User } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import * as cs from '../../services/chatStorage';
@@ -10,16 +11,6 @@ import { NewConversationModal } from './NewConversationModal';
 import { MeetingRoom } from './MeetingRoom';
 import { ChatSettingsModal } from './ChatSettingsModal';
 import './ChatPage.css';
-
-const getStoredUsers = (tenantSlug?: string): any[] => {
-  try {
-    const raw = localStorage.getItem('nexus_users');
-    const all = raw ? JSON.parse(raw) : [];
-    return tenantSlug ? all.filter((u: any) => !u.companySlug || u.companySlug === tenantSlug) : all;
-  } catch {
-    return [];
-  }
-};
 
 interface ActiveMeetingState {
   id: string;
@@ -50,12 +41,12 @@ export const ChatPage: React.FC<{ onNavigate?: (route: string) => void }> = ({ o
   // Build "me" as a ChatMember
   const me: ChatMember | null = user
     ? {
-      id: user.id,
+      id: String(user.id),
       name: user.name,
       email: user.email,
-      roleCode: user.role.code,
-      roleName: user.role.name,
-      companyId,
+      roleCode: user.role?.code || 'sales_executive',
+      roleName: user.role?.name || 'Sales Executive',
+      companyId: String(companyId),
       status: currentPresenceStatus,
     }
     : null;
@@ -63,20 +54,83 @@ export const ChatPage: React.FC<{ onNavigate?: (route: string) => void }> = ({ o
   // Sync presence to chatStorage whenever TopBar availability changes
   useEffect(() => {
     if (user?.id) {
-      cs.setPresence(user.id, currentPresenceStatus === 'busy' ? 'online' : currentPresenceStatus);
+      cs.setPresence(String(user.id), currentPresenceStatus === 'busy' ? 'online' : currentPresenceStatus);
     }
   }, [user?.id, currentPresenceStatus]);
 
-  const loadData = useCallback(() => {
+  const loadData = useCallback(async () => {
     if (!companyId) return;
-    cs.ensureDemoConversations(companyId, tenant?.slug);
-    const convs = cs.getConversations(companyId);
-    setConversations(convs);
 
-    // Build directory from storageService users, filtered strictly to this company
-    const allUsers = getStoredUsers(tenant?.slug);
-    setDirectory(cs.buildDirectory(allUsers as any, companyId, tenant?.slug));
-  }, [companyId, tenant?.slug]);
+    // 1. Fetch live company team members from backend API
+    let liveUsers: User[] = [];
+    try {
+      liveUsers = await adminUserService.getUsers(companyId);
+    } catch (e) {
+      console.error('Failed to load team members for chat', e);
+    }
+
+    // 2. Build live directory from backend users
+    const presenceMap = cs.getPresence();
+    const dir: ChatMember[] = (liveUsers || []).map(u => {
+      const uId = String(u.id);
+      const isMe = String(user?.id) === uId;
+      const isOnline = isMe
+        ? (currentPresenceStatus !== 'offline')
+        : (presenceMap[uId] === 'online');
+
+      return {
+        id: uId,
+        name: u.name,
+        email: u.email,
+        roleCode: u.role?.code || 'sales_executive',
+        roleName: u.role?.name || 'Sales Executive',
+        companyId: String(companyId),
+        status: isOnline ? 'online' : 'offline',
+      };
+    });
+    setDirectory(dir);
+
+    // 3. Load conversations or initialize team channel
+    let convs = cs.getConversations(companyId);
+
+    // Update members in existing conversations with live directory and presence
+    convs = convs.map(c => {
+      const updatedMembers = c.members.map(m => {
+        const found = dir.find(d => String(d.id) === String(m.id)) || (String(m.id) === String(me?.id) ? me : null);
+        if (found) {
+          return {
+            ...m,
+            name: found.name,
+            email: found.email,
+            roleCode: found.roleCode,
+            roleName: found.roleName,
+            status: found.status,
+          };
+        }
+        return m;
+      });
+
+      // Deduplicate members
+      const uniqueMembers = Array.from(new Map(updatedMembers.map(m => [String(m.id), m])).values());
+      return {
+        ...c,
+        members: uniqueMembers,
+        memberIds: uniqueMembers.map(m => String(m.id)),
+      };
+    });
+
+    if (convs.length === 0 && dir.length > 0) {
+      const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2';
+      const teamName = isJamin 
+        ? 'Jamin Bazaar — Sales & Operations'
+        : 'Team General Channel';
+      const allMembers = me ? [me, ...dir.filter(m => String(m.id) !== String(me.id))] : dir;
+      const uniqueMembers = Array.from(new Map(allMembers.map(m => [String(m.id), m])).values());
+      const generalConv = cs.createGroup(companyId, teamName, uniqueMembers);
+      convs = [generalConv];
+    }
+    setConversations(convs);
+  }, [companyId, tenant?.slug, tenant?.id, me, user?.id, currentPresenceStatus]);
 
   useEffect(() => {
     loadData();

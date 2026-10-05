@@ -20,6 +20,9 @@ public class JaminBooking
     public int? CustomerId { get; set; }
     public Customer? Customer { get; set; }
 
+    public int? LeadId { get; set; }
+    public Lead? Lead { get; set; }
+
     public string CustomerName { get; set; } = string.Empty;
     public string CustomerPhone { get; set; } = string.Empty;
 

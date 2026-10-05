@@ -3,8 +3,7 @@
 export const API_CONFIG = {
   // Base configuration
   BASE_URL: import.meta.env.VITE_API_URL || 'http://localhost:5106',
-  IS_MOCK: import.meta.env.VITE_APP_ENV === 'mock',
-  IS_MOCK_AUTH: import.meta.env.VITE_MOCK_AUTH === 'true',
+
 
   // All Platform Endpoints
   ENDPOINTS: {

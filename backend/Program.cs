@@ -1,5 +1,6 @@
 using backend.Extensions;
 using backend.Middleware;
+using backend.Models.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 
@@ -104,97 +105,161 @@ using (var scope = app.Services.CreateScope())
     {
         db.Database.EnsureCreated();
     }
-    // Database schema is managed via EF Core Migrations
-
-        // Patch: ensure tenants have EnabledFeatures populated
+    else
+    {
         try
         {
-            var tenants = db.Tenants.ToList();
-            bool patched = false;
-            foreach (var t in tenants)
+            if (db.Database.GetPendingMigrations().Any())
             {
-                if (t.EnabledFeatures == null || t.EnabledFeatures.Count == 0)
-                {
-                    if (t.Slug == "ghl")
-                    {
-                        t.EnabledFeatures = new List<string>
-                        {
-                            "leads", "customers", "deals", "followups", "calls", "call-recording",
-                            "call-transcription", "investors", "consultations", "investment-opportunities",
-                            "reports", "users", "roles", "company-settings", "audit-logs"
-                        };
-                        patched = true;
-                    }
-                    else if (t.Slug == "jamin")
-                    {
-                        t.EnabledFeatures = new List<string>
-                        {
-                            "leads", "customers", "deals", "followups", "calls", "call-recording",
-                            "call-transcription", "properties", "site-visits", "bookings",
-                            "reports", "users", "roles", "company-settings", "audit-logs"
-                        };
-                        patched = true;
-                    }
-                }
+                db.Database.Migrate();
             }
-            if (patched) db.SaveChanges();
         }
-        catch (Exception ex)
+        catch (Exception migrateEx)
         {
-            Console.WriteLine($"[Tenant Feature Patch Warning] {ex.Message}");
+            Console.WriteLine($"[Database Migration Warning] {migrateEx.Message}");
         }
 
-        // Patch: ensure roles have Permissions populated
+        // Schema Auto-Patch: Ensure any added entity columns exist in PostgreSQL tables
         try
         {
-            var allRoles = db.Roles.ToList();
-            bool rolePatched = false;
-            var allPerms = new[] {
-                "leads.view","leads.create","leads.update","leads.delete","leads.assign","leads.export","leads.import","leads.convert",
-                "customers.view","customers.create","customers.update","customers.delete",
-                "deals.view","deals.create","deals.update","deals.delete",
-                "calls.make","calls.receive","calls.view","calls.recordings.play",
-                "followups.view","followups.create","followups.update",
-                "properties.view","properties.update","site-visits.view","site-visits.create","bookings.view","bookings.create",
-                "investors.view","investors.create","investors.update",
-                "consultations.view","consultations.create","consultations.update",
-                "opportunities.view","opportunities.create","opportunities.update",
-                "reports.view","reports.export",
-                "users.view","users.manage","roles.view","settings.view","settings.update","audit.view",
-                "chat.view","chat.send","kyc.view","kyc.approve"
+            var alterQueries = new[]
+            {
+                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""ReadyToRegister"" VARCHAR(100);",
+                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""TargetDevelopment"" VARCHAR(200);",
+                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""BudgetRange"" VARCHAR(100);",
+                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""InvestmentCapacity"" VARCHAR(100);",
+                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""AssetClass"" VARCHAR(100);",
+                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""Horizon"" VARCHAR(100);",
+                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""InvestorType"" VARCHAR(100);",
+                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""CustomFieldsJson"" TEXT;",
+                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""PreferredVisitDate"" VARCHAR(100);",
+                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""PreferredTimeSlot"" VARCHAR(100);",
+                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""AnythingWeShouldKnow"" VARCHAR(2000);",
+                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""WhatAreYouLookingFor"" VARCHAR(2000);",
+                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""ReadyToRegister"" VARCHAR(100);",
+                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""TargetDevelopment"" VARCHAR(200);",
+                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""BudgetRange"" VARCHAR(100);",
+                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""InvestmentCapacity"" VARCHAR(100);",
+                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""AssetClass"" VARCHAR(100);",
+                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""Horizon"" VARCHAR(100);",
+                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""InvestorType"" VARCHAR(100);",
+                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""CustomFieldsJson"" TEXT;",
+                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""PreferredVisitDate"" VARCHAR(100);",
+                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""PreferredTimeSlot"" VARCHAR(100);",
+                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""AnythingWeShouldKnow"" VARCHAR(2000);",
+                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""WhatAreYouLookingFor"" VARCHAR(2000);"
             };
-            foreach (var role in allRoles)
+
+            foreach (var q in alterQueries)
             {
-                if (role.Permissions == null || role.Permissions.Count == 0)
-                {
-                    if (role.Code == "super_admin" || role.Code == "company_admin")
-                        role.Permissions = allPerms.ToList();
-                    else if (role.Code == "irm")
-                        role.Permissions = new List<string> {
-                            "leads.view","leads.create","investors.view","investors.create","investors.update",
-                            "consultations.view","consultations.create","consultations.update",
-                            "opportunities.view","opportunities.create","opportunities.update",
-                            "calls.make","calls.receive","calls.view","reports.view","chat.view","chat.send"
-                        };
-                    else // sales_executive
-                        role.Permissions = new List<string> {
-                            "leads.view","leads.create","leads.update","leads.convert",
-                            "customers.view","customers.create","customers.update",
-                            "deals.view","deals.create","deals.update",
-                            "calls.make","calls.receive","calls.view",
-                            "followups.view","followups.create","followups.update","chat.view","chat.send"
-                        };
-                    rolePatched = true;
-                }
+                try { db.Database.ExecuteSqlRaw(q); } catch { }
             }
-            if (rolePatched) db.SaveChanges();
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Role Permissions Patch Warning] {ex.Message}");
+            Console.WriteLine($"[Schema Auto-Patch Warning] {ex.Message}");
         }
-
     }
+
+    // Patch: ensure tenants have EnabledFeatures populated
+    try
+    {
+        var tenants = db.Tenants.ToList();
+        bool patched = false;
+        foreach (var t in tenants)
+        {
+            if (t.EnabledFeatures == null || t.EnabledFeatures.Count == 0)
+            {
+                if (t.Slug == "ghl")
+                {
+                    t.EnabledFeatures = new List<string>
+                    {
+                        "leads", "customers", "deals", "followups", "calls", "call-recording",
+                        "call-transcription", "investors", "consultations", "investment-opportunities",
+                        "reports", "users", "roles", "company-settings", "audit-logs"
+                    };
+                    patched = true;
+                }
+                else if (t.Slug == "jamin")
+                {
+                    t.EnabledFeatures = new List<string>
+                    {
+                        "leads", "customers", "deals", "followups", "calls", "call-recording",
+                        "call-transcription", "properties", "site-visits", "bookings",
+                        "reports", "users", "roles", "company-settings", "audit-logs"
+                    };
+                    patched = true;
+                }
+            }
+        }
+        if (patched) db.SaveChanges();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[Tenant Feature Patch Warning] {ex.Message}");
+    }
+
+    // Patch: ensure roles have Permissions populated
+    try
+    {
+        var allRoles = db.Roles.ToList();
+        bool rolePatched = false;
+        var allPerms = new[] {
+            "leads.view","leads.create","leads.update","leads.delete","leads.assign","leads.export","leads.import","leads.convert",
+            "customers.view","customers.create","customers.update","customers.delete",
+            "deals.view","deals.create","deals.update","deals.delete",
+            "calls.make","calls.receive","calls.view","calls.recordings.play",
+            "followups.view","followups.create","followups.update",
+            "properties.view","properties.update","site-visits.view","site-visits.create","bookings.view","bookings.create",
+            "investors.view","investors.create","investors.update",
+            "consultations.view","consultations.create","consultations.update",
+            "opportunities.view","opportunities.create","opportunities.update",
+            "reports.view","reports.export",
+            "users.view","users.manage","roles.view","settings.view","settings.update","audit.view",
+            "chat.view","chat.send","kyc.view","kyc.approve"
+        };
+        foreach (var role in allRoles)
+        {
+            if (role.Permissions == null || role.Permissions.Count == 0)
+            {
+                if (role.Code == "super_admin" || role.Code == "company_admin")
+                    role.Permissions = allPerms.ToList();
+                else if (role.Code == "irm")
+                    role.Permissions = new List<string> {
+                        "leads.view","leads.create","investors.view","investors.create","investors.update",
+                        "consultations.view","consultations.create","consultations.update",
+                        "opportunities.view","opportunities.create","opportunities.update",
+                        "calls.make","calls.receive","calls.view","reports.view","chat.view","chat.send"
+                    };
+                else if (role.Code == "sales_manager")
+                    role.Permissions = new List<string> {
+                        "leads.view","leads.create","leads.update","leads.assign","leads.export","leads.convert",
+                        "customers.view","customers.create","customers.update",
+                        "deals.view","deals.create","deals.update",
+                        "calls.make","calls.receive","calls.view","calls.recordings.play",
+                        "followups.view","followups.create","followups.update",
+                        "properties.view","properties.update","site-visits.view","site-visits.create","bookings.view","bookings.create",
+                        "investors.view","investors.create","consultations.view","consultations.create","opportunities.view","opportunities.create",
+                        "reports.view","reports.export","users.view","chat.view","chat.send"
+                    };
+                else // sales_executive
+                    role.Permissions = new List<string> {
+                        "leads.view","leads.create","leads.update","leads.convert",
+                        "customers.view","customers.create","customers.update",
+                        "deals.view","deals.create","deals.update",
+                        "calls.make","calls.receive","calls.view",
+                        "followups.view","followups.create","followups.update","chat.view","chat.send"
+                    };
+                rolePatched = true;
+            }
+        }
+        if (rolePatched) db.SaveChanges();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[Role Permissions Patch Warning] {ex.Message}");
+    }
+}
 
 // Global Exception Handling Middleware
 app.UseMiddleware<ExceptionHandlingMiddleware>();

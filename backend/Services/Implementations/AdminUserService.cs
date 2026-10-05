@@ -1,3 +1,4 @@
+using backend.Authentication.Interfaces;
 using backend.Data;
 using backend.DTOs.Admin;
 using backend.DTOs.Common;
@@ -12,11 +13,16 @@ public class AdminUserService : IAdminUserService
 {
     private readonly ApplicationDbContext _context;
     private readonly backend.Services.Email.IEmailService _emailService;
+    private readonly ICurrentUserService _currentUser;
 
-    public AdminUserService(ApplicationDbContext context, backend.Services.Email.IEmailService emailService)
+    public AdminUserService(
+        ApplicationDbContext context,
+        backend.Services.Email.IEmailService emailService,
+        ICurrentUserService currentUser)
     {
         _context = context;
         _emailService = emailService;
+        _currentUser = currentUser;
     }
 
     public async Task<ApiResponse<List<AdminUserDto>>> GetUsersByCompanyAsync(int companyId, CancellationToken cancellationToken = default)
@@ -70,18 +76,33 @@ public class AdminUserService : IAdminUserService
 
     public async Task<ApiResponse<AdminUserDto>> CreateUserAsync(int companyId, CreateUserRequestDto request, CancellationToken cancellationToken = default)
     {
+    Console.WriteLine($"[AdminUserService] CreateUser: email={request.Email}, roleId={request.RoleId}, status={request.Status}, companyId={companyId}");
+
         // Check if email already exists
         if (await _context.Users.AnyAsync(u => u.Email == request.Email, cancellationToken))
         {
+            Console.WriteLine($"[AdminUserService] CreateUser FAILED: email already exists: {request.Email}");
             return ApiResponse<AdminUserDto>.FailureResult("Email is already registered.");
         }
 
+        var targetRoleId = request.RoleId;
+        if (companyId == 2)
+        {
+            var salesExecRole = await _context.Roles.FirstOrDefaultAsync(r => r.Code == "sales_executive", cancellationToken);
+            if (salesExecRole != null && targetRoleId == 5)
+            {
+                targetRoleId = salesExecRole.Id;
+            }
+        }
+
         // Check if role exists
-        var role = await _context.Roles.FindAsync(new object[] { request.RoleId }, cancellationToken);
+        var role = await _context.Roles.FirstOrDefaultAsync(r => r.Id == targetRoleId, cancellationToken);
         if (role == null)
         {
+            Console.WriteLine($"[AdminUserService] CreateUser FAILED: role not found for roleId={targetRoleId}");
             return ApiResponse<AdminUserDto>.FailureResult("Invalid Role ID.");
         }
+        Console.WriteLine($"[AdminUserService] CreateUser: role found = {role.Name} (id={role.Id}, code={role.Code})");
 
         var newUser = new User
         {
@@ -89,7 +110,7 @@ public class AdminUserService : IAdminUserService
             Email = request.Email,
             Phone = request.Phone,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
-            RoleId = request.RoleId,
+            RoleId = role.Id,
             CompanyId = companyId,
             Status = request.Status,
             CreatedAt = DateTime.UtcNow
@@ -108,6 +129,23 @@ public class AdminUserService : IAdminUserService
         }
 
         _context.Users.Add(newUser);
+
+        // Audit Trail
+        var audit = new AuditLog
+        {
+            CompanyId = companyId,
+            Timestamp = DateTime.UtcNow,
+            ActorName = !string.IsNullOrWhiteSpace(_currentUser.Name) ? _currentUser.Name : "Company Admin",
+            ActorEmail = !string.IsNullOrWhiteSpace(_currentUser.Email) ? _currentUser.Email : "admin@ghlindiaventures.com",
+            Action = request.Status == backend.Models.Enums.UserStatus.Invited ? "USER_INVITED" : "USER_PROVISIONED",
+            EntityType = "User",
+            EntityId = newUser.Id.ToString(),
+            Details = $"Added team member {newUser.Name} ({newUser.Email}) with role {role.Name}.",
+            Module = "Team Management",
+            Status = "success"
+        };
+        _context.AuditLogs.Add(audit);
+
         await _context.SaveChangesAsync(cancellationToken);
 
         var dto = new AdminUserDto
@@ -127,25 +165,61 @@ public class AdminUserService : IAdminUserService
 
     public async Task<ApiResponse<AdminUserDto>> UpdateUserAsync(int companyId, int userId, UpdateUserRequestDto request, CancellationToken cancellationToken = default)
     {
+        Console.WriteLine($"[AdminUserService] UpdateUser: userId={userId}, companyId={companyId}, roleId={request.RoleId}, status={request.Status}");
+
         var user = await _context.Users
             .Include(u => u.Role)
             .FirstOrDefaultAsync(u => u.CompanyId == companyId && u.Id == userId, cancellationToken);
 
         if (user == null)
-            return ApiResponse<AdminUserDto>.FailureResult("User not found.");
-
-        if (user.RoleId != request.RoleId)
         {
-            var role = await _context.Roles.FindAsync(new object[] { request.RoleId }, cancellationToken);
-            if (role == null) return ApiResponse<AdminUserDto>.FailureResult("Invalid Role ID.");
-            user.Role = role;
+            Console.WriteLine($"[AdminUserService] UpdateUser FAILED: user not found userId={userId} companyId={companyId}");
+            return ApiResponse<AdminUserDto>.FailureResult("User not found.");
         }
+
+        var oldRoleName = user.Role?.Name ?? "Unknown";
+
+        var targetRoleId = request.RoleId;
+        // Jamin tenant (CompanyId = 2) must never have IRM role
+        if (companyId == 2)
+        {
+            var salesExecRole = await _context.Roles.FirstOrDefaultAsync(r => r.Code == "sales_executive", cancellationToken);
+            if (salesExecRole != null && (targetRoleId == 5 || user.Role?.Code == "irm"))
+            {
+                targetRoleId = salesExecRole.Id;
+            }
+        }
+
+        var role = await _context.Roles.FirstOrDefaultAsync(r => r.Id == targetRoleId, cancellationToken);
+        if (role == null)
+        {
+            Console.WriteLine($"[AdminUserService] UpdateUser FAILED: role not found roleId={targetRoleId}");
+            return ApiResponse<AdminUserDto>.FailureResult("Invalid Role ID.");
+        }
+        Console.WriteLine($"[AdminUserService] UpdateUser: resolved role to {role.Name} (id={role.Id}, code={role.Code})");
+        user.Role = role;
+        user.RoleId = role.Id;
 
         user.Name = request.Name;
         user.Phone = request.Phone;
-        user.RoleId = request.RoleId;
         user.Status = request.Status;
         user.UpdatedAt = DateTime.UtcNow;
+
+        // Audit Trail
+        var updateAudit = new AuditLog
+        {
+            CompanyId = companyId,
+            Timestamp = DateTime.UtcNow,
+            ActorName = !string.IsNullOrWhiteSpace(_currentUser.Name) ? _currentUser.Name : "Company Admin",
+            ActorEmail = !string.IsNullOrWhiteSpace(_currentUser.Email) ? _currentUser.Email : "admin@ghlindiaventures.com",
+            Action = "USER_UPDATED",
+            EntityType = "User",
+            EntityId = user.Id.ToString(),
+            Details = $"Updated team member {user.Name} ({user.Email}) - Role: {user.Role?.Name ?? oldRoleName}, Status: {user.Status}.",
+            Module = "Team Management",
+            Status = "success"
+        };
+        _context.AuditLogs.Add(updateAudit);
 
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -156,12 +230,14 @@ public class AdminUserService : IAdminUserService
             Email = user.Email,
             Phone = user.Phone,
             RoleId = user.RoleId,
-            RoleName = user.Role.Name,
+            RoleName = role.Name,
             Status = user.Status,
             LastLoginAt = user.LastLoginAt,
             AvatarUrl = user.AvatarUrl,
             CreatedAt = user.CreatedAt
         };
+
+        Console.WriteLine($"[AdminUserService] UpdateUser: SaveChanges OK → returning roleId={user.RoleId}, roleName={dto.RoleName}");
 
         return ApiResponse<AdminUserDto>.SuccessResult(dto, "User updated successfully.");
     }
@@ -175,6 +251,23 @@ public class AdminUserService : IAdminUserService
             return ApiResponse<bool>.FailureResult("User not found.");
 
         _context.Users.Remove(user);
+
+        // Audit Trail
+        var deleteAudit = new AuditLog
+        {
+            CompanyId = companyId,
+            Timestamp = DateTime.UtcNow,
+            ActorName = !string.IsNullOrWhiteSpace(_currentUser.Name) ? _currentUser.Name : "Company Admin",
+            ActorEmail = !string.IsNullOrWhiteSpace(_currentUser.Email) ? _currentUser.Email : "admin@ghlindiaventures.com",
+            Action = "USER_DELETED",
+            EntityType = "User",
+            EntityId = user.Id.ToString(),
+            Details = $"Deleted team member {user.Name} ({user.Email}).",
+            Module = "Team Management",
+            Status = "success"
+        };
+        _context.AuditLogs.Add(deleteAudit);
+
         await _context.SaveChangesAsync(cancellationToken);
 
         return ApiResponse<bool>.SuccessResult(true, "User deleted successfully.");

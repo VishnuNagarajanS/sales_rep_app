@@ -2,20 +2,16 @@ using backend.Authentication.Interfaces;
 using backend.Data;
 using backend.DTOs.AuditLogs;
 using backend.DTOs.Common;
+using backend.Models.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace backend.Controllers;
 
-/// <summary>
-/// Platform-wide Audit Logs API.
-/// Company Admins (both GHL Admin & Jamin Admin) see their own tenant's logs.
-/// Super Admins see all tenants (can filter by companyId).
-/// </summary>
 [ApiController]
 [Route("api/audit-logs")]
-[Authorize(Roles = "company_admin,sales_manager,super_admin")]
+[Authorize(Roles = "company_admin,sales_manager,super_admin,irm,admin")]
 public class AuditLogsController : ControllerBase
 {
     private readonly ApplicationDbContext _db;
@@ -29,6 +25,7 @@ public class AuditLogsController : ControllerBase
 
     [HttpGet]
     public async Task<ActionResult<ApiResponse<PagedResult<AuditLogResponseDto>>>> GetAuditLogs(
+        [FromQuery] int? companyId,
         [FromQuery] string? entityType,
         [FromQuery] string? action,
         [FromQuery] string? module,
@@ -39,11 +36,22 @@ public class AuditLogsController : ControllerBase
         [FromQuery] int pageSize = 50,
         CancellationToken ct = default)
     {
+        var targetCompanyId = _currentUser.CompanyId ?? companyId;
+        Console.WriteLine($"[AuditLogsController] GetAuditLogs: Role={_currentUser.Role}, CurrentCompanyId={_currentUser.CompanyId}, QueryCompanyId={companyId}, Target={targetCompanyId}");
+
         var query = _db.AuditLogs.AsNoTracking().AsQueryable();
 
-        // Super admins can see everything; company admins scoped to their tenant (GHL=1, Jamin=2)
-        if (_currentUser.Role != "super_admin" && _currentUser.CompanyId.HasValue)
-            query = query.Where(l => l.CompanyId == _currentUser.CompanyId.Value);
+        if (_currentUser.Role != "super_admin")
+        {
+            if (targetCompanyId.HasValue && targetCompanyId.Value > 0)
+                query = query.Where(l => l.CompanyId == targetCompanyId.Value);
+            else
+                query = query.Where(l => false);
+        }
+        else if (companyId.HasValue && companyId.Value > 0)
+        {
+            query = query.Where(l => l.CompanyId == companyId.Value);
+        }
 
         if (!string.IsNullOrWhiteSpace(entityType))
             query = query.Where(l => l.EntityType == entityType);
@@ -103,5 +111,48 @@ public class AuditLogsController : ControllerBase
                 Page = page,
                 PageSize = pageSize
             }));
+    }
+
+    [HttpPost]
+    public async Task<ActionResult<ApiResponse<AuditLogResponseDto>>> CreateAuditLog(
+        [FromBody] CreateAuditLogRequestDto request,
+        CancellationToken ct = default)
+    {
+        var companyId = _currentUser.CompanyId;
+
+        var log = new AuditLog
+        {
+            CompanyId = companyId,
+            Timestamp = DateTime.UtcNow,
+            ActorName = request.ActorName,
+            ActorEmail = request.ActorEmail,
+            Action = request.Action,
+            EntityType = request.EntityType,
+            EntityId = request.EntityId,
+            Details = request.Details,
+            Module = request.Module,
+            Status = request.Status ?? "success",
+            IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString()
+        };
+
+        _db.AuditLogs.Add(log);
+        await _db.SaveChangesAsync(ct);
+
+        var dto = new AuditLogResponseDto
+        {
+            Id = log.Id,
+            CompanyId = log.CompanyId,
+            Timestamp = log.Timestamp,
+            ActorName = log.ActorName,
+            ActorEmail = log.ActorEmail,
+            Action = log.Action,
+            EntityType = log.EntityType,
+            EntityId = log.EntityId,
+            Details = log.Details,
+            Module = log.Module,
+            Status = log.Status,
+        };
+
+        return Ok(ApiResponse<AuditLogResponseDto>.SuccessResult(dto, "Audit log created."));
     }
 }

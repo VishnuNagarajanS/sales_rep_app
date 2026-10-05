@@ -14,7 +14,6 @@ import {
 import { Deal } from '../../../types';
 import { storageService } from '../../../services/storageService';
 import { apiClient } from '../../../services/apiClient';
-import { isMockMode } from '../../../config/environment';
 import './KycLinkComponents.css';
 
 interface SendKycLinkModalProps {

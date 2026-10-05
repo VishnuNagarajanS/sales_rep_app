@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Users,
   Plus,
@@ -31,7 +31,7 @@ const addStoredAuditLog = (log: any) => {
     localStorage.setItem('nexus_audit_logs', JSON.stringify(all));
     window.dispatchEvent(new Event('nexus_storage_updated'));
     window.dispatchEvent(new Event('nexus_admin_updated'));
-  } catch {}
+  } catch { }
 };
 
 export const CompanyUsersPage: React.FC = () => {
@@ -70,18 +70,29 @@ export const CompanyUsersPage: React.FC = () => {
     setTimeout(() => setToast(null), 3500);
   };
 
-  // ── Assignable Company Roles (Strictly Sales Executive & IRM) ──────────────
-  const assignableRoles = [
-    SYSTEM_ROLES.sales_executive,
-    SYSTEM_ROLES.irm,
-  ].filter(Boolean);
+  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2';
+
+  // ── Assignable Company Roles (Jamin: Sales Manager & Sales Executive; GHL: Sales Manager, Sales Executive & IRM) ──
+  const assignableRoles = useMemo(() => {
+    if (isJamin) {
+      return [
+        SYSTEM_ROLES.sales_manager,
+        SYSTEM_ROLES.sales_executive,
+      ].filter(Boolean);
+    }
+    return [
+      SYSTEM_ROLES.sales_manager,
+      SYSTEM_ROLES.sales_executive,
+      SYSTEM_ROLES.irm,
+    ].filter(Boolean);
+  }, [isJamin]);
 
   // ── Add / Invite User Modal State ─────────────────────────────────────────
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [inviteName, setInviteName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
-  const [invitePhone, setInvitePhone] = useState('+91 98450 ');
-  const [inviteDesignation, setInviteDesignation] = useState('Wealth Advisory Consultant');
+  const [invitePhone, setInvitePhone] = useState('+91 ');
+  const [inviteDesignation, setInviteDesignation] = useState('');
   const [inviteRole, setInviteRole] = useState<RoleCode>('sales_executive');
   const [creationMode, setCreationMode] = useState<'invite' | 'instant_password'>('invite');
   const [generatedNewPassword, setGeneratedNewPassword] = useState<string | null>(null);
@@ -104,8 +115,8 @@ export const CompanyUsersPage: React.FC = () => {
   const handleOpenInvite = () => {
     setInviteName('');
     setInviteEmail('');
-    setInvitePhone('+91 98450 ');
-    setInviteDesignation('Wealth Advisory Consultant');
+    setInvitePhone('+91 ');
+    setInviteDesignation('');
     setInviteRole('sales_executive');
     setCreationMode('invite');
     setGeneratedNewPassword(null);
@@ -165,7 +176,7 @@ export const CompanyUsersPage: React.FC = () => {
     // Audit log
     addStoredAuditLog({
       id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
+      timestamp: new Date().toISOString(),
       actorName: user?.name || 'Company Admin',
       actorEmail: user?.email || 'admin@nexus.com',
       action: isInstant ? 'USER_PROVISIONED' : 'USER_INVITED',
@@ -218,7 +229,7 @@ export const CompanyUsersPage: React.FC = () => {
 
     addStoredAuditLog({
       id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
+      timestamp: new Date().toISOString(),
       actorName: user?.name || 'Company Admin',
       actorEmail: user?.email || 'admin@nexus.com',
       action: 'USER_UPDATED',
@@ -244,7 +255,7 @@ export const CompanyUsersPage: React.FC = () => {
 
     addStoredAuditLog({
       id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
+      timestamp: new Date().toISOString(),
       actorName: user?.name || 'Company Admin',
       actorEmail: user?.email || 'admin@nexus.com',
       action: 'USER_PASSWORD_RESET',
@@ -498,7 +509,9 @@ export const CompanyUsersPage: React.FC = () => {
             <Users size={24} color="var(--primary-600)" /> Organization Users & Agents
           </h1>
           <p className="page-subtitle">
-            Manage operational team accounts, roles (Sales Executives & IRMs), and security credentials for {tenant?.name}.
+            {isJamin
+              ? `Manage operational team accounts, roles (Sales Managers & Sales Executives), and security credentials for ${tenant?.name || 'Jamin Bazaar'}.`
+              : `Manage operational team accounts, roles (Sales Managers, Sales Executives & IRMs), and security credentials for ${tenant?.name || 'GHL India Ventures'}.`}
           </p>
         </div>
 
@@ -532,9 +545,8 @@ export const CompanyUsersPage: React.FC = () => {
               gap: 8,
               padding: '10px 18px',
               borderRadius: 'var(--radius-md)',
-              border: `1px solid ${
-                toast.type === 'success' ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'
-              }`,
+              border: `1px solid ${toast.type === 'success' ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'
+                }`,
               backgroundColor:
                 toast.type === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
               backdropFilter: 'blur(6px)',
@@ -565,8 +577,9 @@ export const CompanyUsersPage: React.FC = () => {
             onChange={e => setRoleFilter(e.target.value)}
           >
             <option value="all">All Roles</option>
+            <option value="sales_manager">Sales Manager</option>
             <option value="sales_executive">Sales Executive</option>
-            <option value="irm">Institutional Relationship Manager (IRM)</option>
+            {!isJamin && <option value="irm">Institutional Relationship Manager (IRM)</option>}
             <option value="company_admin">Company Admin</option>
           </select>
         </div>
@@ -677,7 +690,7 @@ export const CompanyUsersPage: React.FC = () => {
                     setInviteEmail(e.target.value);
                     if (inviteError) setInviteError(null);
                   }}
-                  placeholder="sumanth@ghlindiatrust.com"
+                  placeholder="sumanth@ghlindiaventures.com"
                 />
               </div>
             </div>
@@ -687,10 +700,24 @@ export const CompanyUsersPage: React.FC = () => {
               <div className="form-group">
                 <label className="form-label">Contact Phone</label>
                 <input
-                  type="text"
+                  type="tel"
                   className="form-input"
                   value={invitePhone}
-                  onChange={e => setInvitePhone(e.target.value)}
+                  onChange={e => {
+                    const numericOnly = e.target.value.replace(/[^0-9+\s\-()]/g, '');
+                    setInvitePhone(numericOnly);
+                  }}
+                  onKeyDown={e => {
+                    if (
+                      ['Backspace', 'Delete', 'Tab', 'Escape', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key) ||
+                      (e.ctrlKey || e.metaKey)
+                    ) {
+                      return;
+                    }
+                    if (!/[0-9+\s\-()]/.test(e.key)) {
+                      e.preventDefault();
+                    }
+                  }}
                   placeholder="+91 98450 00000"
                 />
               </div>
@@ -702,7 +729,7 @@ export const CompanyUsersPage: React.FC = () => {
                   className="form-input"
                   value={inviteDesignation}
                   onChange={e => setInviteDesignation(e.target.value)}
-                  placeholder="e.g. Senior Wealth Partner"
+                  placeholder={isJamin ? "e.g. Senior Plot Sales Advisor" : "e.g. Senior Wealth Partner"}
                 />
               </div>
             </div>
@@ -813,10 +840,24 @@ export const CompanyUsersPage: React.FC = () => {
               <div className="form-group">
                 <label className="form-label">Contact Phone</label>
                 <input
-                  type="text"
+                  type="tel"
                   className="form-input"
                   value={editPhone}
-                  onChange={e => setEditPhone(e.target.value)}
+                  onChange={e => {
+                    const numericOnly = e.target.value.replace(/[^0-9+\s\-()]/g, '');
+                    setEditPhone(numericOnly);
+                  }}
+                  onKeyDown={e => {
+                    if (
+                      ['Backspace', 'Delete', 'Tab', 'Escape', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key) ||
+                      (e.ctrlKey || e.metaKey)
+                    ) {
+                      return;
+                    }
+                    if (!/[0-9+\s\-()]/.test(e.key)) {
+                      e.preventDefault();
+                    }
+                  }}
                 />
               </div>
 

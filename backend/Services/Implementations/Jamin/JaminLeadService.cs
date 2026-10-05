@@ -24,8 +24,8 @@ public class JaminLeadService : IJaminLeadService
         var defaultAgent = await _context.Users
             .FirstOrDefaultAsync(u => u.CompanyId == JaminTenantId && u.Role != null && u.Role.Code == "sales_executive", ct);
 
-        var agentId = defaultAgent?.Id ?? 1;
-        var agentName = defaultAgent?.Name ?? "Pooja Hegde";
+        int? agentId = defaultAgent?.Id;
+        var agentName = defaultAgent?.Name ?? "Unassigned";
 
         // 1. Create Lead
         var lead = new Lead
@@ -85,8 +85,8 @@ public class JaminLeadService : IJaminLeadService
         var defaultAgent = await _context.Users
             .FirstOrDefaultAsync(u => u.CompanyId == JaminTenantId && u.Role != null && u.Role.Code == "sales_executive", ct);
 
-        var agentId = defaultAgent?.Id ?? 1;
-        var agentName = defaultAgent?.Name ?? "Pooja Hegde";
+        int? agentId = defaultAgent?.Id;
+        var agentName = defaultAgent?.Name ?? "Unassigned";
 
         // Create Lead ONLY (No site visit created)
         var lead = new Lead
@@ -224,9 +224,9 @@ public class JaminLeadService : IJaminLeadService
 
     public async Task<ApiResponse<JaminLeadDto>> CreateLeadAsync(CreateJaminLeadDto dto, CancellationToken ct = default)
     {
-        var agentId = dto.AssignedAgentId ?? 1;
-        var agent = await _context.Users.FirstOrDefaultAsync(u => u.Id == agentId, ct);
-        var agentName = agent?.Name ?? "Pooja Hegde";
+        var agentId = dto.AssignedAgentId; // null = unassigned, do NOT default to user 1 (super admin)
+        var agent = agentId.HasValue ? await _context.Users.FirstOrDefaultAsync(u => u.Id == agentId.Value, ct) : null;
+        var agentName = agent?.Name ?? "Unassigned";
 
         var lead = new Lead
         {

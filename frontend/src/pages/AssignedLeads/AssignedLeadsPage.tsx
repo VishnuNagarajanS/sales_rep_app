@@ -4,6 +4,7 @@ import {
   Phone,
   Edit,
   ExternalLink,
+  Trash2,
 } from 'lucide-react';
 import { Lead } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -14,19 +15,23 @@ import { DataTable, Column, RowAction } from '../../components/common/DataTable'
 import { FilterBar } from '../../components/common/FilterBar';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
+import { StatusChip } from '../../components/common/StatusChip';
+import { apiClient } from '../../services/apiClient';
+import { adminUserService } from '../../services/adminUserService';
 import './AssignedLeadsPage.css';
-
-const MOCK_AGENTS = storageService.getMockAgents();
 
 export const AssignedLeadsPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
+  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2' || user?.companySlug === 'jamin';
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
   const [formData, setFormData] = useState<Partial<Lead>>({});
+  const [statusFilter, setStatusFilter] = useState<string>('All');
+  const [sourceFilter, setSourceFilter] = useState<string>('All');
   const [agentFilter, setAgentFilter] = useState<string>('All');
   const [datePreset, setDatePreset] = useState<string>('all');
   const [dateFrom, setDateFrom] = useState<string>('');
@@ -142,7 +147,18 @@ export const AssignedLeadsPage: React.FC = () => {
         }
         return lead;
       })
-      .filter(lead => (lead as any).assignmentStatus === 'assigned' || Boolean(lead.assignedAgentId));
+      .filter(lead => {
+        const agentId = String(lead.assignedAgentId || '').trim();
+        const name = (lead.assignedAgentName || '').trim();
+        const nameLower = name.toLowerCase();
+
+        // Must have some agent info
+        if (!agentId && !name) return false;
+        // Exclude placeholder names
+        if (name === 'Agent' || name === 'Unassigned') return false;
+
+        return true;
+      });
 
     setLeads(assigned);
     setSelectedLead(prev => {
@@ -173,21 +189,32 @@ export const AssignedLeadsPage: React.FC = () => {
         if (data && data.length > 0) {
           setDynamicAgents(data.map(a => ({ id: a.id, name: a.name })));
         }
-      });
+      }).catch(err => console.warn('Failed to load Jamin agents:', err));
+    } else {
+      adminUserService.getUsers(tenant?.id || '1').then(users => {
+        if (users && users.length > 0) {
+          setDynamicAgents(
+            users
+              .filter(u => u.role?.code === 'sales_executive' || u.role?.code === 'sales_manager' || u.role?.code === 'irm')
+              .map(u => ({ id: u.id, name: u.name }))
+          );
+        }
+      }).catch(err => console.warn('Failed to load GHL agents:', err));
     }
   }, [tenant?.id]);
 
-  // Populate agent options from backend API or MOCK_AGENTS, ensuring current assigned agent is included
+  // Populate agent options from backend API, ensuring current assigned agent is included if valid
   const agentOptions = useMemo<Array<{ id: string | number; name: string }>>(() => {
-    const baseList = (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2') && dynamicAgents.length > 0
-      ? dynamicAgents
-      : MOCK_AGENTS;
-    const list: Array<{ id: string | number; name: string }> = [...baseList];
-    if (formData.assignedAgentName && !list.some(a => a.name.toLowerCase() === formData.assignedAgentName?.toLowerCase())) {
+    const list: Array<{ id: string | number; name: string }> = [...dynamicAgents];
+    if (
+      formData.assignedAgentName &&
+      formData.assignedAgentName !== 'Unassigned' &&
+      !list.some(a => a.name.toLowerCase() === formData.assignedAgentName?.toLowerCase())
+    ) {
       list.unshift({ id: 'current', name: formData.assignedAgentName });
     }
     return list;
-  }, [formData.assignedAgentName, dynamicAgents, tenant?.id]);
+  }, [formData.assignedAgentName, dynamicAgents]);
 
   const handleAgentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newName = e.target.value;
@@ -250,7 +277,7 @@ export const AssignedLeadsPage: React.FC = () => {
           sessionStorage.setItem('ghl_mock_agent_assignments', JSON.stringify(assignments));
         }
       }
-    } catch {}
+    } catch { }
 
     setIsEditDrawerOpen(false);
     loadData();
@@ -280,23 +307,44 @@ export const AssignedLeadsPage: React.FC = () => {
       header: tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' ? 'Target Development / Budget' : 'Investment Amount Range',
       sortable: true,
       render: l => {
-        const val =
-          l.targetDevelopment ||
+        const targetDev = l.targetDevelopment || l.customFields?.targetDevelopment || l.customFields?.preferredDevelopment;
+        const budget =
+          l.budgetRange ||
           l.customFields?.budgetRange ||
+          l.customFields?.budget ||
+          l.customFields?.targetBudget ||
           l.customFields?.investmentCapacity ||
-          (l as any).investmentAmount ||
-          l.location ||
-          '—';
-        return <span className="lead-investment-val">{val}</span>;
+          (l as any).investmentAmount;
+
+        if (targetDev && budget) {
+          return (
+            <div>
+              <div className="lead-investment-val" style={{ fontWeight: 600 }}>{targetDev}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{budget}</div>
+            </div>
+          );
+        }
+
+        if (targetDev) {
+          return <span className="lead-investment-val" style={{ fontWeight: 600 }}>{targetDev}</span>;
+        }
+
+        if (budget) {
+          return <span className="lead-investment-val">{budget}</span>;
+        }
+
+        return <span className="lead-text-muted">—</span>;
       },
     },
     {
       key: 'assignedAgent',
       header: 'Assigned Agent',
       sortable: true,
-      render: l => (
-        <span className="lead-assigned-agent-val">{l.assignedAgentName || '—'}</span>
-      ),
+      render: l => {
+        const name = l.assignedAgentName || '';
+        const isInvalid = !name || name === 'Agent' || name === 'Unassigned';
+        return <span className="lead-assigned-agent-val">{isInvalid ? '—' : name}</span>;
+      },
     },
     {
       key: 'assignedAt',
@@ -320,34 +368,77 @@ export const AssignedLeadsPage: React.FC = () => {
       },
     },
     {
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      render: l => {
+        if ((l.status as string) === 'Callback') {
+          return (
+            <span
+              className="status-chip status-chip-callback"
+              style={{
+                backgroundColor: 'rgba(59, 130, 246, 0.12)',
+                color: '#2563eb',
+                borderColor: 'rgba(59, 130, 246, 0.3)',
+                fontSize: '11px',
+                padding: '2px 8px',
+              }}
+            >
+              <span className="status-dot" style={{ backgroundColor: '#2563eb' }} />
+              Callback
+            </span>
+          );
+        }
+        return <StatusChip status={l.status || 'New'} size="sm" />;
+      },
+    },
+    {
       key: 'source',
       header: 'Source',
       sortable: true,
       render: l => <span className="lead-text-muted">{l.source || '—'}</span>,
     },
-    {
-      key: 'quickCall',
-      header: 'Quick Call',
-      align: 'center',
-      render: l => (
-        <div className="lead-quick-call-cell">
-          <button
-            className="btn btn-call btn-sm btn-icon customer-list-call-btn"
-            title={`Call ${l.name}`}
-            aria-label={`Call ${l.name}`}
-            onClick={e => {
-              e.stopPropagation();
-              initiateCall(l.name, l.phone, 'lead', l.id);
-            }}
-          >
-            <Phone size={12} color="#ffffff" />
-          </button>
-        </div>
-      ),
-    },
   ];
 
+  const handleDeleteLead = async (lead: Lead) => {
+    if (confirm(`Delete lead "${lead.name}"?`)) {
+      try {
+        const cleanId = String(lead.id).replace('db-', '').trim();
+        const numericId = parseInt(cleanId, 10);
+        if (!isNaN(numericId)) {
+          await apiClient.delete(`/leads/${numericId}`).catch(async () => {
+            await apiClient.delete(`/sales-executive/leads/${numericId}`);
+          });
+        }
+      } catch (err) {
+        console.error('Failed to delete lead from DB', err);
+      }
+      storageService.deleteLead(lead.id);
+      storageService.addAuditLog({
+        id: `aud-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        actorName: user?.name || 'Admin',
+        actorEmail: user?.email || (isJamin ? 'admin@jaminbazaar.com' : 'admin@ghlindiaventures.com'),
+        action: 'LEAD_DELETED',
+        entityType: 'Lead',
+        entityId: String(lead.id),
+        companyId: tenant?.id,
+        companyName: tenant?.name,
+        details: `Deleted lead prospect ${lead.name} (Phone: ${lead.phone}).`,
+      });
+      setSelectedLead(null);
+      setIsDetailDrawerOpen(false);
+      setIsEditDrawerOpen(false);
+      await loadData();
+    }
+  };
+
   const rowActions: RowAction<Lead>[] = [
+    {
+      label: 'Call Lead',
+      icon: <Phone size={14} color="#10b981" className="leads-action-icon" />,
+      onClick: l => initiateCall(l.name, l.phone, 'lead', l.id),
+    },
     {
       label: 'View 360 Drawer',
       icon: <ExternalLink size={14} className="leads-action-icon" />,
@@ -361,19 +452,45 @@ export const AssignedLeadsPage: React.FC = () => {
       icon: <Edit size={14} className="leads-action-icon" />,
       onClick: l => handleOpenEdit(l),
     },
+    {
+      label: 'Delete Lead',
+      icon: <Trash2 size={14} color="#ef4444" className="leads-action-icon" />,
+      danger: true,
+      onClick: l => handleDeleteLead(l),
+    },
   ];
 
   // Unique agent names for the filter dropdown
   const uniqueAgents = useMemo(() => {
-    const names = leads
-      .map(l => l.assignedAgentName)
-      .filter((n): n is string => Boolean(n));
-    return Array.from(new Set(names)).sort();
+    return dynamicAgents
+      .map(a => a.name)
+      .sort();
+  }, [dynamicAgents]);
+
+  // Unique source options for the filter dropdown
+  const uniqueSources = useMemo(() => {
+    const sources = leads
+      .map(l => l.source)
+      .filter((s): s is string => Boolean(s));
+    return Array.from(new Set(sources)).sort();
   }, [leads]);
 
-  // Apply agent and date range filter on top of the full leads list
+  // Apply agent, status, source and date range filter on top of the full leads list
   const filteredLeads = useMemo(() => {
     return leads.filter(l => {
+      // Hide converted leads by default — only show when status filter is explicitly 'Converted'
+      if (statusFilter === 'All' && (l.status as string) === 'Converted') {
+        return false;
+      }
+      if (statusFilter !== 'All' && (l.status as string) !== statusFilter) {
+        return false;
+      }
+
+      // Source filter
+      if (sourceFilter !== 'All' && l.source !== sourceFilter) {
+        return false;
+      }
+
       // 1. Agent filter
       if (agentFilter && agentFilter !== 'All' && l.assignedAgentName !== agentFilter) {
         return false;
@@ -398,7 +515,7 @@ export const AssignedLeadsPage: React.FC = () => {
 
       return true;
     });
-  }, [leads, agentFilter, datePreset, dateFrom, dateTo]);
+  }, [leads, statusFilter, sourceFilter, agentFilter, datePreset, dateFrom, dateTo]);
 
   return (
     <div className="leads-page assigned-leads-page">
@@ -435,10 +552,57 @@ export const AssignedLeadsPage: React.FC = () => {
         emptyDescription="Leads assigned to agents will appear here."
         filtersNode={
           <FilterBar
+            showLabel={!isJamin}
+            hideItemLabels={isJamin}
             filters={[
+              {
+                key: 'status',
+                label: 'Status',
+                allLabel: isJamin ? 'All Statuses' : 'All',
+                value: statusFilter,
+                onChange: setStatusFilter,
+                options: isJamin
+                  ? [
+                    { value: 'New', label: 'New' },
+                    { value: 'Contacted', label: 'Contacted' },
+                    { value: 'Interested', label: 'Interested' },
+                    { value: 'Qualified', label: 'Qualified' },
+                    { value: 'Follow-up Required', label: 'Follow-up Required' },
+                    { value: 'Callback', label: 'Callback' },
+                    { value: 'No Response', label: 'No Response' },
+                    { value: 'Not Interested', label: 'Not Interested' },
+                    { value: 'Junk', label: 'Junk' },
+                    { value: 'Lost', label: 'Lost' },
+                    { value: 'Converted', label: '✓ Converted' },
+                  ]
+                  : [
+                    { value: 'New', label: 'New' },
+                    { value: 'Contacted', label: 'Contacted' },
+                    { value: 'Qualified', label: 'Qualified' },
+                    { value: 'Proposal', label: 'Proposal' },
+                    { value: 'Negotiation', label: 'Negotiation' },
+                    { value: 'Interested', label: 'Interested' },
+                    { value: 'Follow-up Required', label: 'Follow-up Required' },
+                    { value: 'Callback', label: 'Callback' },
+                    { value: 'No Response', label: 'No Response' },
+                    { value: 'Not Interested', label: 'Not Interested' },
+                    { value: 'Junk', label: 'Junk' },
+                    { value: 'Lost', label: 'Lost' },
+                    { value: 'Converted', label: '✓ Converted' },
+                  ],
+              },
+              {
+                key: 'source',
+                label: 'Source',
+                allLabel: isJamin ? 'All Sources' : 'All Sources',
+                value: sourceFilter,
+                onChange: setSourceFilter,
+                options: uniqueSources.map(s => ({ value: s, label: s })),
+              },
               {
                 key: 'assignedAgent',
                 label: 'Assigned Agent',
+                allLabel: isJamin ? 'All Agents' : 'All',
                 value: agentFilter,
                 onChange: setAgentFilter,
                 placeholder: 'Select an agent',
@@ -453,6 +617,8 @@ export const AssignedLeadsPage: React.FC = () => {
               onChange: handleCustomDateChange,
             }}
             onClearAll={() => {
+              setStatusFilter('All');
+              setSourceFilter('All');
               setAgentFilter('All');
               setDatePreset('all');
               setDateFrom('');
@@ -494,9 +660,12 @@ export const AssignedLeadsPage: React.FC = () => {
         {selectedLead && (
           <>
             {/* Quick Info Banner */}
-            <div className="lead-quick-banner">
+            <div className="lead-quick-banner" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div className="lead-assigned-note">
-                Assigned to <strong>{selectedLead.assignedAgentName || 'Unassigned'}</strong>
+                Assigned to <strong>{(!selectedLead.assignedAgentName || selectedLead.assignedAgentName === 'Unassigned' || selectedLead.assignedAgentName === 'Agent') ? 'Unassigned' : selectedLead.assignedAgentName}</strong>
+              </div>
+              <div>
+                <StatusChip status={selectedLead.status || 'New'} size="sm" />
               </div>
             </div>
 
@@ -527,8 +696,34 @@ export const AssignedLeadsPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Tenant-Specific Dynamic Custom Fields */}
-            {(() => {
+            {/* Tenant-Specific Attributes (Jamin Property Requirements vs GHL Custom Attributes) */}
+            {isJamin ? (
+              <div className="card lead-custom-card">
+                <h4 className="lead-custom-title">
+                  Requirements &amp; Project Preferences
+                </h4>
+                <div className="lead-detail-grid">
+                  <div>
+                    <span className="lead-custom-label">Target Development / Project:</span>
+                    <div className="lead-custom-value" style={{ fontWeight: 600, color: 'var(--primary-600)' }}>
+                      {selectedLead.targetDevelopment || (selectedLead.customFields as any)?.targetDevelopment || '—'}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="lead-custom-label">Plot Budget Range:</span>
+                    <div className="lead-custom-value" style={{ fontWeight: 700, color: '#059669' }}>
+                      {selectedLead.budgetRange || (selectedLead.customFields as any)?.budgetRange || '—'}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="lead-custom-label">Ready to Register / Timeline:</span>
+                    <div className="lead-custom-value">
+                      {selectedLead.readyToRegister || (selectedLead.customFields as any)?.readyToRegister || '—'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (() => {
               const activeDefs = storageService
                 .getCustomFieldDefinitions(tenant?.id)
                 .filter(d => d.active !== false && (d.module === 'leads' || !d.module))

@@ -10,6 +10,9 @@ public class UpdateLeadDto
     public string? Status { get; set; }
     public string? Priority { get; set; }
     public string? Notes { get; set; }
+    public string? TargetDevelopment { get; set; }
+    public string? BudgetRange { get; set; }
+    public string? ReadyToRegister { get; set; }
 
     public string? InvestmentCapacity { get; set; }
     public string? AssetClass { get; set; }

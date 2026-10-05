@@ -1,8 +1,7 @@
 import { ChatConversation, ChatMessage, ChatMember, ChatAttachment } from '../types';
-import { isMockMode } from '../config/environment';
 
 // ── Storage keys ──────────────────────────────────────────────────────────────
-const getPrefix = () => (isMockMode() ? 'nexus_mock_' : 'nexus_dev_');
+const getPrefix = () => 'nexus_';
 const getConvsKey = () => `${getPrefix()}chat_conversations`;
 const getMsgKey = (id: string) => `${getPrefix()}chat_messages_${id}`;
 const getPresenceKey = () => `${getPrefix()}chat_presence`;
@@ -266,26 +265,9 @@ export function registerDemoChatLoader(loader: DemoChatLoader): void {
 }
 
 // ── Seed Demo Conversations (Strictly Mock Mode Only) ──────────────────────────
-export function ensureDemoConversations(companyId: string, tenantSlug?: string): void {
-  if (!isMockMode() || !demoChatLoader) {
-    // DEV MODE: Never initialize mock conversations or seed demo chat
-    return;
-  }
-
-  const existing = getConversations(companyId);
-  if (existing.length > 0) return;
-
-  const demoData = demoChatLoader(companyId, tenantSlug);
-  if (!demoData) return;
-
-
-  demoData.conversations.forEach((c: any) => saveConversation(c));
-  Object.entries(demoData.messagesByConversationId).forEach(([cId, msgs]: [string, any]) => {
-    try {
-      localStorage.setItem(getMsgKey(cId), JSON.stringify(msgs));
-    } catch { }
-  });
-  emit();
+export function ensureDemoConversations(_companyId: string, _tenantSlug?: string): void {
+  // Real API MODE: Never initialize mock conversations or seed demo chat
+  return;
 }
 
 // ── Conversation Settings & Organization ──────────────────────────────────────

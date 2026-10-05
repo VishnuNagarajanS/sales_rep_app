@@ -16,7 +16,6 @@ import { InvestmentOpportunity, Investor, Deal, DealActivity } from '../../types
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
-import { isMockMode } from '../../config/environment';
 import {
   getOpportunities,
   saveOpportunity as apiSaveOpportunity,
@@ -118,18 +117,6 @@ export const OpportunitiesPage: React.FC = () => {
 
   // ── Data loading ──────────────────────────────────────────────────────────
   const loadData = async () => {
-    if (isMockMode()) {
-      setOpps(storageService.getOpportunities(tenant?.id));
-      setInvestors(storageService.getInvestors(tenant?.id));
-      const latestDeals = storageService.getDeals(tenant?.id);
-      setDeals(latestDeals);
-      setDetailDeal(prev => {
-        if (!prev) return null;
-        const fresh = latestDeals.find(d => d.id === prev.id);
-        return fresh || prev;
-      });
-      return;
-    }
     try {
       const [oppsData, investorsData, dealsData] = await Promise.all([
         getOpportunities(tenant?.id),
@@ -379,10 +366,8 @@ export const OpportunitiesPage: React.FC = () => {
     };
     storageService.addDealActivity(activity);
 
-    if (!isMockMode()) {
-      await apiSaveDeal(updatedDeal).catch(console.error);
-      await apiAddDealActivity(activity).catch(console.error);
-    }
+    await apiSaveDeal(updatedDeal).catch(console.error);
+    await apiAddDealActivity(activity).catch(console.error);
 
     loadData();
     showToast(`Investor structure for "${deal.customerName}" set to ${type}`);

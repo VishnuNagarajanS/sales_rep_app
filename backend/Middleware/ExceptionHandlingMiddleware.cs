@@ -21,6 +21,11 @@ public class ExceptionHandlingMiddleware
         {
             await _next(context);
         }
+        catch (OperationCanceledException)
+        {
+            // Request was aborted by the client (e.g. browser navigation or refresh)
+            _logger.LogInformation("Request was canceled by the client.");
+        }
         catch (Exception ex)
         {
             Console.WriteLine($"[CRITICAL UNHANDLED EXCEPTION] {ex}");
@@ -31,6 +36,11 @@ public class ExceptionHandlingMiddleware
 
     private static async Task HandleExceptionAsync(HttpContext context, Exception exception)
     {
+        if (context.Response.HasStarted)
+        {
+            return;
+        }
+
         context.Response.ContentType = "application/json";
         context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
 

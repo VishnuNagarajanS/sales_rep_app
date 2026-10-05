@@ -105,6 +105,9 @@ public class JaminPlotService : IJaminPlotService
         if (dto.Price.HasValue) plot.Price = dto.Price.Value;
         if (dto.PricePerSqft.HasValue) plot.PricePerSqft = dto.PricePerSqft.Value;
         else if (dto.Price.HasValue && plot.AreaSqFt > 0) plot.PricePerSqft = Math.Round(dto.Price.Value / plot.AreaSqFt, 2);
+        if (dto.HeldByCustomerId.HasValue) plot.HeldByCustomerId = dto.HeldByCustomerId.Value > 0 ? dto.HeldByCustomerId.Value : null;
+        if (dto.HeldByCustomerName != null) plot.HeldByCustomerName = dto.HeldByCustomerName.Trim();
+        if (dto.HeldByCustomerPhone != null) plot.HeldByCustomerPhone = dto.HeldByCustomerPhone.Trim();
         if (dto.HoldByAgent != null) plot.HoldByAgent = dto.HoldByAgent.Trim();
         if (dto.Notes != null) plot.Notes = dto.Notes.Trim();
 
@@ -129,7 +132,19 @@ public class JaminPlotService : IJaminPlotService
             return ApiResponse<JaminPlotResponseDto>.FailureResult($"Cannot hold plot in '{plot.Status}' status.");
         }
 
+        int? resolvedCustomerId = dto.HeldByCustomerId;
+        if (!resolvedCustomerId.HasValue && !string.IsNullOrWhiteSpace(dto.CustomerPhone))
+        {
+            var matchedCustomer = await _context.Customers
+                .FirstOrDefaultAsync(c => c.Phone == dto.CustomerPhone.Trim() && c.CompanyId == JaminTenantId, ct);
+            if (matchedCustomer != null)
+            {
+                resolvedCustomerId = matchedCustomer.Id;
+            }
+        }
+
         plot.Status = "Hold";
+        plot.HeldByCustomerId = resolvedCustomerId;
         plot.HeldByCustomerName = dto.CustomerName.Trim();
         plot.HeldByCustomerPhone = dto.CustomerPhone.Trim();
         plot.HoldByAgent = dto.HoldByAgent?.Trim();
@@ -153,6 +168,7 @@ public class JaminPlotService : IJaminPlotService
         }
 
         plot.Status = "Available";
+        plot.HeldByCustomerId = null;
         plot.HeldByCustomerName = null;
         plot.HeldByCustomerPhone = null;
         plot.HoldByAgent = null;
@@ -176,6 +192,7 @@ public class JaminPlotService : IJaminPlotService
         Status = p.Status,
         Price = p.Price,
         PricePerSqft = p.PricePerSqft > 0 ? p.PricePerSqft : (p.AreaSqFt > 0 ? Math.Round(p.Price / p.AreaSqFt, 2) : 0),
+        HeldByCustomerId = p.HeldByCustomerId,
         HeldByCustomerName = p.HeldByCustomerName,
         HeldByCustomerPhone = p.HeldByCustomerPhone,
         HoldByAgent = p.HoldByAgent,

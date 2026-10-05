@@ -14,6 +14,7 @@ public class JaminPlotResponseDto
     public string Status { get; set; } = "Available";
     public decimal Price { get; set; }
     public decimal PricePerSqft { get; set; }
+    public int? HeldByCustomerId { get; set; }
     public string? HeldByCustomerName { get; set; }
     public string? HeldByCustomerPhone { get; set; }
     public string? HoldByAgent { get; set; }
@@ -39,6 +40,7 @@ public class CreateJaminPlotDto
 
 public class HoldPlotRequestDto
 {
+    public int? HeldByCustomerId { get; set; }
     public string CustomerName { get; set; } = string.Empty;
     public string CustomerPhone { get; set; } = string.Empty;
     public string? HoldByAgent { get; set; }
@@ -55,6 +57,9 @@ public class UpdateJaminPlotDto
     public string? Status { get; set; }
     public decimal? Price { get; set; }
     public decimal? PricePerSqft { get; set; }
+    public int? HeldByCustomerId { get; set; }
+    public string? HeldByCustomerName { get; set; }
+    public string? HeldByCustomerPhone { get; set; }
     public string? HoldByAgent { get; set; }
     public string? Notes { get; set; }
 }

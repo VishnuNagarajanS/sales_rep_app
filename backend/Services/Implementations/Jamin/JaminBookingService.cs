@@ -94,8 +94,51 @@ public class JaminBookingService : IJaminBookingService
             }
         }
 
+        // Resolve Lead ID if passed or matched
+        int? leadId = dto.LeadId;
+        if (!leadId.HasValue && !string.IsNullOrEmpty(dto.CustomerPhone))
+        {
+            var matchedLead = await _context.Leads
+                .FirstOrDefaultAsync(l => l.Phone == dto.CustomerPhone.Trim() && l.CompanyId == JaminTenantId, ct);
+            if (matchedLead != null)
+            {
+                leadId = matchedLead.Id;
+            }
+        }
+
+        // If Customer does not exist yet, automatically create one upon booking!
+        if (!customerId.HasValue)
+        {
+            var newCustomer = new Customer
+            {
+                CompanyId = JaminTenantId,
+                AssignedAgentId = dto.AssignedAgentId,
+                Name = dto.CustomerName.Trim(),
+                Phone = dto.CustomerPhone.Trim(),
+                Status = "Active",
+                TotalValue = dto.TotalPlotPrice,
+                Notes = $"Created upon booking Plot {plotNumber} in {projectName}. {dto.Notes}".Trim(),
+                LastContactedAt = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.Customers.Add(newCustomer);
+            await _context.SaveChangesAsync(ct);
+            customerId = newCustomer.Id;
+        }
+
+        // Mark the linked Lead as Converted in DB
+        if (leadId.HasValue)
+        {
+            var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == leadId.Value && l.CompanyId == JaminTenantId, ct);
+            if (lead != null)
+            {
+                lead.Status = "Converted";
+                lead.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
         // Resolve Agent name
-        string agentName = "Pooja Hegde";
+        string agentName = string.Empty;
         if (dto.AssignedAgentId.HasValue && dto.AssignedAgentId.Value > 0)
         {
             var agent = await _context.Users.FirstOrDefaultAsync(u => u.Id == dto.AssignedAgentId.Value, ct);
@@ -106,6 +149,7 @@ public class JaminBookingService : IJaminBookingService
         {
             CompanyId = JaminTenantId,
             CustomerId = customerId,
+            LeadId = leadId,
             ProjectId = dto.ProjectId,
             PlotId = dto.PlotId,
             CustomerName = dto.CustomerName.Trim(),
@@ -118,7 +162,7 @@ public class JaminBookingService : IJaminBookingService
             PaymentTerms = dto.PaymentTerms?.Trim(),
             Status = "Token Paid",
             BookingDate = DateTime.UtcNow,
-            AssignedAgentId = dto.AssignedAgentId ?? 1,
+            AssignedAgentId = dto.AssignedAgentId,
             AssignedAgentName = agentName,
             Notes = dto.Notes?.Trim(),
             CreatedAt = DateTime.UtcNow
@@ -187,6 +231,7 @@ public class JaminBookingService : IJaminBookingService
         Id = b.Id,
         CompanyId = b.CompanyId,
         CustomerId = b.CustomerId,
+        LeadId = b.LeadId,
         ProjectId = b.ProjectId,
         PlotId = b.PlotId,
         CustomerName = b.CustomerName,

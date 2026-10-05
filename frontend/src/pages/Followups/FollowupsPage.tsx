@@ -10,34 +10,31 @@ import {
   ShieldCheck,
   CheckCircle,
   Pencil,
+  RotateCcw,
 } from 'lucide-react';
 import { Followup, CallRecord, Deal, Lead, Customer } from '../../types';
 import { storageService } from '../../services/storageService';
-import { isMockMode } from '../../config/environment';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import {
   getFollowups,
   saveFollowup as apiSaveFollowup,
+  completeFollowup as apiCompleteFollowup,
   getCalls,
   getLeads,
   saveDeal as apiSaveDeal,
   saveLead as apiSaveLead,
   isTenantMatch,
 } from '../../services/ghlApiService';
+import { jaminApiService } from '../../services/jaminApiService';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { Drawer } from '../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
-import {
-  FollowupRoleFilter,
-  SALES_EXECUTIVE_USERS,
-  IRM_USERS,
-} from '../../mock_data/adminFollowupsData';
-import { jaminApiService } from '../../services/jaminApiService';
+import { adminUserService } from '../../services/adminUserService';
 import { DateRangePreset } from '../../types/kanban';
 import './FollowupsPage.css';
-import '../Leads/LeadsPage.css';
+type FollowupRoleFilter = 'sales_executive' | 'irm' | 'all';
 
 export const FollowupsPage: React.FC = () => {
   const { tenant, user } = useAuth();
@@ -46,8 +43,8 @@ export const FollowupsPage: React.FC = () => {
   const [followups, setFollowups] = useState<Followup[]>([]);
   const [callsList, setCallsList] = useState<CallRecord[]>([]);
   const [allLeads, setAllLeads] = useState<Lead[]>([]);
-  const [jaminAgents, setJaminAgents] = useState<Array<{ id: string; name: string; email: string }>>([]);
-  const [activeTab, setActiveTab] = useState<'all' | 'due' | 'overdue'>('all');
+  const [assignableAgents, setAssignableAgents] = useState<Array<{ id: string; name: string; email: string }>>([]);
+  const [activeTab, setActiveTab] = useState<'all' | 'due' | 'overdue' | 'completed'>('all');
   const [rescheduleItem, setRescheduleItem] = useState<Followup | null>(null);
   const [rescheduleDate, setRescheduleDate] = useState('');
   const [rescheduleTime, setRescheduleTime] = useState('11:00 AM');
@@ -55,22 +52,28 @@ export const FollowupsPage: React.FC = () => {
   const [rescheduleAgentId, setRescheduleAgentId] = useState('');
   const [rescheduleNotes, setRescheduleNotes] = useState('');
 
+  // Complete follow-up state
+  const [completeItem, setCompleteItem] = useState<Followup | null>(null);
+  const [completionNotes, setCompletionNotes] = useState('');
+
   useEffect(() => {
     if (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02') {
       jaminApiService.getAgents().then(data => {
         if (data && data.length > 0) {
-          setJaminAgents(data.map(a => ({ id: String(a.id), name: a.name, email: a.email })));
+          setAssignableAgents(data.map(a => ({ id: String(a.id), name: a.name, email: a.email })));
         }
-      });
+      }).catch(() => {});
+    } else {
+      adminUserService.getUsers(tenant?.id || '1').then(users => {
+        if (users && users.length > 0) {
+          const salesUsers = users.filter(u => u.role?.code === 'sales_executive' || u.role?.code === 'sales_manager' || u.role?.code === 'irm');
+          setAssignableAgents((salesUsers.length > 0 ? salesUsers : users).map(u => ({ id: String(u.id), name: u.name, email: u.email })));
+        }
+      }).catch(() => {});
     }
   }, [tenant?.slug, tenant?.id]);
 
-  const personOptions = useMemo(() => {
-    if (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02') {
-      return jaminAgents;
-    }
-    return (SALES_EXECUTIVE_USERS || []).map(u => ({ id: u.id, name: u.name, email: u.email }));
-  }, [tenant?.slug, tenant?.id, jaminAgents]);
+  const assignableAgentOptions = assignableAgents;
 
   const handleOpenRescheduleModal = (f: Followup) => {
     setRescheduleItem(f);
@@ -119,9 +122,11 @@ export const FollowupsPage: React.FC = () => {
     (roleCode as string) === 'company_admin' ||
     (roleCode as string) === 'admin' ||
     roleCode === 'super_admin';
+
   const isGhlSalesExec = tenant?.slug === 'ghl' && isExec;
   const isIrm = roleCode === 'irm';
-  const canOpenDrawer = isGhlSalesExec || isAdmin || isIrm;
+  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2';
+  const canOpenDrawer = isGhlSalesExec || isAdmin || isIrm || isJamin;
 
   // ── Admin Filter States ──────────────────────────────────────────────────
   const [selectedRole, setSelectedRole] = useState<FollowupRoleFilter>('sales_executive');
@@ -140,24 +145,44 @@ export const FollowupsPage: React.FC = () => {
     setSelectedPerson('All');
   };
 
-  const personOptions = useMemo(() => {
-    if (selectedRole === 'sales_executive') {
-      return storageService.getAgents ? storageService.getAgents(tenant?.id) : SALES_EXECUTIVE_USERS;
-    }
-  }, [selectedRole, tenant?.id]);
+  const adminFilterPersonOptions = useMemo(() => {
+    return assignableAgents;
+  }, [assignableAgents]);
 
   const loadData = async () => {
     try {
-      const [data, calls, leads] = await Promise.all([
-        getFollowups(tenant?.id),
-        getCalls(tenant?.id),
-        getLeads(tenant?.id),
+      const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02';
+      let apiFollowups: Followup[] = [];
+      try {
+        if (isJamin) {
+          apiFollowups = await jaminApiService.getFollowups(true);
+        } else {
+          apiFollowups = await getFollowups(tenant?.id);
+        }
+      } catch (err) {
+        console.warn('[FollowupsPage] API getFollowups warning:', err);
+      }
+
+      const localFollowups = storageService.getFollowups(tenant?.id) || [];
+
+      // Merge API and local follow-ups by unique ID and content
+      const combinedMap = new Map<string, Followup>();
+      localFollowups.forEach(f => combinedMap.set(f.id, f));
+      (apiFollowups || []).forEach(f => combinedMap.set(f.id, f));
+
+      const finalFollowups = Array.from(combinedMap.values());
+
+      const [calls, leads] = await Promise.all([
+        getCalls(tenant?.id).catch(() => storageService.getCalls(tenant?.id)),
+        getLeads(tenant?.id).catch(() => storageService.getLeads(tenant?.id)),
       ]);
-      setFollowups(data || []);
+
+      setFollowups(finalFollowups.length > 0 ? finalFollowups : localFollowups);
       setCallsList(calls || []);
       setAllLeads(leads || []);
     } catch (err) {
       console.error('Failed to load followups data', err);
+      setFollowups(storageService.getFollowups(tenant?.id) || []);
     }
   };
 
@@ -192,7 +217,7 @@ export const FollowupsPage: React.FC = () => {
       try {
         const raw = localStorage.getItem(`nexus_irm_pref_${contactKey}`);
         if (raw) savedLocal = JSON.parse(raw);
-      } catch {}
+      } catch { }
     }
 
     const rawAssetClass =
@@ -508,7 +533,7 @@ export const FollowupsPage: React.FC = () => {
       status: 'Rescheduled',
     });
 
-    const targetAgent = personOptions.find((p: any) => p.id === rescheduleAgentId || p.name === rescheduleAgentId);
+    const targetAgent = assignableAgentOptions.find((p: any) => p.id === rescheduleAgentId || p.name === rescheduleAgentId);
 
     const newFollowup: Followup = {
       id: `fup-${Date.now()}`,
@@ -552,13 +577,93 @@ export const FollowupsPage: React.FC = () => {
     showToast(`✓ Follow-up rescheduled for ${rescheduleItem.contactName} on ${rescheduleDate}!`);
   };
 
+  const handleCompleteFollowup = async (followup: Followup, outcomeNotes?: string) => {
+    const updatedNotes = outcomeNotes
+      ? (followup.notes ? `${followup.notes} | ${outcomeNotes}` : outcomeNotes)
+      : followup.notes;
+
+    const completedFollowup: Followup = {
+      ...followup,
+      status: 'Completed',
+      completedAt: new Date().toISOString(),
+      notes: updatedNotes,
+    };
+
+    // 1. Save locally
+    storageService.saveFollowup(completedFollowup);
+
+    // 2. Call API (both GHL and Jamin / SE)
+    try {
+      const isJaminTenant = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02';
+      if (isJaminTenant) {
+        await jaminApiService.completeFollowup(followup.id);
+      } else {
+        await apiCompleteFollowup(followup.id).catch(() => apiSaveFollowup(completedFollowup));
+      }
+    } catch (err) {
+      console.warn('[FollowupsPage] API complete failed, saved locally:', err);
+    }
+
+    // 3. If tied to a lead, update lead notes
+    const leads = storageService.getLeads(tenant?.id) || [];
+    const matchingLead = leads.find(l =>
+      (followup.contactId && followup.contactId !== 'contact-new' && l.id === followup.contactId) ||
+      (followup.contactPhone && (l.phone || '').replace(/\D/g, '').slice(-10) === (followup.contactPhone || '').replace(/\D/g, '').slice(-10))
+    );
+    if (matchingLead) {
+      storageService.saveLead({
+        ...matchingLead,
+        notes: `${matchingLead.notes ? matchingLead.notes + '\n' : ''}[${new Date().toLocaleDateString()}] Follow-up completed: ${outcomeNotes || 'Marked as completed'}`,
+      });
+    }
+
+    // 4. Audit Log
+    storageService.addAuditLog({
+      id: `aud-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      actorName: user?.name || 'Agent',
+      actorEmail: user?.email || '',
+      action: 'FOLLOWUP_COMPLETED',
+      entityType: 'Followup',
+      entityId: followup.id,
+      companyId: tenant?.id || '1',
+      companyName: tenant?.name || '',
+      details: `Completed follow-up for ${followup.contactName}${outcomeNotes ? `: ${outcomeNotes}` : ''}`,
+    });
+
+    setCompleteItem(null);
+    setCompletionNotes('');
+    loadData();
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+    showToast(`✓ Follow-up with ${followup.contactName} marked as completed!`);
+  };
+
+  const handleReopenFollowup = async (followup: Followup) => {
+    const reopenedFollowup: Followup = {
+      ...followup,
+      status: 'Pending',
+      completedAt: undefined,
+    };
+
+    storageService.saveFollowup(reopenedFollowup);
+    try {
+      await apiSaveFollowup(reopenedFollowup);
+    } catch (err) {
+      console.warn('[FollowupsPage] API reopen failed:', err);
+    }
+
+    loadData();
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+    showToast(`Follow-up with ${followup.contactName} moved back to Pending.`);
+  };
+
   // Helper to determine the assigned role of any followup
   const getFollowupRole = (f: Followup): 'Sales Executive' | 'IRM' => {
     if (f.assignedRole) {
       if (f.assignedRole.toLowerCase().includes('irm')) return 'IRM';
       return 'Sales Executive';
     }
-    const irmsList = storageService.getIrms ? storageService.getIrms(tenant?.id) : IRM_USERS;
+    const irmsList = storageService.getIrms ? storageService.getIrms(tenant?.id) : [];
     if (
       irmsList.some(
         (u: any) =>
@@ -664,22 +769,33 @@ export const FollowupsPage: React.FC = () => {
       return true;
     });
   } else if (isExec) {
-    scopedFollowups = followups.filter(
-      f =>
-        (f.assignedAgentId && f.assignedAgentId === user?.id) ||
-        (f.assignedAgentName && f.assignedAgentName === user?.name)
-    );
+    scopedFollowups = followups.filter(f => {
+      const uId = String(user?.id || '').toLowerCase();
+      const uName = (user?.name || '').toLowerCase();
+      const fAgentId = String(f.assignedAgentId || '').toLowerCase();
+      const fAgentName = (f.assignedAgentName || '').toLowerCase();
+      const fCreatedBy = (f.createdBy || '').toLowerCase();
+
+      if (fAgentId && (fAgentId === uId || fAgentId === '1' || uId === '1')) return true;
+      if (fAgentName && (fAgentName === uName || fAgentName.includes(uName) || uName.includes(fAgentName))) return true;
+      if (fCreatedBy && (fCreatedBy === uName || fCreatedBy.includes(uName))) return true;
+
+      // In Jamin, show sales executive follow-ups for the active company
+      if (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02') {
+        return true;
+      }
+      return false;
+    });
   } else if (isIrm) {
     // IRM Follow-up Required: show ALL pending followups for this tenant
     // Matches linked lead 'Follow-up Required' status, direct assignment, or tenant match
     const leadMap = new Map<string, Lead>();
     allLeads.forEach(l => leadMap.set(l.id, l));
     scopedFollowups = followups.filter(f => {
-      if (f.status !== 'Pending') return false;
       if (f.companyId && tenant?.id && !isTenantMatch(f.companyId, tenant.id)) return false;
       // Directly assigned to IRM agent
       if ((f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
-          (f.assignedAgentName && f.assignedAgentName === user?.name)) {
+        (f.assignedAgentName && f.assignedAgentName === user?.name)) {
         return true;
       }
       // Linked lead has Follow-up Required status
@@ -719,8 +835,8 @@ export const FollowupsPage: React.FC = () => {
           f.contactId && f.contactId !== 'contact-new'
             ? `id:${f.contactId}`
             : phoneDigits
-            ? `phone:${phoneDigits}`
-            : `raw:${f.id}`;
+              ? `phone:${phoneDigits}`
+              : `raw:${f.id}`;
 
         if (!seen.has(key)) {
           seen.set(key, f);
@@ -777,15 +893,50 @@ export const FollowupsPage: React.FC = () => {
     }
   }
 
+  const isFollowupDueToday = (f: Followup): boolean => {
+    if (f.status !== 'Pending') return false;
+    const sched = (f.scheduledAt || '').toLowerCase();
+    if (sched.includes('today')) return true;
+    const dateStr = f.scheduledDate || f.scheduledAt;
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return false;
+    const now = new Date();
+    return (
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() &&
+      d.getDate() === now.getDate()
+    );
+  };
+
+  const isFollowupOverdue = (f: Followup): boolean => {
+    if (f.status !== 'Pending') return false;
+    const sched = (f.scheduledAt || '').toLowerCase();
+    if (sched.includes('yesterday') || sched.includes('overdue')) return true;
+    const dateStr = f.scheduledDate || f.scheduledAt;
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return false;
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    return d.getTime() < todayStart.getTime();
+  };
+
   // Count badges
   const activePendingFollowups = processedFollowups.filter(f => f.status === 'Pending');
+  const completedFollowups = processedFollowups.filter(f => f.status === 'Completed');
+  const dueTodayFollowups = activePendingFollowups.filter(isFollowupDueToday);
+  const overdueFollowups = activePendingFollowups.filter(isFollowupOverdue);
 
   const filteredFollowups = processedFollowups.filter(f => {
+    if (activeTab === 'completed') {
+      return f.status === 'Completed';
+    }
     if (activeTab === 'due') {
-      return f.status === 'Pending' && (f.scheduledAt || '').toLowerCase().includes('today');
+      return isFollowupDueToday(f);
     }
     if (activeTab === 'overdue') {
-      return f.status === 'Pending' && (f.scheduledAt || '').toLowerCase().includes('yesterday');
+      return isFollowupOverdue(f);
     }
     return f.status === 'Pending';
   });
@@ -840,7 +991,7 @@ export const FollowupsPage: React.FC = () => {
                 <option value="All">
                   {selectedRole === 'sales_executive' ? 'All Sales Executives' : 'All IRMs'}
                 </option>
-                {(personOptions || []).map((p: any) => (
+                {(adminFilterPersonOptions || []).map((p: any) => (
                   <option key={p.id} value={p.name}>
                     {p.name}
                   </option>
@@ -891,9 +1042,8 @@ export const FollowupsPage: React.FC = () => {
           {/* Right Section: Role Mode Tag & Total Count */}
           <div className="admin-followup-meta-group">
             <span
-              className={`followup-role-tag ${
-                selectedRole === 'sales_executive' ? 'tag-sales-exec' : 'tag-irm'
-              }`}
+              className={`followup-role-tag ${selectedRole === 'sales_executive' ? 'tag-sales-exec' : 'tag-irm'
+                }`}
             >
               {selectedRole === 'sales_executive' ? (
                 <>
@@ -919,37 +1069,43 @@ export const FollowupsPage: React.FC = () => {
           { id: 'all', label: `All Tasks (${activePendingFollowups.length})` },
           {
             id: 'due',
-            label: `Due Today (${
-              activePendingFollowups.filter(f =>
-                (f.scheduledAt || '').toLowerCase().includes('today')
-              ).length
-            })`,
+            label: `Due Today (${dueTodayFollowups.length})`,
           },
           {
             id: 'overdue',
-            label: `Overdue (${
-              activePendingFollowups.filter(f =>
-                (f.scheduledAt || '').toLowerCase().includes('yesterday')
-              ).length
-            })`,
+            label: `Overdue (${overdueFollowups.length})`,
             danger: true,
+          },
+          {
+            id: 'completed',
+            label: `Completed (${completedFollowups.length})`,
+            success: true,
           },
         ].map(tab => (
           <button
             key={tab.id}
             className={`btn btn-sm ${
-              activeTab === tab.id ? 'btn-primary' : 'btn-secondary'
+              activeTab === tab.id
+                ? tab.danger
+                  ? 'btn-danger followups-tab-danger-active'
+                  : tab.success
+                  ? 'btn-success followups-tab-success-active'
+                  : 'btn-primary'
+                : 'btn-secondary'
             } ${
-              tab.danger && activeTab === tab.id
-                ? 'followups-tab-danger-active'
-                : tab.danger
+              tab.danger && activeTab !== tab.id
                 ? 'followups-tab-danger-inactive'
+                : tab.success && activeTab !== tab.id
+                ? 'followups-tab-success-inactive'
                 : ''
             }`}
             onClick={() => setActiveTab(tab.id as any)}
           >
             {tab.danger && (
               <AlertTriangle size={13} color={activeTab === tab.id ? '#ffffff' : '#dc2626'} />
+            )}
+            {tab.success && (
+              <CheckCircle size={13} color={activeTab === tab.id ? '#ffffff' : '#16a34a'} />
             )}
             {tab.label}
           </button>
@@ -965,31 +1121,57 @@ export const FollowupsPage: React.FC = () => {
         ) : (
           filteredFollowups.map(f => {
             const isOverdue =
-              f.status === 'Pending' && (f.scheduledAt || '').toLowerCase().includes('yesterday');
+              f.status === 'Pending' && isFollowupOverdue(f);
             const callCount = getCallCountForFollowup(f);
             const fRole = getFollowupRole(f);
 
             return (
               <div
                 key={f.id}
-                className={`card card-hover followup-item-card ${isOverdue ? 'overdue' : ''}`}
+                className={`card card-hover followup-item-card ${f.status === 'Completed' ? 'completed' : isOverdue ? 'overdue' : ''}`}
                 onClick={canOpenDrawer ? () => setDrawerFollowup(f) : undefined}
                 style={canOpenDrawer ? { cursor: 'pointer' } : undefined}
               >
                 <div className="followup-item-left">
+                  <button
+                    className={`btn btn-icon btn-ghost followup-check-btn ${f.status === 'Completed' ? 'completed' : ''}`}
+                    title={f.status === 'Completed' ? 'Completed (Click to Reopen)' : 'Click to complete follow-up'}
+                    onClick={e => {
+                      e.stopPropagation();
+                      if (f.status === 'Completed') {
+                        handleReopenFollowup(f);
+                      } else {
+                        setCompleteItem(f);
+                        setCompletionNotes('');
+                      }
+                    }}
+                  >
+                    {f.status === 'Completed' ? (
+                      <CheckCircle size={18} color="#16a34a" />
+                    ) : (
+                      <div className="followup-check-empty" />
+                    )}
+                  </button>
+
                   <div>
                     <div
                       className="followup-contact-header"
                       style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
                     >
                       <span
-                        className="followup-contact-name"
+                        className={`followup-contact-name ${f.status === 'Completed' ? 'completed' : ''}`}
                         style={canOpenDrawer ? { color: 'var(--primary-600)', fontWeight: 700 } : undefined}
                       >
                         {f.contactName}
                       </span>
 
-                      <StatusChip status={f.priority} size="sm" />
+                      {f.status === 'Completed' ? (
+                        <span className="badge-completed-pill">
+                          <CheckCircle size={11} /> Completed
+                        </span>
+                      ) : (
+                        <StatusChip status={f.priority} size="sm" />
+                      )}
 
                       {callCount > 0 && (
                         <span
@@ -1015,14 +1197,19 @@ export const FollowupsPage: React.FC = () => {
                     <p className="followup-notes">{f.notes}</p>
 
                     <div className="followup-meta-row">
-                      <span className={`followup-schedule-time ${isOverdue ? 'overdue' : ''}`}>
-                        ⏰ {f.scheduledAt}
-                      </span>
+                      {f.status === 'Completed' ? (
+                        <span style={{ color: '#16a34a', fontWeight: 600 }}>
+                          ✓ Completed: {f.completedAt ? new Date(f.completedAt).toLocaleString() : 'Done'}
+                        </span>
+                      ) : (
+                        <span className={`followup-schedule-time ${isOverdue ? 'overdue' : ''}`}>
+                          ⏰ {f.scheduledAt}
+                        </span>
+                      )}
                       <span className="followup-assignee">• Assignee: {f.assignedAgentName}</span>
                       <span
-                        className={`badge-role-inline ${
-                          fRole === 'IRM' ? 'badge-role-irm' : 'badge-role-sales'
-                        }`}
+                        className={`badge-role-inline ${fRole === 'IRM' ? 'badge-role-irm' : 'badge-role-sales'
+                          }`}
                       >
                         {fRole}
                       </span>
@@ -1031,15 +1218,52 @@ export const FollowupsPage: React.FC = () => {
                 </div>
 
                 <div className="followup-actions-right">
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    onClick={e => {
-                      e.stopPropagation();
-                      handleOpenRescheduleModal(f);
-                    }}
-                  >
-                    Reschedule
-                  </button>
+                  {f.status === 'Completed' ? (
+                    <>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={e => {
+                          e.stopPropagation();
+                          handleReopenFollowup(f);
+                        }}
+                        title="Move back to Pending tasks"
+                      >
+                        <RotateCcw size={12} style={{ marginRight: 4 }} /> Reopen
+                      </button>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={e => {
+                          e.stopPropagation();
+                          handleOpenRescheduleModal(f);
+                        }}
+                      >
+                        Reschedule
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className="btn btn-sm btn-complete-followup"
+                        onClick={e => {
+                          e.stopPropagation();
+                          setCompleteItem(f);
+                          setCompletionNotes('');
+                        }}
+                        title="Mark follow-up as completed"
+                      >
+                        <CheckCircle size={13} /> Complete
+                      </button>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={e => {
+                          e.stopPropagation();
+                          handleOpenRescheduleModal(f);
+                        }}
+                      >
+                        Reschedule
+                      </button>
+                    </>
+                  )}
                   <button
                     className="btn btn-call btn-sm"
                     onClick={e => {
@@ -1164,7 +1388,7 @@ export const FollowupsPage: React.FC = () => {
               value={rescheduleAgentId}
               onChange={e => setRescheduleAgentId(e.target.value)}
             >
-              {(personOptions || []).map((p: any) => (
+              {(assignableAgentOptions || []).map((p: any) => (
                 <option key={p.id} value={p.id}>
                   {p.name} {p.email ? `(${p.email})` : ''}
                 </option>
@@ -1212,6 +1436,82 @@ export const FollowupsPage: React.FC = () => {
         </form>
       </Modal>
 
+      {/* Complete Follow-up Modal */}
+      <Modal
+        isOpen={!!completeItem}
+        onClose={() => setCompleteItem(null)}
+        title={`Complete Follow-up: ${completeItem?.contactName || ''}`}
+        subtitle={`Mark commitment as accomplished for ${completeItem?.contactPhone || ''}`}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Quick Outcome Chips */}
+          <div>
+            <label className="form-label" style={{ marginBottom: 6 }}>Quick Outcome / Resolution</label>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {[
+                'Connected & Discussed',
+                'Requirements Noted',
+                'Site Visit Scheduled',
+                'Sent Details via WhatsApp',
+                'Discussed & Moving Forward',
+              ].map(chip => (
+                <button
+                  key={chip}
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setCompletionNotes(prev => prev ? `${prev} | ${chip}` : chip)}
+                  style={{ fontSize: '12px', padding: '4px 10px' }}
+                >
+                  + {chip}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Outcome Notes / Remarks</label>
+            <textarea
+              className="form-textarea"
+              rows={3}
+              placeholder="Enter details on what was discussed or accomplished..."
+              value={completionNotes}
+              onChange={e => setCompletionNotes(e.target.value)}
+              style={{ resize: 'vertical' }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setCompleteItem(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-success"
+              style={{
+                backgroundColor: '#16a34a',
+                borderColor: '#16a34a',
+                color: '#ffffff',
+                fontWeight: 600,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+              onClick={() => {
+                if (completeItem) {
+                  handleCompleteFollowup(completeItem, completionNotes.trim());
+                }
+              }}
+            >
+              <CheckCircle size={15} /> Confirm Complete
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       {/* Contact Profile & Detailed Attribution Drawer */}
       {canOpenDrawer && (
         <Drawer
@@ -1220,12 +1520,11 @@ export const FollowupsPage: React.FC = () => {
           title={drawerFollowup?.contactName || 'Contact Profile'}
           subtitle={
             isAdmin
-              ? `Phone: ${drawerFollowup?.contactPhone || '—'} • Assigned to: ${
-                  drawerFollowup?.assignedAgentName || 'Unassigned'
-                } (${drawerFollowupRole})`
+              ? `Phone: ${drawerFollowup?.contactPhone || '—'} • Assigned to: ${drawerFollowup?.assignedAgentName || 'Unassigned'
+              } (${drawerFollowupRole})`
               : drawerFollowup?.contactPhone
-              ? `Phone: ${drawerFollowup.contactPhone} • ${tenant?.name || 'GHL India'}`
-              : (tenant?.name || '')
+                ? `Phone: ${drawerFollowup.contactPhone} • ${tenant?.name || 'GHL India'}`
+                : (tenant?.name || '')
           }
           width={720}
           footer={
@@ -1383,9 +1682,8 @@ export const FollowupsPage: React.FC = () => {
                             {assignedAgent}
                           </strong>
                           <span
-                            className={`admin-owner-role-tag ${
-                              drawerFollowupRole === 'IRM' ? 'tag-irm' : 'tag-sales-exec'
-                            }`}
+                            className={`admin-owner-role-tag ${drawerFollowupRole === 'IRM' ? 'tag-irm' : 'tag-sales-exec'
+                              }`}
                           >
                             <Briefcase size={12} />
                             {drawerFollowupRole === 'IRM'
@@ -1470,197 +1768,226 @@ export const FollowupsPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* ── Investment Capacity ── */}
-                <div className="card lead-custom-card">
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                    <h4 className="lead-custom-title" style={{ margin: 0 }}>Investment Details</h4>
-                    {isIrm && (
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm btn-icon"
-                        title={isEditingCapacity ? 'Cancel edit' : 'Edit Investment Capacity'}
-                        style={{ width: 28, height: 28 }}
-                        onClick={() => setIsEditingCapacity(prev => !prev)}
-                      >
-                        <Pencil size={13} />
-                      </button>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <div>
-                      <span className="lead-detail-label">Investment Capacity:</span>
-                      {isEditingCapacity ? (
-                        <div style={{ marginTop: 6 }}>
-                          <select
-                            className="form-select"
-                            value={capacityValue}
-                            onChange={e => setCapacityValue(e.target.value)}
-                            style={{ width: '100%', fontSize: 13, height: 36 }}
-                          >
-                            <option value="">— Select —</option>
-                            {capacityValue && !INVESTMENT_CAPACITY_OPTIONS.includes(capacityValue) && (
-                              <option value={capacityValue}>{capacityValue}</option>
-                            )}
-                            {INVESTMENT_CAPACITY_OPTIONS.map(opt => (
-                              <option key={opt} value={opt}>
-                                {opt}
-                              </option>
-                            ))}
-                          </select>
-                          <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => setIsEditingCapacity(false)}
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-primary btn-sm"
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                              onClick={() => handleSaveCapacity(matchingLead, matchingCustomer)}
-                            >
-                              <CheckCircle size={14} /> Save
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div
-                          className="lead-detail-value"
-                          style={{
-                            marginTop: 4,
-                            fontSize: 16,
-                            fontWeight: 700,
-                            color: '#10b981',
-                            letterSpacing: '0.01em',
-                          }}
-                        >
-                          {capacityValue || investmentCapacity || '—'}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* ── GHL India Ventures Custom Attributes (with Set by IRM Checkbox) ── */}
-                {!isExec && (
+                {/* ── Jamin: Property & Budget Requirements | GHL: Investment Details & Custom Attributes ── */}
+                {isJamin ? (
                   <div className="card lead-custom-card">
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                      <h4 className="lead-custom-title" style={{ margin: 0 }}>
-                        {tenant?.name || 'GHL India Ventures'} Custom Attributes
-                      </h4>
-                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', fontWeight: 600, color: 'var(--text-primary)' }}>
-                        <input
-                          type="checkbox"
-                          checked={isPrefConfirmed || isEditingPref}
-                          onChange={e => handleTogglePrefCheckbox(e.target.checked, matchingLead, matchingCustomer)}
-                          style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--primary-600)' }}
-                        />
-                        <span>Set by IRM</span>
-                      </label>
+                    <h4 className="lead-custom-title" style={{ margin: '0 0 12px 0' }}>Requirements &amp; Project Preferences</h4>
+                    <div className="lead-detail-grid">
+                      <div>
+                        <span className="lead-custom-label">Target Development / Project:</span>
+                        <div className="lead-custom-value" style={{ fontWeight: 600, color: 'var(--primary-600)' }}>
+                          {matchingLead?.targetDevelopment || (matchingLead?.customFields as any)?.targetDevelopment || '—'}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="lead-custom-label">Plot Budget Range:</span>
+                        <div className="lead-custom-value" style={{ fontWeight: 700, color: '#059669' }}>
+                          {matchingLead?.budgetRange || (matchingLead?.customFields as any)?.budgetRange || matchingCustomer?.budgetRange || '—'}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="lead-custom-label">Ready to Register / Timeline:</span>
+                        <div className="lead-custom-value">
+                          {matchingLead?.readyToRegister || (matchingLead?.customFields as any)?.readyToRegister || '—'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* ── Investment Capacity ── */}
+                    <div className="card lead-custom-card">
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                        <h4 className="lead-custom-title" style={{ margin: 0 }}>Investment Details</h4>
+                        {isIrm && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm btn-icon"
+                            title={isEditingCapacity ? 'Cancel edit' : 'Edit Investment Capacity'}
+                            style={{ width: 28, height: 28 }}
+                            onClick={() => setIsEditingCapacity(prev => !prev)}
+                          >
+                            <Pencil size={13} />
+                          </button>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        <div>
+                          <span className="lead-detail-label">Investment Capacity:</span>
+                          {isEditingCapacity ? (
+                            <div style={{ marginTop: 6 }}>
+                              <select
+                                className="form-select"
+                                value={capacityValue}
+                                onChange={e => setCapacityValue(e.target.value)}
+                                style={{ width: '100%', fontSize: 13, height: 36 }}
+                              >
+                                <option value="">— Select —</option>
+                                {capacityValue && !INVESTMENT_CAPACITY_OPTIONS.includes(capacityValue) && (
+                                  <option value={capacityValue}>{capacityValue}</option>
+                                )}
+                                {INVESTMENT_CAPACITY_OPTIONS.map(opt => (
+                                  <option key={opt} value={opt}>
+                                    {opt}
+                                  </option>
+                                ))}
+                              </select>
+                              <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => setIsEditingCapacity(false)}
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-primary btn-sm"
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                                  onClick={() => handleSaveCapacity(matchingLead, matchingCustomer)}
+                                >
+                                  <CheckCircle size={14} /> Save
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div
+                              className="lead-detail-value"
+                              style={{
+                                marginTop: 4,
+                                fontSize: 16,
+                                fontWeight: 700,
+                                color: '#10b981',
+                                letterSpacing: '0.01em',
+                              }}
+                            >
+                              {capacityValue || investmentCapacity || '—'}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
 
-                    {isEditingPref ? (
-                      <div>
-                        <div className="lead-detail-grid" style={{ gap: 14 }}>
-                          <div>
-                            <label className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
-                              Preferred Asset Class:
-                            </label>
-                            <select
-                              className="form-select"
-                              value={prefAssetClass}
-                              onChange={e => setPrefAssetClass(e.target.value)}
-                              style={{ width: '100%', fontSize: 13, height: 36 }}
-                            >
-                              <option value="CO-AIF">CO-AIF</option>
-                              <option value="AIF">AIF</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
-                              Investment Horizon:
-                            </label>
-                            <select
-                              className="form-select"
-                              value={prefHorizon}
-                              onChange={e => setPrefHorizon(e.target.value)}
-                              style={{ width: '100%', fontSize: 13, height: 36 }}
-                            >
-                              <option value="1-2 Years">1-2 Years</option>
-                              <option value="3-5 Years">3-5 Years</option>
-                              <option value="5-7 Years">5-7 Years</option>
-                              <option value="7-10 Years">7-10 Years</option>
-                              <option value="10+ Years">10+ Years</option>
-                            </select>
-                          </div>
+                    {/* ── GHL India Ventures Custom Attributes (with Set by IRM Checkbox) ── */}
+                    {!isExec && (
+                      <div className="card lead-custom-card">
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                          <h4 className="lead-custom-title" style={{ margin: 0 }}>
+                            {tenant?.name || 'GHL India Ventures'} Custom Attributes
+                          </h4>
+                          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', fontWeight: 600, color: 'var(--text-primary)' }}>
+                            <input
+                              type="checkbox"
+                              checked={isPrefConfirmed || isEditingPref}
+                              onChange={e => handleTogglePrefCheckbox(e.target.checked, matchingLead, matchingCustomer)}
+                              style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--primary-600)' }}
+                            />
+                            <span>Set by IRM</span>
+                          </label>
                         </div>
 
-                        <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                          {isPrefConfirmed && (
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => setIsEditingPref(false)}
-                            >
-                              Cancel
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            className="btn btn-primary btn-sm"
-                            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                            onClick={() => handleSavePreferences(matchingLead, matchingCustomer)}
-                          >
-                            <CheckCircle size={14} /> Confirm Preferences
-                          </button>
-                        </div>
-                      </div>
-                    ) : isPrefConfirmed ? (
-                      <div>
-                        <div className="lead-detail-grid">
+                        {isEditingPref ? (
                           <div>
-                            <span className="lead-custom-label">Preferred Asset Class:</span>
-                            <div className="lead-custom-value">{prefAssetClass}</div>
-                          </div>
-                          <div>
-                            <span className="lead-custom-label">Investment Horizon:</span>
-                            <div className="lead-custom-value">{prefHorizon}</div>
-                          </div>
-                        </div>
-                        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
-                            <CheckCircle size={13} /> Confirmed by IRM — Visible in other modules
-                          </div>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            style={{ fontSize: 11, padding: '3px 8px', height: 'auto' }}
-                            onClick={() => setIsEditingPref(true)}
-                          >
-                            Edit
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{ padding: '12px 14px', background: 'var(--bg-surface)', borderRadius: 6, fontSize: 12, color: 'var(--text-muted)' }}>
-                        Preferred Asset Class and Investment Horizon have not been set by IRM yet. Check <strong>"Set by IRM"</strong> above to configure and confirm them.
-                      </div>
-                    )}
+                            <div className="lead-detail-grid" style={{ gap: 14 }}>
+                              <div>
+                                <label className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                                  Preferred Asset Class:
+                                </label>
+                                <select
+                                  className="form-select"
+                                  value={prefAssetClass}
+                                  onChange={e => setPrefAssetClass(e.target.value)}
+                                  style={{ width: '100%', fontSize: 13, height: 36 }}
+                                >
+                                  <option value="CO-AIF">CO-AIF</option>
+                                  <option value="AIF">AIF</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                                  Investment Horizon:
+                                </label>
+                                <select
+                                  className="form-select"
+                                  value={prefHorizon}
+                                  onChange={e => setPrefHorizon(e.target.value)}
+                                  style={{ width: '100%', fontSize: 13, height: 36 }}
+                                >
+                                  <option value="1-2 Years">1-2 Years</option>
+                                  <option value="3-5 Years">3-5 Years</option>
+                                  <option value="5-7 Years">5-7 Years</option>
+                                  <option value="7-10 Years">7-10 Years</option>
+                                  <option value="10+ Years">10+ Years</option>
+                                </select>
+                              </div>
+                            </div>
 
-                    {/* Any other custom attributes from intake */}
-                    {customFieldRows.length > 0 && (
-                      <div className="lead-detail-grid" style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-base)' }}>
-                        {customFieldRows.map(item => (
-                          <div key={item!.id}>
-                            <span className="lead-custom-label">{item!.label}:</span>
-                            <div className="lead-custom-value">{item!.value}</div>
+                            <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                              {isPrefConfirmed && (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => setIsEditingPref(false)}
+                                >
+                                  Cancel
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className="btn btn-primary btn-sm"
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                                onClick={() => handleSavePreferences(matchingLead, matchingCustomer)}
+                              >
+                                <CheckCircle size={14} /> Confirm Preferences
+                              </button>
+                            </div>
                           </div>
-                        ))}
+                        ) : isPrefConfirmed ? (
+                          <div>
+                            <div className="lead-detail-grid">
+                              <div>
+                                <span className="lead-custom-label">Preferred Asset Class:</span>
+                                <div className="lead-custom-value">{prefAssetClass}</div>
+                              </div>
+                              <div>
+                                <span className="lead-custom-label">Investment Horizon:</span>
+                                <div className="lead-custom-value">{prefHorizon}</div>
+                              </div>
+                            </div>
+                            <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
+                                <CheckCircle size={13} /> Confirmed by IRM — Visible in other modules
+                              </div>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                style={{ fontSize: 11, padding: '3px 8px', height: 'auto' }}
+                                onClick={() => setIsEditingPref(true)}
+                              >
+                                Edit
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ padding: '12px 14px', background: 'var(--bg-surface)', borderRadius: 6, fontSize: 12, color: 'var(--text-muted)' }}>
+                            Preferred Asset Class and Investment Horizon have not been set by IRM yet. Check <strong>"Set by IRM"</strong> above to configure and confirm them.
+                          </div>
+                        )}
+
+                        {/* Any other custom attributes from intake */}
+                        {customFieldRows.length > 0 && (
+                          <div className="lead-detail-grid" style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-base)' }}>
+                            {customFieldRows.map(item => (
+                              <div key={item!.id}>
+                                <span className="lead-custom-label">{item!.label}:</span>
+                                <div className="lead-custom-value">{item!.value}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
-                  </div>
+                  </>
                 )}
 
                 {/* ── Message from User ── */}

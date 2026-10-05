@@ -47,7 +47,8 @@ public class FollowupConfiguration : IEntityTypeConfiguration<Followup>
         builder.HasOne(f => f.AssignedAgent)
             .WithMany()
             .HasForeignKey(f => f.AssignedAgentId)
-            .OnDelete(DeleteBehavior.Restrict);
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.SetNull);
 
         builder.HasOne(f => f.Investor)
             .WithMany(i => i.Followups)

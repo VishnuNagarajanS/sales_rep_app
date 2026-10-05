@@ -10,12 +10,19 @@ import {
   Edit,
   ExternalLink,
   Calendar,
+  History,
+  User as UserIcon,
+  UserPlus,
+  Clock,
+  Sparkles,
+  TrendingUp,
 } from 'lucide-react';
 import { Lead, Customer, Deal, Followup, SiteVisit } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { apiClient } from '../../services/apiClient';
 import { jaminApiService } from '../../services/jaminApiService';
+import { adminUserService } from '../../services/adminUserService';
 import { storageService } from '../../services/storageService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
@@ -34,31 +41,26 @@ const CAPACITY_OPTIONS = [
   'Not sure yet — help me decide'
 ];
 
-const MOCK_AGENTS = storageService.getMockAgents();
-export { MOCK_AGENTS };
-
 export const LeadsPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
 
+  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2' || !tenant;
+  const isJaminUser = isJamin;
   const [leads, setLeads] = useState<Lead[]>([]);
 
-  const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk'];
-
-  // Role-based scoping: Sales Executives and IRMs see only their own leads.
-  // Managers / Admins / Super Admins see the full company lead list (no filter).
-  // Inactive / moved leads (Interested, Follow-up Required, Not Interested, Junk, Converted) are excluded from active Leads.
+  // Role-based scoping: Sales Executives and IRMs see their assigned leads.
+  // Managers / Admins / Super Admins see the full company lead list.
   const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
   const isLeadScopedUser = roleCode === 'sales_executive' || roleCode === 'irm';
   const isIrm = roleCode === 'irm';
-  const scopedLeads = (isLeadScopedUser
+  const scopedLeads = isLeadScopedUser
     ? leads.filter(l =>
-      (l.assignedAgentId && l.assignedAgentId === user?.id) ||
-      (l.assignedAgentName && l.assignedAgentName === user?.name)
+      (l.assignedAgentId && (l.assignedAgentId === user?.id || String(l.assignedAgentId) === String(user?.id))) ||
+      (l.assignedAgentName && user?.name && l.assignedAgentName.toLowerCase() === user.name.toLowerCase())
     )
-    : leads
-  ).filter(l => !MOVED_LEAD_STATUSES.includes(l.status));
+    : leads;
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
@@ -76,19 +78,62 @@ export const LeadsPage: React.FC = () => {
 
   // Filter states
   const [statusFilter, setStatusFilter] = useState('All');
+  const [sourceFilter, setSourceFilter] = useState('All');
   const [capacityFilter, setCapacityFilter] = useState('All');
   const [agentFilter, setAgentFilter] = useState('All');
   const [datePreset, setDatePreset] = useState<string>('all');
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
 
+  const [jaminAgents, setJaminAgents] = useState<Array<{ id: string; name: string; email: string }>>([]);
+  const [apiAgents, setApiAgents] = useState<Array<{ id: string; name: string; email: string }>>([]);
+  const [jaminApiProjects, setJaminApiProjects] = useState<Array<{ id: string; name: string }>>([]);
+
   const agentOptions = useMemo(() => {
-    return Array.from(
-      new Set(scopedLeads.map(l => l.assignedAgentName).filter((n): n is string => !!n))
-    )
+    const list = isJamin ? jaminAgents : apiAgents;
+    return list
+      .filter(a => Boolean(a.name))
+      .map(a => ({ value: a.name, label: a.name }));
+  }, [isJamin, jaminAgents, apiAgents]);
+
+  const JAMIN_SOURCES = [
+    'Website Inbound',
+    'Google Search',
+    'Facebook / Instagram',
+    'Referral - HNW',
+    'Walk-in Site Office',
+  ];
+
+  const GHL_SOURCES = [
+    'Website Inbound',
+    'Phone Call',
+    'Referral',
+    'LinkedIn',
+    'Email Campaign',
+    'WhatsApp',
+    'Walk-in',
+    'Webinar',
+    'Google Ad',
+    'Facebook Ad',
+    'Partner Referral',
+  ];
+
+  const sourceOptions = useMemo(() => {
+    const isJaminTenant = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2';
+    const predefined = isJaminTenant ? JAMIN_SOURCES : GHL_SOURCES;
+    // Merge predefined list with any sources actually in leads data (case-normalized)
+    const seen = new Map<string, string>();
+    predefined.forEach(src => seen.set(src.toLowerCase(), src));
+    scopedLeads.forEach(l => {
+      if (l.source) {
+        const key = l.source.trim().toLowerCase();
+        if (!seen.has(key)) seen.set(key, l.source.trim());
+      }
+    });
+    return Array.from(seen.values())
       .sort()
-      .map(name => ({ value: name, label: name }));
-  }, [scopedLeads]);
+      .map(src => ({ value: src, label: src }));
+  }, [scopedLeads, tenant?.slug, tenant?.id]);
 
   const formatDateYMD = (d: Date): string => {
     const y = d.getFullYear();
@@ -152,7 +197,6 @@ export const LeadsPage: React.FC = () => {
   };
 
   // Tenant flags
-  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02';
   const canJaminAssign =
     isJamin &&
     (['company_admin', 'admin', 'super_admin', 'sales_manager', 'manager'].includes(String(roleCode)));
@@ -164,21 +208,43 @@ export const LeadsPage: React.FC = () => {
   const [jaminAiDistribution, setJaminAiDistribution] = useState<Record<string, Lead[]>>({});
   const [isJaminAiEditMode, setIsJaminAiEditMode] = useState(false);
 
-  const [jaminAgents, setJaminAgents] = useState<Array<{ id: string; name: string; email: string }>>([]);
-
   useEffect(() => {
     if (isJamin) {
       jaminApiService.getAgents().then(data => {
         if (data && data.length > 0) {
-          setJaminAgents(data.map(a => ({
+          const valid = data.map(a => ({
             id: String(a.id),
             name: a.name,
             email: a.email,
+          }));
+          setJaminAgents(valid);
+          setApiAgents(valid);
+        }
+      }).catch(err => console.warn('Failed to load Jamin agents:', err));
+
+      jaminApiService.getProjects().then(data => {
+        if (data && data.length > 0) {
+          setJaminApiProjects(data.map((p: any) => ({
+            id: String(p.id),
+            name: p.name,
           })));
         }
-      });
+      }).catch(err => console.warn('Failed to load Jamin projects:', err));
+    } else {
+      adminUserService.getUsers(tenant?.id || '1').then(users => {
+        if (users && users.length > 0) {
+          const valid = users
+            .filter(u => u.role?.code === 'sales_executive' || u.role?.code === 'sales_manager' || u.role?.code === 'irm')
+            .map(u => ({
+              id: String(u.id),
+              name: u.name,
+              email: u.email,
+            }));
+          setApiAgents(valid);
+        }
+      }).catch(err => console.warn('Failed to load GHL agents:', err));
     }
-  }, [isJamin]);
+  }, [isJamin, tenant?.id]);
 
   // Jamin Quick Schedule Follow-up state
   const [isJaminScheduleModalOpen, setIsJaminScheduleModalOpen] = useState(false);
@@ -209,7 +275,7 @@ export const LeadsPage: React.FC = () => {
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [assignStep, setAssignStep] = useState<'pick-agent' | 'confirm'>('pick-agent');
-  const [assignSelectedAgent, setAssignSelectedAgent] = useState<typeof MOCK_AGENTS[0] | null>(null);
+  const [assignSelectedAgent, setAssignSelectedAgent] = useState<{ id: string | number; name: string; email?: string } | null>(null);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [aiDistribution, setAiDistribution] = useState<Record<number, Lead[]>>({});
   const [isAiEditMode, setIsAiEditMode] = useState(false);
@@ -228,8 +294,7 @@ export const LeadsPage: React.FC = () => {
 
   // Form state
   const [formData, setFormData] = useState<Partial<Lead>>({});
-  const [convertDealTitle, setConvertDealTitle] = useState('');
-  const [convertDealValue, setConvertDealValue] = useState<number>(5000000);
+
 
   const currentAssetClass =
     formData.customFields?.assetClass ||
@@ -249,26 +314,72 @@ export const LeadsPage: React.FC = () => {
 
   const loadData = async () => {
     let updated: Lead[] = [];
-    if (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2') {
-      try {
+    const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2';
+    const effectiveCompanyId = isJamin ? 2 : 1;
+
+    try {
+      if (isJamin) {
         const liveLeads = await jaminApiService.getLeads(true);
         if (liveLeads && liveLeads.length > 0) {
           updated = liveLeads;
-        } else {
-          updated = storageService.getLeads(tenant?.id);
         }
-      } catch {
-        updated = storageService.getLeads(tenant?.id);
+      } else {
+        const res = await apiClient.get<any>(`/leads?tenantId=${effectiveCompanyId}`);
+        if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+          updated = res.data.map((l: any) => ({
+            id: String(l.id),
+            companyId: tenant?.id || 't-ghl-01',
+            name: l.name,
+            phone: l.phone,
+            email: l.email || '',
+            location: l.location || '',
+            source: l.source || 'Website Inbound',
+            status: l.status || 'New',
+            priority: l.priority || 'Medium',
+            assignedAgentId: (l.assignedAgentId && String(l.assignedAgentId) !== '1') ? String(l.assignedAgentId) : '',
+            assignedAgentName: (() => { const n = (l.assignedAgentName || '').trim(); return (!n || n.toLowerCase() === 'yanosh' || String(l.assignedAgentId) === '1') ? 'Unassigned' : n; })(),
+            nextFollowupDate: l.nextFollowupDate,
+            targetDevelopment: l.targetDevelopment,
+            budgetRange: l.budgetRange,
+            readyToRegister: l.readyToRegister,
+            notes: l.notes || '',
+            createdAt: l.createdAt ? new Date(l.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+            customFields: {
+              budgetRange: l.budgetRange || '',
+              readyToRegister: l.readyToRegister || '',
+              investmentCapacity: l.investmentCapacity || '',
+              assetClass: l.assetClass || '',
+              horizon: l.horizon || '',
+              investorType: l.investorType || '',
+            }
+          }));
+        }
       }
-    } else {
+    } catch (err) {
+      console.warn('API leads load error, falling back to storage:', err);
+    }
+
+    if (updated.length === 0) {
       updated = storageService.getLeads(tenant?.id);
     }
 
-    setLeads(updated);
+    const sanitizeAgent = (lead: Lead): Lead => {
+      const name = (lead.assignedAgentName || '').trim();
+      const isYanosh = name.toLowerCase() === 'yanosh' || String(lead.assignedAgentId) === '1';
+      const isInvalid = isYanosh || name === 'Agent' || !name;
+      return {
+        ...lead,
+        assignedAgentId: isInvalid ? '' : String(lead.assignedAgentId || ''),
+        assignedAgentName: isInvalid ? 'Unassigned' : name,
+      };
+    };
+
+    const sanitized = updated.map(sanitizeAgent);
+    setLeads(sanitized);
     setSelectedLead(prev => {
       if (!prev) return null;
-      const found = updated.find(l => l.id === prev.id);
-      if (!found || MOVED_LEAD_STATUSES.includes(found.status)) {
+      const found = sanitized.find(l => l.id === prev.id);
+      if (!found) {
         setIsDetailDrawerOpen(false);
         setIsEditDrawerOpen(false);
         return null;
@@ -367,7 +478,10 @@ export const LeadsPage: React.FC = () => {
       });
       if (hasPendingFollowup) return false;
     }
+    // Hide converted leads by default — only show them when filter is explicitly 'Converted'
+    if (statusFilter === 'All' && (lead.status as string) === 'Converted') return false;
     if (!isGhlAdmin && statusFilter !== 'All' && (lead.status as string) !== statusFilter) return false;
+    if (sourceFilter !== 'All' && lead.source !== sourceFilter) return false;
     if (agentFilter !== 'All' && lead.assignedAgentName !== agentFilter) return false;
     if (capacityFilter !== 'All') {
       if (!matchCapacity(lead, capacityFilter)) return false;
@@ -411,9 +525,9 @@ export const LeadsPage: React.FC = () => {
     setLeads(updated);
     storageService.addAuditLog({
       id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
+      timestamp: new Date().toISOString(),
       actorName: user?.name || 'Admin',
-      actorEmail: user?.email || 'admin@ghlindiaventures.com',
+      actorEmail: user?.email || (isJaminUser ? 'admin@jaminbazaar.com' : 'admin@ghlindiaventures.com'),
       action: 'LEADS_ASSIGNED',
       entityType: 'Lead',
       entityId: Array.from(selectedJaminLeadIds).join(','),
@@ -487,9 +601,9 @@ export const LeadsPage: React.FC = () => {
     setLeads(updated);
     storageService.addAuditLog({
       id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
+      timestamp: new Date().toISOString(),
       actorName: user?.name || 'Admin',
-      actorEmail: user?.email || 'admin@ghlindiaventures.com',
+      actorEmail: user?.email || (isJaminUser ? 'admin@jaminbazaar.com' : 'admin@ghlindiaventures.com'),
       action: 'LEADS_AUTO_ASSIGNED',
       entityType: 'Lead',
       entityId: `bulk-ai-${Date.now()}`,
@@ -533,9 +647,9 @@ export const LeadsPage: React.FC = () => {
     setLeads(updated);
     storageService.addAuditLog({
       id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
+      timestamp: new Date().toISOString(),
       actorName: user?.name || 'Admin',
-      actorEmail: user?.email || 'admin@ghlindiaventures.com',
+      actorEmail: user?.email || (isJaminUser ? 'admin@jaminbazaar.com' : 'admin@ghlindiaventures.com'),
       action: 'LEADS_AUTO_ASSIGNED',
       entityType: 'Lead',
       entityId: `auto-${Date.now()}`,
@@ -637,12 +751,33 @@ export const LeadsPage: React.FC = () => {
     };
     storageService.saveFollowup(newFollowup);
 
+    // Persist to backend API
+    try {
+      const parsedLeadId = selectedLead.id && !isNaN(Number(selectedLead.id))
+        ? Number(selectedLead.id)
+        : (selectedLead.id.startsWith('db-') ? Number(selectedLead.id.replace('db-', '')) : undefined);
+      const parsedAgentId = targetAgentId && !isNaN(Number(targetAgentId)) ? Number(targetAgentId) : 1;
+
+      apiClient.post('/sales-executive/followups', {
+        contactId: parsedLeadId || selectedLead.id,
+        contactName: selectedLead.name,
+        contactPhone: selectedLead.phone,
+        contactType: 'lead',
+        scheduledAt: formattedFollowupString,
+        priority: 'Medium',
+        notes: resolvedNotes,
+        assignedAgentId: parsedAgentId,
+      }).catch(err => console.warn('[LeadsPage] Backend followup schedule warning:', err));
+    } catch (e) {
+      console.warn('[LeadsPage] Backend followup schedule warning:', e);
+    }
+
     // 3. Add Audit log
     storageService.addAuditLog({
       id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
+      timestamp: new Date().toISOString(),
       actorName: user?.name || 'Agent',
-      actorEmail: user?.email || 'admin@ghlindiaventures.com',
+      actorEmail: user?.email || (isJaminUser ? 'agent@jaminbazaar.com' : 'admin@ghlindiaventures.com'),
       action: 'FOLLOWUP_SCHEDULED',
       entityType: 'Lead',
       entityId: selectedLead.id,
@@ -651,13 +786,14 @@ export const LeadsPage: React.FC = () => {
       details: `Scheduled ${scheduleType} follow-up for ${selectedLead.name} on ${formattedFollowupString}.`,
     });
 
+    window.dispatchEvent(new Event('nexus_storage_updated'));
     setIsJaminScheduleModalOpen(false);
     showToast(`✓ Follow-up scheduled for ${selectedLead.name} on ${scheduleDate}!`);
   };
 
   const leadSiteVisits = useMemo(() => {
-    if (!selectedLead || !isJamin) return [];
-    const visits = storageService.getSiteVisits(tenant?.id);
+    if (!selectedLead) return [];
+    const visits = storageService.getSiteVisits(tenant?.id) || [];
     const cleanPhone = (selectedLead.phone || '').replace(/\D/g, '').slice(-10);
     return visits.filter(
       v =>
@@ -665,7 +801,88 @@ export const LeadsPage: React.FC = () => {
         v.leadId === selectedLead.id ||
         (cleanPhone && (v.customerPhone || '').replace(/\D/g, '').slice(-10) === cleanPhone)
     );
-  }, [selectedLead, isJamin, tenant?.id]);
+  }, [selectedLead, tenant?.id, isDetailDrawerOpen]);
+
+  const leadFollowups = useMemo(() => {
+    if (!selectedLead) return [];
+    const all = storageService.getFollowups(tenant?.id) || [];
+    const cleanPhone = (selectedLead.phone || '').replace(/\D/g, '').slice(-10);
+    return all.filter(
+      f =>
+        f.contactId === selectedLead.id ||
+        (cleanPhone && (f.contactPhone || '').replace(/\D/g, '').slice(-10) === cleanPhone)
+    );
+  }, [selectedLead, tenant?.id, isDetailDrawerOpen]);
+
+  const leadConsultations = useMemo(() => {
+    if (!selectedLead) return [];
+    const all = storageService.getConsultations(tenant?.id) || [];
+    const cleanPhone = (selectedLead.phone || '').replace(/\D/g, '').slice(-10);
+    return all.filter(
+      c =>
+        c.investorId === selectedLead.id ||
+        (c as any).leadId === selectedLead.id ||
+        (cleanPhone && (c.investorPhone || (c as any).customerPhone || '').replace(/\D/g, '').slice(-10) === cleanPhone)
+    );
+  }, [selectedLead, tenant?.id, isDetailDrawerOpen]);
+
+  const availableProjects = useMemo(() => {
+    // First priority: API-loaded Jamin projects
+    if (jaminApiProjects.length > 0) {
+      return jaminApiProjects;
+    }
+    // Second priority: locally stored projects
+    const fromStorage = storageService.getProjects() || [];
+    if (fromStorage.length > 0) {
+      return fromStorage.map(p => ({ id: p.id, name: p.name }));
+    }
+    // Fallback defaults (only if no API/storage data)
+    return [
+      { id: 'proj-01', name: 'Greenfield Meadows Phase 2' },
+      { id: 'proj-02', name: 'Greenfield Meadows Phase 1' },
+      { id: 'proj-03', name: 'Palm Grove Estates' },
+      { id: 'proj-04', name: 'Emerald Orchards' },
+    ];
+  }, [jaminApiProjects, tenant?.id]);
+
+  const handleUpdateLeadStatus = (leadId: string, newStatus: Lead['status']) => {
+    const updated = leads.map(l => l.id === leadId ? { ...l, status: newStatus } : l);
+    setLeads(updated);
+    const leadObj = updated.find(l => l.id === leadId);
+    if (leadObj) {
+      storageService.saveLead(leadObj);
+      if (selectedLead && selectedLead.id === leadId) {
+        setSelectedLead(leadObj);
+      }
+      showToast(`✓ Lead status updated to "${newStatus}"!`);
+    }
+  };
+
+  const handleUpdateLeadField = (leadId: string, updates: Partial<Lead>) => {
+    const updated = leads.map(l => {
+      if (l.id === leadId) {
+        const merged: Lead = {
+          ...l,
+          ...updates,
+          customFields: {
+            ...(l.customFields || {}),
+            ...(updates.customFields || {}),
+          },
+        };
+        return merged;
+      }
+      return l;
+    });
+    setLeads(updated);
+    const leadObj = updated.find(l => l.id === leadId);
+    if (leadObj) {
+      storageService.saveLead(leadObj);
+      if (selectedLead && selectedLead.id === leadId) {
+        setSelectedLead(leadObj);
+      }
+      showToast(`✓ Updated details for ${leadObj.name}`);
+    }
+  };
 
   const handleOpenLeadSiteVisitModal = (lead: Lead) => {
     const d = new Date();
@@ -721,9 +938,9 @@ export const LeadsPage: React.FC = () => {
 
     storageService.addAuditLog({
       id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
+      timestamp: new Date().toISOString(),
       actorName: user?.name || 'Agent',
-      actorEmail: user?.email || 'admin@ghlindiaventures.com',
+      actorEmail: user?.email || (isJaminUser ? 'agent@jaminbazaar.com' : 'admin@ghlindiaventures.com'),
       action: 'SITE_VISIT_SCHEDULED',
       entityType: 'SiteVisit',
       entityId: newVisit.id,
@@ -739,7 +956,7 @@ export const LeadsPage: React.FC = () => {
   const handleManualAssignConfirm = () => {
     if (!assignSelectedAgent) return;
     const newAssigned = new Set(assignedLeadIds);
-    const newRecords: Array<{ leadId: string; leadName: string; agentId: number; agentName: string; assignedAt: string }> = [];
+    const newRecords: Array<{ leadId: string; leadName: string; agentId: any; agentName: string; assignedAt: string }> = [];
     selectedLeadIds.forEach(id => {
       newAssigned.add(id);
       const lead = leads.find(l => l.id === id);
@@ -754,11 +971,10 @@ export const LeadsPage: React.FC = () => {
     setAssignedLeadIds(newAssigned);
     setAgentAssignments(prev => {
       const updated = [...prev, ...newRecords];
-      try { sessionStorage.setItem('ghl_mock_agent_assignments', JSON.stringify(updated)); } catch { }
+      try { sessionStorage.setItem('ghl_agent_assignments', JSON.stringify(updated)); } catch { }
       (window as any).__ghlAssignments = updated;
       return updated;
     });
-    console.log('[GHL Admin Leads Assignment - Manual]', newRecords);
     const count = selectedLeadIds.size;
     setSelectedLeadIds(new Set());
     setIsAssignModalOpen(false);
@@ -769,26 +985,30 @@ export const LeadsPage: React.FC = () => {
 
   const handleOpenAiSuggestion = () => {
     const pool = filteredLeads;
-    const dist: Record<number, Lead[]> = {};
-    MOCK_AGENTS.forEach(a => { dist[a.id] = []; });
+    const dist: Record<string, Lead[]> = {};
+    const agentsList = apiAgents && apiAgents.length > 0 ? apiAgents : [];
+    agentsList.forEach(a => { dist[String(a.id)] = []; });
     pool.forEach((lead, i) => {
-      const agent = MOCK_AGENTS[i % MOCK_AGENTS.length];
-      dist[agent.id].push(lead);
+      if (agentsList.length > 0) {
+        const agent = agentsList[i % agentsList.length];
+        dist[String(agent.id)].push(lead);
+      }
     });
-    setAiDistribution(dist);
+    setAiDistribution(dist as any);
     setIsAiEditMode(false);
     setIsAiModalOpen(true);
   };
 
-  const handleAiMoveLead = (leadId: string, fromAgentId: number, direction: 'left' | 'right') => {
-    const agentIds = MOCK_AGENTS.map(a => a.id);
-    const fromIdx = agentIds.indexOf(fromAgentId);
+  const handleAiMoveLead = (leadId: string, fromAgentId: any, direction: 'left' | 'right') => {
+    const agentsList = apiAgents && apiAgents.length > 0 ? apiAgents : [];
+    const agentIds = agentsList.map(a => String(a.id));
+    const fromIdx = agentIds.indexOf(String(fromAgentId));
     const toIdx = direction === 'left' ? fromIdx - 1 : fromIdx + 1;
     if (toIdx < 0 || toIdx >= agentIds.length) return;
     const toAgentId = agentIds[toIdx];
-    setAiDistribution(prev => {
-      const fromLeads = [...(prev[fromAgentId] || [])].filter(l => l.id !== leadId);
-      const movedLead = (prev[fromAgentId] || []).find(l => l.id === leadId);
+    setAiDistribution((prev: any) => {
+      const fromLeads = [...(prev[fromAgentId] || [])].filter((l: any) => l.id !== leadId);
+      const movedLead = (prev[fromAgentId] || []).find((l: any) => l.id === leadId);
       if (!movedLead) return prev;
       const toLeads = [...(prev[toAgentId] || []), movedLead];
       return { ...prev, [fromAgentId]: fromLeads, [toAgentId]: toLeads };
@@ -797,18 +1017,18 @@ export const LeadsPage: React.FC = () => {
 
   const handleAiConfirm = () => {
     const newAssigned = new Set(assignedLeadIds);
-    const newRecords: Array<{ leadId: string; leadName: string; agentId: number; agentName: string; assignedAt: string }> = [];
+    const newRecords: Array<{ leadId: string; leadName: string; agentId: any; agentName: string; assignedAt: string }> = [];
     let count = 0;
+    const agentsList = apiAgents && apiAgents.length > 0 ? apiAgents : [];
     Object.entries(aiDistribution).forEach(([agentIdStr, agentLeads]) => {
-      const agentId = Number(agentIdStr);
-      const agent = MOCK_AGENTS.find(a => a.id === agentId);
-      agentLeads.forEach(l => {
+      const agent = agentsList.find(a => String(a.id) === String(agentIdStr));
+      (agentLeads as Lead[]).forEach(l => {
         newAssigned.add(l.id);
         count++;
         newRecords.push({
           leadId: l.id,
           leadName: l.name,
-          agentId,
+          agentId: agentIdStr,
           agentName: agent?.name || 'Agent',
           assignedAt: new Date().toISOString(),
         });
@@ -817,11 +1037,10 @@ export const LeadsPage: React.FC = () => {
     setAssignedLeadIds(newAssigned);
     setAgentAssignments(prev => {
       const updated = [...prev, ...newRecords];
-      try { sessionStorage.setItem('ghl_mock_agent_assignments', JSON.stringify(updated)); } catch { }
+      try { sessionStorage.setItem('ghl_agent_assignments', JSON.stringify(updated)); } catch { }
       (window as any).__ghlAssignments = updated;
       return updated;
     });
-    console.log('[GHL Admin Leads Assignment - AI Round Robin]', newRecords);
     setIsAiModalOpen(false);
     showToast(`✓ ${count} lead${count !== 1 ? 's' : ''} assigned via AI Suggestion`);
   };
@@ -831,12 +1050,9 @@ export const LeadsPage: React.FC = () => {
       console.warn('[LeadsPage] Cannot create lead: user session is not yet loaded.');
       return;
     }
-    const defaultAgentId = (isJamin && canJaminAssign)
-      ? ''
-      : (user.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec'));
-    const defaultAgentName = (isJamin && canJaminAssign)
-      ? 'Unassigned'
-      : (user.name || 'Agent');
+    const isSalesRole = user.role?.code === 'sales_executive' || user.role?.code === 'sales_manager';
+    const defaultAgentId = isSalesRole ? String(user.id) : '';
+    const defaultAgentName = isSalesRole ? user.name : '';
 
     setFormData({
       id: `lead-${Date.now()}`,
@@ -868,54 +1084,36 @@ export const LeadsPage: React.FC = () => {
     e.preventDefault();
     if (!formData.name || !formData.phone) return;
 
-    // Pull real agent ID and name at save-time to prevent stale/fallback placeholder IDs from leaking
-    const isJaminUser = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02';
-    const isJaminUnassigned = isJaminUser && (!formData.assignedAgentId || formData.assignedAgentId === 'unassigned');
+    // Resolve assigned agent from formData without defaulting to logged in admin user
+    const resolvedAgentId = formData.assignedAgentId && formData.assignedAgentId !== 'unassigned'
+      ? String(formData.assignedAgentId)
+      : '';
+    const resolvedAgentName = formData.assignedAgentName && formData.assignedAgentName !== 'Agent' && formData.assignedAgentName !== 'Unassigned'
+      ? formData.assignedAgentName
+      : (resolvedAgentId ? 'Agent' : 'Unassigned');
 
-    const resolvedAgentId = isJaminUnassigned
-      ? ''
-      : (isLeadScopedUser && user?.id)
-        ? user.id
-        : (formData.assignedAgentId && formData.assignedAgentId !== 'usr-exec' ? formData.assignedAgentId : (user?.id || 'usr-exec'));
-    const resolvedAgentName = isJaminUnassigned
-      ? 'Unassigned'
-      : (isLeadScopedUser && user?.name)
-        ? user.name
-        : (formData.assignedAgentName && formData.assignedAgentName !== 'Agent' ? formData.assignedAgentName : (user?.name || 'Agent'));
-
-    const isExistingById = leads.some(l => l.id === formData.id);
     const targetCompanyId = formData.companyId || tenant?.id || 't-ghl-01';
+    const existingMatch = leads.find(l => l.id === formData.id) || (formData.phone ? storageService.findLeadByPhone(formData.phone, targetCompanyId) : null);
+    const isExistingById = Boolean(existingMatch);
 
     let leadToSave: Lead;
     let isUpdated = isExistingById;
 
-    if (!isExistingById) {
-      const existingMatch = storageService.findLeadByPhone(formData.phone, targetCompanyId);
-      if (existingMatch) {
-        isUpdated = true;
-        leadToSave = {
-          ...existingMatch,
-          ...formData,
-          id: existingMatch.id, // Preserve existing ID
-          companyId: existingMatch.companyId || targetCompanyId,
-          status: formData.status || existingMatch.status || 'New',
-          assignedAgentId: resolvedAgentId || existingMatch.assignedAgentId,
-          assignedAgentName: resolvedAgentName || existingMatch.assignedAgentName,
-          customFields: {
-            ...(existingMatch.customFields || {}),
-            ...(formData.customFields || {}),
-          },
-        };
-      } else {
-        leadToSave = {
-          ...formData,
-          status: formData.status || 'New',
-          assignedAgentId: resolvedAgentId,
-          assignedAgentName: resolvedAgentName,
-          companyId: targetCompanyId,
-          createdAt: formData.createdAt || new Date().toISOString().split('T')[0],
-        } as Lead;
-      }
+    if (existingMatch) {
+      isUpdated = true;
+      leadToSave = {
+        ...existingMatch,
+        ...formData,
+        id: existingMatch.id, // Preserve existing ID
+        companyId: existingMatch.companyId || targetCompanyId,
+        status: formData.status || existingMatch.status || 'New',
+        assignedAgentId: resolvedAgentId || existingMatch.assignedAgentId,
+        assignedAgentName: resolvedAgentName || existingMatch.assignedAgentName,
+        customFields: {
+          ...(existingMatch.customFields || {}),
+          ...(formData.customFields || {}),
+        },
+      };
     } else {
       leadToSave = {
         ...formData,
@@ -923,6 +1121,7 @@ export const LeadsPage: React.FC = () => {
         assignedAgentId: resolvedAgentId,
         assignedAgentName: resolvedAgentName,
         companyId: targetCompanyId,
+        createdAt: formData.createdAt || new Date().toISOString().split('T')[0],
       } as Lead;
     }
 
@@ -939,12 +1138,14 @@ export const LeadsPage: React.FC = () => {
           email: leadToSave.email,
           location: leadToSave.location,
           source: leadToSave.source,
+          status: leadToSave.status || 'New',
           priority: leadToSave.priority,
           notes: leadToSave.notes,
           targetDevelopment: leadToSave.targetDevelopment,
           assignedAgentId: parsedAgentId,
           assignedAgentName: resolvedAgentName !== 'Unassigned' ? resolvedAgentName : undefined,
           budgetRange: leadToSave.customFields?.budgetRange || leadToSave.customFields?.investmentCapacity || '',
+          readyToRegister: leadToSave.customFields?.readyToRegister || (leadToSave as any).readyToRegister || '',
           investmentCapacity: leadToSave.customFields?.investmentCapacity || ''
         });
         if (res.success && res.data) {
@@ -961,12 +1162,14 @@ export const LeadsPage: React.FC = () => {
             email: leadToSave.email,
             location: leadToSave.location,
             source: leadToSave.source,
+            status: leadToSave.status,
             priority: leadToSave.priority,
             notes: leadToSave.notes,
             targetDevelopment: leadToSave.targetDevelopment,
             assignedAgentId: parsedAgentId,
             assignedAgentName: resolvedAgentName !== 'Unassigned' ? resolvedAgentName : undefined,
             budgetRange: leadToSave.customFields?.budgetRange || leadToSave.customFields?.investmentCapacity || '',
+            readyToRegister: leadToSave.customFields?.readyToRegister || (leadToSave as any).readyToRegister || '',
             investmentCapacity: leadToSave.customFields?.investmentCapacity || ''
           });
         }
@@ -977,92 +1180,138 @@ export const LeadsPage: React.FC = () => {
 
     storageService.saveLead(leadToSave);
 
+    // ── Immediately sync React state so the 360 view shows the saved values ──
+    setLeads(prev => {
+      const idx = prev.findIndex(l => l.id === leadToSave.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = leadToSave;
+        return next;
+      }
+      return [leadToSave, ...prev];
+    });
+    if (selectedLead && selectedLead.id === leadToSave.id) {
+      setSelectedLead(leadToSave);
+    }
+
+    let auditDetails = '';
+    if (!isUpdated) {
+      auditDetails = `Created new lead prospect "${leadToSave.name}" (Phone: ${leadToSave.phone}, Status: ${leadToSave.status || 'New'}, Priority: ${leadToSave.priority || 'Medium'}, Source: ${leadToSave.source || 'Website Inbound'}${leadToSave.targetDevelopment ? `, Project: ${leadToSave.targetDevelopment}` : ''}${leadToSave.budgetRange ? `, Budget: ${leadToSave.budgetRange}` : ''}).`;
+    } else {
+      const changes: string[] = [];
+      if (existingMatch) {
+        if (existingMatch.status !== leadToSave.status) changes.push(`Status → ${leadToSave.status}`);
+        if (existingMatch.priority !== leadToSave.priority) changes.push(`Priority → ${leadToSave.priority}`);
+        if (existingMatch.source !== leadToSave.source) changes.push(`Source → ${leadToSave.source}`);
+        if (existingMatch.assignedAgentName !== leadToSave.assignedAgentName) changes.push(`Assigned → ${leadToSave.assignedAgentName}`);
+        if (existingMatch.targetDevelopment !== leadToSave.targetDevelopment && leadToSave.targetDevelopment) changes.push(`Project → ${leadToSave.targetDevelopment}`);
+        if (existingMatch.budgetRange !== leadToSave.budgetRange && leadToSave.budgetRange) changes.push(`Budget → ${leadToSave.budgetRange}`);
+        if (existingMatch.readyToRegister !== leadToSave.readyToRegister && leadToSave.readyToRegister) changes.push(`Timeline → ${leadToSave.readyToRegister}`);
+        if (existingMatch.location !== leadToSave.location && leadToSave.location) changes.push(`Location → ${leadToSave.location}`);
+      }
+      auditDetails = changes.length > 0
+        ? `Updated ${leadToSave.name}: ${changes.join(', ')}.`
+        : `Updated lead record details for ${leadToSave.name}.`;
+    }
+
     storageService.addAuditLog({
       id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
+      timestamp: new Date().toISOString(),
       actorName: user?.name || resolvedAgentName,
-      actorEmail: user?.email || 'agent@nexus.io',
+      actorEmail: user?.email || (isJaminUser ? 'agent@jaminbazaar.com' : 'agent@ghlindiaventures.com'),
       action: isUpdated ? 'LEAD_UPDATED' : 'LEAD_CREATED',
       entityType: 'Lead',
       entityId: leadToSave.id,
       companyId: tenant?.id,
       companyName: tenant?.name,
-      details: `Lead record ${leadToSave.name} (${leadToSave.phone}) saved.`,
+      details: auditDetails,
     });
 
+    showToast(`✓ Lead "${leadToSave.name}" saved successfully!`);
     setIsEditDrawerOpen(false);
   };
 
   const handleDeleteLead = async (lead: Lead) => {
-    if (confirm(`Delete lead ${lead.name}?`)) {
+    if (confirm(`Delete lead "${lead.name}"?`)) {
       try {
-        if (lead.id.toString().startsWith('db-')) {
-          const dbId = lead.id.toString().replace('db-', '');
-          await apiClient.delete(`/sales-executive/leads/${dbId}`);
+        const cleanId = String(lead.id).replace('db-', '').trim();
+        const numericId = parseInt(cleanId, 10);
+        if (!isNaN(numericId)) {
+          await apiClient.delete(`/leads/${numericId}`).catch(async () => {
+            await apiClient.delete(`/sales-executive/leads/${numericId}`);
+          });
         }
       } catch (err) {
         console.error('Failed to delete lead from DB', err);
       }
       storageService.deleteLead(lead.id);
-      loadData();
+      storageService.addAuditLog({
+        id: `aud-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        actorName: user?.name || 'Admin',
+        actorEmail: user?.email || (isJaminUser ? 'admin@jaminbazaar.com' : 'admin@ghlindiaventures.com'),
+        action: 'LEAD_DELETED',
+        entityType: 'Lead',
+        entityId: String(lead.id),
+        companyId: tenant?.id,
+        companyName: tenant?.name,
+        details: `Deleted lead prospect ${lead.name} (Phone: ${lead.phone}).`,
+      });
+      showToast(`✓ Lead "${lead.name}" deleted successfully.`);
+      setSelectedLead(null);
+      setIsDetailDrawerOpen(false);
+      setIsEditDrawerOpen(false);
+      await loadData();
     }
   };
 
   const handleStartConvert = (lead: Lead) => {
     setSelectedLead(lead);
-    setConvertDealTitle(
-      tenant?.slug === 'jamin'
-        ? `${lead.name} - Villa Plot Booking`
-        : `${lead.name} - High Yield Asset Investment`
-    );
     setIsConvertModalOpen(true);
   };
 
-  const handleConfirmConvert = () => {
+  const handleConfirmConvert = async () => {
     if (!selectedLead || !tenant) return;
 
-    // 1. Create Customer
+    // 1. Create / Update Customer in Customer 360
     const newCustomer: Customer = {
       id: `cust-${Date.now()}`,
       companyId: tenant.id,
       name: selectedLead.name,
       phone: selectedLead.phone,
-      email: selectedLead.email,
+      email: selectedLead.email || '',
       status: 'Active',
       assignedAgentId: selectedLead.assignedAgentId,
       assignedAgentName: selectedLead.assignedAgentName,
-      location: selectedLead.location,
+      location: selectedLead.location || '',
       lastContacted: 'Today',
-      openDealsCount: 1,
-      totalValue: convertDealValue,
+      openDealsCount: 0,
+      totalValue: 0,
       createdAt: new Date().toISOString().split('T')[0],
-      notes: `Converted from lead. Original notes: ${selectedLead.notes}`,
+      notes: `Converted from lead prospect. Original notes: ${selectedLead.notes || 'None'}`,
       customFields: selectedLead.customFields,
     };
     storageService.saveCustomer(newCustomer);
 
-    // 2. Create Deal
-    const newDeal: Deal = {
-      id: `deal-${Date.now()}`,
-      companyId: tenant.id,
-      title: convertDealTitle,
-      customerId: newCustomer.id,
-      customerName: newCustomer.name,
-      stage: tenant.slug === 'jamin' ? 'site_visit' : 'consultation',
-      value: convertDealValue,
-      expectedCloseDate: 'Within 30 Days',
-      assignedAgentId: selectedLead.assignedAgentId,
-      assignedAgentName: selectedLead.assignedAgentName,
-      notes: `Deal initiated upon converting lead ${selectedLead.name}.`,
-      createdAt: new Date().toISOString().split('T')[0],
-    };
-    storageService.saveDeal(newDeal);
+    // 2. Mark Lead as Converted locally
+    const updatedLead: Lead = { ...selectedLead, status: 'Converted' };
+    storageService.saveLead(updatedLead);
+    setLeads(prev => prev.map(l => l.id === selectedLead.id ? updatedLead : l));
 
-    // 3. Mark Lead as Converted
-    storageService.saveLead({ ...selectedLead, status: 'Converted' });
+    // 3. Sync with Backend API
+    try {
+      const cleanId = String(selectedLead.id).replace('db-', '').replace('lead-', '').trim();
+      if (!isNaN(Number(cleanId))) {
+        await jaminApiService.convertLead(cleanId, undefined, undefined, selectedLead.notes);
+      }
+    } catch (err) {
+      console.warn('Backend convert sync notice:', err);
+    }
 
+    showToast(`✓ Lead "${selectedLead.name}" converted to Customer successfully.`);
     setIsConvertModalOpen(false);
     setIsDetailDrawerOpen(false);
+    await loadData();
   };
 
   const handleFileSelect = (file: File) => {
@@ -1162,9 +1411,9 @@ export const LeadsPage: React.FC = () => {
 
     storageService.addAuditLog({
       id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
+      timestamp: new Date().toISOString(),
       actorName: user?.name || 'Agent',
-      actorEmail: user?.email || 'agent@nexus.io',
+      actorEmail: user?.email || (isJaminUser ? 'agent@jaminbazaar.com' : 'agent@ghlindiaventures.com'),
       action: 'LEADS_BULK_IMPORTED',
       entityType: 'Lead',
       entityId: `batch-${Date.now()}`,
@@ -1226,10 +1475,9 @@ export const LeadsPage: React.FC = () => {
     sortable: true,
     width: '18%',
     render: l => {
-      const agentName = (l.assignedAgentName && l.assignedAgentName !== 'Agent')
-        ? l.assignedAgentName
-        : (l.assignedAgentId === user?.id && user?.name ? user.name : (l.assignedAgentName || '—'));
-      return <span className="lead-text-muted">{agentName}</span>;
+      const name = l.assignedAgentName || '';
+      const isInvalid = !name || name === 'Agent' || name === 'Unassigned';
+      return <span className="lead-text-muted">{isInvalid ? '—' : name}</span>;
     },
   };
 
@@ -1374,6 +1622,11 @@ export const LeadsPage: React.FC = () => {
       },
     },
     {
+      label: 'Convert to Customer',
+      icon: <Sparkles size={14} color="#10b981" className="leads-action-icon" />,
+      onClick: l => handleStartConvert(l),
+    },
+    {
       label: 'Edit Lead',
       icon: <Edit size={14} className="leads-action-icon" />,
       onClick: l => handleOpenEdit(l),
@@ -1425,7 +1678,7 @@ export const LeadsPage: React.FC = () => {
         searchPlaceholder="Search leads by name, phone, or location..."
         emptyTitle="No leads matching criteria"
         emptyDescription="Create a new lead or clear your filters to display inbound leads."
-        emptyActionLabel="+ Add First Lead"
+        emptyActionLabel="+ Add  Lead"
         onEmptyAction={handleOpenCreate}
         filtersNode={
           <div className="leads-toolbar">
@@ -1439,12 +1692,44 @@ export const LeadsPage: React.FC = () => {
                   allLabel: isJamin ? 'All Statuses' : 'All',
                   value: statusFilter,
                   onChange: setStatusFilter,
-                  options: [
-                    { value: 'New', label: 'New' },
-                    { value: 'Callback', label: 'Callback' },
-                    { value: 'No Response', label: 'No Response' },
-                  ],
+                  options: isJamin
+                    ? [
+                      { value: 'New', label: 'New' },
+                      { value: 'Contacted', label: 'Contacted' },
+                      { value: 'Interested', label: 'Interested' },
+                      { value: 'Qualified', label: 'Qualified' },
+                      { value: 'Follow-up Required', label: 'Follow-up Required' },
+                      { value: 'Callback', label: 'Callback' },
+                      { value: 'No Response', label: 'No Response' },
+                      { value: 'Not Interested', label: 'Not Interested' },
+                      { value: 'Junk', label: 'Junk' },
+                      { value: 'Lost', label: 'Lost' },
+                      { value: 'Converted', label: '✓ Converted' },
+                    ]
+                    : [
+                      { value: 'New', label: 'New' },
+                      { value: 'Contacted', label: 'Contacted' },
+                      { value: 'Qualified', label: 'Qualified' },
+                      { value: 'Proposal', label: 'Proposal' },
+                      { value: 'Negotiation', label: 'Negotiation' },
+                      { value: 'Interested', label: 'Interested' },
+                      { value: 'Follow-up Required', label: 'Follow-up Required' },
+                      { value: 'Callback', label: 'Callback' },
+                      { value: 'No Response', label: 'No Response' },
+                      { value: 'Not Interested', label: 'Not Interested' },
+                      { value: 'Junk', label: 'Junk' },
+                      { value: 'Lost', label: 'Lost' },
+                      { value: 'Converted', label: '✓ Converted' },
+                    ],
                 }]),
+                {
+                  key: 'source',
+                  label: 'Source',
+                  allLabel: isJamin ? 'All Sources' : 'All Sources',
+                  value: sourceFilter,
+                  onChange: setSourceFilter,
+                  options: sourceOptions,
+                },
                 ...(!isExec ? [{
                   key: 'agent',
                   label: 'Agent',
@@ -1472,6 +1757,7 @@ export const LeadsPage: React.FC = () => {
               }}
               onClearAll={() => {
                 setStatusFilter('All');
+                setSourceFilter('All');
                 setAgentFilter('All');
                 setCapacityFilter('All');
                 setDatePreset('all');
@@ -1573,8 +1859,8 @@ export const LeadsPage: React.FC = () => {
         isOpen={isDetailDrawerOpen && !!selectedLead}
         onClose={() => setIsDetailDrawerOpen(false)}
         title={selectedLead?.name || 'Lead Overview'}
-        subtitle={`${selectedLead?.phone} • Created on ${selectedLead?.createdAt}`}
-        width={580}
+        subtitle={`${selectedLead?.phone} • Created on ${selectedLead?.createdAt ? new Date(selectedLead.createdAt).toLocaleDateString() : '—'}`}
+        width={620}
         footer={
           <>
             <button
@@ -1606,6 +1892,7 @@ export const LeadsPage: React.FC = () => {
             selectedLead.customFields?.capacityRange ||
             selectedLead.customFields?.investmentRange ||
             (selectedLead as any).investmentRange ||
+            selectedLead.investmentCapacity ||
             null;
 
           /** ── User-facing message ── */
@@ -1614,31 +1901,79 @@ export const LeadsPage: React.FC = () => {
             (selectedLead as any).userMessage ||
             selectedLead.customFields?.message ||
             selectedLead.customFields?.userMessage ||
+            selectedLead.customFields?.customerNotes ||
+            (selectedLead as any).anythingWeShouldKnow ||
+            (selectedLead as any).whatAreYouLookingFor ||
             selectedLead.notes ||
             null;
 
-
-
-
           return (
-            <>
-              {/* ── Quick Info Banner (Assigned Agent) ── */}
-              <div className="lead-quick-banner">
-                <div className="lead-assigned-note">
-                  Assigned to <strong>{selectedLead.assignedAgentName}</strong>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {/* ── 1. Quick Info Banner (Assigned Agent & Quick Actions) ── */}
+              <div className="lead-quick-banner" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                {/* Left: Assigned Sales Executive */}
+                <div>
+                  <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                    Assigned Sales Executive
+                  </div>
+                  <div className="lead-assigned-note" style={{ margin: 0, marginTop: 2, fontSize: '14px', fontWeight: 700,
+                    color: (!selectedLead.assignedAgentName || selectedLead.assignedAgentName === 'Unassigned' || selectedLead.assignedAgentName === 'Agent')
+                      ? 'var(--text-secondary)' : 'var(--text-primary)' }}>
+                    {(!selectedLead.assignedAgentName || selectedLead.assignedAgentName === 'Unassigned' || selectedLead.assignedAgentName === 'Agent')
+                      ? 'Not Assigned'
+                      : selectedLead.assignedAgentName}
+                  </div>
+                </div>
+
+                {/* Right: Convert to Customer (only when assigned) + other actions */}
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                  {selectedLead.status !== 'Converted' &&
+                    selectedLead.assignedAgentName &&
+                    selectedLead.assignedAgentName !== 'Unassigned' &&
+                    selectedLead.assignedAgentName !== 'Agent' && (
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => handleStartConvert(selectedLead)}
+                      style={{
+                        fontSize: '11px',
+                        padding: '4px 10px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        backgroundColor: '#10b981',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: 6,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                      title="Convert this lead into an active Customer record"
+                    >
+                      <Sparkles size={12} /> Convert to Customer
+                    </button>
+                  )}
                 </div>
               </div>
 
-              {/* ── Contact & Profile Details ── */}
+              {/* ── 2. Contact & Profile Details ── */}
               <div className="card lead-detail-card">
                 <h4 className="lead-detail-title">Contact &amp; Profile Details</h4>
                 <div className="lead-detail-grid">
+                  <div>
+                    <span className="lead-detail-label">Full Name:</span>
+                    <div className="lead-detail-value" style={{ fontWeight: 700 }}>{selectedLead.name}</div>
+                  </div>
+                  <div>
+                    <span className="lead-detail-label">Phone Number:</span>
+                    <div className="lead-detail-value" style={{ fontWeight: 700, color: 'var(--primary-600)' }}>{selectedLead.phone}</div>
+                  </div>
                   <div>
                     <span className="lead-detail-label">Email:</span>
                     <div className="lead-detail-value">{selectedLead.email || '—'}</div>
                   </div>
                   <div>
-                    <span className="lead-detail-label">Location:</span>
+                    <span className="lead-detail-label">Location / City:</span>
                     <div className="lead-detail-value">{selectedLead.location || '—'}</div>
                   </div>
                   <div>
@@ -1646,56 +1981,332 @@ export const LeadsPage: React.FC = () => {
                     <div className="lead-detail-value">{selectedLead.source}</div>
                   </div>
                   <div>
-                    <span className="lead-detail-label">Follow-up:</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px', flexWrap: 'wrap' }}>
-                      <div className="lead-detail-value lead-followup-text has-date" style={{ margin: 0 }}>
-                        {selectedLead.nextFollowupDate ? (
-                          <span>
-                            {selectedLead.nextFollowupType && (
-                              <span style={{ marginRight: '6px', fontWeight: 600 }}>
-                                {selectedLead.nextFollowupType === 'call' && 'Phone Call'}
-                                {selectedLead.nextFollowupType === 'whatsapp' && 'WhatsApp'}
-                                {selectedLead.nextFollowupType === 'meeting' && 'Meeting'}
-                                {!['call', 'whatsapp', 'meeting'].includes(selectedLead.nextFollowupType) && selectedLead.nextFollowupType}
-                                {' •'}
-                              </span>
-                            )}
-                            {selectedLead.nextFollowupDate}
-                          </span>
-                        ) : (
-                          'Not scheduled'
-                        )}
-                      </div>
-                      {isJamin && (
-                        <button
-                          type="button"
-                          className="btn btn-sm"
-                          onClick={() => handleOpenJaminSchedule(selectedLead)}
-                          style={{
-                            padding: '2px 8px',
-                            fontSize: '11px',
-                            fontWeight: 600,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            borderRadius: '4px',
-                            border: '1px solid #dc2626',
-                            background: '#fef2f2',
-                            color: '#dc2626',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <Calendar size={12} /> {selectedLead.nextFollowupDate ? 'Reschedule' : 'Schedule'}
-                        </button>
-                      )}
+                    <span className="lead-detail-label">Intake Date:</span>
+                    <div className="lead-detail-value">
+                      {selectedLead.createdAt ? new Date(selectedLead.createdAt).toLocaleDateString() : '—'}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="lead-detail-label">Lead Status:</span>
+                    <div style={{ marginTop: 4 }}>
+                      <StatusChip status={selectedLead.status} size="sm" />
+                    </div>
+                  </div>
+                  <div>
+                    <span className="lead-detail-label">Priority:</span>
+                    <div style={{ marginTop: 4 }}>
+                      <StatusChip status={selectedLead.priority} size="sm" />
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Jamin Bazaar: Linked Site Visits */}
-              {isJamin && (
-                <div className="card lead-detail-card" style={{ marginTop: 14 }}>
+              {/* ── 3. Dedicated Follow-ups & Scheduled Actions Card (Separate Section) ── */}
+              <div className="card lead-detail-card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <h4 className="lead-detail-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Calendar size={15} color="var(--primary-600)" />
+                    Follow-ups &amp; Scheduled Tasks ({leadFollowups.length})
+                  </h4>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-secondary"
+                    onClick={() => handleOpenJaminSchedule(selectedLead)}
+                    style={{
+                      fontSize: '11px',
+                      padding: '3px 10px',
+                      fontWeight: 600,
+                      color: 'var(--primary-600)',
+                      borderColor: 'var(--primary-200, #fca5a5)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4
+                    }}
+                  >
+                    <Calendar size={12} /> {selectedLead.nextFollowupDate ? 'Reschedule' : '+ Schedule Follow-up'}
+                  </button>
+                </div>
+
+                {/* Next Follow-up Banner */}
+                {selectedLead.nextFollowupDate ? (
+                  <div
+                    style={{
+                      padding: '10px 14px',
+                      borderRadius: 8,
+                      backgroundColor: 'rgba(239, 68, 68, 0.06)',
+                      border: '1px solid rgba(239, 68, 68, 0.2)',
+                      marginBottom: leadFollowups.length > 0 ? 12 : 0,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: 8
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: '11px', textTransform: 'uppercase', fontWeight: 700, color: '#dc2626' }}>
+                        Next Scheduled Action
+                      </div>
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', marginTop: 2 }}>
+                        {selectedLead.nextFollowupType && (
+                          <span style={{ marginRight: '6px', textTransform: 'capitalize' }}>
+                            {selectedLead.nextFollowupType === 'call' && '📞 Phone Call'}
+                            {selectedLead.nextFollowupType === 'whatsapp' && '💬 WhatsApp'}
+                            {selectedLead.nextFollowupType === 'meeting' && '🤝 Meeting'}
+                            {!['call', 'whatsapp', 'meeting'].includes(selectedLead.nextFollowupType) && selectedLead.nextFollowupType}
+                            {' •'}
+                          </span>
+                        )}
+                        {selectedLead.nextFollowupDate}
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        padding: '2px 8px',
+                        borderRadius: 12,
+                        backgroundColor: '#fee2e2',
+                        color: '#991b1b',
+                        fontWeight: 700
+                      }}
+                    >
+                      Action Due
+                    </span>
+                  </div>
+                ) : null}
+
+                {/* List of Follow-up Records */}
+                {leadFollowups.length === 0 && !selectedLead.nextFollowupDate ? (
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>
+                    No follow-ups scheduled for this prospect yet. Click "+ Schedule Follow-up" to set a task.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {leadFollowups.map(f => (
+                      <div
+                        key={f.id}
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: 6,
+                          background: 'var(--bg-card-subtle, #f9fafb)',
+                          border: '1px solid var(--border-base)',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: 8
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: '12px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span>
+                              {f.followupType === 'whatsapp' ? '💬 WhatsApp' : f.followupType === 'meeting' ? '🤝 Meeting' : '📞 Phone Call'}
+                            </span>
+                            <span>•</span>
+                            <span>{f.scheduledAt || `${f.scheduledDate || ''} ${f.scheduledTime || ''}`}</span>
+                          </div>
+                          {f.notes && (
+                            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: 3 }}>
+                              {f.notes}
+                            </div>
+                          )}
+                          {f.assignedAgentName && (
+                            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: 2 }}>
+                              Assigned Agent: <strong>{f.assignedAgentName}</strong>
+                            </div>
+                          )}
+                        </div>
+                        <StatusChip status={f.status} size="sm" />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* ── 4. Requirements & Project Preferences ── */}
+              <div className="card lead-detail-card">
+                <h4 className="lead-detail-title">Requirements &amp; Project Preferences</h4>
+                <div className="lead-detail-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '14px' }}>
+                  <div>
+                    <span className="lead-detail-label">Target Development / Project:</span>
+                    <div className="lead-detail-value" style={{ fontWeight: 700, color: 'var(--primary-600)' }}>
+                      {
+                        selectedLead.targetDevelopment ||
+                        selectedLead.customFields?.targetDevelopment ||
+                        selectedLead.customFields?.project ||
+                        selectedLead.customFields?.preferredProject ||
+                        '—'
+                      }
+                    </div>
+                  </div>
+                  <div>
+                    <span className="lead-detail-label">Price / Budget Range:</span>
+                    <div className="lead-detail-value" style={{ fontWeight: 700, color: '#059669' }}>
+                      {
+                        selectedLead.customFields?.budgetRange ||
+                        selectedLead.customFields?.budget ||
+                        (selectedLead as any).budgetRange ||
+                        selectedLead.budgetRange ||
+                        '—'
+                      }
+                    </div>
+                  </div>
+                  <div>
+                    <span className="lead-detail-label">Ready to Register / Timeline:</span>
+                    <div className="lead-detail-value">
+                      {
+                        selectedLead.customFields?.readyToRegister ||
+                        (selectedLead as any).readyToRegister ||
+                        '—'
+                      }
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── 5. Investment & Mandate Details (GHL / IRM & HNW Prospects) ── */}
+              {(isIrm || isGhlIrm || investmentCapacity || selectedLead.assetClass || selectedLead.customFields?.preferredAssetClass || selectedLead.customFields?.horizon) && (
+                <div className="card lead-custom-card">
+                  <h4 className="lead-custom-title">Investment &amp; Mandate Details</h4>
+                  <div className="lead-detail-grid">
+                    <div>
+                      <span className="lead-custom-label">Investment Capacity:</span>
+                      <div className="lead-custom-value" style={{ color: '#10b981', fontSize: '15px' }}>
+                        {investmentCapacity || '—'}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="lead-custom-label">Preferred Asset Class:</span>
+                      <div className="lead-custom-value">
+                        {selectedLead.assetClass ||
+                          selectedLead.customFields?.preferredAssetClass ||
+                          selectedLead.customFields?.assetClass ||
+                          '—'}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="lead-custom-label">Investment Horizon:</span>
+                      <div className="lead-custom-value">
+                        {selectedLead.horizon ||
+                          selectedLead.customFields?.horizon ||
+                          selectedLead.customFields?.investmentHorizon ||
+                          '—'}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="lead-custom-label">Investor Structure / Type:</span>
+                      <div className="lead-custom-value">
+                        {selectedLead.investorType ||
+                          selectedLead.customFields?.investorType ||
+                          'Direct Prospect'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── 6. Additional Custom Attributes (Dynamic - Nothing Hidden) ── */}
+              {(() => {
+                const knownKeys = new Set([
+                  'investmentCapacity',
+                  'capacityRange',
+                  'investmentRange',
+                  'preferredAssetClass',
+                  'assetClass',
+                  'horizon',
+                  'investmentHorizon',
+                  'investorType',
+                  'budgetRange',
+                  'budget',
+                  'preferredLocation',
+                  'readyToRegister',
+                  'targetDevelopment',
+                  'project',
+                  'preferredProject',
+                  'preferredVisitDate',
+                  'preferredTimeSlot',
+                  'preferredLanguage',
+                  'preferredContactTime',
+                  'leadScore',
+                  'message',
+                  'userMessage',
+                  'customerNotes',
+                  'dispositionReason',
+                  'irmPreferencesConfirmed',
+                ]);
+
+                const activeDefs = storageService
+                  .getCustomFieldDefinitions(tenant?.id)
+                  .filter(d => d.active !== false && (d.module === 'leads' || !d.module));
+
+                const rows: Array<{ id: string; label: string; value: string }> = [];
+
+                activeDefs.forEach(def => {
+                  const key = def.fieldKey || def.id;
+                  if (knownKeys.has(key)) return;
+                  const rawVal = selectedLead.customFields?.[key] ?? (selectedLead as any)[key];
+                  if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
+                    rows.push({
+                      id: def.id,
+                      label: def.label || key.replace(/([A-Z])/g, ' $1'),
+                      value: String(rawVal),
+                    });
+                  }
+                });
+
+                if (selectedLead.customFields) {
+                  Object.entries(selectedLead.customFields).forEach(([k, v]) => {
+                    if (knownKeys.has(k)) return;
+                    if (rows.some(r => r.id === k || r.label.toLowerCase() === k.toLowerCase())) return;
+                    if (v !== undefined && v !== null && v !== '') {
+                      rows.push({
+                        id: k,
+                        label: k.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()),
+                        value: String(v),
+                      });
+                    }
+                  });
+                }
+
+                if (rows.length === 0) return null;
+
+                return (
+                  <div className="card lead-detail-card">
+                    <h4 className="lead-detail-title">Extended Lead Attributes</h4>
+                    <div className="lead-detail-grid">
+                      {rows.map(item => (
+                        <div key={item.id}>
+                          <span className="lead-detail-label">{item.label}:</span>
+                          <div className="lead-detail-value">{item.value}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── 7. Message from Visitor / Lead Notes ── */}
+              <div className="card lead-detail-card">
+                <h4 className="lead-detail-title">Message &amp; Requirements from Lead</h4>
+                <div className="lead-user-message-box">
+                  {userMessage ? (
+                    <div className="lead-user-message-text">{userMessage}</div>
+                  ) : (
+                    <div className="lead-user-message-empty">No written note provided by visitor</div>
+                  )}
+                </div>
+                {selectedLead.customFields?.dispositionReason && (
+                  <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 6, backgroundColor: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Disposition Reason:</span>
+                    <div style={{ fontSize: '12px', marginTop: 2, color: 'var(--text-primary)' }}>
+                      {String(selectedLead.customFields.dispositionReason)}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ── 8. Linked Site Visits (Real Estate / Jamin) ── */}
+              {(isJamin || leadSiteVisits.length > 0) && (
+                <div className="card lead-detail-card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                     <h4 className="lead-detail-title" style={{ margin: 0 }}>
                       Site Visits ({leadSiteVisits.length})
@@ -1749,110 +2360,49 @@ export const LeadsPage: React.FC = () => {
                 </div>
               )}
 
-              {/* ── GHL IRM: Investment Capacity (replaces Preferred Asset Class + Investment Horizon unless confirmed by IRM) ── */}
-              {isGhlIrm ? (
-                <div className="card lead-custom-card">
-                  <h4 className="lead-custom-title">Investment Details</h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <div>
-                      <span className="lead-detail-label">Investment Capacity:</span>
+              {/* ── 9. Consultations (Advisory / GHL) ── */}
+              {leadConsultations.length > 0 && (
+                <div className="card lead-detail-card">
+                  <h4 className="lead-detail-title" style={{ marginBottom: 10 }}>
+                    Consultations ({leadConsultations.length})
+                  </h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {leadConsultations.map(c => (
                       <div
-                        className="lead-detail-value"
+                        key={c.id}
                         style={{
-                          marginTop: 4,
-                          fontSize: 16,
-                          fontWeight: 700,
-                          color: '#10b981',
-                          letterSpacing: '0.01em',
+                          padding: '10px 12px',
+                          borderRadius: 6,
+                          background: 'var(--bg-card-subtle, #f9fafb)',
+                          border: '1px solid var(--border-base)',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
                         }}
                       >
-                        {investmentCapacity || '—'}
-                      </div>
-                    </div>
-
-                    {/* Only show Preferred Asset Class & Horizon if set & confirmed by IRM */}
-                    {Boolean(
-                      selectedLead.customFields?.irmPreferencesConfirmed ||
-                      (() => {
-                        try {
-                          const raw = localStorage.getItem(`nexus_irm_pref_${selectedLead.id}`) ||
-                            localStorage.getItem(`nexus_irm_pref_${(selectedLead.phone || '').replace(/\D/g, '').slice(-10)}`);
-                          if (raw) return JSON.parse(raw)?.confirmed === true;
-                        } catch { }
-                        return false;
-                      })()
-                    ) && (() => {
-                      const localData = (() => {
-                        try {
-                          const raw = localStorage.getItem(`nexus_irm_pref_${selectedLead.id}`) ||
-                            localStorage.getItem(`nexus_irm_pref_${(selectedLead.phone || '').replace(/\D/g, '').slice(-10)}`);
-                          if (raw) return JSON.parse(raw);
-                        } catch { }
-                        return null;
-                      })();
-                      const assetClass = selectedLead.customFields?.preferredAssetClass || localData?.preferredAssetClass || '—';
-                      const horizon = selectedLead.customFields?.horizon || selectedLead.customFields?.investmentHorizon || localData?.horizon || '—';
-
-                      return (
-                        <div className="lead-detail-grid" style={{ marginTop: 4, paddingTop: 10, borderTop: '1px solid var(--border-base)' }}>
-                          <div>
-                            <span className="lead-detail-label">Preferred Asset Class:</span>
-                            <div className="lead-detail-value">{assetClass}</div>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: '13px' }}>
+                            {c.scheduledAt} — <span style={{ color: 'var(--primary-600)' }}>{c.consultantName}</span>
                           </div>
-                          <div>
-                            <span className="lead-detail-label">Investment Horizon:</span>
-                            <div className="lead-detail-value">{horizon}</div>
-                          </div>
+                          {c.agenda && (
+                            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: 2 }}>
+                              Agenda: <strong>{c.agenda}</strong>
+                            </div>
+                          )}
+                          {c.outcomeNotes && (
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: 3, fontStyle: 'italic' }}>
+                              "{c.outcomeNotes}"
+                            </div>
+                          )}
                         </div>
-                      );
-                    })()}
+                        <StatusChip status={c.status} size="sm" />
+                      </div>
+                    ))}
                   </div>
                 </div>
-              ) : (
-                /* Non-IRM tenants: show the generic custom attributes exactly as before */
-                (() => {
-                  const activeDefs = storageService
-                    .getCustomFieldDefinitions(tenant?.id)
-                    .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
-                    .filter(d => !(isExec && (d.fieldKey === 'assetClass' || d.fieldKey === 'preferredAssetClass')))
-                    .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
-                  const rows = activeDefs
-                    .map(def => {
-                      const key = def.fieldKey || def.id;
-                      const val = selectedLead.customFields?.[key];
-                      if (val === undefined || val === null || val === '') return null;
-                      return { id: def.id, label: def.label || key.replace(/([A-Z])/g, ' $1'), value: String(val) };
-                    })
-                    .filter(Boolean);
-                  if (rows.length === 0) return null;
-                  return (
-                    <div className="card lead-custom-card">
-                      <h4 className="lead-custom-title">{tenant?.name} Custom Attributes</h4>
-                      <div className="lead-detail-grid">
-                        {rows.map(item => (
-                          <div key={item!.id}>
-                            <span className="lead-custom-label">{item!.label}:</span>
-                            <div className="lead-custom-value">{item!.value}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()
               )}
 
-              {/* ── Message from User ── */}
-              <div className="card lead-custom-card">
-                <h4 className="lead-custom-title">Message from User</h4>
-                <div className="lead-user-message-box">
-                  {userMessage ? (
-                    <div className="lead-user-message-text">{userMessage}</div>
-                  ) : (
-                    <div className="lead-user-message-empty">No message available</div>
-                  )}
-                </div>
-              </div>
-
+              {/* ── 10. Call Recordings & Transcripts ── */}
               <LeadDetailDrawerContent
                 contactName={selectedLead.name}
                 contactPhone={selectedLead.phone}
@@ -1863,7 +2413,110 @@ export const LeadsPage: React.FC = () => {
                 onCall={() => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id)}
                 sectionsOnly={['callRecordings']}
               />
-            </>
+
+              {/* ── 11. Activity & Audit History Timeline (Jamin Only) ── */}
+              {(isJaminUser || tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2' || !tenant) && (() => {
+                const allLogs = storageService.getAuditLogs(tenant?.id) || [];
+                const targetLeadId = selectedLead.id;
+                const phoneDigits = (selectedLead.phone || '').replace(/\D/g, '').slice(-10);
+                const targetName = (selectedLead.name || '').toLowerCase();
+
+                const leadLogs = allLogs.filter(l => {
+                  if (targetLeadId && (l.entityId === targetLeadId || l.entityId === String(targetLeadId))) return true;
+                  if (l.details && phoneDigits && l.details.includes(phoneDigits)) return true;
+                  if (l.details && targetName && l.details.toLowerCase().includes(targetName)) return true;
+                  return false;
+                });
+
+                return (
+                  <div className="card lead-detail-card">
+                    <h4 className="lead-detail-title" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <History size={16} color="var(--primary-600)" /> Activity &amp; Audit Timeline ({leadLogs.length})
+                    </h4>
+                    {leadLogs.length === 0 ? (
+                      <div style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '12px', backgroundColor: 'var(--bg-card-subtle, #f9fafb)', borderRadius: 6, textAlign: 'center' }}>
+                        No audit activities recorded for this lead yet.
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', position: 'relative', paddingLeft: 16, borderLeft: '2px solid var(--border-base)', gap: 12, marginLeft: 6 }}>
+                        {leadLogs.map((log, idx) => {
+                          let formattedTime = log.timestamp || '';
+                          if (formattedTime) {
+                            const d = new Date(formattedTime);
+                            if (!isNaN(d.getTime())) {
+                              formattedTime = d.toLocaleString('en-IN', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                second: '2-digit',
+                                hour12: true,
+                              });
+                            }
+                          }
+
+                          return (
+                            <div
+                              key={log.id || idx}
+                              style={{
+                                position: 'relative',
+                                backgroundColor: 'var(--bg-surface, #ffffff)',
+                                border: '1px solid var(--border-base)',
+                                borderRadius: 6,
+                                padding: '8px 12px',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  position: 'absolute',
+                                  left: -22,
+                                  top: 12,
+                                  width: 10,
+                                  height: 10,
+                                  borderRadius: '50%',
+                                  backgroundColor: log.action.includes('DELETE') ? '#ef4444' : log.action.includes('CREATE') ? '#10b981' : 'var(--primary-600)',
+                                  border: '2px solid #ffffff',
+                                  boxShadow: '0 0 0 1px var(--border-base)',
+                                }}
+                              />
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span
+                                    style={{
+                                      fontSize: 10,
+                                      fontWeight: 700,
+                                      padding: '1px 5px',
+                                      borderRadius: 4,
+                                      backgroundColor: log.action.includes('DELETE') ? '#fee2e2' : log.action.includes('CREATE') ? '#dcfce7' : '#e0e7ff',
+                                      color: log.action.includes('DELETE') ? '#b91c1c' : log.action.includes('CREATE') ? '#15803d' : '#4338ca',
+                                      textTransform: 'uppercase',
+                                    }}
+                                  >
+                                    {log.action.replace(/_/g, ' ')}
+                                  </span>
+                                  <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                                    <UserIcon size={10} /> <strong>{log.actorName || log.actorEmail || 'System'}</strong>
+                                  </span>
+                                </div>
+                                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>
+                                  {formattedTime}
+                                </span>
+                              </div>
+                              {log.details && (
+                                <div style={{ fontSize: 12, color: 'var(--text-primary)', marginTop: 4, lineHeight: 1.35 }}>
+                                  {log.details}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
           );
         })()}
       </Drawer>
@@ -1895,13 +2548,27 @@ export const LeadsPage: React.FC = () => {
             <div className="form-group">
               <label className="form-label">Phone Number *</label>
               <input
-                type="text"
+                type="tel"
                 className="form-input"
                 required
                 autoComplete="off"
                 name="fld-phone-nexus"
                 value={formData.phone || ''}
-                onChange={e => setFormData({ ...formData, phone: e.target.value })}
+                onChange={e => {
+                  const numericOnly = e.target.value.replace(/[^0-9+\s\-()]/g, '');
+                  setFormData({ ...formData, phone: numericOnly });
+                }}
+                onKeyDown={e => {
+                  if (
+                    ['Backspace', 'Delete', 'Tab', 'Escape', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key) ||
+                    (e.ctrlKey || e.metaKey)
+                  ) {
+                    return;
+                  }
+                  if (!/[0-9+\s\-()]/.test(e.key)) {
+                    e.preventDefault();
+                  }
+                }}
                 placeholder="+91 98800 00000"
               />
             </div>
@@ -1947,6 +2614,45 @@ export const LeadsPage: React.FC = () => {
               </select>
             </div>
           </div>
+
+          <div className="lead-form-grid-2">
+            <div className="form-group">
+              <label className="form-label">Lead Status</label>
+              <select
+                className="form-select"
+                value={formData.status || 'New'}
+                onChange={e => setFormData({ ...formData, status: e.target.value as any })}
+              >
+                <option value="New">New</option>
+                <option value="Contacted">Contacted</option>
+                <option value="Qualified">Qualified</option>
+                <option value="Proposal">Proposal</option>
+                <option value="Negotiation">Negotiation</option>
+                <option value="Interested">Interested</option>
+                <option value="Follow-up Required">Follow-up Required</option>
+                <option value="Callback">Callback</option>
+                <option value="No Response">No Response</option>
+                <option value="Not Interested">Not Interested</option>
+                <option value="Junk">Junk</option>
+                <option value="Lost">Lost</option>
+                <option value="Converted">Converted</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Priority</label>
+              <select
+                className="form-select"
+                value={formData.priority || 'Medium'}
+                onChange={e => setFormData({ ...formData, priority: e.target.value as any })}
+              >
+                <option value="Low">Low</option>
+                <option value="Medium">Medium</option>
+                <option value="High">High</option>
+                <option value="Urgent">Urgent</option>
+              </select>
+            </div>
+          </div>
+
 
           {/* Jamin Bazaar: Assigned Sales Agent */}
           {isJamin && (
@@ -2002,41 +2708,73 @@ export const LeadsPage: React.FC = () => {
             </div>
 
             {tenant?.slug === 'jamin' ? (
-              <div className="lead-form-grid-2">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div className="form-group">
-                  <label className="form-label">Plot Budget Range</label>
+                  <label className="form-label">Target Development / Project</label>
                   <select
                     className="form-select"
-                    value={formData.customFields?.budgetRange || '₹45L - ₹65L'}
-                    onChange={e =>
-                      setFormData({
-                        ...formData,
-                        customFields: { ...formData.customFields, budgetRange: e.target.value },
-                      })
-                    }
+                    value={formData.targetDevelopment || formData.customFields?.targetDevelopment || formData.customFields?.project || ''}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setFormData(prev => ({
+                        ...prev,
+                        targetDevelopment: val,
+                        customFields: {
+                          ...prev.customFields,
+                          targetDevelopment: val,
+                          project: val,
+                        },
+                      }));
+                    }}
                   >
-                    <option value="₹25L - ₹45L">₹25L - ₹45L</option>
-                    <option value="₹45L - ₹65L">₹45L - ₹65L</option>
-                    <option value="₹65L - ₹90L">₹65L - ₹90L</option>
-                    <option value="₹90L+">₹90L+</option>
+                    <option value="">-- Select Available Project --</option>
+                    {availableProjects.map(proj => (
+                      <option key={proj.id} value={proj.name}>
+                        {proj.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Preferred Micro-Market</label>
-                  <select
-                    className="form-select"
-                    value={formData.customFields?.preferredLocation || 'Devanahalli North'}
-                    onChange={e =>
-                      setFormData({
-                        ...formData,
-                        customFields: { ...formData.customFields, preferredLocation: e.target.value },
-                      })
-                    }
-                  >
-                    <option value="Devanahalli North">Devanahalli North (Airport)</option>
-                    <option value="Sarjapur East">Sarjapur East</option>
-                    <option value="Mysore Highway Corridor">Mysore Highway Corridor</option>
-                  </select>
+                <div className="lead-form-grid-2">
+                  <div className="form-group">
+                    <label className="form-label">Plot Budget Range</label>
+                    <select
+                      className="form-select"
+                      value={formData.customFields?.budgetRange || ''}
+                      onChange={e =>
+                        setFormData({
+                          ...formData,
+                          customFields: { ...formData.customFields, budgetRange: e.target.value },
+                        })
+                      }
+                    >
+                      <option value="">-- Not Selected --</option>
+                      <option value="₹25L - ₹45L">₹25L - ₹45L</option>
+                      <option value="₹45L - ₹65L">₹45L - ₹65L</option>
+                      <option value="₹65L - ₹90L">₹65L - ₹90L</option>
+                      <option value="₹90L+">₹90L+</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Ready to Register / Timeline</label>
+                    <select
+                      className="form-select"
+                      value={formData.customFields?.readyToRegister || ''}
+                      onChange={e =>
+                        setFormData({
+                          ...formData,
+                          customFields: { ...formData.customFields, readyToRegister: e.target.value },
+                        })
+                      }
+                    >
+                      <option value="">-- Not Selected --</option>
+                      <option value="Immediate">Immediate</option>
+                      <option value="Within 15 Days">Within 15 Days</option>
+                      <option value="Within 30 Days">Within 30 Days</option>
+                      <option value="Within 60 Days">Within 60 Days</option>
+                      <option value="Exploring / Flexible">Exploring / Flexible</option>
+                    </select>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -2108,52 +2846,67 @@ export const LeadsPage: React.FC = () => {
       <Modal
         isOpen={isConvertModalOpen && !!selectedLead}
         onClose={() => setIsConvertModalOpen(false)}
-        title="Convert Lead to Customer Record"
-        subtitle={`Moving ${selectedLead?.name} into your active Customer 360 database`}
+        title="Convert Lead to Customer"
+        subtitle={`Promote ${selectedLead?.name || ''} to your Customer 360 database`}
         footer={
           <>
             <button className="btn btn-secondary" onClick={() => setIsConvertModalOpen(false)}>
               Cancel
             </button>
-            <button className="btn btn-primary" onClick={handleConfirmConvert}>
-              Confirm Conversion & Create Deal
+            <button
+              className="btn btn-primary"
+              onClick={handleConfirmConvert}
+              style={{
+                background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                borderColor: '#16a34a',
+                color: '#ffffff',
+                fontWeight: 600,
+              }}
+            >
+              ✓ Confirm & Convert to Customer
             </button>
           </>
         }
       >
-        <div className="lead-modal-content">
-          <p className="lead-modal-desc">
-            Converting this lead will automatically establish a permanent <strong>Customer 360</strong>{' '}
-            profile and launch an active pipeline opportunity.
+        <div className="lead-modal-content" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <p className="lead-modal-desc" style={{ fontSize: '13.5px', color: 'var(--text-secondary)' }}>
+            Converting this prospect will mark the lead as <strong>Converted</strong> and create a permanent active record in <strong>Customer 360</strong>.
           </p>
 
-          <div className="form-group">
-            <label className="form-label">Initial Deal Title *</label>
-            <input
-              type="text"
-              className="form-input"
-              autoComplete="off"
-              name="fld-deal-title-nexus"
-              value={convertDealTitle}
-              onChange={e => setConvertDealTitle(e.target.value)}
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Estimated Deal Value (₹)</label>
-            <input
-              type="number"
-              className="form-input"
-              autoComplete="off"
-              name="fld-deal-value-nexus"
-              value={convertDealValue}
-              onChange={e => setConvertDealValue(Number(e.target.value))}
-            />
-          </div>
-
-          <div className="lead-convert-notice">
-            ✓ On {tenant?.name}, this also automatically schedules a{' '}
-            <strong>{tenant?.slug === 'jamin' ? 'Site Visit' : 'Wealth Consultation'}</strong> step!
+          <div style={{
+            background: 'var(--bg-card-subtle, #f8fafc)',
+            border: '1px solid var(--border-base, #e2e8f0)',
+            borderRadius: 8,
+            padding: '12px 16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+            fontSize: '13px'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Customer Name:</span>
+              <strong>{selectedLead?.name}</strong>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Phone:</span>
+              <strong>{selectedLead?.phone}</strong>
+            </div>
+            {selectedLead?.email && (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Email:</span>
+                <span>{selectedLead?.email}</span>
+              </div>
+            )}
+            {selectedLead?.location && (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Location / Interest:</span>
+                <span>{selectedLead?.location}</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Assigned Agent:</span>
+              <span>{(() => { const n = selectedLead?.assignedAgentName || ''; return (!n || n === 'Unassigned' || n.toLowerCase() === 'yanosh') ? 'Unassigned' : n; })()}</span>
+            </div>
           </div>
         </div>
       </Modal>
@@ -2458,165 +3211,163 @@ export const LeadsPage: React.FC = () => {
         </div>
       )}
 
-      {/* ── Jamin: Quick Schedule Follow-up Modal ──────────────────────── */}
-      {isJamin && (
-        <Modal
-          isOpen={isJaminScheduleModalOpen && !!selectedLead}
-          onClose={() => setIsJaminScheduleModalOpen(false)}
-          title={`Schedule Follow-up: ${selectedLead?.name || ''}`}
-        >
-          <form onSubmit={handleSaveJaminSchedule} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: -6 }}>
-              Contact: <strong>{selectedLead?.phone}</strong>
-              {selectedLead?.assignedAgentName && selectedLead.assignedAgentName !== 'Unassigned' && (
-                <span> • Assigned to <strong>{selectedLead.assignedAgentName}</strong></span>
-              )}
-            </div>
-
-            {/* Quick Presets */}
-            <div>
-              <label className="form-label" style={{ marginBottom: 6 }}>Quick Date Presets</label>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => setQuickDatePreset(1)}
-                  style={{ fontSize: '12px', padding: '4px 10px' }}
-                >
-                  Tomorrow
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => setQuickDatePreset(2)}
-                  style={{ fontSize: '12px', padding: '4px 10px' }}
-                >
-                  In 2 Days
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => setQuickDatePreset(7)}
-                  style={{ fontSize: '12px', padding: '4px 10px' }}
-                >
-                  In 1 Week
-                </button>
-              </div>
-            </div>
-
-            {/* Date & Time Grid */}
-            <div className="lead-form-grid-2">
-              <div className="form-group">
-                <label className="form-label">Follow-up Date *</label>
-                <input
-                  type="date"
-                  className="form-input"
-                  required
-                  value={scheduleDate}
-                  min={formatDateYMD(new Date())}
-                  onChange={e => setScheduleDate(e.target.value)}
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Follow-up Time</label>
-                <input
-                  type="time"
-                  className="form-input"
-                  value={scheduleTime}
-                  onChange={e => setScheduleTime(e.target.value)}
-                />
-              </div>
-            </div>
-
-            {/* Follow-up Type */}
-            <div className="form-group">
-              <label className="form-label">Activity Type</label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-                {[
-                  { id: 'call', label: 'Phone Call' },
-                  { id: 'whatsapp', label: 'WhatsApp' },
-                  { id: 'meeting', label: 'Meeting' },
-                ].map(t => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => setScheduleType(t.id as any)}
-                    style={{
-                      padding: '8px 4px',
-                      fontSize: '12px',
-                      borderRadius: '6px',
-                      border: scheduleType === t.id ? '2px solid #dc2626' : '1px solid var(--border-base)',
-                      background: scheduleType === t.id ? '#fef2f2' : 'var(--bg-card)',
-                      color: scheduleType === t.id ? '#dc2626' : 'var(--text-primary)',
-                      fontWeight: scheduleType === t.id ? 600 : 400,
-                      cursor: 'pointer',
-                      textAlign: 'center',
-                    }}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Assigned Executive */}
-            {canJaminAssign && (
-              <div className="form-group">
-                <label className="form-label">Assigned Executive</label>
-                <select
-                  className="form-select"
-                  value={scheduleAgentId}
-                  onChange={e => setScheduleAgentId(e.target.value)}
-                >
-                  {jaminAgents.map(ag => (
-                    <option key={ag.id} value={ag.id}>
-                      {ag.name} ({ag.email})
-                    </option>
-                  ))}
-                </select>
-              </div>
+      {/* ── Quick Schedule Follow-up Modal ──────────────────────── */}
+      <Modal
+        isOpen={isJaminScheduleModalOpen && !!selectedLead}
+        onClose={() => setIsJaminScheduleModalOpen(false)}
+        title={`Schedule Follow-up: ${selectedLead?.name || ''}`}
+      >
+        <form onSubmit={handleSaveJaminSchedule} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: -6 }}>
+            Contact: <strong>{selectedLead?.phone}</strong>
+            {selectedLead?.assignedAgentName && selectedLead.assignedAgentName !== 'Unassigned' && (
+              <span> • Assigned to <strong>{selectedLead.assignedAgentName}</strong></span>
             )}
+          </div>
 
-            {/* Notes */}
-            <div className="form-group">
-              <label className="form-label">Follow-up Notes</label>
-              <textarea
-                className="form-textarea"
-                rows={2}
-                value={scheduleNotes}
-                onChange={e => setScheduleNotes(e.target.value)}
-                placeholder="e.g. Call client regarding plot availability..."
-              />
-            </div>
-
-            {/* Modal Actions */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+          {/* Quick Presets */}
+          <div>
+            <label className="form-label" style={{ marginBottom: 6 }}>Quick Date Presets</label>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button
                 type="button"
-                className="btn btn-secondary"
-                onClick={() => setIsJaminScheduleModalOpen(false)}
+                className="btn btn-secondary btn-sm"
+                onClick={() => setQuickDatePreset(1)}
+                style={{ fontSize: '12px', padding: '4px 10px' }}
               >
-                Cancel
+                Tomorrow
               </button>
               <button
-                type="submit"
-                className="btn btn-primary"
-                style={{
-                  background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
-                  borderColor: '#dc2626',
-                  color: '#ffffff',
-                  fontWeight: 600,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                }}
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setQuickDatePreset(2)}
+                style={{ fontSize: '12px', padding: '4px 10px' }}
               >
-                <Calendar size={14} /> Confirm Follow-up
+                In 2 Days
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setQuickDatePreset(7)}
+                style={{ fontSize: '12px', padding: '4px 10px' }}
+              >
+                In 1 Week
               </button>
             </div>
-          </form>
-        </Modal>
-      )}
+          </div>
+
+          {/* Date & Time Grid */}
+          <div className="lead-form-grid-2">
+            <div className="form-group">
+              <label className="form-label">Follow-up Date *</label>
+              <input
+                type="date"
+                className="form-input"
+                required
+                value={scheduleDate}
+                min={formatDateYMD(new Date())}
+                onChange={e => setScheduleDate(e.target.value)}
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Follow-up Time</label>
+              <input
+                type="time"
+                className="form-input"
+                value={scheduleTime}
+                onChange={e => setScheduleTime(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Follow-up Type */}
+          <div className="form-group">
+            <label className="form-label">Activity Type</label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              {[
+                { id: 'call', label: 'Phone Call' },
+                { id: 'whatsapp', label: 'WhatsApp' },
+                { id: 'meeting', label: 'Meeting' },
+              ].map(t => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setScheduleType(t.id as any)}
+                  style={{
+                    padding: '8px 4px',
+                    fontSize: '12px',
+                    borderRadius: '6px',
+                    border: scheduleType === t.id ? '2px solid #dc2626' : '1px solid var(--border-base)',
+                    background: scheduleType === t.id ? '#fef2f2' : 'var(--bg-card)',
+                    color: scheduleType === t.id ? '#dc2626' : 'var(--text-primary)',
+                    fontWeight: scheduleType === t.id ? 600 : 400,
+                    cursor: 'pointer',
+                    textAlign: 'center',
+                  }}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Assigned Executive */}
+          {jaminAgents.length > 0 && (
+            <div className="form-group">
+              <label className="form-label">Assigned Executive</label>
+              <select
+                className="form-select"
+                value={scheduleAgentId}
+                onChange={e => setScheduleAgentId(e.target.value)}
+              >
+                {jaminAgents.map(ag => (
+                  <option key={ag.id} value={ag.id}>
+                    {ag.name} ({ag.email})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Notes */}
+          <div className="form-group">
+            <label className="form-label">Follow-up Notes</label>
+            <textarea
+              className="form-textarea"
+              rows={2}
+              value={scheduleNotes}
+              onChange={e => setScheduleNotes(e.target.value)}
+              placeholder="e.g. Call client regarding requirements..."
+            />
+          </div>
+
+          {/* Modal Actions */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setIsJaminScheduleModalOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              style={{
+                background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                borderColor: '#dc2626',
+                color: '#ffffff',
+                fontWeight: 600,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              <Calendar size={14} /> Confirm Follow-up
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       {/* ── Jamin: Book Site Visit for Lead Modal ──────────────────────── */}
       {isJamin && (
@@ -2792,7 +3543,7 @@ export const LeadsPage: React.FC = () => {
               <>
                 <p className="assign-modal-sub">Select an agent to assign the {selectedLeadIds.size} selected lead{selectedLeadIds.size !== 1 ? 's' : ''} to:</p>
                 <div className="assign-agent-list">
-                  {MOCK_AGENTS.map(agent => (
+                  {(apiAgents && apiAgents.length > 0 ? apiAgents : []).map((agent: any) => (
                     <label key={agent.id} className={`assign-agent-row${assignSelectedAgent?.id === agent.id ? ' selected' : ''}`}>
                       <input
                         type="radio"
@@ -2845,7 +3596,7 @@ export const LeadsPage: React.FC = () => {
               <div>
                 <h3 className="assign-modal-title">✦ AI Suggestion — Round Robin</h3>
                 <p className="assign-modal-sub" style={{ margin: '2px 0 0' }}>
-                  {Object.values(aiDistribution).flat().length} leads distributed across {MOCK_AGENTS.length} agents
+                  {Object.values(aiDistribution).flat().length} leads distributed across {(apiAgents?.length || 0)} agents
                 </p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -2860,8 +3611,8 @@ export const LeadsPage: React.FC = () => {
             </div>
 
             <div className="ai-dist-grid">
-              {MOCK_AGENTS.map((agent, agentIdx) => {
-                const agentLeads = aiDistribution[agent.id] || [];
+              {(apiAgents && apiAgents.length > 0 ? apiAgents : []).map((agent: any, agentIdx: number) => {
+                const agentLeads = (aiDistribution as any)[agent.id] || [];
                 return (
                   <div key={agent.id} className="ai-dist-col">
                     <div className="ai-dist-col-header">
@@ -2873,7 +3624,7 @@ export const LeadsPage: React.FC = () => {
                       {agentLeads.length === 0 ? (
                         <div className="ai-dist-empty">No leads</div>
                       ) : (
-                        agentLeads.map(lead => (
+                        agentLeads.map((lead: Lead) => (
                           <div key={lead.id} className="ai-dist-lead-card">
                             <div className="ai-dist-lead-name">{lead.name}</div>
                             <div className="ai-dist-lead-phone">{lead.phone}</div>
@@ -2887,7 +3638,7 @@ export const LeadsPage: React.FC = () => {
                                 >◀</button>
                                 <button
                                   className="ai-move-btn"
-                                  disabled={agentIdx === MOCK_AGENTS.length - 1}
+                                  disabled={agentIdx === (apiAgents?.length || 1) - 1}
                                   onClick={() => handleAiMoveLead(lead.id, agent.id, 'right')}
                                   title="Move right"
                                 >▶</button>

@@ -12,7 +12,7 @@ public class JaminLeadDto
     public string Status { get; set; } = "New";
     public string Priority { get; set; } = "Medium";
     public string Notes { get; set; } = string.Empty;
-    public int AssignedAgentId { get; set; }
+    public int? AssignedAgentId { get; set; }
     public string AssignedAgentName { get; set; } = string.Empty;
     public string? TargetDevelopment { get; set; }
     public string? PreferredVisitDate { get; set; }

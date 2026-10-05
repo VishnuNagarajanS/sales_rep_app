@@ -46,6 +46,7 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
         builder.HasOne(c => c.AssignedAgent)
             .WithMany()
             .HasForeignKey(c => c.AssignedAgentId)
-            .OnDelete(DeleteBehavior.Restrict);
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }

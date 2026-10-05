@@ -5,12 +5,18 @@ public class CreateLeadDto
     public string Name { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
     public int? CompanyId { get; set; }
+    public int? AssignedAgentId { get; set; }
     public string? Email { get; set; }
     public string? Location { get; set; }
     public string? Source { get; set; } = "Website Inbound";
     public string? Status { get; set; } = "New";
     public string? Priority { get; set; } = "Medium";
     public string? Notes { get; set; }
+
+    // jamin Target development & Budget/Timeline
+    public string? TargetDevelopment { get; set; }
+    public string? BudgetRange { get; set; }
+    public string? ReadyToRegister { get; set; }
 
     // GHL Custom Fields
     public string? InvestmentCapacity { get; set; } // e.g. "₹1 Cr – ₹5 Cr"

@@ -191,7 +191,11 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
           <input
             type="text"
             className="form-input topbar-search-input"
-            placeholder="Search leads, customers, deals, plots... (Press /)"
+            placeholder={
+              tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2'
+                ? "Search leads, customers, plots, bookings... (Press /)"
+                : "Search leads, customers, deals, consultations... (Press /)"
+            }
             value={searchQuery}
             onFocus={() => setIsSearchOpen(true)}
             onChange={e => {

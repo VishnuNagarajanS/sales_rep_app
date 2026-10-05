@@ -19,7 +19,6 @@ import { Customer, CallRecord, Followup, Deal, Lead, IrmProfile, SiteVisit, Cust
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
-import { isMockMode } from '../../config/environment';
 import {
   getCustomers,
   saveCustomer as apiSaveCustomer,
@@ -34,7 +33,6 @@ import { DocumentUploader } from '../../components/common/DocumentUploader';
 import { DocumentList } from '../../components/common/DocumentList';
 import { Modal } from '../../components/common/Modal';
 import { Timeline, TimelineEvent } from '../../components/common/Timeline';
-import { MOCK_IRMS } from '../../mock_data/mockData';
 import { jaminApiService } from '../../services/jaminApiService';
 import './CustomersPage.css';
 
@@ -77,11 +75,12 @@ export const CustomersPage: React.FC = () => {
 
   const scopedCustomers = isExec
     ? customers.filter(c =>
-      (c.assignedAgentId && c.assignedAgentId === user?.id) ||
-      (c.assignedAgentName && c.assignedAgentName === user?.name)
+      (c.assignedAgentId && (String(c.assignedAgentId) === String(user?.id) || c.assignedAgentId === user?.id)) ||
+      (c.assignedAgentName && user?.name && c.assignedAgentName.toLowerCase() === user.name.toLowerCase()) ||
+      !c.assignedAgentId
     )
     : customers;
-  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02';
+  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2' || user?.companySlug === 'jamin';
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'calls' | 'followups' | 'timeline' | 'documents' | 'site_visits'>('overview');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -127,24 +126,40 @@ export const CustomersPage: React.FC = () => {
   const loadData = async () => {
     try {
       const [custs, cCalls, cFollowups, cDeals, cLeads] = await Promise.all([
-        getCustomers(tenant?.id),
-        getCalls(tenant?.id),
-        getFollowups(tenant?.id),
-        getDeals(tenant?.id),
-        getLeads(tenant?.id),
+        getCustomers(tenant?.id).catch(() => []),
+        getCalls(tenant?.id).catch(() => []),
+        getFollowups(tenant?.id).catch(() => []),
+        getDeals(tenant?.id).catch(() => []),
+        getLeads(tenant?.id).catch(() => []),
       ]);
-      setCustomers(custs);
+
+      const localCusts = tenant?.id ? storageService.getCustomers(tenant.id) : [];
+      const combinedCustsMap = new Map<string, Customer>();
+      localCusts.forEach(c => {
+        const phoneKey = (c.phone || '').replace(/\D/g, '').slice(-10);
+        if (phoneKey) combinedCustsMap.set(phoneKey, c);
+        else combinedCustsMap.set(String(c.id), c);
+      });
+      (custs || []).forEach(c => {
+        const phoneKey = (c.phone || '').replace(/\D/g, '').slice(-10);
+        if (phoneKey) combinedCustsMap.set(phoneKey, { ...(combinedCustsMap.get(phoneKey) || {}), ...c });
+        else combinedCustsMap.set(String(c.id), c);
+      });
+      const allCusts = Array.from(combinedCustsMap.values());
+
+      setCustomers(allCusts);
       setCalls(cCalls);
       setFollowups(cFollowups);
       setDeals(cDeals);
       setLeads(cLeads);
 
       const firstVisible = isExec
-        ? custs.filter(c =>
-          (c.assignedAgentId && c.assignedAgentId === user?.id) ||
-          (c.assignedAgentName && c.assignedAgentName === user?.name)
+        ? allCusts.filter(c =>
+          (c.assignedAgentId && (String(c.assignedAgentId) === String(user?.id) || c.assignedAgentId === user?.id)) ||
+          (c.assignedAgentName && user?.name && c.assignedAgentName.toLowerCase() === user.name.toLowerCase()) ||
+          !c.assignedAgentId
         )[0]
-        : custs[0];
+        : allCusts[0];
       if (firstVisible && !selectedCustomer) {
         setSelectedCustomer(firstVisible);
       }
@@ -347,7 +362,7 @@ export const CustomersPage: React.FC = () => {
       const selectedCusts = scopedCustomers.filter(c => selectedCustomerIds.has(c.id) && isCustomerEligibleForIrm(c));
       if (selectedCusts.length === 0) return;
 
-      setSelectedIrmId(irms[0]?.id || MOCK_IRMS[0]?.id || '');
+      setSelectedIrmId(irms[0]?.id || '');
       setIsManualModalOpen(true);
     } else {
       if (eligibleUnassignedCustomers.length === 0) return;
@@ -358,7 +373,7 @@ export const CustomersPage: React.FC = () => {
   };
 
   const handleConfirmManualAssignment = async () => {
-    const selectedIrm = irms.find((i: IrmProfile) => i.id === selectedIrmId) || MOCK_IRMS.find((i: IrmProfile) => i.id === selectedIrmId);
+    const selectedIrm = irms.find((i: IrmProfile) => i.id === selectedIrmId);
     if (!selectedIrm) return;
 
     let assignedCount = 0;
@@ -381,10 +396,8 @@ export const CustomersPage: React.FC = () => {
       }
     });
 
-    if (!isMockMode()) {
-      for (const u of toUpdate) {
-        await apiSaveCustomer(u).catch(console.error);
-      }
+    for (const u of toUpdate) {
+      await apiSaveCustomer(u).catch(console.error);
     }
 
     setIsManualModalOpen(false);
@@ -415,10 +428,8 @@ export const CustomersPage: React.FC = () => {
       }
     });
 
-    if (!isMockMode()) {
-      for (const u of toUpdate) {
-        await apiSaveCustomer(u).catch(console.error);
-      }
+    for (const u of toUpdate) {
+      await apiSaveCustomer(u).catch(console.error);
     }
 
     setIsAutoPreviewModalOpen(false);
@@ -430,7 +441,7 @@ export const CustomersPage: React.FC = () => {
   };
 
   const handleUpdateSingleRecommendation = (customerId: string, newIrmId: string) => {
-    const newIrm = irms.find((i: IrmProfile) => i.id === newIrmId) || MOCK_IRMS.find((i: IrmProfile) => i.id === newIrmId);
+    const newIrm = irms.find((i: IrmProfile) => i.id === newIrmId);
     if (!newIrm) return;
     setAutoRecommendations(prev =>
       prev.map(rec => {
@@ -1019,17 +1030,17 @@ export const CustomersPage: React.FC = () => {
                     /* Jamin-specific guaranteed rows */
                     const jaminRows = isJamin
                       ? [
-                          {
-                            id: 'preferredPaymentBank',
-                            label: 'Preferred Payment Bank',
-                            value: cf['preferredPaymentBank'] || '—',
-                          },
-                          {
-                            id: 'advocateAssigned',
-                            label: 'Advocate Assigned',
-                            value: cf['advocateAssigned'] || '—',
-                          },
-                        ]
+                        {
+                          id: 'preferredPaymentBank',
+                          label: 'Preferred Payment Bank',
+                          value: cf['preferredPaymentBank'] || '—',
+                        },
+                        {
+                          id: 'advocateAssigned',
+                          label: 'Advocate Assigned',
+                          value: cf['advocateAssigned'] || '—',
+                        },
+                      ]
                       : [];
 
                     /* Dynamic tenant custom fields (from localStorage definitions) */
@@ -1288,7 +1299,7 @@ export const CustomersPage: React.FC = () => {
                   <DocumentUploader
                     entityType="customer"
                     entityId={selectedCustomer.id}
-                    allowedCategories={['KYC', 'Agreement', 'Payment Receipt', 'Identity Proof', 'Other']}
+                    allowedCategories={isJamin ? ['Booking Form', 'Sale Agreement', 'Payment Receipt', 'Identity Proof', 'Other'] : ['KYC', 'Agreement', 'Payment Receipt', 'Identity Proof', 'Other']}
                   />
                   <DocumentList
                     entityType="customer"

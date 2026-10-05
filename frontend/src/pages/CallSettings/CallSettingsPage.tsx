@@ -44,12 +44,12 @@ const DEFAULT_ADMIN_SETTINGS: AdminCallSettings = {
 };
 
 const getPopupPosition = (): PopupPosition => {
-  return (localStorage.getItem('nexus_popup_pos') as PopupPosition) || 'top-right';
+  return storageService.getPopupPosition();
 };
 
 const setPopupPosition = (pos: PopupPosition) => {
+  storageService.setPopupPosition(pos);
   localStorage.setItem('nexus_popup_pos', pos);
-  window.dispatchEvent(new Event('nexus_storage_updated'));
 };
 
 const getCallPreferences = (): CallPreferences => {

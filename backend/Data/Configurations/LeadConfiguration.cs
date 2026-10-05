@@ -41,6 +41,27 @@ public class LeadConfiguration : IEntityTypeConfiguration<Lead>
         builder.Property(l => l.Notes)
             .HasMaxLength(4000);
 
+        builder.Property(l => l.ReadyToRegister)
+            .HasMaxLength(100);
+
+        builder.Property(l => l.TargetDevelopment)
+            .HasMaxLength(200);
+
+        builder.Property(l => l.BudgetRange)
+            .HasMaxLength(100);
+
+        builder.Property(l => l.InvestmentCapacity)
+            .HasMaxLength(100);
+
+        builder.Property(l => l.AssetClass)
+            .HasMaxLength(100);
+
+        builder.Property(l => l.Horizon)
+            .HasMaxLength(100);
+
+        builder.Property(l => l.InvestorType)
+            .HasMaxLength(100);
+
         builder.Property(l => l.CreatedAt)
             .HasDefaultValueSql("NOW()");
 

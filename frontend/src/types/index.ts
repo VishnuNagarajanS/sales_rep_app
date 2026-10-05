@@ -125,6 +125,7 @@ export interface Lead {
   slaStatus?: 'on_track' | 'at_risk' | 'breached';
   createdBy?: string;
   updatedBy?: string;
+  readyToRegister?: boolean;
 }
 
 export interface Customer {
@@ -155,6 +156,7 @@ export interface Customer {
   assignedIrmId?: string;
   assignedIrmName?: string;
   assignedIrmAt?: string;
+  budgetRange?: string;
 }
 
 export interface IrmProfile {
@@ -251,6 +253,7 @@ export interface CallRecord {
   recordingStatus?: 'pending' | 'completed' | 'failed';
   callStatus?: 'completed' | 'missed' | 'abandoned' | 'transferred';
   source?: string;
+  agentRole?: string;
 }
 
 export interface Followup {
@@ -267,6 +270,7 @@ export interface Followup {
   assignedAgentId: string;
   assignedAgentName: string;
   assignedRole?: string;
+  assignedToName?: string;
   followupType?: 'call' | 'meeting' | 'email' | 'whatsapp';
   scheduledDate?: string;
   scheduledTime?: string;
@@ -300,6 +304,7 @@ export interface Plot {
   status: 'Available' | 'Hold' | 'Sold';
   dimension?: string;
   facing?: string;
+  heldByCustomerId?: string | number;
   holdByCustomer?: string;
   holdByAgent?: string;
   holdExpiry?: string;
@@ -328,7 +333,8 @@ export interface SiteVisit {
 export interface Booking {
   id: string;
   companyId: string;
-  customerId: string;
+  customerId?: string;
+  leadId?: string;
   customerName: string;
   customerPhone: string;
   projectId: string;

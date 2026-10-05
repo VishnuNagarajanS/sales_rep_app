@@ -36,6 +36,8 @@ public class JaminPlot
     public decimal PricePerSqft { get; set; }
 
     // Hold tracking
+    public int? HeldByCustomerId { get; set; }
+    public Customer? HeldByCustomer { get; set; }
     public string? HeldByCustomerName { get; set; }
     public string? HeldByCustomerPhone { get; set; }
     public string? HoldByAgent { get; set; }

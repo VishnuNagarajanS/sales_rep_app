@@ -8,9 +8,10 @@ function initials(name: string) {
   return name.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
 }
 
-const ROLE_ORDER = ['company_admin', 'sales_executive', 'irm'];
+const ROLE_ORDER = ['company_admin', 'sales_manager', 'sales_executive', 'irm'];
 const ROLE_LABELS: Record<string, string> = {
   company_admin: 'Admins',
+  sales_manager: 'Sales Managers',
   sales_executive: 'Sales Executives',
   irm: 'Investor Relationship Managers (IRM)',
 };
@@ -31,26 +32,29 @@ export const NewConversationModal: React.FC<Props> = ({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [groupName, setGroupName] = useState('');
 
-  const others = directory.filter(m => m.id !== me.id);
+  const others = directory.filter(m => String(m.id) !== String(me.id));
 
   const toggleSelect = (id: string) => {
+    const sId = String(id);
     if (tab === 'dm') {
-      setSelectedIds([id]);
+      setSelectedIds([sId]);
     } else {
-      setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+      setSelectedIds(prev => prev.includes(sId) ? prev.filter(x => x !== sId) : [...prev, sId]);
     }
   };
 
   const handleCreate = () => {
     if (tab === 'dm') {
       if (selectedIds.length !== 1) return;
-      const them = others.find(m => m.id === selectedIds[0])!;
+      const them = others.find(m => String(m.id) === String(selectedIds[0]))!;
+      if (!them) return;
       const conv = cs.getOrCreateDm(companyId, me.id, them, me);
       onConversationCreated(conv);
     } else {
       if (!groupName.trim() || selectedIds.length < 2) return;
-      const members = [me, ...others.filter(m => selectedIds.includes(m.id))];
-      const conv = cs.createGroup(companyId, groupName.trim(), members);
+      const rawMembers = [me, ...others.filter(m => selectedIds.includes(String(m.id)))];
+      const unique = Array.from(new Map(rawMembers.map(m => [String(m.id), m])).values());
+      const conv = cs.createGroup(companyId, groupName.trim(), unique);
       onConversationCreated(conv);
     }
     setSelectedIds([]);
@@ -116,15 +120,21 @@ export const NewConversationModal: React.FC<Props> = ({
         <div className="chat-dir-list">
           {others.length === 0 ? (
             <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, padding: '20px 0' }}>
-              No other team members in this workspace yet.
+              No other team members found for this company in backend.
             </div>
           ) : (
-            ROLE_ORDER.map(roleCode => {
+            Object.keys(byRole).map(roleCode => {
               const members = byRole[roleCode];
               if (!members || members.length === 0) return null;
+              const groupLabel = roleCode === 'company_admin' ? 'Company Administrators'
+                : roleCode === 'sales_executive' ? 'Sales Executives'
+                : roleCode === 'sales_manager' ? 'Sales Managers'
+                : roleCode === 'irm' ? 'Investor Relationship Managers (IRM)'
+                : 'Team Members';
+
               return (
                 <React.Fragment key={roleCode}>
-                  <div className="chat-dir-group-label">{ROLE_LABELS[roleCode] || roleCode}</div>
+                  <div className="chat-dir-group-label">{groupLabel}</div>
                   {members.map(m => {
                     const sel = selectedIds.includes(m.id);
                     return (
@@ -139,7 +149,7 @@ export const NewConversationModal: React.FC<Props> = ({
                         </div>
                         <div style={{ flex: 1 }}>
                           <div className="chat-dir-name">{m.name}</div>
-                          <div className="chat-dir-role">{m.roleName} · {m.status === 'online' ? '🟢 Online' : '⚫ Offline'}</div>
+                          <div className="chat-dir-role">{m.roleName || 'Team Member'} · {m.status === 'online' ? '🟢 Online' : '⚫ Offline'}</div>
                         </div>
                         {sel && <Check size={15} style={{ color: 'var(--primary-600)', flexShrink: 0 }} />}
                       </div>

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { CallDisposition, CallRecord, Lead, Customer, Deal } from '../types';
+import { CallDisposition, CallRecord, Lead, Customer, Deal, Followup } from '../types';
 import {
   logCall as apiLogCall,
   saveLead as apiSaveLead,
@@ -10,6 +10,7 @@ import {
   getCustomers as apiGetCustomers,
 } from '../services/ghlApiService';
 import { storageService } from '../services/storageService';
+import { jaminApiService } from '../services/jaminApiService';
 import { useAuth } from './AuthContext';
 
 export type AgentAvailability = 'Available' | 'Busy' | 'Offline';
@@ -284,93 +285,104 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       apiLogCall(callRecord).catch(console.error);
 
       // Locate matched lead if any
-      const leadId = lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : null;
-      const allLeads = leads.length > 0 ? leads : (tenant ? storageService.getLeads(tenant.id) : []);
+      const rawLeadId = String(lastCallRecord.matchedRecord?.type === 'lead' ? (lastCallRecord.matchedRecord.id || '') : '');
+      const cleanLeadId = rawLeadId.replace('db-', '').replace('lead-', '').replace('l-', '').trim();
+      const allLeads = [
+        ...(leads || []),
+        ...(tenant?.id ? storageService.getLeads(tenant.id) : [])
+      ];
       const normalize = (p: string) => (p || '').replace(/\D/g, '').slice(-10);
       const callPhoneDigits = normalize(lastCallRecord.contactPhone);
-      const matchedLead = leadId
-        ? allLeads.find((l: Lead) => l.id === leadId)
-        : allLeads.find((l: Lead) =>
-            (callPhoneDigits && normalize(l.phone) === callPhoneDigits) ||
-            (l.name && l.name.toLowerCase() === lastCallRecord.contactName.toLowerCase())
-          );
+      
+      let matchedLead = allLeads.find((l: Lead) => {
+        const lCleanId = String(l.id || '').replace('db-', '').replace('lead-', '').replace('l-', '').trim();
+        if (cleanLeadId && lCleanId === cleanLeadId) return true;
+        const lPhoneDigits = normalize(l.phone);
+        if (callPhoneDigits && lPhoneDigits && callPhoneDigits === lPhoneDigits) return true;
+        if (lastCallRecord.contactName && l.name && l.name.trim().toLowerCase() === lastCallRecord.contactName.trim().toLowerCase()) return true;
+        return false;
+      });
 
-      // 1. Interested -> Move to Customer 360, remove from active Leads
-      if (disposition === 'Interested') {
-        const existingCustomers = await apiGetCustomers(tenant.id).catch(() => []);
-        let cust = existingCustomers.find(c =>
-          (matchedLead && c.phone === matchedLead.phone) ||
-          c.phone === lastCallRecord.contactPhone ||
-          (matchedLead?.email && c.email === matchedLead.email)
-        );
+      // Complete source follow-up or matching pending follow-up for this contact upon call completion
+      try {
+        const targetFollowupId = lastCallRecord.sourceFollowupId;
+        const allFollowups = storageService.getFollowups(tenant?.id) || [];
+        let followupToComplete = targetFollowupId
+          ? allFollowups.find(f => f.id === targetFollowupId)
+          : null;
 
-        if (!cust) {
-          cust = {
-            id: matchedLead ? `cust-${matchedLead.id.replace('lead-', '')}` : `cust-${Date.now()}`,
-            companyId: tenant.id,
-            name: matchedLead?.name || lastCallRecord.contactName || 'Customer',
-            phone: matchedLead?.phone || lastCallRecord.contactPhone,
-            email: matchedLead?.email || '',
-            status: 'Active',
-            assignedAgentId: matchedLead?.assignedAgentId || user.id,
-            assignedAgentName: matchedLead?.assignedAgentName || user.name,
-            location: matchedLead?.location || '',
-            lastContacted: 'Just now',
-            openDealsCount: 0,
-            totalValue: 0,
-            createdAt: matchedLead?.createdAt || new Date().toISOString().split('T')[0],
-            notes: notes
-              ? `${matchedLead?.notes ? matchedLead.notes + '\n\n' : ''}[Call Disposition - Interested]: ${notes}`
-              : (matchedLead?.notes || 'Interested - Transferred to Customer 360'),
-            customFields: {
-              ...(matchedLead?.customFields || {}),
-              movedFromLeadAt: new Date().toISOString(),
-              disposition: 'Interested',
-            },
+        if (!followupToComplete && callPhoneDigits) {
+          followupToComplete = allFollowups.find(f => {
+            if (f.status !== 'Pending') return false;
+            const fPhone = normalize(f.contactPhone);
+            return fPhone && fPhone === callPhoneDigits;
+          }) || null;
+        }
+
+        if (followupToComplete) {
+          const completedF: Followup = {
+            ...followupToComplete,
+            status: 'Completed',
+            completedAt: new Date().toISOString(),
+            notes: `${followupToComplete.notes ? followupToComplete.notes + ' | ' : ''}Call Completed (${disposition})${notes ? `: ${notes}` : ''}`,
           };
-        } else {
-          cust.lastContacted = 'Just now';
-          if (notes) {
-            cust.notes = cust.notes ? `${cust.notes}\n\n[Call Disposition - Interested]: ${notes}` : `[Call Disposition - Interested]: ${notes}`;
-          }
-          if (matchedLead?.customFields) {
-            cust.customFields = { ...cust.customFields, ...matchedLead.customFields };
+          storageService.saveFollowup(completedF);
+          apiSaveFollowup(completedF).catch(console.error);
+          const isJaminTenant =
+            tenant?.slug === 'jamin' ||
+            tenant?.id === 't-jamin-02' ||
+            String(tenant?.id) === '2';
+          if (isJaminTenant) {
+            jaminApiService.completeFollowup(followupToComplete.id).catch(console.error);
           }
         }
-        apiSaveCustomer(cust).catch(console.error);
+      } catch (fErr) {
+        console.warn('[CallContext] Error completing source followup:', fErr);
+      }
 
+      // If matchedRecord was a lead but not yet found in array, construct reference to existing lead
+      if (!matchedLead && (rawLeadId || lastCallRecord.matchedRecord?.type === 'lead')) {
+        matchedLead = {
+          id: rawLeadId || `db-${cleanLeadId}`,
+          companyId: tenant.id,
+          name: lastCallRecord.contactName || 'Lead',
+          phone: lastCallRecord.contactPhone,
+          email: '',
+          location: '',
+          source: 'Website Inbound',
+          status: 'New',
+          priority: 'Medium',
+          assignedAgentId: user.id,
+          assignedAgentName: user.name,
+          createdAt: new Date().toISOString().split('T')[0],
+          notes: '',
+          customFields: {},
+        };
+      }
+
+      // 1. Interested -> Keep as active warm lead in Leads (NOT converted yet)
+      if (disposition === 'Interested') {
         if (matchedLead) {
+          const isJaminTenant =
+            tenant?.slug === 'jamin' ||
+            tenant?.id === 't-jamin-02' ||
+            String(tenant?.id) === '2' ||
+            user?.companySlug === 'jamin' ||
+            String(user?.companyId) === '2' ||
+            matchedLead?.companyId === 't-jamin-02' ||
+            String(matchedLead?.companyId) === '2';
+
           matchedLead.status = 'Interested';
-          matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Interested - Handed over to IRM${notes ? `: ${notes}` : ''}`;
+          matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Interested - ${isJaminTenant ? 'Qualified Prospect' : 'Handed over to IRM'}${notes ? `: ${notes}` : ''}`;
           if (!matchedLead.customFields) matchedLead.customFields = {};
           matchedLead.customFields.qualifiedByAgentName = user.name;
           matchedLead.customFields.qualifiedAt = new Date().toISOString();
-          matchedLead.customFields.transferredToIrm = 'true';
+          if (!isJaminTenant) {
+            matchedLead.customFields.transferredToIrm = 'true';
+          }
           apiSaveLead(matchedLead).catch(console.error);
           storageService.saveLead(matchedLead);
-        } else if (lastCallRecord.contactPhone || lastCallRecord.contactName) {
-          const newInterestedLead: Lead = {
-            id: `lead-${Date.now()}`,
-            companyId: tenant.id,
-            name: lastCallRecord.contactName || 'Interested Prospect',
-            phone: lastCallRecord.contactPhone,
-            email: '',
-            location: '',
-            source: 'Phone Call',
-            status: 'Interested',
-            priority: 'High',
-            assignedAgentId: user.id,
-            assignedAgentName: user.name,
-            createdAt: new Date().toISOString().split('T')[0],
-            notes: notes ? `[Call Disposition - Interested]: ${notes}` : 'Interested prospect qualified via call',
-            customFields: {
-              qualifiedByAgentName: user.name,
-              qualifiedAt: new Date().toISOString(),
-              transferredToIrm: 'true',
-            },
-          };
-          apiSaveLead(newInterestedLead).catch(console.error);
-          storageService.saveLead(newInterestedLead);
+          setLeads(prev => prev.map(l => l.id === matchedLead!.id ? matchedLead! : l));
         }
       }
 
@@ -539,53 +551,43 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      // 7. Converted -> Existing conversion behavior
+      // 7. Converted -> Instant Conversion to Customer 360
       else if (disposition === 'Converted') {
         if (matchedLead) {
-          const existingCustomers = await apiGetCustomers(tenant.id).catch(() => []);
-          let cust = existingCustomers.find(c => c.phone === matchedLead.phone || (matchedLead.email && c.email === matchedLead.email));
-          if (!cust) {
-            cust = {
-              id: `cust-${matchedLead.id.replace('lead-', '')}`,
-              companyId: tenant.id,
-              name: matchedLead.name,
-              phone: matchedLead.phone,
-              email: matchedLead.email || '',
-              status: 'Active',
-              assignedAgentId: matchedLead.assignedAgentId || user.id,
-              assignedAgentName: matchedLead.assignedAgentName || user.name,
-              location: matchedLead.location || '',
-              lastContacted: 'Just now',
-              openDealsCount: 1,
-              totalValue: 5000000,
-              createdAt: new Date().toISOString().split('T')[0],
-              notes: `Converted from lead. Original notes: ${matchedLead.notes || ''}`,
-              customFields: matchedLead.customFields,
-            };
-            apiSaveCustomer(cust).catch(console.error);
-          }
-
-          const newDeal: Deal = {
-            id: `deal-${Date.now()}`,
+          // 1. Create / Update Customer in Customer 360
+          const cust: Customer = {
+            id: `cust-${Date.now()}`,
             companyId: tenant.id,
-            title: `${cust.name} - Investment Consultation`,
-            customerId: cust.id,
-            customerName: cust.name,
-            stage: tenant.slug === 'jamin' ? 'site_visit' : 'consultation',
-            value: 5000000,
-            expectedCloseDate: 'Within 30 Days',
+            name: matchedLead.name,
+            phone: matchedLead.phone,
+            email: matchedLead.email || '',
+            status: 'Active',
             assignedAgentId: matchedLead.assignedAgentId || user.id,
             assignedAgentName: matchedLead.assignedAgentName || user.name,
-            notes: `Deal initiated upon converting lead ${matchedLead.name}. ${notes ? `Call notes: ${notes}` : ''}`,
+            location: matchedLead.location || '',
+            lastContacted: 'Just now',
+            openDealsCount: 0,
+            totalValue: 0,
             createdAt: new Date().toISOString().split('T')[0],
+            notes: `Converted from lead via Call Wrap-up. ${notes ? `Call notes: ${notes}` : ''} ${matchedLead.notes ? `Original: ${matchedLead.notes}` : ''}`.trim(),
+            customFields: matchedLead.customFields,
           };
-          apiSaveDeal(newDeal).catch(console.error);
+          storageService.saveCustomer(cust);
+          apiSaveCustomer(cust).catch(console.error);
 
+          // 2. Mark Lead as Converted locally and in DB
           matchedLead.status = 'Converted';
           if (notes) {
             matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Converted: ${notes}`;
           }
-          apiSaveLead(matchedLead).catch(console.error);
+          storageService.saveLead(matchedLead);
+          setLeads(prev => prev.map(l => l.id === matchedLead!.id ? { ...matchedLead!, status: 'Converted' } : l));
+
+          // 3. Call backend convert API to create backend Customer and set Lead.Status = 'Converted'
+          const cleanId = String(matchedLead.id).replace('db-', '').replace('lead-', '').replace('l-', '').trim();
+          if (!isNaN(Number(cleanId)) && Number(cleanId) > 0) {
+            jaminApiService.convertLead(cleanId, undefined, undefined, matchedLead.notes).catch(console.error);
+          }
         }
       }
     }

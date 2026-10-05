@@ -7,6 +7,7 @@ public class JaminBookingResponseDto
     public int Id { get; set; }
     public int CompanyId { get; set; }
     public int? CustomerId { get; set; }
+    public int? LeadId { get; set; }
     public int? ProjectId { get; set; }
     public int? PlotId { get; set; }
     public string CustomerName { get; set; } = string.Empty;
@@ -31,6 +32,7 @@ public class JaminBookingResponseDto
 public class CreateJaminBookingDto
 {
     public int? CustomerId { get; set; }
+    public int? LeadId { get; set; }
     public string CustomerName { get; set; } = string.Empty;
     public string CustomerPhone { get; set; } = string.Empty;
     public int? ProjectId { get; set; }

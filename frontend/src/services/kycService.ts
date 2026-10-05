@@ -1,5 +1,3 @@
-import { isMockMode } from '../config/environment';
-
 export interface KycReviewData {
   refId: string;
   submissionDate: string;
@@ -77,28 +75,11 @@ export type CustomerKycStatus =
   | 'Needs Correction'
   | 'Pending';
 
-export interface MockKycProvider {
-  getReviewData: (deal: any) => KycReviewData | null;
-  getCustomerStatus: (dealId: string, currentStatus?: string) => CustomerKycStatus;
-}
-
-let mockKycProviderInstance: MockKycProvider | null = null;
-
-export function registerMockKycProvider(provider: MockKycProvider): void {
-  mockKycProviderInstance = provider;
-}
-
-export function getKycReviewData(deal: any): KycReviewData | null {
-  if (isMockMode() && mockKycProviderInstance) {
-    return mockKycProviderInstance.getReviewData(deal);
-  }
+export function getKycReviewData(_deal: any): KycReviewData | null {
   return null;
 }
 
-export function getCustomerKycStatus(dealId: string, currentStatus?: string): CustomerKycStatus {
-  if (isMockMode() && mockKycProviderInstance) {
-    return mockKycProviderInstance.getCustomerStatus(dealId, currentStatus);
-  }
+export function getCustomerKycStatus(_dealId: string, currentStatus?: string): CustomerKycStatus {
   if (currentStatus === 'completed') return 'Verified';
   return (currentStatus as CustomerKycStatus) || 'Pending';
 }

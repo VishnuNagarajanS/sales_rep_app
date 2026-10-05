@@ -1,17 +1,4 @@
-/**
- * jaminApiService.ts
- *
- * Dedicated API service for Jamin Bazaar (Land & Plotted Development Sales).
- * Strictly communicates with backend controllers:
- *   - Leads: /api/leads & /api/sales-executive/leads
- *   - Follow-ups: /api/sales-executive/followups
- *   - Site Visits: /api/jamin/site-visits
- *   - Projects: /api/jamin/projects
- *   - Plots: /api/jamin/plots
- *   - Bookings: /api/jamin/bookings
- *
- * All data comes directly from the backend database (no mock fallback).
- */
+
 
 import { apiClient } from './apiClient';
 import type { Lead, SiteVisit, Followup } from '../types';
@@ -52,6 +39,8 @@ export interface CreateJaminLeadPayload {
   priority?: string;
   targetDevelopment?: string;
   budgetRange?: string;
+  readyToRegister?: string;
+  investmentCapacity?: string;
   notes?: string;
   assignedAgentId?: number;
 }
@@ -65,6 +54,8 @@ export interface UpdateJaminLeadPayload {
   priority?: string;
   targetDevelopment?: string;
   budgetRange?: string;
+  readyToRegister?: string;
+  investmentCapacity?: string;
   notes?: string;
   assignedAgentId?: number;
 }
@@ -86,6 +77,7 @@ export interface ScheduleSiteVisitPayload {
   plotId?: string | number;
   customerName: string;
   customerPhone: string;
+  contactType?: 'lead' | 'customer' | string;
   projectName: string;
   plotNumber?: string;
   scheduledAt: string;
@@ -118,8 +110,8 @@ export const jaminApiService = {
           source: l.source || 'Website',
           status: l.status || 'New',
           priority: l.priority || 'Medium',
-          assignedAgentId: String(l.assignedAgentId || '6'),
-          assignedAgentName: l.assignedAgentName || 'Rajesh Sharma',
+          assignedAgentId: l.assignedAgentId ? String(l.assignedAgentId) : undefined,
+          assignedAgentName: l.assignedAgentName || (l.assignedAgent?.name) || 'Unassigned',
           nextFollowupDate: l.nextFollowupDate ? new Date(l.nextFollowupDate).toLocaleDateString() : undefined,
           targetDevelopment: l.targetDevelopment,
           preferredVisitDate: l.preferredVisitDate,
@@ -128,7 +120,9 @@ export const jaminApiService = {
           notes: l.notes || '',
           createdAt: l.createdAt ? new Date(l.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
           customFields: {
-            budgetRange: l.budgetRange || '',
+            budgetRange: l.budgetRange || l.customFields?.budgetRange || '',
+            readyToRegister: l.readyToRegister || l.customFields?.readyToRegister || '',
+            investmentCapacity: l.investmentCapacity || l.customFields?.investmentCapacity || '',
           },
         }));
       }
@@ -153,8 +147,8 @@ export const jaminApiService = {
           source: d.source || 'Website',
           status: d.status || 'New',
           priority: d.priority || 'Medium',
-          assignedAgentId: String(d.assignedAgentId || '6'),
-          assignedAgentName: d.assignedAgentName || 'Rajesh Sharma',
+          assignedAgentId: d.assignedAgentId ? String(d.assignedAgentId) : '',
+          assignedAgentName: d.assignedAgentName || (d.assignedAgent?.name) || 'Unassigned',
           nextFollowupDate: d.nextFollowupDate,
           targetDevelopment: d.targetDevelopment,
           preferredVisitDate: d.preferredVisitDate,
@@ -163,7 +157,9 @@ export const jaminApiService = {
           notes: d.notes || '',
           createdAt: d.createdAt,
           customFields: {
-            budgetRange: d.budgetRange || '',
+            budgetRange: d.budgetRange || d.customFields?.budgetRange || '',
+            readyToRegister: d.readyToRegister || d.customFields?.readyToRegister || '',
+            investmentCapacity: d.investmentCapacity || d.customFields?.investmentCapacity || '',
           },
         };
         const siteVisits = await this.getSiteVisits(true);
@@ -193,12 +189,16 @@ export const jaminApiService = {
           source: l.source,
           status: l.status,
           priority: l.priority,
-          assignedAgentId: String(l.assignedAgentId || '6'),
-          assignedAgentName: l.assignedAgentName || 'Rajesh Sharma',
+          assignedAgentId: l.assignedAgentId ? String(l.assignedAgentId) : '',
+          assignedAgentName: l.assignedAgentName || (l.assignedAgent?.name) || 'Unassigned',
           targetDevelopment: l.targetDevelopment,
           notes: l.notes,
           createdAt: l.createdAt,
-          customFields: { budgetRange: l.budgetRange },
+          customFields: {
+            budgetRange: l.budgetRange || '',
+            readyToRegister: l.readyToRegister || '',
+            investmentCapacity: l.investmentCapacity || '',
+          },
         };
       }
     } catch (err) {
@@ -213,6 +213,38 @@ export const jaminApiService = {
       return res && res.success;
     } catch (err) {
       console.error(`Failed to update lead status #${id}`, err);
+      return false;
+    }
+  },
+
+  async convertLead(id: string | number, dealTitle?: string, dealValue?: number, notes?: string): Promise<{ customerId?: number; leadId?: number; success: boolean }> {
+    try {
+      const cleanId = String(id).replace('db-', '').replace('lead-', '').trim();
+      const res = await apiClient.post<any>(`/leads/${cleanId}/convert`, {
+        dealTitle,
+        dealValue,
+        notes,
+      });
+      if (res && res.success) {
+        return {
+          customerId: res.data?.customerId,
+          leadId: res.data?.leadId,
+          success: true,
+        };
+      }
+    } catch (err) {
+      console.error(`Failed to convert lead #${id} on backend`, err);
+    }
+    return { success: false };
+  },
+
+  async deleteLead(id: string | number): Promise<boolean> {
+    try {
+      const cleanId = String(id).replace('db-', '').trim();
+      const res = await apiClient.delete<any>(`/leads/${cleanId}`);
+      return Boolean(res && res.success);
+    } catch (err) {
+      console.error(`Failed to delete lead #${id}`, err);
       return false;
     }
   },
@@ -257,6 +289,7 @@ export const jaminApiService = {
       const res = await apiClient.post<any>('/jamin/site-visits', {
         leadId: payload.leadId ? Number(payload.leadId) : undefined,
         customerId: payload.customerId ? Number(payload.customerId) : undefined,
+        contactType: payload.contactType || (payload.customerId ? 'customer' : 'lead'),
         projectId: payload.projectId ? Number(payload.projectId) : undefined,
         plotId: payload.plotId ? Number(payload.plotId) : undefined,
         customerName: payload.customerName,
@@ -324,8 +357,9 @@ export const jaminApiService = {
       if (status && status !== 'All') params.append('status', status);
 
       const res = await apiClient.get<any>(`/sales-executive/followups?${params.toString()}`);
-      if (res && res.success && Array.isArray(res.data)) {
-        return res.data.map((f: any) => ({
+      const items = Array.isArray(res?.data) ? res.data : (res?.data?.items || []);
+      if (res && res.success && items.length > 0) {
+        return items.map((f: any) => ({
           id: String(f.id),
           companyId: 't-jamin-02',
           contactId: String(f.contactId),
@@ -337,8 +371,9 @@ export const jaminApiService = {
           status: (f.status as any) || 'Pending',
           notes: f.notes || '',
           assignedAgentId: String(f.assignedAgentId || '1'),
-          assignedAgentName: f.assignedToName || 'Agent',
+          assignedAgentName: f.assignedToName || f.assignedAgentName || 'Agent',
           assignedRole: 'sales_executive',
+          completedAt: f.completedAt,
         }));
       }
     } catch (err) {
@@ -541,9 +576,16 @@ export const jaminApiService = {
     }
   },
 
-  async holdPlot(plotId: string | number, customerName: string, customerPhone: string, holdDays: number = 7, notes?: string, holdByAgent?: string): Promise<boolean> {
+  async holdPlot(plotId: string | number, customerName: string, customerPhone: string, holdDays: number = 7, notes?: string, holdByAgent?: string, heldByCustomerId?: number | string): Promise<boolean> {
     try {
-      const res = await apiClient.post<any>(`/jamin/plots/${plotId}/hold`, { customerName, customerPhone, holdDays, notes, holdByAgent });
+      const res = await apiClient.post<any>(`/jamin/plots/${plotId}/hold`, {
+        heldByCustomerId: heldByCustomerId ? Number(heldByCustomerId) : undefined,
+        customerName,
+        customerPhone,
+        holdDays,
+        notes,
+        holdByAgent,
+      });
       return res && res.success;
     } catch (err) {
       console.error(`Failed to place plot #${plotId} on hold`, err);
@@ -622,16 +664,6 @@ export const jaminApiService = {
       return res && res.success;
     } catch (err) {
       console.error(`Failed to delete site visit #${id}`, err);
-      return false;
-    }
-  },
-
-  async deleteLead(id: number | string): Promise<boolean> {
-    try {
-      const res = await apiClient.delete<any>(`/leads/${id}`);
-      return res && res.success;
-    } catch (err) {
-      console.error(`Failed to delete lead #${id}`, err);
       return false;
     }
   },

@@ -88,7 +88,7 @@ public class JaminSiteVisitService : IJaminSiteVisitService
             ProjectName = projectName,
             PlotNumber = plotNumber,
             ScheduledAt = dto.ScheduledAt,
-            AssignedAgentId = dto.AssignedAgentId ?? 1,
+            AssignedAgentId = dto.AssignedAgentId,
             AssignedAgentName = dto.AssignedAgentName ?? string.Empty,
             Status = "Scheduled",
             VisitorNote = dto.VisitorNote,

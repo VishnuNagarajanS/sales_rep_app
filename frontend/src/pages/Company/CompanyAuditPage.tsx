@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FileCheck, Download, Filter, Shield } from 'lucide-react';
 import { AuditLog } from '../../types';
 import { useAuth } from '../../context/AuthContext';
-import { getAuditLogs } from '../../services/ghlApiService';
+import { auditService } from '../../services/auditService';
 import { DataTable, Column } from '../../components/common/DataTable';
 import './CompanyAuditPage.css';
 
@@ -12,7 +12,7 @@ export const CompanyAuditPage: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const data = await getAuditLogs(tenant?.id);
+      const data = await auditService.getCompanyAuditLogs(tenant?.id);
       setLogs(data);
     } catch (err) {
       console.error('Failed to load audit logs', err);
@@ -23,7 +23,13 @@ export const CompanyAuditPage: React.FC = () => {
     loadData();
     const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+    window.addEventListener('nexus_admin_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    return () => {
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
+      window.removeEventListener('nexus_admin_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
   }, [tenant?.id]);
 
   const columns: Column<AuditLog>[] = [
@@ -31,7 +37,24 @@ export const CompanyAuditPage: React.FC = () => {
       key: 'timestamp',
       header: 'Timestamp',
       sortable: true,
-      render: l => <span className="company-audit-cell-timestamp">{l.timestamp}</span>,
+      render: l => {
+        let displayTime = l.timestamp;
+        try {
+          const d = new Date(l.timestamp);
+          if (!isNaN(d.getTime())) {
+            displayTime = d.toLocaleString(undefined, {
+              day: '2-digit',
+              month: 'short',
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+              hour12: true
+            });
+          }
+        } catch {}
+        return <span className="company-audit-cell-timestamp">{displayTime}</span>;
+      },
     },
     {
       key: 'actorName',
