@@ -37,6 +37,16 @@ public static class AuthenticationExtensions
             };
             options.Events = new JwtBearerEvents
             {
+                OnMessageReceived = context =>
+                {
+                    var accessToken = context.Request.Query["access_token"];
+                    var path = context.HttpContext.Request.Path;
+                    if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                    {
+                        context.Token = accessToken;
+                    }
+                    return Task.CompletedTask;
+                },
                 OnTokenValidated = async context =>
                 {
                     var userIdClaim = context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
@@ -53,6 +63,37 @@ public static class AuthenticationExtensions
                         if (user == null || user.Status != backend.Models.Enums.UserStatus.Active)
                         {
                             context.Fail("Your account has been suspended or is inactive.");
+                            return;
+                        }
+
+                        // Enforce Tenant Suspension: Non-super-admins cannot access if tenant is suspended
+                        var roleCode = context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value?.ToLowerInvariant();
+                        if (user.CompanyId.HasValue && roleCode != "super_admin")
+                        {
+                            var tenant = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(
+                                dbContext.Tenants.AsNoTracking(),
+                                t => t.Id == user.CompanyId.Value);
+
+                            if (tenant == null || !tenant.IsActive || tenant.Status == "Suspended")
+                            {
+                                context.Fail("Your organization account has been suspended or is inactive.");
+                                return;
+                            }
+                        }
+
+                        // Enforce Session Revocation: Check if this specific JWT Jti token was revoked
+                        var jti = context.Principal?.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Jti)?.Value;
+                        if (!string.IsNullOrEmpty(jti))
+                        {
+                            var session = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(
+                                dbContext.UserSessions.AsNoTracking(),
+                                s => s.TokenId == jti);
+
+                            if (session != null && (!session.IsActive || session.RevokedAt.HasValue))
+                            {
+                                context.Fail("This session has been revoked. Please sign in again.");
+                                return;
+                            }
                         }
                     }
                 }

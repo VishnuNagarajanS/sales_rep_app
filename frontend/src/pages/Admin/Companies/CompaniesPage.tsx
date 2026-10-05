@@ -298,10 +298,8 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
   useEffect(() => {
     loadData();
     window.addEventListener('nexus_admin_updated', handleStorageUpdate);
-    window.addEventListener('nexus_storage_updated', handleStorageUpdate);
     return () => {
       window.removeEventListener('nexus_admin_updated', handleStorageUpdate);
-      window.removeEventListener('nexus_storage_updated', handleStorageUpdate);
     };
   }, []);
 

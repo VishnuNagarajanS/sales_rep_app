@@ -34,11 +34,67 @@ const STORAGE_KEYS = {
   METRICS: 'nexus_platform_metrics',
 };
 
-// Dispatch storage update helper
+export interface SecurityOverviewDto {
+  activeSessionsCount: number;
+  failedLogins24h: number;
+  securityEvents24h: number;
+  mfaEnabledUsersCount: number;
+}
+
+export interface UserSessionDto {
+  id: number;
+  userId: number;
+  userName: string;
+  userEmail: string;
+  roleCode: string;
+  tokenId: string;
+  ipAddress?: string;
+  userAgent?: string;
+  device?: string;
+  location?: string;
+  isActive: boolean;
+  isCurrentSession?: boolean;
+  isCurrent?: boolean;
+  createdAt: string;
+  lastActivityAt?: string;
+  revokedAt?: string;
+  revokedReason?: string;
+}
+
+export interface SecurityEventDto {
+  id: number;
+  eventType: string;
+  severity: string;
+  description?: string;
+  details?: string;
+  actorEmail?: string;
+  userEmail?: string;
+  userId?: number;
+  ipAddress?: string;
+  timestamp: string;
+}
+
+export interface MfaStatusDto {
+  isTwoFactorEnabled: boolean;
+  remainingRecoveryCodes: number;
+  userEmail?: string;
+}
+
+export interface MfaSetupResponseDto {
+  secret: string;
+  qrCodeUri: string;
+  manualEntryKey: string;
+  recoveryCodes: string[];
+}
+
+// Dispatch storage update helper with debounce
+let adminUpdateDebounceTimer: any = null;
 export const notifyAdminStorageUpdated = () => {
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-    window.dispatchEvent(new Event('nexus_admin_updated'));
+    if (adminUpdateDebounceTimer) clearTimeout(adminUpdateDebounceTimer);
+    adminUpdateDebounceTimer = setTimeout(() => {
+      window.dispatchEvent(new Event('nexus_admin_updated'));
+    }, 150);
   }
 };
 
@@ -46,7 +102,7 @@ export const notifyAdminStorageUpdated = () => {
 // Service Implementation
 // ============================================================================
 
-class SuperAdminService {
+export class SuperAdminService {
   // ── TENANTS / COMPANIES ───────────────────────────────────────────────────
 
   async fetchTenantsFromApi(): Promise<Tenant[]> {
@@ -545,15 +601,45 @@ class SuperAdminService {
 
   // ── USERS ─────────────────────────────────────────────────────────────────
 
-  async fetchUsersFromApi(filters?: { companyId?: string; roleCode?: string; status?: string; search?: string }): Promise<User[]> {
-    const res = await apiClient.get<ApiResponse<User[]>>('/super-admin/users', filters);
+  async fetchUsersPagedFromApi(filters?: {
+    companyId?: string;
+    roleCode?: string;
+    status?: string;
+    search?: string;
+    page?: number;
+    pageSize?: number;
+    sortBy?: string;
+    sortDir?: string;
+  }): Promise<PagedResult<User>> {
+    const res = await apiClient.get<ApiResponse<any>>('/super-admin/users', filters);
     if (!res || !res.data) {
       throw new Error(res?.message || 'Failed to fetch users from database.');
     }
-    if (!filters || Object.keys(filters).length === 0) {
-      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(res.data));
+    const data = res.data;
+    if (Array.isArray(data)) {
+      return {
+        items: data,
+        totalCount: data.length,
+        pageNumber: 1,
+        pageSize: data.length,
+        totalPages: 1,
+      };
     }
-    return res.data;
+    return {
+      items: data.items || [],
+      totalCount: data.totalCount ?? 0,
+      pageNumber: data.page ?? data.pageNumber ?? 1,
+      pageSize: data.pageSize ?? 25,
+      totalPages: data.totalPages ?? 1,
+    };
+  }
+
+  async fetchUsersFromApi(filters?: { companyId?: string; roleCode?: string; status?: string; search?: string }): Promise<User[]> {
+    const paged = await this.fetchUsersPagedFromApi({ ...filters, page: 1, pageSize: 200 });
+    if (!filters || Object.keys(filters).length === 0) {
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(paged.items));
+    }
+    return paged.items;
   }
 
   async createUserApi(userData: Partial<User>, initialPassword?: string): Promise<User> {
@@ -571,7 +657,6 @@ class SuperAdminService {
     if (!res || !res.data) {
       throw new Error(res?.message || 'Failed to provision user in database.');
     }
-    await this.fetchUsersFromApi();
     notifyAdminStorageUpdated();
     return res.data;
   }
@@ -600,7 +685,6 @@ class SuperAdminService {
         }
       } catch {}
     }
-    await this.fetchUsersFromApi();
     notifyAdminStorageUpdated();
     return res.data;
   }
@@ -614,7 +698,6 @@ class SuperAdminService {
     if (!res || !res.data) {
       throw new Error(res?.message || 'Failed to delete user from database.');
     }
-    await this.fetchUsersFromApi();
     notifyAdminStorageUpdated();
     return true;
   }
@@ -2032,6 +2115,74 @@ class SuperAdminService {
       totalCustomers: 0,
       systemHealthScore: 100,
     };
+  }
+
+  // ── SECURITY & SESSIONS ───────────────────────────────────────────────────
+
+  async getSecurityOverview(): Promise<any> {
+    const res = await apiClient.get<ApiResponse<any>>('/super-admin/security/overview');
+    if (!res || !res.data) throw new Error(res?.message || 'Failed to load security overview.');
+    return res.data;
+  }
+
+  async getUserSessions(activeOnly: boolean = true): Promise<any[]> {
+    const res = await apiClient.get<ApiResponse<any[]>>('/super-admin/security/sessions', { activeOnly });
+    if (!res || !res.data) throw new Error(res?.message || 'Failed to load user sessions.');
+    return res.data;
+  }
+
+  async revokeSession(id: number | string): Promise<boolean> {
+    const res = await apiClient.post<ApiResponse<boolean>>(`/super-admin/security/sessions/${id}/revoke`);
+    if (!res || !res.data) throw new Error(res?.message || 'Failed to revoke session.');
+    return true;
+  }
+
+  async revokeAllSessions(targetUserId?: number): Promise<number> {
+    const res = await apiClient.post<ApiResponse<number>>('/super-admin/security/sessions/revoke-all', targetUserId ? { targetUserId } : {});
+    if (!res || res.data === undefined) throw new Error(res?.message || 'Failed to revoke all sessions.');
+    return res.data;
+  }
+
+  async getSecurityEvents(page: number = 1, pageSize: number = 25, severity?: string): Promise<PagedResult<SecurityEventDto>> {
+    const params: any = { page, pageSize };
+    if (severity && severity !== 'all') params.severity = severity;
+    const res = await apiClient.get<ApiResponse<PagedResult<SecurityEventDto>>>('/super-admin/security/events', params);
+    if (!res || !res.data) throw new Error(res?.message || 'Failed to load security events.');
+    return res.data;
+  }
+
+  async getMfaStatus(): Promise<MfaStatusDto> {
+    const res = await apiClient.get<ApiResponse<any>>('/super-admin/security/mfa/status');
+    if (!res || !res.data) throw new Error(res?.message || 'Failed to load MFA status.');
+    return {
+      isTwoFactorEnabled: Boolean(res.data.isEnabled ?? res.data.isTwoFactorEnabled),
+      remainingRecoveryCodes: Number(res.data.recoveryCodesRemaining ?? res.data.remainingRecoveryCodes ?? 0),
+      userEmail: res.data.userEmail,
+    };
+  }
+
+  async setupMfa(): Promise<MfaSetupResponseDto> {
+    const res = await apiClient.post<ApiResponse<MfaSetupResponseDto>>('/super-admin/security/mfa/setup');
+    if (!res || !res.data) throw new Error(res?.message || 'Failed to initiate MFA setup.');
+    return res.data;
+  }
+
+  async verifyAndEnableMfa(code: string): Promise<boolean> {
+    const res = await apiClient.post<ApiResponse<boolean>>('/super-admin/security/mfa/verify-and-enable', { code });
+    if (!res || !res.data) throw new Error(res?.message || 'Failed to verify MFA code.');
+    return true;
+  }
+
+  async disableMfa(password: string): Promise<boolean> {
+    const res = await apiClient.post<ApiResponse<boolean>>('/super-admin/security/mfa/disable', { password });
+    if (!res || !res.data) throw new Error(res?.message || 'Failed to disable MFA.');
+    return true;
+  }
+
+  async getBackupStatus(): Promise<any> {
+    const res = await apiClient.get<ApiResponse<any>>('/super-admin/system/backup/status');
+    if (!res || !res.data) throw new Error(res?.message || 'Failed to fetch backup status.');
+    return res.data;
   }
 
   exportPlatformSnapshot(): string {

@@ -57,6 +57,7 @@ public static class ServiceExtensions
 
         // 4. Services
         services.AddScoped<IJwtService, JwtService>();
+        services.AddScoped<ITotpService, TotpService>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IEmailService, EmailService>();
         services.AddScoped<IOtpService, OtpService>();

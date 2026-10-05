@@ -18,6 +18,8 @@ export const routeToPath = (route: string, isSuperAdmin: boolean): string => {
         return '/settings';
       case 'admin-audit':
         return '/audit';
+      case 'admin-security':
+        return '/security';
       case 'admin-system':
         return '/system-health';
       default:
@@ -59,6 +61,8 @@ export const pathToRoute = (pathname: string, isSuperAdmin: boolean): string => 
         return 'admin-call-config';
       case '/audit':
         return 'admin-audit';
+      case '/security':
+        return 'admin-security';
       case '/system-health':
       case '/system':
         return 'admin-system';
@@ -137,6 +141,8 @@ import { PlatformFeaturesPage } from './pages/Admin/Features/PlatformFeaturesPag
 import { PlatformCallConfigPage } from './pages/Admin/CallConfig/PlatformCallConfigPage';
 import { PlatformAuditPage } from './pages/Admin/Audit/PlatformAuditPage';
 import { PlatformSystemPage } from './pages/Admin/System/PlatformSystemPage';
+import { PlatformSecurityPage } from './pages/Admin/Security/PlatformSecurityPage';
+import { signalRService } from './services/signalRService';
 
 import { ProtectedRoute } from './components/common/Guards';
 import { Modal } from './components/common/Modal';
@@ -201,6 +207,49 @@ export const App: React.FC = () => {
       sessionStorage.setItem('nexus_current_route', 'dashboard');
     }
   }, [user?.role?.code, currentRoute]);
+
+  // Real-Time SignalR Fleet Event Listener
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    signalRService.startConnection().catch((err) => {
+      console.warn('Real-time SignalR connection failed to initialize:', err);
+    });
+
+    const unsubUserSuspended = signalRService.on('UserSuspended', (data: any) => {
+      console.warn('Real-time event: User suspended', data);
+      if (data?.userId === user?.id) {
+        alert('Your user account has been suspended by an administrator. You will be signed out.');
+        window.location.href = '/login';
+      }
+    });
+
+    const unsubTenantSuspended = signalRService.on('TenantSuspended', (data: any) => {
+      console.warn('Real-time event: Tenant suspended', data);
+      if (data?.tenantId === tenant?.id && !isSuperAdmin) {
+        alert('Your organization has been suspended by the platform administrator. Access is restricted.');
+        window.location.href = '/login';
+      }
+    });
+
+    const unsubMaintenance = signalRService.on('MaintenanceModeToggled', (data: any) => {
+      console.info('Real-time event: Maintenance mode toggled', data);
+      if (data?.isEnabled && !isSuperAdmin) {
+        alert(`Platform Maintenance Notice: ${data.message || 'System maintenance in progress.'}`);
+      }
+    });
+
+    const unsubPlatformUpdated = signalRService.on('PlatformDataUpdated', (data: any) => {
+      window.dispatchEvent(new CustomEvent('nexus_admin_updated', { detail: data }));
+    });
+
+    return () => {
+      unsubUserSuspended();
+      unsubTenantSuspended();
+      unsubMaintenance();
+      unsubPlatformUpdated();
+    };
+  }, [isAuthenticated, user?.id, tenant?.id, isSuperAdmin]);
 
   // Quick Create Modal State
   const [quickCreateType, setQuickCreateType] = useState<
@@ -633,6 +682,8 @@ export const App: React.FC = () => {
           <PlatformAuditPage />
         ) : currentRoute === 'admin-system' ? (
           <PlatformSystemPage />
+        ) : currentRoute === 'admin-security' ? (
+          <PlatformSecurityPage />
         ) : (
           <PlatformDashboardPage onNavigate={navigate} />
         )}

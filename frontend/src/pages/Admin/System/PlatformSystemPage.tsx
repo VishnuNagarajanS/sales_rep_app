@@ -62,6 +62,7 @@ export const PlatformSystemPage: React.FC = () => {
   const [successMsg, setSuccessMsg] = useState('');
   const [isExporting, setIsExporting] = useState(false);
   const [isTogglingMaint, setIsTogglingMaint] = useState(false);
+  const [backupStatus, setBackupStatus] = useState<any>(null);
 
   // Announcement Modal
   const [isAnnModalOpen, setIsAnnModalOpen] = useState(false);
@@ -104,13 +105,14 @@ export const PlatformSystemPage: React.FC = () => {
     setErrorMsg(null);
 
     try {
-      const [diag, health, config, anns, allTenants, maint] = await Promise.all([
+      const [diag, health, config, anns, allTenants, maint, backup] = await Promise.all([
         superAdminService.fetchSystemDiagnosticsFromApi(),
         superAdminService.fetchSystemHealthChecksFromApi(),
         superAdminService.fetchGlobalConfigFromApi(),
         superAdminService.fetchAnnouncementsFromApi(),
         superAdminService.fetchTenantsFromApi(),
         superAdminService.fetchMaintenanceModeFromApi(),
+        superAdminService.getBackupStatus().catch(() => null),
       ]);
 
       setDiagnostics(diag);
@@ -120,6 +122,7 @@ export const PlatformSystemPage: React.FC = () => {
       setAnnouncements(anns || []);
       setTenants(allTenants || []);
       setMaintenance(maint);
+      setBackupStatus(backup);
       if (isManualRefresh) {
         showSuccess('Live telemetry and system health refreshed.');
       }
@@ -550,12 +553,18 @@ export const PlatformSystemPage: React.FC = () => {
                   </div>
 
                   <div className="telemetry-item-box">
-                    <span className="telemetry-item-label">Last Backup</span>
-                    <span className="telemetry-item-value" style={{ fontSize: '13px' }}>
-                      {diagnostics.lastBackupAt ? new Date(diagnostics.lastBackupAt).toLocaleDateString() : 'No Backup Stored'}
+                    <span className="telemetry-item-label">
+                      Database Backup ({backupStatus?.provider || 'PostgreSQL Neon AWS'})
+                    </span>
+                    <span className="telemetry-item-value" style={{ fontSize: '13px', color: backupStatus?.status === 'Healthy' ? '#34d399' : '#38bdf8' }}>
+                      {backupStatus?.lastBackupAt
+                        ? `${new Date(backupStatus.lastBackupAt).toLocaleDateString()} (${backupStatus.backupSize})`
+                        : diagnostics.lastBackupAt
+                        ? new Date(diagnostics.lastBackupAt).toLocaleDateString()
+                        : 'Active Automated Snapshots'}
                     </span>
                     <span className="telemetry-item-sub">
-                      {diagnostics.lastBackupAt ? new Date(diagnostics.lastBackupAt).toLocaleTimeString() : 'Export a backup anytime'}
+                      Status: {backupStatus?.status || 'Active'} • Retention: {backupStatus?.retentionDays || 30} days ({backupStatus?.tablesArchivedCount || 16} tables)
                     </span>
                   </div>
                 </div>

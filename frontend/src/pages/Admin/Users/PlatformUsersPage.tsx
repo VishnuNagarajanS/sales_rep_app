@@ -35,6 +35,9 @@ export const PlatformUsersPage: React.FC = () => {
   const [selectedCompanyFilter, setSelectedCompanyFilter] = useState('all');
   const [selectedRoleFilter, setSelectedRoleFilter] = useState('all');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalUsersCount, setTotalUsersCount] = useState(0);
 
   // Provision User Modal state (Super Admin can create ONLY Company Admins)
   const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false);
@@ -84,18 +87,28 @@ export const PlatformUsersPage: React.FC = () => {
   );
   useUnsavedChanges(isProvisionDirty || isEditDirty, 'You have unsaved changes in user details. Are you sure you want to discard them?');
 
-  const loadData = async () => {
+  const loadData = async (pageToLoad: number = currentPage) => {
     setIsLoading(true);
     setLoadError(null);
     try {
-      const [tList, rMap, uList] = await Promise.all([
+      const [tList, rMap, pagedRes] = await Promise.all([
         superAdminService.fetchTenantsFromApi(),
         superAdminService.fetchRolesFromApi(),
-        superAdminService.fetchUsersFromApi(),
+        superAdminService.fetchUsersPagedFromApi({
+          companyId: selectedCompanyFilter,
+          roleCode: selectedRoleFilter,
+          status: selectedStatusFilter,
+          search: searchQuery,
+          page: pageToLoad,
+          pageSize: 25,
+        }),
       ]);
       setTenants(tList || []);
       setRoles(rMap || {});
-      setUsers(uList || []);
+      setUsers(pagedRes.items || []);
+      setTotalUsersCount(pagedRes.totalCount ?? 0);
+      setTotalPages(pagedRes.totalPages ?? 1);
+      setCurrentPage(pageToLoad);
     } catch (err: any) {
       console.error('Failed to load user directory from API:', err);
       setLoadError(err.message || 'Failed to load user directory from database.');
@@ -105,21 +118,19 @@ export const PlatformUsersPage: React.FC = () => {
   };
 
   const applyFilters = async () => {
-    await loadData();
+    await loadData(1);
   };
 
   useEffect(() => {
-    loadData();
+    loadData(1);
     const handleUpdate = () => {
-      loadData();
+      loadData(currentPage);
     };
     window.addEventListener('nexus_admin_updated', handleUpdate);
-    window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => {
       window.removeEventListener('nexus_admin_updated', handleUpdate);
-      window.removeEventListener('nexus_storage_updated', handleUpdate);
     };
-  }, []);
+  }, [selectedCompanyFilter, selectedRoleFilter, selectedStatusFilter]);
 
   const showFeedback = (msg: string) => {
     setFeedbackMsg(msg);
@@ -565,6 +576,41 @@ export const PlatformUsersPage: React.FC = () => {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Server-Side Pagination Bar */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '12px 18px',
+          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+          backgroundColor: 'rgba(255, 255, 255, 0.02)',
+          fontSize: '13px',
+          color: '#94a3b8'
+        }}>
+          <div>
+            Showing {totalUsersCount === 0 ? 0 : (currentPage - 1) * 25 + 1} to {Math.min(currentPage * 25, totalUsersCount)} of {totalUsersCount} platform users
+          </div>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button
+              className="btn btn-secondary btn-sm"
+              disabled={currentPage <= 1 || isLoading}
+              onClick={() => loadData(currentPage - 1)}
+            >
+              Previous
+            </button>
+            <span style={{ padding: '0 8px', fontWeight: 600, color: '#f8fafc' }}>
+              Page {currentPage} of {Math.max(1, totalPages)}
+            </span>
+            <button
+              className="btn btn-secondary btn-sm"
+              disabled={currentPage >= totalPages || isLoading}
+              onClick={() => loadData(currentPage + 1)}
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
 

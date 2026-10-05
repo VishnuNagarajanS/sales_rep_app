@@ -74,10 +74,8 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
   useEffect(() => {
     loadData();
     window.addEventListener('nexus_admin_updated', loadData);
-    window.addEventListener('nexus_storage_updated', loadData);
     return () => {
       window.removeEventListener('nexus_admin_updated', loadData);
-      window.removeEventListener('nexus_storage_updated', loadData);
     };
   }, []);
 

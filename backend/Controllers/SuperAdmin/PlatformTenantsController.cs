@@ -2,10 +2,12 @@ using backend.Authentication.Interfaces;
 using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.SuperAdmin;
+using backend.Hubs;
 using backend.Models.Entities;
 using backend.Models.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace backend.Controllers.SuperAdmin;
@@ -17,11 +19,16 @@ public class PlatformTenantsController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
+    private readonly IHubContext<PlatformHub, IPlatformHubClient> _hubContext;
 
-    public PlatformTenantsController(ApplicationDbContext context, ICurrentUserService currentUser)
+    public PlatformTenantsController(
+        ApplicationDbContext context,
+        ICurrentUserService currentUser,
+        IHubContext<PlatformHub, IPlatformHubClient> hubContext)
     {
         _context = context;
         _currentUser = currentUser;
+        _hubContext = hubContext;
     }
 
     [HttpGet]
@@ -33,7 +40,58 @@ public class PlatformTenantsController : ControllerBase
             .OrderBy(t => t.Id)
             .ToListAsync(ct);
 
-        var dtos = tenants.Select(MapToResponseDto).ToList();
+        // Compute real live telemetry aggregations across database
+        var userStats = await _context.Users
+            .Where(u => u.CompanyId.HasValue)
+            .GroupBy(u => u.CompanyId!.Value)
+            .Select(g => new
+            {
+                TenantId = g.Key,
+                Total = g.Count(),
+                Active = g.Count(u => u.Status == UserStatus.Active)
+            })
+            .ToDictionaryAsync(x => x.TenantId, x => x, ct);
+
+        var leadStats = await _context.Leads
+            .GroupBy(l => l.CompanyId)
+            .Select(g => new { TenantId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.TenantId, x => x.Count, ct);
+
+        var customerStats = await _context.Customers
+            .GroupBy(c => c.CompanyId)
+            .Select(g => new { TenantId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.TenantId, x => x.Count, ct);
+
+        var didStats = await _context.TenantDidMappings
+            .Where(d => d.TenantId.HasValue)
+            .GroupBy(d => d.TenantId!.Value)
+            .Select(g => new { TenantId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.TenantId, x => x.Count, ct);
+
+        var callStats = await _context.CallRecords
+            .GroupBy(c => c.CompanyId)
+            .Select(g => new { TenantId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.TenantId, x => x.Count, ct);
+
+        var dtos = tenants.Select(t =>
+        {
+            var uStat = userStats.TryGetValue(t.Id, out var us) ? us : null;
+            var lCount = leadStats.TryGetValue(t.Id, out var lc) ? lc : 0;
+            var cCount = customerStats.TryGetValue(t.Id, out var cc) ? cc : 0;
+            var dCount = didStats.TryGetValue(t.Id, out var dc) ? dc : 0;
+            var callCount = callStats.TryGetValue(t.Id, out var cal) ? cal : 0;
+
+            var dto = MapToResponseDto(t);
+            dto.UsersCount = uStat?.Total ?? 0;
+            dto.ActiveUsersCount = uStat?.Active ?? 0;
+            dto.LeadsCount = lCount;
+            dto.CustomersCount = cCount;
+            dto.CallsCount = callCount;
+            dto.DidsCount = dCount;
+            dto.IsProtected = t.IsProtected;
+            return dto;
+        }).ToList();
+
         return Ok(ApiResponse<List<TenantResponseDto>>.SuccessResult(dtos));
     }
 
@@ -44,7 +102,23 @@ public class PlatformTenantsController : ControllerBase
         if (tenant == null)
             return NotFound(ApiResponse<TenantResponseDto>.FailureResult("Tenant organization not found."));
 
-        return Ok(ApiResponse<TenantResponseDto>.SuccessResult(MapToResponseDto(tenant)));
+        var totalUsers = await _context.Users.CountAsync(u => u.CompanyId == tenant.Id, ct);
+        var activeUsers = await _context.Users.CountAsync(u => u.CompanyId == tenant.Id && u.Status == UserStatus.Active, ct);
+        var leadsCount = await _context.Leads.CountAsync(l => l.CompanyId == tenant.Id, ct);
+        var customersCount = await _context.Customers.CountAsync(c => c.CompanyId == tenant.Id, ct);
+        var didsCount = await _context.TenantDidMappings.CountAsync(d => d.TenantId == tenant.Id, ct);
+        var callsCount = await _context.CallRecords.CountAsync(c => c.CompanyId == tenant.Id, ct);
+
+        var dto = MapToResponseDto(tenant);
+        dto.UsersCount = totalUsers;
+        dto.ActiveUsersCount = activeUsers;
+        dto.LeadsCount = leadsCount;
+        dto.CustomersCount = customersCount;
+        dto.CallsCount = callsCount;
+        dto.DidsCount = didsCount;
+        dto.IsProtected = tenant.IsProtected;
+
+        return Ok(ApiResponse<TenantResponseDto>.SuccessResult(dto));
     }
 
     [HttpPost]
@@ -98,63 +172,49 @@ public class PlatformTenantsController : ControllerBase
         // Optional provision of Company Admin user
         if (req.AdminUser != null && !string.IsNullOrWhiteSpace(req.AdminUser.Email))
         {
-            var email = req.AdminUser.Email.Trim().ToLowerInvariant();
-            var emailExists = await _context.Users.AnyAsync(u => u.Email.ToLower() == email, ct);
-            if (!emailExists)
+            var adminRole = await _context.Roles.FirstOrDefaultAsync(r => r.Code == "company_admin", ct);
+            if (adminRole != null)
             {
-                var companyAdminRole = await _context.Roles.FirstOrDefaultAsync(r => r.Code == "company_admin", ct);
-                var rawPassword = string.IsNullOrWhiteSpace(req.AdminUser.Password) ? "Password@123" : req.AdminUser.Password;
-                var passwordHash = BCrypt.Net.BCrypt.HashPassword(rawPassword);
-
                 var adminUser = new User
                 {
-                    Name = string.IsNullOrWhiteSpace(req.AdminUser.Name) ? "Primary Admin" : req.AdminUser.Name.Trim(),
-                    Email = email,
-                    Phone = req.AdminUser.Phone ?? "+91 98000 00000",
-                    PasswordHash = passwordHash,
-                    RoleId = companyAdminRole?.Id ?? 2,
+                    Name = req.AdminUser.Name.Trim(),
+                    Email = req.AdminUser.Email.Trim().ToLowerInvariant(),
+                    Phone = req.AdminUser.Phone?.Trim() ?? string.Empty,
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(string.IsNullOrWhiteSpace(req.AdminUser.Password) ? "Password@123" : req.AdminUser.Password),
+                    RoleId = adminRole.Id,
                     CompanyId = tenant.Id,
                     Status = UserStatus.Active,
                     CreatedAt = DateTime.UtcNow
                 };
+
                 _context.Users.Add(adminUser);
             }
         }
 
-        // Optional provision of DID mapping
-        if (req.DidData != null && !string.IsNullOrWhiteSpace(req.DidData.PhoneNumber))
+        // Optional DID assignment
+        if (req.Did != null && !string.IsNullOrWhiteSpace(req.Did.PhoneNumber))
         {
-            var didPhone = req.DidData.PhoneNumber.Trim();
-            var didExists = await _context.TenantDidMappings.AnyAsync(d => d.PhoneNumber == didPhone, ct);
-            if (!didExists)
+            var did = new TenantDidMapping
             {
-                var did = new TenantDidMapping
-                {
-                    TenantId = tenant.Id,
-                    PhoneNumber = didPhone,
-                    RoutingStrategy = req.DidData.RoutingStrategy ?? "Round-Robin",
-                    QueueName = $"{tenant.Name} Inbound",
-                    EnableRecording = true,
-                    EnableAiWhisper = true,
-                    Status = "Online",
-                    ChannelsCount = 6,
-                    AllocatedAt = DateTime.UtcNow,
-                    CreatedAt = DateTime.UtcNow
-                };
-                _context.TenantDidMappings.Add(did);
-            }
+                TenantId = tenant.Id,
+                PhoneNumber = req.Did.PhoneNumber.Trim(),
+                RoutingStrategy = req.Did.RoutingStrategy ?? "round_robin",
+                QueueName = $"{tenant.Slug}-general-queue",
+                Status = "Online",
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.TenantDidMappings.Add(did);
         }
 
-        // Record Audit Log
         _context.AuditLogs.Add(new AuditLog
         {
-            Action = "PROVISION_TENANT",
+            Action = "CREATE_TENANT",
             EntityType = "Tenant",
             EntityId = tenant.Id.ToString(),
             CompanyId = tenant.Id,
             ActorName = _currentUser.Email ?? "Super Admin",
             ActorEmail = _currentUser.Email ?? "admin@platform.com",
-            Details = $"Super Admin provisioned new tenant organization: \"{tenant.Name}\" ({tenant.Industry}) with {tenant.EnabledFeatures.Count} features.",
+            Details = $"Super Admin created tenant organization: \"{tenant.Name}\" ({cleanSlug}).",
             Module = "Companies",
             Status = "success",
             Timestamp = DateTime.UtcNow
@@ -162,7 +222,13 @@ public class PlatformTenantsController : ControllerBase
 
         await _context.SaveChangesAsync(ct);
 
-        return CreatedAtAction(nameof(GetTenantById), new { id = tenant.Id }, ApiResponse<TenantResponseDto>.SuccessResult(MapToResponseDto(tenant), "Tenant provisioned successfully."));
+        try
+        {
+            await _hubContext.Clients.All.PlatformDataUpdated("Tenant", "Created");
+        }
+        catch { }
+
+        return CreatedAtAction(nameof(GetTenantById), new { id = tenant.Id }, ApiResponse<TenantResponseDto>.SuccessResult(MapToResponseDto(tenant), "Tenant organization created successfully."));
     }
 
     [HttpPut("{id}")]
@@ -183,13 +249,14 @@ public class PlatformTenantsController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(req.Slug))
         {
-            var cleanSlug = req.Slug.ToLowerInvariant().Trim();
-            if (cleanSlug != tenant.Slug.ToLowerInvariant())
+            var clean = req.Slug.ToLowerInvariant().Trim();
+            clean = System.Text.RegularExpressions.Regex.Replace(clean, @"[^a-z0-9]", "");
+            if (clean != tenant.Slug)
             {
-                var exists = await _context.Tenants.AnyAsync(t => t.Slug.ToLower() == cleanSlug && t.Id != tenant.Id, ct);
-                if (exists)
-                    return BadRequest(ApiResponse<TenantResponseDto>.FailureResult($"Slug '{cleanSlug}' is already taken by another organization."));
-                tenant.Slug = cleanSlug;
+                var conflict = await _context.Tenants.AnyAsync(t => t.Slug == clean && t.Id != tenant.Id, ct);
+                if (conflict)
+                    return BadRequest(ApiResponse<TenantResponseDto>.FailureResult($"Slug '{clean}' is already in use by another tenant."));
+                tenant.Slug = clean;
             }
         }
 
@@ -197,7 +264,6 @@ public class PlatformTenantsController : ControllerBase
         if (req.Logo != null) tenant.Logo = req.Logo;
         if (req.Tagline != null) tenant.Tagline = req.Tagline.Trim();
         if (req.Industry != null) tenant.Industry = req.Industry.Trim();
-        if (req.EnabledFeatures != null) tenant.EnabledFeatures = req.EnabledFeatures;
         if (req.Timezone != null) tenant.Timezone = req.Timezone;
         if (req.Currency != null) tenant.Currency = req.Currency;
         if (req.BusinessHours != null) tenant.BusinessHours = req.BusinessHours;
@@ -206,6 +272,7 @@ public class PlatformTenantsController : ControllerBase
         if (req.CallEnabled.HasValue) tenant.CallEnabled = req.CallEnabled.Value;
         if (req.RecordingEnabled.HasValue) tenant.RecordingEnabled = req.RecordingEnabled.Value;
         if (req.TranscriptionEnabled.HasValue) tenant.TranscriptionEnabled = req.TranscriptionEnabled.Value;
+        if (req.EnabledFeatures != null) tenant.EnabledFeatures = req.EnabledFeatures;
 
         if (!string.IsNullOrWhiteSpace(req.Status))
         {
@@ -223,14 +290,21 @@ public class PlatformTenantsController : ControllerBase
             CompanyId = tenant.Id,
             ActorName = _currentUser.Email ?? "Super Admin",
             ActorEmail = _currentUser.Email ?? "admin@platform.com",
-            Details = $"Super Admin updated organization settings for \"{tenant.Name}\".",
+            Details = $"Super Admin updated configuration for tenant organization: \"{tenant.Name}\".",
             Module = "Companies",
             Status = "success",
             Timestamp = DateTime.UtcNow
         });
 
         await _context.SaveChangesAsync(ct);
-        return Ok(ApiResponse<TenantResponseDto>.SuccessResult(MapToResponseDto(tenant), "Tenant updated successfully."));
+
+        try
+        {
+            await _hubContext.Clients.All.PlatformDataUpdated("Tenant", "Updated");
+        }
+        catch { }
+
+        return Ok(ApiResponse<TenantResponseDto>.SuccessResult(MapToResponseDto(tenant), "Tenant configuration updated successfully."));
     }
 
     [HttpPatch("{id}/status")]
@@ -243,10 +317,43 @@ public class PlatformTenantsController : ControllerBase
         if (tenant == null)
             return NotFound(ApiResponse<TenantResponseDto>.FailureResult("Tenant organization not found."));
 
+        if (tenant.IsProtected && req.Status.Equals("Suspended", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(ApiResponse<TenantResponseDto>.FailureResult(
+                $"Tenant organization '{tenant.Name}' is a protected core enterprise organization and cannot be suspended."));
+        }
+
         var previousStatus = tenant.Status ?? (tenant.IsActive ? "Active" : "Inactive");
         tenant.Status = req.Status;
         tenant.IsActive = req.Status.Equals("Active", StringComparison.OrdinalIgnoreCase);
         tenant.UpdatedAt = DateTime.UtcNow;
+
+        // If suspending tenant, revoke all active sessions for its users
+        if (req.Status.Equals("Suspended", StringComparison.OrdinalIgnoreCase))
+        {
+            var tenantUserIds = await _context.Users.Where(u => u.CompanyId == tenant.Id).Select(u => u.Id).ToListAsync(ct);
+            var activeSessions = await _context.UserSessions.Where(s => tenantUserIds.Contains(s.UserId) && s.IsActive).ToListAsync(ct);
+            foreach (var s in activeSessions)
+            {
+                s.IsActive = false;
+                s.RevokedAt = DateTime.UtcNow;
+                s.RevokedReason = $"Tenant organization '{tenant.Name}' was suspended.";
+            }
+
+            try
+            {
+                await _hubContext.Clients.Group($"tenant_{tenant.Id}").TenantSuspended(tenant.Id, $"Organization '{tenant.Name}' has been suspended by platform administration.");
+            }
+            catch { }
+        }
+        else if (req.Status.Equals("Active", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                await _hubContext.Clients.Group($"tenant_{tenant.Id}").TenantActivated(tenant.Id);
+            }
+            catch { }
+        }
 
         _context.AuditLogs.Add(new AuditLog
         {
@@ -263,6 +370,13 @@ public class PlatformTenantsController : ControllerBase
         });
 
         await _context.SaveChangesAsync(ct);
+
+        try
+        {
+            await _hubContext.Clients.All.PlatformDataUpdated("Tenant", "StatusChanged");
+        }
+        catch { }
+
         return Ok(ApiResponse<TenantResponseDto>.SuccessResult(MapToResponseDto(tenant), "Status updated successfully."));
     }
 
@@ -273,8 +387,8 @@ public class PlatformTenantsController : ControllerBase
         if (tenant == null)
             return NotFound(ApiResponse<bool>.FailureResult("Tenant organization not found."));
 
-        // Protect primary demonstration tenants
-        if (tenant.Id == 1 || tenant.Id == 2)
+        // Enforce protection via explicit entity flag
+        if (tenant.IsProtected)
             return BadRequest(ApiResponse<bool>.FailureResult($"Tenant '{tenant.Name}' is a protected core enterprise organization and cannot be deleted."));
 
         var tenantName = tenant.Name;
@@ -296,6 +410,13 @@ public class PlatformTenantsController : ControllerBase
         });
 
         await _context.SaveChangesAsync(ct);
+
+        try
+        {
+            await _hubContext.Clients.All.PlatformDataUpdated("Tenant", "Deleted");
+        }
+        catch { }
+
         return Ok(ApiResponse<bool>.SuccessResult(true, $"Tenant '{tenantName}' deleted successfully."));
     }
 
@@ -330,6 +451,7 @@ public class PlatformTenantsController : ControllerBase
             CallEnabled = t.CallEnabled,
             RecordingEnabled = t.RecordingEnabled,
             TranscriptionEnabled = t.TranscriptionEnabled,
+            IsProtected = t.IsProtected,
             CreatedAt = t.CreatedAt,
             UpdatedAt = t.UpdatedAt
         };

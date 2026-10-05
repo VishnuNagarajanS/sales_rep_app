@@ -24,6 +24,9 @@ public class Tenant
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
 
+    /// <summary>Indicates core platform tenants (GHL, Jamin) that cannot be deleted or suspended.</summary>
+    public bool IsProtected { get; set; } = false;
+
     // Navigation properties
     public ICollection<User> Users { get; set; } = new List<User>();
     public ICollection<TenantDidMapping> DidMappings { get; set; } = new List<TenantDidMapping>();

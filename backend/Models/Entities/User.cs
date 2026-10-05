@@ -22,4 +22,16 @@ public class User
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
+
+    /// <summary>Indicates root platform accounts that cannot be deleted or suspended.</summary>
+    public bool IsProtected { get; set; } = false;
+
+    /// <summary>Whether two-factor authentication (TOTP) is enforced for this user.</summary>
+    public bool IsTwoFactorEnabled { get; set; } = false;
+
+    /// <summary>Base32 encoded secret for RFC 6238 TOTP authenticator.</summary>
+    public string? TwoFactorSecret { get; set; }
+
+    /// <summary>JSON array of hashed one-time backup recovery codes.</summary>
+    public string? TwoFactorRecoveryCodesJson { get; set; }
 }
