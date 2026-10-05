@@ -165,11 +165,34 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       // IRM My Leads: ONLY leads that are 'Interested' AND assigned to THIS IRM
       // (e.g. Sales Exec Naveen hands a lead to IRM Dhinakaran -> only Dhinakaran sees it).
       // Leads of other IRMs, or still owned by a Sales Executive, are never shown.
+      // Also exclude any lead that already has a real, persisted pending follow-up record —
+      // those contacts belong in the Follow-ups screen only, not here.
+      const pendingFollowupContactIds = new Set<string>(
+        (allFollowups || [])
+          .filter(f => f.status === 'Pending')
+          .map(f => String(f.contactId || ''))
+          .filter(Boolean)
+      );
+      const pendingFollowupPhones = new Set<string>(
+        (allFollowups || [])
+          .filter(f => f.status === 'Pending')
+          .map(f => (f.contactPhone || '').replace(/\D/g, '').slice(-10))
+          .filter(Boolean)
+      );
+
       const raw = tenantLeads.filter(l => {
         if (l.status !== 'Interested') return false;
-        if (l.assignedAgentId) return String(l.assignedAgentId) === String(user?.id);
-        // Legacy rows without an agent id: fall back to the exact name
-        return !!l.assignedAgentName && l.assignedAgentName === user?.name;
+        if (l.assignedAgentId) {
+          if (String(l.assignedAgentId) !== String(user?.id)) return false;
+        } else {
+          // Legacy rows without an agent id: fall back to the exact name
+          if (!l.assignedAgentName || l.assignedAgentName !== user?.name) return false;
+        }
+        // Exclude if a real pending followup already exists for this contact
+        if (pendingFollowupContactIds.has(String(l.id))) return false;
+        const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+        if (lPhone && pendingFollowupPhones.has(lPhone)) return false;
+        return true;
       });
       // Deduplicate by phone to prevent double-entries from different IDs
       const seen = new Set<string>();
@@ -183,7 +206,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     }
 
     return tenantLeads.filter(l => !MOVED_LEAD_STATUSES.includes(l.status));
-  }, [tenantLeads, isExec, isIrm, user?.id, user?.name]);
+  }, [tenantLeads, isExec, isIrm, user?.id, user?.name, allFollowups]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);

@@ -150,33 +150,10 @@ export const FollowupsPage: React.FC = () => {
         isAdmin ? adminUserService.getUsers(tenant?.id || '') : Promise.resolve([])
       ]);
 
-      let followupsList = (data && data.length > 0) ? [...data] : (storageService.getFollowups(tenant?.id) || []);
-
-      // Also ensure any lead with status 'Follow-up Required' is represented in followups
-      const existingContactIds = new Set(followupsList.map(f => String(f.contactId || f.id)));
-      const existingPhones = new Set(followupsList.map(f => (f.contactPhone || '').replace(/\D/g, '').slice(-10)).filter(Boolean));
-
-      (leads || []).forEach(l => {
-        if (l.status === 'Follow-up Required') {
-          const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
-          if (!existingContactIds.has(String(l.id)) && (!lPhone || !existingPhones.has(lPhone))) {
-            followupsList.push({
-              id: `flw-lead-${l.id}`,
-              companyId: l.companyId || tenant?.id || '1',
-              contactId: String(l.id),
-              contactName: l.name,
-              contactPhone: l.phone,
-              contactType: 'lead',
-              scheduledAt: l.createdAt || new Date().toISOString(),
-              priority: l.priority === 'Urgent' ? 'High' : (l.priority as any || 'Medium'),
-              status: 'Pending',
-              notes: l.notes || 'Lead marked Follow-up Required',
-              assignedAgentId: String(l.assignedAgentId || ''),
-              assignedAgentName: l.assignedAgentName || '',
-            });
-          }
-        }
-      });
+      // Use only real persisted followup records from the backend (or localStorage mirror).
+      // Do NOT synthesize fake followup cards from lead status — that creates duplicates
+      // where a contact appears in both My Leads and Follow-ups simultaneously.
+      const followupsList = (data && data.length > 0) ? [...data] : (storageService.getFollowups(tenant?.id) || []);
 
       setFollowups(followupsList);
       setCallsList(calls || []);

@@ -97,15 +97,38 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     : deals;
 
   const scopedLeads = isGhlIrm
-    ? leads
-        .filter(l => !l.companyId || isTenantMatch(l.companyId, tenant?.id))
-        // Same rule as IRM "My Leads": only 'Interested' leads assigned to THIS IRM
-        .filter(l => l.status === 'Interested')
-        .filter(l =>
-          l.assignedAgentId
-            ? String(l.assignedAgentId) === String(user?.id)
-            : !!l.assignedAgentName && l.assignedAgentName === user?.name
-        )
+    ? (() => {
+        // Build sets of contact IDs / phones that already have a real pending followup.
+        // A lead with an active followup belongs in the Follow-up column only.
+        const pendingFuContactIds = new Set<string>(
+          followups
+            .filter(f => f.status === 'Pending')
+            .map(f => String(f.contactId || ''))
+            .filter(Boolean)
+        );
+        const pendingFuPhones = new Set<string>(
+          followups
+            .filter(f => f.status === 'Pending')
+            .map(f => (f.contactPhone || '').replace(/\D/g, '').slice(-10))
+            .filter(Boolean)
+        );
+        return leads
+          .filter(l => !l.companyId || isTenantMatch(l.companyId, tenant?.id))
+          // Same rule as IRM "My Leads": only 'Interested' leads assigned to THIS IRM
+          .filter(l => l.status === 'Interested')
+          .filter(l =>
+            l.assignedAgentId
+              ? String(l.assignedAgentId) === String(user?.id)
+              : !!l.assignedAgentName && l.assignedAgentName === user?.name
+          )
+          // Exclude leads that already have a real pending followup record
+          .filter(l => {
+            if (pendingFuContactIds.has(String(l.id))) return false;
+            const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+            if (lPhone && pendingFuPhones.has(lPhone)) return false;
+            return true;
+          });
+      })()
     : [];
 
   const scopedFollowups = isGhlIrm
