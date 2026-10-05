@@ -44,39 +44,36 @@ public class LeadService : ILeadService
 
     private IQueryable<Lead> GetScopedLeadsQuery(LeadFilterDto? filter = null)
     {
-        var role = _currentUser.Role;
+        var role = (_currentUser.Role ?? string.Empty).ToLowerInvariant();
         var agentId = _currentUser.UserId;
         var companyId = _currentUser.CompanyId;
 
-        int? requestedCompanyId = null;
-        if (filter != null && filter.CompanyId.HasValue)
-        {
-            requestedCompanyId = filter.CompanyId.Value;
-        }
-        else if (!string.IsNullOrWhiteSpace(filter?.CompanySlug))
-        {
-            var slug = filter.CompanySlug.Trim().ToLowerInvariant();
-            if (slug == "ghl" || slug == "1" || slug == "t-ghl-01") requestedCompanyId = 1;
-            else if (slug == "jamin" || slug == "2" || slug == "t-jamin-02") requestedCompanyId = 2;
-        }
+        // Do not trust tenant/company ID supplied by the browser when authenticated claims determine it
+        int? effectiveCompanyId = (companyId.HasValue && companyId.Value > 0)
+            ? companyId.Value
+            : (role == "super_admin" ? (filter?.CompanyId ?? (filter?.CompanySlug == "jamin" || filter?.CompanySlug == "2" ? 2 : 1)) : null);
 
         var query = _context.Leads.AsNoTracking().Include(l => l.AssignedAgent).AsQueryable();
 
         if (role == "super_admin")
         {
-            var targetCompanyId = requestedCompanyId ?? companyId;
-            if (targetCompanyId.HasValue)
-                query = query.Where(l => l.CompanyId == targetCompanyId.Value);
+            if (effectiveCompanyId.HasValue)
+                query = query.Where(l => l.CompanyId == effectiveCompanyId.Value);
             return query;
         }
 
-        var effectiveCompanyId = companyId ?? requestedCompanyId;
         if (effectiveCompanyId.HasValue)
         {
             query = query.Where(l => l.CompanyId == effectiveCompanyId.Value);
         }
 
-        if ((role == "sales_executive" || role == "irm") && agentId.HasValue)
+        if (role == "irm" && agentId.HasValue)
+        {
+            // In IRM My Leads, show a lead only when its status is exactly Interested,
+            // its assigned agent ID matches the logged-in IRM, and company matches
+            query = query.Where(l => l.AssignedAgentId == agentId.Value && l.Status == "Interested");
+        }
+        else if (role == "sales_executive" && agentId.HasValue)
         {
             query = query.Where(l => l.AssignedAgentId == agentId.Value);
         }
@@ -220,6 +217,7 @@ public class LeadService : ILeadService
         if (normPref != null) customFields["preferredAssetClass"] = normPref;
 
         if (!string.IsNullOrWhiteSpace(dto.Horizon)) customFields["horizon"] = dto.Horizon;
+        if (!string.IsNullOrWhiteSpace(dto.InvestmentAmount)) customFields["investmentAmount"] = dto.InvestmentAmount.Trim();
 
         // Canonical Customer Duplicate Check: check normalized phone (last 10 digits) and normalized email
         var normPhone = NormalizePhone(dto.Phone);
@@ -247,37 +245,41 @@ public class LeadService : ILeadService
             Customer? existingCustomer = null;
             Followup? matchingPendingFollowup = null;
             List<Followup> companyFollowups = new();
+            InvestorKyc? matchingKyc = null;
+            GhlDeal? matchingKycDeal = null;
+            IrmPipelineCard? matchingKycCard = null;
+            List<GhlDeal> companyDeals = new();
 
             if (hasIdentifier)
             {
                 var companyLeads = await _context.Leads
                     .Include(l => l.AssignedAgent)
-                    .Where(l => l.CompanyId == companyId)
+                    .Where(l => l.CompanyId == companyId && !l.IsDuplicate)
                     .ToListAsync(ct);
 
                 existingLead = companyLeads.FirstOrDefault(l =>
                 {
-                    var lEmail = NormalizeEmail(l.Email);
-                    if (normEmail != null && lEmail != null && lEmail == normEmail) return true;
-
-                    var lPhone = NormalizePhone(l.Phone);
+                    var lPhone = NormalizePhone(l.NormalizedPhone) ?? NormalizePhone(l.Phone);
                     if (normPhone != null && lPhone != null && lPhone == normPhone) return true;
+
+                    var lEmail = NormalizeEmail(l.NormalizedEmail) ?? NormalizeEmail(l.Email);
+                    if (normEmail != null && lEmail != null && lEmail == normEmail) return true;
 
                     return false;
                 });
 
                 var companyCustomers = await _context.Customers
                     .Include(c => c.AssignedAgent)
-                    .Where(c => c.CompanyId == companyId)
+                    .Where(c => c.CompanyId == companyId && !c.IsDuplicate)
                     .ToListAsync(ct);
 
                 existingCustomer = companyCustomers.FirstOrDefault(c =>
                 {
-                    var cEmail = NormalizeEmail(c.Email);
-                    if (normEmail != null && cEmail != null && cEmail == normEmail) return true;
-
-                    var cPhone = NormalizePhone(c.Phone);
+                    var cPhone = NormalizePhone(c.NormalizedPhone) ?? NormalizePhone(c.Phone);
                     if (normPhone != null && cPhone != null && cPhone == normPhone) return true;
+
+                    var cEmail = NormalizeEmail(c.NormalizedEmail) ?? NormalizeEmail(c.Email);
+                    if (normEmail != null && cEmail != null && cEmail == normEmail) return true;
 
                     return false;
                 });
@@ -297,21 +299,161 @@ public class LeadService : ILeadService
 
                     return false;
                 });
+
+                // Fetch tenant-scoped KYC records
+                var companyKycs = await _context.InvestorKycs
+                    .Include(k => k.Irm)
+                    .Where(k => k.CompanyId == companyId)
+                    .ToListAsync(ct);
+
+                matchingKyc = companyKycs.FirstOrDefault(k =>
+                {
+                    var kPhone = NormalizePhone(k.Phone);
+                    if (normPhone != null && kPhone != null && kPhone == normPhone) return true;
+                    var kEmail = NormalizeEmail(k.Email);
+                    if (normEmail != null && kEmail != null && kEmail == normEmail) return true;
+                    return false;
+                });
+
+                // Fetch tenant-scoped deals
+                companyDeals = await _context.GhlDeals
+                    .Include(d => d.AssignedAgent)
+                    .Include(d => d.Customer)
+                    .Where(d => d.CompanyId == companyId)
+                    .ToListAsync(ct);
+
+                matchingKycDeal = companyDeals.FirstOrDefault(d =>
+                {
+                    var isKycStage = d.Stage == "qualified_investor" || d.KycId != null || !string.IsNullOrWhiteSpace(d.KycStatus);
+                    if (!isKycStage) return false;
+
+                    if (existingCustomer != null && d.CustomerId == existingCustomer.Id) return true;
+                    if (existingLead != null && d.CustomerId == existingLead.Id) return true;
+
+                    if (d.Customer != null)
+                    {
+                        if (normPhone != null && d.Customer.NormalizedPhone == normPhone) return true;
+                        if (normEmail != null && d.Customer.NormalizedEmail == normEmail) return true;
+                    }
+
+                    return false;
+                });
+
+                // Fetch tenant-scoped IRM pipeline cards in qualified_investor stage
+                var companyCards = await _context.IrmPipelineCards
+                    .Include(c => c.AssignedIrm)
+                    .Where(c => c.CompanyId == companyId && c.StageId == "qualified_investor")
+                    .ToListAsync(ct);
+
+                matchingKycCard = companyCards.FirstOrDefault(c =>
+                {
+                    var cPhone = NormalizePhone(c.InvestorPhone);
+                    if (normPhone != null && cPhone != null && cPhone == normPhone) return true;
+                    var cEmail = NormalizeEmail(c.InvestorEmail);
+                    if (normEmail != null && cEmail != null && cEmail == normEmail) return true;
+                    return false;
+                });
             }
 
-            // Detect if the contact already exists in Follow-up
+            // 1. Authoritative Stage Detection: Check if contact is currently in KYC
+            var isLeadInKyc = existingLead != null && (
+                existingLead.Status == "Qualified" ||
+                (existingLead.CustomFieldsJson != null && existingLead.CustomFieldsJson.Contains("\"movedToKycAt\""))
+            );
+
+            var isContactInKyc = matchingKyc != null || matchingKycDeal != null || matchingKycCard != null || isLeadInKyc;
+
+            if (isContactInKyc)
+            {
+                // Synchronize stale lead status if it was previously set to Follow-up Required
+                if (existingLead != null && existingLead.Status == "Follow-up Required")
+                {
+                    existingLead.Status = "Qualified";
+                    existingLead.UpdatedAt = DateTime.UtcNow;
+                    await _context.SaveChangesAsync(ct);
+                }
+
+                var contactName = matchingKyc?.InvestorName
+                    ?? matchingKycDeal?.CustomerName
+                    ?? existingCustomer?.Name
+                    ?? existingLead?.Name
+                    ?? matchingKycCard?.InvestorName
+                    ?? dto.Name;
+
+                var assignedAgentName = matchingKyc?.Irm?.Name
+                    ?? matchingKycDeal?.AssignedAgent?.Name
+                    ?? existingCustomer?.AssignedAgent?.Name
+                    ?? existingLead?.AssignedAgent?.Name
+                    ?? matchingKycCard?.AssignedIrmName
+                    ?? "an assigned agent";
+
+                var assignedAgentId = matchingKyc?.IrmId
+                    ?? matchingKycDeal?.AssignedAgentId
+                    ?? existingCustomer?.AssignedAgentId
+                    ?? existingLead?.AssignedAgentId
+                    ?? matchingKycCard?.AssignedIrmId
+                    ?? 0;
+
+                var contactType = existingCustomer != null ? "customer" : "lead";
+                var contactId = existingCustomer != null
+                    ? existingCustomer.Id.ToString()
+                    : (existingLead?.Id.ToString() ?? matchingKycDeal?.CustomerId?.ToString() ?? matchingKyc?.InvestorId.ToString() ?? "");
+                var contactPhone = existingCustomer?.Phone ?? existingLead?.Phone ?? matchingKyc?.Phone ?? matchingKycDeal?.Customer?.Phone ?? dto.Phone;
+                var contactEmail = existingCustomer?.Email ?? existingLead?.Email ?? matchingKyc?.Email ?? matchingKycDeal?.Customer?.Email ?? dto.Email ?? string.Empty;
+
+                var kycId = matchingKyc?.Id.ToString() ?? matchingKycDeal?.KycId?.ToString() ?? "";
+                var dealId = matchingKycDeal?.Id.ToString() ?? "";
+
+                var failureMsg = $"Customer \"{contactName}\" already exists in KYC Onboarding (assigned to {assignedAgentName}).";
+                var failureErrors = new List<string>
+                {
+                    "DUPLICATE_IN_KYC",
+                    "STAGE:KYC",
+                    $"CONTACT_ID:{contactId}",
+                    $"CONTACT_TYPE:{contactType}",
+                    $"CONTACT_NAME:{contactName}",
+                    $"CONTACT_PHONE:{contactPhone}",
+                    $"CONTACT_EMAIL:{contactEmail}",
+                    $"ASSIGNED_AGENT:{assignedAgentName}",
+                    $"ASSIGNED_AGENT_ID:{assignedAgentId}",
+                    $"KYC_ID:{kycId}",
+                    $"DEAL_ID:{dealId}"
+                };
+
+                var failResult = ApiResponse<LeadResponseDto>.FailureResult(failureMsg, failureErrors);
+                if (existingLead != null)
+                {
+                    failResult.Data = MapToDto(existingLead);
+                }
+                return failResult;
+            }
+
+            // 2. Authoritative Stage Detection: Check if contact is genuinely in Follow-up
+            // (Do not infer stage merely because a follow-up task exists for an investor/customer in another stage)
+            var matchingFollowupDeal = companyDeals.FirstOrDefault(d =>
+            {
+                if (d.Stage != "followup") return false;
+                if (existingCustomer != null && d.CustomerId == existingCustomer.Id) return true;
+                if (existingLead != null && d.CustomerId == existingLead.Id) return true;
+                if (d.Customer != null)
+                {
+                    if (normPhone != null && d.Customer.NormalizedPhone == normPhone) return true;
+                    if (normEmail != null && d.Customer.NormalizedEmail == normEmail) return true;
+                }
+                return false;
+            });
+
             var isLeadInFollowup = existingLead != null && (
                 existingLead.Status == "Follow-up Required" ||
-                (matchingPendingFollowup != null && matchingPendingFollowup.ContactType == "lead" && matchingPendingFollowup.ContactId == existingLead.Id.ToString()) ||
-                (existingLead.NextFollowupDate.HasValue && existingLead.NextFollowupDate.Value > DateTime.UtcNow.AddDays(-30))
+                (matchingPendingFollowup != null && matchingPendingFollowup.ContactType == "lead" && matchingPendingFollowup.ContactId == existingLead.Id.ToString())
             );
 
             var isCustomerInFollowup = existingCustomer != null && (
-                matchingPendingFollowup != null ||
+                (matchingPendingFollowup != null && matchingPendingFollowup.ContactType == "customer" && matchingPendingFollowup.ContactId == existingCustomer.Id.ToString()) ||
                 companyFollowups.Any(f => f.ContactType == "customer" && f.ContactId == existingCustomer.Id.ToString())
             );
 
-            var existsInFollowup = isLeadInFollowup || isCustomerInFollowup || matchingPendingFollowup != null;
+            var existsInFollowup = isLeadInFollowup || isCustomerInFollowup || matchingFollowupDeal != null || (existingCustomer == null && matchingPendingFollowup != null);
 
             if (existsInFollowup)
             {
@@ -453,8 +595,53 @@ public class LeadService : ILeadService
             return ApiResponse<LeadResponseDto>.FailureResult("Lead not found or access denied.");
 
         if (dto.Name != null) lead.Name = dto.Name.Trim();
-        if (dto.Phone != null) lead.Phone = dto.Phone.Trim();
-        if (dto.Email != null) lead.Email = dto.Email.Trim();
+
+        // Duplicate protection on update: normalize phone/email and check against customers and other leads in tenant
+        if (dto.Phone != null || dto.Email != null)
+        {
+            var candidatePhone = dto.Phone != null ? dto.Phone.Trim() : lead.Phone;
+            var candidateEmail = dto.Email != null ? dto.Email.Trim() : lead.Email;
+            var newNormPhone = NormalizePhone(candidatePhone);
+            var newNormEmail = NormalizeEmail(candidateEmail);
+
+            if (newNormPhone != null || newNormEmail != null)
+            {
+                var existingCustomer = await _context.Customers
+                    .Include(c => c.AssignedAgent)
+                    .FirstOrDefaultAsync(c =>
+                        c.CompanyId == lead.CompanyId &&
+                        !c.IsDuplicate &&
+                        ((newNormPhone != null && c.NormalizedPhone == newNormPhone) ||
+                         (newNormEmail != null && c.NormalizedEmail == newNormEmail)), ct);
+
+                if (existingCustomer != null)
+                {
+                    return ApiResponse<LeadResponseDto>.FailureResult(
+                        $"Cannot update lead: A customer already exists with this contact information: {existingCustomer.Name} ({existingCustomer.Phone} / {existingCustomer.Email}).");
+                }
+
+                var existingOtherLead = await _context.Leads
+                    .Include(l => l.AssignedAgent)
+                    .FirstOrDefaultAsync(l =>
+                        l.CompanyId == lead.CompanyId &&
+                        l.Id != lead.Id &&
+                        !l.IsDuplicate &&
+                        ((newNormPhone != null && l.NormalizedPhone == newNormPhone) ||
+                         (newNormEmail != null && l.NormalizedEmail == newNormEmail)), ct);
+
+                if (existingOtherLead != null)
+                {
+                    return ApiResponse<LeadResponseDto>.FailureResult(
+                        $"Cannot update lead: Another lead already exists with this contact information: {existingOtherLead.Name} ({existingOtherLead.Phone} / {existingOtherLead.Email}).");
+                }
+            }
+
+            if (dto.Phone != null) lead.Phone = dto.Phone.Trim();
+            if (dto.Email != null) lead.Email = dto.Email.Trim();
+            lead.NormalizedPhone = newNormPhone;
+            lead.NormalizedEmail = newNormEmail;
+        }
+
         if (dto.Location != null) lead.Location = dto.Location.Trim();
         if (dto.Source != null) lead.Source = dto.Source.Trim();
         if (dto.Status != null) lead.Status = dto.Status.Trim();
@@ -475,6 +662,14 @@ public class LeadService : ILeadService
             var cap = OptionalFieldNormalizer.Normalize(dto.InvestmentCapacity);
             if (cap == null) customFields.Remove("investmentCapacity");
             else customFields["investmentCapacity"] = cap;
+        }
+
+        if (dto.InvestmentAmount != null)
+        {
+            if (string.IsNullOrWhiteSpace(dto.InvestmentAmount))
+                customFields.Remove("investmentAmount");
+            else
+                customFields["investmentAmount"] = dto.InvestmentAmount.Trim();
         }
         
         if (dto.AssetClass != null || dto.PreferredAssetClass != null)
@@ -513,9 +708,19 @@ public class LeadService : ILeadService
         var agentId = lead.AssignedAgentId;
         var companyId = lead.CompanyId;
 
-        // Check if customer already exists with this phone
-        var customer = await _context.Customers
-            .FirstOrDefaultAsync(c => c.Phone == lead.Phone && c.CompanyId == companyId, ct);
+        // Check if customer already exists with normalized phone or email in this tenant
+        var leadNormPhone = NormalizePhone(lead.Phone);
+        var leadNormEmail = NormalizeEmail(lead.Email);
+
+        Customer? customer = null;
+        if (leadNormPhone != null || leadNormEmail != null)
+        {
+            customer = await _context.Customers.FirstOrDefaultAsync(c =>
+                c.CompanyId == companyId &&
+                !c.IsDuplicate &&
+                ((leadNormPhone != null && c.NormalizedPhone == leadNormPhone) ||
+                 (leadNormEmail != null && c.NormalizedEmail == leadNormEmail)), ct);
+        }
 
         if (customer == null)
         {
@@ -526,6 +731,9 @@ public class LeadService : ILeadService
                 Name = lead.Name,
                 Phone = lead.Phone,
                 Email = lead.Email,
+                NormalizedPhone = leadNormPhone,
+                NormalizedEmail = leadNormEmail,
+                IsDuplicate = false,
                 Location = lead.Location,
                 Status = "Active",
                 TotalValue = dto.DealValue ?? 0,

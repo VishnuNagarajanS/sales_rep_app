@@ -40,7 +40,7 @@ import { DocumentUploader } from '../../components/common/DocumentUploader';
 import { DocumentList } from '../../components/common/DocumentList';
 import { Modal } from '../../components/common/Modal';
 import { Timeline, TimelineEvent } from '../../components/common/Timeline';
-import { MOCK_IRMS } from '../../mock_data/mockData';
+
 import './CustomersPage.css';
 
 const getCustomFieldDefinitions = (tenantId?: string): CustomFieldDefinition[] => {
@@ -354,7 +354,7 @@ export const CustomersPage: React.FC = () => {
       const selectedCusts = scopedCustomers.filter(c => selectedCustomerIds.has(c.id) && isCustomerEligibleForIrm(c));
       if (selectedCusts.length === 0) return;
 
-      setSelectedIrmId(irms[0]?.id || MOCK_IRMS[0]?.id || '');
+      setSelectedIrmId(irms[0]?.id || '');
       setIsManualModalOpen(true);
     } else {
       if (eligibleUnassignedCustomers.length === 0) return;
@@ -404,7 +404,7 @@ export const CustomersPage: React.FC = () => {
   };
 
   const handleConfirmManualAssignment = async () => {
-    const selectedIrm = irms.find((i: IrmProfile) => i.id === selectedIrmId) || MOCK_IRMS.find((i: IrmProfile) => i.id === selectedIrmId);
+    const selectedIrm = irms.find((i: IrmProfile) => i.id === selectedIrmId);
     if (!selectedIrm) return;
 
     let assignedCount = 0;
@@ -482,7 +482,7 @@ export const CustomersPage: React.FC = () => {
   };
 
   const handleUpdateSingleRecommendation = (customerId: string, newIrmId: string) => {
-    const newIrm = irms.find((i: IrmProfile) => i.id === newIrmId) || MOCK_IRMS.find((i: IrmProfile) => i.id === newIrmId);
+    const newIrm = irms.find((i: IrmProfile) => i.id === newIrmId);
     if (!newIrm) return;
     setAutoRecommendations(prev =>
       prev.map(rec => {

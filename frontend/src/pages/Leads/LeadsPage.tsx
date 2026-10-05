@@ -28,6 +28,7 @@ import {
 } from '../../services/agentDirectory';
 import {
   getLeads,
+  getDeals,
   saveLead as apiSaveLead,
   saveCustomer as apiSaveCustomer,
   saveOpportunity as apiSaveOpportunity,
@@ -101,6 +102,20 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     existingStatus?: string;
   }
   const [duplicateFollowupModal, setDuplicateFollowupModal] = useState<DuplicateFollowupModalData | null>(null);
+
+  interface DuplicateKycModalData {
+    contactId: string;
+    contactType: 'lead' | 'customer' | 'kyc';
+    contactName: string;
+    contactPhone: string;
+    contactEmail?: string;
+    assignedAgentName: string;
+    assignedAgentId?: string;
+    kycId?: string;
+    dealId?: string;
+  }
+  const [duplicateKycModal, setDuplicateKycModal] = useState<DuplicateKycModalData | null>(null);
+  const [deals, setDeals] = useState<Deal[]>([]);
   const [isSchedulingActivity, setIsSchedulingActivity] = useState<boolean>(false);
   const [followupDate, setFollowupDate] = useState<string>(() => {
     const d = new Date();
@@ -120,6 +135,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     assignedAgentName: string;
   }
   const [duplicateCustomerModal, setDuplicateCustomerModal] = useState<DuplicateCustomerModalData | null>(null);
+  const [formErrorMessage, setFormErrorMessage] = useState<string | null>(null);
 
   const agentsList = useMemo(() => storageService.getAgents(tenant?.id), [tenant?.id]);
 
@@ -347,13 +363,15 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     }
 
     try {
-      const [updatedFollowups, updatedCustomers] = await Promise.all([
+      const [updatedFollowups, updatedCustomers, updatedDeals] = await Promise.all([
         getFollowups(tenant?.id).catch(() => []),
         getCustomers(tenant?.id).catch(() => []),
+        getDeals(tenant?.id).catch(() => []),
       ]);
       const pendingFus = (updatedFollowups || []).filter((f: any) => f.status === 'Pending');
       setAllFollowups(pendingFus);
       setCustomers(updatedCustomers || []);
+      setDeals(updatedDeals || []);
 
       let loadedLeads: Lead[] = [];
       if (isGhlAdmin) {
@@ -660,11 +678,13 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         ? { budgetRange: '₹45L - ₹65L', preferredLocation: 'Devanahalli North', readyToRegister: 'Immediate' }
         : { investmentCapacity: '', assetClass: '', preferredAssetClass: '', horizon: '3-5 Years' },
     });
+    setFormErrorMessage(null);
     setIsEditDrawerOpen(true);
   };
 
   const handleOpenEdit = (lead: Lead) => {
     setFormData({ ...lead });
+    setFormErrorMessage(null);
     setIsEditDrawerOpen(true);
   };
 
@@ -691,6 +711,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         assignedAgentName: user?.name || 'Agent',
       });
       showToast(`Follow-up activity successfully scheduled for "${contactName}".`);
+      setDuplicateKycModal(null);
       setDuplicateFollowupModal(null);
       setDuplicateCustomerModal(null);
       setIsEditDrawerOpen(false);
@@ -705,14 +726,19 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
   const handleSaveLead = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormErrorMessage(null);
     if (!formData.name || !formData.phone) {
-      showToast('Please provide both contact name and phone number.');
+      const msg = 'Please provide both contact name and phone number.';
+      setFormErrorMessage(msg);
+      showToast(msg);
       return;
     }
 
     const cleanPhone = (formData.phone || '').replace(/\D/g, '');
     if (cleanPhone.length < 10) {
-      showToast('Please enter a valid phone number with at least 10 digits.');
+      const msg = 'Please enter a valid phone number with at least 10 digits.';
+      setFormErrorMessage(msg);
+      showToast(msg);
       return;
     }
 
@@ -737,6 +763,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       let matchingPendingFollowup: any = null;
       let existingMatch: Lead | undefined;
       let existingCustomer: Customer | undefined;
+      let matchingKycDeal: Deal | undefined;
 
       if (normNewPhone || normNewEmail) {
         // 1. Search pending follow-ups
@@ -771,13 +798,57 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
           }
           return false;
         });
+
+        // 4. Search existing KYC deals
+        matchingKycDeal = (deals || []).find(d => {
+          if (!targetCompanyId || isTenantMatch(d.companyId, targetCompanyId)) {
+            const isKyc = d.stage === 'qualified_investor' || !!d.kycStatus || !!(d as any).kycId;
+            if (!isKyc) return false;
+            if (existingCustomer && d.customerId && String(d.customerId) === String(existingCustomer.id)) return true;
+            if (existingMatch && d.customerId && String(d.customerId) === String(existingMatch.id)) return true;
+            const dPhone = normalizePhone(d.phone);
+            if (normNewPhone && dPhone && dPhone === normNewPhone) return true;
+            const dEmail = normalizeEmail(d.email);
+            if (normNewEmail && dEmail && dEmail === normNewEmail) return true;
+          }
+          return false;
+        });
       }
 
-      // Check if contact already exists in Follow-up
+      // 1. Authoritative Stage Detection: Check if contact already exists in KYC
+      const isLeadInKyc = existingMatch && (
+        existingMatch.status === 'Qualified' ||
+        !!(existingMatch.customFields as any)?.movedToKycAt
+      );
+
+      const isContactInKyc = !!matchingKycDeal || isLeadInKyc;
+
+      if (isContactInKyc) {
+        const cName = matchingKycDeal?.customerName || existingCustomer?.name || existingMatch?.name || formData.name;
+        const cAgent = matchingKycDeal?.assignedAgentName || existingCustomer?.assignedAgentName || existingMatch?.assignedAgentName || 'an assigned agent';
+        const cType: 'lead' | 'customer' = existingCustomer ? 'customer' : 'lead';
+        const cId = existingCustomer?.id || existingMatch?.id || matchingKycDeal?.customerId || '';
+        const cPhone = existingCustomer?.phone || existingMatch?.phone || matchingKycDeal?.phone || formData.phone;
+
+        setDuplicateKycModal({
+          contactId: String(cId),
+          contactType: cType,
+          contactName: cName,
+          contactPhone: cPhone,
+          contactEmail: existingCustomer?.email || existingMatch?.email || matchingKycDeal?.email || formData.email,
+          assignedAgentName: cAgent,
+          dealId: matchingKycDeal?.id ? String(matchingKycDeal.id) : undefined,
+          kycId: (matchingKycDeal as any)?.kycId ? String((matchingKycDeal as any).kycId) : undefined,
+        });
+        setFollowupNotes(formData.notes ? `Follow-up from lead intake: ${formData.notes}` : `Follow-up with ${cName}`);
+        setIsSchedulingActivity(false);
+        return; // Prevent creating duplicate lead
+      }
+
+      // 2. Authoritative Stage Detection: Check if contact genuinely exists in Follow-up
       const isLeadInFollowup = existingMatch && (
         existingMatch.status === 'Follow-up Required' ||
-        (matchingPendingFollowup && (matchingPendingFollowup.contactType === 'lead' || !matchingPendingFollowup.contactType) && matchingPendingFollowup.contactId === existingMatch.id) ||
-        (existingMatch.nextFollowupDate && new Date(existingMatch.nextFollowupDate).getTime() > Date.now() - 30 * 86400000)
+        (matchingPendingFollowup && (matchingPendingFollowup.contactType === 'lead' || !matchingPendingFollowup.contactType) && matchingPendingFollowup.contactId === existingMatch.id)
       );
       const isCustomerInFollowup = existingCustomer && (
         (matchingPendingFollowup && matchingPendingFollowup.contactType === 'customer' && matchingPendingFollowup.contactId === existingCustomer.id) ||
@@ -881,16 +952,44 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
       await loadData();
       showToast(isUpdated ? 'Lead updated successfully.' : 'New lead created successfully.');
+      setFormErrorMessage(null);
       setIsEditDrawerOpen(false);
     } catch (err: any) {
       console.error('[LeadsPage] Failed to save lead:', err);
       const errMsg = err.message || '';
       const errList: string[] = err.errors || [];
-      const isDupFollowup =
-        errList.includes('DUPLICATE_IN_FOLLOWUP') ||
-        errMsg.includes('already exists in Follow-up');
 
-      if (isDupFollowup) {
+      const isDupKyc =
+        errList.includes('DUPLICATE_IN_KYC') ||
+        errMsg.includes('already exists in KYC');
+
+      const isDupFollowup =
+        !isDupKyc && (
+          errList.includes('DUPLICATE_IN_FOLLOWUP') ||
+          errMsg.includes('already exists in Follow-up')
+        );
+
+      if (isDupKyc) {
+        const cId = errList.find(e => e.startsWith('CONTACT_ID:'))?.split(':')[1] || '';
+        const cType = (errList.find(e => e.startsWith('CONTACT_TYPE:'))?.split(':')[1] as any) || 'lead';
+        const cName = errList.find(e => e.startsWith('CONTACT_NAME:'))?.split(':')[1] || formData.name;
+        const cAgent = errList.find(e => e.startsWith('ASSIGNED_AGENT:'))?.split(':')[1] || 'Agent';
+        const kId = errList.find(e => e.startsWith('KYC_ID:'))?.split(':')[1] || '';
+        const dId = errList.find(e => e.startsWith('DEAL_ID:'))?.split(':')[1] || '';
+
+        setDuplicateKycModal({
+          contactId: cId,
+          contactType: cType,
+          contactName: cName,
+          contactPhone: formData.phone,
+          contactEmail: formData.email,
+          assignedAgentName: cAgent,
+          kycId: kId,
+          dealId: dId,
+        });
+        setFollowupNotes(formData.notes ? `Follow-up from lead intake: ${formData.notes}` : `Follow-up with ${cName}`);
+        setIsSchedulingActivity(false);
+      } else if (isDupFollowup) {
         const cId = errList.find(e => e.startsWith('CONTACT_ID:'))?.split(':')[1] || '';
         const cType = (errList.find(e => e.startsWith('CONTACT_TYPE:'))?.split(':')[1] as any) || 'lead';
         const cName = errList.find(e => e.startsWith('CONTACT_NAME:'))?.split(':')[1] || formData.name;
@@ -918,7 +1017,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
           assignedAgentName: cAgent,
         });
       } else {
-        showToast(`⚠️ ${errMsg || 'Failed to save lead record.'}`);
+        const displayErr = errMsg || 'Failed to save lead record. Please check the entered values and try again.';
+        setFormErrorMessage(displayErr);
+        showToast(`⚠️ ${displayErr}`);
       }
     }
   };
@@ -1039,12 +1140,20 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     let updatedCount = 0;
     const companyId = tenant?.id || 't-ghl-01';
 
-    // Build a dedup set from the current leads so we can detect duplicates quickly
+    // Build a dedup set from current leads AND customers so we detect duplicates across both
     const normalizePhone = (ph: string) => (ph || '').replace(/\D/g, '').slice(-10);
     const normalizeEmail = (em: string) => (em || '').trim().toLowerCase();
 
     const existingPhones = new Set(leads.map(l => normalizePhone(l.phone)).filter(Boolean));
     const existingEmails = new Set(leads.map(l => normalizeEmail(l.email)).filter(Boolean));
+
+    const existingCompanyCustomers = storageService.getCustomers(tenant?.id) || [];
+    existingCompanyCustomers.forEach((c: any) => {
+      const cPh = normalizePhone(c.phone);
+      if (cPh) existingPhones.add(cPh);
+      const cEm = normalizeEmail(c.email);
+      if (cEm) existingEmails.add(cEm);
+    });
 
     parsedRows.forEach((row, index) => {
       const nameVal = row[columnMap['name']];
@@ -1484,7 +1593,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                 {/* ── Quick Info Banner (Assigned Agent) ── */}
                 <div className="lead-quick-banner">
                   <div className="lead-assigned-note">
-                    Assigned to <strong>{selectedLead.assignedAgentName}</strong>
+                    Assigned : <strong>{selectedLead.assignedAgentName}</strong>
                   </div>
                 </div>
 
@@ -1806,6 +1915,22 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
               placeholder="Client background, key objections, time horizon..."
             />
           </div>
+
+          {formErrorMessage && (
+            <div style={{
+              margin: '14px 0',
+              padding: '10px 14px',
+              borderRadius: 6,
+              backgroundColor: 'rgba(239,68,68,0.08)',
+              border: '1px solid rgba(239,68,68,0.25)',
+              color: '#dc2626',
+              fontSize: 13,
+              lineHeight: 1.5,
+              fontWeight: 500
+            }}>
+              ⚠️ {formErrorMessage}
+            </div>
+          )}
 
           <div className="lead-form-footer-actions">
             <button
@@ -2185,6 +2310,155 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Duplicate in KYC Resolution Modal ────────────────────────────── */}
+      {duplicateKycModal && (
+        <Modal
+          isOpen={!!duplicateKycModal}
+          onClose={() => {
+            setDuplicateKycModal(null);
+            setIsSchedulingActivity(false);
+          }}
+          title="Contact Already in KYC"
+          subtitle="Duplicate Contact Prevention"
+          maxWidth={540}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{
+              display: 'flex',
+              gap: 12,
+              alignItems: 'flex-start',
+              padding: 14,
+              borderRadius: 'var(--radius-md)',
+              background: 'rgba(16, 185, 129, 0.08)',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+              color: 'var(--text-primary)',
+            }}>
+              <CheckCircle2 size={24} style={{ color: '#10b981', flexShrink: 0, marginTop: 2 }} />
+              <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+                <strong>Customer "{duplicateKycModal.contactName}"</strong> already exists in KYC Onboarding (assigned to <strong>{duplicateKycModal.assignedAgentName}</strong>).
+                <div style={{ marginTop: 4, color: 'var(--text-secondary)' }}>
+                  A record matching phone <code>{duplicateKycModal.contactPhone}</code> is currently active in the KYC verification pipeline. To prevent duplicate investor profiles, this record was not overwritten.
+                </div>
+              </div>
+            </div>
+
+            {!isSchedulingActivity ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 4 }}>
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>
+                  What would you like to do with this contact?
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ justifyContent: 'flex-start', padding: '12px 16px' }}
+                    onClick={() => {
+                      setDuplicateKycModal(null);
+                      setIsEditDrawerOpen(false);
+                      handleNavigate('kyc');
+                    }}
+                  >
+                    <ArrowRight size={16} />
+                    <span>Open Contact in KYC</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ justifyContent: 'flex-start', padding: '12px 16px' }}
+                    onClick={() => setIsSchedulingActivity(true)}
+                  >
+                    <CalendarCheck size={16} style={{ color: 'var(--primary-color)' }} />
+                    <span>Schedule Additional Follow-up Task for This Contact</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ justifyContent: 'center' }}
+                    onClick={() => {
+                      setDuplicateKycModal(null);
+                      setIsSchedulingActivity(false);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 4 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                  Schedule Follow-up Activity for "{duplicateKycModal.contactName}"
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Follow-up Date & Time *</label>
+                  <input
+                    type="datetime-local"
+                    className="form-input"
+                    value={followupDate}
+                    onChange={e => setFollowupDate(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Priority</label>
+                  <select
+                    className="form-select"
+                    value={followupPriority}
+                    onChange={e => setFollowupPriority(e.target.value)}
+                  >
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                    <option value="Urgent">Urgent</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Task Notes / Agenda</label>
+                  <textarea
+                    className="form-textarea"
+                    rows={3}
+                    value={followupNotes}
+                    onChange={e => setFollowupNotes(e.target.value)}
+                    placeholder="Enter details for this follow-up activity..."
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 8 }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setIsSchedulingActivity(false)}
+                    disabled={isSavingFollowupActivity}
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={isSavingFollowupActivity}
+                    onClick={() =>
+                      handleScheduleActivityForExisting(
+                        duplicateKycModal.contactId,
+                        duplicateKycModal.contactType === 'customer' ? 'customer' : 'lead',
+                        duplicateKycModal.contactName,
+                        duplicateKycModal.contactPhone
+                      )
+                    }
+                  >
+                    {isSavingFollowupActivity ? 'Scheduling...' : 'Save Follow-up Activity'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </Modal>
       )}
 
       {/* ── Duplicate in Follow-up Resolution Modal ──────────────────────── */}

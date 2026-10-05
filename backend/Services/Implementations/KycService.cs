@@ -1,9 +1,13 @@
+using System.Security.Cryptography;
+using System.Text;
+using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.Irm;
 using backend.Models.Entities;
 using backend.Models.Enums;
 using backend.Repositories.Interfaces;
 using backend.Services.Interfaces;
+using Microsoft.EntityFrameworkCore;
 
 namespace backend.Services.Implementations;
 
@@ -12,17 +16,23 @@ public class KycService : IKycService
     private readonly IKycRepository _kycRepo;
     private readonly IInvestorRepository _investorRepo;
     private readonly IEmailService _emailService;
+    private readonly IOtpService _otpService;
+    private readonly ApplicationDbContext _db;
     private readonly ILogger<KycService> _logger;
 
     public KycService(
         IKycRepository kycRepo,
         IInvestorRepository investorRepo,
         IEmailService emailService,
+        IOtpService otpService,
+        ApplicationDbContext db,
         ILogger<KycService> logger)
     {
         _kycRepo = kycRepo;
         _investorRepo = investorRepo;
         _emailService = emailService;
+        _otpService = otpService;
+        _db = db;
         _logger = logger;
     }
 
@@ -42,6 +52,13 @@ public class KycService : IKycService
             return ApiResponse<KycDto>.ErrorResponse("KYC record not found");
 
         return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc));
+    }
+
+    public static string HashToken(string rawToken)
+    {
+        if (string.IsNullOrWhiteSpace(rawToken)) return string.Empty;
+        using var sha256 = SHA256.Create();
+        return Convert.ToHexString(sha256.ComputeHash(Encoding.UTF8.GetBytes(rawToken.Trim()))).ToLowerInvariant();
     }
 
     public async Task<ApiResponse<SendKycLinkResponseDto>> SendKycLinkAsync(int companyId, int irmId, SendKycLinkDto dto, CancellationToken ct = default)
@@ -78,7 +95,10 @@ public class KycService : IKycService
             investor = await _investorRepo.CreateAsync(investor, ct);
         }
 
-        var token = Guid.NewGuid().ToString("N");
+        // Cryptographically secure token (32 random bytes -> 64 hex characters)
+        var rawToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+        var tokenHash = HashToken(rawToken);
+
         var days = dto.Expiry?.ToLower() switch
         {
             "24h" => 1,
@@ -112,7 +132,9 @@ public class KycService : IKycService
                 Email = recipientEmail,
                 // LinkSent: link dispatched, customer has NOT yet submitted
                 Status = KycStatus.LinkSent,
-                KycLinkToken = token,
+                KycLinkToken = rawToken,
+                KycTokenHash = tokenHash,
+                IsRevoked = false,
                 KycLinkSent = true,
                 KycLinkSentAt = DateTime.UtcNow,
                 KycLinkExpiresAt = expiresAt,
@@ -122,23 +144,32 @@ public class KycService : IKycService
         }
         else
         {
-            // Resend: refresh token, expiry, and sent timestamp. Keep existing submission data intact.
-            existing.KycLinkToken = token;
+            // Resend: Invalidate and revoke the previous link and pending OTPs
+            if (!string.IsNullOrWhiteSpace(existing.KycLinkToken))
+            {
+                await _otpService.InvalidateOtpAsync(existing.KycLinkToken, existing.Email, ct);
+            }
+
+            existing.KycLinkToken = rawToken;
+            existing.KycTokenHash = tokenHash;
+            existing.IsRevoked = false;
+            existing.RevokedAt = null;
             existing.KycLinkSent = true;
             existing.KycLinkSentAt = DateTime.UtcNow;
             existing.KycLinkExpiresAt = expiresAt;
             if (!string.IsNullOrWhiteSpace(recipientEmail)) existing.Email = recipientEmail;
             if (!string.IsNullOrWhiteSpace(recipientPhone)) existing.Phone = recipientPhone;
             if (!string.IsNullOrWhiteSpace(investorName)) existing.InvestorName = investorName;
-            // Upgrade Draft to LinkSent; do NOT downgrade a record that is already submitted/reviewed
-            if (existing.Status == KycStatus.Draft)
+
+            // Upgrade Draft/LinkSent to LinkSent; do NOT mark Completed or downgrade an already reviewed record
+            if (existing.Status == KycStatus.Draft || existing.Status == KycStatus.LinkSent)
                 existing.Status = KycStatus.LinkSent;
+
             await _kycRepo.UpdateAsync(existing, ct);
         }
 
         var baseUrl = !string.IsNullOrWhiteSpace(dto.BaseUrl) ? dto.BaseUrl.TrimEnd('/') : "http://localhost:5173";
-        var nameSlug = Uri.EscapeDataString(new string(investorName.Where(char.IsLetterOrDigit).ToArray()).ToLower());
-        var fullKycLink = $"{baseUrl}/kyc/tok_{token[..8]}_{(string.IsNullOrEmpty(nameSlug) ? "investor" : nameSlug)}";
+        var fullKycLink = $"{baseUrl}/kyc/{rawToken}";
 
         bool emailSent = false;
         string deliveryStatus = "Generated";
@@ -155,7 +186,7 @@ public class KycService : IKycService
 
             deliveryStatus = emailSent 
                 ? $"Email delivered successfully to {recipientEmail} via Gmail SMTP" 
-                : $"Email could not be sent: {_emailService.LastError ?? "unknown error"}";
+                : $"Email could not be sent: {_emailService.LastError ?? "SMTP service delivery failed"}";
         }
         else if (string.Equals(dto.Channel, "email", StringComparison.OrdinalIgnoreCase))
         {
@@ -166,14 +197,21 @@ public class KycService : IKycService
             deliveryStatus = $"Link dispatched via {dto.Channel?.ToUpper() ?? "SMS"}";
         }
 
-        return ApiResponse<SendKycLinkResponseDto>.SuccessResponse(new SendKycLinkResponseDto
+        var responseData = new SendKycLinkResponseDto
         {
-            Token = token,
+            Token = rawToken,
             Link = fullKycLink,
             ExpiresAt = expiresAt,
             EmailSent = emailSent,
             DeliveryStatus = deliveryStatus
-        }, emailSent ? "KYC verification email dispatched successfully!" : "KYC verification link generated successfully");
+        };
+
+        if ((string.IsNullOrWhiteSpace(dto.Channel) || dto.Channel.Equals("email", StringComparison.OrdinalIgnoreCase)) && !emailSent)
+        {
+            return ApiResponse<SendKycLinkResponseDto>.SuccessResponse(responseData, $"KYC verification link generated, but email delivery failed: {_emailService.LastError ?? "SMTP delivery failed"}. Please check email configuration.");
+        }
+
+        return ApiResponse<SendKycLinkResponseDto>.SuccessResponse(responseData, emailSent ? "KYC verification email dispatched successfully!" : "KYC verification link generated successfully");
     }
 
     public async Task<ApiResponse<KycDto>> SubmitKycAsync(int companyId, SubmitKycDto dto, CancellationToken ct = default)
@@ -303,19 +341,36 @@ public class KycService : IKycService
         return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc), $"KYC status updated to {kyc.Status}");
     }
 
-    public async Task<ApiResponse<KycDto>> GetByTokenAsync(string token, CancellationToken ct = default)
+    public async Task<ApiResponse<PublicKycDto>> GetByTokenAsync(string token, CancellationToken ct = default)
     {
         var kyc = await _kycRepo.GetByTokenAsync(token, ct);
         if (kyc == null)
-            return ApiResponse<KycDto>.ErrorResponse("Invalid or expired KYC token");
+            return ApiResponse<PublicKycDto>.ErrorResponse("Invalid or expired KYC token");
+
+        if (kyc.IsRevoked)
+            return ApiResponse<PublicKycDto>.ErrorResponse("This KYC link has been revoked or replaced by a fresh link.");
+
+        if (kyc.KycLinkExpiresAt.HasValue && kyc.KycLinkExpiresAt.Value <= DateTime.UtcNow)
+            return ApiResponse<PublicKycDto>.ErrorResponse("This KYC link has expired. Please request a new link.");
 
         if (kyc.Status == KycStatus.Approved)
-            return ApiResponse<KycDto>.ErrorResponse("This KYC has already been verified and approved.");
+            return ApiResponse<PublicKycDto>.ErrorResponse("This KYC has already been verified and approved.");
 
         if (kyc.SubmittedAt != null && kyc.Status == KycStatus.PendingReview)
-            return ApiResponse<KycDto>.ErrorResponse("You have already submitted your KYC. It is currently awaiting IRM verification.");
+            return ApiResponse<PublicKycDto>.ErrorResponse("You have already submitted your KYC. It is currently awaiting IRM verification.");
 
-        return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc));
+        // Return minimum customer info needed for form pre-fill
+        var publicDto = new PublicKycDto
+        {
+            InvestorName = kyc.InvestorName,
+            Email = kyc.Email,
+            Phone = kyc.Phone,
+            Status = kyc.Status.ToString(),
+            IsExpired = kyc.KycLinkExpiresAt.HasValue && kyc.KycLinkExpiresAt.Value <= DateTime.UtcNow,
+            ExpiresAt = kyc.KycLinkExpiresAt
+        };
+
+        return ApiResponse<PublicKycDto>.SuccessResponse(publicDto);
     }
 
     public async Task<ApiResponse<KycDto>> GetByEmailAsync(string email, int companyId, CancellationToken ct = default)
@@ -443,6 +498,38 @@ public class KycService : IKycService
 
         kyc.UpdatedAt = DateTime.UtcNow;
 
+        kyc.IsAssisted = true;
+        kyc.AssistedByUserId = irmId;
+        kyc.CustomerConsentObtained = dto.CustomerConsentObtained;
+        kyc.CustomerConsentTimestamp = dto.CustomerConsentObtained
+            ? (dto.CustomerConsentTimestamp ?? DateTime.UtcNow)
+            : null;
+        kyc.CustomerConsentDetails = dto.CustomerConsentObtained
+            ? (!string.IsNullOrWhiteSpace(dto.CustomerConsentDetails) ? dto.CustomerConsentDetails.Trim() : "Customer verbal and electronic consent confirmed during assisted KYC session.")
+            : null;
+
+        // Reject assisted KYC submissions unless customer consent is confirmed
+        if (dto.IsFinalSubmit && !dto.CustomerConsentObtained)
+        {
+            var rejectAudit = new AuditLog
+            {
+                CompanyId = companyId,
+                Action = "ASSISTED_KYC_SUBMIT_REJECTED",
+                EntityType = "InvestorKyc",
+                EntityId = kyc.Id != 0 ? kyc.Id.ToString() : (dto.InvestorId > 0 ? dto.InvestorId.ToString() : "0"),
+                Details = $"Assisted KYC submission rejected: Customer consent was not confirmed by IRM ID {irmId} for investor '{kyc.InvestorName}'.",
+                ActorName = $"IRM (ID: {irmId})",
+                Timestamp = DateTime.UtcNow,
+                Module = "KYC_ASSISTED",
+                Status = "failed"
+            };
+            _db.AuditLogs.Add(rejectAudit);
+            await _db.SaveChangesAsync(ct);
+
+            return ApiResponse<KycDto>.ErrorResponse(
+                "Assisted KYC submission rejected: Confirmed customer consent is required before submission. Please obtain and confirm customer consent.");
+        }
+
         if (dto.IsFinalSubmit)
         {
             kyc.SubmittedAt = DateTime.UtcNow;
@@ -459,6 +546,22 @@ public class KycService : IKycService
             await _kycRepo.CreateAsync(kyc, ct);
         else
             await _kycRepo.UpdateAsync(kyc, ct);
+
+        // Record immutable backend audit log retaining full consent and submission details
+        var audit = new AuditLog
+        {
+            CompanyId = companyId,
+            Action = dto.IsFinalSubmit ? "ASSISTED_KYC_SUBMIT" : "ASSISTED_KYC_DRAFT",
+            EntityType = "InvestorKyc",
+            EntityId = kyc.Id.ToString(),
+            Details = $"Assisted KYC {(dto.IsFinalSubmit ? "submitted for verification" : "draft saved")} by IRM ID {irmId} for investor '{kyc.InvestorName}' (Consent: {kyc.CustomerConsentObtained}, Timestamp: {kyc.CustomerConsentTimestamp:O}, Details: {kyc.CustomerConsentDetails})",
+            ActorName = $"IRM (ID: {irmId})",
+            Timestamp = DateTime.UtcNow,
+            Module = "KYC_ASSISTED",
+            Status = "success"
+        };
+        _db.AuditLogs.Add(audit);
+        await _db.SaveChangesAsync(ct);
 
         return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc), dto.IsFinalSubmit ? "Assisted KYC submitted for verification" : "Assisted KYC draft saved");
     }
@@ -507,6 +610,8 @@ public class KycService : IKycService
         KycLinkSent = k.KycLinkSent,
         KycLinkSentAt = k.KycLinkSentAt,
         SubmittedAt = k.SubmittedAt,
+        IsAssisted = k.IsAssisted,
+        CustomerConsentObtained = k.CustomerConsentObtained,
         CreatedAt = k.CreatedAt,
         UpdatedAt = k.UpdatedAt
     };
@@ -558,6 +663,10 @@ public class KycService : IKycService
         KycLinkSent = k.KycLinkSent,
         KycLinkSentAt = k.KycLinkSentAt,
         SubmittedAt = k.SubmittedAt,
+        IsAssisted = k.IsAssisted,
+        AssistedByUserId = k.AssistedByUserId,
+        CustomerConsentObtained = k.CustomerConsentObtained,
+        CustomerConsentTimestamp = k.CustomerConsentTimestamp,
         CreatedAt = k.CreatedAt,
         UpdatedAt = k.UpdatedAt
     };

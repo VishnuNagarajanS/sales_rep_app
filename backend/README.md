@@ -150,8 +150,8 @@ The database has been seeded with standard roles, tenants, and demo users. All d
 |---|---|---|---|
 | `1` | Super Admin | `super_admin` | Full platform operator privileges across all tenants. |
 | `2` | Company Admin | `company_admin` | Full administrative control within their specific tenant. |
-| `3` | Sales Manager | `sales_manager` | Manages leads, deals, calls, and sales reps in the tenant. |
-| `4` | Sales Executive | `sales_executive` | Field sales, client calling, leads, site visits, and bookings. |
+| `3` | Sales Executive | `sales_executive` | Field sales, client calling, leads, site visits, and bookings. |
+| `4` | IRM | `irm` | Investor Relationship Management, KYC, consultations, and fund opportunities. |
 
 ### 4.2 Tenants
 | ID | Slug | Name | Primary Domain / Focus |

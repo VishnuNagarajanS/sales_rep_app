@@ -4,6 +4,10 @@ import {
   Phone,
   Edit,
   ExternalLink,
+  Users,
+  RotateCcw,
+  CheckCircle2,
+  AlertCircle,
 } from 'lucide-react';
 import { Lead } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -20,6 +24,7 @@ import { DataTable, Column, RowAction } from '../../components/common/DataTable'
 import { FilterBar } from '../../components/common/FilterBar';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
+import { getAuthHeaders } from '../../utils/authHeaders';
 import './AssignedLeadsPage.css';
 
 export const AssignedLeadsPage: React.FC = () => {
@@ -48,6 +53,100 @@ export const AssignedLeadsPage: React.FC = () => {
   const isGhlAdmin =
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
+
+  const isAdmin =
+    isGhlAdmin ||
+    roleCode === 'company_admin' ||
+    (roleCode as string) === 'admin' ||
+    roleCode === 'super_admin' ||
+    (roleCode as string) === 'sales_manager';
+
+  // IRM Coverage & Reassignment states
+  const [activeCoverages, setActiveCoverages] = useState<any[]>([]);
+  const [isCoverageModalOpen, setIsCoverageModalOpen] = useState(false);
+  const [coverageTab, setCoverageTab] = useState<'assign' | 'active'>('assign');
+  const [fromIrmId, setFromIrmId] = useState('');
+  const [toIrmId, setToIrmId] = useState('');
+  const [coverageReason, setCoverageReason] = useState('');
+  const [isSubmittingCoverage, setIsSubmittingCoverage] = useState(false);
+  const [coverageMessage, setCoverageMessage] = useState<string | null>(null);
+  const [coverageError, setCoverageError] = useState<string | null>(null);
+
+  const loadActiveCoverages = async () => {
+    try {
+      const res = await fetch('/api/irm/admin/coverage/active', {
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.data) {
+          setActiveCoverages(json.data);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load active coverages', e);
+    }
+  };
+
+  const handleReassignWork = async () => {
+    setCoverageError(null);
+    setCoverageMessage(null);
+    if (!fromIrmId || !toIrmId) {
+      setCoverageError('Please select both the absent IRM and covering IRM.');
+      return;
+    }
+    if (fromIrmId === toIrmId) {
+      setCoverageError('Source IRM and Covering IRM cannot be the same person.');
+      return;
+    }
+
+    setIsSubmittingCoverage(true);
+    try {
+      const res = await fetch('/api/irm/admin/reassign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({
+          fromIrmId: Number(fromIrmId),
+          toIrmId: Number(toIrmId),
+          reason: coverageReason.trim() || 'Temporary coverage assignment',
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        setCoverageError(json?.message || 'Failed to reassign work.');
+      } else {
+        setCoverageMessage(
+          `Reassigned ${json.data.reassignedLeadsCount} leads, ${json.data.reassignedFollowupsCount} follow-ups, ${json.data.reassignedKycsCount} KYCs, ${json.data.reassignedDealsCount} deals to ${json.data.toIrmName}.`
+        );
+        setFromIrmId('');
+        setToIrmId('');
+        setCoverageReason('');
+        await loadActiveCoverages();
+        await loadData();
+      }
+    } catch (e: any) {
+      setCoverageError(e.message || 'An error occurred during reassignment.');
+    } finally {
+      setIsSubmittingCoverage(false);
+    }
+  };
+
+  const handleEndCoverage = async (coverageId: number) => {
+    try {
+      const res = await fetch('/api/irm/admin/coverage/end', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ coverageId }),
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        await loadActiveCoverages();
+        await loadData();
+      }
+    } catch (e) {
+      console.error('Failed to end coverage', e);
+    }
+  };
 
   // Date range helpers
   const formatDateYMD = (d: Date): string => {
@@ -203,14 +302,14 @@ export const AssignedLeadsPage: React.FC = () => {
     setIsEditDrawerOpen(true);
   };
 
-  // Populate agent options from MOCK_AGENTS, ensuring the current assigned agent is included
+  // Populate agent options from agents (with storageService fallback), ensuring the current assigned agent is included
   const agentOptions = useMemo<AssignableAgent[]>(() => {
-    const list: AssignableAgent[] = [...agents];
+    const list: AssignableAgent[] = agents.length > 0 ? [...agents] : (storageService.getAgents(tenant?.id) as any[] || []);
     if (formData.assignedAgentName && !list.some(a => a.name.toLowerCase() === formData.assignedAgentName?.toLowerCase())) {
-      list.unshift({ id: 'current', name: formData.assignedAgentName });
+      list.unshift({ id: 'current', name: formData.assignedAgentName } as any);
     }
     return list;
-  }, [formData.assignedAgentName, agents]);
+  }, [formData.assignedAgentName, agents, tenant?.id]);
 
   const handleAgentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newName = e.target.value;
@@ -464,7 +563,7 @@ export const AssignedLeadsPage: React.FC = () => {
   return (
     <div className="leads-page assigned-leads-page">
       {/* Header */}
-      <div className="page-header">
+      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <h1 className="page-title">
             <UserCheck size={24} color="var(--primary-600)" /> Assigned Leads
@@ -473,6 +572,20 @@ export const AssignedLeadsPage: React.FC = () => {
             View all inbound prospects that have been assigned to sales agents for {tenant?.name}.
           </p>
         </div>
+        {isAdmin && (
+          <div>
+            <button
+              className="btn btn-secondary"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+              onClick={() => {
+                setIsCoverageModalOpen(true);
+                loadActiveCoverages();
+              }}
+            >
+              <Users size={15} /> IRM Coverage &amp; Reassignment
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Assigned Leads Table */}
@@ -557,7 +670,7 @@ export const AssignedLeadsPage: React.FC = () => {
             {/* Quick Info Banner */}
             <div className="lead-quick-banner">
               <div className="lead-assigned-note">
-                Assigned to <strong>{selectedLead.assignedAgentName || 'Unassigned'}</strong>
+                Assigned : <strong>{selectedLead.assignedAgentName || 'Unassigned'}</strong>
               </div>
             </div>
 
@@ -787,6 +900,151 @@ export const AssignedLeadsPage: React.FC = () => {
           <strong>{formData.assignedAgentName || 'Unassigned'}</strong> to{' '}
           <strong>{pendingAgent?.name}</strong>.
         </p>
+      </Modal>
+
+      {/* Admin IRM Coverage & Reassignment Modal */}
+      <Modal
+        isOpen={isCoverageModalOpen}
+        onClose={() => setIsCoverageModalOpen(false)}
+        title="Admin IRM Coverage & Work Reassignment"
+        subtitle="Temporarily assign an absent IRM's open records to a covering IRM with reversible audit trail."
+        maxWidth={700}
+      >
+        <div style={{ padding: '4px 0' }}>
+          {/* Tabs */}
+          <div style={{ display: 'flex', gap: 8, borderBottom: '1px solid var(--border-color)', marginBottom: 16 }}>
+            <button
+              className={`btn btn-sm ${coverageTab === 'assign' ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => setCoverageTab('assign')}
+            >
+              Assign Coverage
+            </button>
+            <button
+              className={`btn btn-sm ${coverageTab === 'active' ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => {
+                setCoverageTab('active');
+                loadActiveCoverages();
+              }}
+            >
+              Active Coverages ({activeCoverages.length})
+            </button>
+          </div>
+
+          {coverageError && (
+            <div style={{ padding: '8px 12px', borderRadius: 6, backgroundColor: 'rgba(239,68,68,0.1)', color: '#dc2626', fontSize: 13, marginBottom: 14 }}>
+              ⚠️ {coverageError}
+            </div>
+          )}
+
+          {coverageMessage && (
+            <div style={{ padding: '8px 12px', borderRadius: 6, backgroundColor: 'rgba(16,185,129,0.1)', color: '#059669', fontSize: 13, marginBottom: 14 }}>
+              ✓ {coverageMessage}
+            </div>
+          )}
+
+          {coverageTab === 'assign' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Absent IRM (Source) *</label>
+                  <select
+                    className="form-select"
+                    value={fromIrmId}
+                    onChange={e => setFromIrmId(e.target.value)}
+                  >
+                    <option value="">— Select Absent IRM —</option>
+                    {agentOptions.filter(a => a.id !== 'current').map(a => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Covering IRM (Destination) *</label>
+                  <select
+                    className="form-select"
+                    value={toIrmId}
+                    onChange={e => setToIrmId(e.target.value)}
+                  >
+                    <option value="">— Select Covering IRM —</option>
+                    {agentOptions.filter(a => a.id !== 'current' && String(a.id) !== fromIrmId).map(a => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Reason for Coverage</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Annual leave coverage until Monday"
+                  value={coverageReason}
+                  onChange={e => setCoverageReason(e.target.value)}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setIsCoverageModalOpen(false)}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={isSubmittingCoverage || !fromIrmId || !toIrmId}
+                  onClick={handleReassignWork}
+                >
+                  {isSubmittingCoverage ? 'Reassigning...' : 'Assign Coverage'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              {activeCoverages.length === 0 ? (
+                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+                  No active coverage assignments for this organization.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {activeCoverages.map((c: any) => (
+                    <div
+                      key={c.id}
+                      style={{
+                        padding: '12px 14px',
+                        borderRadius: 8,
+                        border: '1px solid var(--border-color)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        backgroundColor: 'var(--bg-card)'
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>
+                          {c.originalIrmName} ➔ Covering: {c.coveringIrmName}
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
+                          Reason: {c.reason || 'None specified'} • Started: {new Date(c.startedAt).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                        onClick={() => handleEndCoverage(c.id)}
+                      >
+                        <RotateCcw size={13} /> End &amp; Revert
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </Modal>
     </div>
   );

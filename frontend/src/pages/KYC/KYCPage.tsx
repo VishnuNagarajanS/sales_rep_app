@@ -318,18 +318,35 @@ const GhlIrmKycView: React.FC = () => {
   const [validationErrorSummary, setValidationErrorSummary] = useState<string | null>(null);
 
   const enrichDealWithContact = (d: Deal, leadsList: Lead[], customersList: Customer[]): Deal => {
-    if (d.phone && d.email) return d;
-    const matchLead = leadsList.find(
-      l => (d.customerId && l.id === d.customerId) || (l.name && d.customerName && l.name.toLowerCase() === d.customerName.toLowerCase())
-    );
-    const matchCust = customersList.find(
-      c => (d.customerId && c.id === d.customerId) || (c.name && d.customerName && c.name.toLowerCase() === d.customerName.toLowerCase())
-    );
+    // If the API already populated all three contact fields, nothing to do
+    if (d.phone && d.email && d.location) return d;
+
+    // Prefer ID-based match; fall back to normalised-phone match; then name match
+    const custIdStr = d.customerId ? String(d.customerId) : null;
+    const dealPhoneDigits = (d.phone || '').replace(/\D/g, '').slice(-10);
+    const dealNameLower = (d.customerName || '').trim().toLowerCase();
+
+    const matchCust = customersList.find(c => {
+      if (custIdStr && String(c.id) === custIdStr) return true;
+      const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
+      if (cDigits && dealPhoneDigits && cDigits === dealPhoneDigits) return true;
+      if (dealNameLower && c.name && c.name.trim().toLowerCase() === dealNameLower) return true;
+      return false;
+    });
+
+    const matchLead = !matchCust ? leadsList.find(l => {
+      if (custIdStr && String(l.id) === custIdStr) return true;
+      const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+      if (lDigits && dealPhoneDigits && lDigits === dealPhoneDigits) return true;
+      if (dealNameLower && l.name && l.name.trim().toLowerCase() === dealNameLower) return true;
+      return false;
+    }) : null;
+
     return {
       ...d,
-      phone: d.phone || matchLead?.phone || matchCust?.phone || '',
-      email: d.email || matchLead?.email || matchCust?.email || '',
-      location: d.location || matchLead?.location || matchCust?.location || '',
+      phone: d.phone || matchCust?.phone || matchLead?.phone || '',
+      email: d.email || matchCust?.email || matchLead?.email || '',
+      location: d.location || matchCust?.location || matchLead?.location || '',
     };
   };
 
@@ -972,14 +989,19 @@ const GhlIrmKycView: React.FC = () => {
         aadhaarDocumentUrl: data.aadhaarDoc?.name || null,
         bankChequeUrl: data.bankProofDoc?.name || null,
         dematDocumentUrl: data.hasNoDemat ? null : (data.dematDoc?.name || null),
+        customerConsentObtained: true,
+        customerConsentTimestamp: new Date().toISOString(),
+        customerConsentDetails: "Customer verbal and electronic consent obtained during assisted KYC session.",
         isFinalSubmit: false,
       };
       await fetch('/api/irm/kyc/assisted-draft', {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(payload),
       });
-    } catch {}
+    } catch (err) {
+      console.warn('Draft save error:', err);
+    }
   };
 
   const submitBackendAssistedKyc = async (deal: Deal, data: KYCFormData) => {
@@ -1014,14 +1036,24 @@ const GhlIrmKycView: React.FC = () => {
         aadhaarDocumentUrl: data.aadhaarDoc?.name || null,
         bankChequeUrl: data.bankProofDoc?.name || null,
         dematDocumentUrl: data.hasNoDemat ? null : (data.dematDoc?.name || null),
+        customerConsentObtained: Boolean(customerConsentChecked),
+        customerConsentTimestamp: new Date().toISOString(),
+        customerConsentDetails: "Customer verbal and electronic consent obtained during assisted KYC session.",
         isFinalSubmit: true,
       };
-      await fetch('/api/irm/kyc/assisted-submit', {
+      const res = await fetch('/api/irm/kyc/assisted-submit', {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(payload),
       });
-    } catch {}
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.message || 'Failed to submit assisted KYC to backend');
+      }
+    } catch (err) {
+      console.error('[Assisted KYC] Backend submit error:', err);
+      throw err;
+    }
   };
 
   const handleSaveDraft = (showToastNotice: boolean = true) => {
@@ -1588,6 +1620,16 @@ const GhlIrmKycView: React.FC = () => {
     }
     if (!selectedDeal) return;
 
+    // Await server submission first; never report success if backend save fails
+    if (!isMockMode() && user) {
+      try {
+        await submitBackendAssistedKyc(selectedDeal, formData);
+      } catch (err: any) {
+        showToast(`⚠️ Failed to submit assisted KYC: ${err.message || 'Server error'}`);
+        return;
+      }
+    }
+
     const investorName = formData.investorName.trim();
     const dealId = selectedDeal.id;
     const nowIso = new Date().toISOString();
@@ -1701,11 +1743,6 @@ const GhlIrmKycView: React.FC = () => {
       await persistDeal(updatedDeal);
     } catch (e) {
       console.warn('Error saving deal:', e);
-    }
-
-    // 5. Submit to backend if available
-    if (!isMockMode() && user) {
-      submitBackendAssistedKyc(selectedDeal, formData).catch(() => {});
     }
 
     setIsAssistedReviewModalOpen(false);
@@ -1897,14 +1934,25 @@ const GhlIrmKycView: React.FC = () => {
       render: deal => {
         const status = resolveCustomerKycStatus(deal);
 
-        // IRM-verified: no further link action needed
+        // IRM-verified: show professional Verified badge with checkmark
         if (status === 'Verified') {
           return (
             <span
-              style={{ color: 'var(--text-muted, #94a3b8)', fontSize: 13, fontWeight: 500 }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '3px 10px',
+                borderRadius: 20,
+                fontSize: 12,
+                fontWeight: 600,
+                backgroundColor: 'rgba(16,185,129,0.1)',
+                color: '#059669',
+                border: '1px solid rgba(16,185,129,0.3)',
+              }}
               title="KYC verified by IRM"
             >
-              —
+              <CheckCircle size={12} /> Verified
             </span>
           );
         }

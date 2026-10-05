@@ -455,9 +455,11 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         assignedAgentId: nid(lead.assignedAgentId) || undefined,
         companyId: nid(lead.companyId) || 1,
         investmentCapacity: customFields['Investment Capacity'] ?? customFields['investmentCapacity'],
+        investmentAmount: (lead as any).investmentAmount ?? customFields['Investment Amount'] ?? customFields['investmentAmount'],
         assetClass: customFields['Asset Class'] ?? customFields['assetClass'],
         preferredAssetClass: customFields['Preferred Asset Class'] ?? customFields['preferredAssetClass'],
         horizon: customFields['Horizon'] ?? customFields['horizon'],
+        additionalCustomFields: customFields,
       };
       const res: ApiResponse<any> = await apiClient.post('/sales-executive/leads', payload);
       if (res && res.success && res.data) {
@@ -480,9 +482,11 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         nextFollowupDate: lead.nextFollowupDate,
         assignedAgentId: nid(lead.assignedAgentId?.toString()) || undefined,
         investmentCapacity: customFields['Investment Capacity'] ?? customFields['investmentCapacity'],
+        investmentAmount: (lead as any).investmentAmount ?? customFields['Investment Amount'] ?? customFields['investmentAmount'],
         assetClass: customFields['Asset Class'] ?? customFields['assetClass'],
         preferredAssetClass: customFields['Preferred Asset Class'] ?? customFields['preferredAssetClass'],
         horizon: customFields['Horizon'] ?? customFields['horizon'],
+        additionalCustomFields: customFields,
       };
       const res: ApiResponse<any> = await apiClient.put(
         `/sales-executive/leads/${nid(lead.id)}`,
@@ -534,6 +538,12 @@ export async function saveFollowup(followup: Followup): Promise<Followup> {
   const isNew =
     !followup.id || followup.id.startsWith('flw-') || followup.id.startsWith('fu-') || followup.id.startsWith('f-');
 
+  if (isMockMode()) {
+    storageService.saveFollowup(followup);
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+    return followup;
+  }
+
   try {
     if (isNew) {
       const payload = {
@@ -541,6 +551,7 @@ export async function saveFollowup(followup: Followup): Promise<Followup> {
         contactType: followup.contactType || 'lead',
         contactName: followup.contactName,
         contactPhone: followup.contactPhone,
+        contactEmail: (followup as any).contactEmail || (followup as any).email || undefined,
         scheduledAt: followup.scheduledAt,
         priority: followup.priority,
         notes: followup.notes,
@@ -555,6 +566,7 @@ export async function saveFollowup(followup: Followup): Promise<Followup> {
         window.dispatchEvent(new Event('nexus_storage_updated'));
         return saved;
       }
+      throw new Error(res?.message || 'Failed to create follow-up on server');
     } else {
       const payload = {
         scheduledAt: followup.scheduledAt,
@@ -572,14 +584,12 @@ export async function saveFollowup(followup: Followup): Promise<Followup> {
         window.dispatchEvent(new Event('nexus_storage_updated'));
         return saved;
       }
+      throw new Error(res?.message || 'Failed to update follow-up on server');
     }
-  } catch (err) {
-    console.warn('[ghlApiService] API saveFollowup failed, saving locally:', err);
+  } catch (err: any) {
+    console.error('[ghlApiService] API saveFollowup failed:', err);
+    throw err;
   }
-
-  storageService.saveFollowup(followup);
-  window.dispatchEvent(new Event('nexus_storage_updated'));
-  return followup;
 }
 
 export async function completeFollowup(followupId: string): Promise<void> {
@@ -622,13 +632,15 @@ export async function saveCustomer(customer: Customer): Promise<Customer> {
     customer.id.startsWith('cust-') ||
     customer.id.startsWith('c-');
 
-  const payload = {
+  const payload: Record<string, any> = {
     name: customer.name,
     phone: customer.phone,
     email: customer.email,
     location: customer.location,
     status: customer.status,
     notes: customer.notes,
+    totalValue: customer.totalValue,
+    customFields: customer.customFields,
   };
 
   if (isNew) {

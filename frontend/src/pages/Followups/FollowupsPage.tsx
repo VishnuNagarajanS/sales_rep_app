@@ -31,11 +31,7 @@ import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { Drawer } from '../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
-import {
-  FollowupRoleFilter,
-  SALES_EXECUTIVE_USERS,
-  IRM_USERS,
-} from '../../mock_data/adminFollowupsData';
+type FollowupRoleFilter = 'sales_executive' | 'irm';
 import { DateRangePreset } from '../../types/kanban';
 import { adminUserService } from '../../services/adminUserService';
 import { User as UserModel } from '../../types';
@@ -126,6 +122,10 @@ export const FollowupsPage: React.FC = () => {
         });
         if (irms.length > 0) return irms;
       }
+    }
+    if (selectedRole === 'sales_executive') {
+      const storageAgents = storageService.getAgents(tenant?.id);
+      if (storageAgents && storageAgents.length > 0) return storageAgents;
     }
     // Fallback strictly to real DB users
     if (selectedRole === 'sales_executive') {
@@ -358,6 +358,22 @@ export const FollowupsPage: React.FC = () => {
     const num = parseFloat(investmentAmountValue.replace(/,/g, '').trim()) || 0;
     const cleanStr = num > 0 ? String(num) : '';
 
+    const fDigits = (drawerFollowup.contactPhone || '').replace(/\D/g, '').slice(-10);
+    const resolvedContactId = drawerFollowup.contactId || matchingLead?.id || matchingCustomer?.id;
+    const allDeals = storageService.getDeals(tenant?.id) || [];
+    const existingDeal = allDeals.find((deal: Deal) =>
+      (resolvedContactId && (deal.customerId === resolvedContactId || deal.id === resolvedContactId)) ||
+      (drawerFollowup.contactPhone && deal.phone === drawerFollowup.contactPhone) ||
+      (fDigits && deal.phone && deal.phone.replace(/\D/g, '').slice(-10) === fDigits)
+    );
+
+    if (!matchingLead && !matchingCustomer && !existingDeal) {
+      showToast('Cannot save Investment Amount: No matching lead, customer, or deal record found.');
+      return;
+    }
+
+    let serverSavesConfirmed = 0;
+
     if (matchingLead) {
       const updatedLead: Lead = {
         ...matchingLead,
@@ -368,10 +384,14 @@ export const FollowupsPage: React.FC = () => {
       };
       try {
         await apiSaveLead(updatedLead);
-      } catch {
-        storageService.saveLead(updatedLead);
+        serverSavesConfirmed++;
+      } catch (err: any) {
+        console.error('[FollowupsPage] Server saveLead failed:', err);
+        showToast(`Server save failed for lead: ${err?.message || 'Server error'}`);
+        return;
       }
     }
+
     if (matchingCustomer) {
       const updatedCust: Customer = {
         ...matchingCustomer,
@@ -382,19 +402,14 @@ export const FollowupsPage: React.FC = () => {
       };
       try {
         await apiSaveCustomer(updatedCust);
-      } catch {
-        storageService.saveCustomer(updatedCust);
+        serverSavesConfirmed++;
+      } catch (err: any) {
+        console.error('[FollowupsPage] Server saveCustomer failed:', err);
+        showToast(`Server save failed for customer: ${err?.message || 'Server error'}`);
+        return;
       }
     }
 
-    const fDigits = (drawerFollowup.contactPhone || '').replace(/\D/g, '').slice(-10);
-    const resolvedContactId = drawerFollowup.contactId || matchingLead?.id || matchingCustomer?.id;
-    const allDeals = storageService.getDeals(tenant?.id) || [];
-    const existingDeal = allDeals.find((deal: Deal) =>
-      (resolvedContactId && (deal.customerId === resolvedContactId || deal.id === resolvedContactId)) ||
-      (drawerFollowup.contactPhone && deal.phone === drawerFollowup.contactPhone) ||
-      (fDigits && deal.phone && deal.phone.replace(/\D/g, '').slice(-10) === fDigits)
-    );
     if (existingDeal) {
       const updatedDeal: Deal = {
         ...existingDeal,
@@ -402,15 +417,23 @@ export const FollowupsPage: React.FC = () => {
       };
       try {
         await apiSaveDeal(updatedDeal);
-      } catch {
-        storageService.saveDeal(updatedDeal);
+        serverSavesConfirmed++;
+      } catch (err: any) {
+        console.error('[FollowupsPage] Server saveDeal failed:', err);
+        showToast(`Server save failed for deal: ${err?.message || 'Server error'}`);
+        return;
       }
+    }
+
+    if (serverSavesConfirmed === 0) {
+      showToast('No matching record was saved to the server.');
+      return;
     }
 
     (drawerFollowup as any).investmentAmount = cleanStr;
 
     window.dispatchEvent(new Event('nexus_storage_updated'));
-    showToast('Investment Amount updated successfully');
+    showToast('✓ Investment Amount saved successfully to server');
     setIsEditingAmount(false);
   };
 
@@ -547,9 +570,10 @@ export const FollowupsPage: React.FC = () => {
     // Save deal to DB (API) — this persists stage='qualified_investor' in Neon
     try {
       await apiSaveDeal(kycDeal);
-    } catch (err) {
-      console.warn('[FollowupsPage] API saveDeal failed, saving locally:', err);
-      storageService.saveDeal(kycDeal);
+    } catch (err: any) {
+      console.error('[FollowupsPage] API saveDeal failed:', err);
+      showToast(`Failed to move to KYC: ${err?.message || 'Error updating deal status'}`);
+      return;
     }
 
     // 2. Mark the follow-up task as completed in DB so it does not show in the followup page
@@ -559,13 +583,10 @@ export const FollowupsPage: React.FC = () => {
         status: 'Completed',
         notes: `${drawerFollowup.notes ? drawerFollowup.notes + ' | ' : ''}Ready for KYC: Moved to KYC Module by IRM`,
       });
-    } catch (err) {
-      console.warn('[FollowupsPage] API saveFollowup (complete) failed:', err);
-      storageService.saveFollowup({
-        ...drawerFollowup,
-        status: 'Completed',
-        notes: `${drawerFollowup.notes ? drawerFollowup.notes + ' | ' : ''}Ready for KYC: Moved to KYC Module by IRM`,
-      });
+    } catch (err: any) {
+      console.error('[FollowupsPage] API saveFollowup (complete) failed:', err);
+      showToast(`Failed to complete follow-up task: ${err?.message || 'Error updating follow-up status'}`);
+      return;
     }
 
     // 3. If matching lead exists, update lead status to 'Ready for KYC' in DB
@@ -586,9 +607,10 @@ export const FollowupsPage: React.FC = () => {
       };
       try {
         await apiSaveLead(updatedLead);
-      } catch (err) {
-        console.warn('[FollowupsPage] API saveLead (qualified) failed:', err);
-        storageService.saveLead(updatedLead);
+      } catch (err: any) {
+        console.error('[FollowupsPage] API saveLead (qualified) failed:', err);
+        showToast(`Failed to update lead status: ${err?.message || 'Error updating lead'}`);
+        return;
       }
     }
 
@@ -613,11 +635,18 @@ export const FollowupsPage: React.FC = () => {
     showToast(`✓ ${drawerFollowup.contactName} moved to KYC module!`);
   };
 
-  const handleSaveReschedule = () => {
+  const handleSaveReschedule = async () => {
     if (rescheduleItem && newDate) {
-      apiSaveFollowup({ ...rescheduleItem, scheduledAt: newDate, status: 'Pending' }).catch(console.error);
-      setRescheduleItem(null);
-      setNewDate('');
+      try {
+        await apiSaveFollowup({ ...rescheduleItem, scheduledAt: newDate, status: 'Pending' });
+        setRescheduleItem(null);
+        setNewDate('');
+        loadData();
+        showToast('✓ Follow-up rescheduled successfully');
+      } catch (err: any) {
+        console.error('[FollowupsPage] API reschedule failed:', err);
+        showToast(`Failed to reschedule follow-up: ${err?.message || 'Server error'}`);
+      }
     }
   };
 
@@ -772,35 +801,25 @@ export const FollowupsPage: React.FC = () => {
     scopedFollowups = followups;
   }
 
-  // Safely deduplicate display rows for all roles so at most one active pending follow-up is rendered per contact
+  // Do NOT collapse legitimate separate tasks merely because they belong to the same customer or have nearby schedules.
+  // Deduplicate only by unique ID so distinct tasks are never merged
   let processedFollowups = scopedFollowups;
   try {
-    const seen = new Map<string, Followup>();
+    const seen = new Set<string>();
     const deduped: Followup[] = [];
 
-      for (const f of scopedFollowups) {
-        if (f.status !== 'Pending') {
-          deduped.push(f);
-          continue;
-        }
-        const phoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-        const key =
-          f.contactId && f.contactId !== 'contact-new'
-            ? `id:${f.contactId}`
-            : phoneDigits
-            ? `phone:${phoneDigits}`
-            : `raw:${f.id}`;
-
-        if (!seen.has(key)) {
-          seen.set(key, f);
-          deduped.push(f);
-        }
+    for (const f of scopedFollowups) {
+      const key = String(f.id);
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(f);
       }
-      processedFollowups = deduped;
-    } catch (err) {
-      console.error('Error deduping followups list:', err);
-      processedFollowups = scopedFollowups;
     }
+    processedFollowups = deduped;
+  } catch (err) {
+    console.error('Error deduping followups list:', err);
+    processedFollowups = scopedFollowups;
+  }
 
   const getCallCountForFollowup = (f: Followup): number => {
     const fPhoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
@@ -1203,7 +1222,7 @@ export const FollowupsPage: React.FC = () => {
           title={drawerFollowup?.contactName || 'Contact Profile'}
           subtitle={
             isAdmin
-              ? `Phone: ${drawerFollowup?.contactPhone || '—'} • Assigned: ${
+              ? `Phone: ${drawerFollowup?.contactPhone || '—'} • Assigned : ${
                   drawerFollowup?.assignedAgentName || 'Unassigned'
                 } (${drawerFollowupRole})`
               : drawerFollowup?.contactPhone
@@ -1295,7 +1314,7 @@ export const FollowupsPage: React.FC = () => {
               matchingCustomer?.assignedAgentName ||
               'Unassigned';
 
-            const contactEmail = matchingLead?.email || matchingCustomer?.email || (drawerFollowup as any).email || '—';
+            const contactEmail = (drawerFollowup as any).contactEmail || (drawerFollowup as any).email || matchingLead?.email || matchingCustomer?.email || '—';
             const contactLocation = matchingLead?.location || matchingCustomer?.location || (drawerFollowup as any).location || '—';
             const contactSource = matchingLead?.source || (drawerFollowup as any).source || 'Follow-up Task';
 
@@ -1408,7 +1427,7 @@ export const FollowupsPage: React.FC = () => {
                 {!isAdmin && (
                   <div className="lead-quick-banner">
                     <div className="lead-assigned-note" style={{ fontSize: 13, marginTop: 0 }}>
-                      Assigned: <strong>{assignedAgent}</strong>
+                      Assigned : <strong>{assignedAgent}</strong>
                       {drawerFollowupRole && (
                         <span
                           style={{

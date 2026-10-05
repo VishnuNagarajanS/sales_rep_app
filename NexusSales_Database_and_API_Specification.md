@@ -84,7 +84,7 @@ Master registry for companies on the platform.
 
 #### 2. `roles` (Active in PostgreSQL)
 System roles and permission strings.
-* `Id` (INT, PK) — `1` (Super Admin), `2` (Company Admin), `3` (Sales Manager), `4` (Sales Executive)
+* `Id` (INT, PK) — `1` (Super Admin), `2` (Company Admin), `3` (Sales Executive), `4` (IRM)
 * `Name` (VARCHAR(50), NOT NULL) — Display role name
 * `Code` (VARCHAR(50), UNIQUE, NOT NULL) — System role key (`super_admin`, `company_admin`, `sales_executive`, `irm`)
 * `Permissions` (TEXT[], NOT NULL) — Array of granted permission keys (`leads.view`, `deals.create`, etc.)
@@ -396,11 +396,11 @@ Total REST endpoints: **92 APIs** across **15 Controller groups**.
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/company/settings` | Get current tenant profile, timezone, currency | `company_admin` |
 | `PUT` | `/api/company/settings` | Update tenant business hours, branding, details | `company_admin` |
-| `GET` | `/api/company/users` | List company employees, reps, managers | `company_admin`, `sales_manager` |
+| `GET` | `/api/company/users` | List company employees, reps, managers | `company_admin` |
 | `POST` | `/api/company/users` | Invite new employee to company | `company_admin` |
 | `PUT` | `/api/company/users/{id}` | Update employee role, quota, active status | `company_admin` |
 | `DELETE` | `/api/company/users/{id}` | Deactivate employee account | `company_admin` |
-| `GET` | `/api/company/teams` | List company sales teams and assignment pools | `company_admin`, `sales_manager` |
+| `GET` | `/api/company/teams` | List company sales teams and assignment pools | `company_admin` |
 | `POST` | `/api/company/teams` | Create new sales team | `company_admin` |
 
 ### Module 4: Leads Management (`/api/sales-executive/leads`)
@@ -408,11 +408,11 @@ Total REST endpoints: **92 APIs** across **15 Controller groups**.
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/sales-executive/leads` | Paginated leads filtered by status, priority, search | All roles (scoped) |
 | `POST` | `/api/sales-executive/leads` | Create lead (writes `CompanyId` and custom fields) | All roles |
-| `POST` | `/api/sales-executive/leads/import-csv` | Bulk CSV import with field mapping | `company_admin`, `sales_manager` |
+| `POST` | `/api/sales-executive/leads/import-csv` | Bulk CSV import with field mapping | `company_admin` |
 | `GET` | `/api/sales-executive/leads/{id}` | Fetch detailed lead profile & history | All roles (scoped) |
 | `PUT` | `/api/sales-executive/leads/{id}` | Update lead information & contact details | All roles (scoped) |
 | `DELETE` | `/api/sales-executive/leads/{id}` | Remove lead or move to Junk | All roles (scoped) |
-| `POST` | `/api/sales-executive/leads/{id}/assign` | Reassign lead to another agent or IRM | `company_admin`, `sales_manager` |
+| `POST` | `/api/sales-executive/leads/{id}/assign` | Reassign lead to another agent or IRM | `company_admin` |
 | `POST` | `/api/sales-executive/leads/{id}/convert` | Convert lead into a Customer record | All roles |
 | `GET` | `/api/sales-executive/leads/assigned` | Quick-fetch leads assigned to authenticated agent | `sales_executive`, `irm` |
 
@@ -462,7 +462,7 @@ Total REST endpoints: **92 APIs** across **15 Controller groups**.
 | `POST` | `/api/ghl/deals` | Create investment pipeline deal (`403 Forbidden` for GHL Admin if IRM stage/agent) | `ghl` tenant roles |
 | `GET` | `/api/ghl/deals/{id}` | Deal details & financial values | `ghl` tenant roles |
 | `PUT` | `/api/ghl/deals/{id}` | Update deal stage, probability, close date (`403 Forbidden` for GHL Admin on IRM deals) | `ghl` tenant roles |
-| `DELETE` | `/api/ghl/deals/{id}` | Delete deal (`403 Forbidden` for GHL Admin on IRM deals) | `company_admin`, `sales_manager` |
+| `DELETE` | `/api/ghl/deals/{id}` | Delete deal (`403 Forbidden` for GHL Admin on IRM deals) | `company_admin` |
 | `GET` | `/api/ghl/deals/{id}/activities` | Get deal chronological timeline | `ghl` tenant roles |
 | `POST` | `/api/ghl/deals/{id}/activities` | Log note, meeting, or stage change (`403 Forbidden` for GHL Admin on IRM deals) | `ghl` tenant roles |
 
@@ -477,9 +477,9 @@ Total REST endpoints: **92 APIs** across **15 Controller groups**.
 | `PUT` | `/api/ghl/investors/{id}` | Update ticket size & asset class preference (`403 Forbidden` for GHL Admin) | `irm`, `irm_admin` (GHL Admin Read-Only) |
 | `DELETE` | `/api/ghl/investors/{id}` | Archive investor profile (`403 Forbidden` for GHL Admin) | `irm_admin` (GHL Admin Read-Only) |
 | `GET` | `/api/ghl/investment-opportunities` | List active AIF funds and yield offerings | `ghl` tenant roles |
-| `POST` | `/api/ghl/investment-opportunities` | Create investment opportunity (`403 Forbidden` for GHL Admin) | `irm_admin` (GHL Admin Read-Only) |
-| `PUT` | `/api/ghl/investment-opportunities/{id}` | Update fund size, return, tenure (`403 Forbidden` for GHL Admin) | `irm_admin` (GHL Admin Read-Only) |
-| `DELETE` | `/api/ghl/investment-opportunities/{id}` | Archive opportunity (`403 Forbidden` for GHL Admin) | `irm_admin` (GHL Admin Read-Only) |
+| `POST` | `/api/ghl/investment-opportunities` | Create investment opportunity (`403 Forbidden` for GHL Admin) | `irm_admin`, `irm` (GHL Admin Read-Only) |
+| `PUT` | `/api/ghl/investment-opportunities/{id}` | Update fund size, return, tenure (`403 Forbidden` for GHL Admin) | `irm_admin`, `irm` (GHL Admin Read-Only) |
+| `DELETE` | `/api/ghl/investment-opportunities/{id}` | Archive opportunity (`403 Forbidden` for GHL Admin) | `irm_admin`, `irm` (GHL Admin Read-Only) |
 
 ### Module 11: Jamin Bazaar Real Estate Domain (`/api/properties`, etc.)
 | Method | Endpoint | Description | Auth Roles |
@@ -496,7 +496,7 @@ Total REST endpoints: **92 APIs** across **15 Controller groups**.
 | `PUT` | `/api/site-visits/{id}` | Record visit outcome notes & status | `jamin` tenant roles |
 | `GET` | `/api/bookings` | List plot booking agreements | `jamin` tenant roles |
 | `POST` | `/api/bookings` | Book plot unit with advance payment | `jamin` tenant roles |
-| `PUT` | `/api/bookings/{id}` | Confirm allotment or cancel booking | `company_admin`, `sales_manager` |
+| `PUT` | `/api/bookings/{id}` | Confirm allotment or cancel booking | `company_admin` |
 
 ### Module 12: Audit Logs & System Health
 | Method | Endpoint | Description | Auth Roles |
@@ -518,9 +518,9 @@ Total REST endpoints: **92 APIs** across **15 Controller groups**.
 ### Module 14: Analytics & Reports (`/api/reports`)
 | Method | Endpoint | Description | Auth Roles |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/reports/leads` | Lead pipeline conversion rate & source analysis | `sales_manager`, `company_admin` |
-| `GET` | `/api/reports/sales-performance` | Agent performance leaderboard & talk time | `sales_manager`, `company_admin` |
-| `GET` | `/api/reports/deals` | Deal revenue forecast & stage velocity | `sales_manager`, `company_admin` |
+| `GET` | `/api/reports/leads` | Lead pipeline conversion rate & source analysis | `company_admin` |
+| `GET` | `/api/reports/sales-performance` | Agent performance leaderboard & talk time | `company_admin` |
+| `GET` | `/api/reports/deals` | Deal revenue forecast & stage velocity | `company_admin` |
 | `GET` | `/api/reports/export` | Download Excel/CSV report of metrics | `company_admin` |
 
 ### Module 15: KYC & Document Management (`/api/documents`)

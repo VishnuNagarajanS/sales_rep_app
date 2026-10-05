@@ -20,7 +20,7 @@ import { CustomerKycStatus, getKycReviewData, KycChecklist, normalizeLegacyKycSt
 import { useAuth } from '../../../context/AuthContext';
 import { PERMISSIONS } from '../../../constants/permissions';
 import { Modal } from '../../../components/common/Modal';
-import { createMockKycReviewData } from '../../../mock/data/kycFixtures';
+
 
 interface Props {
   deal: Deal;
@@ -101,7 +101,7 @@ export const KycStatusDropdown: React.FC<Props> = ({
   const [wrongFlaggedSections, setWrongFlaggedSections] = useState<string[]>([]);
 
   // Submitted details for review modal
-  const reviewData = getKycReviewData(deal) || createMockKycReviewData(deal);
+  const reviewData = getKycReviewData(deal);
 
   const displayStatus = localStatus || currentStatus;
 
@@ -475,7 +475,7 @@ export const KycStatusDropdown: React.FC<Props> = ({
               <h4 style={{ margin: '0 0 10px 0', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Users size={15} color="#ea580c" /> 4. Nominee Details
               </h4>
-              {(reviewData?.nominees || []).length > 0 ? (
+              {(reviewData?.nominees && reviewData.nominees.length > 0) ? (
                 reviewData.nominees.map((n, i) => (
                   <div key={i} style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <div><strong>{n.name}</strong> ({n.relationship})</div>
@@ -492,9 +492,9 @@ export const KycStatusDropdown: React.FC<Props> = ({
                 <CreditCard size={15} color="#0284c7" /> 5. Demat Account
               </h4>
               <div style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <div><span style={{ color: 'var(--text-muted)' }}>Depository:</span> <strong>{reviewData?.dematDetails?.dematDepository || 'CDSL'}</strong></div>
-                <div><span style={{ color: 'var(--text-muted)' }}>DP ID:</span> <strong>{reviewData?.dematDetails?.dematDpId || '12081600'}</strong></div>
-                <div><span style={{ color: 'var(--text-muted)' }}>Client ID:</span> <strong>{reviewData?.dematDetails?.dematClientId || '00349812'}</strong></div>
+                <div><span style={{ color: 'var(--text-muted)' }}>Depository:</span> <strong>{reviewData?.dematDetails?.dematDepository || '—'}</strong></div>
+                <div><span style={{ color: 'var(--text-muted)' }}>DP ID:</span> <strong>{reviewData?.dematDetails?.dematDpId || '—'}</strong></div>
+                <div><span style={{ color: 'var(--text-muted)' }}>Client ID:</span> <strong>{reviewData?.dematDetails?.dematClientId || '—'}</strong></div>
               </div>
             </div>
           </div>

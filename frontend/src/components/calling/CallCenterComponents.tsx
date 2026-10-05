@@ -47,7 +47,7 @@ const getCallPreferences = (): CallPreferences => {
     return DEFAULT_CALL_PREFS;
   }
 };
-import { MOCK_AGENTS, MOCK_IRMS } from '../../mock_data/mockData';
+
 
 import {
   Phone,
@@ -1089,6 +1089,7 @@ export const DispositionModal: React.FC = () => {
   const [skipReason, setSkipReason] = useState('');
   const [skipError, setSkipError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState('');
 
   // No Response customized customer message state
   const [customerMessage, setCustomerMessage] = useState('');
@@ -1133,6 +1134,7 @@ export const DispositionModal: React.FC = () => {
     setIsSkipping(false);
     setSkipReason('');
     setSkipError('');
+    setFormError('');
     setIsSubmitting(false);
 
     // Look up email address from local store / matched record
@@ -1302,9 +1304,8 @@ export const DispositionModal: React.FC = () => {
           type: 'error',
           text: `Message dispatch error: ${err.message || 'Unable to connect to server'}. State preserved for retry.`,
         });
-      } else {
-        alert(`Failed to save wrap-up: ${err.message || 'Unknown error'}`);
       }
+      setFormError(err.message || 'Failed to save wrap-up. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -1321,6 +1322,8 @@ export const DispositionModal: React.FC = () => {
     setIsSubmitting(true);
     try {
       await skipDispositionWithReason(skipReason.trim(), notes.trim());
+    } catch (err: any) {
+      setSkipError(err.message || 'Failed to save skip reason. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -1727,6 +1730,24 @@ export const DispositionModal: React.FC = () => {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {formError && (
+            <div style={{
+              marginTop: 16,
+              padding: '10px 14px',
+              backgroundColor: '#fef2f2',
+              border: '1px solid #f87171',
+              borderRadius: 8,
+              color: '#b91c1c',
+              fontSize: 13,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}>
+              <AlertCircle size={16} />
+              <span>{formError}</span>
             </div>
           )}
         </div>

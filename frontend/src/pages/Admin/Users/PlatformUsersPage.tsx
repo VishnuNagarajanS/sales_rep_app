@@ -35,16 +35,17 @@ export const PlatformUsersPage: React.FC = () => {
   const [selectedRoleFilter, setSelectedRoleFilter] = useState('all');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('all');
 
-  // Provision User Modal state
+  // Provision User Modal state (Super Admin can create ONLY Company Admins)
   const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false);
-  const [provisionUserType, setProvisionUserType] = useState<'platform_admin' | 'tenant_user'>('tenant_user');
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newPhone, setNewPhone] = useState('+91 98450 ');
   const [newCompanyId, setNewCompanyId] = useState('');
-  const [newRoleCode, setNewRoleCode] = useState('company_admin');
-  const [newDesignation, setNewDesignation] = useState('Organization Administrator');
+  const [newRoleCode] = useState('company_admin');
+  const [newDesignation, setNewDesignation] = useState('Company Administrator');
   const [newEmployeeCode, setNewEmployeeCode] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Edit User Drawer state
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -69,64 +70,32 @@ export const PlatformUsersPage: React.FC = () => {
 
   const loadData = async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
       const [tList, rMap, uList] = await Promise.all([
         superAdminService.fetchTenantsFromApi(),
         superAdminService.fetchRolesFromApi(),
-        superAdminService.fetchUsersFromApi({
-          companyId: selectedCompanyFilter,
-          roleCode: selectedRoleFilter,
-          status: selectedStatusFilter,
-          search: searchQuery,
-        }),
+        superAdminService.fetchUsersFromApi(),
       ]);
-      setTenants(tList);
-      setRoles(rMap);
-      setUsers(uList);
-    } catch {
-      setTenants(superAdminService.getTenants());
-      setRoles(superAdminService.getRoles());
-      setUsers(
-        superAdminService.getUsers({
-          companyId: selectedCompanyFilter,
-          roleCode: selectedRoleFilter,
-          status: selectedStatusFilter,
-          search: searchQuery,
-        })
-      );
+      setTenants(tList || []);
+      setRoles(rMap || {});
+      setUsers(uList || []);
+    } catch (err: any) {
+      console.error('Failed to load user directory from API:', err);
+      setLoadError(err.message || 'Failed to load user directory from database.');
     } finally {
       setIsLoading(false);
     }
   };
 
   const applyFilters = async () => {
-    setIsLoading(true);
-    try {
-      const list = await superAdminService.fetchUsersFromApi({
-        companyId: selectedCompanyFilter,
-        roleCode: selectedRoleFilter,
-        status: selectedStatusFilter,
-        search: searchQuery,
-      });
-      setUsers(list);
-    } catch {
-      setUsers(
-        superAdminService.getUsers({
-          companyId: selectedCompanyFilter,
-          roleCode: selectedRoleFilter,
-          status: selectedStatusFilter,
-          search: searchQuery,
-        })
-      );
-    } finally {
-      setIsLoading(false);
-    }
+    await loadData();
   };
 
   useEffect(() => {
     loadData();
     const handleUpdate = () => {
-      applyFilters();
+      loadData();
     };
     window.addEventListener('nexus_admin_updated', handleUpdate);
     window.addEventListener('nexus_storage_updated', handleUpdate);
@@ -136,40 +105,57 @@ export const PlatformUsersPage: React.FC = () => {
     };
   }, []);
 
-  useEffect(() => {
-    applyFilters();
-  }, [searchQuery, selectedCompanyFilter, selectedRoleFilter, selectedStatusFilter]);
-
   const showFeedback = (msg: string) => {
     setFeedbackMsg(msg);
     setTimeout(() => setFeedbackMsg(''), 3000);
   };
 
-  // Handle Provisioning
+  // Handle Provisioning (Super Admin can create ONLY Company Admins)
   const handleProvisionUser = async () => {
-    if (!newName || !newEmail) return;
+    if (!newName.trim() || !newEmail.trim()) {
+      alert('Full Name and Work Email are required.');
+      return;
+    }
 
-    const isPlatform = provisionUserType === 'platform_admin';
-    const targetRole = isPlatform ? roles.super_admin : roles.company_admin;
-    const targetCompany = isPlatform ? undefined : newCompanyId || tenants[0]?.id;
+    const targetCompanyId = newCompanyId || tenants[0]?.id;
+    if (!targetCompanyId) {
+      alert('A valid Tenant Organization must be assigned for Company Admin creation.');
+      return;
+    }
 
-    await superAdminService.createUserApi({
-      name: newName,
-      email: newEmail,
-      phone: newPhone,
-      role: targetRole,
-      companyId: targetCompany,
-      designation: newDesignation,
-      employeeCode: newEmployeeCode,
-      status: 'Active',
-    });
+    const companyAdminRole = roles.company_admin || {
+      id: '2',
+      name: 'Company Admin',
+      code: 'company_admin',
+      permissions: [],
+      isSystemRole: true,
+    };
 
-    setIsProvisionModalOpen(false);
-    // Reset
-    setNewName('');
-    setNewEmail('');
-    showFeedback(`User account "${newName}" provisioned successfully in database.`);
-    await applyFilters();
+    setIsSubmitting(true);
+    try {
+      await superAdminService.createUserApi({
+        name: newName.trim(),
+        email: newEmail.trim(),
+        phone: newPhone.trim(),
+        role: companyAdminRole,
+        companyId: targetCompanyId,
+        designation: newDesignation || 'Company Administrator',
+        employeeCode: newEmployeeCode.trim() || undefined,
+        status: 'Active',
+      });
+
+      setIsProvisionModalOpen(false);
+      // Reset form
+      setNewName('');
+      setNewEmail('');
+      setNewEmployeeCode('');
+      showFeedback(`Company Admin account "${newName.trim()}" provisioned successfully in database.`);
+      await loadData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to provision Company Admin.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Handle Editing
@@ -243,6 +229,55 @@ export const PlatformUsersPage: React.FC = () => {
     }
   };
 
+  // Filter users by dropdown filters (Organization, Role, Status) and search query
+  const filteredUsers = users.filter(u => {
+    // 1. Organization filter
+    if (selectedCompanyFilter !== 'all') {
+      if (selectedCompanyFilter === 'global') {
+        if (u.companyId && u.companyId !== 'global') {
+          return false;
+        }
+      } else {
+        if (!u.companyId || String(u.companyId) !== String(selectedCompanyFilter)) {
+          return false;
+        }
+      }
+    }
+
+    // 2. Role filter
+    if (selectedRoleFilter !== 'all') {
+      const roleCode = typeof u.role === 'object' && u.role ? u.role.code : String(u.role || '');
+      if (!roleCode || roleCode.toLowerCase() !== selectedRoleFilter.toLowerCase()) {
+        return false;
+      }
+    }
+
+    // 3. Status filter
+    if (selectedStatusFilter !== 'all') {
+      if (!u.status || u.status.toLowerCase() !== selectedStatusFilter.toLowerCase()) {
+        return false;
+      }
+    }
+
+    // 4. Search query (Name, Email, Phone, Organization)
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const nameMatch = (u.name || '').toLowerCase().includes(q);
+      const emailMatch = (u.email || '').toLowerCase().includes(q);
+      const phoneMatch = (u.phone || '').toLowerCase().includes(q);
+      const tenantObj = u.companyId ? tenants.find(t => String(t.id) === String(u.companyId)) : undefined;
+      const orgName = u.companyName || tenantObj?.name || 'Platform Console (Global)';
+      const orgMatch =
+        orgName.toLowerCase().includes(q) ||
+        Boolean(tenantObj?.slug && tenantObj.slug.toLowerCase().includes(q)) ||
+        Boolean(u.companySlug && u.companySlug.toLowerCase().includes(q));
+      if (!nameMatch && !emailMatch && !phoneMatch && !orgMatch) {
+        return false;
+      }
+    }
+
+    return true;
+  });
 
   return (
     <div className="platform-users-page-container">
@@ -270,15 +305,21 @@ export const PlatformUsersPage: React.FC = () => {
           <button
             className="btn btn-primary btn-sm btn-provision-user"
             onClick={() => {
-              setProvisionUserType('tenant_user');
               setNewCompanyId(tenants[0]?.id || '');
+              setNewDesignation('Company Administrator');
               setIsProvisionModalOpen(true);
             }}
           >
-            <UserPlus size={14} /> Provision User Account
+            <UserPlus size={14} /> Provision Company Admin
           </button>
         </div>
       </div>
+
+      {loadError && (
+        <div className="users-feedback-alert animate-fade-in" style={{ background: 'rgba(239, 68, 68, 0.15)', borderColor: 'rgba(239, 68, 68, 0.35)', color: '#f87171' }}>
+          <AlertTriangle size={16} /> {loadError}
+        </div>
+      )}
 
       {feedbackMsg && (
         <div className="users-feedback-alert animate-fade-in">
@@ -322,10 +363,11 @@ export const PlatformUsersPage: React.FC = () => {
             onChange={e => setSelectedRoleFilter(e.target.value)}
           >
             <option value="all">All Roles</option>
-            <option value="super_admin">Super Admin</option>
-            <option value="company_admin">Company Admin</option>
-            <option value="sales_executive">Sales Executive</option>
-            <option value="irm">IRM</option>
+            {Object.values(roles).map(r => (
+              <option key={r.code} value={r.code}>
+                {r.name}
+              </option>
+            ))}
           </select>
 
           {/* Status Filter */}
@@ -365,104 +407,104 @@ export const PlatformUsersPage: React.FC = () => {
                     </div>
                   </td>
                 </tr>
-              ) : users.length === 0 ? (
+              ) : filteredUsers.length === 0 ? (
                 <tr>
                   <td colSpan={6} style={{ textAlign: 'center', padding: '40px 16px', color: '#94a3b8' }}>
                     No users found matching current filters.
                   </td>
                 </tr>
               ) : (
-                users.map(u => {
+                filteredUsers.map(u => {
                   const isSuperAdminUser = u.role.code === 'super_admin';
                   return (
                     <tr key={u.id} className="user-table-row">
-                    <td>
-                      <div className="user-identity-cell">
-                        <div
-                          className="user-avatar-circle"
-                          style={{
-                            backgroundColor: isSuperAdminUser ? '#8b5cf6' : '#334155',
-                          }}
-                        >
-                          {u.name.slice(0, 2).toUpperCase()}
-                        </div>
-                        <div>
-                          <div className="user-name-title">
-                            {u.name}
-                            {isSuperAdminUser && <span className="super-crown">⚡</span>}
-                          </div>
-                          <div className="user-email-subtitle">
-                            {u.email} • {u.phone}
-                          </div>
-                          {u.designation && <div className="user-designation-tag">{u.designation}</div>}
-                        </div>
-                      </div>
-                    </td>
-
-                    <td>
-                      <span className="tenant-tag-badge">
-                        <Building2 size={12} />
-                        {u.companyName || 'Platform Console (Global)'}
-                      </span>
-                    </td>
-
-                    <td>
-                      <div className="role-cell-wrap">
-                        <span className={`role-badge ${u.role.code}`}>{u.role.name}</span>
-                        <span className="role-privilege-count">
-                          {u.role.permissions.length} Privileges
-                        </span>
-                      </div>
-                    </td>
-
-                    <td>
-                      <span className={`user-status-pill ${u.status.toLowerCase()}`}>
-                        {u.status}
-                      </span>
-                    </td>
-
-                    <td>
-                      <span className="last-login-text">{u.lastLogin || 'Never'}</span>
-                    </td>
-
-                    <td style={{ textAlign: 'right' }}>
-                      <div className="user-row-actions">
-                        <button
-                          className="action-icon-btn"
-                          title="Reset Password"
-                          onClick={() => openResetModal(u)}
-                        >
-                          <KeyRound size={14} />
-                        </button>
-                        <button
-                          className="action-icon-btn"
-                          title="Edit Profile"
-                          onClick={() => openEditDrawer(u)}
-                        >
-                          <Edit2 size={14} />
-                        </button>
-                        <button
-                          className={`action-icon-btn ${u.status === 'Active' ? 'text-amber' : 'text-green'}`}
-                          title={u.status === 'Active' ? 'Suspend Account' : 'Activate Account'}
-                          onClick={() => handleToggleStatus(u)}
-                        >
-                          {u.status === 'Active' ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}
-                        </button>
-                        {!isSuperAdminUser && (
-                          <button
-                            className="action-icon-btn text-danger"
-                            title="Delete User"
-                            onClick={() => handleDeleteUser(u)}
+                      <td>
+                        <div className="user-identity-cell">
+                          <div
+                            className="user-avatar-circle"
+                            style={{
+                              backgroundColor: isSuperAdminUser ? '#8b5cf6' : '#334155',
+                            }}
                           >
-                            <Trash2 size={14} />
+                            {u.name.slice(0, 2).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="user-name-title">
+                              {u.name}
+                              {isSuperAdminUser && <span className="super-crown">⚡</span>}
+                            </div>
+                            <div className="user-email-subtitle">
+                              {u.email} • {u.phone}
+                            </div>
+                            {u.designation && <div className="user-designation-tag">{u.designation}</div>}
+                          </div>
+                        </div>
+                      </td>
+
+                      <td>
+                        <span className="tenant-tag-badge">
+                          <Building2 size={12} />
+                          {u.companyName || (u.companyId ? (tenants.find(t => String(t.id) === String(u.companyId))?.name || `Tenant #${u.companyId}`) : 'Platform Console (Global)')}
+                        </span>
+                      </td>
+
+                      <td>
+                        <div className="role-cell-wrap">
+                          <span className={`role-badge ${u.role.code}`}>{u.role.name}</span>
+                          <span className="role-privilege-count">
+                            {u.role.permissions.length} Privileges
+                          </span>
+                        </div>
+                      </td>
+
+                      <td>
+                        <span className={`user-status-pill ${u.status.toLowerCase()}`}>
+                          {u.status}
+                        </span>
+                      </td>
+
+                      <td>
+                        <span className="last-login-text">{u.lastLogin || 'Never'}</span>
+                      </td>
+
+                      <td style={{ textAlign: 'right' }}>
+                        <div className="user-row-actions">
+                          <button
+                            className="action-icon-btn"
+                            title="Reset Password"
+                            onClick={() => openResetModal(u)}
+                          >
+                            <KeyRound size={14} />
                           </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
+                          <button
+                            className="action-icon-btn"
+                            title="Edit Profile"
+                            onClick={() => openEditDrawer(u)}
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            className={`action-icon-btn ${u.status === 'Active' ? 'text-amber' : 'text-green'}`}
+                            title={u.status === 'Active' ? 'Suspend Account' : 'Activate Account'}
+                            onClick={() => handleToggleStatus(u)}
+                          >
+                            {u.status === 'Active' ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}
+                          </button>
+                          {!isSuperAdminUser && (
+                            <button
+                              className="action-icon-btn text-danger"
+                              title="Delete User"
+                              onClick={() => handleDeleteUser(u)}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -471,30 +513,17 @@ export const PlatformUsersPage: React.FC = () => {
       {/* ========================================================================= */}
       {/* PROVISION USER MODAL */}
       {/* ========================================================================= */}
+      {/* ========================================================================= */}
+      {/* PROVISION COMPANY ADMIN MODAL */}
+      {/* ========================================================================= */}
       {isProvisionModalOpen && (
         <Modal
           isOpen={isProvisionModalOpen}
           onClose={() => setIsProvisionModalOpen(false)}
-          title="⚡ Provision User Identity Account"
+          title="⚡ Provision Company Admin Account"
           size="md"
         >
           <div className="provision-modal-content">
-            {/* User Type Switcher */}
-            <div className="user-type-selector-tabs">
-              <button
-                className={`type-tab ${provisionUserType === 'tenant_user' ? 'active' : ''}`}
-                onClick={() => setProvisionUserType('tenant_user')}
-              >
-                Tenant Organization Rep
-              </button>
-              <button
-                className={`type-tab ${provisionUserType === 'platform_admin' ? 'active' : ''}`}
-                onClick={() => setProvisionUserType('platform_admin')}
-              >
-                ⚡ Platform Super Admin
-              </button>
-            </div>
-
             <div className="form-group">
               <label className="form-label required">Full Name</label>
               <input
@@ -540,58 +569,46 @@ export const PlatformUsersPage: React.FC = () => {
               </div>
             </div>
 
-            {provisionUserType === 'tenant_user' ? (
-              <>
-                <div className="form-group">
-                  <label className="form-label required">Assign Tenant Organization</label>
-                  <select
-                    className="form-control"
-                    value={newCompanyId}
-                    onChange={e => setNewCompanyId(e.target.value)}
-                  >
-                    {tenants.map(t => (
-                      <option key={t.id} value={t.id}>
-                        {t.name} ({t.slug})
-                      </option>
-                    ))}
-                  </select>
-                </div>
+            <div className="form-group">
+              <label className="form-label required">Assign Tenant Organization</label>
+              <select
+                className="form-control"
+                value={newCompanyId}
+                onChange={e => setNewCompanyId(e.target.value)}
+              >
+                {tenants.map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} ({t.slug})
+                  </option>
+                ))}
+              </select>
+            </div>
 
-                <div className="form-grid-two">
-                  <div className="form-group">
-                    <label className="form-label required">Role Scope</label>
-                    <select
-                      className="form-control"
-                      value="company_admin"
-                      disabled
-                    >
-                      <option value="company_admin">Company Admin (Tenant Root)</option>
-                    </select>
-                    <span style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', display: 'block' }}>
-                      Super Admin creates Company Admins. Company Admins manage their own Sales Executives and IRMs.
-                    </span>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label">Designation / Title</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={newDesignation}
-                      onChange={e => setNewDesignation(e.target.value)}
-                    />
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="platform-admin-notice">
-                <Shield size={18} color="#c084fc" />
-                <div>
-                  <strong>Root Operator Privileges:</strong> This account will be provisioned with platform-wide
-                  Super Admin privileges across all tenant nodes, telephony gateways, and security audit ledgers.
-                </div>
+            <div className="form-grid-two">
+              <div className="form-group">
+                <label className="form-label required">Role Scope</label>
+                <select
+                  className="form-control"
+                  value="company_admin"
+                  disabled
+                >
+                  <option value="company_admin">Company Admin (Tenant Scope)</option>
+                </select>
+                <span style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', display: 'block' }}>
+                  Super Admin can provision Company Admins only. Sales Executives, IRMs, and other team members must be invited by their respective Company Admin.
+                </span>
               </div>
-            )}
+
+              <div className="form-group">
+                <label className="form-label">Designation / Title</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={newDesignation}
+                  onChange={e => setNewDesignation(e.target.value)}
+                />
+              </div>
+            </div>
 
             <div className="modal-actions-footer">
               <button className="btn btn-ghost" onClick={() => setIsProvisionModalOpen(false)}>
@@ -599,10 +616,10 @@ export const PlatformUsersPage: React.FC = () => {
               </button>
               <button
                 className="btn btn-primary"
-                disabled={!newName || !newEmail}
+                disabled={!newName || !newEmail || isSubmitting}
                 onClick={handleProvisionUser}
               >
-                Provision Account
+                {isSubmitting ? 'Provisioning...' : 'Provision Account'}
               </button>
             </div>
           </div>
@@ -682,21 +699,13 @@ export const PlatformUsersPage: React.FC = () => {
                 className="form-control"
                 value={editRoleCode}
                 onChange={e => setEditRoleCode(e.target.value)}
-                disabled={editRoleCode === 'sales_executive' || editRoleCode === 'irm'}
               >
-                <option value="company_admin">Company Admin (Tenant Root)</option>
-                <option value="super_admin">Super Admin (Platform Root)</option>
-                {(editRoleCode === 'sales_executive' || editRoleCode === 'irm') && (
-                  <option value={editRoleCode} disabled>
-                    {editRoleCode === 'irm' ? 'IRM (Managed by Company Admin)' : 'Sales Executive (Managed by Company Admin)'}
+                {Object.values(roles).map(r => (
+                  <option key={r.code} value={r.code}>
+                    {r.name} {r.isSystemRole ? '(System Role)' : '(Custom Role)'}
                   </option>
-                )}
+                ))}
               </select>
-              {(editRoleCode === 'sales_executive' || editRoleCode === 'irm') && (
-                <span style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', display: 'block' }}>
-                  Company-level operational roles are managed directly by the Company Admin.
-                </span>
-              )}
             </div>
 
             <div className="drawer-actions-row">

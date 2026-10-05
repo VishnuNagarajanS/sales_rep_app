@@ -19,9 +19,14 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
   const [announcements, setAnnouncements] = useState<BroadcastAnnouncement[]>([]);
   const [maintenance, setMaintenance] = useState(() => superAdminService.getMaintenanceMode());
 
-  const loadBannerData = () => {
-    setAnnouncements(superAdminService.getAnnouncements());
+  const loadBannerData = async () => {
     setMaintenance(superAdminService.getMaintenanceMode());
+    try {
+      const live = await superAdminService.fetchAnnouncementsFromApi();
+      setAnnouncements(live);
+    } catch {
+      setAnnouncements(superAdminService.getAnnouncements());
+    }
   };
 
   useEffect(() => {

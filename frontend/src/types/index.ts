@@ -33,15 +33,40 @@ export interface Tenant {
   transcriptionEnabled?: boolean;
   createdAt?: string;
   updatedAt?: string;
+  organizationId?: string;
+  organizationSlug?: string;
+  parentTenantId?: string;
+  parentId?: string;
+  isOrganization?: boolean;
+  companies?: Array<string | Tenant | { id: string; name?: string; slug?: string }>;
 }
 
-export type RoleCode = 'super_admin' | 'company_admin' | 'sales_executive' | 'irm';
+export type RoleCode = 'super_admin' | 'company_admin' | 'sales_executive' | 'irm' | string;
 
 export interface Role {
   id: string;
   name: string;
   code: RoleCode;
   permissions: string[];
+  description?: string;
+  isSystemRole?: boolean;
+  isActive?: boolean;
+  usersCount?: number;
+  permissionsCount?: number;
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface PermissionItem {
+  key: string;
+  label: string;
+  description?: string;
+}
+
+export interface PermissionGroup {
+  group: string;
+  items: PermissionItem[];
 }
 
 export interface User {
@@ -53,6 +78,9 @@ export interface User {
   companyId?: string;
   companySlug?: TenantSlug;
   companyName?: string;
+  organizationId?: string;
+  organizationSlug?: string;
+  organizationName?: string;
   status: 'Active' | 'Invited' | 'Disabled';
   lastLogin?: string;
   avatar?: string;
@@ -259,6 +287,8 @@ export interface Followup {
   contactId: string;
   contactName: string;
   contactPhone: string;
+  contactEmail?: string;
+  email?: string;
   contactType: 'lead' | 'customer' | 'investor';
   scheduledAt: string;
   priority: 'Low' | 'Medium' | 'High';
@@ -760,9 +790,19 @@ export interface PlatformCarrierSettings {
   maxConcurrentChannels: number;
   emergencyRoutingEnabled: boolean;
   whisperAiModel: string;
+  accountSid?: string;
+  authTokenMasked?: string;
+  authToken?: string;
+  primaryGatewayHost?: string;
+  failoverGatewayHost?: string;
+  status?: string;
   lastTestedAt?: string;
   testStatus?: 'Success' | 'Degraded' | 'Offline';
+  primaryTrunkHealth?: 'online' | 'degraded' | 'offline';
+  failoverTrunkHealth?: 'online' | 'degraded' | 'offline';
+  speechToTextHealth?: 'online' | 'degraded' | 'offline';
 }
+
 
 export interface SystemDiagnostics {
   apiStatus: 'Healthy' | 'Degraded' | 'Down';
@@ -774,12 +814,70 @@ export interface SystemDiagnostics {
   memoryLimitMb: number;
   storageUsedGb: number;
   storageLimitGb: number;
+  storageFreeGb?: number;
   activeSessions: number;
   activeWebSockets: number;
   telephonyDropRate: number;
   systemUptimePercentage: number;
   lastBackupAt: string;
+  trunkStatus?: string;
+  trunkTestStatus?: string;
+  trunkLastTestedAt?: string;
+  databaseConnected?: boolean;
+  serverTimeUtc?: string;
+  totalUsers?: number;
+  activeUsers?: number;
+  totalTenants?: number;
+  totalCalls?: number;
+  failedCalls?: number;
+  totalAuditLogs?: number;
+  serverHost?: string;
+  osDescription?: string;
+  frameworkDescription?: string;
+  processUptime?: string;
+  processStartTimeUtc?: string;
 }
+
+export interface SystemHealthCheckItem {
+  name: string;
+  component: string;
+  status: 'Healthy' | 'Degraded' | 'Unhealthy' | 'Not Configured';
+  latencyMs: number;
+  message: string;
+  details: Record<string, any>;
+  checkedAt: string;
+}
+
+export interface SystemHealthReport {
+  overallStatus: 'Healthy' | 'Degraded' | 'Unhealthy';
+  healthyCount: number;
+  degradedCount: number;
+  unhealthyCount: number;
+  checks: SystemHealthCheckItem[];
+  generatedAt: string;
+}
+
+export interface GlobalConfig {
+  platformName: string;
+  supportEmail: string;
+  defaultTimezone: string;
+  sessionTimeoutMinutes: number;
+  maxUploadSizeMb: number;
+  enforceMfa: boolean;
+  tokenExpirationMinutes: number;
+  passwordMinLength: number;
+  recordingRetentionDays: number;
+  smtpHost: string;
+  smtpPort: number;
+  smtpEnableSsl: boolean;
+  smtpSenderEmail: string;
+  smtpSenderName: string;
+  databaseEngine: string;
+  lastUpdatedAt?: string;
+  lastUpdatedBy?: string;
+}
+
+
 
 export interface BroadcastAnnouncement {
   id: string;
@@ -801,9 +899,16 @@ export interface PlatformMetrics {
   suspendedTenants: number;
   totalUsers: number;
   activeUsers: number;
+  superAdminCount?: number;
+  companyAdminCount?: number;
+  salesExecutiveCount?: number;
+  irmCount?: number;
+  totalCalls?: number;
   callsToday: number;
   callsConnected: number;
   totalLeads: number;
+  currentMonthLeads?: number;
+  previousMonthLeads?: number;
   totalPipelineValue: number;
   totalCustomers: number;
   systemHealthScore: number;

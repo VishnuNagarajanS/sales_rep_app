@@ -15,7 +15,7 @@ It bridges the gap between sales management and active voice communication by co
 1. **Full-Cycle CRM Pipelines** (Leads, Deals, Customer 360, Interactive Kanban).
 2. **Embedded Telephony Engine** (Click-to-Call, In-Call Floating Bar, Video Preview, Call Recordings, Waveforms, and AI Transcription).
 3. **Tenant-Specific Business Specializations** (Plotted Real Estate & Farmland vs. Institutional Wealth & Investment Advisory).
-4. **Multi-Role Scoping & Access Governance** (Super Admin, Company Admin, Sales Manager, Sales Executive).
+4. **Multi-Role Scoping & Access Governance** (Super Admin, Company Admin, Sales Executive, IRM).
 
 The frontend operates in an **offline-first, zero-backend-dependency demo mode** via its built-in `storageService` (LocalStorage engine with full relational mock data), while also supporting live REST API communication with JWT-based Bearer authentication.
 
@@ -40,12 +40,11 @@ graph TD
     SuperAdmin --> TenantJamin["Tenant: Jamin Bazaar (Real Estate / Plots)"]
     
     TenantGHL --> CA1["Company Admin"]
-    CA1 --> SM1["Sales Manager"]
-    SM1 --> SE1["Sales Executive (Advisory Rep)"]
+    CA1 --> SE1["Sales Executive (Advisory Rep)"]
+    CA1 --> IRM1["IRM (Investor Relations Manager)"]
     
     TenantJamin --> CA2["Company Admin"]
-    CA2 --> SM2["Sales Manager"]
-    SM2 --> SE2["Sales Executive (Field Rep)"]
+    CA2 --> SE2["Sales Executive (Field Rep)"]
 ```
 
 ### 3.1 Super Admin (Platform Operator)
@@ -62,12 +61,12 @@ graph TD
   - Configure company branding (logo, theme color, taglines, business hours, lead SLA timers).
   - Inspect company-wide audit trails and enforce compliance.
 
-### 3.3 Sales Manager
-- **Who they are:** Team Leads managing squads of telecallers and field executives.
+### 3.3 IRM (Investor Relationship Manager)
+- **Who they are:** Investment and relations officers managing high-net-worth investor profiles, mandates, and consultations.
 - **Key Responsibilities:**
-  - Oversee team pipeline health and conversion bottlenecks on the Kanban board.
-  - Assign and re-route inbound lead queues to reps based on availability.
-  - Listen to call recordings, evaluate AI transcriptions, and review performance reports.
+  - Oversee investor relationship pipelines, KYC onboarding, and compliance documents.
+  - Coordinate wealth and real estate investment advisory consultations.
+  - Manage investment fund opportunities and investor tranches.
 
 ### 3.4 Sales Executive (Field Rep / Telecaller)
 - **Who they are:** Frontline sales professionals executing daily outreach.

@@ -12,7 +12,6 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Deal } from '../../../types';
-import { storageService } from '../../../services/storageService';
 import { apiClient } from '../../../services/apiClient';
 import { isMockMode } from '../../../config/environment';
 import { getAuthHeaders } from '../../../utils/authHeaders';
@@ -45,45 +44,10 @@ export const SendKycLinkModal: React.FC<SendKycLinkModalProps> = ({
   const rawCustomerName = (deal.customerName || (deal as any)?.name || '').trim();
   const customerNameDisplay = rawCustomerName || '—';
 
-  const resolvedPhone = (() => {
-    if (deal.phone && deal.phone.trim()) return deal.phone.trim();
-    try {
-      const leads = storageService.getLeads(deal.companyId) || storageService.getLeads();
-      const match = leads.find(l => 
-        (deal.customerId && l.id === deal.customerId) || 
-        (rawCustomerName && l.name && l.name.trim().toLowerCase() === rawCustomerName.toLowerCase())
-      );
-      if (match?.phone && match.phone.trim()) return match.phone.trim();
-
-      const customers = storageService.getCustomers(deal.companyId) || storageService.getCustomers();
-      const cMatch = customers.find(c => 
-        (deal.customerId && c.id === deal.customerId) || 
-        (rawCustomerName && c.name && c.name.trim().toLowerCase() === rawCustomerName.toLowerCase())
-      );
-      if (cMatch?.phone && cMatch.phone.trim()) return cMatch.phone.trim();
-    } catch {}
-    return '';
-  })();
-
-  const resolvedEmail = (() => {
-    if (deal.email && deal.email.trim()) return deal.email.trim();
-    try {
-      const leads = storageService.getLeads(deal.companyId) || storageService.getLeads();
-      const match = leads.find(l => 
-        (deal.customerId && l.id === deal.customerId) || 
-        (rawCustomerName && l.name && l.name.trim().toLowerCase() === rawCustomerName.toLowerCase())
-      );
-      if (match?.email && match.email.trim()) return match.email.trim();
-
-      const customers = storageService.getCustomers(deal.companyId) || storageService.getCustomers();
-      const cMatch = customers.find(c => 
-        (deal.customerId && c.id === deal.customerId) || 
-        (rawCustomerName && c.name && c.name.trim().toLowerCase() === rawCustomerName.toLowerCase())
-      );
-      if (cMatch?.email && cMatch.email.trim()) return cMatch.email.trim();
-    } catch {}
-    return '';
-  })();
+  // phone and email are populated directly from the deal by the backend (via Customer record JOIN).
+  // No localStorage lookup needed — that was always empty in production API mode.
+  const resolvedPhone = (deal.phone || '').trim();
+  const resolvedEmail = (deal.email || '').trim();
 
   const mockToken = `tok_${(deal.id || 'demo').replace(/[^a-zA-Z0-9]/g, '').slice(-8)}_${(rawCustomerName || 'investor').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 6)}`;
   const generatedLink = `${window.location.origin}/kyc/${mockToken}`;

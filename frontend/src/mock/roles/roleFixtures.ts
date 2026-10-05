@@ -6,12 +6,18 @@ export const MOCK_ROLES: Record<string, Role> = {
     id: 'role-super',
     name: 'Super Admin',
     code: 'super_admin',
+    description: 'System Administrator with full platform control',
+    isSystemRole: true,
+    isActive: true,
     permissions: Object.values(PERMISSIONS),
   },
   company_admin: {
     id: 'role-cadmin',
     name: 'Company Admin',
     code: 'company_admin',
+    description: 'Company Administrator managing organization and users',
+    isSystemRole: true,
+    isActive: true,
     permissions: [
       PERMISSIONS.LEADS_VIEW, PERMISSIONS.LEADS_CREATE, PERMISSIONS.LEADS_UPDATE, PERMISSIONS.LEADS_DELETE, PERMISSIONS.LEADS_ASSIGN, PERMISSIONS.LEADS_EXPORT, PERMISSIONS.LEADS_IMPORT, PERMISSIONS.LEADS_CONVERT,
       PERMISSIONS.CUSTOMERS_VIEW, PERMISSIONS.CUSTOMERS_CREATE, PERMISSIONS.CUSTOMERS_UPDATE, PERMISSIONS.CUSTOMERS_DELETE,
@@ -30,6 +36,9 @@ export const MOCK_ROLES: Record<string, Role> = {
     id: 'role-exec',
     name: 'Sales Executive',
     code: 'sales_executive',
+    description: 'Sales Executive managing leads and client communications',
+    isSystemRole: true,
+    isActive: true,
     permissions: [
       PERMISSIONS.LEADS_VIEW, PERMISSIONS.LEADS_CREATE, PERMISSIONS.LEADS_UPDATE, PERMISSIONS.LEADS_CONVERT,
       PERMISSIONS.CUSTOMERS_VIEW, PERMISSIONS.CUSTOMERS_CREATE, PERMISSIONS.CUSTOMERS_UPDATE,
@@ -47,6 +56,9 @@ export const MOCK_ROLES: Record<string, Role> = {
     id: 'role-irm',
     name: 'IRM',
     code: 'irm',
+    description: 'Investor Relations Manager managing investors, KYC, and deals',
+    isSystemRole: true,
+    isActive: true,
     permissions: [
       PERMISSIONS.LEADS_VIEW,
       PERMISSIONS.LEADS_CREATE,

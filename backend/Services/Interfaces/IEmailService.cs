@@ -28,6 +28,16 @@ public interface IEmailService
         CancellationToken ct = default);
 
     /// <summary>
+    /// Sends a password reset link to the user via HTML email.
+    /// </summary>
+    Task<bool> SendPasswordResetEmailAsync(
+        string recipientEmail,
+        string recipientName,
+        string resetLink,
+        int expiryMinutes = 60,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Generic HTML email sending method.
     /// </summary>
     Task<bool> SendEmailAsync(

@@ -20,11 +20,26 @@ public static class ServiceExtensions
 
         // 1. Database Context
         services.AddMemoryCache();
-        var connectionString = configuration.GetConnectionString("DefaultConnection")
-                               ?? throw new InvalidOperationException("DefaultConnection connection string is not configured.");
+        var connectionString = configuration.GetConnectionString("DefaultConnection");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            connectionString = configuration["ConnectionStrings:DefaultConnection"]
+                ?? configuration["ConnectionString:DefaultConnection"];
+        }
+        var hasValidConnectionString = !string.IsNullOrWhiteSpace(connectionString) && !connectionString.Equals("InMemory", StringComparison.OrdinalIgnoreCase);
+        var useInMemory = configuration.GetValue<bool>("UseInMemoryDatabase", !hasValidConnectionString) || !hasValidConnectionString;
 
         services.AddDbContext<ApplicationDbContext>(options =>
-            options.UseNpgsql(connectionString));
+        {
+            if (useInMemory)
+            {
+                options.UseInMemoryDatabase("NexusSalesDb");
+            }
+            else
+            {
+                options.UseNpgsql(connectionString);
+            }
+        });
 
         // 2. Options pattern
         services.Configure<JwtSettings>(configuration.GetSection(JwtSettings.SectionName));

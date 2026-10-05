@@ -648,17 +648,18 @@ export const OpportunitiesPage: React.FC = () => {
       key: 'value',
       header: 'Investment Amount',
       sortable: true,
-      render: deal => (
-        deal.investmentAmountConfirmed ? (
+      render: deal => {
+        const val = deal.value || (deal as any).customFields?.investmentAmount;
+        return val && Number(val) > 0 ? (
           <span style={{ color: '#10b981', fontWeight: 800, fontSize: 13 }}>
-            {formatCurrency(deal.value)}
+            {formatCurrency(Number(val))}
           </span>
         ) : (
           <span style={{ color: 'var(--text-muted, #94a3b8)', fontWeight: 600, fontSize: 13 }}>
             —
           </span>
-        )
-      ),
+        );
+      },
     },
     {
       key: 'preferredAssetClass',

@@ -34,7 +34,7 @@ Open your browser at **`http://localhost:5173`**.
   - Post-call disposition modal with automated task rescheduling.
   - Call recordings playback with audio waveforms and AI transcriptions.
 - **Customer 360 Cockpit**: Split-view relationship management with unified activity timeline, linked deals, follow-up calendar, and document repository.
-- **Role Scoping**: Persona-based access for Super Admin, Company Admin, Sales Manager, and Sales Executive.
+- **Role Scoping**: Persona-based access for Super Admin, Company Admin, Sales Executive, and IRM.
 
 ---
 

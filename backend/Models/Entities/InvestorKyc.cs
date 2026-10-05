@@ -78,10 +78,20 @@ public class InvestorKyc
 
     // Public KYC link (for customer self-fill)
     public string? KycLinkToken { get; set; }
+    public string? KycTokenHash { get; set; }
     public DateTime? KycLinkExpiresAt { get; set; }
     public bool KycLinkSent { get; set; } = false;
     /// <summary>Timestamp of the most recent successful KYC link dispatch (or resend).</summary>
     public DateTime? KycLinkSentAt { get; set; }
+    public bool IsRevoked { get; set; } = false;
+    public DateTime? RevokedAt { get; set; }
+
+    // Assisted KYC Details & Customer Consent Audit
+    public bool IsAssisted { get; set; } = false;
+    public int? AssistedByUserId { get; set; }
+    public bool CustomerConsentObtained { get; set; } = false;
+    public DateTime? CustomerConsentTimestamp { get; set; }
+    public string? CustomerConsentDetails { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }

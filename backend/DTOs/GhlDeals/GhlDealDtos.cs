@@ -76,6 +76,13 @@ public class GhlDealResponseDto
     public DateTime? VerifiedAt { get; set; }
     public string? Remarks { get; set; }
     public string? FlaggedSections { get; set; }
+
+    /// <summary>Contact phone resolved from the linked Customer record, then the denormalised CustomerName fallback.</summary>
+    public string? Phone { get; set; }
+    /// <summary>Contact email resolved from the linked Customer record.</summary>
+    public string? Email { get; set; }
+    /// <summary>Location resolved from the linked Customer record.</summary>
+    public string? Location { get; set; }
 }
 
 public class GhlDealActivityResponseDto
