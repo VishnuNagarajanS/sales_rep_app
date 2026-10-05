@@ -53,7 +53,10 @@ public class LeadService : ILeadService
             ? companyId.Value
             : (role == "super_admin" ? (filter?.CompanyId ?? (filter?.CompanySlug == "jamin" || filter?.CompanySlug == "2" ? 2 : 1)) : null);
 
-        var query = _context.Leads.AsNoTracking().Include(l => l.AssignedAgent).AsQueryable();
+        var query = _context.Leads.AsNoTracking()
+            .Include(l => l.AssignedAgent)
+                .ThenInclude(u => u!.Role)
+            .AsQueryable();
 
         if (role == "super_admin")
         {
@@ -114,9 +117,9 @@ public class LeadService : ILeadService
         if (_currentUser.Role == "company_admin" || _currentUser.Role == "super_admin")
         {
             if (string.Equals(filter.Assignment, "unassigned", StringComparison.OrdinalIgnoreCase))
-                query = query.Where(l => l.AssignedAgentId == null);
+                query = query.Where(l => l.AssignedAgentId == null || l.AssignedAgent!.Role.Code == "company_admin" || l.AssignedAgent!.Role.Code == "super_admin");
             else if (string.Equals(filter.Assignment, "assigned", StringComparison.OrdinalIgnoreCase))
-                query = query.Where(l => l.AssignedAgentId != null);
+                query = query.Where(l => l.AssignedAgentId != null && l.AssignedAgent!.Role.Code != "company_admin" && l.AssignedAgent!.Role.Code != "super_admin");
         }
 
         if (string.Equals(filter.Status, "all", StringComparison.OrdinalIgnoreCase))
@@ -196,8 +199,15 @@ public class LeadService : ILeadService
         }
         else if (dto.AssignedAgentId.HasValue && dto.AssignedAgentId.Value > 0)
         {
-            agentId = dto.AssignedAgentId.Value;
-            assignedAt = DateTime.UtcNow;
+            // Verify if the target user is a real agent (sales_executive / irm).
+            // If it belongs to an admin or super_admin, keep lead unassigned in the queue!
+            var targetAgent = await _context.Users.Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.Id == dto.AssignedAgentId.Value, ct);
+            if (targetAgent != null && targetAgent.Role?.Code != "company_admin" && targetAgent.Role?.Code != "super_admin")
+            {
+                agentId = dto.AssignedAgentId.Value;
+                assignedAt = DateTime.UtcNow;
+            }
         }
 
         var companyId = dto.CompanyId ?? _currentUser.CompanyId ?? 1;

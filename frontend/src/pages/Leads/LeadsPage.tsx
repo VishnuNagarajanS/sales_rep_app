@@ -309,7 +309,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   );
 
   useEffect(() => {
-    if (!isGhlAdmin) return;
+    if (isLeadScopedUser) return;
     let cancelled = false;
     loadAgentDirectory(tenant?.id, user?.id).then(dir => {
       if (cancelled) return;
@@ -318,7 +318,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       setAgentsFromApi(dir.fromApi);
     });
     return () => { cancelled = true; };
-  }, [tenant?.id, user?.id, isGhlAdmin]);
+  }, [tenant?.id, user?.id, isLeadScopedUser]);
 
   // Form state
   const [formData, setFormData] = useState<Partial<Lead>>({});
@@ -657,8 +657,8 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       console.warn('[LeadsPage] Cannot create lead: user session is not yet loaded.');
       return;
     }
-    const defaultAgentId = user.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec');
-    const defaultAgentName = user.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer');
+    const defaultAgentId = isLeadScopedUser ? user.id : undefined;
+    const defaultAgentName = isLeadScopedUser ? user.name : undefined;
 
     setFormData({
       id: `lead-${Date.now()}`,
@@ -745,10 +745,14 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     // Pull real agent ID and name at save-time to prevent stale/fallback placeholder IDs from leaking
     const resolvedAgentId = (isLeadScopedUser && user?.id)
       ? user.id
-      : (formData.assignedAgentId && formData.assignedAgentId !== 'usr-exec' ? formData.assignedAgentId : (user?.id || 'usr-exec'));
+      : (formData.assignedAgentId && formData.assignedAgentId !== 'usr-exec' && formData.assignedAgentId !== 'unassigned'
+          ? formData.assignedAgentId
+          : undefined);
     const resolvedAgentName = (isLeadScopedUser && user?.name)
       ? user.name
-      : (formData.assignedAgentName && formData.assignedAgentName !== 'Agent' ? formData.assignedAgentName : (user?.name || 'Agent'));
+      : (formData.assignedAgentName && formData.assignedAgentName !== 'Agent' && formData.assignedAgentName !== 'Unassigned'
+          ? formData.assignedAgentName
+          : undefined);
 
     const isExistingById = leads.some(l => l.id === formData.id);
     const targetCompanyId = formData.companyId || tenant?.id || 't-ghl-01';
@@ -940,7 +944,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       storageService.addAuditLog({
         id: `aud-${Date.now()}`,
         timestamp: 'Just now',
-        actorName: user?.name || resolvedAgentName,
+        actorName: user?.name || resolvedAgentName || 'Admin',
         actorEmail: user?.email || 'agent@nexus.io',
         action: isUpdated ? 'LEAD_UPDATED' : 'LEAD_CREATED',
         entityType: 'Lead',
@@ -1820,6 +1824,32 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
               </select>
             </div>
           </div>
+
+          {!isLeadScopedUser && (
+            <div className="form-group">
+              <label className="form-label">Assigned Sales Agent</label>
+              <select
+                className="form-select"
+                value={formData.assignedAgentId || ''}
+                onChange={e => {
+                  const val = e.target.value;
+                  const agentObj = agents.find(a => String(a.id) === String(val) || String(a.dbId) === String(val));
+                  setFormData(prev => ({
+                    ...prev,
+                    assignedAgentId: val || undefined,
+                    assignedAgentName: agentObj ? agentObj.name : undefined,
+                  }));
+                }}
+              >
+                <option value="">Unassigned (Queue for manual / auto distribution)</option>
+                {agents.map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* DYNAMIC TENANT CUSTOM FIELDS (Blueprint Section 7.3) */}
           <div className="lead-custom-schema-box">
