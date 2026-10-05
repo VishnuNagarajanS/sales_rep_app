@@ -595,17 +595,22 @@ const GhlIrmKycView: React.FC = () => {
   useEffect(() => {
     if (isMockMode()) return;
 
-    const interval = setInterval(() => {
-      refreshDbKycs();
-    }, 15000);
+    let isMounted = true;
+    const safeRefresh = () => {
+      if (isMounted) {
+        refreshDbKycs();
+      }
+    };
+
+    const interval = setInterval(safeRefresh, 15000);
 
     const handleFocus = () => {
-      refreshDbKycs();
+      safeRefresh();
     };
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        refreshDbKycs();
+        safeRefresh();
       }
     };
 
@@ -613,6 +618,7 @@ const GhlIrmKycView: React.FC = () => {
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
+      isMounted = false;
       clearInterval(interval);
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibilityChange);

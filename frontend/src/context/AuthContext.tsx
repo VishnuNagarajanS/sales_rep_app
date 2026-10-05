@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { User, Tenant, TenantSlug, RoleCode } from '../types';
 import { DEFAULT_TENANTS } from '../constants/defaultTenants';
 import { SYSTEM_ROLES } from '../constants/roles';
@@ -109,10 +109,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return null;
     }
 
-    const saved = sessionStorage.getItem('nexus_current_user');
+    const saved = sessionStorage.getItem('nexus_current_user') || localStorage.getItem('nexus_current_user');
     if (saved) {
       try {
-        const parsed = JSON.parse(saved);
+        const rawParsed = JSON.parse(saved);
+        const parsed = rawParsed?.user && (rawParsed.user.id || rawParsed.user.email) ? rawParsed.user : rawParsed;
         if (parsed?.role?.code && SYSTEM_ROLES[parsed.role.code]) {
           parsed.role.permissions = Array.from(
             new Set([...(parsed.role.permissions || []), ...SYSTEM_ROLES[parsed.role.code].permissions])
@@ -129,10 +130,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Tenant state
   const [tenant, setTenant] = useState<Tenant | null>(() => {
     // If the restored user is a Super Admin, tenant is null unless active in support mode
-    const savedUser = sessionStorage.getItem('nexus_current_user');
+    const savedUser = sessionStorage.getItem('nexus_current_user') || localStorage.getItem('nexus_current_user');
     if (savedUser) {
       try {
-        const parsedUser = JSON.parse(savedUser);
+        const rawUser = JSON.parse(savedUser);
+        const parsedUser = rawUser?.user && (rawUser.user.id || rawUser.user.email) ? rawUser.user : rawUser;
         if (parsedUser?.role?.code === 'super_admin') {
           const supportModeTenant = sessionStorage.getItem('nexus_support_mode_tenant');
           if (supportModeTenant) {
@@ -142,7 +144,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } catch {}
     }
-    const saved = sessionStorage.getItem('nexus_current_tenant');
+    const saved = sessionStorage.getItem('nexus_current_tenant') || localStorage.getItem('nexus_current_tenant');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -379,8 +381,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {}
   };
 
+  const userRef = useRef<User | null>(user);
+  userRef.current = user;
+
+  const lastRevalidationRef = useRef<number>(0);
+
   const revalidateSession = async () => {
-    if (!user || isMockMode()) return;
+    if (!userRef.current || isMockMode()) return;
     const token = sessionStorage.getItem('nexus_auth_token') || localStorage.getItem('nexus_auth_token');
     if (!token || isJwtExpired(token)) {
       logout();
@@ -389,10 +396,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const res: any = await apiClient.get('/auth/me');
       if (res && res.success && res.data) {
-        setUser(res.data);
+        // Backend returns ApiResponse<LoginResponseDto> which is { user: UserDto, tenant: TenantDto }
+        const userData: User | null = res.data.user || (res.data.id ? res.data : null);
+        const tenantData: Tenant | null = res.data.tenant || null;
+
+        if (userData) {
+          if (userData.role?.code && SYSTEM_ROLES[userData.role.code]) {
+            userData.role.permissions = Array.from(
+              new Set([...(userData.role.permissions || []), ...(SYSTEM_ROLES[userData.role.code].permissions || [])])
+            );
+          }
+          setUser(userData);
+        }
+
+        if (userData?.role?.code === 'super_admin') {
+          const supportModeTenant = sessionStorage.getItem('nexus_support_mode_tenant');
+          if (supportModeTenant) {
+            try {
+              setTenant(JSON.parse(supportModeTenant));
+            } catch {
+              setTenant(null);
+            }
+          } else {
+            setTenant(null);
+          }
+        } else if (tenantData) {
+          setTenant(tenantData);
+        }
       }
     } catch {
-      // 401 triggers nexus_auth_unauthorized automatically
+      // 401 triggers nexus_auth_unauthorized automatically via apiClient
     }
   };
 
@@ -409,7 +442,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const rawUser = localStorage.getItem('nexus_current_user');
           if (rawUser) {
             try {
-              setUser(JSON.parse(rawUser));
+              const raw = JSON.parse(rawUser);
+              const u = raw?.user && (raw.user.id || raw.user.email) ? raw.user : raw;
+              if (u) {
+                if (u.role?.code && SYSTEM_ROLES[u.role.code]) {
+                  u.role.permissions = Array.from(
+                    new Set([...(u.role.permissions || []), ...(SYSTEM_ROLES[u.role.code].permissions || [])])
+                  );
+                }
+                setUser(u);
+              }
             } catch {}
           }
           const rawTenant = localStorage.getItem('nexus_current_tenant');
@@ -426,11 +468,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       logout();
     };
 
-    let lastRevalidation = 0;
     const handleRevalidate = () => {
+      if (!userRef.current) return;
       const now = Date.now();
-      if (now - lastRevalidation < 15000) return;
-      lastRevalidation = now;
+      if (now - lastRevalidationRef.current < 15000) return;
+      lastRevalidationRef.current = now;
       revalidateSession();
     };
 
@@ -451,7 +493,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       window.removeEventListener('focus', handleRevalidate);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [user]);
+  }, []);
 
   return (
     <AuthContext.Provider
