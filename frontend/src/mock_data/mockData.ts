@@ -53,6 +53,7 @@ export const TENANTS: Record<string, Tenant> = {
     currency: '₹ INR',
     businessHours: '09:30 AM - 07:00 PM IST',
     status: 'Active',
+    subscriptionPlan: 'Wealth Advisory Enterprise Suite',
   },
   jamin: {
     id: 't-jamin-02',
@@ -83,6 +84,7 @@ export const TENANTS: Record<string, Tenant> = {
     currency: '₹ INR',
     businessHours: '09:00 AM - 06:30 PM IST',
     status: 'Active',
+    subscriptionPlan: 'Wealth Advisory Enterprise Suite',
   },
 };
 

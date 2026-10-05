@@ -184,6 +184,7 @@ public class ApplicationDbContext : DbContext
                 Timezone = "Asia/Kolkata (IST)",
                 Currency = "₹ INR",
                 BusinessHours = "10:00 AM - 06:30 PM IST",
+                SubscriptionPlan = "Wealth Advisory Enterprise Suite",
                 IsActive = true,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
@@ -203,6 +204,7 @@ public class ApplicationDbContext : DbContext
                 Timezone = "Asia/Kolkata (IST)",
                 Currency = "₹ INR",
                 BusinessHours = "10:00 AM - 06:30 PM IST",
+                SubscriptionPlan = "Wealth Advisory Enterprise Suite",
                 IsActive = true,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             }
