@@ -40,6 +40,7 @@ export const AssignedLeadsPage: React.FC = () => {
   const [datePreset, setDatePreset] = useState<string>('all');
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Agent reassignment confirmation state for Edit panel
   const [pendingAgent, setPendingAgent] = useState<AssignableAgent | null>(null);
@@ -225,6 +226,7 @@ export const AssignedLeadsPage: React.FC = () => {
 
   const loadData = async () => {
     if (apiClient.isMockMode()) {
+      setLoadError(null);
       const allLeads = storageService.getLeads(tenant?.id);
       const assigned = allLeads.filter(lead => isLeadAssigned(lead, adminIds));
       setLeads(assigned);
@@ -236,6 +238,7 @@ export const AssignedLeadsPage: React.FC = () => {
     }
 
     try {
+      setLoadError(null);
       const res = await apiClient.get<any>('/sales-executive/leads?page=1&pageSize=200&assignment=assigned');
       if (res.success && res.data && res.data.items) {
         const apiLeads = res.data.items.map((item: any) => ({
@@ -249,9 +252,12 @@ export const AssignedLeadsPage: React.FC = () => {
           if (!prev) return null;
           return apiLeads.find((l: any) => l.id === prev.id) || null;
         });
+      } else {
+        setLoadError(res.message || 'Failed to load assigned leads from server.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load leads from API', err);
+      setLoadError(err?.message || 'Failed to connect to server. Please try again.');
     }
   };
 
@@ -589,6 +595,34 @@ export const AssignedLeadsPage: React.FC = () => {
       </div>
 
       {/* Assigned Leads Table */}
+      {loadError && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '12px 16px',
+          marginBottom: 16,
+          borderRadius: 8,
+          backgroundColor: 'rgba(239, 68, 68, 0.1)',
+          border: '1px solid rgba(239, 68, 68, 0.25)',
+          color: '#ef4444',
+          fontSize: 13,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <AlertCircle size={16} />
+            <span>{loadError}</span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => loadData()}
+            style={{ borderColor: '#ef4444', color: '#ef4444' }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       <DataTable
         columns={columns}
         data={filteredLeads}

@@ -130,9 +130,11 @@ export const CustomersPage: React.FC = () => {
   const [followups, setFollowups] = useState<Followup[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadData = async () => {
     try {
+      setLoadError(null);
       const [custs, cCalls, cFollowups, cDeals, cLeads] = await Promise.all([
         getCustomers(tenant?.id),
         getCalls(tenant?.id),
@@ -155,8 +157,14 @@ export const CustomersPage: React.FC = () => {
       if (firstVisible && !selectedCustomer) {
         setSelectedCustomer(firstVisible);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load customers page data', err);
+      setCustomers([]);
+      setCalls([]);
+      setFollowups([]);
+      setDeals([]);
+      setLeads([]);
+      setLoadError(err?.message || 'Failed to load customer records from server.');
     }
   };
 
@@ -375,7 +383,7 @@ export const CustomersPage: React.FC = () => {
     try {
       allLeads = await getLeads(tenant?.id);
     } catch {
-      allLeads = storageService.getLeads(tenant?.id) || [];
+      allLeads = isMockMode() ? (storageService.getLeads(tenant?.id) || []) : [];
     }
     for (const { customer, irmId, irmName } of pairs) {
       const lead = allLeads.find(l =>
@@ -786,6 +794,25 @@ export const CustomersPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {loadError && (
+        <div
+          className="alert-banner error"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px 16px',
+            marginBottom: '16px',
+            borderRadius: '8px',
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            color: '#ef4444',
+          }}
+        >
+          <span>{loadError}</span>
+        </div>
+      )}
 
       {/* Customer 360 Split View: List on left, Full 360 on right */}
       <div className="customers-split-layout">

@@ -89,6 +89,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [allFollowups, setAllFollowups] = useState<any[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Duplicate in Follow-up & Customer Resolution States
   interface DuplicateFollowupModalData {
@@ -386,6 +387,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     }
 
     try {
+      setLoadError(null);
       const [updatedFollowups, updatedCustomers, updatedDeals] = await Promise.all([
         getFollowups(tenant?.id).catch(() => []),
         getCustomers(tenant?.id).catch(() => []),
@@ -406,6 +408,8 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
             assignedAgentId: item.assignedAgentId ? String(item.assignedAgentId) : undefined,
             customFields: item.customFields || {}
           }));
+        } else {
+          throw new Error(res.message || 'Failed to load unassigned leads from server.');
         }
       } else {
         loadedLeads = await getLeads(tenant?.id);
@@ -421,8 +425,10 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         }
         return found;
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load leads from API', err);
+      setLeads([]);
+      setLoadError(err?.message || 'Failed to load leads from server.');
     }
   };
 
@@ -1459,6 +1465,25 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
           </button>
         </div>
       </div>
+
+      {loadError && (
+        <div
+          className="alert-banner error"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px 16px',
+            marginBottom: '16px',
+            borderRadius: '8px',
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            color: '#ef4444',
+          }}
+        >
+          <span>{loadError}</span>
+        </div>
+      )}
 
       {/* Leads Table */}
       <DataTable

@@ -87,23 +87,45 @@ export const InvestorsPage: React.FC = () => {
   const [form, setForm] = useState<InvestorForm>(BLANK_FORM);
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof InvestorForm, string>>>({});
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   // ── Data loading ──────────────────────────────────────────────────────────
   const loadData = async () => {
     try {
-      const [apiInvestors, apiDeals] = await Promise.all([
+      setLoadError(null);
+      const [apiInvestors, apiDeals, apiCalls, apiConsultations, apiOpportunities, apiFollowups] = await Promise.all([
         getInvestors(tenant?.id),
         getDeals(tenant?.id),
+        getCalls(tenant?.id),
+        getConsultations(tenant?.id),
+        getOpportunities(tenant?.id),
+        getFollowups(tenant?.id),
       ]);
       setInvestors(apiInvestors || []);
       setDeals(apiDeals || []);
-    } catch {
-      setInvestors(storageService.getInvestors(tenant?.id));
-      setDeals(storageService.getDeals(tenant?.id));
+      setAllCalls(apiCalls || []);
+      setAllConsultations(apiConsultations || []);
+      setAllOpportunities(apiOpportunities || []);
+      setAllFollowups(apiFollowups || []);
+    } catch (err: any) {
+      console.error('Failed to load investor data:', err);
+      if (storageService.isMockMode()) {
+        setInvestors(storageService.getInvestors(tenant?.id));
+        setDeals(storageService.getDeals(tenant?.id));
+        setAllCalls(storageService.getCalls(tenant?.id));
+        setAllConsultations(storageService.getConsultations(tenant?.id));
+        setAllOpportunities(storageService.getOpportunities(tenant?.id));
+        setAllFollowups(storageService.getFollowups(tenant?.id));
+      } else {
+        setInvestors([]);
+        setDeals([]);
+        setAllCalls([]);
+        setAllConsultations([]);
+        setAllOpportunities([]);
+        setAllFollowups([]);
+        setLoadError(err?.message || 'Failed to load investor records from server.');
+      }
     }
-    setAllCalls(storageService.getCalls(tenant?.id));
-    setAllConsultations(storageService.getConsultations(tenant?.id));
-    setAllOpportunities(storageService.getOpportunities(tenant?.id));
-    setAllFollowups(storageService.getFollowups(tenant?.id));
   };
 
   useEffect(() => {
@@ -431,6 +453,25 @@ export const InvestorsPage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {loadError && (
+        <div
+          className="alert-banner error"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px 16px',
+            marginBottom: '16px',
+            borderRadius: '8px',
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            color: '#ef4444',
+          }}
+        >
+          <span>{loadError}</span>
+        </div>
+      )}
 
       {/* ── Data table ───────────────────────────────────────────────────── */}
       <DataTable

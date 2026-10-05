@@ -30,26 +30,18 @@ import {
 } from '../types';
 import { DEFAULT_TENANTS } from '../constants/defaultTenants';
 import { isMockMode } from '../config/environment';
-import {
-  INITIAL_CUSTOM_FIELD_DEFINITIONS,
-  INITIAL_INVESTORS,
-  INITIAL_CONSULTATIONS,
-  INITIAL_OPPORTUNITIES,
-  INITIAL_NOTIFICATIONS,
-  INITIAL_DEAL_ACTIVITIES,
-  INITIAL_CALLS,
-  INITIAL_CUSTOMERS,
-  MOCK_AGENTS,
-  MOCK_IRMS,
-  USERS,
-} from '../mock_data/mockData';
-import { ensureInitialAdminFollowups } from '../mock_data/adminFollowupsData';
+import { DEFAULT_CUSTOM_FIELD_DEFINITIONS } from '../constants/customFields';
 
 export type PopupPosition = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
 
 class StorageService {
   constructor() {
     this.runLeadsDedupMigration();
+    this.cleanupFakeRuntimeData();
+  }
+
+  isMockMode(): boolean {
+    return isMockMode();
   }
 
   private runLeadsDedupMigration(): void {
@@ -61,6 +53,122 @@ class StorageService {
       localStorage.setItem(MIGRATION_KEY, 'true');
     } catch (e) {
       console.error('Error in runLeadsDedupMigration:', e);
+    }
+  }
+
+  private cleanupFakeRuntimeData(): void {
+    try {
+      if (typeof window === 'undefined' || !window.localStorage) return;
+      if (isMockMode()) return;
+
+      // 1. Purge fake follow-ups (only confirmed exact fixture IDs)
+      const exactFakeFollowupIds = new Set([
+        'flw-se-ps-01', 'flw-se-ps-02', 'flw-se-ps-03',
+        'flw-se-rv-01', 'flw-se-rv-02', 'flw-se-rv-03',
+        'flw-irm-rv-01', 'flw-irm-rv-02', 'flw-irm-rv-03',
+        'flw-irm-mn-01', 'flw-irm-mn-02', 'flw-irm-mn-03',
+        'flw-irm-sj-01', 'flw-irm-sj-02', 'flw-irm-sj-03',
+      ]);
+      const rawFollowups = localStorage.getItem('nexus_followups');
+      if (rawFollowups) {
+        const parsed = JSON.parse(rawFollowups);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter((f: any) => !exactFakeFollowupIds.has(String(f.id || '')));
+          if (cleaned.length !== parsed.length) {
+            localStorage.setItem('nexus_followups', JSON.stringify(cleaned));
+          }
+        }
+      }
+
+      // 2. Purge fake investors (only confirmed exact fixture IDs)
+      const exactFakeInvestorIds = new Set(['inv-01', 'inv-02', 'inv-03', 'inv-04', 'inv-05']);
+      const rawInvestors = localStorage.getItem('nexus_investors');
+      if (rawInvestors) {
+        const parsed = JSON.parse(rawInvestors);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter((i: any) => !exactFakeInvestorIds.has(String(i.id || '')));
+          if (cleaned.length !== parsed.length) {
+            localStorage.setItem('nexus_investors', JSON.stringify(cleaned));
+          }
+        }
+      }
+
+      // 3. Purge fake opportunities (only confirmed exact fixture IDs)
+      const exactFakeOppIds = new Set(['opp-01', 'opp-02', 'opp-03', 'opp-04', 'opp-05']);
+      const rawOpps = localStorage.getItem('nexus_opportunities');
+      if (rawOpps) {
+        const parsed = JSON.parse(rawOpps);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter((o: any) => !exactFakeOppIds.has(String(o.id || '')));
+          if (cleaned.length !== parsed.length) {
+            localStorage.setItem('nexus_opportunities', JSON.stringify(cleaned));
+          }
+        }
+      }
+
+      // 4. Purge fake consultations (only confirmed exact fixture IDs)
+      const exactFakeConsIds = new Set(['cns-01', 'cns-02', 'cns-03', 'cns-04', 'cns-05']);
+      const rawCons = localStorage.getItem('nexus_consultations');
+      if (rawCons) {
+        const parsed = JSON.parse(rawCons);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter((c: any) => !exactFakeConsIds.has(String(c.id || '')));
+          if (cleaned.length !== parsed.length) {
+            localStorage.setItem('nexus_consultations', JSON.stringify(cleaned));
+          }
+        }
+      }
+
+      // 5. Purge fake calls (only confirmed exact fixture IDs)
+      const exactFakeCallIds = new Set([
+        'call-01', 'call-02', 'call-03', 'call-04', 'call-05',
+        'call-06', 'call-07', 'call-08', 'call-09', 'call-10'
+      ]);
+      const rawCalls = localStorage.getItem('nexus_calls');
+      if (rawCalls) {
+        const parsed = JSON.parse(rawCalls);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter((c: any) => !exactFakeCallIds.has(String(c.id || '')));
+          if (cleaned.length !== parsed.length) {
+            localStorage.setItem('nexus_calls', JSON.stringify(cleaned));
+          }
+        }
+      }
+
+      // 6. Purge fake test users (only confirmed exact IDs)
+      const exactFakeUserIds = new Set(['28', '29', '30']);
+      ['nexus_dev_users', 'nexus_users'].forEach(key => {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            const cleaned = parsed.filter((u: any) => !exactFakeUserIds.has(String(u.id || '')));
+            if (cleaned.length !== parsed.length) {
+              localStorage.setItem(key, JSON.stringify(cleaned));
+            }
+          }
+        }
+      });
+
+      // 7. Purge fake admin kanban cards (only confirmed exact fixture IDs)
+      const exactFakeKanbanIds = new Set([
+        'kanban-se-01', 'kanban-se-02', 'kanban-se-03', 'kanban-se-04', 'kanban-se-05',
+        'kanban-se-06', 'kanban-se-07', 'kanban-se-08', 'kanban-se-09', 'kanban-se-10',
+        'kanban-irm-01', 'kanban-irm-02', 'kanban-irm-03', 'kanban-irm-04', 'kanban-irm-05',
+        'kanban-irm-06', 'kanban-irm-07', 'kanban-irm-08', 'kanban-irm-09', 'kanban-irm-10'
+      ]);
+      const rawKanban = localStorage.getItem('nexus_admin_kanban_cards_v1');
+      if (rawKanban) {
+        const parsed = JSON.parse(rawKanban);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter((c: any) => !exactFakeKanbanIds.has(String(c.id || '')));
+          if (cleaned.length !== parsed.length) {
+            localStorage.setItem('nexus_admin_kanban_cards_v1', JSON.stringify(cleaned));
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error in cleanupFakeRuntimeData:', e);
     }
   }
 
@@ -102,14 +210,10 @@ class StorageService {
   getUsers(companySlug?: string): User[] {
     let users = this.get<User[]>('users', []);
     if (!users || users.length === 0) {
-      if (isMockMode()) {
-        users = USERS;
-      } else {
-        try {
-          const raw = localStorage.getItem('nexus_dev_users');
-          if (raw) users = JSON.parse(raw);
-        } catch {}
-      }
+      try {
+        const raw = localStorage.getItem('nexus_dev_users');
+        if (raw) users = JSON.parse(raw);
+      } catch {}
     }
     return companySlug ? users.filter(u => u.companySlug === companySlug || (u as any).companyId === companySlug) : users;
   }
@@ -297,24 +401,21 @@ class StorageService {
 
   // Deal Activities
   getDealActivities(dealId: string, companyId?: string): DealActivity[] {
-    const activities = this.get<DealActivity[]>('deal_activities', INITIAL_DEAL_ACTIVITIES);
+    const activities = this.get<DealActivity[]>('deal_activities', []);
     return activities.filter(a => a.dealId === dealId && (!companyId || a.companyId === companyId));
   }
 
   addDealActivity(activity: DealActivity): void {
-    const activities = this.get<DealActivity[]>('deal_activities', INITIAL_DEAL_ACTIVITIES);
+    const activities = this.get<DealActivity[]>('deal_activities', []);
     activities.unshift(activity);
     this.set('deal_activities', activities);
     window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 
-  // Calls (Seeds from INITIAL_CALLS; real calls are prepended via addCall)
+  // Calls
   getCalls(companyId?: string): CallRecord[] {
     const stored = this.get<CallRecord[]>('calls', []);
-    // Merge: keep stored calls first, then append any INITIAL_CALLS not already present
-    const storedIds = new Set(stored.map(c => c.id));
-    const merged = [...stored, ...INITIAL_CALLS.filter(c => !storedIds.has(c.id))];
-    return companyId ? merged.filter(c => c.companyId === companyId) : merged;
+    return companyId ? stored.filter(c => c.companyId === companyId) : stored;
   }
 
   addCall(call: CallRecord): void {
@@ -323,18 +424,10 @@ class StorageService {
     this.set('calls', calls);
   }
 
-  // Follow-ups (Defaults to empty [] - real-time data only)
+  // Follow-ups
   getFollowups(companyId?: string): Followup[] {
     const raw = this.get<Followup[]>('followups', []) || [];
-    const { list, modified } = ensureInitialAdminFollowups(raw);
-    if (modified) {
-      try {
-        localStorage.setItem('nexus_followups', JSON.stringify(list));
-      } catch (e) {
-        console.error('Failed to seed admin followups', e);
-      }
-    }
-    return companyId ? list.filter(f => f.companyId === companyId) : list;
+    return companyId ? raw.filter(f => f.companyId === companyId) : raw;
   }
 
   cleanupGhlPendingFollowups(companyId?: string): void {
@@ -523,19 +616,9 @@ class StorageService {
     this.set('bookings', bookings);
   }
 
-  // Investors (Defaults to INITIAL_INVESTORS)
+  // Investors (Defaults to empty [] - real-time data only)
   getInvestors(companyId?: string): Investor[] {
-    let investors = this.get<Investor[]>('investors', INITIAL_INVESTORS);
-    if (!investors || investors.length === 0) {
-      investors = INITIAL_INVESTORS;
-    } else {
-      const existingIds = new Set(investors.map(i => i.id));
-      const missing = INITIAL_INVESTORS.filter(i => !existingIds.has(i.id));
-      if (missing.length > 0) {
-        investors = [...investors, ...missing];
-        this.set('investors', investors);
-      }
-    }
+    const investors = this.get<Investor[]>('investors', []);
     return companyId ? investors.filter(i => i.companyId === companyId) : investors;
   }
 
@@ -555,19 +638,9 @@ class StorageService {
     this.set('investors', investors);
   }
 
-  // Consultations (Defaults to INITIAL_CONSULTATIONS)
+  // Consultations (Defaults to empty [] - real-time data only)
   getConsultations(companyId?: string): Consultation[] {
-    let consultations = this.get<Consultation[]>('consultations', INITIAL_CONSULTATIONS);
-    if (!consultations || consultations.length === 0) {
-      consultations = INITIAL_CONSULTATIONS;
-    } else {
-      const existingIds = new Set(consultations.map(c => c.id));
-      const missing = INITIAL_CONSULTATIONS.filter(c => !existingIds.has(c.id));
-      if (missing.length > 0) {
-        consultations = [...consultations, ...missing];
-        this.set('consultations', consultations);
-      }
-    }
+    const consultations = this.get<Consultation[]>('consultations', []);
     return companyId ? consultations.filter(c => c.companyId === companyId) : consultations;
   }
 
@@ -587,19 +660,9 @@ class StorageService {
     this.set('consultations', consultations);
   }
 
-  // Opportunities (Defaults to INITIAL_OPPORTUNITIES)
+  // Opportunities (Defaults to empty [] - real-time data only)
   getOpportunities(companyId?: string): InvestmentOpportunity[] {
-    let opps = this.get<InvestmentOpportunity[]>('opportunities', INITIAL_OPPORTUNITIES);
-    if (!opps || opps.length === 0) {
-      opps = INITIAL_OPPORTUNITIES;
-    } else {
-      const existingIds = new Set(opps.map(o => o.id));
-      const missing = INITIAL_OPPORTUNITIES.filter(o => !existingIds.has(o.id));
-      if (missing.length > 0) {
-        opps = [...opps, ...missing];
-        this.set('opportunities', opps);
-      }
-    }
+    const opps = this.get<InvestmentOpportunity[]>('opportunities', []);
     return companyId ? opps.filter(o => o.companyId === companyId) : opps;
   }
 
@@ -634,17 +697,7 @@ class StorageService {
 
   // Notifications (Multi-tenant scoped with strict cross-tenant isolation)
   getNotifications(companyId?: string, userId?: string, userRoleCode?: string): NotificationItem[] {
-    let raw = this.get<NotificationItem[]>('notifications', []);
-
-    // Seed defaults if empty
-    if (raw.length === 0) {
-      raw = INITIAL_NOTIFICATIONS;
-      try {
-        localStorage.setItem('nexus_notifications', JSON.stringify(raw));
-      } catch (e) {
-        console.error('Failed to seed initial notifications', e);
-      }
-    }
+    const raw = this.get<NotificationItem[]>('notifications', []);
 
     // Auto-migrate any legacy items lacking tenant information (default to GHL)
     let migrated = false;
@@ -907,7 +960,7 @@ class StorageService {
 
   // Custom Field Definitions
   getCustomFieldDefinitions(companyId?: string): CustomFieldDefinition[] {
-    const definitions = this.get<CustomFieldDefinition[]>('custom_field_definitions', INITIAL_CUSTOM_FIELD_DEFINITIONS);
+    const definitions = this.get<CustomFieldDefinition[]>('custom_field_definitions', DEFAULT_CUSTOM_FIELD_DEFINITIONS);
     if (!companyId) return definitions;
     return definitions.filter(d =>
       d.companyId === companyId ||
@@ -946,62 +999,24 @@ class StorageService {
     this.set('products_services', items);
   }
 
-
-
-  // Optional: Explicitly populate demo mock data from separate mock_data folder
-  async loadMockDataFromSeparateFolder(): Promise<void> {
-    const mock = await import('../mock_data/mockData');
-    this.set('leads', mock.INITIAL_LEADS);
-    this.set('customers', mock.INITIAL_CUSTOMERS);
-    this.set('deals', mock.INITIAL_DEALS);
-    this.set('calls', mock.INITIAL_CALLS);
-    this.set('followups', mock.INITIAL_FOLLOWUPS);
-    this.set('projects', mock.INITIAL_PROJECTS);
-    this.set('plots', mock.INITIAL_PLOTS);
-    this.set('site_visits', mock.INITIAL_SITE_VISITS);
-    this.set('bookings', mock.INITIAL_BOOKINGS);
-    this.set('investors', mock.INITIAL_INVESTORS);
-    this.set('consultations', mock.INITIAL_CONSULTATIONS);
-    this.set('opportunities', mock.INITIAL_OPPORTUNITIES);
-    this.set('audit_logs', mock.INITIAL_AUDIT_LOGS);
-    this.set('notifications', mock.INITIAL_NOTIFICATIONS);
-    this.set('users', mock.USERS);
-    this.set('tenants', Object.values(mock.TENANTS));
-    this.set('custom_field_definitions', mock.INITIAL_CUSTOM_FIELD_DEFINITIONS);
-    this.set('deal_activities', mock.INITIAL_DEAL_ACTIVITIES);
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-  }
-
-  // Proxy methods for remaining mock data usage
   getMockAgents() {
-    return MOCK_AGENTS;
+    return this.getAgents();
   }
 
   getMockIrms() {
-    return MOCK_IRMS;
+    return this.getIrms();
   }
 
   // Used by InCallBar, CustomersPage, FollowupsPage, AdminKanbanBoard.
   getAgents(companyId?: string): Array<{ id: number | string; name: string; email?: string; role?: string }> {
-    if (isMockMode()) {
-      return MOCK_AGENTS;
-    }
     const users = this.getUsers(companyId);
     const agents = users
       .filter(u => u.role?.code === 'sales_executive' || u.role?.name?.toLowerCase().includes('sales'))
       .map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role?.name || 'Sales Executive' }));
-    if (agents.length > 0) return agents;
-    return [
-      { id: '3', name: 'Naveen', role: 'Sales Executive', email: 'naveen@ghlindiaventures.com' },
-      { id: '28', name: 'Test_Sales', role: 'Sales Executive', email: 'test_sales@ghlindiaventures.com' },
-      { id: '29', name: 'Test_sales_2', role: 'Sales Executive', email: 'test_sales_2@ghlindiaventures.com' },
-    ];
+    return agents;
   }
 
   getIrms(companyId?: string): IrmProfile[] {
-    if (isMockMode()) {
-      return MOCK_IRMS;
-    }
     const users = this.getUsers(companyId);
     const irms = users
       .filter(u => u.role?.code === 'irm' || u.role?.name?.toLowerCase().includes('irm') || u.role?.name?.toLowerCase().includes('investor'))
@@ -1016,15 +1031,11 @@ class StorageService {
         performance: 95,
         status: 'Available' as const,
       }));
-    if (irms.length > 0) return irms;
-    return [
-      { id: '5', name: 'Dhinakaran', email: 'dhinakaran@ghlindiaventures.com', phone: '+91 98110 77889', experience: '5 Years', experienceYears: 5, experienceLevel: 'Experienced' as const, performance: 95, status: 'Available' as const },
-      { id: '30', name: 'Test_IRM', email: 'test_irm@ghlindiaventures.com', phone: '+91 98110 77890', experience: '3 Years', experienceYears: 3, experienceLevel: 'Mid-Level' as const, performance: 90, status: 'Available' as const },
-    ];
+    return irms;
   }
 
-  getInitialCustomers() {
-    return INITIAL_CUSTOMERS;
+  getInitialCustomers(): Customer[] {
+    return [];
   }
 
   // Incoming Call Popup Position

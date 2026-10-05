@@ -16,15 +16,12 @@
   },
   "dependencies": {
     "lucide-react": "^1.44.0",
-    "node-fetch": "^3.3.2",
     "ogl": "^1.0.11",
     "papaparse": "^5.7.0",
-    "pg": "^8.23.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
-    "@types/jest": "^30.0.0",
     "@types/node": "^24.13.3",
     "@types/papaparse": "^5.5.2",
     "@types/react": "^19.2.18",

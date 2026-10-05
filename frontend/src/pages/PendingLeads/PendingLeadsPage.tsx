@@ -38,6 +38,7 @@ export const PendingLeadsPage: React.FC = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [usersList, setUsersList] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Filters
   const [roleFilter, setRoleFilter] = useState<'all' | 'sales_executive' | 'irm'>('all');
@@ -74,6 +75,7 @@ export const PendingLeadsPage: React.FC = () => {
         setLeads(allLeads);
       } else {
         try {
+          setLoadError(null);
           const res = await apiClient.get<any>('/sales-executive/leads?page=1&pageSize=300');
           if (res.success && res.data && res.data.items) {
             const apiLeads = res.data.items.map((item: any) => ({
@@ -84,12 +86,13 @@ export const PendingLeadsPage: React.FC = () => {
             }));
             setLeads(apiLeads);
           } else {
-            const local = storageService.getLeads(tenant?.id) || [];
-            setLeads(local);
+            setLeads([]);
+            setLoadError(res?.message || 'Failed to load pending leads from server.');
           }
-        } catch (e) {
-          const local = storageService.getLeads(tenant?.id) || [];
-          setLeads(local);
+        } catch (e: any) {
+          console.error('Failed to load pending leads:', e);
+          setLeads([]);
+          setLoadError(e?.message || 'Failed to load pending leads from server.');
         }
       }
     } finally {
@@ -402,6 +405,25 @@ export const PendingLeadsPage: React.FC = () => {
           <RefreshCw size={14} /> Refresh
         </button>
       </div>
+
+      {loadError && (
+        <div
+          className="alert-banner error"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px 16px',
+            marginBottom: '16px',
+            borderRadius: '8px',
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            color: '#ef4444',
+          }}
+        >
+          <span>{loadError}</span>
+        </div>
+      )}
 
       {/* Top Metric Cards */}
       <div className="pending-leads-kpi-grid">

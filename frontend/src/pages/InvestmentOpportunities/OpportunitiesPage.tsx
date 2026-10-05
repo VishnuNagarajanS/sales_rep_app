@@ -118,6 +118,7 @@ export const OpportunitiesPage: React.FC = () => {
   const [amountInput, setAmountInput] = useState<string>('');
   const [isEditingAmount, setIsEditingAmount] = useState<boolean>(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // ── Data loading ──────────────────────────────────────────────────────────
   const loadData = async () => {
@@ -134,6 +135,7 @@ export const OpportunitiesPage: React.FC = () => {
       return;
     }
     try {
+      setLoadError(null);
       const [oppsData, investorsData, dealsData] = await Promise.all([
         getOpportunities(tenant?.id),
         getInvestors(tenant?.id),
@@ -147,8 +149,12 @@ export const OpportunitiesPage: React.FC = () => {
         const fresh = (dealsData || []).find(d => d.id === prev.id);
         return fresh || prev;
       });
-    } catch {
-      // Stop trusting stale cache in non-mock mode
+    } catch (err: any) {
+      console.error('Failed to load opportunities data:', err);
+      setOpps([]);
+      setInvestors([]);
+      setDeals([]);
+      setLoadError(err?.message || 'Failed to load investment opportunities from server.');
     }
   };
 
@@ -825,6 +831,25 @@ export const OpportunitiesPage: React.FC = () => {
           </button>
         )}
       </div>
+
+      {loadError && (
+        <div
+          className="alert-banner error"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px 16px',
+            marginBottom: '16px',
+            borderRadius: '8px',
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            color: '#ef4444',
+          }}
+        >
+          <span>{loadError}</span>
+        </div>
+      )}
 
       {/* ── Data table ───────────────────────────────────────────────────── */}
       {isGhlIrm ? (

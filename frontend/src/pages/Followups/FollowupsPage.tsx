@@ -126,23 +126,18 @@ export const FollowupsPage: React.FC = () => {
     if (selectedRole === 'sales_executive') {
       const storageAgents = storageService.getAgents(tenant?.id);
       if (storageAgents && storageAgents.length > 0) return storageAgents;
+      return [{ id: '3', name: 'Naveen' }];
     }
-    // Fallback strictly to real DB users
-    if (selectedRole === 'sales_executive') {
-      return [
-        { id: '3', name: 'Naveen' },
-        { id: '28', name: 'Test_Sales' },
-        { id: '29', name: 'Test_sales_2' },
-      ];
-    }
-    return [
-      { id: '5', name: 'Dhinakaran' },
-      { id: '30', name: 'Test_IRM' },
-    ];
+    const storageIrms = storageService.getIrms(tenant?.id);
+    if (storageIrms && storageIrms.length > 0) return storageIrms;
+    return [{ id: '5', name: 'Dhinakaran' }];
   }, [selectedRole, users]);
+
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadData = async () => {
     try {
+      setLoadError(null);
       const [data, calls, leads, fetchedUsers] = await Promise.all([
         getFollowups(tenant?.id),
         getCalls(tenant?.id),
@@ -150,10 +145,9 @@ export const FollowupsPage: React.FC = () => {
         isAdmin ? adminUserService.getUsers(tenant?.id || '') : Promise.resolve([])
       ]);
 
-      // Use only real persisted followup records from the backend (or localStorage mirror).
-      // Do NOT synthesize fake followup cards from lead status — that creates duplicates
-      // where a contact appears in both My Leads and Follow-ups simultaneously.
-      const followupsList = (data && data.length > 0) ? [...data] : (storageService.getFollowups(tenant?.id) || []);
+      const followupsList = isMockMode()
+        ? ((data && data.length > 0) ? [...data] : (storageService.getFollowups(tenant?.id) || []))
+        : (data || []);
 
       setFollowups(followupsList);
       setCallsList(calls || []);
@@ -161,9 +155,14 @@ export const FollowupsPage: React.FC = () => {
       if (fetchedUsers && fetchedUsers.length > 0) {
         setUsers(fetchedUsers);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load followups data', err);
-      setFollowups(storageService.getFollowups(tenant?.id) || []);
+      if (isMockMode()) {
+        setFollowups(storageService.getFollowups(tenant?.id) || []);
+      } else {
+        setFollowups([]);
+        setLoadError(err?.message || 'Failed to load follow-up records from server.');
+      }
     }
   };
 
@@ -657,7 +656,7 @@ export const FollowupsPage: React.FC = () => {
       return 'Sales Executive';
     }
     // Direct check for known IRMs in db or storage
-    if (agentName.includes('dhinakaran') || agentId === '5' || agentId === '30' || agentName.includes('irm')) {
+    if (agentName.includes('dhinakaran') || agentId === '5' || agentName.includes('irm')) {
       return 'IRM';
     }
     const irmsList = storageService.getIrms ? storageService.getIrms(tenant?.id) : [];
@@ -889,6 +888,25 @@ export const FollowupsPage: React.FC = () => {
           </p>
         </div>
       </div>
+
+      {loadError && (
+        <div
+          className="alert-banner error"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px 16px',
+            marginBottom: '16px',
+            borderRadius: '8px',
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            color: '#ef4444',
+          }}
+        >
+          <span>{loadError}</span>
+        </div>
+      )}
 
       {/* ── Admin Global Filter Bar ─────────────────────────────────────────── */}
       {isAdmin && (

@@ -258,9 +258,9 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
           getDeals(tenant?.id),
           getLeads(tenant?.id),
           getFollowups(tenant?.id),
-          getInvestors(tenant?.id).catch(() => storageService.getInvestors(tenant?.id) || []),
-          getOpportunities(tenant?.id).catch(() => storageService.getOpportunities(tenant?.id) || []),
-          getConsultations(tenant?.id).catch(() => storageService.getConsultations(tenant?.id) || []),
+          getInvestors(tenant?.id),
+          getOpportunities(tenant?.id),
+          getConsultations(tenant?.id),
         ]);
         if (my !== reqId.current) return;
         const dealsList = apiDeals || [];
