@@ -11,6 +11,11 @@ public class KycChecklistDto
     public bool Demat { get; set; }
 
     public bool IsAllChecked => Identity && Bank && Documents && Nominee && Demat;
+
+    /// <summary>
+    /// Validates checklist completion. Nominee is optional when no nominee was submitted.
+    /// </summary>
+    public bool IsValid(bool hasNominee) => Identity && Bank && Documents && Demat && (!hasNominee || Nominee);
 }
 
 public class UpdateKycStatusDto

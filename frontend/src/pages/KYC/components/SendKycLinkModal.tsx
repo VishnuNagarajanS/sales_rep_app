@@ -172,7 +172,7 @@ Please click the secure link below to complete your verification:
         customerName: deal.customerName,
         phone: resolvedPhone || deal.phone || '',
         email: targetEmail,
-        channel: selectedChannel,
+        channel: selectedChannel === 'email' ? 'email' : 'link',
         expiry: expiry,
         baseUrl: window.location.origin,
         forceNewToken: isResend || selectedChannel === 'email',
@@ -223,7 +223,7 @@ Please click the secure link below to complete your verification:
           : `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
 
         window.open(waUrl, '_blank', 'noopener,noreferrer');
-        onShowToast(`WhatsApp Web opened with pre-filled KYC message for ${deal.customerName}!`);
+        onShowToast(`WhatsApp Web opened with pre-filled KYC message for ${deal.customerName}! (Server gateway offline)`);
         onClose();
         return;
       }
@@ -240,7 +240,7 @@ Please click the secure link below to complete your verification:
         if (cleanPhone) {
           window.open(`sms:${cleanPhone}?body=${encodeURIComponent(smsText)}`, '_blank');
         }
-        onShowToast(`SMS app launched for ${deal.customerName}!`);
+        onShowToast(`SMS app launched for ${deal.customerName}! (Server gateway offline)`);
         onClose();
         return;
       }
@@ -335,7 +335,7 @@ Please click the secure link below to complete your verification:
                   setErrorMessage(null);
                 }}
               >
-                <MessageSquare size={14} /> WhatsApp
+                <MessageSquare size={14} /> WhatsApp Web
               </button>
               <button
                 type="button"
@@ -345,7 +345,7 @@ Please click the secure link below to complete your verification:
                   setErrorMessage(null);
                 }}
               >
-                <Smartphone size={14} /> SMS
+                <Smartphone size={14} /> SMS App
               </button>
               <button
                 type="button"
@@ -355,7 +355,7 @@ Please click the secure link below to complete your verification:
                   setErrorMessage(null);
                 }}
               >
-                <Mail size={14} /> Email
+                <Mail size={14} /> Email (SMTP)
               </button>
             </div>
 
@@ -364,7 +364,7 @@ Please click the secure link below to complete your verification:
               <div className="kyc-link-helper-box kyc-link-helper-box-whatsapp">
                 <MessageSquare size={15} style={{ flexShrink: 0, marginTop: 2 }} />
                 <span>
-                  <strong>WhatsApp Web Click-to-Chat:</strong> Clicking Send will instantly launch WhatsApp Web with the verified secure KYC link ready to send to <strong>{resolvedPhone || 'the investor'}</strong>.
+                  <strong>WhatsApp Web (Client-Side):</strong> Server-side WhatsApp Business gateway is offline/unconfigured. Clicking Send will launch WhatsApp Web client-side with the secure KYC link ready to send to <strong>{resolvedPhone || 'the investor'}</strong>.
                 </span>
               </div>
             )}
@@ -373,7 +373,7 @@ Please click the secure link below to complete your verification:
               <div className="kyc-link-helper-box kyc-link-helper-box-email">
                 <Mail size={15} style={{ flexShrink: 0, marginTop: 2 }} />
                 <span>
-                  <strong>Real-Time Gmail SMTP:</strong> Clicking Send will dispatch a branded HTML KYC verification email to <strong>{recipientEmail || resolvedEmail || 'investor email'}</strong> via configured SMTP.
+                  <strong>Configured Server SMTP:</strong> Clicking Send will dispatch a branded HTML KYC verification email to <strong>{recipientEmail || resolvedEmail || 'investor email'}</strong> via configured Gmail SMTP.
                 </span>
               </div>
             )}
@@ -382,7 +382,7 @@ Please click the secure link below to complete your verification:
               <div className="kyc-link-helper-box kyc-link-helper-box-sms">
                 <Smartphone size={15} style={{ flexShrink: 0, marginTop: 2 }} />
                 <span>
-                  <strong>Direct SMS:</strong> Clicking Send will trigger your device's SMS app with the verified secure KYC link ready to send to <strong>{resolvedPhone || 'the investor'}</strong>.
+                  <strong>Direct SMS (Device-Side):</strong> Server-side SMS gateway is offline/unconfigured. Clicking Send will trigger your device's SMS app with the secure KYC link ready to send to <strong>{resolvedPhone || 'the investor'}</strong>.
                 </span>
               </div>
             )}

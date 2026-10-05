@@ -115,6 +115,11 @@ public class IrmKycController : ControllerBase
     [Authorize]
     public async Task<IActionResult> SendKycLink([FromBody] SendKycLinkDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<SendKycLinkResponseDto>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM KYC records."));
+        }
+
         var companyId = User.GetCompanyId(0);
         if (companyId <= 0)
             return Unauthorized();
@@ -179,16 +184,32 @@ public class IrmKycController : ControllerBase
         if (!result.Success)
             return BadRequest(result);
 
-        // Invalidate OTP on successful submission so it cannot be reused
-        await _otpService.InvalidateOtpAsync(rawToken, kyc.Email, ct);
+        // Only invalidate OTP on final successful submission so draft sessions can continue
+        if (dto.IsFinalSubmit)
+        {
+            await _otpService.InvalidateOtpAsync(rawToken, kyc.Email, ct);
+        }
 
         return Ok(result);
+    }
+
+    [HttpPost("draft")]
+    [AllowAnonymous]
+    public async Task<IActionResult> SaveCustomerDraft([FromBody] SubmitKycDto dto, CancellationToken ct)
+    {
+        dto.IsFinalSubmit = false;
+        return await SubmitKyc(dto, ct);
     }
 
     [HttpPost("assisted-draft")]
     [Authorize]
     public async Task<IActionResult> SaveAssistedDraft([FromBody] SubmitKycDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<KycDto>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM KYC records."));
+        }
+
         var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
         var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
         var companyId = User.GetCompanyId(0);
@@ -212,6 +233,11 @@ public class IrmKycController : ControllerBase
     [Authorize]
     public async Task<IActionResult> SubmitAssistedKyc([FromBody] SubmitKycDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<KycDto>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM KYC records."));
+        }
+
         var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
         var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
         var companyId = User.GetCompanyId(0);
@@ -257,6 +283,11 @@ public class IrmKycController : ControllerBase
     [Authorize]
     public async Task<IActionResult> ReviewKyc(int id, [FromBody] KycReviewDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<KycDto>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM KYC records."));
+        }
+
         var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
         var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
         var companyId = User.GetCompanyId(0);
@@ -306,6 +337,11 @@ public class IrmKycController : ControllerBase
     [Authorize]
     public async Task<IActionResult> UpdateKycStatus(int id, [FromBody] UpdateKycStatusDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<bool>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM KYC records."));
+        }
+
         var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
         var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
         var companyId = User.GetCompanyId(0);
@@ -355,9 +391,10 @@ public class IrmKycController : ControllerBase
                 return StatusCode(StatusCodes.Status409Conflict, ApiResponse<bool>.ErrorResponse("Cannot confirm KYC: No genuine customer submission exists for this record."));
             }
 
-            if (dto.Checklist == null || !dto.Checklist.IsAllChecked)
+            bool hasNominees = !string.IsNullOrWhiteSpace(kyc.NomineesJson) && kyc.NomineesJson.Trim() != "[]";
+            if (dto.Checklist == null || !dto.Checklist.IsValid(hasNominees))
             {
-                return BadRequest(ApiResponse<bool>.ErrorResponse("All 5 required checklist items (Identity, Bank, Documents, Nominee, Demat) must be manually verified and confirmed."));
+                return BadRequest(ApiResponse<bool>.ErrorResponse("Required checklist items (Identity, Bank, Documents, Demat" + (hasNominees ? ", Nominee" : "") + ") must be manually verified and confirmed."));
             }
         }
         else if (dto.Status == "Wrong")
@@ -463,6 +500,11 @@ public class IrmKycController : ControllerBase
     public async Task<IActionResult> SaveVerificationDraft(
         int id, [FromBody] SaveVerificationDraftDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<bool>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM KYC records."));
+        }
+
         var companyId = User.GetCompanyId(0);
         if (companyId <= 0)
             return Unauthorized();

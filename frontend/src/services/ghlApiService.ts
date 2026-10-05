@@ -692,15 +692,23 @@ function mapCallRecord(c: Record<string, any>): CallRecord {
   const connectVia: 'Connect via Agent' | 'Connect via IRM' = isIrm ? 'Connect via IRM' : 'Connect via Agent';
   const agentRole = isIrm ? 'IRM' : 'Agent';
 
-  // Only assign recordingUrl and transcription if real and not placeholder/mock
-  const recordingUrl = (c.recordingUrl && typeof c.recordingUrl === 'string' && !c.recordingUrl.includes('sample.mp3'))
-    ? c.recordingUrl
-    : undefined;
+  // Only assign recordingUrl and transcription if genuine real provider data exists (no mock/sample/placeholder)
+  const isMockRecording = !c.recordingUrl ||
+    typeof c.recordingUrl !== 'string' ||
+    c.recordingUrl.includes('sample.mp3') ||
+    c.recordingUrl.includes('nexusplatform.io') ||
+    c.recordingUrl.includes('placeholder') ||
+    c.recordingUrl.includes('example.com');
+  const recordingUrl = !isMockRecording ? c.recordingUrl : undefined;
 
   const rawTranscript = c.transcript || c.transcription;
-  const transcription = (rawTranscript && typeof rawTranscript === 'string' && !rawTranscript.startsWith('Automated Call Transcript: Agent'))
-    ? rawTranscript
-    : undefined;
+  const isMockTranscript = !rawTranscript ||
+    typeof rawTranscript !== 'string' ||
+    rawTranscript.startsWith('Automated Call Transcript: Agent') ||
+    rawTranscript.includes('Agent explained commercial cap rate') ||
+    rawTranscript.includes('Customer called inquiring about BDA') ||
+    rawTranscript.includes('AIF Category II structured debt product');
+  const transcription = !isMockTranscript ? rawTranscript : undefined;
 
   return {
     id: sid(c.id),

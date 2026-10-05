@@ -29,6 +29,7 @@ import {
   saveDeal as apiSaveDeal,
   saveFollowup as apiSaveFollowup,
   saveLead as apiSaveLead,
+  saveInvestor as apiSaveInvestor,
   persistDeal,
 } from '../../services/ghlApiService';
 import { isMockMode } from '../../config/environment';

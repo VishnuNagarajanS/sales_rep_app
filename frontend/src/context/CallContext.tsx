@@ -13,7 +13,7 @@ import { storageService } from '../services/storageService';
 import { useAuth } from './AuthContext';
 
 export type AgentAvailability = 'Available' | 'Busy' | 'Offline';
-export type CallStatus = 'idle' | 'ringing' | 'connected' | 'ended';
+export type CallStatus = 'idle' | 'ringing' | 'connected' | 'ended' | 'simulated';
 
 interface MatchedRecord {
   type: 'lead' | 'customer' | 'unknown';
@@ -41,6 +41,8 @@ interface ActiveCall {
   // Follow-up task linkage — set when the call is initiated from a scheduled follow-up task.
   // The disposition modal uses this to restrict available Call Outcome options.
   sourceFollowupId?: string;
+  isSimulated?: boolean;
+  providerStatus?: string;
 }
 
 interface CallContextType {
@@ -100,9 +102,9 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [tenant?.id]);
 
-  // Timer for connected calls
+  // Timer for connected calls only (never increments for simulated/unconnected calls)
   useEffect(() => {
-    if (activeCall?.status === 'connected') {
+    if (activeCall?.status === 'connected' && !activeCall.isSimulated) {
       timerRef.current = setInterval(() => {
         setActiveCall(prev => (prev ? { ...prev, duration: prev.duration + 1 } : null));
       }, 1000);
@@ -112,15 +114,20 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [activeCall?.status]);
+  }, [activeCall?.status, activeCall?.isSimulated]);
 
   const initiateCall = (name: string, phone: string, recordType: 'lead' | 'customer' = 'lead', recordId?: string, sourceFollowupId?: string) => {
+    // Actual provider results: carrier PBX trunk is not connected in this environment.
+    // Do not mark simulated calls as connected or successful.
+    const isSimulated = true;
     const newCall: ActiveCall = {
       id: `call-${Date.now()}`,
       contactName: name,
       contactPhone: phone,
       direction: 'outbound',
-      status: 'connected', // instantly connected for dialer simulation
+      status: 'simulated', // Not marked as connected without real carrier trunk
+      isSimulated,
+      providerStatus: 'Simulated Call — Telephony Gateway Offline',
       duration: 0,
       isMuted: false,
       isOnHold: false,
@@ -157,6 +164,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       contactPhone: matchedLead ? matchedLead.phone : phone,
       direction: 'inbound',
       status: 'ringing',
+      isSimulated: true,
+      providerStatus: 'Simulated Incoming Call (Carrier Offline)',
       duration: 0,
       isMuted: false,
       isOnHold: false,
@@ -198,7 +207,16 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const acceptCall = () => {
     if (activeCall) {
-      setActiveCall({ ...activeCall, status: 'connected', duration: 0, isExpanded: true, isVideoMode: false, meetingLink: null });
+      // Do not mark simulated calls as connected or successful
+      const status: CallStatus = activeCall.isSimulated ? 'simulated' : 'connected';
+      setActiveCall({ 
+        ...activeCall, 
+        status, 
+        duration: 0, 
+        isExpanded: true, 
+        isVideoMode: false, 
+        meetingLink: null 
+      });
     }
   };
 
@@ -211,7 +229,11 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const endCall = (skipDisposition?: boolean | unknown) => {
     if (activeCall) {
-      const finishedCall = { ...activeCall, status: 'ended' as CallStatus };
+      const finishedCall = { 
+        ...activeCall, 
+        status: 'ended' as CallStatus,
+        duration: activeCall.isSimulated ? 0 : activeCall.duration
+      };
       setLastCallRecord(finishedCall);
       setActiveCall(null);
       if (skipDisposition === true) {
@@ -265,20 +287,33 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     reason?: string
   ) => {
     if (lastCallRecord && tenant && user) {
+      const isSim = !!lastCallRecord.isSimulated || lastCallRecord.status !== 'connected';
       let finalNotes = notes || lastCallRecord.quickNotes || '';
+      if (isSim && !finalNotes.includes('Simulated')) {
+        finalNotes = finalNotes 
+          ? `[Provider Result: Simulated - Call Not Connected (0s)]\n${finalNotes}` 
+          : '[Provider Result: Simulated - Call Not Connected (0s)]';
+      }
       if (reason?.trim()) {
         finalNotes = finalNotes ? `${finalNotes}\n[Reason]: ${reason.trim()}` : `[Reason]: ${reason.trim()}`;
       }
+
+      // Do not mark simulated calls as connected or successful
+      let effectiveDispo = disposition;
+      if (isSim && (effectiveDispo === 'Interested' || effectiveDispo === 'Converted')) {
+        effectiveDispo = 'No Response';
+      }
+
       const callRecord: CallRecord = {
         id: lastCallRecord.id,
         companyId: tenant.id,
         contactName: lastCallRecord.contactName,
         contactPhone: lastCallRecord.contactPhone,
         direction: lastCallRecord.direction,
-        duration: lastCallRecord.duration,
+        duration: isSim ? 0 : lastCallRecord.duration,
         agentId: user.id,
         agentName: user.name,
-        disposition,
+        disposition: effectiveDispo,
         timestamp: new Date().toISOString(),
         recordingUrl: undefined,
         transcription: undefined,
@@ -626,10 +661,14 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const skipDispositionWithReason = async (reason: string, notes?: string) => {
     if (lastCallRecord && tenant && user) {
+      const isSim = !!lastCallRecord.isSimulated || lastCallRecord.status !== 'connected';
       const trimmedReason = reason.trim();
-      const combinedNotes = notes?.trim()
+      let combinedNotes = notes?.trim()
         ? `${notes.trim()}\n[Skip Reason]: ${trimmedReason}`
         : `[Skip Reason]: ${trimmedReason}`;
+      if (isSim && !combinedNotes.includes('Simulated')) {
+        combinedNotes = `[Provider Result: Simulated - Call Not Connected (0s)]\n${combinedNotes}`;
+      }
 
       const callRecord: CallRecord = {
         id: lastCallRecord.id,
@@ -637,7 +676,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         contactName: lastCallRecord.contactName,
         contactPhone: lastCallRecord.contactPhone,
         direction: lastCallRecord.direction,
-        duration: lastCallRecord.duration,
+        duration: isSim ? 0 : lastCallRecord.duration,
         agentId: user.id,
         agentName: user.name,
         disposition: 'Skipped',

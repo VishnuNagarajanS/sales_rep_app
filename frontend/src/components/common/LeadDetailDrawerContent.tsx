@@ -579,18 +579,22 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                     </div>
                   )}
 
-                  {/* Audio Player */}
-                  {c.recordingUrl && (
+                  {/* Audio Player / Honest Recording State */}
+                  {c.recordingUrl ? (
                     <div style={{ marginTop: 10 }}>
                       <div style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
                         <Volume2 size={12} /> Call Recording Audio
                       </div>
                       <audio controls src={c.recordingUrl} style={{ width: '100%', height: 36 }} />
                     </div>
+                  ) : (
+                    <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <Volume2 size={12} /> Recording: <span>Unavailable (carrier trunk offline)</span>
+                    </div>
                   )}
 
-                  {/* Collapsible Transcription */}
-                  {c.transcription && (
+                  {/* Collapsible Transcription / Honest Transcript State */}
+                  {c.transcription ? (
                     <div style={{ marginTop: 8 }}>
                       <button
                         type="button"
@@ -619,6 +623,10 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                           {c.transcription}
                         </div>
                       )}
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <FileText size={12} /> Transcript: <span>Unavailable (speech-to-text offline)</span>
                     </div>
                   )}
                 </div>

@@ -194,12 +194,20 @@ public class KycService : IKycService
         {
             deliveryStatus = "Secure KYC verification link generated successfully.";
         }
+        else if (isWhatsApp)
+        {
+            deliveryStatus = "WhatsApp delivery unavailable: No WhatsApp Business API provider is configured on the backend server.";
+        }
+        else if (isSms)
+        {
+            deliveryStatus = "SMS delivery unavailable: No SMS gateway provider is configured on the backend server.";
+        }
         else
         {
-            deliveryStatus = $"Link dispatched via {dto.Channel.ToUpper()}";
+            deliveryStatus = $"Message delivery failed: Channel '{dto.Channel}' is not configured.";
         }
 
-        // Persist real KYC record safely based on actual dispatch outcome
+        // Persist real KYC record safely based on actual dispatch outcome (never claim fake delivery for unconfigured SMS/WhatsApp)
         if (existing == null)
         {
             existing = new InvestorKyc
@@ -210,12 +218,12 @@ public class KycService : IKycService
                 InvestorName = investorName,
                 Phone = recipientPhone,
                 Email = recipientEmail,
-                Status = (emailSent || isWhatsApp || isSms) ? KycStatus.LinkSent : KycStatus.Draft,
+                Status = emailSent ? KycStatus.LinkSent : KycStatus.Draft,
                 KycLinkToken = rawToken,
                 KycTokenHash = tokenHash,
                 IsRevoked = false,
-                KycLinkSent = (emailSent || isWhatsApp || isSms),
-                KycLinkSentAt = (emailSent || isWhatsApp || isSms) ? DateTime.UtcNow : null,
+                KycLinkSent = emailSent,
+                KycLinkSentAt = emailSent ? DateTime.UtcNow : null,
                 KycLinkExpiresAt = expiresAt,
                 CreatedAt = DateTime.UtcNow
             };
@@ -232,18 +240,18 @@ public class KycService : IKycService
             if (!string.IsNullOrWhiteSpace(recipientPhone)) existing.Phone = recipientPhone;
             if (!string.IsNullOrWhiteSpace(investorName)) existing.InvestorName = investorName;
 
-            if (emailSent || isWhatsApp || isSms)
+            if (emailSent)
             {
                 existing.KycLinkSent = true;
                 existing.KycLinkSentAt = DateTime.UtcNow;
                 if (existing.Status == KycStatus.Draft || existing.Status == KycStatus.LinkSent)
                     existing.Status = KycStatus.LinkSent;
             }
-            else if (isEmailChannel && !emailSent)
+            else
             {
-                // Email delivery failed: do not falsely claim the link was dispatched
+                // No backend delivery occurred or email failed: do not falsely claim link was dispatched
                 existing.KycLinkSent = false;
-                if (existing.Status == KycStatus.LinkSent)
+                if (existing.Status == KycStatus.LinkSent && isEmailChannel)
                     existing.Status = KycStatus.Draft;
             }
 
@@ -268,6 +276,11 @@ public class KycService : IKycService
         {
             var errReason = _emailService.LastError ?? "SMTP delivery failed";
             return ApiResponse<SendKycLinkResponseDto>.FailureResult($"Email delivery failed: {errReason}", responseData);
+        }
+
+        if (isWhatsApp || isSms)
+        {
+            return ApiResponse<SendKycLinkResponseDto>.FailureResult(deliveryStatus, responseData);
         }
 
         return ApiResponse<SendKycLinkResponseDto>.SuccessResponse(responseData, emailSent ? "KYC verification email dispatched successfully!" : "KYC verification link generated successfully");
@@ -334,7 +347,10 @@ public class KycService : IKycService
         kyc.DematAccountNumber = dto.DematAccountNumber ?? kyc.DematAccountNumber;
         kyc.DpId = dto.DpId ?? kyc.DpId;
 
-        kyc.NomineesJson = dto.NomineesJson ?? kyc.NomineesJson;
+        if (dto.NomineesJson != null)
+        {
+            kyc.NomineesJson = string.IsNullOrWhiteSpace(dto.NomineesJson) ? "[]" : dto.NomineesJson.Trim();
+        }
 
         kyc.PanDocumentUrl = dto.PanDocumentUrl ?? kyc.PanDocumentUrl;
         kyc.AadhaarDocumentUrl = dto.AadhaarDocumentUrl ?? kyc.AadhaarDocumentUrl;
@@ -389,9 +405,13 @@ public class KycService : IKycService
                 return ApiResponse<KycDto>.ErrorResponse("Cannot approve KYC: No genuine customer submission exists for this record.");
             }
 
-            if (dto.Checklist != null && !dto.Checklist.IsAllChecked)
+            if (dto.Checklist != null)
             {
-                return ApiResponse<KycDto>.ErrorResponse("All 5 required checklist items (Identity, Bank, Documents, Nominee, Demat) must be verified.");
+                bool hasNominees = !string.IsNullOrWhiteSpace(kyc.NomineesJson) && kyc.NomineesJson.Trim() != "[]";
+                if (!dto.Checklist.IsValid(hasNominees))
+                {
+                    return ApiResponse<KycDto>.ErrorResponse("Required checklist items (Identity, Bank, Documents, Demat" + (hasNominees ? ", Nominee" : "") + ") must be verified.");
+                }
             }
 
             kyc.VerifiedAt = DateTime.UtcNow;
@@ -434,15 +454,55 @@ public class KycService : IKycService
         if (kyc.SubmittedAt != null && kyc.Status == KycStatus.PendingReview)
             return ApiResponse<PublicKycDto>.ErrorResponse("You have already submitted your KYC. It is currently awaiting IRM verification.");
 
-        // Return minimum customer info needed for form pre-fill
+        // Return full customer & draft info needed for form pre-fill and resumption
         var publicDto = new PublicKycDto
         {
+            Id = kyc.Id,
+            InvestorId = kyc.InvestorId,
             InvestorName = kyc.InvestorName,
             Email = kyc.Email,
             Phone = kyc.Phone,
             Status = kyc.Status.ToString(),
             IsExpired = kyc.KycLinkExpiresAt.HasValue && kyc.KycLinkExpiresAt.Value <= DateTime.UtcNow,
-            ExpiresAt = kyc.KycLinkExpiresAt
+            ExpiresAt = kyc.KycLinkExpiresAt,
+
+            FatherName = kyc.FatherName,
+            DateOfBirth = kyc.DateOfBirth,
+            Dob = kyc.DateOfBirth,
+            NameAsPerPan = kyc.NameAsPerPan,
+            Gender = kyc.Gender,
+            InvestorType = kyc.InvestorType,
+            ResidentType = kyc.ResidentType,
+            Occupation = kyc.Occupation,
+
+            PanNumber = kyc.PanNumber,
+            AadhaarNumber = kyc.AadhaarNumber,
+            AddressLine1 = kyc.AddressLine1,
+            AddressLine2 = kyc.AddressLine2,
+            City = kyc.City,
+            State = kyc.State,
+            Pincode = kyc.Pincode,
+            Country = kyc.Country,
+
+            BankName = kyc.BankName,
+            AccountNumber = kyc.AccountNumber,
+            IfscCode = kyc.IfscCode,
+            AccountType = kyc.AccountType,
+            DematAccountNumber = kyc.DematAccountNumber,
+            DpId = kyc.DpId,
+
+            NomineesJson = kyc.NomineesJson,
+
+            PanDocumentUrl = kyc.PanDocumentUrl,
+            AadhaarDocumentUrl = kyc.AadhaarDocumentUrl,
+            BankChequeUrl = kyc.BankChequeUrl,
+            DematDocumentUrl = kyc.DematDocumentUrl,
+            PhotoUrl = kyc.PhotoUrl,
+            SignatureUrl = kyc.SignatureUrl,
+
+            IsAssisted = kyc.IsAssisted,
+            CustomerConsentObtained = kyc.CustomerConsentObtained,
+            SubmittedAt = kyc.SubmittedAt
         };
 
         return ApiResponse<PublicKycDto>.SuccessResponse(publicDto);
@@ -562,7 +622,10 @@ public class KycService : IKycService
         kyc.DematAccountNumber = dto.DematAccountNumber ?? kyc.DematAccountNumber;
         kyc.DpId = dto.DpId ?? kyc.DpId;
 
-        kyc.NomineesJson = dto.NomineesJson ?? kyc.NomineesJson;
+        if (dto.NomineesJson != null)
+        {
+            kyc.NomineesJson = string.IsNullOrWhiteSpace(dto.NomineesJson) ? "[]" : dto.NomineesJson.Trim();
+        }
 
         kyc.PanDocumentUrl = dto.PanDocumentUrl ?? kyc.PanDocumentUrl;
         kyc.AadhaarDocumentUrl = dto.AadhaarDocumentUrl ?? kyc.AadhaarDocumentUrl;

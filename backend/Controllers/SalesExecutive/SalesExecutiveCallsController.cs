@@ -2,6 +2,7 @@ using backend.Authentication.Interfaces;
 using backend.Data;
 using backend.DTOs.Calls;
 using backend.DTOs.Common;
+using backend.Extensions;
 using backend.Models.Entities;
 using backend.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -12,7 +13,7 @@ namespace backend.Controllers.SalesExecutive;
 
 [ApiController]
 [Route("api/sales-executive/calls")]
-[Authorize(Roles = "sales_executive,company_admin,super_admin,irm")]
+[Authorize(Roles = "sales_executive,company_admin,super_admin,irm,admin,ghl_admin")]
 public class SalesExecutiveCallsController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
@@ -45,12 +46,13 @@ public class SalesExecutiveCallsController : ControllerBase
         [FromQuery] int pageSize = 20,
         CancellationToken ct = default)
     {
-        var role = _currentUser.Role;
+        var role = (_currentUser.Role ?? string.Empty).ToLowerInvariant();
         var agentId = _currentUser.UserId;
         var companyId = _currentUser.CompanyId;
 
         var query = _context.CallRecords.AsNoTracking()
             .Include(c => c.Agent)
+                .ThenInclude(a => a!.Role)
             .AsQueryable();
 
         if (role != "super_admin" && companyId.HasValue)
@@ -133,12 +135,13 @@ public class SalesExecutiveCallsController : ControllerBase
         int id,
         CancellationToken ct = default)
     {
-        var role = _currentUser.Role;
+        var role = (_currentUser.Role ?? string.Empty).ToLowerInvariant();
         var agentId = _currentUser.UserId;
         var companyId = _currentUser.CompanyId;
 
         var call = await _context.CallRecords.AsNoTracking()
             .Include(c => c.Agent)
+                .ThenInclude(a => a!.Role)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
 
         if (call == null)
@@ -173,6 +176,26 @@ public class SalesExecutiveCallsController : ControllerBase
         return Ok(ApiResponse<CallRecordResponseDto>.SuccessResult(dto, "Call record retrieved successfully."));
     }
 
+    [HttpGet("carrier-status")]
+    public async Task<ActionResult<ApiResponse<object>>> GetCarrierStatus(CancellationToken ct = default)
+    {
+        var carrier = await _context.CarrierSettings.AsNoTracking().FirstOrDefaultAsync(ct);
+        var isConfigured = carrier != null && 
+            !string.IsNullOrWhiteSpace(carrier.AccountSid) && 
+            !string.IsNullOrWhiteSpace(carrier.AuthTokenEncrypted) &&
+            carrier.Status == "Active";
+
+        return Ok(ApiResponse<object>.SuccessResult(new
+        {
+            isConfigured,
+            primaryCarrier = carrier?.PrimaryCarrier ?? "None",
+            status = isConfigured ? "Connected" : "Not Configured / Unavailable",
+            message = isConfigured 
+                ? "Carrier trunk connected." 
+                : "No active carrier trunk (Twilio / Exotel) credentials configured on the backend server. Live telephony calls unavailable."
+        }, "Carrier status retrieved."));
+    }
+
     private static CallRecordResponseDto MapToResponseDto(CallRecord c, Dictionary<int, Role>? rolesDict = null)
     {
         Role? agentRoleObj = null;
@@ -194,6 +217,7 @@ public class SalesExecutiveCallsController : ControllerBase
 
         // Categorize using the call's stored source, role of agent, and explicit markers
         var isIrm = roleCode == "irm"
+            || (c.Agent != null && c.Agent.RoleId == 4)
             || (roleName != null && (roleName.Contains("irm") || roleName.Contains("investor relations")))
             || notes.Contains("Connect via IRM", StringComparison.OrdinalIgnoreCase)
             || notes.Contains("Connected to IRM", StringComparison.OrdinalIgnoreCase)
@@ -268,6 +292,13 @@ public class SalesExecutiveCallsController : ControllerBase
         [FromBody] LogCallDto dto,
         CancellationToken ct = default)
     {
+        var role = (_currentUser.Role ?? string.Empty).ToLowerInvariant();
+        if (User.IsGhlAdmin() || role == "ghl_admin")
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<CallRecordResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM call records."));
+        }
+
         var agentId = _currentUser.UserId;
         if (!agentId.HasValue || agentId.Value <= 0)
             return Unauthorized(ApiResponse<CallRecordResponseDto>.FailureResult("Unauthorized: User ID is missing."));
@@ -276,6 +307,40 @@ public class SalesExecutiveCallsController : ControllerBase
         if (!companyId.HasValue || companyId.Value <= 0)
             return Unauthorized(ApiResponse<CallRecordResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
 
+        // Use actual provider results; do not mark simulated calls as connected or successful
+        var carrier = await _context.CarrierSettings.AsNoTracking().FirstOrDefaultAsync(ct);
+        var hasCarrier = carrier != null && 
+            !string.IsNullOrWhiteSpace(carrier.AccountSid) && 
+            !string.IsNullOrWhiteSpace(carrier.AuthTokenEncrypted) &&
+            carrier.Status == "Active";
+
+        var isSimulated = !hasCarrier || (dto.Notes != null && dto.Notes.Contains("Simulated", StringComparison.OrdinalIgnoreCase));
+        var effectiveDuration = isSimulated ? 0 : dto.Duration;
+        var rawNotes = dto.Notes?.Trim() ?? string.Empty;
+
+        var effectiveDisposition = dto.Disposition.Trim();
+        if (isSimulated && (effectiveDisposition == "Interested" || effectiveDisposition == "Converted"))
+        {
+            effectiveDisposition = "No Response";
+            if (!rawNotes.Contains("Simulated", StringComparison.OrdinalIgnoreCase))
+            {
+                rawNotes = string.IsNullOrWhiteSpace(rawNotes)
+                    ? "[Provider Result: Simulated / Telephony Gateway Offline - Call not connected]"
+                    : $"{rawNotes}\n[Provider Result: Simulated / Telephony Gateway Offline - Call not connected]";
+            }
+        }
+        else if (isSimulated && !rawNotes.Contains("Simulated", StringComparison.OrdinalIgnoreCase))
+        {
+            rawNotes = string.IsNullOrWhiteSpace(rawNotes)
+                ? "[Provider Result: Simulated / Carrier Not Connected]"
+                : $"{rawNotes}\n[Provider Result: Simulated / Carrier Not Connected]";
+        }
+
+        if (role == "irm" && !rawNotes.Contains("[Source: irm]", StringComparison.OrdinalIgnoreCase))
+        {
+            rawNotes = $"{rawNotes} [Source: irm]".Trim();
+        }
+
         var call = new CallRecord
         {
             CompanyId = companyId.Value,
@@ -283,9 +348,9 @@ public class SalesExecutiveCallsController : ControllerBase
             ContactName = dto.ContactName.Trim(),
             ContactPhone = dto.ContactPhone.Trim(),
             Direction = string.IsNullOrWhiteSpace(dto.Direction) ? "outbound" : dto.Direction.Trim().ToLower(),
-            Duration = dto.Duration,
-            Disposition = dto.Disposition.Trim(),
-            Notes = dto.Notes?.Trim() ?? string.Empty,
+            Duration = effectiveDuration,
+            Disposition = effectiveDisposition,
+            Notes = rawNotes,
             LeadId = dto.LeadId,
             CustomerId = dto.CustomerId,
             Timestamp = DateTime.UtcNow,
@@ -307,6 +372,13 @@ public class SalesExecutiveCallsController : ControllerBase
         [FromBody] CallDispositionDto request,
         CancellationToken ct = default)
     {
+        var role = (_currentUser.Role ?? string.Empty).ToLowerInvariant();
+        if (User.IsGhlAdmin() || role == "ghl_admin")
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<CallRecordDto>.FailureResult("Access denied: GHL Admin has read-only access to call disposition records."));
+        }
+
         var result = await _callService.ProcessDispositionAsync(request, ct);
         if (!result.Success)
         {
@@ -322,6 +394,13 @@ public class SalesExecutiveCallsController : ControllerBase
         [FromBody] SendCustomerMessageRequestDto dto,
         CancellationToken ct = default)
     {
+        var role = (_currentUser.Role ?? string.Empty).ToLowerInvariant();
+        if (User.IsGhlAdmin() || role == "ghl_admin")
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<SendCustomerMessageResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to customer messaging records."));
+        }
+
         var agentId = _currentUser.UserId;
         if (!agentId.HasValue || agentId.Value <= 0)
             return Unauthorized(ApiResponse<SendCustomerMessageResponseDto>.FailureResult("Unauthorized: User ID is missing."));
@@ -545,8 +624,15 @@ public class SalesExecutiveCallsController : ControllerBase
             SentByRole = senderRole
         };
 
+        if (!delivered)
+        {
+            return Ok(ApiResponse<SendCustomerMessageResponseDto>.FailureResult(
+                deliveryResult,
+                response));
+        }
+
         return Ok(ApiResponse<SendCustomerMessageResponseDto>.SuccessResult(
             response, 
-            delivered ? "Customer message dispatched successfully." : "Message delivery failed or unavailable."));
+            "Customer message dispatched successfully."));
     }
 }

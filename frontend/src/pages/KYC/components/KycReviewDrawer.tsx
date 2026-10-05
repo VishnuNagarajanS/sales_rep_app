@@ -92,9 +92,10 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
     const fetchLiveKyc = async () => {
       setLoadingKyc(true);
       try {
-        const email = deal.email;
-        if (email) {
-          const res = await fetch(`/api/irm/kyc/by-email?email=${encodeURIComponent(email)}`, {
+        // 1. Stable direct KYC record ID or investor/customer ID
+        const kycId = (deal as any).kycId || (deal as any).kycRecordId || (deal as any).customerId;
+        if (kycId) {
+          const res = await fetch(`/api/irm/kyc/${kycId}`, {
             headers: getAuthHeaders(),
           });
           if (res.ok) {
@@ -106,9 +107,10 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
           }
         }
 
-        const kycId = (deal as any).kycId || (deal as any).kycRecordId || (deal as any).customerId;
-        if (kycId) {
-          const res = await fetch(`/api/irm/kyc/${kycId}`, {
+        // 2. Fallback to email match
+        const email = deal.email;
+        if (email) {
+          const res = await fetch(`/api/irm/kyc/by-email?email=${encodeURIComponent(email)}`, {
             headers: getAuthHeaders(),
           });
           if (res.ok) {
@@ -293,11 +295,15 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
     },
   };
 
+  const hasNominees = Boolean(
+    parsedNominees && parsedNominees.length > 0 && parsedNominees[0]?.name
+  );
+
   const allChecklistCompleted =
     reviewChecklist.identity &&
     reviewChecklist.bank &&
     reviewChecklist.documents &&
-    reviewChecklist.nominee &&
+    (!hasNominees || reviewChecklist.nominee) &&
     reviewChecklist.demat;
 
   const handleApprove = async () => {
@@ -306,14 +312,19 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
       return;
     }
     if (!allChecklistCompleted) {
-      onShowToast('Please complete all 5 checklist verification items before confirming approval.');
+      onShowToast(hasNominees ? 'Please complete all 5 checklist verification items before confirming approval.' : 'Please complete all required checklist verification items before confirming approval.');
       return;
     }
 
     setApproving(true);
     try {
+      const effectiveChecklist = {
+        ...reviewChecklist,
+        nominee: !hasNominees ? true : reviewChecklist.nominee,
+      };
+
       if (onChangeKycStatus) {
-        await onChangeKycStatus(deal, 'Verified', 'KYC verified and approved by IRM', undefined, reviewChecklist);
+        await onChangeKycStatus(deal, 'Verified', 'KYC verified and approved by IRM', undefined, effectiveChecklist);
       } else {
         const kycId = liveKyc?.id || (deal as any).kycId || (deal as any).kycRecordId;
         if (kycId) {
@@ -323,7 +334,7 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
             body: JSON.stringify({
               status: 'Verified',
               comment: 'KYC verified and approved by IRM',
-              checklist: reviewChecklist,
+              checklist: effectiveChecklist,
             }),
           });
           if (!res.ok) {
@@ -869,7 +880,9 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
                   fontWeight: 700,
                 }}
               >
-                {Object.values(reviewChecklist).filter(Boolean).length}/5 Completed
+                {allChecklistCompleted
+                  ? 'All Required Items Completed'
+                  : `${(reviewChecklist.identity ? 1 : 0) + (reviewChecklist.bank ? 1 : 0) + (reviewChecklist.documents ? 1 : 0) + (hasNominees ? (reviewChecklist.nominee ? 1 : 0) : 1) + (reviewChecklist.demat ? 1 : 0)}/5 Completed`}
               </span>
             </div>
             <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 12px 0' }}>
@@ -906,16 +919,25 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
                   3. <strong>Uploaded Documents:</strong> I have manually inspected all uploaded document copies (uploads are not automatically verified).
                 </span>
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={reviewChecklist.nominee}
-                  onChange={e => setReviewChecklist(prev => ({ ...prev, nominee: e.target.checked }))}
-                />
-                <span>
-                  4. <strong>Nominee Information:</strong> I have inspected nominee allocations or confirmed single applicant.
-                </span>
-              </label>
+              {hasNominees ? (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={reviewChecklist.nominee}
+                    onChange={e => setReviewChecklist(prev => ({ ...prev, nominee: e.target.checked }))}
+                  />
+                  <span>
+                    4. <strong>Nominee Information:</strong> I have inspected nominee allocations ({parsedNominees.length} nominee(s) totaling 100%).
+                  </span>
+                </label>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#059669', background: 'rgba(16, 185, 129, 0.08)', padding: '6px 10px', borderRadius: 6, fontSize: 12 }}>
+                  <CheckCircle size={15} style={{ flexShrink: 0 }} />
+                  <span>
+                    4. <strong>Nominee Information:</strong> No nominee submitted (Opted out / Single applicant — Verified &amp; Waived)
+                  </span>
+                </div>
+              )}
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                 <input
                   type="checkbox"

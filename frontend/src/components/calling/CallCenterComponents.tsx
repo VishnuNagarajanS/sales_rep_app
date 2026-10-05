@@ -218,6 +218,11 @@ export const IncomingCallPopup: React.FC = () => {
             </div>
             <div className="incoming-call-caller-phone">
               {activeCall.contactPhone}
+              {activeCall.isSimulated && (
+                <div style={{ fontSize: 11, color: '#f59e0b', fontWeight: 600, marginTop: 4 }}>
+                  Simulated Call Event (Carrier Trunk Offline)
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -537,13 +542,16 @@ export const InCallBar: React.FC = () => {
           onMouseDown={handleDragMouseDown}
         >
           {/* Pulse dot */}
-          <div className="incall-minimized-dot" />
+          <div
+            className="incall-minimized-dot"
+            style={activeCall.isSimulated ? { background: '#f59e0b', animation: 'none' } : undefined}
+          />
 
           {/* Name + timer */}
           <div className="incall-minimized-info">
             <div className="incall-minimized-name">{activeCall.contactName}</div>
-            <div className="incall-minimized-timer">
-              {formatDuration(activeCall.duration)}
+            <div className="incall-minimized-timer" style={activeCall.isSimulated ? { color: '#f59e0b', fontSize: 11 } : undefined}>
+              {activeCall.isSimulated ? 'Simulated (Not Connected)' : formatDuration(activeCall.duration)}
             </div>
           </div>
 
@@ -600,11 +608,21 @@ export const InCallBar: React.FC = () => {
               <div className="incall-caller-sub">
                 {activeCall.contactPhone}
                 <span>•</span>
-                {/* Pulse dot + live timer */}
-                <span className="incall-live-dot" />
-                <span className="incall-live-timer">
-                  {formatDuration(activeCall.duration)}
-                </span>
+                {activeCall.isSimulated ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#f59e0b', display: 'inline-block' }} />
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Simulated (Not Connected)
+                    </span>
+                  </span>
+                ) : (
+                  <>
+                    <span className="incall-live-dot" />
+                    <span className="incall-live-timer">
+                      {formatDuration(activeCall.duration)}
+                    </span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -637,8 +655,10 @@ export const InCallBar: React.FC = () => {
             </div>
 
             {/* Simulated-call disclaimer */}
-            <span className="incall-simulated-tag">
-              Simulated call — no live audio
+            <span className="incall-simulated-tag" style={activeCall.isSimulated ? { color: '#f59e0b', fontWeight: 600 } : undefined}>
+              {activeCall.isSimulated
+                ? 'Actual provider results: Carrier trunk offline • Call not connected'
+                : 'Live audio call in progress'}
             </span>
           </div>
 
@@ -1123,11 +1143,15 @@ export const DispositionModal: React.FC = () => {
     const freshTomorrow = d.toISOString().slice(0, 10);
     const isFollowup = !!lastCallRecord.sourceFollowupId;
     const isIrmLead = user?.role?.code === 'irm' && lastCallRecord.matchedRecord?.type === 'lead';
-    const defaultDispo: CallDisposition = isIrmLead && !isFollowup ? 'Follow-up Required' : 'Interested';
+    const isSimulated = !!lastCallRecord.isSimulated || lastCallRecord.status !== 'connected';
+    // Use actual provider results; do not mark simulated calls as connected or successful
+    const defaultDispo: CallDisposition = isSimulated
+      ? 'No Response'
+      : (isIrmLead && !isFollowup ? 'Follow-up Required' : 'Interested');
     setDisposition(defaultDispo);
-    setNotes('');
+    setNotes(isSimulated ? '[Provider Result: Simulated - Call Not Connected (0s)]' : '');
     setReason('');
-    setScheduleFollowup(defaultDispo === 'Follow-up Required');
+    setScheduleFollowup(defaultDispo === 'Follow-up Required' || defaultDispo === 'No Response');
     setFollowupDate(freshTomorrow);
     setFollowupTime(getCallPreferences().defaultFollowupTime);
     setFollowupPriority('High');
@@ -1168,6 +1192,7 @@ export const DispositionModal: React.FC = () => {
   const isFollowupCall = !!lastCallRecord.sourceFollowupId;
   const isIrm = user?.role?.code === 'irm';
   const isIrmLeadCall = isIrm && lastCallRecord.matchedRecord?.type === 'lead';
+  const isSimulated = !!lastCallRecord.isSimulated || lastCallRecord.status !== 'connected';
 
   const allDispositions: CallDisposition[] = [
     'Interested',
@@ -1177,6 +1202,14 @@ export const DispositionModal: React.FC = () => {
     'Not Interested',
     'Wrong Number',
     'No Response',
+  ];
+
+  const SIMULATED_OUTCOMES: CallDisposition[] = [
+    'No Response',
+    'Follow-up Required',
+    'Call Back',
+    'Not Interested',
+    'Wrong Number',
   ];
 
   // For follow-up calls, "Call Back" and "Wrong Number" are not valid outcomes.
@@ -1189,16 +1222,27 @@ export const DispositionModal: React.FC = () => {
   // For IRM calls against Lead records, restrict to Follow-up Required, Converted, and No Response beside Converted
   const IRM_LEAD_OUTCOMES: CallDisposition[] = ['Follow-up Required', 'Converted', 'No Response'];
 
-  const dispositions: CallDisposition[] = isFollowupCall
-    ? (isIrm ? IRM_FOLLOWUP_CALL_OUTCOMES : FOLLOWUP_CALL_OUTCOMES)
-    : isIrmLeadCall
-      ? IRM_LEAD_OUTCOMES
-      : isGhlSalesExec
-        ? allDispositions.filter(d => d !== 'Converted')
-        : allDispositions;
+  const dispositions: CallDisposition[] = isSimulated
+    ? (isFollowupCall
+        ? ['No Response', 'Follow-up Required', 'Not Interested']
+        : (isIrmLeadCall
+            ? ['No Response', 'Follow-up Required']
+            : SIMULATED_OUTCOMES))
+    : (isFollowupCall
+        ? (isIrm ? IRM_FOLLOWUP_CALL_OUTCOMES : FOLLOWUP_CALL_OUTCOMES)
+        : isIrmLeadCall
+          ? IRM_LEAD_OUTCOMES
+          : isGhlSalesExec
+            ? allDispositions.filter(d => d !== 'Converted')
+            : allDispositions);
 
   const handleSave = async () => {
     if (isSubmitting) return;
+
+    if (isSimulated && (disposition === 'Interested' || disposition === 'Converted')) {
+      alert('Simulated calls without an active carrier connection cannot be marked as connected or successful.');
+      return;
+    }
 
     if ((disposition === 'Not Interested' || disposition === 'Wrong Number') && !reason.trim()) {
       alert(`Please provide a reason why this contact was marked as "${disposition}".`);
@@ -1339,7 +1383,7 @@ export const DispositionModal: React.FC = () => {
       closeOnEscape={false}
       hideCloseButton={true}
       title={isSkipping ? "Skip Call Wrap-up" : "Call Wrap-up & Disposition"}
-      subtitle={`Call with ${lastCallRecord.contactName} (${lastCallRecord.contactPhone}) • Duration: ${Math.floor(lastCallRecord.duration / 60)}m ${lastCallRecord.duration % 60}s`}
+      subtitle={`Call with ${lastCallRecord.contactName} (${lastCallRecord.contactPhone}) • Duration: ${isSimulated ? '0s (Not Connected)' : `${Math.floor(lastCallRecord.duration / 60)}m ${lastCallRecord.duration % 60}s`}`}
       maxWidth={580}
       footer={
         isSkipping ? (
@@ -1454,6 +1498,28 @@ export const DispositionModal: React.FC = () => {
         </div>
       ) : (
         <div className="disposition-form-container">
+          {isSimulated && (
+            <div
+              style={{
+                padding: '10px 14px',
+                backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                border: '1px solid rgba(245, 158, 11, 0.3)',
+                borderRadius: 8,
+                fontSize: 12,
+                color: '#d97706',
+                marginBottom: 16,
+                lineHeight: 1.5,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <AlertCircle size={16} style={{ flexShrink: 0 }} />
+              <span>
+                <strong>Provider Notice:</strong> Telephony gateway not connected. This was a simulated call event and cannot be marked as connected or successful. Call duration is recorded as 0s.
+              </span>
+            </div>
+          )}
           {/* Disposition Selector */}
           <div className="form-group">
             <label className="form-label">Call Outcome / Disposition *</label>

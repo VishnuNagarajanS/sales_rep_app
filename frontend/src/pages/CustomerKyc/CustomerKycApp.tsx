@@ -18,9 +18,22 @@ import {
   XCircle,
   Eye,
   Trash2,
+  Save,
+  Plus,
+  Users,
 } from 'lucide-react';
 import './CustomerKycApp.css';
-import { kycValidators } from '../../utils/kycValidators';
+import {
+  kycValidators,
+  validateKycStep,
+  SharedKycFormData,
+  NomineeItem,
+  GENDER_OPTIONS,
+  INVESTOR_TYPE_OPTIONS,
+  RESIDENT_TYPE_OPTIONS,
+  ACCOUNT_TYPE_OPTIONS,
+  NOMINEE_RELATIONSHIP_OPTIONS,
+} from '../../utils/kycValidators';
 import { isMockMode } from '../../config/environment';
 
 type ScreenId =
@@ -77,14 +90,14 @@ export const CustomerKycApp: React.FC = () => {
   const hasDispatchedOtpRef = useRef<boolean>(false);
 
   // Screen 4: Wizard fields state (populated by investor during onboarding)
-  const [formData, setFormData] = useState(() => {
+  const [formData, setFormData] = useState<SharedKycFormData>(() => {
     return {
       // Step 1: Basic Details (prefilled from invitation or blank)
       investorName: '',
       phone: '',
       email: '',
       gender: 'Male',
-      investorType: 'Individual / HNI',
+      investorType: 'Individual / Retail HNW',
       residentType: 'Resident Indian',
       occupation: '',
 
@@ -95,6 +108,8 @@ export const CustomerKycApp: React.FC = () => {
       fatherName: '',
       dob: '',
       address: '',
+      courierAddress: '',
+      country: 'India',
       city: '',
       state: '',
       pincode: '',
@@ -113,12 +128,9 @@ export const CustomerKycApp: React.FC = () => {
       dematDpId: '',
       dematClientId: '',
 
-      // Step 5: Nominee Details (entered by investor, optional)
-      nomineeName: '',
-      nomineeRelationship: 'Spouse',
-      nomineeDob: '',
-      nomineeAllocation: 100,
-      nomineeAddress: '',
+      // Step 5: Nominee Details (optional in both flows)
+      hasNominee: false,
+      nominees: [],
     };
   });
 
@@ -160,66 +172,8 @@ export const CustomerKycApp: React.FC = () => {
 
   // ── Validation helpers ────────────────────────────────────────────────────
 
-  const E = (msg: string) => msg; // identity, just for readability
-
   const validateStep = useCallback((step: WizardStep, data: typeof formData): Record<string, string> => {
-    const errs: Record<string, string> = {};
-
-    if (step === 1) {
-      if (!kycValidators.requiredText(data.investorName, 3))
-        errs.investorName = E('Full name must be at least 3 characters.');
-      if (!kycValidators.phone(data.phone))
-        errs.phone = E('Enter a valid 10-digit Indian mobile number.');
-      if (!kycValidators.email(data.email))
-        errs.email = E('Enter a valid email address.');
-      if (!kycValidators.requiredText(data.occupation, 2))
-        errs.occupation = E('Occupation / source of wealth is required.');
-    }
-
-    if (step === 2) {
-      if (!kycValidators.pan(data.panNumber?.trim() || ''))
-        errs.panNumber = E('Enter a valid PAN (e.g. ABCDE1234F).');
-      if (!kycValidators.requiredText(data.nameAsPerPan, 3))
-        errs.nameAsPerPan = E('Name as per PAN must be at least 3 characters.');
-      if (!kycValidators.aadhaar(data.aadhaarNumber.replace(/\s/g, '')))
-        errs.aadhaarNumber = E('Enter a valid 12-digit Aadhaar number (cannot start with 0 or 1).');
-      if (!kycValidators.dob(data.dob))
-        errs.dob = E('Date of birth is required and the investor must be at least 18 years old.');
-      if (!kycValidators.requiredText(data.address, 10))
-        errs.address = E('Enter your complete permanent address (at least 10 characters).');
-      if (!kycValidators.pincode(data.pincode))
-        errs.pincode = E('Enter a valid 6-digit PIN code (cannot start with 0).');
-    }
-
-    if (step === 3) {
-      if (!kycValidators.requiredText(data.bankName, 2))
-        errs.bankName = E('Bank name is required.');
-      if (!kycValidators.bankAccount(data.accountNumber))
-        errs.accountNumber = E('Enter a valid bank account number (9–18 digits).');
-      if (!kycValidators.ifsc(data.ifscCode))
-        errs.ifscCode = E('Enter a valid IFSC code (e.g. HDFC0001234).');
-    }
-
-    if (step === 4) {
-      if (!data.hasNoDemat) {
-        if (!kycValidators.dematBoid(data.dematAccountNumber))
-          errs.dematAccountNumber = E('Demat beneficiary ID must be exactly 16 digits.');
-      }
-    }
-
-    if (step === 5) {
-      // Nominee is now optional: only validate if nomineeName is entered
-      if (data.nomineeName && data.nomineeName.trim().length > 0) {
-        if (!kycValidators.requiredText(data.nomineeName, 2))
-          errs.nomineeName = E('Nominee full name must be at least 2 characters.');
-        if (!kycValidators.nomineeDob(data.nomineeDob))
-          errs.nomineeDob = E('Nominee date of birth is required.');
-        if (data.nomineeAllocation !== 100)
-          errs.nomineeAllocation = E('Allocation must be exactly 100%.');
-      }
-    }
-
-    return errs;
+    return validateKycStep(step, data);
   }, []);
 
   const isStepValid = useCallback((step: WizardStep, data: typeof formData): boolean => {
@@ -567,6 +521,74 @@ export const CustomerKycApp: React.FC = () => {
     };
   }, [currentScreen, livenessState, startCamera, stopCamera]);
 
+  const [isDraftSaving, setIsDraftSaving] = useState<boolean>(false);
+  const [draftToast, setDraftToast] = useState<string | null>(null);
+
+  const handleSaveDraft = async () => {
+    setIsDraftSaving(true);
+    setDraftToast(null);
+    try {
+      const activeToken = token || extractTokenFromUrl();
+      const payload: any = {
+        token: activeToken,
+        investorName: formData.investorName,
+        phone: formData.phone,
+        email: formData.email,
+        fatherName: formData.fatherName,
+        dob: formData.dob,
+        dateOfBirth: formData.dob,
+        nameAsPerPan: formData.nameAsPerPan,
+        city: formData.city,
+        state: formData.state,
+        country: formData.country || 'India',
+        gender: formData.gender,
+        investorType: formData.investorType,
+        residentType: formData.residentType,
+        occupation: formData.occupation,
+        panNumber: formData.panNumber?.trim(),
+        aadhaarNumber: formData.aadhaarNumber?.replace(/\s/g, ''),
+        addressLine1: formData.address,
+        addressLine2: formData.courierAddress || undefined,
+        pincode: formData.pincode,
+        bankName: formData.bankName,
+        accountNumber: formData.accountNumber,
+        ifscCode: formData.ifscCode?.toUpperCase(),
+        accountType: formData.accountType,
+        dematAccountNumber: formData.hasNoDemat ? '' : formData.dematAccountNumber,
+        dpId: formData.dematDpId,
+        nomineesJson: formData.hasNominee && formData.nominees && formData.nominees.length > 0
+          ? JSON.stringify(formData.nominees)
+          : '[]',
+        panDocumentUrl: documents.pan.dataUrl || undefined,
+        aadhaarDocumentUrl: documents.aadhaar.dataUrl || undefined,
+        bankChequeUrl: documents.bank.dataUrl || undefined,
+        dematDocumentUrl: documents.demat.dataUrl || undefined,
+        photoUrl: capturedPhoto || undefined,
+        isFinalSubmit: false,
+      };
+
+      const res = await fetch('/api/irm/kyc/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        setDraftToast('Draft saved successfully! You can resume your application anytime.');
+        setTimeout(() => setDraftToast(null), 4000);
+      } else {
+        const json = await res.json().catch(() => ({}));
+        setDraftToast(json.message || 'Failed to save draft.');
+        setTimeout(() => setDraftToast(null), 4000);
+      }
+    } catch {
+      setDraftToast('Network error while saving draft.');
+      setTimeout(() => setDraftToast(null), 4000);
+    } finally {
+      setIsDraftSaving(false);
+    }
+  };
+
   const handleSubmitDossier = async () => {
     setIsSubmitting(true);
     setSubmitError(null);
@@ -583,6 +605,7 @@ export const CustomerKycApp: React.FC = () => {
         nameAsPerPan: formData.nameAsPerPan,
         city: formData.city,
         state: formData.state,
+        country: formData.country || 'India',
         gender: formData.gender,
         investorType: formData.investorType,
         residentType: formData.residentType,
@@ -590,6 +613,7 @@ export const CustomerKycApp: React.FC = () => {
         panNumber: formData.panNumber?.trim(),
         aadhaarNumber: formData.aadhaarNumber?.replace(/\s/g, ''),
         addressLine1: formData.address,
+        addressLine2: formData.courierAddress || undefined,
         pincode: formData.pincode,
         bankName: formData.bankName,
         accountNumber: formData.accountNumber,
@@ -597,16 +621,8 @@ export const CustomerKycApp: React.FC = () => {
         accountType: formData.accountType,
         dematAccountNumber: formData.hasNoDemat ? '' : formData.dematAccountNumber,
         dpId: formData.dematDpId,
-        nomineesJson: formData.nomineeName?.trim()
-          ? JSON.stringify([
-              {
-                name: formData.nomineeName.trim(),
-                relationship: formData.nomineeRelationship,
-                dob: formData.nomineeDob,
-                allocationPercentage: formData.nomineeAllocation || 100,
-                address: formData.nomineeAddress || '',
-              }
-            ])
+        nomineesJson: formData.hasNominee && formData.nominees && formData.nominees.length > 0
+          ? JSON.stringify(formData.nominees)
           : '[]',
         panDocumentUrl: documents.pan.dataUrl || undefined,
         aadhaarDocumentUrl: documents.aadhaar.dataUrl || undefined,
@@ -670,6 +686,19 @@ export const CustomerKycApp: React.FC = () => {
         const regEmail = (k.email || '').trim();
         setRegisteredEmail(regEmail);
 
+        // Parse nominees from backend record
+        let parsedNominees: NomineeItem[] = [];
+        let hasNomineeFlag = false;
+        if (k.nomineesJson) {
+          try {
+            const p = JSON.parse(k.nomineesJson);
+            if (Array.isArray(p) && p.length > 0 && p[0]?.name) {
+              parsedNominees = p;
+              hasNomineeFlag = true;
+            }
+          } catch {}
+        }
+
         setFormData(prev => ({
           ...prev,
           investorName: k.investorName || prev.investorName,
@@ -680,6 +709,7 @@ export const CustomerKycApp: React.FC = () => {
           nameAsPerPan: k.nameAsPerPan || prev.nameAsPerPan,
           city: k.city || prev.city,
           state: k.state || prev.state,
+          country: k.country || prev.country || 'India',
           gender: k.gender || prev.gender,
           investorType: k.investorType || prev.investorType,
           residentType: k.residentType || prev.residentType,
@@ -687,12 +717,36 @@ export const CustomerKycApp: React.FC = () => {
           panNumber: k.panNumber || prev.panNumber,
           aadhaarNumber: k.aadhaarNumber || prev.aadhaarNumber,
           address: k.addressLine1 || prev.address,
+          courierAddress: k.addressLine2 || prev.courierAddress || '',
           pincode: k.pincode || prev.pincode,
           bankName: k.bankName || prev.bankName,
           accountNumber: k.accountNumber || prev.accountNumber,
           ifscCode: k.ifscCode || prev.ifscCode,
           accountType: k.accountType || prev.accountType,
+          accountHolderName: k.nameAsPerPan || k.investorName || prev.accountHolderName,
+          hasNoDemat: !k.dematAccountNumber,
+          dematAccountNumber: k.dematAccountNumber || prev.dematAccountNumber,
+          dematDpId: k.dpId || prev.dematDpId,
+          hasNominee: hasNomineeFlag,
+          nominees: parsedNominees,
         }));
+
+        if (k.panDocumentUrl) {
+          setDocuments(d => ({ ...d, pan: { name: 'pan_document.pdf', size: 'Saved', dataUrl: k.panDocumentUrl, status: 'uploaded' } }));
+        }
+        if (k.aadhaarDocumentUrl) {
+          setDocuments(d => ({ ...d, aadhaar: { name: 'aadhaar_document.pdf', size: 'Saved', dataUrl: k.aadhaarDocumentUrl, status: 'uploaded' } }));
+        }
+        if (k.bankChequeUrl) {
+          setDocuments(d => ({ ...d, bank: { name: 'bank_document.pdf', size: 'Saved', dataUrl: k.bankChequeUrl, status: 'uploaded' } }));
+        }
+        if (k.dematDocumentUrl) {
+          setDocuments(d => ({ ...d, demat: { name: 'demat_document.pdf', size: 'Saved', dataUrl: k.dematDocumentUrl, status: 'uploaded' } }));
+        }
+        if (k.photoUrl) {
+          setCapturedPhoto(k.photoUrl);
+          setLivenessState('captured');
+        }
 
         setCurrentScreen('otp');
 
@@ -816,6 +870,78 @@ export const CustomerKycApp: React.FC = () => {
     setFormErrors({});
     setStepValidated(prev => ({ ...prev, [wizardStep]: true }));
     return true;
+  };
+
+  const handleToggleNominee = (enabled: boolean) => {
+    setFormData(prev => ({
+      ...prev,
+      hasNominee: enabled,
+      nominees: enabled
+        ? (prev.nominees && prev.nominees.length > 0 ? prev.nominees : [
+            {
+              id: 'nom-1',
+              name: '',
+              relationship: 'Spouse',
+              dob: '',
+              allocationPercentage: 100,
+              address: '',
+              guardianName: '',
+            }
+          ])
+        : [],
+    }));
+    setFormErrors(prev => {
+      const copy = { ...prev };
+      delete copy.nominees;
+      Object.keys(copy).forEach(k => {
+        if (k.startsWith('nominee_')) delete copy[k];
+      });
+      return copy;
+    });
+  };
+
+  const handleAddNominee = () => {
+    if (formData.nominees.length >= 3) return;
+    const currentCount = formData.nominees.length;
+    const newNominee: NomineeItem = {
+      id: `nom-${Date.now()}`,
+      name: '',
+      relationship: 'Spouse',
+      dob: '',
+      allocationPercentage: currentCount === 0 ? 100 : 0,
+      address: '',
+      guardianName: '',
+    };
+    setFormData(prev => ({
+      ...prev,
+      hasNominee: true,
+      nominees: [...prev.nominees, newNominee],
+    }));
+  };
+
+  const handleRemoveNominee = (index: number) => {
+    setFormData(prev => {
+      const updated = prev.nominees.filter((_, i) => i !== index);
+      return {
+        ...prev,
+        nominees: updated,
+        hasNominee: updated.length > 0,
+      };
+    });
+  };
+
+  const handleUpdateNominee = (index: number, field: keyof NomineeItem, value: any) => {
+    setFormData(prev => {
+      const updated = [...prev.nominees];
+      updated[index] = { ...updated[index], [field]: value };
+      return { ...prev, nominees: updated };
+    });
+    setFormErrors(prev => {
+      const copy = { ...prev };
+      delete copy[`nominee_${index}_${field}`];
+      delete copy.nominees;
+      return copy;
+    });
   };
 
   /** Inline error message component */
@@ -1184,10 +1310,10 @@ export const CustomerKycApp: React.FC = () => {
                 </div>
 
                 <div className="ckyc-form-group">
-                  <label className="ckyc-form-label" htmlFor="w-gender">Gender</label>
+                  <label className="ckyc-form-label" htmlFor="w-gender">Gender *</label>
                   <select
                     id="w-gender"
-                    className="ckyc-input"
+                    className={`ckyc-input${formErrors.gender ? ' ckyc-input-error' : ''}`}
                     value={formData.gender}
                     onChange={e => handleInputChange('gender', e.target.value)}
                   >
@@ -1195,15 +1321,52 @@ export const CustomerKycApp: React.FC = () => {
                     <option value="Female">Female</option>
                     <option value="Other">Other</option>
                   </select>
+                  <FieldError field="gender" />
                 </div>
 
                 <div className="ckyc-form-group">
-                  <label className="ckyc-form-label" htmlFor="w-occ">Occupation / Source of Wealth *</label>
+                  <label className="ckyc-form-label" htmlFor="w-inv-type">Investor Type *</label>
+                  <select
+                    id="w-inv-type"
+                    className={`ckyc-input${formErrors.investorType ? ' ckyc-input-error' : ''}`}
+                    value={formData.investorType}
+                    onChange={e => handleInputChange('investorType', e.target.value)}
+                  >
+                    <option value="Individual / Retail HNW">Individual / Retail HNW</option>
+                    <option value="Corporate / Non-Individual">Corporate / Non-Individual</option>
+                    <option value="HUF">HUF (Hindu Undivided Family)</option>
+                    <option value="NRI / Foreign">NRI / Foreign</option>
+                    <option value="Partnership / LLP">Partnership / LLP</option>
+                    <option value="Trust / Society">Trust / Society</option>
+                    <option value="Other">Other</option>
+                  </select>
+                  <FieldError field="investorType" />
+                </div>
+
+                <div className="ckyc-form-group">
+                  <label className="ckyc-form-label" htmlFor="w-res-type">Resident Status *</label>
+                  <select
+                    id="w-res-type"
+                    className={`ckyc-input${formErrors.residentType ? ' ckyc-input-error' : ''}`}
+                    value={formData.residentType}
+                    onChange={e => handleInputChange('residentType', e.target.value)}
+                  >
+                    <option value="Resident Indian">Resident Indian (RI)</option>
+                    <option value="Non-Resident Indian (NRI)">Non-Resident Indian (NRI)</option>
+                    <option value="Person of Indian Origin (PIO)">Person of Indian Origin (PIO)</option>
+                    <option value="Foreign National">Foreign National</option>
+                  </select>
+                  <FieldError field="residentType" />
+                </div>
+
+                <div className="ckyc-form-group">
+                  <label className="ckyc-form-label" htmlFor="w-occ">Occupation / Source of Wealth (Optional)</label>
                   <input
                     id="w-occ"
                     type="text"
+                    placeholder="e.g. Salaried / Business / Professional"
                     className={`ckyc-input${formErrors.occupation ? ' ckyc-input-error' : ''}`}
-                    value={formData.occupation}
+                    value={formData.occupation || ''}
                     onChange={e => handleInputChange('occupation', e.target.value)}
                   />
                   <FieldError field="occupation" />
@@ -1253,13 +1416,13 @@ export const CustomerKycApp: React.FC = () => {
                 </div>
 
                 <div className="ckyc-form-group">
-                  <label className="ckyc-form-label" htmlFor="w-father-name">Father's Full Name</label>
+                  <label className="ckyc-form-label" htmlFor="w-father-name">Father's Full Name (Optional)</label>
                   <input
                     id="w-father-name"
                     type="text"
                     placeholder="Father's full name"
                     className="ckyc-input"
-                    value={formData.fatherName}
+                    value={formData.fatherName || ''}
                     onChange={e => handleInputChange('fatherName', e.target.value)}
                   />
                 </div>
@@ -1305,43 +1468,70 @@ export const CustomerKycApp: React.FC = () => {
                   <FieldError field="address" />
                 </div>
 
+                <div className="ckyc-form-group">
+                  <label className="ckyc-form-label" htmlFor="w-courier-addr">Communication / Current Address (Optional)</label>
+                  <textarea
+                    id="w-courier-addr"
+                    className="ckyc-input"
+                    placeholder="Mailing / Courier address (leave blank if same as permanent)"
+                    style={{ minHeight: 60, resize: 'vertical' }}
+                    value={formData.courierAddress || ''}
+                    onChange={e => handleInputChange('courierAddress', e.target.value)}
+                  />
+                </div>
+
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div className="ckyc-form-group">
-                    <label className="ckyc-form-label" htmlFor="w-city">City</label>
+                    <label className="ckyc-form-label" htmlFor="w-city">City *</label>
                     <input
                       id="w-city"
                       type="text"
                       placeholder="e.g. Mumbai"
-                      className="ckyc-input"
+                      className={`ckyc-input${formErrors.city ? ' ckyc-input-error' : ''}`}
                       value={formData.city}
                       onChange={e => handleInputChange('city', e.target.value)}
                     />
+                    <FieldError field="city" />
                   </div>
                   <div className="ckyc-form-group">
-                    <label className="ckyc-form-label" htmlFor="w-state">State</label>
+                    <label className="ckyc-form-label" htmlFor="w-state">State *</label>
                     <input
                       id="w-state"
                       type="text"
                       placeholder="e.g. Maharashtra"
-                      className="ckyc-input"
+                      className={`ckyc-input${formErrors.state ? ' ckyc-input-error' : ''}`}
                       value={formData.state}
                       onChange={e => handleInputChange('state', e.target.value)}
                     />
+                    <FieldError field="state" />
                   </div>
                 </div>
 
-                <div className="ckyc-form-group">
-                  <label className="ckyc-form-label" htmlFor="w-pin">PIN Code *</label>
-                  <input
-                    id="w-pin"
-                    type="text"
-                    maxLength={6}
-                    placeholder="e.g. 560103"
-                    className={`ckyc-input${formErrors.pincode ? ' ckyc-input-error' : ''}`}
-                    value={formData.pincode}
-                    onChange={e => handleInputChange('pincode', e.target.value)}
-                  />
-                  <FieldError field="pincode" />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div className="ckyc-form-group">
+                    <label className="ckyc-form-label" htmlFor="w-pin">PIN Code *</label>
+                    <input
+                      id="w-pin"
+                      type="text"
+                      maxLength={6}
+                      placeholder="e.g. 560103"
+                      className={`ckyc-input${formErrors.pincode ? ' ckyc-input-error' : ''}`}
+                      value={formData.pincode}
+                      onChange={e => handleInputChange('pincode', e.target.value)}
+                    />
+                    <FieldError field="pincode" />
+                  </div>
+                  <div className="ckyc-form-group">
+                    <label className="ckyc-form-label" htmlFor="w-country">Country</label>
+                    <input
+                      id="w-country"
+                      type="text"
+                      placeholder="e.g. India"
+                      className="ckyc-input"
+                      value={formData.country || 'India'}
+                      onChange={e => handleInputChange('country', e.target.value)}
+                    />
+                  </div>
                 </div>
               </div>
             )}
@@ -1464,77 +1654,187 @@ export const CustomerKycApp: React.FC = () => {
               </div>
             )}
 
-            {/* Step 5: Nominee Details (Optional) */}
+            {/* Step 5: Nominee Details (Optional in both flows) */}
             {wizardStep === 5 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <div className="ckyc-card-title-group">
-                  <h3 className="ckyc-card-title">5. Primary Nominee (Optional)</h3>
-                  <p className="ckyc-card-desc">Add a registered legal nominee for your investment portfolio, or skip to proceed.</p>
+                <div className="ckyc-card-title-group" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <h3 className="ckyc-card-title">5. Nominee Details (Optional)</h3>
+                    <p className="ckyc-card-desc">
+                      Designate legal nominee(s) for your portfolio, or proceed without nomination.
+                    </p>
+                  </div>
+                  {formData.hasNominee && formData.nominees.length < 3 && (
+                    <button
+                      type="button"
+                      className="ckyc-btn-secondary"
+                      style={{ padding: '6px 12px', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                      onClick={handleAddNominee}
+                    >
+                      <Plus size={14} /> Add Nominee
+                    </button>
+                  )}
                 </div>
 
-                <div className="ckyc-form-group">
-                  <label className="ckyc-form-label" htmlFor="w-nom-name">
-                    Nominee Name (Optional)
-                    <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--ckyc-text-muted)' }}>Leave blank to skip</span>
-                  </label>
+                {/* Optional Nominee Toggle */}
+                <label className="ckyc-checkbox-row" style={{ padding: '12px 14px', borderRadius: 10, background: 'var(--ckyc-bg)', border: '1px solid var(--ckyc-border)' }}>
                   <input
-                    id="w-nom-name"
-                    type="text"
-                    placeholder="Nominee full legal name (optional)"
-                    className={`ckyc-input${formErrors.nomineeName ? ' ckyc-input-error' : ''}`}
-                    value={formData.nomineeName}
-                    onChange={e => handleInputChange('nomineeName', e.target.value)}
+                    type="checkbox"
+                    className="ckyc-checkbox"
+                    checked={formData.hasNominee}
+                    onChange={e => handleToggleNominee(e.target.checked)}
                   />
-                  <FieldError field="nomineeName" />
-                </div>
+                  <div>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ckyc-text-primary)' }}>
+                      I wish to register nominee(s) for this investment account
+                    </span>
+                    <div style={{ fontSize: 12, color: 'var(--ckyc-text-muted)', marginTop: 2 }}>
+                      Nomination protects investor assets. You can register up to 3 nominees with percentage allocations.
+                    </div>
+                  </div>
+                </label>
 
-                {formData.nomineeName.trim().length > 0 && (
+                {!formData.hasNominee ? (
+                  <div style={{ padding: '14px 16px', borderRadius: 10, backgroundColor: 'rgba(59, 130, 246, 0.06)', border: '1px solid rgba(59, 130, 246, 0.2)', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                    <ShieldCheck size={20} color="#2563eb" style={{ flexShrink: 0, marginTop: 2 }} />
+                    <div style={{ fontSize: 12.5, color: 'var(--ckyc-text-secondary)', lineHeight: 1.5 }}>
+                      <strong style={{ color: 'var(--ckyc-text-primary)' }}>Single Applicant / Nominee Opt-out:</strong> You have chosen to continue without nominating an individual. All account benefits and redemption distributions will accrue solely to the primary account holder or legal heirs.
+                    </div>
+                  </div>
+                ) : (
                   <>
-                    <div className="ckyc-form-group">
-                      <label className="ckyc-form-label" htmlFor="w-nom-rel">Relationship *</label>
-                      <select
-                        id="w-nom-rel"
-                        className="ckyc-input"
-                        value={formData.nomineeRelationship}
-                        onChange={e => handleInputChange('nomineeRelationship', e.target.value)}
-                      >
-                        <option value="Spouse">Spouse</option>
-                        <option value="Son">Son</option>
-                        <option value="Daughter">Daughter</option>
-                        <option value="Mother">Mother</option>
-                        <option value="Father">Father</option>
-                        <option value="Brother">Brother</option>
-                        <option value="Sister">Sister</option>
-                      </select>
-                    </div>
+                    {/* Total Allocation Progress Pill */}
+                    {(() => {
+                      const totalPct = formData.nominees.reduce((sum, n) => sum + (Number(n.allocationPercentage) || 0), 0);
+                      const is100 = totalPct === 100;
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderRadius: 8, background: is100 ? 'rgba(16, 185, 129, 0.08)' : 'rgba(245, 158, 11, 0.08)', border: `1px solid ${is100 ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.3)'}` }}>
+                          <span style={{ fontSize: 12.5, fontWeight: 600, color: is100 ? '#059669' : '#d97706', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            {is100 ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
+                            Total Allocation: {totalPct}% / 100% {is100 ? '(Valid)' : `(Needs ${100 - totalPct > 0 ? `${100 - totalPct}% more` : `${totalPct - 100}% less`})`}
+                          </span>
+                          <span style={{ fontSize: 11, color: 'var(--ckyc-text-muted)' }}>
+                            {formData.nominees.length} of 3 nominees added
+                          </span>
+                        </div>
+                      );
+                    })()}
 
-                    <div className="ckyc-form-group">
-                      <label className="ckyc-form-label" htmlFor="w-nom-dob">Date of Birth *</label>
-                      <input
-                        id="w-nom-dob"
-                        type="date"
-                        className={`ckyc-input${formErrors.nomineeDob ? ' ckyc-input-error' : ''}`}
-                        value={formData.nomineeDob}
-                        onChange={e => handleInputChange('nomineeDob', e.target.value)}
-                      />
-                      <FieldError field="nomineeDob" />
-                    </div>
+                    <FieldError field="nominees" />
 
-                    <div className="ckyc-form-group">
-                      <label className="ckyc-form-label" htmlFor="w-nom-share">Allocation Percentage (%) *</label>
-                      <input
-                        id="w-nom-share"
-                        type="number"
-                        min={1}
-                        max={100}
-                        className={`ckyc-input${formErrors.nomineeAllocation ? ' ckyc-input-error' : ''}`}
-                        value={formData.nomineeAllocation}
-                        onChange={e => handleInputChange('nomineeAllocation', Number(e.target.value))}
-                      />
-                      <FieldError field="nomineeAllocation" />
-                    </div>
+                    {formData.nominees.map((nom, idx) => (
+                      <div key={nom.id || idx} style={{ border: '1px solid var(--ckyc-border)', borderRadius: 10, padding: 14, backgroundColor: 'var(--ckyc-card-bg, #fff)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ckyc-text-primary)' }}>
+                            Nominee #{idx + 1}
+                          </span>
+                          {formData.nominees.length > 1 && (
+                            <button
+                              type="button"
+                              style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                              onClick={() => handleRemoveNominee(idx)}
+                            >
+                              <Trash2 size={13} /> Remove
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="ckyc-form-group">
+                          <label className="ckyc-form-label" htmlFor={`w-nom-${idx}-name`}>Nominee Full Name *</label>
+                          <input
+                            id={`w-nom-${idx}-name`}
+                            type="text"
+                            placeholder="Full legal name"
+                            className={`ckyc-input${formErrors[`nominee_${idx}_name`] ? ' ckyc-input-error' : ''}`}
+                            value={nom.name}
+                            onChange={e => handleUpdateNominee(idx, 'name', e.target.value)}
+                          />
+                          <FieldError field={`nominee_${idx}_name`} />
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                          <div className="ckyc-form-group">
+                            <label className="ckyc-form-label" htmlFor={`w-nom-${idx}-rel`}>Relationship *</label>
+                            <select
+                              id={`w-nom-${idx}-rel`}
+                              className={`ckyc-input${formErrors[`nominee_${idx}_relationship`] ? ' ckyc-input-error' : ''}`}
+                              value={nom.relationship}
+                              onChange={e => handleUpdateNominee(idx, 'relationship', e.target.value)}
+                            >
+                              <option value="Spouse">Spouse</option>
+                              <option value="Son">Son</option>
+                              <option value="Daughter">Daughter</option>
+                              <option value="Mother">Mother</option>
+                              <option value="Father">Father</option>
+                              <option value="Brother">Brother</option>
+                              <option value="Sister">Sister</option>
+                              <option value="Other">Other</option>
+                            </select>
+                            <FieldError field={`nominee_${idx}_relationship`} />
+                          </div>
+
+                          <div className="ckyc-form-group">
+                            <label className="ckyc-form-label" htmlFor={`w-nom-${idx}-dob`}>Date of Birth *</label>
+                            <input
+                              id={`w-nom-${idx}-dob`}
+                              type="date"
+                              className={`ckyc-input${formErrors[`nominee_${idx}_dob`] ? ' ckyc-input-error' : ''}`}
+                              value={nom.dob}
+                              onChange={e => handleUpdateNominee(idx, 'dob', e.target.value)}
+                            />
+                            <FieldError field={`nominee_${idx}_dob`} />
+                          </div>
+                        </div>
+
+                        <div className="ckyc-form-group">
+                          <label className="ckyc-form-label" htmlFor={`w-nom-${idx}-pct`}>Allocation Percentage (%) *</label>
+                          <input
+                            id={`w-nom-${idx}-pct`}
+                            type="number"
+                            min={1}
+                            max={100}
+                            className={`ckyc-input${formErrors[`nominee_${idx}_pct`] ? ' ckyc-input-error' : ''}`}
+                            value={nom.allocationPercentage}
+                            onChange={e => handleUpdateNominee(idx, 'allocationPercentage', Number(e.target.value))}
+                          />
+                          <FieldError field={`nominee_${idx}_pct`} />
+                        </div>
+
+                        <div className="ckyc-form-group">
+                          <label className="ckyc-form-label" htmlFor={`w-nom-${idx}-addr`}>Nominee Address (Optional)</label>
+                          <input
+                            id={`w-nom-${idx}-addr`}
+                            type="text"
+                            placeholder="Leave blank if same as permanent address"
+                            className="ckyc-input"
+                            value={nom.address || ''}
+                            onChange={e => handleUpdateNominee(idx, 'address', e.target.value)}
+                          />
+                        </div>
+
+                        <div className="ckyc-form-group">
+                          <label className="ckyc-form-label" htmlFor={`w-nom-${idx}-guard`}>Guardian Name (if Nominee is Minor under 18)</label>
+                          <input
+                            id={`w-nom-${idx}-guard`}
+                            type="text"
+                            placeholder="Guardian full name"
+                            className="ckyc-input"
+                            value={nom.guardianName || ''}
+                            onChange={e => handleUpdateNominee(idx, 'guardianName', e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    ))}
                   </>
                 )}
+              </div>
+            )}
+
+            {/* Draft Toast Notification */}
+            {draftToast && (
+              <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, backgroundColor: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#059669', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <CheckCircle size={16} />
+                <span>{draftToast}</span>
               </div>
             )}
 
@@ -1553,6 +1853,16 @@ export const CustomerKycApp: React.FC = () => {
                   <ArrowLeft size={16} /> Back
                 </button>
               )}
+              <button
+                type="button"
+                className="ckyc-btn-secondary"
+                style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                disabled={isDraftSaving}
+                onClick={handleSaveDraft}
+                title="Save your progress as draft to resume later"
+              >
+                <Save size={15} /> {isDraftSaving ? 'Saving...' : 'Save Draft'}
+              </button>
               <button
                 type="button"
                 className="ckyc-btn-primary"

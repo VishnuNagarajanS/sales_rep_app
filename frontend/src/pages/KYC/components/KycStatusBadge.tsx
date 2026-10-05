@@ -64,10 +64,12 @@ export const KycStatusBadge: React.FC<KycStatusBadgeProps> = ({ status }) => {
             alignItems: 'center',
             gap: 5,
             fontWeight: 600,
+            whiteSpace: 'nowrap',
           }}
+          title="Assisted KYC – Submitted for Verification"
         >
           <UserCheck size={11} />
-          Assisted KYC – Submitted for Verification
+          Under Verification
         </span>
       );
     case 'Pending':

@@ -120,8 +120,10 @@ export const KycStatusDropdown: React.FC<Props> = ({
     if (!showVerifiedModal || !deal) return;
     const fetchKyc = async () => {
       try {
-        if (deal.email) {
-          const res = await fetch(`/api/irm/kyc/by-email?email=${encodeURIComponent(deal.email)}`, {
+        // 1. Stable direct KYC record ID or investor/customer ID
+        const kycId = (deal as any).kycId || (deal as any).kycRecordId || (deal as any).customerId;
+        if (kycId) {
+          const res = await fetch(`/api/irm/kyc/${kycId}`, {
             headers: getAuthHeaders(),
           });
           if (res.ok) {
@@ -132,9 +134,10 @@ export const KycStatusDropdown: React.FC<Props> = ({
             }
           }
         }
-        const kycId = (deal as any).kycId || (deal as any).kycRecordId;
-        if (kycId) {
-          const res = await fetch(`/api/irm/kyc/${kycId}`, {
+
+        // 2. Fallback to email match
+        if (deal.email) {
+          const res = await fetch(`/api/irm/kyc/by-email?email=${encodeURIComponent(deal.email)}`, {
             headers: getAuthHeaders(),
           });
           if (res.ok) {
@@ -171,11 +174,19 @@ export const KycStatusDropdown: React.FC<Props> = ({
       Boolean(localStorage.getItem(`nexus_kyc_assisted_${deal.id}`))
     );
 
+  let parsedNomsForChecklist: any[] = [];
+  if (liveKycData?.nomineesJson) {
+    try { parsedNomsForChecklist = JSON.parse(liveKycData.nomineesJson); } catch {}
+  }
+  const hasNominees = Boolean(
+    parsedNomsForChecklist && parsedNomsForChecklist.length > 0 && parsedNomsForChecklist[0]?.name
+  );
+
   const allChecklistCompleted =
     checklist.identity &&
     checklist.bank &&
     checklist.documents &&
-    checklist.nominee &&
+    (!hasNominees || checklist.nominee) &&
     checklist.demat;
 
   const handleSelect = (status: 'Pending' | 'Wrong' | 'Verified') => {
@@ -410,8 +421,8 @@ export const KycStatusDropdown: React.FC<Props> = ({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
             <span style={{ fontSize: 12, color: allChecklistCompleted ? '#059669' : '#dc2626', fontWeight: 600 }}>
               {allChecklistCompleted
-                ? '✓ All 5 checklist items confirmed'
-                : '⚠ Please verify and tick all 5 checklist items before proceeding'}
+                ? (hasNominees ? '✓ All 5 checklist items confirmed' : '✓ All required checklist items confirmed (Nominee waived)')
+                : (hasNominees ? '⚠ Please verify and tick all 5 checklist items before proceeding' : '⚠ Please verify and tick all required checklist items before proceeding')}
             </span>
             <div style={{ display: 'flex', gap: 10 }}>
               <button
@@ -626,14 +637,21 @@ export const KycStatusDropdown: React.FC<Props> = ({
                 <span>I have inspected all uploaded Documents for validity & clarity</span>
               </label>
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={checklist.nominee}
-                  onChange={e => setChecklist(prev => ({ ...prev, nominee: e.target.checked }))}
-                />
-                <span>I have verified the Nominee nomination and allocation percentages</span>
-              </label>
+              {hasNominees ? (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={checklist.nominee}
+                    onChange={e => setChecklist(prev => ({ ...prev, nominee: e.target.checked }))}
+                  />
+                  <span>I have verified the Nominee nomination and allocation percentages</span>
+                </label>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#059669', background: 'rgba(16, 185, 129, 0.08)', padding: '6px 10px', borderRadius: 6, fontSize: 12 }}>
+                  <ShieldCheck size={14} style={{ flexShrink: 0 }} />
+                  <span>No Nominee Submitted (Opted out / Single applicant — Verified &amp; Waived)</span>
+                </div>
+              )}
 
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                 <input
@@ -669,11 +687,15 @@ export const KycStatusDropdown: React.FC<Props> = ({
               disabled={loading}
               onClick={async () => {
                 setShowVerifiedConfirmModal(false);
+                const effectiveChecklist = {
+                  ...checklist,
+                  nominee: !hasNominees ? true : checklist.nominee,
+                };
                 await executeChange(
                   'Verified',
                   'Manual verification completed by IRM',
                   undefined,
-                  checklist
+                  effectiveChecklist
                 );
               }}
               style={{ background: '#10b981', borderColor: '#059669' }}

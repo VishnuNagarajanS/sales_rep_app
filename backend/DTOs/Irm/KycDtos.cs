@@ -219,12 +219,57 @@ public class SubmitKycDto
 
 public class PublicKycDto
 {
+    public int Id { get; set; }
+    public int InvestorId { get; set; }
     public string InvestorName { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public bool IsExpired { get; set; }
     public DateTime? ExpiresAt { get; set; }
+
+    // Step 1: Basic Details
+    public string? FatherName { get; set; }
+    public string? DateOfBirth { get; set; }
+    public string? Dob { get; set; }
+    public string? NameAsPerPan { get; set; }
+    public string? Gender { get; set; }
+    public string? InvestorType { get; set; }
+    public string? ResidentType { get; set; }
+    public string? Occupation { get; set; }
+
+    // Step 2: Identity & Address
+    public string? PanNumber { get; set; }
+    public string? AadhaarNumber { get; set; }
+    public string? AddressLine1 { get; set; }
+    public string? AddressLine2 { get; set; }
+    public string? City { get; set; }
+    public string? State { get; set; }
+    public string? Pincode { get; set; }
+    public string? Country { get; set; }
+
+    // Step 3: Bank Details
+    public string? BankName { get; set; }
+    public string? AccountNumber { get; set; }
+    public string? IfscCode { get; set; }
+    public string? AccountType { get; set; }
+    public string? DematAccountNumber { get; set; }
+    public string? DpId { get; set; }
+
+    // Step 4: Nominees JSON
+    public string? NomineesJson { get; set; }
+
+    // Step 5: Document URLs
+    public string? PanDocumentUrl { get; set; }
+    public string? AadhaarDocumentUrl { get; set; }
+    public string? BankChequeUrl { get; set; }
+    public string? DematDocumentUrl { get; set; }
+    public string? PhotoUrl { get; set; }
+    public string? SignatureUrl { get; set; }
+
+    public bool IsAssisted { get; set; }
+    public bool CustomerConsentObtained { get; set; }
+    public DateTime? SubmittedAt { get; set; }
 }
 
 public class KycReviewDto

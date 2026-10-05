@@ -55,75 +55,26 @@ import { DataTable, Column, RowAction } from '../../components/common/DataTable'
 import { FilterBar } from '../../components/common/FilterBar';
 import { Modal } from '../../components/common/Modal';
 import { getAuthHeaders } from '../../utils/authHeaders';
+import {
+  SharedKycFormData,
+  NomineeItem,
+  validateKycStep,
+  GENDER_OPTIONS,
+  INVESTOR_TYPE_OPTIONS,
+  RESIDENT_TYPE_OPTIONS,
+  ACCOUNT_TYPE_OPTIONS,
+} from '../../utils/kycValidators';
 import './KYCPage.css';
 
 // ── Types for GHL IRM 5-Step Flow ──────────────────────────────────────────────
-interface NomineeItem {
-  id: string;
-  name: string;
-  relationship: string;
-  dob: string;
-  allocationPercentage: number;
-  address: string;
-  guardianName: string;
-}
+export type { NomineeItem };
 
-interface KYCFormData {
-  // Step 1: Basic Details
-  investorName: string;
-  phone: string;
-  email: string;
-  gender: string;
-  investorType: string;
-  residentType: string;
-  occupation?: string;
-
-  // Step 2: Identity Details
-  panNumber: string;
-  nameAsPerPan: string;
-  aadhaarNumber: string;
-  fatherName: string;
-  dob: string;
-  address: string;
-  courierAddress: string;
-  country: string;
-  state: string;
-  city: string;
-  pincode: string;
+export interface KYCFormData extends SharedKycFormData {
   aadhaarDoc: { name: string; size: string; type: string } | null;
   panDoc: { name: string; size: string; type: string } | null;
-
-  // Step 3: Bank Details
-  accountType: string;
-  accountNumber: string;
-  ifscCode: string;
-  swiftCode: string;
-  accountHolderName: string;
-  bankName: string;
-  branchName: string;
   bankProofDoc: { name: string; size: string; type: string } | null;
-
-  // Step 4: Demat Account
-  hasNoDemat: boolean;
-  dematAccountNumber: string;
-  dematDepository?: string;
-  dematDpId?: string;
-  dematClientId?: string;
   dematDoc: { name: string; size: string; type: string } | null;
-
-  // Step 5: Nominee Details
-  nominees: NomineeItem[];
 }
-
-const INITIAL_NOMINEE: NomineeItem = {
-  id: 'nom-1',
-  name: '',
-  relationship: 'Spouse',
-  dob: '',
-  allocationPercentage: 100,
-  address: '',
-  guardianName: '',
-};
 
 const BLANK_KYC_FORM: KYCFormData = {
   investorName: '',
@@ -148,7 +99,7 @@ const BLANK_KYC_FORM: KYCFormData = {
   aadhaarDoc: null,
   panDoc: null,
 
-  accountType: 'Savings',
+  accountType: 'Savings Account',
   accountNumber: '',
   ifscCode: '',
   swiftCode: '',
@@ -159,12 +110,13 @@ const BLANK_KYC_FORM: KYCFormData = {
 
   hasNoDemat: false,
   dematAccountNumber: '',
-  dematDepository: '',
+  dematDepository: 'CDSL',
   dematDpId: '',
   dematClientId: '',
   dematDoc: null,
 
-  nominees: [INITIAL_NOMINEE],
+  hasNominee: false,
+  nominees: [],
 };
 
 function formatBytes(bytes: number): string {
@@ -390,6 +342,64 @@ const GhlIrmKycView: React.FC = () => {
     };
   };
 
+  const findBackendKyc = (
+    deal: Deal | null | undefined,
+    dbKycsMap: Record<string, any>,
+    companyId?: string | number
+  ): any => {
+    if (!deal) return null;
+    const allKycs: any[] = Array.from(new Set(Object.values(dbKycsMap || {})));
+    const compIdStr = companyId ? String(companyId) : deal.companyId ? String(deal.companyId) : '';
+
+    // 1. Stable direct KYC record ID
+    const directKycId = (deal as any).kycId || (deal as any).kycRecordId;
+    if (directKycId) {
+      const byId = dbKycsMap[`id_${directKycId}`] || allKycs.find(k => k && k.id === Number(directKycId));
+      if (byId) return byId;
+    }
+
+    // 2. Stable Investor ID (deal.customerId / deal.investorId) and company scope
+    const investorIdNum = deal.customerId ? Number(deal.customerId) : (deal as any).investorId ? Number((deal as any).investorId) : 0;
+    if (investorIdNum > 0) {
+      if (compIdStr) {
+        const scopedMatch = allKycs.find(
+          k => k && k.investorId === investorIdNum && (!k.companyId || String(k.companyId) === compIdStr)
+        );
+        if (scopedMatch) return scopedMatch;
+      }
+      const invMatch = dbKycsMap[`inv_${investorIdNum}`] || allKycs.find(k => k && k.investorId === investorIdNum);
+      if (invMatch) return invMatch;
+    }
+
+    // 3. Stable Deal ID match if tracked on KYC record
+    if (deal.id) {
+      const dealMatch = allKycs.find(k => k && (k as any).dealId && String((k as any).dealId) === String(deal.id));
+      if (dealMatch) return dealMatch;
+    }
+
+    // 4. Fallback to phone match (sanitized 10 digits)
+    const phoneDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+    if (phoneDigits) {
+      const phoneMatch = allKycs.find(
+        k => k && (k.phone || '').replace(/\D/g, '').slice(-10) === phoneDigits &&
+          (!compIdStr || !k.companyId || String(k.companyId) === compIdStr)
+      );
+      if (phoneMatch) return phoneMatch;
+    }
+
+    // 5. Fallback to email match
+    const email = (deal.email || '').toLowerCase().trim();
+    if (email) {
+      const emailMatch = allKycs.find(
+        k => k && (k.email || '').toLowerCase().trim() === email &&
+          (!compIdStr || !k.companyId || String(k.companyId) === compIdStr)
+      );
+      if (emailMatch) return emailMatch;
+    }
+
+    return null;
+  };
+
   const refreshDbKycs = async () => {
     try {
       const res = await fetch('/api/irm/kyc/all', {
@@ -400,8 +410,20 @@ const GhlIrmKycView: React.FC = () => {
       if (json?.success && Array.isArray(json.data)) {
         const map: Record<string, any> = {};
         json.data.forEach((k: any) => {
-          if (k.email) map[k.email.toLowerCase().trim()] = k;
+          if (!k) return;
           if (k.id) map[`id_${k.id}`] = k;
+          if (k.investorId) map[`inv_${k.investorId}`] = k;
+          if (k.email) {
+            map[`email_${k.email.toLowerCase().trim()}`] = k;
+            map[k.email.toLowerCase().trim()] = k;
+          }
+          if (k.phone) {
+            const p10 = (k.phone || '').replace(/\D/g, '').slice(-10);
+            if (p10) map[`phone_${p10}`] = k;
+          }
+          if (k.companyId && k.investorId) {
+            map[`comp_${k.companyId}_inv_${k.investorId}`] = k;
+          }
         });
         setDbKycs(map);
       }
@@ -415,7 +437,7 @@ const GhlIrmKycView: React.FC = () => {
     if (deal.kycStatus === 'Verified') return 'Verified';
     if (deal.kycStatus === 'Wrong') return 'Needs Correction';
 
-    // 1.5 Check if Assisted KYC was submitted for this deal
+    // 1.5 Check if Assisted KYC was submitted for this deal locally
     const assistedKey = `nexus_kyc_assisted_${deal.id}`;
     const assistedRaw = localStorage.getItem(assistedKey);
     if (assistedRaw) {
@@ -430,24 +452,29 @@ const GhlIrmKycView: React.FC = () => {
       return 'Assisted KYC – Submitted for Verification';
     }
 
-    // 2. Check DB KYC record by email/phone
-    const emailKey = (deal.email || '').toLowerCase().trim();
-    const phoneDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
-    const rec = dbKycs[emailKey] || (phoneDigits
-      ? Object.values(dbKycs).find((k: any) => (k.phone || '').replace(/\D/g, '').slice(-10) === phoneDigits)
-      : null);
+    // 2. Check DB KYC record by stable IDs and scope first
+    const rec = findBackendKyc(deal, dbKycs, tenant?.id);
 
     if (rec) {
-      // Map backend KycStatus enum string to CustomerKycStatus
-      switch ((rec.status || '').toLowerCase()) {
-        case 'approved':   return 'Verified';
-        case 'pendingreview': return 'Submitted';     // Customer submitted; IRM reviewing
-        case 'linksent':  return 'Link Sent';         // Link dispatched; customer hasn't submitted yet
-        case 'reuploadrequested': return 'Needs Correction';
-        case 'rejected':  return 'Rejected';
-        case 'draft':     break;                      // Fall through to draft checks
-        default:          break;
+      const recStatus = (rec.status || '').toLowerCase();
+      if (recStatus === 'approved') return 'Verified';
+      if (recStatus === 'reuploadrequested') return 'Needs Correction';
+      if (recStatus === 'rejected') return 'Rejected';
+
+      // Confirmed backend submission awaiting verification
+      if (rec.submittedAt || recStatus === 'pendingreview') {
+        if (rec.isAssisted) {
+          return 'Assisted KYC – Submitted for Verification';
+        }
+        return 'Submitted';
       }
+
+      if (recStatus === 'draft') {
+        if (rec.isAssisted) return 'Assisted Draft';
+        if (rec.kycLinkSent) return 'Link Sent';
+        return 'Assisted Draft';
+      }
+      if (recStatus === 'linksent') return 'Link Sent';
     }
 
     // 2.5 Check if there is an active Assisted KYC Draft
@@ -557,8 +584,20 @@ const GhlIrmKycView: React.FC = () => {
         if (json?.success && Array.isArray(json.data)) {
           const map: Record<string, any> = {};
           json.data.forEach((k: any) => {
-            if (k.email) map[k.email.toLowerCase().trim()] = k;
+            if (!k) return;
             if (k.id) map[`id_${k.id}`] = k;
+            if (k.investorId) map[`inv_${k.investorId}`] = k;
+            if (k.email) {
+              map[`email_${k.email.toLowerCase().trim()}`] = k;
+              map[k.email.toLowerCase().trim()] = k;
+            }
+            if (k.phone) {
+              const p10 = (k.phone || '').replace(/\D/g, '').slice(-10);
+              if (p10) map[`phone_${p10}`] = k;
+            }
+            if (k.companyId && k.investorId) {
+              map[`comp_${k.companyId}_inv_${k.investorId}`] = k;
+            }
           });
           setDbKycs(map);
         }
@@ -740,8 +779,12 @@ const GhlIrmKycView: React.FC = () => {
     return Math.max(25, Math.min(100, pct));
   };
 
-  const handleOpenCustomerProfile = (deal: Deal) => {
-    setSelectedCustomerDeal(deal);
+  const buildMergedProfileData = (
+    deal: Deal,
+    dbKyc: any,
+    matchingLead?: any,
+    matchingCustomer?: any
+  ): Partial<KYCFormData> => {
     const savedKycKey = `nexus_kyc_data_${deal.id}`;
     let saved: Partial<KYCFormData> | null = null;
     try {
@@ -749,54 +792,6 @@ const GhlIrmKycView: React.FC = () => {
       if (raw) saved = JSON.parse(raw);
     } catch { }
 
-    const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
-    const matchingLead = leads.find(l => {
-      if (deal.customerId && l.id === deal.customerId) return true;
-      const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
-      return Boolean(lDigits && fDigits && lDigits === fDigits);
-    });
-    const matchingCustomer = customers.find(c => {
-      if (deal.customerId && c.id === deal.customerId) return true;
-      const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
-      return Boolean(cDigits && fDigits && cDigits === fDigits);
-    });
-
-    // Find the submitted record: by deal.email, then matchingLead/matchingCustomer email, then by last-10-digits phone across Object.values(dbKycs)
-    const allDbKycs = Object.values(dbKycs) as any[];
-    const dealEmail = (deal.email || '').toLowerCase().trim();
-    const leadEmail = (matchingLead?.email || '').toLowerCase().trim();
-    const customerEmail = (matchingCustomer?.email || '').toLowerCase().trim();
-
-    let dbKyc: any = null;
-    if (dealEmail) {
-      dbKyc = dbKycs[dealEmail] || allDbKycs.find(k => (k.email || '').toLowerCase().trim() === dealEmail);
-    }
-    if (!dbKyc && leadEmail) {
-      dbKyc = dbKycs[leadEmail] || allDbKycs.find(k => (k.email || '').toLowerCase().trim() === leadEmail);
-    }
-    if (!dbKyc && customerEmail) {
-      dbKyc = dbKycs[customerEmail] || allDbKycs.find(k => (k.email || '').toLowerCase().trim() === customerEmail);
-    }
-
-    if (!dbKyc) {
-      const phoneCandidates = [deal.phone, matchingLead?.phone, matchingCustomer?.phone]
-        .map(ph => (ph || '').replace(/\D/g, '').slice(-10))
-        .filter(Boolean);
-
-      if (phoneCandidates.length) {
-        dbKyc = allDbKycs.find(k => {
-          const kDigits = ((k as any).phone || '').replace(/\D/g, '').slice(-10);
-          return Boolean(kDigits && phoneCandidates.includes(kDigits));
-        });
-      }
-    }
-
-    if (!dbKyc && ((deal as any).kycId || (deal as any).kycRecordId)) {
-      const recId = Number((deal as any).kycId || (deal as any).kycRecordId);
-      dbKyc = allDbKycs.find(k => k.id === recId);
-    }
-
-    // Parse dbKyc.nomineesJson (JSON array) into the nominees array (id, name, relationship, dob, allocationPercentage, address, guardianName)
     let dbNominees: NomineeItem[] = [];
     if (dbKyc?.nomineesJson) {
       try {
@@ -822,7 +817,6 @@ const GhlIrmKycView: React.FC = () => {
     const docFrom = (url?: string | null, label = 'Uploaded document') =>
       url && String(url).trim() ? { name: label, size: '', type: '' } : null;
 
-    // The local draft must NEVER overwrite submitted DB values: drop empty-string values from the draft and do not spread ...saved last
     const savedNonEmpty: Record<string, any> = {};
     if (saved && typeof saved === 'object') {
       for (const [key, val] of Object.entries(saved)) {
@@ -836,7 +830,7 @@ const GhlIrmKycView: React.FC = () => {
       }
     }
 
-    const merged: Partial<KYCFormData> = {
+    return {
       ...savedNonEmpty,
       investorName: dbKyc?.investorName || savedNonEmpty.investorName || deal.customerName || matchingLead?.name || matchingCustomer?.name || '',
       phone: dbKyc?.phone || savedNonEmpty.phone || deal.phone || matchingLead?.phone || matchingCustomer?.phone || '',
@@ -874,10 +868,79 @@ const GhlIrmKycView: React.FC = () => {
       bankProofDoc: docFrom(dbKyc?.bankChequeUrl, 'Bank proof (uploaded)') || savedNonEmpty.bankProofDoc || null,
       dematDoc: docFrom(dbKyc?.dematDocumentUrl, 'Demat proof (uploaded)') || savedNonEmpty.dematDoc || null,
     };
+  };
+
+  const handleOpenCustomerProfile = (deal: Deal) => {
+    setSelectedCustomerDeal(deal);
+
+    const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+    const matchingLead = leads.find(l => {
+      if (deal.customerId && l.id === deal.customerId) return true;
+      const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+      return Boolean(lDigits && fDigits && lDigits === fDigits);
+    });
+    const matchingCustomer = customers.find(c => {
+      if (deal.customerId && c.id === deal.customerId) return true;
+      const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
+      return Boolean(cDigits && fDigits && cDigits === fDigits);
+    });
+
+    // 1. Stable lookup using stable investor / deal / KYC record ID and company scope first
+    const dbKyc = findBackendKyc(deal, dbKycs, tenant?.id);
+    const merged = buildMergedProfileData(deal, dbKyc, matchingLead, matchingCustomer);
 
     setProfileKycData(merged);
     setViewMode('profile');
   };
+
+  useEffect(() => {
+    if (!selectedCustomerDeal || viewMode !== 'profile') return;
+    let isCancelled = false;
+    const fetchLiveKycForProfile = async () => {
+      try {
+        const targetId = (selectedCustomerDeal as any).kycId ||
+                         (selectedCustomerDeal as any).kycRecordId ||
+                         (selectedCustomerDeal.customerId ? Number(selectedCustomerDeal.customerId) : 0);
+        let liveRecord: any = null;
+        if (targetId) {
+          const res = await fetch(`/api/irm/kyc/${targetId}`, { headers: getAuthHeaders() });
+          if (res.ok) {
+            const json = await res.json();
+            if (json.success && json.data) {
+              liveRecord = json.data;
+            }
+          }
+        }
+        if (!liveRecord && selectedCustomerDeal.email) {
+          const res = await fetch(`/api/irm/kyc/by-email?email=${encodeURIComponent(selectedCustomerDeal.email)}`, { headers: getAuthHeaders() });
+          if (res.ok) {
+            const json = await res.json();
+            if (json.success && json.data) {
+              liveRecord = json.data;
+            }
+          }
+        }
+        if (!isCancelled && liveRecord) {
+          setDbKycs(prev => ({
+            ...prev,
+            [`id_${liveRecord.id}`]: liveRecord,
+            ...(liveRecord.investorId ? { [`inv_${liveRecord.investorId}`]: liveRecord } : {}),
+            ...(liveRecord.email ? { [`email_${liveRecord.email.toLowerCase().trim()}`]: liveRecord, [liveRecord.email.toLowerCase().trim()]: liveRecord } : {}),
+          }));
+          const fDigits = (selectedCustomerDeal.phone || '').replace(/\D/g, '').slice(-10);
+          const matchLead = leads.find(l => (selectedCustomerDeal.customerId && l.id === selectedCustomerDeal.customerId) || (l.phone && l.phone.replace(/\D/g, '').slice(-10) === fDigits));
+          const matchCust = customers.find(c => (selectedCustomerDeal.customerId && c.id === selectedCustomerDeal.customerId) || (c.phone && c.phone.replace(/\D/g, '').slice(-10) === fDigits));
+          setProfileKycData(buildMergedProfileData(selectedCustomerDeal, liveRecord, matchLead, matchCust));
+        }
+      } catch (err) {
+        console.warn('Error loading live KYC record for customer profile:', err);
+      }
+    };
+    fetchLiveKycForProfile();
+    return () => {
+      isCancelled = true;
+    };
+  }, [selectedCustomerDeal, viewMode]);
 
   const handleExitFlow = () => {
     if (isAssistedFlow && selectedDeal) {
@@ -936,6 +999,78 @@ const GhlIrmKycView: React.FC = () => {
       };
     }
 
+    // If backend record exists in dbKycs, reload genuine submitted/drafted KYC data
+    if (targetDeal) {
+      const emailKey = (targetDeal.email || '').toLowerCase().trim();
+      const phoneDigits = (targetDeal.phone || '').replace(/\D/g, '').slice(-10);
+      const dbKyc = dbKycs[emailKey] || (phoneDigits ? Object.values(dbKycs).find((k: any) => (k.phone || '').replace(/\D/g, '').slice(-10) === phoneDigits) : null);
+
+      if (dbKyc) {
+        let dbNominees: NomineeItem[] = [];
+        let hasNomineeFlag = false;
+        if (dbKyc.nomineesJson) {
+          try {
+            const parsed = typeof dbKyc.nomineesJson === 'string'
+              ? JSON.parse(dbKyc.nomineesJson)
+              : dbKyc.nomineesJson;
+            if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.name) {
+              dbNominees = parsed.map((n: any, i: number) => ({
+                id: String(n.id || `nom-${i + 1}`),
+                name: String(n.name || n.nomineeName || ''),
+                relationship: String(n.relationship || n.nomineeRelationship || 'Spouse'),
+                dob: String(n.dob || n.nomineeDob || ''),
+                allocationPercentage: Number(n.allocationPercentage ?? n.nomineeAllocation) || 100,
+                address: String(n.address || n.nomineeAddress || ''),
+                guardianName: String(n.guardianName || ''),
+              }));
+              hasNomineeFlag = true;
+            }
+          } catch {}
+        }
+
+        const docFrom = (url?: string | null, label = 'Uploaded document') =>
+          url && String(url).trim() ? { name: label, size: 'Saved', type: 'application/pdf' } : null;
+
+        initialForm = {
+          ...initialForm,
+          investorName: dbKyc.investorName || initialForm.investorName || targetDeal.customerName || '',
+          phone: dbKyc.phone || initialForm.phone || targetDeal.phone || '',
+          email: dbKyc.email || initialForm.email || targetDeal.email || '',
+          gender: dbKyc.gender || initialForm.gender || 'Male',
+          investorType: dbKyc.investorType || initialForm.investorType || 'Individual / Retail HNW',
+          residentType: dbKyc.residentType || initialForm.residentType || 'Resident Indian (RI)',
+          occupation: dbKyc.occupation || initialForm.occupation || '',
+          panNumber: dbKyc.panNumber || initialForm.panNumber || '',
+          nameAsPerPan: dbKyc.nameAsPerPan || dbKyc.investorName || initialForm.nameAsPerPan || '',
+          aadhaarNumber: dbKyc.aadhaarNumber || initialForm.aadhaarNumber || '',
+          fatherName: dbKyc.fatherName || initialForm.fatherName || '',
+          dob: dbKyc.dateOfBirth || dbKyc.dob || initialForm.dob || '',
+          address: dbKyc.addressLine1 || dbKyc.address || initialForm.address || '',
+          courierAddress: dbKyc.addressLine2 || dbKyc.courierAddress || initialForm.courierAddress || '',
+          country: dbKyc.country || initialForm.country || 'India',
+          state: dbKyc.state || initialForm.state || '',
+          city: dbKyc.city || initialForm.city || '',
+          pincode: dbKyc.pincode || initialForm.pincode || '',
+          bankName: dbKyc.bankName || initialForm.bankName || '',
+          accountNumber: dbKyc.accountNumber || initialForm.accountNumber || '',
+          ifscCode: dbKyc.ifscCode || initialForm.ifscCode || '',
+          accountType: dbKyc.accountType || initialForm.accountType || 'Savings Account',
+          accountHolderName: dbKyc.accountHolderName || dbKyc.nameAsPerPan || dbKyc.investorName || initialForm.accountHolderName || '',
+          hasNoDemat: dbKyc.dematAccountNumber ? false : initialForm.hasNoDemat,
+          dematAccountNumber: dbKyc.dematAccountNumber || initialForm.dematAccountNumber || '',
+          dematDepository: dbKyc.dematDepository || initialForm.dematDepository || 'CDSL',
+          dematDpId: dbKyc.dpId || dbKyc.dematDpId || initialForm.dematDpId || '',
+          dematClientId: dbKyc.dematClientId || initialForm.dematClientId || '',
+          hasNominee: hasNomineeFlag,
+          nominees: dbNominees,
+          aadhaarDoc: docFrom(dbKyc.aadhaarDocumentUrl, 'Aadhaar (saved)') || initialForm.aadhaarDoc,
+          panDoc: docFrom(dbKyc.panDocumentUrl, 'PAN (saved)') || initialForm.panDoc,
+          bankProofDoc: docFrom(dbKyc.bankChequeUrl, 'Bank proof (saved)') || initialForm.bankProofDoc,
+          dematDoc: docFrom(dbKyc.dematDocumentUrl, 'Demat statement (saved)') || initialForm.dematDoc,
+        };
+      }
+    }
+
     // Check if there was a saved draft with step info
     let resumeStep = targetStep;
     if (targetDeal) {
@@ -991,7 +1126,7 @@ const GhlIrmKycView: React.FC = () => {
         ifscCode: data.ifscCode,
         accountType: data.accountType,
         dematAccountNumber: data.hasNoDemat ? null : data.dematAccountNumber,
-        nomineesJson: data.nominees && data.nominees.length > 0 ? JSON.stringify(data.nominees) : null,
+        nomineesJson: data.hasNominee && data.nominees && data.nominees.length > 0 ? JSON.stringify(data.nominees) : '[]',
         panDocumentUrl: data.panDoc?.name || null,
         aadhaarDocumentUrl: data.aadhaarDoc?.name || null,
         bankChequeUrl: data.bankProofDoc?.name || null,
@@ -1038,7 +1173,7 @@ const GhlIrmKycView: React.FC = () => {
         ifscCode: data.ifscCode,
         accountType: data.accountType,
         dematAccountNumber: data.hasNoDemat ? null : data.dematAccountNumber,
-        nomineesJson: data.nominees && data.nominees.length > 0 ? JSON.stringify(data.nominees) : null,
+        nomineesJson: data.hasNominee && data.nominees && data.nominees.length > 0 ? JSON.stringify(data.nominees) : '[]',
         panDocumentUrl: data.panDoc?.name || null,
         aadhaarDocumentUrl: data.aadhaarDoc?.name || null,
         bankChequeUrl: data.bankProofDoc?.name || null,
@@ -1057,6 +1192,8 @@ const GhlIrmKycView: React.FC = () => {
         const errJson = await res.json().catch(() => null);
         throw new Error(errJson?.message || 'Failed to submit assisted KYC to backend');
       }
+      const json = await res.json().catch(() => null);
+      return json?.data;
     } catch (err) {
       console.error('[Assisted KYC] Backend submit error:', err);
       throw err;
@@ -1422,81 +1559,10 @@ const GhlIrmKycView: React.FC = () => {
 
   // ── Step Validations ────────────────────────────────────────────────────────
   const validateStep = (step: number): boolean => {
-    const errs: Record<string, string> = {};
+    const errs = validateKycStep(step as 1 | 2 | 3 | 4 | 5, formData);
 
-    if (step === 1) {
-      // Step 1: Basic Details
-      if (!formData.investorName.trim()) {
-        errs.investorName = 'Investor Name is required';
-      }
-      const digits = formData.phone.replace(/\D/g, '');
-      if (!formData.phone.trim() || digits.length < 10) {
-        errs.phone = 'Valid phone number with at least 10 digits is required';
-      }
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!formData.email.trim() || !emailRegex.test(formData.email.trim())) {
-        errs.email = 'Valid email address is required';
-      }
-      if (!formData.gender) {
-        errs.gender = 'Gender is required';
-      }
-      if (!formData.investorType) {
-        errs.investorType = 'Investor Type is required';
-      }
-      if (!formData.residentType) {
-        errs.residentType = 'Resident Type is required';
-      }
-    }
-
+    // In Assisted KYC flow, validate document uploads:
     if (step === 2) {
-      // Step 2: Identity Details
-      const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
-      const cleanPan = formData.panNumber.trim().toUpperCase();
-      if (!cleanPan) {
-        errs.panNumber = 'PAN Number is required';
-      } else if (!panRegex.test(cleanPan)) {
-        errs.panNumber = 'Invalid PAN format (e.g. ABCDE1234F)';
-      }
-
-      if (!formData.nameAsPerPan.trim()) {
-        errs.nameAsPerPan = 'Name as per PAN is required';
-      }
-
-      const cleanAadhaar = formData.aadhaarNumber.replace(/\D/g, '');
-      if (!cleanAadhaar) {
-        errs.aadhaarNumber = 'Aadhaar Number is required';
-      } else if (cleanAadhaar.length !== 12) {
-        errs.aadhaarNumber = 'Aadhaar Number must be exactly 12 digits';
-      }
-
-      if (!formData.fatherName.trim()) {
-        errs.fatherName = "Father's Name is required";
-      }
-      if (!formData.dob.trim()) {
-        errs.dob = 'Date of Birth is required';
-      }
-      if (!formData.address.trim()) {
-        errs.address = 'Permanent Address is required';
-      }
-      if (!formData.courierAddress.trim()) {
-        errs.courierAddress = 'Courier / Current Address is required';
-      }
-      if (!formData.country.trim()) {
-        errs.country = 'Country is required';
-      }
-      if (!formData.state.trim()) {
-        errs.state = 'State is required';
-      }
-      if (!formData.city.trim()) {
-        errs.city = 'City is required';
-      }
-      const cleanPincode = formData.pincode.replace(/\D/g, '');
-      if (!cleanPincode) {
-        errs.pincode = 'Pincode is required';
-      } else if (cleanPincode.length !== 6) {
-        errs.pincode = 'Pincode must be exactly 6 digits';
-      }
-
       if (!formData.aadhaarDoc) {
         errs.aadhaarDoc = 'Upload Aadhaar is required';
       }
@@ -1504,66 +1570,14 @@ const GhlIrmKycView: React.FC = () => {
         errs.panDoc = 'Upload PAN is required';
       }
     }
-
     if (step === 3) {
-      // Step 3: Bank Details
-      if (!formData.accountType) {
-        errs.accountType = 'Account Type is required';
-      }
-      if (!formData.accountNumber.trim()) {
-        errs.accountNumber = 'Account Number is required';
-      }
-      const ifscRegex = /^[A-Z]{4}0[A-Z0-9]{6}$/;
-      const cleanIfsc = formData.ifscCode.trim().toUpperCase();
-      if (!cleanIfsc) {
-        errs.ifscCode = 'IFSC Code is required';
-      } else if (!ifscRegex.test(cleanIfsc)) {
-        errs.ifscCode = 'Invalid IFSC format (e.g. HDFC0001234)';
-      }
-      if (!formData.accountHolderName.trim()) {
-        errs.accountHolderName = 'Account Holder Name is required';
-      }
-      if (!formData.bankName.trim()) {
-        errs.bankName = 'Bank Name is required';
-      }
       if (!formData.bankProofDoc) {
         errs.bankProofDoc = 'Upload Bank Statement / Cheque / Passbook is required';
       }
     }
-
     if (step === 4) {
-      // Step 4: Demat Account
-      if (!formData.hasNoDemat) {
-        if (!formData.dematAccountNumber.trim()) {
-          errs.dematAccountNumber = 'Demat Account Number is required';
-        }
-        if (!formData.dematDoc) {
-          errs.dematDoc = 'Upload Demat Statement is required';
-        }
-      }
-    }
-
-    if (step === 5) {
-      // Step 5: Nominee Details
-      if (formData.nominees.length === 0) {
-        errs.nominees = 'Please add at least one nominee';
-      } else {
-        let totalPct = 0;
-        formData.nominees.forEach((nom, idx) => {
-          if (!nom.name.trim()) {
-            errs[`nominee_${idx}_name`] = 'Nominee Name is required';
-          }
-          if (!nom.dob.trim()) {
-            errs[`nominee_${idx}_dob`] = 'Nominee DOB / Age is required';
-          }
-          if (!nom.allocationPercentage || nom.allocationPercentage <= 0) {
-            errs[`nominee_${idx}_pct`] = 'Allocation % must be greater than 0';
-          }
-          totalPct += Number(nom.allocationPercentage) || 0;
-        });
-        if (totalPct !== 100) {
-          errs.nominees = `Total allocation across all nominees must equal exactly 100% (currently ${totalPct}%)`;
-        }
+      if (!formData.hasNoDemat && !formData.dematDoc) {
+        errs.dematDoc = 'Upload Demat Statement is required';
       }
     }
 
@@ -1637,10 +1651,15 @@ const GhlIrmKycView: React.FC = () => {
     }
     if (!selectedDeal) return;
 
+    let savedKycDto: any = null;
     // Await server submission first; never report success if backend save fails
     if (!isMockMode() && user) {
       try {
-        await submitBackendAssistedKyc(selectedDeal, formData);
+        savedKycDto = await submitBackendAssistedKyc(selectedDeal, formData);
+        if (savedKycDto?.id) {
+          selectedDeal.kycId = savedKycDto.id;
+          (selectedDeal as any).kycRecordId = savedKycDto.id;
+        }
       } catch (err: any) {
         showToast(`⚠️ Failed to submit assisted KYC: ${err.message || 'Server error'}`);
         return;
@@ -1750,9 +1769,10 @@ const GhlIrmKycView: React.FC = () => {
       details: activityText,
     });
 
-    // 4. Update deal with Assisted KYC status and attribution
+    // 4. Update deal with Assisted KYC status, stable kycId, and attribution
     const updatedDeal: Deal = {
       ...selectedDeal,
+      kycId: selectedDeal.kycId,
       customerKycStatus: 'Assisted KYC – Submitted for Verification' as any,
       notes: selectedDeal.notes ? `${selectedDeal.notes} | ${activityText}` : activityText,
     };
@@ -1761,6 +1781,16 @@ const GhlIrmKycView: React.FC = () => {
     } catch (e) {
       console.warn('Error saving deal:', e);
     }
+
+    if (savedKycDto?.id) {
+      const kycRec = { ...savedKycDto, status: 'PendingReview', submittedAt: nowIso };
+      setDbKycs(prev => ({
+        ...prev,
+        [`id_${savedKycDto.id}`]: kycRec,
+        ...(savedKycDto.investorId ? { [`inv_${savedKycDto.investorId}`]: kycRec } : {}),
+      }));
+    }
+    refreshDbKycs();
 
     setIsAssistedReviewModalOpen(false);
     setIsAssistedFlow(false);
@@ -1777,33 +1807,47 @@ const GhlIrmKycView: React.FC = () => {
 
   // Nominee helpers
   const handleAddNominee = () => {
+    if (formData.nominees.length >= 3) return;
+    const currentCount = formData.nominees.length;
     const newNominee: NomineeItem = {
       id: `nom-${Date.now()}`,
       name: '',
       relationship: 'Spouse',
       dob: '',
-      allocationPercentage: 50,
+      allocationPercentage: currentCount === 0 ? 100 : 0,
       address: '',
       guardianName: '',
     };
     setFormData(prev => ({
       ...prev,
+      hasNominee: true,
       nominees: [...prev.nominees, newNominee],
     }));
   };
 
-  const handleRemoveNominee = (id: string) => {
-    setFormData(prev => ({
-      ...prev,
-      nominees: prev.nominees.filter(n => n.id !== id),
-    }));
+  const handleRemoveNominee = (idOrIndex: string | number) => {
+    setFormData(prev => {
+      const updated = prev.nominees.filter((n, i) => (n.id ? n.id !== idOrIndex : i !== idOrIndex));
+      return {
+        ...prev,
+        nominees: updated,
+        hasNominee: updated.length > 0,
+      };
+    });
   };
 
-  const handleNomineeChange = (id: string, field: keyof NomineeItem, value: any) => {
+  const handleNomineeChange = (idOrIndex: string | number, field: keyof NomineeItem, value: any) => {
     setFormData(prev => ({
       ...prev,
-      nominees: prev.nominees.map(n => (n.id === id ? { ...n, [field]: value } : n)),
+      nominees: prev.nominees.map((n, i) =>
+        (n.id ? n.id === idOrIndex : i === idOrIndex) ? { ...n, [field]: value } : n
+      ),
     }));
+    setFormErrors(prev => {
+      const c = { ...prev };
+      delete c.nominees;
+      return c;
+    });
   };
 
   const filteredDeals = deals;
@@ -1974,14 +2018,55 @@ const GhlIrmKycView: React.FC = () => {
           );
         }
 
+        // Assisted KYC submitted awaiting IRM verification: show compact green assisted icon with hover/focus tooltip
+        if (status === 'Assisted KYC – Submitted for Verification') {
+          return (
+            <div
+              className="kyc-stage-action-group"
+              onClick={e => e.stopPropagation()}
+              style={{ display: 'inline-flex', alignItems: 'center' }}
+            >
+              <div className="kyc-stage-action-tooltip-wrapper">
+                <button
+                  type="button"
+                  className="kyc-stage-action-btn"
+                  tabIndex={0}
+                  aria-label="Assisted KYC submitted — awaiting IRM verification"
+                  style={{
+                    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                    borderColor: 'rgba(16, 185, 129, 0.35)',
+                    color: '#059669',
+                    cursor: 'default',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 28,
+                    height: 28,
+                    minWidth: 28,
+                    borderRadius: 6,
+                    padding: 0,
+                  }}
+                >
+                  <UserCheck size={14} />
+                </button>
+                <span
+                  className="kyc-stage-action-tooltip"
+                  role="tooltip"
+                  style={{ whiteSpace: 'nowrap' }}
+                >
+                  Assisted KYC submitted — awaiting IRM verification
+                </span>
+              </div>
+            </div>
+          );
+        }
+
         // Customer or IRM submitted: waiting for IRM review — show a status badge, not a send button
         if (
           status === 'Submitted' ||
           status === 'Under Verification' ||
-          status === 'Completed' ||
-          status === 'Assisted KYC – Submitted for Verification'
+          status === 'Completed'
         ) {
-          const isAssisted = status === 'Assisted KYC – Submitted for Verification';
           return (
             <span
               style={{
@@ -1992,15 +2077,15 @@ const GhlIrmKycView: React.FC = () => {
                 fontWeight: 600,
                 padding: '4px 10px',
                 borderRadius: 6,
-                backgroundColor: isAssisted ? 'rgba(124, 58, 237, 0.10)' : 'rgba(99, 102, 241, 0.10)',
-                color: isAssisted ? '#7c3aed' : '#6366f1',
-                border: isAssisted ? '1px solid rgba(124, 58, 237, 0.25)' : '1px solid rgba(99, 102, 241, 0.25)',
+                backgroundColor: 'rgba(99, 102, 241, 0.10)',
+                color: '#6366f1',
+                border: '1px solid rgba(99, 102, 241, 0.25)',
                 whiteSpace: 'nowrap',
               }}
-              title={isAssisted ? "Assisted KYC submitted — awaiting IRM verification" : "Customer has submitted the KYC form — awaiting IRM review"}
+              title="Customer has submitted the KYC form — awaiting IRM review"
             >
               <CheckCircle size={12} />
-              {isAssisted ? 'Assisted Submitted' : 'KYC Submitted'}
+              KYC Submitted
             </span>
           );
         }
@@ -2242,11 +2327,44 @@ const GhlIrmKycView: React.FC = () => {
                 {(() => {
                   const normalizedStatus = normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy);
                   const custStatus = resolveCustomerKycStatus(deal);
+                  const backendKyc = findBackendKyc(deal, dbKycs, tenant?.id);
+
+                  // Backend confirmed submission: record has submittedAt and is awaiting review or approved
+                  const backendSubmitted = Boolean(
+                    backendKyc && (
+                      (backendKyc.submittedAt && (backendKyc.status || '').toLowerCase() === 'pendingreview') ||
+                      (backendKyc.submittedAt && (backendKyc.status || '').toLowerCase() === 'approved') ||
+                      (backendKyc.isAssisted && backendKyc.customerConsentObtained && backendKyc.submittedAt)
+                    )
+                  );
+
+                  // Distinguish draft-only records from submitted records
+                  const isBackendDraft = Boolean(
+                    backendKyc &&
+                    (backendKyc.status || '').toLowerCase() === 'draft' &&
+                    !backendKyc.submittedAt
+                  );
+
+                  const isAssistedSubmitted =
+                    custStatus === 'Assisted KYC – Submitted for Verification' ||
+                    (deal as any).customerKycStatus === 'Assisted KYC – Submitted for Verification' ||
+                    Boolean(backendKyc?.isAssisted && backendSubmitted);
+
+                  const isDraftOnly =
+                    custStatus === 'Assisted Draft' ||
+                    (deal as any).customerKycStatus === 'Assisted Draft' ||
+                    isBackendDraft;
+
                   const customerSubmitted =
-                    custStatus === 'Completed' ||
-                    custStatus === 'Submitted' ||
-                    custStatus === 'Under Verification' ||
-                    custStatus === 'Verified';
+                    !isDraftOnly && (
+                      backendSubmitted ||
+                      isAssistedSubmitted ||
+                      custStatus === 'Completed' ||
+                      custStatus === 'Submitted' ||
+                      custStatus === 'Under Verification' ||
+                      custStatus === 'Verified'
+                    );
+
                   const canVerify =
                     permissions.includes(PERMISSIONS.KYC_VERIFY) ||
                     user?.role?.code === 'irm' ||
@@ -2255,12 +2373,16 @@ const GhlIrmKycView: React.FC = () => {
                     user?.role?.code === 'sales_executive' ||
                     !permissions ||
                     permissions.length === 0;
+
                   const isBtnDisabled = !canVerify || !customerSubmitted;
                   const tooltipText = !canVerify
                     ? 'You do not have permission to verify KYC'
-                    : !customerSubmitted
-                      ? 'Customer has not submitted KYC yet'
-                      : undefined;
+                    : isDraftOnly
+                      ? 'Assisted KYC is currently an incomplete draft and has not been submitted yet'
+                      : !customerSubmitted
+                        ? 'Customer has not submitted KYC yet'
+                        : undefined;
+
                   return (
                     <button
                       type="button"
@@ -2273,7 +2395,15 @@ const GhlIrmKycView: React.FC = () => {
                         cursor: isBtnDisabled ? 'not-allowed' : 'pointer',
                         opacity: isBtnDisabled ? 0.6 : 1,
                       }}
-                      onClick={() => setVerifyModalDeal(deal)}
+                      onClick={() => {
+                        if (!profileKycData) {
+                          const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+                          const matchLead = leads.find(l => (deal.customerId && l.id === deal.customerId) || (l.phone && l.phone.replace(/\D/g, '').slice(-10) === fDigits));
+                          const matchCust = customers.find(c => (deal.customerId && c.id === deal.customerId) || (c.phone && c.phone.replace(/\D/g, '').slice(-10) === fDigits));
+                          setProfileKycData(buildMergedProfileData(deal, backendKyc, matchLead, matchCust));
+                        }
+                        setVerifyModalDeal(deal);
+                      }}
                     >
                       <ShieldCheck size={14} />
                       {normalizedStatus === 'Verified' ? 'Re-verify KYC' : 'Verify KYC'}
@@ -2654,6 +2784,17 @@ const GhlIrmKycView: React.FC = () => {
                       </select>
                       {formErrors.residentType && <div className="kyc-field-error">{formErrors.residentType}</div>}
                     </div>
+
+                    <div className="form-group kyc-form-grid-full">
+                      <label className="form-label">Occupation / Source of Wealth (Optional)</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g. Salaried / Business / Professional"
+                        value={formData.occupation || ''}
+                        onChange={e => setFormData({ ...formData, occupation: e.target.value })}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2740,20 +2881,14 @@ const GhlIrmKycView: React.FC = () => {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label">Father's Name <span className="kyc-required-star">*</span></label>
+                      <label className="form-label">Father's Full Name (Optional)</label>
                       <input
                         type="text"
-                        className={`form-input ${formErrors.fatherName ? 'kyc-input-error' : ''}`}
+                        className="form-input"
                         placeholder="Father's full name"
-                        value={formData.fatherName}
-                        onChange={e => {
-                          setFormData({ ...formData, fatherName: e.target.value });
-                          if (formErrors.fatherName) {
-                            setFormErrors(prev => { const c = { ...prev }; delete c.fatherName; return c; });
-                          }
-                        }}
+                        value={formData.fatherName || ''}
+                        onChange={e => setFormData({ ...formData, fatherName: e.target.value })}
                       />
-                      {formErrors.fatherName && <div className="kyc-field-error">{formErrors.fatherName}</div>}
                     </div>
 
                     <div className="form-group">
@@ -2773,15 +2908,14 @@ const GhlIrmKycView: React.FC = () => {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label">Country <span className="kyc-required-star">*</span></label>
+                      <label className="form-label">Country</label>
                       <input
                         type="text"
-                        className={`form-input ${formErrors.country ? 'kyc-input-error' : ''}`}
+                        className="form-input"
                         placeholder="India"
-                        value={formData.country}
+                        value={formData.country || 'India'}
                         onChange={e => setFormData({ ...formData, country: e.target.value })}
                       />
-                      {formErrors.country && <div className="kyc-field-error">{formErrors.country}</div>}
                     </div>
                   </div>
                 </div>
@@ -2817,7 +2951,7 @@ const GhlIrmKycView: React.FC = () => {
 
                     <div className="form-group kyc-form-grid-full">
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                        <label className="form-label" style={{ margin: 0 }}>Courier Address (Current Address) <span className="kyc-required-star">*</span></label>
+                        <label className="form-label" style={{ margin: 0 }}>Communication / Courier Address (Optional)</label>
                         <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: 'var(--text-secondary)' }}>
                           <input
                             type="checkbox"
@@ -2835,17 +2969,11 @@ const GhlIrmKycView: React.FC = () => {
                       </div>
                       <textarea
                         rows={2}
-                        className={`form-textarea ${formErrors.courierAddress ? 'kyc-input-error' : ''}`}
+                        className="form-textarea"
                         placeholder="Delivery & physical documentation address"
-                        value={formData.courierAddress}
-                        onChange={e => {
-                          setFormData({ ...formData, courierAddress: e.target.value });
-                          if (formErrors.courierAddress) {
-                            setFormErrors(prev => { const c = { ...prev }; delete c.courierAddress; return c; });
-                          }
-                        }}
+                        value={formData.courierAddress || ''}
+                        onChange={e => setFormData({ ...formData, courierAddress: e.target.value })}
                       />
-                      {formErrors.courierAddress && <div className="kyc-field-error">{formErrors.courierAddress}</div>}
                     </div>
                   </div>
 
@@ -3203,7 +3331,7 @@ const GhlIrmKycView: React.FC = () => {
                       SEBI statutory nomination declaration. Designate up to 3 nominees for asset succession.
                     </p>
                   </div>
-                  {formData.nominees.length < 3 && (
+                  {formData.hasNominee && formData.nominees.length < 3 && (
                     <button
                       type="button"
                       className="btn btn-secondary btn-sm"
@@ -3215,134 +3343,194 @@ const GhlIrmKycView: React.FC = () => {
                   )}
                 </div>
 
-                <div className="kyc-step-guidance-box">
-                  <Info size={16} className="kyc-step-guidance-box-icon" />
-                  <div className="kyc-step-guidance-box-text">
-                    <strong>Guidance:</strong> SEBI requires at least one legal nominee. The sum of allocation percentages across all nominees must total <strong>exactly 100%</strong>. If any nominee is a minor (under 18), guardian details must be provided.
-                  </div>
+                {/* Optional Nominee Toggle */}
+                <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 8, background: 'var(--bg-secondary, #f8fafc)', border: '1px solid var(--border-color, #e2e8f0)' }}>
+                  <label className="kyc-checkbox-label" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      className="kyc-checkbox-input"
+                      checked={formData.hasNominee}
+                      onChange={e => {
+                        const enabled = e.target.checked;
+                        setFormData(prev => ({
+                          ...prev,
+                          hasNominee: enabled,
+                          nominees: enabled
+                            ? (prev.nominees.length > 0 ? prev.nominees : [
+                                {
+                                  id: `nom-${Date.now()}`,
+                                  name: '',
+                                  relationship: 'Spouse',
+                                  dob: '',
+                                  allocationPercentage: 100,
+                                  address: '',
+                                  guardianName: '',
+                                }
+                              ])
+                            : [],
+                        }));
+                        if (!enabled) {
+                          setFormErrors(prev => {
+                            const c = { ...prev };
+                            delete c.nominees;
+                            Object.keys(c).forEach(k => {
+                              if (k.startsWith('nominee_')) delete c[k];
+                            });
+                            return c;
+                          });
+                        }
+                      }}
+                    />
+                    <div>
+                      <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)' }}>
+                        Register Nominee(s) for this Investment Account
+                      </span>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                        Nomination is optional. Designate up to 3 legal nominees or uncheck to proceed as a single applicant without nominee.
+                      </div>
+                    </div>
+                  </label>
                 </div>
 
-                {/* Total Allocation Progress Pill */}
-                {(() => {
-                  const totalPct = formData.nominees.reduce((sum, n) => sum + (Number(n.allocationPercentage) || 0), 0);
-                  const is100 = totalPct === 100;
-                  return (
-                    <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span className={is100 ? 'kyc-allocation-pill-ok' : 'kyc-allocation-pill-warn'}>
-                        {is100 ? <CheckCircle size={13} /> : <AlertCircle size={13} />}
-                        Total Allocation: {totalPct}% / 100% {is100 ? '(Valid)' : `(Needs ${100 - totalPct > 0 ? `${100 - totalPct}% more` : `${totalPct - 100}% less`})`}
-                      </span>
-                    </div>
-                  );
-                })()}
-
-                {formErrors.nominees && (
-                  <div className="kyc-field-error" style={{ marginBottom: 16 }}>{formErrors.nominees}</div>
-                )}
-
-                {formData.nominees.map((nom, idx) => (
-                  <div key={nom.id} className="kyc-nominee-box">
-                    <div className="kyc-nominee-box-header">
-                      <div className="kyc-nominee-box-title">
-                        Nominee #{idx + 1}
-                      </div>
-                      {formData.nominees.length > 1 && (
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          style={{ color: '#ef4444', display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                          onClick={() => handleRemoveNominee(nom.id)}
-                        >
-                          <Trash2 size={14} /> Remove
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="kyc-form-grid">
-                      <div className="form-group">
-                        <label className="form-label">Nominee Full Name <span className="kyc-required-star">*</span></label>
-                        <input
-                          type="text"
-                          className={`form-input ${formErrors[`nominee_${idx}_name`] ? 'kyc-input-error' : ''}`}
-                          placeholder="Nominee legal name"
-                          value={nom.name}
-                          onChange={e => handleNomineeChange(nom.id, 'name', e.target.value)}
-                        />
-                        {formErrors[`nominee_${idx}_name`] && (
-                          <div className="kyc-field-error">{formErrors[`nominee_${idx}_name`]}</div>
-                        )}
-                      </div>
-
-                      <div className="form-group">
-                        <label className="form-label">Relationship with Investor <span className="kyc-required-star">*</span></label>
-                        <select
-                          className="form-select"
-                          value={nom.relationship}
-                          onChange={e => handleNomineeChange(nom.id, 'relationship', e.target.value)}
-                        >
-                          <option value="Spouse">Spouse</option>
-                          <option value="Son">Son</option>
-                          <option value="Daughter">Daughter</option>
-                          <option value="Father">Father</option>
-                          <option value="Mother">Mother</option>
-                          <option value="Brother">Brother</option>
-                          <option value="Sister">Sister</option>
-                          <option value="Other">Other</option>
-                        </select>
-                      </div>
-
-                      <div className="form-group">
-                        <label className="form-label">Date of Birth / Age <span className="kyc-required-star">*</span></label>
-                        <input
-                          type="date"
-                          className={`form-input ${formErrors[`nominee_${idx}_dob`] ? 'kyc-input-error' : ''}`}
-                          value={nom.dob}
-                          onChange={e => handleNomineeChange(nom.id, 'dob', e.target.value)}
-                        />
-                        {formErrors[`nominee_${idx}_dob`] && (
-                          <div className="kyc-field-error">{formErrors[`nominee_${idx}_dob`]}</div>
-                        )}
-                      </div>
-
-                      <div className="form-group">
-                        <label className="form-label">Allocation Percentage (%) <span className="kyc-required-star">*</span></label>
-                        <input
-                          type="number"
-                          min={1}
-                          max={100}
-                          className={`form-input ${formErrors[`nominee_${idx}_pct`] ? 'kyc-input-error' : ''}`}
-                          value={nom.allocationPercentage}
-                          onChange={e => handleNomineeChange(nom.id, 'allocationPercentage', Number(e.target.value))}
-                        />
-                        {formErrors[`nominee_${idx}_pct`] && (
-                          <div className="kyc-field-error">{formErrors[`nominee_${idx}_pct`]}</div>
-                        )}
-                      </div>
-
-                      <div className="form-group kyc-form-grid-full">
-                        <label className="form-label">Nominee Address</label>
-                        <input
-                          type="text"
-                          className="form-input"
-                          placeholder="Address (Leave blank if same as investor)"
-                          value={nom.address}
-                          onChange={e => handleNomineeChange(nom.id, 'address', e.target.value)}
-                        />
-                      </div>
-
-                      <div className="form-group kyc-form-grid-full">
-                        <label className="form-label">Guardian Name (If nominee is a minor under 18)</label>
-                        <input
-                          type="text"
-                          className="form-input"
-                          placeholder="Guardian full name"
-                          value={nom.guardianName}
-                          onChange={e => handleNomineeChange(nom.id, 'guardianName', e.target.value)}
-                        />
-                      </div>
+                {!formData.hasNominee ? (
+                  <div style={{ padding: '14px 16px', borderRadius: 8, backgroundColor: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.25)', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                    <ShieldCheck size={20} color="#2563eb" style={{ flexShrink: 0, marginTop: 2 }} />
+                    <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                      <strong style={{ color: 'var(--text-primary)' }}>No Nominee Appointed (Opted Out):</strong> You or the investor has elected to proceed without declaring a nominee. All investment account rights and redemption proceeds will accrue strictly to the primary applicant or legal succession heirs.
                     </div>
                   </div>
-                ))}
+                ) : (
+                  <>
+                    <div className="kyc-step-guidance-box">
+                      <Info size={16} className="kyc-step-guidance-box-icon" />
+                      <div className="kyc-step-guidance-box-text">
+                        <strong>Guidance:</strong> The sum of allocation percentages across all nominees must total <strong>exactly 100%</strong>. If any nominee is a minor (under 18), guardian details must be provided.
+                      </div>
+                    </div>
+
+                    {/* Total Allocation Progress Pill */}
+                    {(() => {
+                      const totalPct = formData.nominees.reduce((sum, n) => sum + (Number(n.allocationPercentage) || 0), 0);
+                      const is100 = totalPct === 100;
+                      return (
+                        <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span className={is100 ? 'kyc-allocation-pill-ok' : 'kyc-allocation-pill-warn'}>
+                            {is100 ? <CheckCircle size={13} /> : <AlertCircle size={13} />}
+                            Total Allocation: {totalPct}% / 100% {is100 ? '(Valid)' : `(Needs ${100 - totalPct > 0 ? `${100 - totalPct}% more` : `${totalPct - 100}% less`})`}
+                          </span>
+                        </div>
+                      );
+                    })()}
+
+                    {formErrors.nominees && (
+                      <div className="kyc-field-error" style={{ marginBottom: 16 }}>{formErrors.nominees}</div>
+                    )}
+
+                    {formData.nominees.map((nom, idx) => (
+                      <div key={nom.id} className="kyc-nominee-box">
+                        <div className="kyc-nominee-box-header">
+                          <div className="kyc-nominee-box-title">
+                            Nominee #{idx + 1}
+                          </div>
+                          {formData.nominees.length > 1 && (
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              style={{ color: '#ef4444', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                              onClick={() => handleRemoveNominee(nom.id || idx)}
+                            >
+                              <Trash2 size={14} /> Remove
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="kyc-form-grid">
+                          <div className="form-group">
+                            <label className="form-label">Nominee Full Name <span className="kyc-required-star">*</span></label>
+                            <input
+                              type="text"
+                              className={`form-input ${formErrors[`nominee_${idx}_name`] ? 'kyc-input-error' : ''}`}
+                              placeholder="Nominee legal name"
+                              value={nom.name}
+                              onChange={e => handleNomineeChange(nom.id || idx, 'name', e.target.value)}
+                            />
+                            {formErrors[`nominee_${idx}_name`] && (
+                              <div className="kyc-field-error">{formErrors[`nominee_${idx}_name`]}</div>
+                            )}
+                          </div>
+
+                          <div className="form-group">
+                            <label className="form-label">Relationship with Investor <span className="kyc-required-star">*</span></label>
+                            <select
+                              className="form-select"
+                              value={nom.relationship}
+                              onChange={e => handleNomineeChange(nom.id || idx, 'relationship', e.target.value)}
+                            >
+                              <option value="Spouse">Spouse</option>
+                              <option value="Son">Son</option>
+                              <option value="Daughter">Daughter</option>
+                              <option value="Father">Father</option>
+                              <option value="Mother">Mother</option>
+                              <option value="Brother">Brother</option>
+                              <option value="Sister">Sister</option>
+                              <option value="Other">Other</option>
+                            </select>
+                          </div>
+
+                          <div className="form-group">
+                            <label className="form-label">Date of Birth / Age <span className="kyc-required-star">*</span></label>
+                            <input
+                              type="date"
+                              className={`form-input ${formErrors[`nominee_${idx}_dob`] ? 'kyc-input-error' : ''}`}
+                              value={nom.dob}
+                              onChange={e => handleNomineeChange(nom.id || idx, 'dob', e.target.value)}
+                            />
+                            {formErrors[`nominee_${idx}_dob`] && (
+                              <div className="kyc-field-error">{formErrors[`nominee_${idx}_dob`]}</div>
+                            )}
+                          </div>
+
+                          <div className="form-group">
+                            <label className="form-label">Allocation Percentage (%) <span className="kyc-required-star">*</span></label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={100}
+                              className={`form-input ${formErrors[`nominee_${idx}_pct`] ? 'kyc-input-error' : ''}`}
+                              value={nom.allocationPercentage}
+                              onChange={e => handleNomineeChange(nom.id || idx, 'allocationPercentage', Number(e.target.value))}
+                            />
+                            {formErrors[`nominee_${idx}_pct`] && (
+                              <div className="kyc-field-error">{formErrors[`nominee_${idx}_pct`]}</div>
+                            )}
+                          </div>
+
+                          <div className="form-group kyc-form-grid-full">
+                            <label className="form-label">Nominee Address</label>
+                            <input
+                              type="text"
+                              className="form-input"
+                              placeholder="Address (Leave blank if same as investor)"
+                              value={nom.address}
+                              onChange={e => handleNomineeChange(nom.id || idx, 'address', e.target.value)}
+                            />
+                          </div>
+
+                          <div className="form-group kyc-form-grid-full">
+                            <label className="form-label">Guardian Name (If nominee is a minor under 18)</label>
+                            <input
+                              type="text"
+                              className="form-input"
+                              placeholder="Guardian full name"
+                              value={nom.guardianName}
+                              onChange={e => handleNomineeChange(nom.id || idx, 'guardianName', e.target.value)}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                )}
               </div>
             )}
 
@@ -3916,12 +4104,19 @@ const GhlIrmKycView: React.FC = () => {
       </Modal>
 
       {/* KycVerifyModal — opened from profile card Verify KYC button */}
-      {verifyModalDeal && profileKycData && (
+      {verifyModalDeal && (
         <KycVerifyModal
           isOpen={verifyModalDeal !== null}
           onClose={() => setVerifyModalDeal(null)}
           deal={verifyModalDeal}
-          profileKycData={profileKycData as Record<string, any>}
+          profileKycData={
+            (profileKycData || buildMergedProfileData(
+              verifyModalDeal,
+              findBackendKyc(verifyModalDeal, dbKycs, tenant?.id),
+              leads.find(l => (verifyModalDeal.customerId && l.id === verifyModalDeal.customerId) || (l.phone && l.phone.replace(/\D/g, '').slice(-10) === (verifyModalDeal.phone || '').replace(/\D/g, '').slice(-10))),
+              customers.find(c => (verifyModalDeal.customerId && c.id === verifyModalDeal.customerId) || (c.phone && c.phone.replace(/\D/g, '').slice(-10) === (verifyModalDeal.phone || '').replace(/\D/g, '').slice(-10)))
+            )) as Record<string, any>
+          }
           onSaveVerification={async (status, comment, flaggedSections, checklist) => {
             await handleStatusChange(verifyModalDeal, status, comment, flaggedSections, checklist);
           }}

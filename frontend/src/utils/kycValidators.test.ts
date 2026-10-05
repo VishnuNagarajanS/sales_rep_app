@@ -1,5 +1,5 @@
-﻿import { describe, it, expect } from 'vitest';
-import { kycValidators } from './kycValidators';
+import { describe, it, expect } from 'vitest';
+import { kycValidators, validateKycStep } from './kycValidators';
 
 describe('kycValidators', () => {
   describe('pan', () => {
@@ -138,6 +138,57 @@ describe('kycValidators', () => {
     it('rejects empty or invalid dates', () => {
       expect(kycValidators.nomineeDob('')).toBe(false);
       expect(kycValidators.nomineeDob('not-a-date')).toBe(false);
+    });
+  });
+
+  describe('validateKycStep', () => {
+    it('allows Step 5 with no nominee (nominee is optional)', () => {
+      const errs1 = validateKycStep(5, { hasNominee: false, nominees: [] });
+      expect(Object.keys(errs1).length).toBe(0);
+
+      const errs2 = validateKycStep(5, { nominees: [] });
+      expect(Object.keys(errs2).length).toBe(0);
+    });
+
+    it('validates Step 5 nominees when provided and enforces 100% allocation', () => {
+      const invalidAllocation = validateKycStep(5, {
+        hasNominee: true,
+        nominees: [
+          { name: 'Jane Doe', relationship: 'Spouse', dob: '1990-01-01', allocationPercentage: 50 },
+        ],
+      });
+      expect(invalidAllocation.nominees).toContain('Total allocation across all nominees must equal exactly 100%');
+
+      const validNominees = validateKycStep(5, {
+        hasNominee: true,
+        nominees: [
+          { name: 'Jane Doe', relationship: 'Spouse', dob: '1990-01-01', allocationPercentage: 60 },
+          { name: 'John Doe Jr', relationship: 'Son', dob: '2015-05-10', allocationPercentage: 40 },
+        ],
+      });
+      expect(Object.keys(validNominees).length).toBe(0);
+    });
+
+    it('validates Step 1 required fields and keeps occupation optional', () => {
+      const missing = validateKycStep(1, {});
+      expect(missing.investorName).toBeDefined();
+      expect(missing.phone).toBeDefined();
+      expect(missing.email).toBeDefined();
+      expect(missing.gender).toBeDefined();
+      expect(missing.investorType).toBeDefined();
+      expect(missing.residentType).toBeDefined();
+      // occupation must be optional
+      expect(missing.occupation).toBeUndefined();
+
+      const valid = validateKycStep(1, {
+        investorName: 'Ramesh Patel',
+        phone: '9876543210',
+        email: 'ramesh@example.com',
+        gender: 'Male',
+        investorType: 'Individual / Retail HNW',
+        residentType: 'Resident Indian',
+      });
+      expect(Object.keys(valid).length).toBe(0);
     });
   });
 });
