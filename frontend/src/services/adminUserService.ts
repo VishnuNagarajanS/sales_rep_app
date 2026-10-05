@@ -19,6 +19,9 @@ interface AdminUserDto {
   lastLoginAt?: string;
   avatarUrl?: string;
   createdAt: string;
+  emailSent?: boolean;
+  emailError?: string;
+  temporaryPassword?: string;
 }
 
 const mapDtoToUser = (dto: AdminUserDto): User => {
@@ -61,6 +64,9 @@ const mapDtoToUser = (dto: AdminUserDto): User => {
     status: statusStr,
     lastLogin: dto.lastLoginAt,
     avatar: dto.avatarUrl,
+    emailSent: dto.emailSent,
+    emailError: dto.emailError,
+    temporaryPassword: dto.temporaryPassword,
   };
 };
 
@@ -111,12 +117,15 @@ export const adminUserService = {
     else if (userData.role?.code === 'irm') roleId = 4;
     else roleId = 3;
 
-    const payload = {
+    const payload: any = {
       name: userData.name,
       phone: userData.phone || '',
       roleId,
       status: userData.status === 'Active' ? 0 : (userData.status === 'Disabled' ? 2 : 1)
     };
+    if (userData.password) {
+      payload.password = userData.password;
+    }
     const res = await apiClient.put<ApiResponse<AdminUserDto>>(`/AdminUsers/${id}`, payload);
     if (!res.success) throw new Error(res.message);
     return mapDtoToUser(res.data);

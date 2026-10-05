@@ -100,6 +100,9 @@ export interface User {
   joinedAt?: string;
   createdAt?: string;
   updatedAt?: string;
+  emailSent?: boolean;
+  emailError?: string;
+  temporaryPassword?: string;
 }
 
 export interface Lead {

@@ -102,6 +102,9 @@ public class AdminUserService : IAdminUserService
         _context.Users.Add(newUser);
         await _context.SaveChangesAsync(cancellationToken);
 
+        bool emailSent = request.Status != backend.Models.Enums.UserStatus.Invited;
+        string? emailError = null;
+
         if (request.Status == backend.Models.Enums.UserStatus.Invited)
         {
             try
@@ -114,9 +117,13 @@ public class AdminUserService : IAdminUserService
                     <p>Please login at <a href='{loginUrl}'>{loginUrl}</a> and change your password.</p>";
                     
                 await _emailService.SendEmailAsync(request.Email, "Invitation to GHL India Ventures", emailBody);
+                emailSent = true;
             }
             catch (Exception ex)
             {
+                emailError = ex.Message.Contains("Daily user sending limit exceeded")
+                    ? "Gmail daily sending limit exceeded for the sender email account."
+                    : ex.Message;
                 Console.WriteLine($"[AdminUserService] Warning: Email dispatch failed for {request.Email}: {ex.Message}");
             }
         }
@@ -131,10 +138,17 @@ public class AdminUserService : IAdminUserService
             RoleName = role.Name,
             RoleCode = role.Code,
             Status = newUser.Status,
-            CreatedAt = newUser.CreatedAt
+            CreatedAt = newUser.CreatedAt,
+            EmailSent = emailSent,
+            EmailError = emailError,
+            TemporaryPassword = passwordToHash
         };
 
-        return ApiResponse<AdminUserDto>.SuccessResult(dto, "User created successfully.");
+        var message = emailSent
+            ? "User created successfully and invitation email sent."
+            : $"User created successfully. (Notice: Email delivery failed: {emailError})";
+
+        return ApiResponse<AdminUserDto>.SuccessResult(dto, message);
     }
 
     public async Task<ApiResponse<AdminUserDto>> UpdateUserAsync(int companyId, int userId, UpdateUserRequestDto request, CancellationToken cancellationToken = default)
@@ -157,6 +171,10 @@ public class AdminUserService : IAdminUserService
         user.Phone = request.Phone;
         user.RoleId = request.RoleId;
         user.Status = request.Status;
+        if (!string.IsNullOrWhiteSpace(request.Password))
+        {
+            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password);
+        }
         user.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(cancellationToken);
