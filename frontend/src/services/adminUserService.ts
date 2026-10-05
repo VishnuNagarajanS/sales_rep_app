@@ -89,15 +89,18 @@ export const adminUserService = {
     else if (userData.role?.code === 'irm') roleId = 4;
     else roleId = 3;
 
+    const companyIdNum = userData.companyId === '2' || userData.companyId === 't-jamin-02' ? 2 : 1;
+
     const payload = {
       name: userData.name,
       email: userData.email,
       phone: userData.phone || '',
       password: userData.password || 'Password@123',
       roleId,
+      companyId: companyIdNum,
       status: userData.status === 'Active' ? 0 : (userData.status === 'Disabled' ? 2 : 1)
     };
-    const res = await apiClient.post<ApiResponse<AdminUserDto>>('/AdminUsers', payload);
+    const res = await apiClient.post<ApiResponse<AdminUserDto>>(`/AdminUsers?companyId=${companyIdNum}`, payload);
     if (!res.success) throw new Error(res.message);
     return mapDtoToUser(res.data);
   },

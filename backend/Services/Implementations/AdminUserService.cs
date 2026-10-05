@@ -85,32 +85,41 @@ public class AdminUserService : IAdminUserService
             return ApiResponse<AdminUserDto>.FailureResult("Invalid Role ID.");
         }
 
+        var passwordToHash = !string.IsNullOrWhiteSpace(request.Password) ? request.Password : "Password@123";
+
         var newUser = new User
         {
-            Name = request.Name,
-            Email = request.Email,
-            Phone = request.Phone,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
+            Name = request.Name.Trim(),
+            Email = request.Email.Trim().ToLower(),
+            Phone = request.Phone?.Trim() ?? string.Empty,
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(passwordToHash),
             RoleId = request.RoleId,
             CompanyId = companyId,
             Status = request.Status,
             CreatedAt = DateTime.UtcNow
         };
 
-        if (request.Status == backend.Models.Enums.UserStatus.Invited)
-        {
-            var loginUrl = "http://localhost:5173/auth/login";
-            var emailBody = $@"
-                <h3>Welcome to GHL India Ventures, {request.Name}!</h3>
-                <p>You have been invited to join the platform as a <b>{role.Name}</b>.</p>
-                <p>Your temporary password is: <strong>{request.Password}</strong></p>
-                <p>Please login at <a href='{loginUrl}'>{loginUrl}</a> and change your password.</p>";
-                
-            await _emailService.SendEmailAsync(request.Email, "Invitation to GHL India Ventures", emailBody);
-        }
-
         _context.Users.Add(newUser);
         await _context.SaveChangesAsync(cancellationToken);
+
+        if (request.Status == backend.Models.Enums.UserStatus.Invited)
+        {
+            try
+            {
+                var loginUrl = "http://localhost:5173/auth/login";
+                var emailBody = $@"
+                    <h3>Welcome to GHL India Ventures, {request.Name}!</h3>
+                    <p>You have been invited to join the platform as a <b>{role.Name}</b>.</p>
+                    <p>Your temporary password is: <strong>{passwordToHash}</strong></p>
+                    <p>Please login at <a href='{loginUrl}'>{loginUrl}</a> and change your password.</p>";
+                    
+                await _emailService.SendEmailAsync(request.Email, "Invitation to GHL India Ventures", emailBody);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AdminUserService] Warning: Email dispatch failed for {request.Email}: {ex.Message}");
+            }
+        }
 
         var dto = new AdminUserDto
         {
