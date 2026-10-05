@@ -90,6 +90,9 @@ export interface Lead {
   createdAt: string;
   notes: string;
   customFields: Record<string, any>;
+  assignedIrmId?: string;
+  assignedIrmName?: string;
+  assignedIrmAt?: string;
   departmentId?: string;
   teamId?: string;
   queueId?: string;

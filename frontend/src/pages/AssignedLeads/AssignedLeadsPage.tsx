@@ -9,6 +9,7 @@ import { Lead } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
+import { getLeads, saveLead as apiSaveLead } from '../../services/ghlApiService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { Drawer } from '../../components/common/Drawer';
@@ -115,8 +116,13 @@ export const AssignedLeadsPage: React.FC = () => {
     setDateTo(to);
   };
 
-  const loadData = () => {
-    const allLeads = storageService.getLeads(tenant?.id);
+  const loadData = async () => {
+    let allLeads: Lead[] = [];
+    try {
+      allLeads = await getLeads(tenant?.id);
+    } catch {
+      allLeads = storageService.getLeads(tenant?.id);
+    }
 
     // Merge any mock assignments from session storage if present
     let sessionAssignments: Array<{ leadId: string; agentId: number; agentName: string }> = [];
@@ -201,7 +207,7 @@ export const AssignedLeadsPage: React.FC = () => {
     setPendingAgent(null);
   };
 
-  const handleSaveLead = (e: React.FormEvent) => {
+  const handleSaveLead = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.phone) return;
 
@@ -213,6 +219,11 @@ export const AssignedLeadsPage: React.FC = () => {
       companyId: formData.companyId || tenant?.id || 't-ghl-01',
     };
 
+    try {
+      await apiSaveLead(leadToSave);
+    } catch (err) {
+      console.warn('[AssignedLeadsPage] apiSaveLead failed, saving locally:', err);
+    }
     storageService.saveLead(leadToSave);
 
     // Keep session mock assignments in sync if tracked
@@ -233,7 +244,7 @@ export const AssignedLeadsPage: React.FC = () => {
     } catch {}
 
     setIsEditDrawerOpen(false);
-    loadData();
+    await loadData();
   };
 
   // Table columns exactly matching the requested specification

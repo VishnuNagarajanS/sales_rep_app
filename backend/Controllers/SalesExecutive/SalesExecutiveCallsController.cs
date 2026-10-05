@@ -87,12 +87,12 @@ public class SalesExecutiveCallsController : ControllerBase
 
         if (from.HasValue)
         {
-            query = query.Where(c => c.Timestamp >= from.Value.ToUniversalTime());
+            query = query.Where(c => c.StartedAt >= from.Value.ToUniversalTime());
         }
 
         if (to.HasValue)
         {
-            query = query.Where(c => c.Timestamp <= to.Value.ToUniversalTime());
+            query = query.Where(c => c.StartedAt <= to.Value.ToUniversalTime());
         }
 
         var totalCount = await query.CountAsync(ct);
@@ -101,7 +101,7 @@ public class SalesExecutiveCallsController : ControllerBase
         pageSize = Math.Clamp(pageSize, 1, 100);
 
         var items = await query
-            .OrderByDescending(c => c.Timestamp)
+            .OrderByDescending(c => c.StartedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(c => new CallRecordResponseDto
@@ -113,12 +113,12 @@ public class SalesExecutiveCallsController : ControllerBase
                 ContactName = c.ContactName,
                 ContactPhone = c.ContactPhone,
                 Direction = c.Direction,
-                Duration = c.Duration,
+                Duration = c.DurationSeconds,
                 Disposition = c.Disposition,
                 Notes = c.Notes,
                 LeadId = c.LeadId,
                 CustomerId = c.CustomerId,
-                Timestamp = c.Timestamp,
+                Timestamp = c.StartedAt,
                 CreatedAt = c.CreatedAt
             })
             .ToListAsync(ct);
@@ -126,6 +126,52 @@ public class SalesExecutiveCallsController : ControllerBase
         return Ok(ApiResponse<PagedResult<CallRecordResponseDto>>.SuccessResult(
             PagedResult<CallRecordResponseDto>.Create(items, totalCount, page, pageSize),
             "Call records retrieved successfully."));
+    }
+
+    [HttpGet("{id:int}")]
+    public async Task<ActionResult<ApiResponse<CallRecordResponseDto>>> GetCallById(
+        [FromRoute] int id,
+        CancellationToken ct = default)
+    {
+        var role = _currentUser.Role;
+        var agentId = _currentUser.UserId;
+        var companyId = _currentUser.CompanyId;
+
+        var query = _context.CallRecords.AsNoTracking().Include(c => c.Agent).AsQueryable();
+
+        if (role != "super_admin" && companyId.HasValue)
+        {
+            query = query.Where(c => c.CompanyId == companyId.Value);
+        }
+
+        if (role == "sales_executive" && agentId.HasValue)
+        {
+            query = query.Where(c => c.AgentId == agentId.Value);
+        }
+
+        var call = await query.FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (call == null)
+            return NotFound(ApiResponse<CallRecordResponseDto>.FailureResult("Call record not found or access denied."));
+
+        var response = new CallRecordResponseDto
+        {
+            Id = call.Id,
+            CompanyId = call.CompanyId,
+            AgentId = call.AgentId,
+            AgentName = call.Agent?.Name,
+            ContactName = call.ContactName,
+            ContactPhone = call.ContactPhone,
+            Direction = call.Direction,
+            Duration = call.DurationSeconds,
+            Disposition = call.Disposition,
+            Notes = call.Notes,
+            LeadId = call.LeadId,
+            CustomerId = call.CustomerId,
+            Timestamp = call.StartedAt,
+            CreatedAt = call.CreatedAt
+        };
+
+        return Ok(ApiResponse<CallRecordResponseDto>.SuccessResult(response));
     }
 
     [HttpPost]
@@ -143,12 +189,12 @@ public class SalesExecutiveCallsController : ControllerBase
             ContactName = dto.ContactName.Trim(),
             ContactPhone = dto.ContactPhone.Trim(),
             Direction = string.IsNullOrWhiteSpace(dto.Direction) ? "outbound" : dto.Direction.Trim().ToLower(),
-            Duration = dto.Duration,
+            DurationSeconds = dto.Duration,
             Disposition = dto.Disposition.Trim(),
             Notes = dto.Notes?.Trim() ?? string.Empty,
             LeadId = dto.LeadId,
             CustomerId = dto.CustomerId,
-            Timestamp = DateTime.UtcNow,
+            StartedAt = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow
         };
 
@@ -166,12 +212,12 @@ public class SalesExecutiveCallsController : ControllerBase
             ContactName = call.ContactName,
             ContactPhone = call.ContactPhone,
             Direction = call.Direction,
-            Duration = call.Duration,
+            Duration = call.DurationSeconds,
             Disposition = call.Disposition,
             Notes = call.Notes,
             LeadId = call.LeadId,
             CustomerId = call.CustomerId,
-            Timestamp = call.Timestamp,
+            Timestamp = call.StartedAt,
             CreatedAt = call.CreatedAt
         };
 

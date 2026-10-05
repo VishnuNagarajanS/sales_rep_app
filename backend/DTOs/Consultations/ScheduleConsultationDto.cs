@@ -6,6 +6,10 @@ public class ScheduleConsultationDto
     public string InvestorName { get; set; } = string.Empty;
     public string InvestorPhone { get; set; } = string.Empty;
     public DateTime ScheduledAt { get; set; }
+    public int? ConsultantId { get; set; }
+    public string? ConsultantName { get; set; }
+    public string? ReferredByAgentName { get; set; }
     public string? Agenda { get; set; }
     public string? Notes { get; set; }
 }
+

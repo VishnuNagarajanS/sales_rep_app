@@ -48,6 +48,18 @@ public class AuthService : IAuthService
                 return ApiResponse<LoginResponseDto>.FailureResult("Invalid email or password.");
             }
 
+            var dbIrm = await _context.Users.Include(u => u.Role).Include(u => u.Company).FirstOrDefaultAsync(u => u.Email.ToLower() == normalizedEmail, cancellationToken);
+            if (dbIrm != null)
+            {
+                var dbToken = _jwtService.GenerateToken(dbIrm);
+                return ApiResponse<LoginResponseDto>.SuccessResult(new LoginResponseDto
+                {
+                    Token = dbToken,
+                    User = MapToUserDto(dbIrm),
+                    Tenant = dbIrm.Company != null ? MapToTenantDto(dbIrm.Company) : null
+                }, "Login successful");
+            }
+
             var ghlTenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Id == 1, cancellationToken);
             var irmUser = new User
             {

@@ -1,4 +1,4 @@
-using backend.Models.Entities;
+ sing backend.Models.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -11,6 +11,8 @@ public class LeadConfiguration : IEntityTypeConfiguration<Lead>
         builder.ToTable("leads");
 
         builder.HasKey(l => l.Id);
+
+        builder.Property(l => l.AssignedAgentId);
 
         builder.Property(l => l.Name)
             .HasMaxLength(150)
@@ -38,6 +40,18 @@ public class LeadConfiguration : IEntityTypeConfiguration<Lead>
             .HasMaxLength(50)
             .HasDefaultValue("Medium");
 
+        builder.Property(l => l.AssetClass)
+            .HasMaxLength(150);
+
+        builder.Property(l => l.Horizon)
+            .HasMaxLength(150);
+
+        builder.Property(l => l.InvestmentCapacity)
+            .HasMaxLength(150);
+
+        builder.Property(l => l.PreferredAssetClass)
+            .HasMaxLength(150);
+
         builder.Property(l => l.CreatedAt)
             .HasDefaultValueSql("NOW()");
 
@@ -47,9 +61,13 @@ public class LeadConfiguration : IEntityTypeConfiguration<Lead>
             .HasForeignKey(l => l.CompanyId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        builder.Property(l => l.AssignedAgentId)
+            .IsRequired(false);
+
         builder.HasOne(l => l.AssignedAgent)
             .WithMany()
             .HasForeignKey(l => l.AssignedAgentId)
-            .OnDelete(DeleteBehavior.Restrict);
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }

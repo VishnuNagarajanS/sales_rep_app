@@ -144,6 +144,17 @@ export const App: React.FC = () => {
     sessionStorage.setItem('nexus_current_route', route);
   };
 
+  useEffect(() => {
+    const handleNavigate = (e: Event) => {
+      const customEvent = e as CustomEvent<{ route: string }>;
+      if (customEvent.detail?.route) {
+        navigate(customEvent.detail.route);
+      }
+    };
+    window.addEventListener('nexus_navigate', handleNavigate);
+    return () => window.removeEventListener('nexus_navigate', handleNavigate);
+  }, []);
+
   const handleOpenQuickCreate = (type: 'lead' | 'followup' | 'deal' | 'visit' | 'consultation') => {
     setQuickCreateType(type);
     setQuickName('');
@@ -171,12 +182,12 @@ export const App: React.FC = () => {
     setSelectedCustomerId(existingCustomers[0]?.id || '');
   };
 
-  const handleSaveQuickCreate = (e: React.FormEvent) => {
+  const handleSaveQuickCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!quickName) return;
 
     if (quickCreateType === 'lead') {
-      storageService.saveLead({
+      const newLead: any = {
         id: `lead-${Date.now()}`,
         companyId: tenant?.id || 't-ghl-01',
         name: quickName,
@@ -195,11 +206,18 @@ export const App: React.FC = () => {
           preferredAssetClass: quickAssetClass,
           investmentCapacity: quickInvestmentCapacity,
         },
-      });
+      };
+
+      try {
+        await apiSaveLead(newLead);
+      } catch (err) {
+        console.warn('[App QuickCreate] API failed, falling back to local storage:', err);
+        storageService.saveLead(newLead);
+      }
 
     } else if (quickCreateType === 'followup') {
       const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
-      storageService.saveFollowup({
+      const newFollowup: any = {
         id: `flw-${Date.now()}`,
         companyId: tenant?.id || 't-ghl-01',
         contactId: `contact-${Date.now()}`,
@@ -214,7 +232,14 @@ export const App: React.FC = () => {
         notes: quickNotes,
         assignedAgentId: user?.id || 'usr-exec',
         assignedAgentName: user?.name || 'Agent',
-      });
+      };
+
+      try {
+        await apiSaveFollowup(newFollowup);
+      } catch (err) {
+        console.warn('[App QuickCreate] API failed, falling back to local storage:', err);
+        storageService.saveFollowup(newFollowup);
+      }
 
     } else if (quickCreateType === 'consultation') {
       // Task 1 — Schedule Consultation

@@ -20,6 +20,7 @@
 
 import { apiClient } from './apiClient';
 import { storageService } from './storageService';
+import { isDevMode } from '../config/environment';
 import type {
   Deal,
   DealActivity,
@@ -31,12 +32,18 @@ import type {
   CallRecord,
   Consultation,
   AuditLog,
+  IrmProfile,
 } from '../types';
 
 // ── ID type helpers ───────────────────────────────────────────────────────────
 // Backend uses int IDs; frontend types use string.
 const sid = (n: number | string | undefined | null): string => String(n ?? '');
-const nid = (s: string | undefined | null): number => parseInt(s ?? '0', 10) || 0;
+const nid = (s: string | number | undefined | null): number => {
+  if (typeof s === 'number') return s;
+  if (!s) return 0;
+  const digits = String(s).replace(/\D/g, '');
+  return digits ? parseInt(digits, 10) : (parseInt(String(s), 10) || 0);
+};
 
 // ── Tenant match helper ───────────────────────────────────────────────────────
 export function isTenantMatch(
@@ -387,6 +394,7 @@ export async function getAuditLogs(
 // ══════════════════════════════════════════════════════════════════════════════
 
 function mapLead(l: Record<string, any>): Lead {
+  const custom = l.customFields ?? {};
   return {
     id: sid(l.id),
     companyId: sid(l.companyId),
@@ -398,23 +406,34 @@ function mapLead(l: Record<string, any>): Lead {
     status: l.status ?? 'New',
     priority: l.priority ?? 'Medium',
     assignedAgentId: sid(l.assignedAgentId),
-    assignedAgentName: l.assignedAgentName ?? '',
+    assignedAgentName: l.assignedAgentName || l.assignedAgent?.name || '',
+    assignedIrmId: l.assignedIrmId ? sid(l.assignedIrmId) : (custom.assignedIrmId ? sid(custom.assignedIrmId) : undefined),
+    assignedIrmName: l.assignedIrmName || custom.assignedIrmName || '',
+    assignedIrmAt: l.assignedIrmAt || custom.assignedIrmAt || '',
     nextFollowupDate: l.nextFollowupDate,
     createdAt: l.createdAt ?? new Date().toISOString(),
     notes: l.notes ?? '',
-    customFields: l.customFields ?? {},
+    customFields: custom,
   };
 }
 
 export async function getLeads(companyId?: string): Promise<Lead[]> {
   try {
     const raw = await fetchAll<any>('/sales-executive/leads');
-    if (raw && raw.length > 0) {
+    if (Array.isArray(raw)) {
       const apiLeads = raw.map(mapLead);
+      if (isDevMode()) {
+        try {
+          localStorage.setItem('nexus_leads', JSON.stringify(apiLeads));
+        } catch {}
+        return companyId ? apiLeads.filter(l => isTenantMatch(l.companyId, companyId)) : apiLeads;
+      }
+      // Mock / offline resilience fallback
       const localLeads = storageService.getLeads(companyId);
       const apiIds = new Set(apiLeads.map(l => l.id));
       const unsynced = localLeads.filter((l: Lead) => !apiIds.has(l.id));
-      return [...apiLeads, ...unsynced];
+      const combined = [...apiLeads, ...unsynced];
+      return companyId ? combined.filter(l => isTenantMatch(l.companyId, companyId)) : combined;
     }
   } catch (err) {
     console.warn('[ghlApiService] Failed to fetch leads from API, falling back to local storage:', err);
@@ -437,15 +456,22 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         status: lead.status || 'New',
         priority: lead.priority,
         notes: lead.notes,
+        assignedAgentId: nid(lead.assignedAgentId) || undefined,
         companyId: nid(lead.companyId) || 1,
         investmentCapacity: customFields['Investment Capacity'] ?? customFields['investmentCapacity'],
         assetClass: customFields['Asset Class'] ?? customFields['assetClass'],
         preferredAssetClass: customFields['Preferred Asset Class'] ?? customFields['preferredAssetClass'],
         horizon: customFields['Horizon'] ?? customFields['horizon'],
+        assignedIrmId: nid(lead.assignedIrmId) || (customFields['assignedIrmId'] ? nid(customFields['assignedIrmId']) : undefined),
+        assignedIrmName: lead.assignedIrmName || customFields['assignedIrmName'] || undefined,
+        assignedIrmAt: lead.assignedIrmAt || customFields['assignedIrmAt'] || undefined,
       };
       const res: ApiResponse<any> = await apiClient.post('/sales-executive/leads', payload);
       if (res && res.success && res.data) {
         const saved = mapLead(res.data);
+        if (lead.id && lead.id !== saved.id) {
+          storageService.deleteLead(lead.id);
+        }
         storageService.saveLead(saved);
         window.dispatchEvent(new Event('nexus_storage_updated'));
         return saved;
@@ -466,6 +492,10 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         assetClass: customFields['Asset Class'] ?? customFields['assetClass'],
         preferredAssetClass: customFields['Preferred Asset Class'] ?? customFields['preferredAssetClass'],
         horizon: customFields['Horizon'] ?? customFields['horizon'],
+        dispositionReason: customFields['dispositionReason'] ?? customFields['disposition_reason'],
+        assignedIrmId: nid(lead.assignedIrmId) || (customFields['assignedIrmId'] ? nid(customFields['assignedIrmId']) : undefined),
+        assignedIrmName: lead.assignedIrmName || customFields['assignedIrmName'] || undefined,
+        assignedIrmAt: lead.assignedIrmAt || customFields['assignedIrmAt'] || undefined,
       };
       const res: ApiResponse<any> = await apiClient.put(
         `/sales-executive/leads/${nid(lead.id)}`,
@@ -486,6 +516,32 @@ export async function saveLead(lead: Lead): Promise<Lead> {
   storageService.saveLead(lead);
   window.dispatchEvent(new Event('nexus_storage_updated'));
   return lead;
+}
+
+export async function getNotInterestedLeads(companyId?: string): Promise<Lead[]> {
+  try {
+    const raw = await fetchAll<any>('/sales-executive/leads/not-interested');
+    if (Array.isArray(raw)) {
+      const apiLeads = raw.map(mapLead);
+      return companyId ? apiLeads.filter(l => isTenantMatch(l.companyId, companyId)) : apiLeads;
+    }
+  } catch (err) {
+    console.warn('[ghlApiService] Failed to fetch not-interested leads from API, falling back to local storage:', err);
+  }
+  return storageService.getLeads(companyId).filter(l => l.status === 'Not Interested');
+}
+
+export async function deleteLead(leadId: string): Promise<void> {
+  try {
+    const numId = nid(leadId);
+    if (numId > 0) {
+      await apiClient.delete(`/sales-executive/leads/${numId}`);
+    }
+  } catch (err) {
+    console.warn('[ghlApiService] API lead delete failed:', err);
+  }
+  storageService.deleteLead(leadId);
+  window.dispatchEvent(new Event('nexus_storage_updated'));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -577,6 +633,7 @@ export async function completeFollowup(followupId: string): Promise<void> {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function mapCustomer(c: Record<string, any>): Customer {
+  const customFields = c.customFields ?? {};
   return {
     id: sid(c.id),
     companyId: sid(c.companyId),
@@ -592,7 +649,10 @@ function mapCustomer(c: Record<string, any>): Customer {
     totalValue: c.totalValue ?? 0,
     createdAt: c.createdAt ?? new Date().toISOString(),
     notes: c.notes ?? '',
-    customFields: c.customFields ?? {},
+    customFields,
+    assignedIrmId: c.assignedIrmId || customFields.assignedIrmId,
+    assignedIrmName: c.assignedIrmName || customFields.assignedIrmName,
+    assignedIrmAt: c.assignedIrmAt || customFields.assignedIrmAt,
   };
 }
 
@@ -607,6 +667,13 @@ export async function saveCustomer(customer: Customer): Promise<Customer> {
     customer.id.startsWith('cust-') ||
     customer.id.startsWith('c-');
 
+  const customFields = {
+    ...(customer.customFields || {}),
+    ...(customer.assignedIrmId ? { assignedIrmId: customer.assignedIrmId } : {}),
+    ...(customer.assignedIrmName ? { assignedIrmName: customer.assignedIrmName } : {}),
+    ...(customer.assignedIrmAt ? { assignedIrmAt: customer.assignedIrmAt } : {}),
+  };
+
   const payload = {
     name: customer.name,
     phone: customer.phone,
@@ -614,6 +681,7 @@ export async function saveCustomer(customer: Customer): Promise<Customer> {
     location: customer.location,
     status: customer.status,
     notes: customer.notes,
+    customFields,
   };
 
   if (isNew) {
@@ -705,44 +773,83 @@ export async function getConsultations(companyId?: string): Promise<Consultation
   return raw.map(mapConsultation);
 }
 
+export async function getCompanyIrms(companyId?: string): Promise<IrmProfile[]> {
+  try {
+    const res = await apiClient.get<ApiResponse<any[]>>('/sales-executive/consultations/irms');
+    if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+      return res.data.map(u => ({
+        id: String(u.id),
+        name: u.name,
+        email: u.email || '',
+        phone: u.phone || '',
+        status: (u.status === 'Busy' ? 'Busy' : 'Available') as 'Available' | 'Busy',
+        experience: u.specialization || 'Private Wealth & Advisory',
+        experienceYears: 5,
+        experienceLevel: 'Experienced' as const,
+        performance: 95,
+      }));
+    }
+  } catch (err) {
+    console.warn('[ghlApiService] Failed to fetch IRMs from API:', err);
+  }
+  return storageService.getIrms(companyId) || [];
+}
+
 export async function saveConsultation(consultation: Consultation): Promise<Consultation> {
   const isNew =
     !consultation.id ||
     consultation.id.startsWith('cons-') ||
-    consultation.id.startsWith('co-');
+    consultation.id.startsWith('co-') ||
+    consultation.id.startsWith('cns-');
 
   const payload = {
     investorId: consultation.investorId,
     investorName: consultation.investorName,
     investorPhone: consultation.investorPhone,
     scheduledAt: consultation.scheduledAt,
+    consultantId: nid(consultation.consultantId) || undefined,
+    consultantName: consultation.consultantName,
     agenda: consultation.agenda,
     outcomeNotes: consultation.outcomeNotes,
     referredByAgentName: consultation.referredByAgentName,
   };
 
-  if (isNew) {
-    const res: ApiResponse<any> = await apiClient.post(
-      '/sales-executive/consultations',
-      payload
-    );
-    if (!res.success || !res.data) throw new Error(res.message);
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-    return mapConsultation(res.data);
-  } else {
-    const updatePayload = {
-      scheduledAt: consultation.scheduledAt,
-      status: consultation.status,
-      agenda: consultation.agenda,
-      outcomeNotes: consultation.outcomeNotes,
-    };
-    const res: ApiResponse<any> = await apiClient.put(
-      `/sales-executive/consultations/${nid(consultation.id)}`,
-      updatePayload
-    );
-    if (!res.success || !res.data) throw new Error(res.message);
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-    return mapConsultation(res.data);
+  try {
+    if (isNew) {
+      const res: ApiResponse<any> = await apiClient.post(
+        '/sales-executive/consultations',
+        payload
+      );
+      if (res && res.success && res.data) {
+        const saved = mapConsultation(res.data);
+        storageService.saveConsultation(saved);
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+        return saved;
+      }
+    } else {
+      const updatePayload = {
+        scheduledAt: consultation.scheduledAt,
+        status: consultation.status,
+        agenda: consultation.agenda,
+        outcomeNotes: consultation.outcomeNotes,
+      };
+      const res: ApiResponse<any> = await apiClient.put(
+        `/sales-executive/consultations/${nid(consultation.id)}`,
+        updatePayload
+      );
+      if (res && res.success && res.data) {
+        const saved = mapConsultation(res.data);
+        storageService.saveConsultation(saved);
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+        return saved;
+      }
+    }
+  } catch (err) {
+    console.warn('[ghlApiService] API consultation save failed, persisting locally:', err);
   }
+
+  storageService.saveConsultation(consultation);
+  window.dispatchEvent(new Event('nexus_storage_updated'));
+  return consultation;
 }
 

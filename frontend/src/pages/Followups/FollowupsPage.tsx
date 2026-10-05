@@ -10,6 +10,10 @@ import {
   ShieldCheck,
   CheckCircle,
   Pencil,
+  Clock,
+  RotateCcw,
+  ArrowUpDown,
+  Filter,
 } from 'lucide-react';
 import { Followup, CallRecord, Deal, Lead, Customer } from '../../types';
 import { storageService } from '../../services/storageService';
@@ -29,11 +33,235 @@ import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { Drawer } from '../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
-import {
-  FollowupRoleFilter,
-  SALES_EXECUTIVE_USERS,
-  IRM_USERS,
-} from '../../mock_data/adminFollowupsData';
+// FollowupRoleFilter type (was imported from mock_data — moved inline; mock data is in mock_data/ folder only)
+export type FollowupRoleFilter = 'sales_executive' | 'irm';
+export type TimeSortOption = 'time_asc' | 'time_desc' | 'priority_desc' | 'default';
+export type DateFilterOption =
+  | 'all'
+  | 'today'
+  | 'tomorrow'
+  | 'yesterday'
+  | 'this_week'
+  | 'this_month'
+  | 'specific_date'
+  | 'custom_range';
+
+export interface ParsedFollowupDateTime {
+  timestamp: number;
+  timeMinutes: number;
+  dateKey: string;
+  hasTime: boolean;
+  displayTime: string;
+}
+
+export function parseFollowupDateTime(f: Followup): ParsedFollowupDateTime {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const formatDateKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+  const todayKey = formatDateKey(now);
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const yesterdayKey = formatDateKey(yesterday);
+  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const tomorrowKey = formatDateKey(tomorrow);
+
+  let targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let dateKey = todayKey;
+  let hours = 9;
+  let minutes = 0;
+  let hasTime = false;
+  let displayTime = '';
+
+  const rawSched = (f.scheduledAt || '').trim();
+  const lowerSched = rawSched.toLowerCase();
+
+  // 1. Determine date component
+  if (lowerSched.includes('today')) {
+    targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    dateKey = todayKey;
+  } else if (lowerSched.includes('yesterday')) {
+    targetDate = yesterday;
+    dateKey = yesterdayKey;
+  } else if (lowerSched.includes('tomorrow')) {
+    targetDate = tomorrow;
+    dateKey = tomorrowKey;
+  } else if (f.scheduledDate && /^\d{4}-\d{2}-\d{2}$/.test(f.scheduledDate.trim())) {
+    const parts = f.scheduledDate.trim().split('-');
+    targetDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    dateKey = f.scheduledDate.trim();
+  } else if (rawSched) {
+    const parsedIso = Date.parse(rawSched);
+    if (!isNaN(parsedIso)) {
+      const d = new Date(parsedIso);
+      targetDate = d;
+      dateKey = formatDateKey(d);
+      hours = d.getHours();
+      minutes = d.getMinutes();
+      hasTime = true;
+    }
+  }
+
+  // 2. Extract time component from f.scheduledTime or rawSched
+  const timeSource = (f.scheduledTime || rawSched).trim();
+  const timeMatch = timeSource.match(/(?:^|[,\s])(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+
+  if (timeMatch) {
+    let h = parseInt(timeMatch[1], 10);
+    const m = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
+    const meridiem = timeMatch[3] ? timeMatch[3].toUpperCase() : null;
+
+    if (meridiem) {
+      if (meridiem === 'PM' && h < 12) h += 12;
+      if (meridiem === 'AM' && h === 12) h = 0;
+      hours = h;
+      minutes = m;
+      hasTime = true;
+      const displayH = h % 12 === 0 ? 12 : h % 12;
+      displayTime = `${pad(displayH)}:${pad(m)} ${meridiem}`;
+    } else if (timeMatch[2] !== undefined && h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+      hours = h;
+      minutes = m;
+      hasTime = true;
+      const period = h >= 12 ? 'PM' : 'AM';
+      const displayH = h % 12 === 0 ? 12 : h % 12;
+      displayTime = `${pad(displayH)}:${pad(m)} ${period}`;
+    }
+  }
+
+  const timeMinutes = hours * 60 + minutes;
+  const fullTimestamp = new Date(
+    targetDate.getFullYear(),
+    targetDate.getMonth(),
+    targetDate.getDate(),
+    hours,
+    minutes,
+    0
+  ).getTime();
+
+  return {
+    timestamp: fullTimestamp,
+    timeMinutes,
+    dateKey,
+    hasTime,
+    displayTime: displayTime || `${pad(hours % 12 || 12)}:${pad(minutes)} ${hours >= 12 ? 'PM' : 'AM'}`,
+  };
+}
+
+export function isFollowupMatchingDate(
+  f: Followup,
+  filterType: DateFilterOption,
+  specDate: string,
+  startD: string,
+  endD: string
+): boolean {
+  if (filterType === 'all') return true;
+
+  const parsed = parseFollowupDateTime(f);
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const todayKey = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+
+  const yest = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const yestKey = `${yest.getFullYear()}-${pad(yest.getMonth() + 1)}-${pad(yest.getDate())}`;
+
+  const tom = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const tomKey = `${tom.getFullYear()}-${pad(tom.getMonth() + 1)}-${pad(tom.getDate())}`;
+
+  const raw = (f.scheduledAt || '').toLowerCase();
+
+  if (filterType === 'today') {
+    return raw.includes('today') || parsed.dateKey === todayKey;
+  }
+  if (filterType === 'tomorrow') {
+    return raw.includes('tomorrow') || parsed.dateKey === tomKey;
+  }
+  if (filterType === 'yesterday') {
+    return (
+      raw.includes('yesterday') ||
+      parsed.dateKey === yestKey ||
+      parsed.timestamp < new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    );
+  }
+  if (filterType === 'this_week') {
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - now.getDay());
+    startOfWeek.setHours(0, 0, 0, 0);
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 7);
+    endOfWeek.setHours(23, 59, 59, 999);
+    return parsed.timestamp >= startOfWeek.getTime() && parsed.timestamp <= endOfWeek.getTime();
+  }
+  if (filterType === 'this_month') {
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).getTime();
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
+    return parsed.timestamp >= startOfMonth && parsed.timestamp <= endOfMonth;
+  }
+  if (filterType === 'specific_date') {
+    if (!specDate) return true;
+    if (specDate === todayKey && raw.includes('today')) return true;
+    if (specDate === yestKey && raw.includes('yesterday')) return true;
+    if (specDate === tomKey && raw.includes('tomorrow')) return true;
+    return parsed.dateKey === specDate;
+  }
+  if (filterType === 'custom_range') {
+    if (!startD && !endD) return true;
+    const start = startD ? new Date(`${startD}T00:00:00`).getTime() : 0;
+    const end = endD ? new Date(`${endD}T23:59:59`).getTime() : Infinity;
+    return parsed.timestamp >= start && parsed.timestamp <= end;
+  }
+  return true;
+}
+
+export function sortFollowups(list: Followup[], sortOption: TimeSortOption): Followup[] {
+  if (sortOption === 'default') return list;
+
+  return [...list].sort((a, b) => {
+    const parsedA = parseFollowupDateTime(a);
+    const parsedB = parseFollowupDateTime(b);
+
+    if (sortOption === 'time_asc') {
+      // 1. If on the same date, prioritize timeMinutes ascending (10:00 AM before 12:00 PM)
+      if (parsedA.dateKey === parsedB.dateKey) {
+        if (parsedA.timeMinutes !== parsedB.timeMinutes) {
+          return parsedA.timeMinutes - parsedB.timeMinutes;
+        }
+      } else {
+        // Across different dates, earlier date comes first
+        if (parsedA.timestamp !== parsedB.timestamp) {
+          return parsedA.timestamp - parsedB.timestamp;
+        }
+      }
+      // Secondary: Priority (High before Medium before Low)
+      const priorityWeight: Record<string, number> = { High: 3, Medium: 2, Low: 1 };
+      const diff = (priorityWeight[b.priority] || 2) - (priorityWeight[a.priority] || 2);
+      if (diff !== 0) return diff;
+      return a.contactName.localeCompare(b.contactName);
+    }
+
+    if (sortOption === 'time_desc') {
+      // 1. If on the same date, latest time of day first (12:00 PM before 10:00 AM)
+      if (parsedA.dateKey === parsedB.dateKey) {
+        if (parsedA.timeMinutes !== parsedB.timeMinutes) {
+          return parsedB.timeMinutes - parsedA.timeMinutes;
+        }
+      } else {
+        if (parsedA.timestamp !== parsedB.timestamp) {
+          return parsedB.timestamp - parsedA.timestamp;
+        }
+      }
+      return a.contactName.localeCompare(b.contactName);
+    }
+
+    if (sortOption === 'priority_desc') {
+      const priorityWeight: Record<string, number> = { High: 3, Medium: 2, Low: 1 };
+      const diff = (priorityWeight[b.priority] || 2) - (priorityWeight[a.priority] || 2);
+      if (diff !== 0) return diff;
+      return parsedA.timestamp - parsedB.timestamp;
+    }
+
+    return 0;
+  });
+}
 import { DateRangePreset } from '../../types/kanban';
 import './FollowupsPage.css';
 import '../Leads/LeadsPage.css';
@@ -95,6 +323,43 @@ export const FollowupsPage: React.FC = () => {
   const [customEndDate, setCustomEndDate] = useState<string>(() => {
     return new Date().toISOString().split('T')[0];
   });
+
+  // ── Time Priority and Date Filter States ──────────────────────────────────
+  const [timeSortOption, setTimeSortOption] = useState<TimeSortOption>('time_asc');
+  const [dateFilterOption, setDateFilterOption] = useState<DateFilterOption>('all');
+  const [specificDate, setSpecificDate] = useState<string>(() => {
+    return new Date().toISOString().split('T')[0];
+  });
+
+  const handleTabClick = (tabId: 'all' | 'due' | 'overdue') => {
+    setActiveTab(tabId);
+    if (tabId === 'due') {
+      setDateFilterOption('today');
+    } else if (tabId === 'overdue') {
+      setDateFilterOption('yesterday');
+    } else {
+      setDateFilterOption('all');
+    }
+  };
+
+  const handleDateFilterChange = (newVal: DateFilterOption) => {
+    setDateFilterOption(newVal);
+    if (newVal === 'today') {
+      setActiveTab('due');
+    } else if (newVal === 'yesterday') {
+      setActiveTab('overdue');
+    } else {
+      setActiveTab('all');
+    }
+  };
+
+  const handleResetFilters = () => {
+    setDateFilterOption('all');
+    setTimeSortOption('time_asc');
+    setActiveTab('all');
+    setSpecificDate(new Date().toISOString().split('T')[0]);
+  };
+
   const handleRoleChange = (newRole: FollowupRoleFilter) => {
     setSelectedRole(newRole);
     setSelectedPerson('All');
@@ -102,7 +367,7 @@ export const FollowupsPage: React.FC = () => {
 
   const personOptions = useMemo(() => {
     if (selectedRole === 'sales_executive') {
-      return storageService.getAgents ? storageService.getAgents(tenant?.id) : SALES_EXECUTIVE_USERS;
+      return storageService.getAgents ? storageService.getAgents(tenant?.id) : [];
     }
   }, [selectedRole, tenant?.id]);
 
@@ -470,7 +735,7 @@ export const FollowupsPage: React.FC = () => {
       if (f.assignedRole.toLowerCase().includes('irm')) return 'IRM';
       return 'Sales Executive';
     }
-    const irmsList = storageService.getIrms ? storageService.getIrms(tenant?.id) : IRM_USERS;
+    const irmsList = storageService.getIrms ? storageService.getIrms(tenant?.id) : [];
     if (
       irmsList.some(
         (u: any) =>
@@ -576,11 +841,22 @@ export const FollowupsPage: React.FC = () => {
       return true;
     });
   } else if (isExec) {
-    scopedFollowups = followups.filter(
+    const directMatches = followups.filter(
       f =>
-        (f.assignedAgentId && f.assignedAgentId === user?.id) ||
-        (f.assignedAgentName && f.assignedAgentName === user?.name)
+        (f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
+        (f.assignedAgentName && f.assignedAgentName.toLowerCase() === (user?.name || '').toLowerCase())
     );
+    if (directMatches.length > 0) {
+      scopedFollowups = directMatches;
+    } else {
+      // Fallback: Sales Executive follow-ups for this tenant
+      const execFollowups = followups.filter(
+        f =>
+          (!f.assignedRole || f.assignedRole.toLowerCase().includes('sales')) &&
+          (!f.companyId || !tenant?.id || isTenantMatch(f.companyId, tenant.id))
+      );
+      scopedFollowups = execFollowups.length > 0 ? execFollowups : followups;
+    }
   } else if (isIrm) {
     // IRM Follow-up Required: show ALL pending followups for this tenant
     // Matches linked lead 'Follow-up Required' status, direct assignment, or tenant match
@@ -692,15 +968,57 @@ export const FollowupsPage: React.FC = () => {
   // Count badges
   const activePendingFollowups = processedFollowups.filter(f => f.status === 'Pending');
 
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const todayKey = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const yesterdayKey = `${yesterday.getFullYear()}-${pad(yesterday.getMonth() + 1)}-${pad(yesterday.getDate())}`;
+  const todayStartMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+
+  const dueCount = activePendingFollowups.filter(f => {
+    const raw = (f.scheduledAt || '').toLowerCase();
+    if (raw.includes('today')) return true;
+    const parsed = parseFollowupDateTime(f);
+    return parsed.dateKey === todayKey;
+  }).length;
+
+  const overdueCount = activePendingFollowups.filter(f => {
+    const raw = (f.scheduledAt || '').toLowerCase();
+    if (raw.includes('yesterday')) return true;
+    const parsed = parseFollowupDateTime(f);
+    return parsed.dateKey === yesterdayKey || parsed.timestamp < todayStartMs;
+  }).length;
+
   const filteredFollowups = processedFollowups.filter(f => {
+    if (f.status !== 'Pending') return false;
+
+    // Tab filter
     if (activeTab === 'due') {
-      return f.status === 'Pending' && (f.scheduledAt || '').toLowerCase().includes('today');
+      const raw = (f.scheduledAt || '').toLowerCase();
+      const parsed = parseFollowupDateTime(f);
+      const isDue = raw.includes('today') || parsed.dateKey === todayKey;
+      if (!isDue) return false;
+    } else if (activeTab === 'overdue') {
+      const raw = (f.scheduledAt || '').toLowerCase();
+      const parsed = parseFollowupDateTime(f);
+      const isOverdue =
+        raw.includes('yesterday') ||
+        parsed.dateKey === yesterdayKey ||
+        parsed.timestamp < todayStartMs;
+      if (!isOverdue) return false;
     }
-    if (activeTab === 'overdue') {
-      return f.status === 'Pending' && (f.scheduledAt || '').toLowerCase().includes('yesterday');
+
+    // Date filter: applied when on 'all' tab or explicit date filter active
+    if (activeTab === 'all' && !isFollowupMatchingDate(f, dateFilterOption, specificDate, customStartDate, customEndDate)) {
+      return false;
     }
-    return f.status === 'Pending';
+
+    return true;
   });
+
+  const finalSortedFollowups = useMemo(() => {
+    return sortFollowups(filteredFollowups, timeSortOption);
+  }, [filteredFollowups, timeSortOption]);
 
   const drawerFollowupRole = drawerFollowup ? getFollowupRole(drawerFollowup) : '';
 
@@ -798,6 +1116,26 @@ export const FollowupsPage: React.FC = () => {
                 />
               </div>
             )}
+
+            {/* 4. Time Priority Filter */}
+            <div className="followup-filter-item">
+              <span className="followup-filter-label">
+                <Clock size={14} color="var(--primary-600)" />
+                Time Priority:
+              </span>
+              <select
+                id="admin-filter-time-priority"
+                className="followup-filter-select"
+                value={timeSortOption}
+                onChange={e => setTimeSortOption(e.target.value as TimeSortOption)}
+                title="Sort follow-ups by time of day (Earliest first e.g. 10 AM before 12 PM)"
+              >
+                <option value="time_asc">Earliest First (10 AM → 12 PM)</option>
+                <option value="time_desc">Latest First (12 PM → 10 AM)</option>
+                <option value="priority_desc">Priority: High to Low</option>
+                <option value="default">Default Order</option>
+              </select>
+            </div>
           </div>
 
           {/* Right Section: Role Mode Tag & Total Count */}
@@ -819,63 +1157,160 @@ export const FollowupsPage: React.FC = () => {
             </span>
 
             <span className="followup-total-badge">
-              Total Tasks: <strong>{activePendingFollowups.length}</strong>
+              Showing: <strong>{finalSortedFollowups.length}</strong> of {activePendingFollowups.length}
             </span>
           </div>
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="followups-tabs-container">
-        {[
-          { id: 'all', label: `All Tasks (${activePendingFollowups.length})` },
-          {
-            id: 'due',
-            label: `Due Today (${
-              activePendingFollowups.filter(f =>
-                (f.scheduledAt || '').toLowerCase().includes('today')
-              ).length
-            })`,
-          },
-          {
-            id: 'overdue',
-            label: `Overdue (${
-              activePendingFollowups.filter(f =>
-                (f.scheduledAt || '').toLowerCase().includes('yesterday')
-              ).length
-            })`,
-            danger: true,
-          },
-        ].map(tab => (
-          <button
-            key={tab.id}
-            className={`btn btn-sm ${
-              activeTab === tab.id ? 'btn-primary' : 'btn-secondary'
-            } ${
-              tab.danger && activeTab === tab.id
-                ? 'followups-tab-danger-active'
-                : tab.danger
-                ? 'followups-tab-danger-inactive'
-                : ''
-            }`}
-            onClick={() => setActiveTab(tab.id as any)}
-          >
-            {tab.danger && (
-              <AlertTriangle size={13} color={activeTab === tab.id ? '#ffffff' : '#dc2626'} />
-            )}
-            {tab.label}
-          </button>
-        ))}
+      {/* ── Unified Single-Row Controls: Tabs + Date Filter + Time Priority ── */}
+      <div className="followups-unified-row">
+        {/* Left: Quick Scope Tabs (All Tasks, Due Today, Overdue) */}
+        <div className="followups-tabs-pill-group">
+          {[
+            { id: 'all', label: 'All Tasks', count: activePendingFollowups.length },
+            { id: 'due', label: 'Due Today', count: dueCount },
+            { id: 'overdue', label: 'Overdue', count: overdueCount, danger: true },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              type="button"
+              className={`followup-tab-pill ${
+                activeTab === tab.id ? 'active' : ''
+              } ${
+                tab.danger ? (activeTab === tab.id ? 'danger-active' : 'danger-inactive') : ''
+              }`}
+              onClick={() => handleTabClick(tab.id as any)}
+            >
+              {tab.danger && (
+                <AlertTriangle size={13} color={activeTab === tab.id ? '#ffffff' : '#dc2626'} />
+              )}
+              <span>{tab.label}</span>
+              <span className={`followup-pill-count ${activeTab === tab.id ? 'count-active' : ''}`}>
+                {tab.count}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <div className="followups-row-divider" />
+
+        {/* Center: Filters (Date Filter & Time Priority) */}
+        <div className="followups-filters-inline-group">
+          {/* 1. Date Filter */}
+          <div className="followup-filter-item">
+            <span className="followup-filter-label">
+              <Calendar size={14} color="var(--primary-600)" />
+              Date:
+            </span>
+            <select
+              id="filter-date-select"
+              className="followup-filter-select-compact"
+              value={dateFilterOption}
+              onChange={e => handleDateFilterChange(e.target.value as DateFilterOption)}
+              title="Filter tasks by scheduled date"
+            >
+              <option value="all">All Dates</option>
+              <option value="today">Today</option>
+              <option value="tomorrow">Tomorrow</option>
+              <option value="yesterday">Overdue / Yesterday</option>
+              <option value="this_week">This Week</option>
+              <option value="this_month">This Month</option>
+              <option value="specific_date">Specific Date...</option>
+              <option value="custom_range">Custom Range...</option>
+            </select>
+          </div>
+
+          {/* Specific Date input if selected */}
+          {dateFilterOption === 'specific_date' && (
+            <div className="followup-filter-item">
+              <input
+                id="filter-specific-date"
+                type="date"
+                className="followup-date-input-compact"
+                value={specificDate}
+                onChange={e => setSpecificDate(e.target.value)}
+                title="Choose Specific Date"
+              />
+            </div>
+          )}
+
+          {/* Custom Date Range inputs if selected */}
+          {dateFilterOption === 'custom_range' && (
+            <div className="followup-date-custom-inputs">
+              <input
+                id="filter-custom-start-date"
+                type="date"
+                className="followup-date-input-compact"
+                value={customStartDate}
+                onChange={e => setCustomStartDate(e.target.value)}
+                title="Start Date"
+              />
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>to</span>
+              <input
+                id="filter-custom-end-date"
+                type="date"
+                className="followup-date-input-compact"
+                value={customEndDate}
+                onChange={e => setCustomEndDate(e.target.value)}
+                title="End Date"
+              />
+            </div>
+          )}
+
+          {/* 2. Time Priority Sort Filter */}
+          <div className="followup-filter-item">
+            <span className="followup-filter-label">
+              <Clock size={14} color="var(--primary-600)" />
+              Time Priority:
+            </span>
+            <select
+              id="filter-time-priority"
+              className="followup-filter-select-compact"
+              value={timeSortOption}
+              onChange={e => setTimeSortOption(e.target.value as TimeSortOption)}
+              title="Sort follow-ups by time of day (Earliest first e.g. 10 AM before 12 PM)"
+            >
+              <option value="time_asc">Earliest First (10 AM → 12 PM)</option>
+              <option value="time_desc">Latest First (12 PM → 10 AM)</option>
+              <option value="priority_desc">Priority: High to Low</option>
+              <option value="default">Default Order</option>
+            </select>
+          </div>
+
+          {/* Reset Filters button if modified */}
+          {(dateFilterOption !== 'all' || timeSortOption !== 'time_asc' || activeTab !== 'all') && (
+            <button
+              type="button"
+              className="followup-reset-btn-compact"
+              onClick={handleResetFilters}
+              title="Reset all filters and sorting to defaults"
+            >
+              <RotateCcw size={12} /> Reset
+            </button>
+          )}
+        </div>
+
+        {/* Right: Showing Tasks Count */}
+        <div className="followups-row-right">
+          <span className="followup-total-badge">
+            Showing: <strong>{finalSortedFollowups.length}</strong> of {activePendingFollowups.length}
+          </span>
+        </div>
       </div>
 
       {/* Follow-ups List Cards */}
       <div className="followups-list">
-        {filteredFollowups.length === 0 ? (
+        {finalSortedFollowups.length === 0 ? (
           <div className="card text-center followups-empty-card">
-            No tasks in this category. You're all caught up!
+            {dateFilterOption === 'specific_date'
+              ? `No follow-up tasks scheduled for ${specificDate}. You're all caught up!`
+              : dateFilterOption === 'tomorrow'
+              ? "No follow-up tasks scheduled for tomorrow. You're all caught up!"
+              : "No tasks in this category. You're all caught up!"}
           </div>
         ) : (
-          filteredFollowups.map(f => {
+          finalSortedFollowups.map(f => {
             const isOverdue =
               f.status === 'Pending' && (f.scheduledAt || '').toLowerCase().includes('yesterday');
             const callCount = getCallCountForFollowup(f);

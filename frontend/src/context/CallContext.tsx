@@ -264,6 +264,18 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     reason?: string
   ) => {
     if (lastCallRecord && tenant && user) {
+      // Locate matched lead if any
+      const leadId = lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : null;
+      const allLeads = leads.length > 0 ? leads : (tenant ? storageService.getLeads(tenant.id) : []);
+      const normalize = (p: string) => (p || '').replace(/\D/g, '').slice(-10);
+      const callPhoneDigits = normalize(lastCallRecord.contactPhone);
+      const matchedLead = leadId
+        ? allLeads.find((l: Lead) => l.id === leadId)
+        : allLeads.find((l: Lead) =>
+            (callPhoneDigits && normalize(l.phone) === callPhoneDigits) ||
+            (l.name && l.name.toLowerCase() === lastCallRecord.contactName.toLowerCase())
+          );
+
       const callRecord: CallRecord = {
         id: lastCallRecord.id,
         companyId: tenant.id,
@@ -279,21 +291,10 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         transcription: `Automated Call Transcript: Agent ${user.name} connected with ${lastCallRecord.contactName}. Call disposition marked as ${disposition}.`,
         notes: notes || lastCallRecord.quickNotes || undefined,
         reason: reason || undefined,
+        leadId: matchedLead?.id || leadId || undefined,
       };
 
       apiLogCall(callRecord).catch(console.error);
-
-      // Locate matched lead if any
-      const leadId = lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : null;
-      const allLeads = leads.length > 0 ? leads : (tenant ? storageService.getLeads(tenant.id) : []);
-      const normalize = (p: string) => (p || '').replace(/\D/g, '').slice(-10);
-      const callPhoneDigits = normalize(lastCallRecord.contactPhone);
-      const matchedLead = leadId
-        ? allLeads.find((l: Lead) => l.id === leadId)
-        : allLeads.find((l: Lead) =>
-            (callPhoneDigits && normalize(l.phone) === callPhoneDigits) ||
-            (l.name && l.name.toLowerCase() === lastCallRecord.contactName.toLowerCase())
-          );
 
       // 1. Interested -> Move to Customer 360, remove from active Leads
       if (disposition === 'Interested') {
@@ -459,8 +460,12 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const reasonText = reason || notes || 'Not Interested';
         if (matchedLead) {
           matchedLead.status = 'Not Interested';
+          matchedLead.notes = matchedLead.notes
+            ? `${matchedLead.notes}\n\n[Not Interested Reason]: ${reasonText}`
+            : `[Not Interested Reason]: ${reasonText}`;
           matchedLead.customFields = { ...matchedLead.customFields, dispositionReason: reasonText };
           apiSaveLead(matchedLead).catch(console.error);
+          storageService.saveLead(matchedLead);
         } else {
           const newLead: Lead = {
             id: `lead-${Date.now()}`,
@@ -475,11 +480,14 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             assignedAgentId: user.id,
             assignedAgentName: user.name,
             createdAt: new Date().toISOString().split('T')[0],
-            notes: '',
+            notes: `[Not Interested Reason]: ${reasonText}`,
             customFields: { dispositionReason: reasonText },
           };
           apiSaveLead(newLead).catch(console.error);
+          storageService.saveLead(newLead);
         }
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+        window.dispatchEvent(new CustomEvent('nexus_navigate', { detail: { route: 'not-interested' } }));
       }
 
       // 5. Wrong Number -> Remove from Leads, move to Junk section

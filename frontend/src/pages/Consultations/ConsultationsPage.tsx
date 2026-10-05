@@ -34,6 +34,8 @@ interface ConsultationForm {
   investorId: string;
   investorName: string;
   investorPhone: string;
+  scheduledDate: string;
+  scheduledTime: string;
   scheduledAt: string;
   consultantId: string;
   consultantName: string;
@@ -47,6 +49,8 @@ const BLANK_FORM: ConsultationForm = {
   investorId: '',
   investorName: '',
   investorPhone: '',
+  scheduledDate: '',
+  scheduledTime: '15:00',
   scheduledAt: '',
   consultantId: '',
   consultantName: '',
@@ -54,6 +58,63 @@ const BLANK_FORM: ConsultationForm = {
   agenda: '',
   outcomeNotes: '',
   referredByAgentName: '',
+};
+
+const formatSlotDateTime = (dateStr: string, timeStr: string): string => {
+  if (!dateStr) return '';
+  const time = timeStr || '15:00';
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return `${dateStr} ${time}`;
+  const [year, month, day] = parts.map(Number);
+  const [hour, minute] = time.split(':').map(Number);
+  const dt = new Date(year, month - 1, day, hour || 0, minute || 0);
+  if (isNaN(dt.getTime())) return `${dateStr} ${time}`;
+  return (
+    dt.toLocaleDateString('en-US', {
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    }) +
+    ', ' +
+    dt.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    })
+  );
+};
+
+const parseScheduledSlot = (val: string): { date: string; time: string } => {
+  let date = '';
+  let time = '15:00';
+  if (val) {
+    const parsed = Date.parse(val);
+    if (!isNaN(parsed)) {
+      const d = new Date(parsed);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const hours = String(d.getHours()).padStart(2, '0');
+      const mins = String(d.getMinutes()).padStart(2, '0');
+      return { date: `${year}-${month}-${day}`, time: `${hours}:${mins}` };
+    }
+    const tMatch = val.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+    if (tMatch) {
+      let h = parseInt(tMatch[1], 10);
+      const m = tMatch[2];
+      const ap = tMatch[3].toUpperCase();
+      if (ap === 'PM' && h < 12) h += 12;
+      if (ap === 'AM' && h === 12) h = 0;
+      time = `${String(h).padStart(2, '0')}:${m}`;
+    }
+  }
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  date = `${year}-${month}-${day}`;
+  return { date, time };
 };
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -103,20 +164,21 @@ export const ConsultationsPage: React.FC = () => {
 
   // ── Helper to parse timestamp for newest-first sorting / deduplication ────
   const getConsultationTimestamp = (c: Consultation): number => {
-    // 1. Highest timestamp parsed from the cns-<timestamp> id
+    // 1. Parse scheduledAt ISO date/time
+    if (c.scheduledAt) {
+      const parsed = Date.parse(c.scheduledAt);
+      if (!isNaN(parsed)) return parsed;
+    }
+    // 2. Timestamp parsed from cns-<timestamp> id
     const match = (c.id || '').match(/^cns-(\d+)$/);
     if (match) {
       const ts = parseInt(match[1], 10);
       if (!isNaN(ts) && ts > 10000000000) return ts;
     }
-    // 2. Fall back to parsing scheduledAt
-    if (c.scheduledAt) {
-      const parsed = Date.parse(c.scheduledAt);
-      if (!isNaN(parsed)) return parsed;
-    }
-    // 3. Fall back to any numeric value from id (e.g. seed data cns-01 -> 1)
-    if (match) {
-      const ts = parseInt(match[1], 10);
+    // 3. Fall back to any numeric value from id
+    const numMatch = (c.id || '').match(/\d+/);
+    if (numMatch) {
+      const ts = parseInt(numMatch[0], 10);
       if (!isNaN(ts)) return ts;
     }
     return 0;
@@ -192,9 +254,17 @@ export const ConsultationsPage: React.FC = () => {
   const openCreateModal = () => {
     setEditingConsultation(null);
     setIsRescheduleMode(false);
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const initDate = `${yyyy}-${mm}-${dd}`;
+    const initTime = '15:00';
     setForm({
       ...BLANK_FORM,
-      scheduledAt: 'This Friday, 03:00 PM',
+      scheduledDate: initDate,
+      scheduledTime: initTime,
+      scheduledAt: formatSlotDateTime(initDate, initTime),
       agenda: 'Commercial REIT yield analysis & pass-through taxation discussion.',
       consultantId: user?.id ?? '',
       consultantName: user?.name ?? 'Advisor',
@@ -207,11 +277,14 @@ export const ConsultationsPage: React.FC = () => {
   const openRescheduleModal = (c: Consultation) => {
     setEditingConsultation(c);
     setIsRescheduleMode(true);
+    const { date, time } = parseScheduledSlot(c.scheduledAt);
     setForm({
       investorId: c.investorId,
       investorName: c.investorName,
       investorPhone: c.investorPhone,
-      scheduledAt: c.scheduledAt,
+      scheduledDate: date,
+      scheduledTime: time,
+      scheduledAt: c.scheduledAt || formatSlotDateTime(date, time),
       consultantId: c.consultantId,
       consultantName: c.consultantName,
       status: 'Rescheduled',
@@ -240,26 +313,38 @@ export const ConsultationsPage: React.FC = () => {
     if (e) e.preventDefault();
 
     const errors: Partial<Record<keyof ConsultationForm, string>> = {};
-    if (!form.investorId) errors.investorId = 'Please select an investor.';
-    if (!form.scheduledAt.trim()) errors.scheduledAt = 'Consultation slot is required.';
+    if (!form.investorName.trim()) errors.investorName = 'Please enter an investor name.';
+    if (!form.scheduledDate && !form.scheduledAt.trim()) {
+      errors.scheduledAt = 'Consultation date slot is required.';
+    }
     if (Object.keys(errors).length > 0) {
       setFormErrors(errors);
       return;
     }
 
+    let resolvedInvestorId = form.investorId;
+    if (!resolvedInvestorId) {
+      const matched = investors.find(
+        i => i.name.toLowerCase() === form.investorName.trim().toLowerCase()
+      );
+      resolvedInvestorId = matched?.id || `inv-${Date.now()}`;
+    }
+
+    const slotValue = form.scheduledAt.trim() || formatSlotDateTime(form.scheduledDate, form.scheduledTime);
+
     const isEdit = !!editingConsultation;
     const cons: Consultation = {
       id: editingConsultation ? editingConsultation.id : `cns-${Date.now()}`,
       companyId: tenant?.id || 't-ghl-01',
-      investorId: form.investorId,
-      investorName: form.investorName,
-      investorPhone: form.investorPhone,
-      scheduledAt: form.scheduledAt.trim(),
+      investorId: resolvedInvestorId,
+      investorName: form.investorName.trim(),
+      investorPhone: form.investorPhone.trim(),
+      scheduledAt: slotValue,
       consultantId: form.consultantId.trim() || (user?.id ?? 'usr-admin'),
       consultantName: form.consultantName.trim() || (user?.name ?? 'Advisor'),
       status: form.status,
       agenda: form.agenda.trim(),
-      outcomeNotes: form.outcomeNotes.trim() || undefined,
+      outcomeNotes: editingConsultation?.outcomeNotes || undefined,
       referredByAgentName: form.referredByAgentName.trim() || undefined,
     };
 
@@ -467,34 +552,41 @@ export const ConsultationsPage: React.FC = () => {
         }
       >
         <form onSubmit={handleSaveConsultation} className="consultation-form">
-          {/* Investor Dropdown */}
+          {/* Investor Name Entering Option */}
           <div className="form-group">
-            <label className="form-label">Investor *</label>
-            <select
+            <label className="form-label">Investor Name *</label>
+            <input
               id="consultation-form-investor"
-              className={`form-select${formErrors.investorId ? ' is-invalid' : ''}`}
-              value={form.investorId}
+              type="text"
+              className={`form-input${formErrors.investorName ? ' is-invalid' : ''}`}
+              placeholder="Enter investor name"
+              value={form.investorName}
               onChange={e => {
-                const inv = investors.find(i => i.id === e.target.value);
-                setField('investorId', e.target.value);
-                setField('investorName', inv?.name ?? '');
-                setField('investorPhone', inv?.phone ?? '');
+                const val = e.target.value;
+                setField('investorName', val);
+                const matched = investors.find(
+                  i => i.name.toLowerCase() === val.trim().toLowerCase()
+                );
+                if (matched) {
+                  setField('investorId', matched.id);
+                  if (matched.phone && !form.investorPhone) {
+                    setField('investorPhone', matched.phone);
+                  }
+                } else if (!editingConsultation) {
+                  setField('investorId', '');
+                }
               }}
-            >
-              <option value="">— Select Investor —</option>
-              {form.investorId && !investors.some(i => i.id === form.investorId) && (
-                <option value={form.investorId}>
-                  {form.investorName || form.investorId} (Current)
-                </option>
-              )}
+              list="investors-datalist"
+            />
+            <datalist id="investors-datalist">
               {investors.map(inv => (
-                <option key={inv.id} value={inv.id}>
-                  {inv.name} {inv.phone ? `(${inv.phone})` : ''}
+                <option key={inv.id} value={inv.name}>
+                  {inv.phone ? `${inv.name} (${inv.phone})` : inv.name}
                 </option>
               ))}
-            </select>
-            {formErrors.investorId && (
-              <div className="form-error">{formErrors.investorId}</div>
+            </datalist>
+            {formErrors.investorName && (
+              <div className="form-error">{formErrors.investorName}</div>
             )}
           </div>
 
@@ -513,14 +605,37 @@ export const ConsultationsPage: React.FC = () => {
 
             <div className="form-group">
               <label className="form-label">Consultation Slot *</label>
-              <input
-                id="consultation-form-slot"
-                type="text"
-                className={`form-input${formErrors.scheduledAt ? ' is-invalid' : ''}`}
-                placeholder="e.g. Thursday, 04:00 PM"
-                value={form.scheduledAt}
-                onChange={e => setField('scheduledAt', e.target.value)}
-              />
+              <div className="consultation-calendar-slot-inputs">
+                <input
+                  id="consultation-form-date"
+                  type="date"
+                  className={`form-input${formErrors.scheduledAt ? ' is-invalid' : ''}`}
+                  value={form.scheduledDate}
+                  onChange={e => {
+                    const newDate = e.target.value;
+                    setField('scheduledDate', newDate);
+                    setField('scheduledAt', formatSlotDateTime(newDate, form.scheduledTime));
+                  }}
+                  title="Select consultation date from calendar"
+                />
+                <input
+                  id="consultation-form-time"
+                  type="time"
+                  className="form-input"
+                  value={form.scheduledTime}
+                  onChange={e => {
+                    const newTime = e.target.value;
+                    setField('scheduledTime', newTime);
+                    setField('scheduledAt', formatSlotDateTime(form.scheduledDate, newTime));
+                  }}
+                  title="Select consultation time"
+                />
+              </div>
+              {form.scheduledAt && (
+                <div className="consultation-slot-preview">
+                  📅 {form.scheduledAt}
+                </div>
+              )}
               {formErrors.scheduledAt && (
                 <div className="form-error">{formErrors.scheduledAt}</div>
               )}
@@ -611,32 +726,6 @@ export const ConsultationsPage: React.FC = () => {
               placeholder="e.g. Commercial REIT yield analysis & pass-through taxation discussion."
               value={form.agenda}
               onChange={e => setField('agenda', e.target.value)}
-              style={{ resize: 'vertical' }}
-            />
-          </div>
-
-          {/* Outcome Notes */}
-          <div className="form-group">
-            <label className="form-label">
-              Outcome Notes & Recommendations
-              <span
-                style={{
-                  marginLeft: 6,
-                  fontSize: 11,
-                  color: 'var(--text-muted)',
-                  fontWeight: 400,
-                }}
-              >
-                (advisory notes, mandate agreements, next steps)
-              </span>
-            </label>
-            <textarea
-              id="consultation-form-outcome"
-              className="form-textarea"
-              rows={3}
-              placeholder="Record key takeaways, investor interest level, follow-up requirements..."
-              value={form.outcomeNotes}
-              onChange={e => setField('outcomeNotes', e.target.value)}
               style={{ resize: 'vertical' }}
             />
           </div>

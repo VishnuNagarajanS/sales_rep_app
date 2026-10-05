@@ -27,13 +27,14 @@ import {
   saveFollowup as apiSaveFollowup,
   getDeals,
   getLeads,
+  saveLead as apiSaveLead,
+  getCompanyIrms,
 } from '../../services/ghlApiService';
 import { StatusChip } from '../../components/common/StatusChip';
 import { DocumentUploader } from '../../components/common/DocumentUploader';
 import { DocumentList } from '../../components/common/DocumentList';
 import { Modal } from '../../components/common/Modal';
 import { Timeline, TimelineEvent } from '../../components/common/Timeline';
-import { MOCK_IRMS } from '../../mock_data/mockData';
 import './CustomersPage.css';
 
 const getCustomFieldDefinitions = (tenantId?: string): CustomFieldDefinition[] => {
@@ -61,7 +62,10 @@ export const CustomersPage: React.FC = () => {
   const { initiateCall } = useCall();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const irms = useMemo(() => storageService.getIrms(tenant?.id), [tenant?.id]);
+  const [irms, setIrms] = useState<IrmProfile[]>(() => {
+    const local = storageService.getIrms(tenant?.id);
+    return local && local.length > 0 ? local : [];
+  });
 
   // Role-based scoping: Sales Executives see only their own customers.
   // Managers / Admins / Super Admins see the full company customer list (no filter).
@@ -123,18 +127,21 @@ export const CustomersPage: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [custs, cCalls, cFollowups, cDeals, cLeads] = await Promise.all([
+      const [custs, cCalls, cFollowups, cDeals, cLeads, cIrms] = await Promise.all([
         getCustomers(tenant?.id),
         getCalls(tenant?.id),
         getFollowups(tenant?.id),
         getDeals(tenant?.id),
         getLeads(tenant?.id),
+        getCompanyIrms(tenant?.id).catch(() => []),
       ]);
       setCustomers(custs);
       setCalls(cCalls);
       setFollowups(cFollowups);
       setDeals(cDeals);
       setLeads(cLeads);
+
+      setIrms(cIrms || []);
 
       const firstVisible = isExec
         ? custs.filter(c =>
@@ -344,7 +351,7 @@ export const CustomersPage: React.FC = () => {
       const selectedCusts = scopedCustomers.filter(c => selectedCustomerIds.has(c.id) && isCustomerEligibleForIrm(c));
       if (selectedCusts.length === 0) return;
 
-      setSelectedIrmId(irms[0]?.id || MOCK_IRMS[0]?.id || '');
+      setSelectedIrmId(irms[0]?.id || '');
       setIsManualModalOpen(true);
     } else {
       if (eligibleUnassignedCustomers.length === 0) return;
@@ -355,7 +362,7 @@ export const CustomersPage: React.FC = () => {
   };
 
   const handleConfirmManualAssignment = async () => {
-    const selectedIrm = irms.find((i: IrmProfile) => i.id === selectedIrmId) || MOCK_IRMS.find((i: IrmProfile) => i.id === selectedIrmId);
+    const selectedIrm = irms.find((i: IrmProfile) => i.id === selectedIrmId);
     if (!selectedIrm) return;
 
     let assignedCount = 0;
@@ -381,6 +388,56 @@ export const CustomersPage: React.FC = () => {
     if (!isMockMode()) {
       for (const u of toUpdate) {
         await apiSaveCustomer(u).catch(console.error);
+
+        // Synchronize corresponding Lead to the assigned IRM member
+        const custPhoneDigits = (u.phone || '').replace(/\D/g, '').slice(-10);
+        const matchingLead = (leads || []).find(l =>
+          (custPhoneDigits && (l.phone || '').replace(/\D/g, '').slice(-10) === custPhoneDigits) ||
+          (u.email && l.email && l.email.toLowerCase() === u.email.toLowerCase()) ||
+          (u.name && l.name && l.name.toLowerCase() === u.name.toLowerCase())
+        );
+
+        if (matchingLead) {
+          const updatedLead: Lead = {
+            ...matchingLead,
+            assignedIrmId: selectedIrm.id,
+            assignedIrmName: selectedIrm.name,
+            assignedIrmAt: new Date().toISOString(),
+            customFields: {
+              ...(matchingLead.customFields || {}),
+              assignedIrmId: selectedIrm.id,
+              assignedIrmName: selectedIrm.name,
+              assignedIrmAt: new Date().toISOString(),
+            },
+          };
+          await apiSaveLead(updatedLead).catch(console.error);
+        } else {
+          const newLead: Lead = {
+            id: '',
+            companyId: u.companyId || tenant?.id || '1',
+            name: u.name,
+            phone: u.phone || '',
+            email: u.email || '',
+            location: u.location || '',
+            source: 'Customer 360',
+            status: 'Interested',
+            priority: 'High',
+            assignedAgentId: String(user?.id || ''),
+            assignedAgentName: user?.name || '',
+            assignedIrmId: selectedIrm.id,
+            assignedIrmName: selectedIrm.name,
+            assignedIrmAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+            notes: `Assigned to IRM: ${selectedIrm.name} from Customer 360`,
+            customFields: {
+              assignedIrmId: selectedIrm.id,
+              assignedIrmName: selectedIrm.name,
+              assignedIrmAt: new Date().toISOString(),
+              ...(u.customFields || {}),
+            },
+          };
+          await apiSaveLead(newLead).catch(console.error);
+        }
       }
     }
 
@@ -388,6 +445,7 @@ export const CustomersPage: React.FC = () => {
     setIsAssignMode(false);
     setSelectedCustomerIds(new Set());
     loadData();
+    window.dispatchEvent(new Event('nexus_storage_updated'));
     showToast(`Successfully assigned ${assignedCount} customer(s) to ${selectedIrm.name}!`);
   };
 
@@ -415,6 +473,56 @@ export const CustomersPage: React.FC = () => {
     if (!isMockMode()) {
       for (const u of toUpdate) {
         await apiSaveCustomer(u).catch(console.error);
+
+        // Synchronize corresponding Lead to the assigned IRM member
+        const custPhoneDigits = (u.phone || '').replace(/\D/g, '').slice(-10);
+        const matchingLead = (leads || []).find(l =>
+          (custPhoneDigits && (l.phone || '').replace(/\D/g, '').slice(-10) === custPhoneDigits) ||
+          (u.email && l.email && l.email.toLowerCase() === u.email.toLowerCase()) ||
+          (u.name && l.name && l.name.toLowerCase() === u.name.toLowerCase())
+        );
+
+        if (matchingLead) {
+          const updatedLead: Lead = {
+            ...matchingLead,
+            assignedIrmId: u.assignedIrmId,
+            assignedIrmName: u.assignedIrmName,
+            assignedIrmAt: new Date().toISOString(),
+            customFields: {
+              ...(matchingLead.customFields || {}),
+              assignedIrmId: u.assignedIrmId,
+              assignedIrmName: u.assignedIrmName,
+              assignedIrmAt: new Date().toISOString(),
+            },
+          };
+          await apiSaveLead(updatedLead).catch(console.error);
+        } else {
+          const newLead: Lead = {
+            id: '',
+            companyId: u.companyId || tenant?.id || '1',
+            name: u.name,
+            phone: u.phone || '',
+            email: u.email || '',
+            location: u.location || '',
+            source: 'Customer 360',
+            status: 'Interested',
+            priority: 'High',
+            assignedAgentId: String(user?.id || ''),
+            assignedAgentName: user?.name || '',
+            assignedIrmId: u.assignedIrmId,
+            assignedIrmName: u.assignedIrmName,
+            assignedIrmAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+            notes: `Auto-assigned to IRM: ${u.assignedIrmName} from Customer 360`,
+            customFields: {
+              assignedIrmId: u.assignedIrmId,
+              assignedIrmName: u.assignedIrmName,
+              assignedIrmAt: new Date().toISOString(),
+              ...(u.customFields || {}),
+            },
+          };
+          await apiSaveLead(newLead).catch(console.error);
+        }
       }
     }
 
@@ -423,11 +531,12 @@ export const CustomersPage: React.FC = () => {
     setSelectedCustomerIds(new Set());
     setAutoRecommendations([]);
     loadData();
+    window.dispatchEvent(new Event('nexus_storage_updated'));
     showToast(`Successfully confirmed auto-assignment for ${assignedCount} customer(s)!`);
   };
 
   const handleUpdateSingleRecommendation = (customerId: string, newIrmId: string) => {
-    const newIrm = irms.find((i: IrmProfile) => i.id === newIrmId) || MOCK_IRMS.find((i: IrmProfile) => i.id === newIrmId);
+    const newIrm = irms.find((i: IrmProfile) => i.id === newIrmId);
     if (!newIrm) return;
     setAutoRecommendations(prev =>
       prev.map(rec => {

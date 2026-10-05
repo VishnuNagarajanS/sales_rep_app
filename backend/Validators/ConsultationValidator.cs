@@ -7,8 +7,8 @@ public sealed class ScheduleConsultationValidator : AbstractValidator<ScheduleCo
 {
     public ScheduleConsultationValidator()
     {
-        RuleFor(x => x.InvestorId).NotEmpty();
         RuleFor(x => x.InvestorName).NotEmpty().MaximumLength(200);
+        RuleFor(x => x.InvestorPhone).NotEmpty().MaximumLength(30);
         RuleFor(x => x.ScheduledAt).NotEmpty();
         RuleFor(x => x.Agenda).MaximumLength(500).When(x => !string.IsNullOrEmpty(x.Agenda));
         RuleFor(x => x.Notes).MaximumLength(2000).When(x => !string.IsNullOrEmpty(x.Notes));

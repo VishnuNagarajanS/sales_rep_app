@@ -59,7 +59,28 @@ public class LeadService : ILeadService
 
         if (role == "sales_executive" && agentId.HasValue)
         {
-            query = query.Where(l => l.AssignedAgentId == agentId.Value);
+            // Sales Executive sees leads owned by them that have NOT been transferred/assigned to an IRM
+            query = query.Where(l =>
+                l.AssignedAgentId == agentId.Value &&
+                (l.CustomFieldsJson == null ||
+                 (!l.CustomFieldsJson.Contains("\"assignedIrmId\"") &&
+                  !l.CustomFieldsJson.Contains("\"assignedIrmName\"")))
+            );
+        }
+        else if (role == "irm" && agentId.HasValue)
+        {
+            var strId = agentId.Value.ToString();
+            var irmUser = _context.Users.AsNoTracking().FirstOrDefault(u => u.Id == agentId.Value);
+            var irmName = irmUser?.Name;
+
+            query = query.Where(l =>
+                (l.CustomFieldsJson != null && (
+                    l.CustomFieldsJson.Contains("\"assignedIrmId\":\"" + strId + "\"") ||
+                    l.CustomFieldsJson.Contains("\"assignedIrmId\":" + strId) ||
+                    (irmName != null && l.CustomFieldsJson.Contains("\"assignedIrmName\":\"" + irmName + "\""))
+                )) ||
+                (l.AssignedAgentId == agentId.Value)
+            );
         }
 
         return query;
@@ -86,6 +107,21 @@ public class LeadService : ILeadService
         if (role == "sales_executive" && agentId.HasValue)
         {
             query = query.Where(l => l.AssignedAgentId == agentId.Value);
+        }
+        else if (role == "irm" && agentId.HasValue)
+        {
+            var strId = agentId.Value.ToString();
+            var irmUser = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == agentId.Value, ct);
+            var irmName = irmUser?.Name;
+
+            query = query.Where(l =>
+                l.AssignedAgentId == agentId.Value ||
+                (l.CustomFieldsJson != null && (
+                    l.CustomFieldsJson.Contains("\"assignedIrmId\":\"" + strId + "\"") ||
+                    l.CustomFieldsJson.Contains("\"assignedIrmId\":" + strId) ||
+                    (irmName != null && l.CustomFieldsJson.Contains("\"assignedIrmName\":\"" + irmName + "\""))
+                ))
+            );
         }
 
         return await query.FirstOrDefaultAsync(ct);
@@ -163,7 +199,7 @@ public class LeadService : ILeadService
 
     public async Task<ApiResponse<LeadResponseDto>> CreateLeadAsync(CreateLeadDto dto, CancellationToken ct = default)
     {
-        var agentId = _currentUser.UserId ?? 1;
+        var agentId = dto.AssignedAgentId ?? _currentUser.UserId ?? 1;
         var companyId = dto.CompanyId ?? _currentUser.CompanyId ?? 1;
 
         // Build Custom Fields Dictionary for GHL
@@ -172,6 +208,14 @@ public class LeadService : ILeadService
         if (!string.IsNullOrWhiteSpace(dto.AssetClass)) customFields["assetClass"] = dto.AssetClass;
         if (!string.IsNullOrWhiteSpace(dto.PreferredAssetClass)) customFields["preferredAssetClass"] = dto.PreferredAssetClass;
         if (!string.IsNullOrWhiteSpace(dto.Horizon)) customFields["horizon"] = dto.Horizon;
+        if (dto.AssignedIrmId.HasValue) customFields["assignedIrmId"] = dto.AssignedIrmId.Value.ToString();
+        if (!string.IsNullOrWhiteSpace(dto.AssignedIrmName)) customFields["assignedIrmName"] = dto.AssignedIrmName.Trim();
+        if (!string.IsNullOrWhiteSpace(dto.AssignedIrmAt)) customFields["assignedIrmAt"] = dto.AssignedIrmAt.Trim();
+        else if (dto.AssignedIrmId.HasValue || !string.IsNullOrWhiteSpace(dto.AssignedIrmName))
+        {
+            if (!customFields.ContainsKey("assignedIrmAt"))
+                customFields["assignedIrmAt"] = DateTime.UtcNow.ToString("o");
+        }
 
         var lead = new Lead
         {
@@ -185,6 +229,10 @@ public class LeadService : ILeadService
             Status = string.IsNullOrWhiteSpace(dto.Status) ? "New" : dto.Status.Trim(),
             Priority = string.IsNullOrWhiteSpace(dto.Priority) ? "Medium" : dto.Priority.Trim(),
             Notes = dto.Notes?.Trim() ?? string.Empty,
+            InvestmentCapacity = dto.InvestmentCapacity,
+            AssetClass = dto.AssetClass,
+            PreferredAssetClass = dto.PreferredAssetClass,
+            Horizon = dto.Horizon,
             CustomFieldsJson = customFields.Count > 0 ? JsonSerializer.Serialize(customFields) : null,
             CreatedAt = DateTime.UtcNow
         };
@@ -214,6 +262,10 @@ public class LeadService : ILeadService
         if (dto.Notes != null) lead.Notes = dto.Notes.Trim();
         if (dto.NextFollowupDate.HasValue) lead.NextFollowupDate = dto.NextFollowupDate.Value;
         if (dto.AssignedAgentId.HasValue) lead.AssignedAgentId = dto.AssignedAgentId.Value;
+        if (dto.InvestmentCapacity != null) lead.InvestmentCapacity = dto.InvestmentCapacity;
+        if (dto.AssetClass != null) lead.AssetClass = dto.AssetClass;
+        if (dto.PreferredAssetClass != null) lead.PreferredAssetClass = dto.PreferredAssetClass;
+        if (dto.Horizon != null) lead.Horizon = dto.Horizon;
 
         // Merge custom fields
         var customFields = DeserializeCustomFields(lead.CustomFieldsJson);
@@ -222,6 +274,14 @@ public class LeadService : ILeadService
         if (dto.PreferredAssetClass != null) customFields["preferredAssetClass"] = dto.PreferredAssetClass;
         if (dto.Horizon != null) customFields["horizon"] = dto.Horizon;
         if (dto.DispositionReason != null) customFields["dispositionReason"] = dto.DispositionReason;
+        if (dto.AssignedIrmId.HasValue) customFields["assignedIrmId"] = dto.AssignedIrmId.Value.ToString();
+        if (dto.AssignedIrmName != null) customFields["assignedIrmName"] = dto.AssignedIrmName.Trim();
+        if (dto.AssignedIrmAt != null) customFields["assignedIrmAt"] = dto.AssignedIrmAt.Trim();
+        else if (dto.AssignedIrmId.HasValue || dto.AssignedIrmName != null)
+        {
+            if (!customFields.ContainsKey("assignedIrmAt"))
+                customFields["assignedIrmAt"] = DateTime.UtcNow.ToString("o");
+        }
         if (dto.AdditionalCustomFields != null)
         {
             foreach (var kvp in dto.AdditionalCustomFields)
@@ -232,6 +292,10 @@ public class LeadService : ILeadService
         lead.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(ct);
+        if (dto.AssignedAgentId.HasValue)
+        {
+            await _context.Entry(lead).Reference(l => l.AssignedAgent).LoadAsync(ct);
+        }
 
         return ApiResponse<LeadResponseDto>.SuccessResult(MapToDto(lead), "Lead updated successfully.");
     }
@@ -254,7 +318,7 @@ public class LeadService : ILeadService
             customer = new Customer
             {
                 CompanyId = companyId,
-                AssignedAgentId = agentId,
+                AssignedAgentId = agentId ?? _currentUser.UserId ?? 1,
                 Name = lead.Name,
                 Phone = lead.Phone,
                 Email = lead.Email,
@@ -354,7 +418,7 @@ public class LeadService : ILeadService
         var freshFollowup = new Followup
         {
             CompanyId = lead.CompanyId,
-            AssignedAgentId = lead.AssignedAgentId,
+            AssignedAgentId = lead.AssignedAgentId ?? _currentUser.UserId ?? 1,
             ContactId = lead.Id.ToString(),
             ContactType = "lead",
             ContactName = lead.Name,
@@ -375,12 +439,34 @@ public class LeadService : ILeadService
 
     private static LeadResponseDto MapToDto(Lead lead)
     {
+        var customFields = DeserializeCustomFields(lead.CustomFieldsJson);
+        if (!string.IsNullOrWhiteSpace(lead.InvestmentCapacity) && !customFields.ContainsKey("investmentCapacity"))
+            customFields["investmentCapacity"] = lead.InvestmentCapacity;
+        if (!string.IsNullOrWhiteSpace(lead.AssetClass) && !customFields.ContainsKey("assetClass"))
+            customFields["assetClass"] = lead.AssetClass;
+        if (!string.IsNullOrWhiteSpace(lead.PreferredAssetClass) && !customFields.ContainsKey("preferredAssetClass"))
+            customFields["preferredAssetClass"] = lead.PreferredAssetClass;
+        if (!string.IsNullOrWhiteSpace(lead.Horizon) && !customFields.ContainsKey("horizon"))
+            customFields["horizon"] = lead.Horizon;
+
+        int? assignedIrmId = null;
+        if (customFields.TryGetValue("assignedIrmId", out var irmIdStr) && int.TryParse(irmIdStr, out var parsedIrmId))
+        {
+            assignedIrmId = parsedIrmId;
+        }
+
+        string? assignedIrmName = customFields.TryGetValue("assignedIrmName", out var iname) ? iname : null;
+        string? assignedIrmAt = customFields.TryGetValue("assignedIrmAt", out var iat) ? iat : null;
+
         return new LeadResponseDto
         {
             Id = lead.Id,
             CompanyId = lead.CompanyId,
             AssignedAgentId = lead.AssignedAgentId,
-            AssignedAgentName = lead.AssignedAgent?.Name,
+            AssignedAgentName = lead.AssignedAgent?.Name ?? "Unassigned",
+            AssignedIrmId = assignedIrmId,
+            AssignedIrmName = assignedIrmName,
+            AssignedIrmAt = assignedIrmAt,
             Name = lead.Name,
             Phone = lead.Phone,
             Email = lead.Email,
@@ -389,7 +475,7 @@ public class LeadService : ILeadService
             Status = lead.Status,
             Priority = lead.Priority,
             Notes = lead.Notes,
-            CustomFields = DeserializeCustomFields(lead.CustomFieldsJson),
+            CustomFields = customFields,
             NextFollowupDate = lead.NextFollowupDate,
             CreatedAt = lead.CreatedAt,
             UpdatedAt = lead.UpdatedAt

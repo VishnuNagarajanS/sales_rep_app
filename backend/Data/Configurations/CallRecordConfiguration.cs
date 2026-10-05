@@ -12,6 +12,12 @@ public class CallRecordConfiguration : IEntityTypeConfiguration<CallRecord>
 
         builder.HasKey(cr => cr.Id);
 
+        builder.Property(cr => cr.DurationSeconds)
+            .HasColumnName("DurationSeconds");
+
+        builder.Property(cr => cr.StartedAt)
+            .HasColumnName("StartedAt");
+
         builder.Property(cr => cr.ContactName)
             .HasMaxLength(150);
 

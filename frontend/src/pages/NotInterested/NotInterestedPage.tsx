@@ -4,11 +4,12 @@ import { Lead, CallRecord } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import {
-  getLeads,
+  getNotInterestedLeads,
   saveLead as apiSaveLead,
   saveFollowup as apiSaveFollowup,
   getCalls,
 } from '../../services/ghlApiService';
+import { storageService } from '../../services/storageService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { Drawer } from '../../components/common/Drawer';
 import { Timeline, TimelineEvent } from '../../components/common/Timeline';
@@ -31,21 +32,25 @@ export const NotInterestedPage: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [allLeads, allCalls] = await Promise.all([
-        getLeads(tenant?.id),
+      const [apiNiLeads, allCalls] = await Promise.all([
+        getNotInterestedLeads(tenant?.id),
         getCalls(tenant?.id),
       ]);
-      const niLeads = allLeads.filter(l => l.status === 'Not Interested');
+
+      const localLeads = storageService.getLeads(tenant?.id).filter(l => l.status === 'Not Interested');
+      const apiIds = new Set((apiNiLeads || []).map(l => l.id));
+      const combinedNiLeads = [...(apiNiLeads || []), ...localLeads.filter(l => !apiIds.has(l.id))];
 
       const scopedLeads = isExec
-        ? niLeads.filter(l =>
-            (l.assignedAgentId && l.assignedAgentId === user?.id) ||
+        ? combinedNiLeads.filter(l =>
+            !l.assignedAgentId ||
+            (l.assignedAgentId && (l.assignedAgentId === user?.id || String(l.assignedAgentId) === String(user?.id))) ||
             (l.assignedAgentName && l.assignedAgentName === user?.name)
           )
-        : niLeads;
+        : combinedNiLeads;
 
       setLeads(scopedLeads);
-      setCalls(allCalls);
+      setCalls(allCalls || []);
     } catch (err) {
       console.error('Failed to load not-interested leads', err);
     }

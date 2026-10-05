@@ -12,6 +12,8 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
 
         builder.HasKey(c => c.Id);
 
+        builder.Property(c => c.AssignedAgentId);
+
         builder.Property(c => c.Name)
             .HasMaxLength(150)
             .IsRequired();
@@ -31,8 +33,8 @@ public class CustomerConfiguration : IEntityTypeConfiguration<Customer>
             .HasDefaultValue("Active");
 
         builder.Property(c => c.TotalValue)
-            .HasColumnType("numeric(18,2)")
-            .HasDefaultValue(0);
+            .HasColumnType("decimal(18,2)")
+            .HasDefaultValue(0.0m);
 
         builder.Property(c => c.CreatedAt)
             .HasDefaultValueSql("NOW()");

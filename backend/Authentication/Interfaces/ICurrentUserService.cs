@@ -6,5 +6,6 @@ public interface ICurrentUserService
     int? CompanyId { get; }
     string? Role { get; }
     string? Email { get; }
+    string? Name { get; }
     bool IsAuthenticated { get; }
 }

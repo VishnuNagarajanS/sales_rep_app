@@ -54,3 +54,27 @@
   gap: 10px;
   margin-top: 8px;
 }
+
+.consultation-calendar-slot-inputs {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 8px;
+}
+
+.consultation-calendar-slot-inputs input[type="date"],
+.consultation-calendar-slot-inputs input[type="time"] {
+  min-width: 0;
+  padding: 8px 10px;
+  color-scheme: light dark;
+}
+
+.consultation-slot-preview {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--primary-600, #dc2626);
+  margin-top: 5px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+

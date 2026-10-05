@@ -26,21 +26,10 @@ import {
   RoutingAttempt,
   CustomFieldDefinition,
   ProductService,
+  IrmProfile,
 } from '../types';
 import { DEFAULT_TENANTS } from '../constants/defaultTenants';
-import {
-  INITIAL_CUSTOM_FIELD_DEFINITIONS,
-  INITIAL_INVESTORS,
-  INITIAL_CONSULTATIONS,
-  INITIAL_OPPORTUNITIES,
-  INITIAL_NOTIFICATIONS,
-  INITIAL_DEAL_ACTIVITIES,
-  INITIAL_CALLS,
-  INITIAL_CUSTOMERS,
-  MOCK_AGENTS,
-  MOCK_IRMS,
-} from '../mock_data/mockData';
-import { ensureInitialAdminFollowups } from '../mock_data/adminFollowupsData';
+import { isMockMode } from '../config/environment';
 
 export type PopupPosition = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
 
@@ -266,24 +255,21 @@ class StorageService {
 
   // Deal Activities
   getDealActivities(dealId: string, companyId?: string): DealActivity[] {
-    const activities = this.get<DealActivity[]>('deal_activities', INITIAL_DEAL_ACTIVITIES);
+    const activities = this.get<DealActivity[]>('deal_activities', []);
     return activities.filter(a => a.dealId === dealId && (!companyId || a.companyId === companyId));
   }
 
   addDealActivity(activity: DealActivity): void {
-    const activities = this.get<DealActivity[]>('deal_activities', INITIAL_DEAL_ACTIVITIES);
+    const activities = this.get<DealActivity[]>('deal_activities', []);
     activities.unshift(activity);
     this.set('deal_activities', activities);
     window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 
-  // Calls (Seeds from INITIAL_CALLS; real calls are prepended via addCall)
+  // Calls — in dev mode data comes from real API, in mock mode pre-populated by mockBootstrap
   getCalls(companyId?: string): CallRecord[] {
     const stored = this.get<CallRecord[]>('calls', []);
-    // Merge: keep stored calls first, then append any INITIAL_CALLS not already present
-    const storedIds = new Set(stored.map(c => c.id));
-    const merged = [...stored, ...INITIAL_CALLS.filter(c => !storedIds.has(c.id))];
-    return companyId ? merged.filter(c => c.companyId === companyId) : merged;
+    return companyId ? stored.filter(c => c.companyId === companyId) : stored;
   }
 
   addCall(call: CallRecord): void {
@@ -295,15 +281,7 @@ class StorageService {
   // Follow-ups (Defaults to empty [] - real-time data only)
   getFollowups(companyId?: string): Followup[] {
     const raw = this.get<Followup[]>('followups', []) || [];
-    const { list, modified } = ensureInitialAdminFollowups(raw);
-    if (modified) {
-      try {
-        localStorage.setItem('nexus_followups', JSON.stringify(list));
-      } catch (e) {
-        console.error('Failed to seed admin followups', e);
-      }
-    }
-    return companyId ? list.filter(f => f.companyId === companyId) : list;
+    return companyId ? raw.filter(f => f.companyId === companyId) : raw;
   }
 
   cleanupGhlPendingFollowups(companyId?: string): void {
@@ -492,19 +470,9 @@ class StorageService {
     this.set('bookings', bookings);
   }
 
-  // Investors (Defaults to INITIAL_INVESTORS)
+  // Investors (Defaults to empty [] - real API data only)
   getInvestors(companyId?: string): Investor[] {
-    let investors = this.get<Investor[]>('investors', INITIAL_INVESTORS);
-    if (!investors || investors.length === 0) {
-      investors = INITIAL_INVESTORS;
-    } else {
-      const existingIds = new Set(investors.map(i => i.id));
-      const missing = INITIAL_INVESTORS.filter(i => !existingIds.has(i.id));
-      if (missing.length > 0) {
-        investors = [...investors, ...missing];
-        this.set('investors', investors);
-      }
-    }
+    const investors = this.get<Investor[]>('investors', []);
     return companyId ? investors.filter(i => i.companyId === companyId) : investors;
   }
 
@@ -524,19 +492,9 @@ class StorageService {
     this.set('investors', investors);
   }
 
-  // Consultations (Defaults to INITIAL_CONSULTATIONS)
+  // Consultations (Defaults to empty [] - real API data only)
   getConsultations(companyId?: string): Consultation[] {
-    let consultations = this.get<Consultation[]>('consultations', INITIAL_CONSULTATIONS);
-    if (!consultations || consultations.length === 0) {
-      consultations = INITIAL_CONSULTATIONS;
-    } else {
-      const existingIds = new Set(consultations.map(c => c.id));
-      const missing = INITIAL_CONSULTATIONS.filter(c => !existingIds.has(c.id));
-      if (missing.length > 0) {
-        consultations = [...consultations, ...missing];
-        this.set('consultations', consultations);
-      }
-    }
+    const consultations = this.get<Consultation[]>('consultations', []);
     return companyId ? consultations.filter(c => c.companyId === companyId) : consultations;
   }
 
@@ -556,19 +514,9 @@ class StorageService {
     this.set('consultations', consultations);
   }
 
-  // Opportunities (Defaults to INITIAL_OPPORTUNITIES)
+  // Opportunities (Defaults to empty [] - real API data only)
   getOpportunities(companyId?: string): InvestmentOpportunity[] {
-    let opps = this.get<InvestmentOpportunity[]>('opportunities', INITIAL_OPPORTUNITIES);
-    if (!opps || opps.length === 0) {
-      opps = INITIAL_OPPORTUNITIES;
-    } else {
-      const existingIds = new Set(opps.map(o => o.id));
-      const missing = INITIAL_OPPORTUNITIES.filter(o => !existingIds.has(o.id));
-      if (missing.length > 0) {
-        opps = [...opps, ...missing];
-        this.set('opportunities', opps);
-      }
-    }
+    const opps = this.get<InvestmentOpportunity[]>('opportunities', []);
     return companyId ? opps.filter(o => o.companyId === companyId) : opps;
   }
 
@@ -605,15 +553,7 @@ class StorageService {
   getNotifications(companyId?: string, userId?: string, userRoleCode?: string): NotificationItem[] {
     let raw = this.get<NotificationItem[]>('notifications', []);
 
-    // Seed defaults if empty
-    if (raw.length === 0) {
-      raw = INITIAL_NOTIFICATIONS;
-      try {
-        localStorage.setItem('nexus_notifications', JSON.stringify(raw));
-      } catch (e) {
-        console.error('Failed to seed initial notifications', e);
-      }
-    }
+    if (raw.length === 0) return [];
 
     // Auto-migrate any legacy items lacking tenant information (default to GHL)
     let migrated = false;
@@ -876,7 +816,7 @@ class StorageService {
 
   // Custom Field Definitions
   getCustomFieldDefinitions(companyId?: string): CustomFieldDefinition[] {
-    const definitions = this.get<CustomFieldDefinition[]>('custom_field_definitions', INITIAL_CUSTOM_FIELD_DEFINITIONS);
+    const definitions = this.get<CustomFieldDefinition[]>('custom_field_definitions', []);
     if (!companyId) return definitions;
     return definitions.filter(d =>
       d.companyId === companyId ||
@@ -915,8 +855,6 @@ class StorageService {
     this.set('products_services', items);
   }
 
-
-
   // Optional: Explicitly populate demo mock data from separate mock_data folder
   async loadMockDataFromSeparateFolder(): Promise<void> {
     const mock = await import('../mock_data/mockData');
@@ -941,27 +879,42 @@ class StorageService {
     window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 
-  // Proxy methods for remaining mock data usage
-  getMockAgents() {
-    return MOCK_AGENTS;
+  // In dev mode these return [] — agents/IRMs must come from the real user API.
+  // In mock mode, mockBootstrap registers the mockStorageAdapter which provides mock agent/IRM lists.
+  getMockAgents(): Array<{ id: number; name: string }> {
+    if (isMockMode()) {
+      const adapter = (window as any).__nexus_mock_storage_adapter;
+      if (adapter?.getAgents) return adapter.getAgents();
+    }
+    return [];
   }
 
-  getMockIrms() {
-    return MOCK_IRMS;
+  getMockIrms(): IrmProfile[] {
+    if (isMockMode()) {
+      const adapter = (window as any).__nexus_mock_storage_adapter;
+      if (adapter?.getIrms) return adapter.getIrms();
+    }
+    return [];
   }
 
-  // Used by InCallBar, CustomersPage, FollowupsPage, AdminKanbanBoard.
-  // (Were missing after the app merge -> TypeError -> white screen)
-  getAgents(_companyId?: string) {
-    return MOCK_AGENTS;
+  getAgents(_companyId?: string): Array<{ id: number; name: string }> {
+    if (isMockMode()) {
+      const adapter = (window as any).__nexus_mock_storage_adapter;
+      if (adapter?.getAgents) return adapter.getAgents();
+    }
+    return [];
   }
 
-  getIrms(_companyId?: string) {
-    return MOCK_IRMS;
+  getIrms(_companyId?: string): IrmProfile[] {
+    if (isMockMode()) {
+      const adapter = (window as any).__nexus_mock_storage_adapter;
+      if (adapter?.getIrms) return adapter.getIrms();
+    }
+    return [];
   }
 
-  getInitialCustomers() {
-    return INITIAL_CUSTOMERS;
+  getInitialCustomers(): Customer[] {
+    return [];
   }
 
   // Incoming Call Popup Position

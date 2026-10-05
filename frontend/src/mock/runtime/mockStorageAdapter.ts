@@ -250,7 +250,7 @@ export const mockStorageAdapter = {
   },
 
   // Mock Agents & IRMs
-  getAgents(): Array<{ id: number | string; name: string }> {
+  getAgents(): Array<{ id: number; name: string }> {
     return MOCK_AGENTS;
   },
   getIrms(): IrmProfile[] {

@@ -20,5 +20,9 @@ public class UpdateLeadDto
     public DateTime? NextFollowupDate { get; set; }
     public int? AssignedAgentId { get; set; }
 
+    public int? AssignedIrmId { get; set; }
+    public string? AssignedIrmName { get; set; }
+    public string? AssignedIrmAt { get; set; }
+
     public Dictionary<string, string>? AdditionalCustomFields { get; set; }
 }

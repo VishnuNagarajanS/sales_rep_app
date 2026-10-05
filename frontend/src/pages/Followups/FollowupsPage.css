@@ -22,6 +22,157 @@
   border-color: rgba(239, 68, 68, 0.4) !important;
 }
 
+/* ==========================================================================
+   Followups Single-Row Unified Controls Toolbar
+   ========================================================================== */
+.followups-unified-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 16px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.followups-tabs-pill-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.followup-tab-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+  background-color: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  user-select: none;
+}
+
+.followup-tab-pill:hover {
+  background-color: var(--bg-surface-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.followup-tab-pill.active {
+  background-color: var(--primary-600);
+  color: #ffffff;
+  border-color: var(--primary-600);
+  box-shadow: 0 1px 3px rgba(220, 38, 38, 0.25);
+}
+
+.followup-tab-pill.danger-inactive {
+  border-color: rgba(239, 68, 68, 0.45);
+  color: #dc2626;
+}
+
+.followup-tab-pill.danger-active {
+  background-color: #dc2626;
+  color: #ffffff;
+  border-color: #dc2626;
+}
+
+.followup-pill-count {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background-color: rgba(0, 0, 0, 0.06);
+  color: var(--text-muted);
+}
+
+.followup-pill-count.count-active {
+  background-color: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+.followups-row-divider {
+  width: 1px;
+  height: 22px;
+  background-color: var(--border-base);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
+.followups-filters-inline-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.followup-filter-select-compact {
+  height: 34px;
+  font-size: 13px;
+  padding: 0 28px 0 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+  min-width: 130px;
+  transition: all var(--transition-fast);
+}
+
+.followup-filter-select-compact:focus {
+  border-color: var(--primary-500);
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.15);
+  outline: none;
+}
+
+.followup-date-input-compact {
+  height: 34px;
+  font-size: 12px;
+  padding: 0 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+  width: 125px;
+}
+
+.followup-reset-btn-compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--border-strong);
+  background-color: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.followup-reset-btn-compact:hover {
+  background-color: rgba(220, 38, 38, 0.08);
+  color: var(--primary-600);
+  border-color: var(--primary-600);
+}
+
+.followups-row-right {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  padding-left: 8px;
+}
+
 .followups-list {
   display: flex;
   flex-direction: column;
@@ -127,9 +278,10 @@
 }
 
 /* ==========================================================================
-   Admin Global Filter Bar Styles
+   Admin & Sales Executive Filter Bar Styles
    ========================================================================== */
-.admin-followup-filterbar {
+.admin-followup-filterbar,
+.sales-exec-followup-filterbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -142,11 +294,34 @@
   box-shadow: var(--shadow-sm);
 }
 
-.admin-followup-filter-group {
+.admin-followup-filter-group,
+.sales-exec-filter-group {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 14px;
+}
+
+.followup-reset-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+  background-color: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.followup-reset-btn:hover {
+  background-color: var(--bg-surface-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
 }
 
 .followup-filter-item {

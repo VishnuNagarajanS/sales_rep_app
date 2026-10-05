@@ -9,18 +9,22 @@ import {
   Trash2,
   Edit,
   ExternalLink,
+  UserCheck,
 } from 'lucide-react';
-import { Lead, Customer, Deal } from '../../types';
+import { Lead, Customer, Deal, IrmProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { apiClient } from '../../services/apiClient';
 import { storageService } from '../../services/storageService';
+import { getLeads, saveLead as apiSaveLead, deleteLead as apiDeleteLead, getCompanyIrms } from '../../services/ghlApiService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
+import { isMockMode } from '../../config/environment';
+import { adminUserService } from '../../services/adminUserService';
 import './LeadsPage.css';
 
 const CAPACITY_OPTIONS = [
@@ -41,22 +45,74 @@ export const LeadsPage: React.FC = () => {
 
   const [leads, setLeads] = useState<Lead[]>([]);
 
-  const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk'];
+  const INACTIVE_LEAD_STATUSES = ['Converted', 'Not Interested', 'Junk'];
 
   // Role-based scoping: Sales Executives and IRMs see only their own leads.
   // Managers / Admins / Super Admins see the full company lead list (no filter).
-  // Inactive / moved leads (Interested, Follow-up Required, Not Interested, Junk, Converted) are excluded from active Leads.
+  // Inactive leads (Converted, Not Interested, Junk) are excluded from active Leads list.
   const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
   const isLeadScopedUser = roleCode === 'sales_executive' || roleCode === 'irm';
   const isIrm = roleCode === 'irm';
-  const scopedLeads = (isLeadScopedUser
-    ? leads.filter(l =>
-      (l.assignedAgentId && l.assignedAgentId === user?.id) ||
-      (l.assignedAgentName && l.assignedAgentName === user?.name)
-    )
-    : leads
-  ).filter(l => !MOVED_LEAD_STATUSES.includes(l.status));
+
+  const [companyIrms, setCompanyIrms] = useState<IrmProfile[]>([]);
+  const [isAssignIrmModalOpen, setIsAssignIrmModalOpen] = useState(false);
+  const [leadToAssignIrm, setLeadToAssignIrm] = useState<Lead | null>(null);
+  const [selectedIrmForLead, setSelectedIrmForLead] = useState<string>('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await getCompanyIrms(tenant?.id);
+        setCompanyIrms(list || []);
+      } catch (err) {
+        console.warn('[LeadsPage] Failed to fetch company IRMs:', err);
+      }
+    })();
+  }, [tenant?.id]);
+
+  const isAgentMatch = (l: Lead) => {
+    if (!isLeadScopedUser) return true;
+
+    // IRM Scoping: IRMs MUST ONLY see leads assigned to them
+    if (isIrm) {
+      const uId = String(user?.id || '');
+      const uName = (user?.name || '').trim().toLowerCase();
+      if (l.assignedIrmId && String(l.assignedIrmId) === uId) return true;
+      if (l.assignedIrmName && l.assignedIrmName.trim().toLowerCase() === uName) return true;
+      if (l.customFields?.assignedIrmId && String(l.customFields.assignedIrmId) === uId) return true;
+      if (l.customFields?.assignedIrmName && String(l.customFields.assignedIrmName).trim().toLowerCase() === uName) return true;
+      if (l.assignedAgentId && String(l.assignedAgentId) === uId) return true;
+      if (l.assignedAgentName && l.assignedAgentName.trim().toLowerCase() === uName) return true;
+      return false;
+    }
+
+    // Sales Executive Scoping: Once assigned to an IRM, the lead is handed off and NOT shown to Sales Executive
+    if (isExec) {
+      const hasIrm = Boolean(
+        l.assignedIrmId ||
+        l.assignedIrmName ||
+        l.customFields?.assignedIrmId ||
+        l.customFields?.assignedIrmName
+      );
+      if (hasIrm) return false;
+
+      if (l.assignedAgentId && user?.id) {
+        if (String(l.assignedAgentId) === String(user.id)) return true;
+        if (String(user.id).includes(String(l.assignedAgentId)) || String(l.assignedAgentId).includes(String(user.id))) return true;
+      }
+      if (l.assignedAgentName && user?.name) {
+        if (l.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase()) return true;
+      }
+      // Any backend lead fetched from the API is already scoped to the authenticated sales executive
+      if (l.id && !isNaN(Number(l.id))) return true;
+      return !l.assignedAgentId && !l.assignedAgentName;
+    }
+  };
+
+  const scopedLeads = leads
+    .filter(isAgentMatch)
+    .filter(l => !INACTIVE_LEAD_STATUSES.includes(l.status));
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
@@ -157,7 +213,13 @@ export const LeadsPage: React.FC = () => {
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [assignStep, setAssignStep] = useState<'pick-agent' | 'confirm'>('pick-agent');
-  const [assignSelectedAgent, setAssignSelectedAgent] = useState<typeof MOCK_AGENTS[0] | null>(null);
+  const [agentsList, setAgentsList] = useState<Array<{ id: number; name: string }>>(() => {
+    return storageService.getMockAgents();
+  });
+  const availableAgents = useMemo(() => {
+    return agentsList.length > 0 ? agentsList : MOCK_AGENTS;
+  }, [agentsList]);
+  const [assignSelectedAgent, setAssignSelectedAgent] = useState<{ id: number; name: string } | null>(null);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [aiDistribution, setAiDistribution] = useState<Record<number, Lead[]>>({});
   const [isAiEditMode, setIsAiEditMode] = useState(false);
@@ -195,19 +257,38 @@ export const LeadsPage: React.FC = () => {
     }));
   };
 
-  const loadData = () => {
-    const updated = storageService.getLeads(tenant?.id);
-    setLeads(updated);
-    setSelectedLead(prev => {
-      if (!prev) return null;
-      const found = updated.find(l => l.id === prev.id);
-      if (!found || MOVED_LEAD_STATUSES.includes(found.status)) {
-        setIsDetailDrawerOpen(false);
-        setIsEditDrawerOpen(false);
-        return null;
+  const loadData = async () => {
+    try {
+      const updated = await getLeads(tenant?.id);
+      setLeads(updated);
+      setSelectedLead(prev => {
+        if (!prev) return null;
+        const found = updated.find(l => l.id === prev.id);
+        if (!found || INACTIVE_LEAD_STATUSES.includes(found.status)) {
+          setIsDetailDrawerOpen(false);
+          setIsEditDrawerOpen(false);
+          return null;
+        }
+        return found;
+      });
+    } catch {
+      const updated = storageService.getLeads(tenant?.id);
+      setLeads(updated);
+    }
+
+    if (!isMockMode()) {
+      try {
+        const users = await adminUserService.getUsers(tenant?.id || '1');
+        const agentUsers = users
+          .filter(u => u.role?.code === 'sales_executive' || u.role?.code === 'irm' || u.role?.name?.toLowerCase().includes('executive') || u.role?.name?.toLowerCase().includes('agent'))
+          .map(u => ({ id: Number(u.id), name: u.name }));
+        if (agentUsers.length > 0) {
+          setAgentsList(agentUsers);
+        }
+      } catch (err) {
+        console.warn('[LeadsPage] Could not load live agents from API:', err);
       }
-      return found;
-    });
+    }
   };
 
   useEffect(() => {
@@ -288,18 +369,7 @@ export const LeadsPage: React.FC = () => {
   };
 
   const filteredLeads = scopedLeads.filter(lead => {
-    if (assignedLeadIds.has(lead.id)) return false;
-    if (isGhlSalesExec && lead.status !== 'Callback') {
-      const leadPhoneDigits = (lead.phone || '').replace(/\D/g, '').slice(-10);
-      const hasPendingFollowup = ghlPendingFollowups.some(f => {
-        if (f.contactId && f.contactId !== 'contact-new' && f.contactId === lead.id) {
-          return true;
-        }
-        const fPhoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-        return fPhoneDigits && leadPhoneDigits && fPhoneDigits === leadPhoneDigits;
-      });
-      if (hasPendingFollowup) return false;
-    }
+    if (isMockMode() && assignedLeadIds.has(lead.id) && agentFilter === 'All') return false;
     if (!isGhlAdmin && statusFilter !== 'All' && (lead.status as string) !== statusFilter) return false;
     if (agentFilter !== 'All' && lead.assignedAgentName !== agentFilter) return false;
     if (capacityFilter !== 'All') {
@@ -325,10 +395,54 @@ export const LeadsPage: React.FC = () => {
     setTimeout(() => setToast(null), 3500);
   };
 
-  const handleManualAssignConfirm = () => {
+  const handleOpenAssignIrm = (lead: Lead) => {
+    setLeadToAssignIrm(lead);
+    setSelectedIrmForLead(lead.assignedIrmId || companyIrms[0]?.id || '');
+    setIsAssignIrmModalOpen(true);
+  };
+
+  const handleConfirmAssignIrm = async () => {
+    if (!leadToAssignIrm || !selectedIrmForLead) return;
+    const chosenIrm = companyIrms.find(i => String(i.id) === String(selectedIrmForLead));
+    if (!chosenIrm) return;
+
+    const nowIso = new Date().toISOString();
+    const updatedLead: Lead = {
+      ...leadToAssignIrm,
+      assignedIrmId: String(chosenIrm.id),
+      assignedIrmName: chosenIrm.name,
+      assignedIrmAt: nowIso,
+      notes: `${leadToAssignIrm.notes ? leadToAssignIrm.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Assigned to IRM: ${chosenIrm.name} by ${user?.name || 'Sales Executive'}`,
+      customFields: {
+        ...leadToAssignIrm.customFields,
+        assignedIrmId: String(chosenIrm.id),
+        assignedIrmName: chosenIrm.name,
+        assignedIrmAt: nowIso,
+      }
+    };
+
+    try {
+      await apiSaveLead(updatedLead);
+    } catch (err) {
+      console.warn('[LeadsPage] Failed to save IRM assigned lead to API:', err);
+      storageService.saveLead(updatedLead);
+    }
+
+    setIsAssignIrmModalOpen(false);
+    setLeadToAssignIrm(null);
+    if (selectedLead?.id === leadToAssignIrm.id) {
+      setSelectedLead(updatedLead);
+    }
+    await loadData();
+    showToast(`✓ Lead "${updatedLead.name}" successfully assigned to IRM ${chosenIrm.name}!`);
+  };
+
+  const handleManualAssignConfirm = async () => {
     if (!assignSelectedAgent) return;
     const newAssigned = new Set(assignedLeadIds);
     const newRecords: Array<{ leadId: string; leadName: string; agentId: number; agentName: string; assignedAt: string }> = [];
+    const leadUpdates: Promise<any>[] = [];
+
     selectedLeadIds.forEach(id => {
       newAssigned.add(id);
       const lead = leads.find(l => l.id === id);
@@ -339,7 +453,22 @@ export const LeadsPage: React.FC = () => {
         agentName: assignSelectedAgent.name,
         assignedAt: new Date().toISOString(),
       });
+
+      if (lead) {
+        const updatedLead: Lead = {
+          ...lead,
+          assignedAgentId: String(assignSelectedAgent.id),
+          assignedAgentName: assignSelectedAgent.name,
+        };
+        leadUpdates.push(
+          apiSaveLead(updatedLead).catch(err => {
+            console.warn('[LeadsPage] Failed to save assigned agent to API:', err);
+            storageService.saveLead(updatedLead);
+          })
+        );
+      }
     });
+
     setAssignedLeadIds(newAssigned);
     setAgentAssignments(prev => {
       const updated = [...prev, ...newRecords];
@@ -347,7 +476,10 @@ export const LeadsPage: React.FC = () => {
       (window as any).__ghlAssignments = updated;
       return updated;
     });
-    console.log('[GHL Admin Leads Assignment - Manual]', newRecords);
+
+    await Promise.allSettled(leadUpdates);
+    await loadData();
+
     const count = selectedLeadIds.size;
     setSelectedLeadIds(new Set());
     setIsAssignModalOpen(false);
@@ -359,9 +491,9 @@ export const LeadsPage: React.FC = () => {
   const handleOpenAiSuggestion = () => {
     const pool = filteredLeads;
     const dist: Record<number, Lead[]> = {};
-    MOCK_AGENTS.forEach(a => { dist[a.id] = []; });
+    availableAgents.forEach(a => { dist[a.id] = []; });
     pool.forEach((lead, i) => {
-      const agent = MOCK_AGENTS[i % MOCK_AGENTS.length];
+      const agent = availableAgents[i % availableAgents.length];
       dist[agent.id].push(lead);
     });
     setAiDistribution(dist);
@@ -370,7 +502,7 @@ export const LeadsPage: React.FC = () => {
   };
 
   const handleAiMoveLead = (leadId: string, fromAgentId: number, direction: 'left' | 'right') => {
-    const agentIds = MOCK_AGENTS.map(a => a.id);
+    const agentIds = availableAgents.map(a => a.id);
     const fromIdx = agentIds.indexOf(fromAgentId);
     const toIdx = direction === 'left' ? fromIdx - 1 : fromIdx + 1;
     if (toIdx < 0 || toIdx >= agentIds.length) return;
@@ -384,13 +516,15 @@ export const LeadsPage: React.FC = () => {
     });
   };
 
-  const handleAiConfirm = () => {
+  const handleAiConfirm = async () => {
     const newAssigned = new Set(assignedLeadIds);
     const newRecords: Array<{ leadId: string; leadName: string; agentId: number; agentName: string; assignedAt: string }> = [];
+    const leadUpdates: Promise<any>[] = [];
     let count = 0;
+
     Object.entries(aiDistribution).forEach(([agentIdStr, agentLeads]) => {
       const agentId = Number(agentIdStr);
-      const agent = MOCK_AGENTS.find(a => a.id === agentId);
+      const agent = availableAgents.find(a => a.id === agentId);
       agentLeads.forEach(l => {
         newAssigned.add(l.id);
         count++;
@@ -401,8 +535,21 @@ export const LeadsPage: React.FC = () => {
           agentName: agent?.name || 'Agent',
           assignedAt: new Date().toISOString(),
         });
+
+        const updatedLead: Lead = {
+          ...l,
+          assignedAgentId: String(agentId),
+          assignedAgentName: agent?.name || 'Agent',
+        };
+        leadUpdates.push(
+          apiSaveLead(updatedLead).catch(err => {
+            console.warn('[LeadsPage] Failed to save AI assigned agent to API:', err);
+            storageService.saveLead(updatedLead);
+          })
+        );
       });
     });
+
     setAssignedLeadIds(newAssigned);
     setAgentAssignments(prev => {
       const updated = [...prev, ...newRecords];
@@ -410,7 +557,10 @@ export const LeadsPage: React.FC = () => {
       (window as any).__ghlAssignments = updated;
       return updated;
     });
-    console.log('[GHL Admin Leads Assignment - AI Round Robin]', newRecords);
+
+    await Promise.allSettled(leadUpdates);
+    await loadData();
+
     setIsAiModalOpen(false);
     showToast(`✓ ${count} lead${count !== 1 ? 's' : ''} assigned via AI Suggestion`);
   };
@@ -420,8 +570,13 @@ export const LeadsPage: React.FC = () => {
       console.warn('[LeadsPage] Cannot create lead: user session is not yet loaded.');
       return;
     }
-    const defaultAgentId = user.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec');
-    const defaultAgentName = user.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer');
+    const defaultAgent = availableAgents.length > 0 ? availableAgents[0] : null;
+    const defaultAgentId = isLeadScopedUser
+      ? (user.id || '')
+      : (defaultAgent?.id ? String(defaultAgent.id) : (user.id || ''));
+    const defaultAgentName = isLeadScopedUser
+      ? (user.name || 'Agent')
+      : (defaultAgent?.name || user.name || 'Agent');
 
     setFormData({
       id: `lead-${Date.now()}`,
@@ -454,95 +609,58 @@ export const LeadsPage: React.FC = () => {
     if (!formData.name || !formData.phone) return;
 
     // Pull real agent ID and name at save-time to prevent stale/fallback placeholder IDs from leaking
+    const matchedAgent = availableAgents.find(a => String(a.id) === String(formData.assignedAgentId));
     const resolvedAgentId = (isLeadScopedUser && user?.id)
       ? user.id
-      : (formData.assignedAgentId && formData.assignedAgentId !== 'usr-exec' ? formData.assignedAgentId : (user?.id || 'usr-exec'));
+      : (formData.assignedAgentId && formData.assignedAgentId !== 'usr-exec' ? formData.assignedAgentId : (user?.id || undefined));
     const resolvedAgentName = (isLeadScopedUser && user?.name)
       ? user.name
-      : (formData.assignedAgentName && formData.assignedAgentName !== 'Agent' ? formData.assignedAgentName : (user?.name || 'Agent'));
+      : (matchedAgent?.name || (formData.assignedAgentName && formData.assignedAgentName !== 'Agent' ? formData.assignedAgentName : (user?.name || 'Agent')));
 
-    const isExistingById = leads.some(l => l.id === formData.id);
+    const existingInList = leads.find(l => l.id === formData.id);
     const targetCompanyId = formData.companyId || tenant?.id || 't-ghl-01';
 
     let leadToSave: Lead;
-    let isUpdated = isExistingById;
+    let isUpdated = !!existingInList;
 
-    if (!isExistingById) {
-      const existingMatch = storageService.findLeadByPhone(formData.phone, targetCompanyId);
-      if (existingMatch) {
-        isUpdated = true;
-        leadToSave = {
-          ...existingMatch,
-          ...formData,
-          id: existingMatch.id, // Preserve existing ID
-          companyId: existingMatch.companyId || targetCompanyId,
-          status: formData.status || existingMatch.status || 'New',
-          assignedAgentId: resolvedAgentId || existingMatch.assignedAgentId,
-          assignedAgentName: resolvedAgentName || existingMatch.assignedAgentName,
-          customFields: {
-            ...(existingMatch.customFields || {}),
-            ...(formData.customFields || {}),
-          },
-        };
-      } else {
-        leadToSave = {
-          ...formData,
-          status: formData.status || 'New',
-          assignedAgentId: resolvedAgentId,
-          assignedAgentName: resolvedAgentName,
-          companyId: targetCompanyId,
-          createdAt: formData.createdAt || new Date().toISOString().split('T')[0],
-        } as Lead;
-      }
-    } else {
+    if (!existingInList) {
       leadToSave = {
         ...formData,
+        id: formData.id && formData.id.startsWith('lead-') ? formData.id : `lead-${Date.now()}`,
         status: formData.status || 'New',
         assignedAgentId: resolvedAgentId,
         assignedAgentName: resolvedAgentName,
+        companyId: targetCompanyId,
+        createdAt: formData.createdAt || new Date().toISOString().split('T')[0],
+      } as Lead;
+    } else {
+      leadToSave = {
+        ...existingInList,
+        ...formData,
+        id: existingInList.id,
+        status: formData.status || existingInList.status || 'New',
+        assignedAgentId: resolvedAgentId || existingInList.assignedAgentId,
+        assignedAgentName: resolvedAgentName || existingInList.assignedAgentName,
         companyId: targetCompanyId,
       } as Lead;
     }
 
     try {
-      if (!isUpdated) {
-        // Create in backend
-        const res = await apiClient.post<any>('/sales-executive/leads', {
-          name: leadToSave.name,
-          phone: leadToSave.phone,
-          companyId: typeof targetCompanyId === 'number' ? targetCompanyId : parseInt(targetCompanyId, 10) || 1,
-          email: leadToSave.email,
-          location: leadToSave.location,
-          source: leadToSave.source,
-          priority: leadToSave.priority,
-          notes: leadToSave.notes,
-          investmentCapacity: leadToSave.customFields?.investmentCapacity || ''
-        });
-        if (res.success && res.data) {
-          leadToSave.id = `db-${res.data.id}`;
+      const savedLead = await apiSaveLead(leadToSave);
+      setLeads(prev => {
+        const idx = prev.findIndex(l => l.id === savedLead.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = savedLead;
+          return next;
         }
-      } else {
-        // Update in backend
-        if (leadToSave.id.toString().startsWith('db-')) {
-          const dbId = leadToSave.id.toString().replace('db-', '');
-          await apiClient.put<any>(`/sales-executive/leads/${dbId}`, {
-            name: leadToSave.name,
-            phone: leadToSave.phone,
-            companyId: typeof targetCompanyId === 'number' ? targetCompanyId : parseInt(targetCompanyId, 10) || 1,
-            email: leadToSave.email,
-            location: leadToSave.location,
-            source: leadToSave.source,
-            priority: leadToSave.priority,
-            notes: leadToSave.notes,
-            investmentCapacity: leadToSave.customFields?.investmentCapacity || ''
-          });
-        }
-      }
+        return [savedLead, ...prev];
+      });
     } catch (err) {
-      console.error('Failed to save to backend DB', err);
+      console.error('Failed to save lead', err);
+      storageService.saveLead(leadToSave);
+      setLeads(prev => [leadToSave, ...prev]);
     }
-
-    storageService.saveLead(leadToSave);
 
     storageService.addAuditLog({
       id: `aud-${Date.now()}`,
@@ -558,19 +676,17 @@ export const LeadsPage: React.FC = () => {
     });
 
     setIsEditDrawerOpen(false);
+    await loadData();
   };
 
   const handleDeleteLead = async (lead: Lead) => {
     if (confirm(`Delete lead ${lead.name}?`)) {
       try {
-        if (lead.id.toString().startsWith('db-')) {
-          const dbId = lead.id.toString().replace('db-', '');
-          await apiClient.delete(`/sales-executive/leads/${dbId}`);
-        }
+        await apiDeleteLead(lead.id);
       } catch (err) {
-        console.error('Failed to delete lead from DB', err);
+        console.error('Failed to delete lead', err);
+        storageService.deleteLead(lead.id);
       }
-      storageService.deleteLead(lead.id);
       loadData();
     }
   };
@@ -665,13 +781,13 @@ export const LeadsPage: React.FC = () => {
     if (file) handleFileSelect(file);
   };
 
-  const handleImportLeads = () => {
+  const handleImportLeads = async () => {
     let successCount = 0;
     let skipCount = 0;
     let updatedCount = 0;
     const companyId = tenant?.id || 't-ghl-01';
 
-    parsedRows.forEach((row, index) => {
+    const promises = parsedRows.map(async (row, index) => {
       const nameVal = row[columnMap['name']];
       const phoneVal = row[columnMap['phone']];
 
@@ -689,7 +805,7 @@ export const LeadsPage: React.FC = () => {
         priorityVal = rawPriority;
       }
 
-      // Check for existing lead by phone in this company
+      // Check for existing lead by phone — uses localStorage cache (populated from API)
       const existingMatch = storageService.findLeadByPhone(phoneVal, companyId);
       if (existingMatch) {
         const updatedLead: Lead = {
@@ -700,7 +816,7 @@ export const LeadsPage: React.FC = () => {
           source: sourceVal || existingMatch.source,
           priority: (priorityVal as any) || existingMatch.priority,
         };
-        storageService.saveLead(updatedLead);
+        try { await apiSaveLead(updatedLead); } catch { storageService.saveLead(updatedLead); }
         updatedCount++;
         successCount++;
         return;
@@ -723,9 +839,11 @@ export const LeadsPage: React.FC = () => {
         customFields: {}
       };
 
-      storageService.saveLead(newLead);
+      try { await apiSaveLead(newLead); } catch { storageService.saveLead(newLead); }
       successCount++;
     });
+
+    await Promise.allSettled(promises);
 
     storageService.addAuditLog({
       id: `aud-${Date.now()}`,
@@ -800,6 +918,23 @@ export const LeadsPage: React.FC = () => {
     },
   };
 
+  const assignedIrmColumn: Column<Lead> = {
+    key: 'assignedIrm',
+    header: 'Assigned IRM',
+    sortable: true,
+    render: l => (
+      l.assignedIrmName ? (
+        <span className="customer-irm-status-pill assigned">
+          <UserCheck size={11} /> {l.assignedIrmName}
+        </span>
+      ) : (
+        <span className="customer-irm-status-pill unassigned">
+          Unassigned
+        </span>
+      )
+    ),
+  };
+
   const columns: Column<Lead>[] = [
     ...(isGhlAdmin && assignMode === 'manual' ? [{
       key: 'select',
@@ -868,7 +1003,7 @@ export const LeadsPage: React.FC = () => {
         return <span className="lead-investment-val">{amount}</span>;
       },
     },
-    ...(isIrm ? [assignedAgentColumn] : [statusColumn, sourceColumn]),
+    ...(isIrm ? [assignedAgentColumn] : [statusColumn, sourceColumn, assignedIrmColumn]),
     {
       key: 'quickCall',
       header: 'Quick Call',
@@ -900,6 +1035,11 @@ export const LeadsPage: React.FC = () => {
         setIsDetailDrawerOpen(true);
       },
     },
+    ...(!isIrm ? [{
+      label: 'Assign to IRM',
+      icon: <UserCheck size={14} className="leads-action-icon" style={{ color: '#8b5cf6' }} />,
+      onClick: (l: Lead) => handleOpenAssignIrm(l),
+    }] : []),
     {
       label: 'Edit Lead',
       icon: <Edit size={14} className="leads-action-icon" />,
@@ -965,7 +1105,10 @@ export const LeadsPage: React.FC = () => {
                   onChange: setStatusFilter,
                   options: [
                     { value: 'New', label: 'New' },
+                    { value: 'Contacted', label: 'Contacted' },
                     { value: 'Callback', label: 'Callback' },
+                    { value: 'Interested', label: 'Interested' },
+                    { value: 'Follow-up Required', label: 'Follow-up Required' },
                     { value: 'No Response', label: 'No Response' },
                   ],
                 }]),
@@ -1096,6 +1239,45 @@ export const LeadsPage: React.FC = () => {
                 <div className="lead-quick-banner">
                   <div className="lead-assigned-note">
                     Assigned to <strong>{selectedLead.assignedAgentName}</strong>
+                  </div>
+                </div>
+
+                {/* ── IRM Assignment Section ── */}
+                <div className="lead-irm-card">
+                  <div className="lead-irm-card-header">
+                    <span className="lead-irm-card-title">
+                      <UserCheck size={14} color="#8b5cf6" /> IRM Relationship Manager
+                    </span>
+                    {!isIrm && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handleOpenAssignIrm(selectedLead)}
+                      >
+                        {selectedLead.assignedIrmName ? 'Reassign IRM' : '+ Assign IRM'}
+                      </button>
+                    )}
+                  </div>
+                  <div className="lead-irm-body">
+                    <div className="lead-irm-info">
+                      <div className="lead-irm-name">
+                        {selectedLead.assignedIrmName || 'Not assigned to IRM'}
+                      </div>
+                      <div className="lead-irm-sub">
+                        {selectedLead.assignedIrmAt
+                          ? `Assigned on ${new Date(selectedLead.assignedIrmAt).toLocaleDateString()}`
+                          : 'Assign to IRM to route this lead to high-net-worth portfolio management'}
+                      </div>
+                    </div>
+                    <span className={`customer-irm-status-pill ${selectedLead.assignedIrmName ? 'assigned' : 'unassigned'}`}>
+                      {selectedLead.assignedIrmName ? (
+                        <>
+                          <UserCheck size={11} /> {selectedLead.assignedIrmName}
+                        </>
+                      ) : (
+                        'Unassigned'
+                      )}
+                    </span>
                   </div>
                 </div>
 
@@ -1323,6 +1505,85 @@ export const LeadsPage: React.FC = () => {
             </div>
           </div>
 
+          <div className="lead-form-grid-2">
+            <div className="form-group">
+              <label className="form-label">Assigned Agent</label>
+              <select
+                className="form-select"
+                value={formData.assignedAgentId || (isLeadScopedUser ? (user?.id || '') : '')}
+                disabled={isLeadScopedUser}
+                onChange={e => {
+                  const selectedId = e.target.value;
+                  const agentObj = availableAgents.find(a => String(a.id) === String(selectedId));
+                  setFormData(prev => ({
+                    ...prev,
+                    assignedAgentId: selectedId,
+                    assignedAgentName: agentObj?.name || (user?.name ?? 'Agent'),
+                  }));
+                }}
+              >
+                {isLeadScopedUser ? (
+                  <option value={user?.id || ''}>{user?.name || 'Current User'}</option>
+                ) : (
+                  <>
+                    <option value="">-- Unassigned --</option>
+                    {availableAgents.map(ag => (
+                      <option key={ag.id} value={ag.id}>
+                        {ag.name}
+                      </option>
+                    ))}
+                  </>
+                )}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Lead Status</label>
+              <select
+                className="form-select"
+                value={formData.status || 'New'}
+                onChange={e => setFormData({ ...formData, status: e.target.value as any })}
+              >
+                <option value="New">New</option>
+                <option value="Contacted">Contacted</option>
+                <option value="Callback">Callback</option>
+                <option value="Interested">Interested</option>
+                <option value="Follow-up Required">Follow-up Required</option>
+              </select>
+            </div>
+            {!isIrm && (
+              <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                <label className="form-label">Assign to IRM (Investment Relationship Manager)</label>
+                <select
+                  className="form-select"
+                  value={formData.assignedIrmId || ''}
+                  onChange={e => {
+                    const selId = e.target.value;
+                    const irm = companyIrms.find(i => String(i.id) === String(selId));
+                    setFormData(prev => ({
+                      ...prev,
+                      assignedIrmId: selId || undefined,
+                      assignedIrmName: irm?.name || undefined,
+                      assignedIrmAt: selId ? (prev.assignedIrmAt || new Date().toISOString()) : undefined,
+                      customFields: {
+                        ...prev.customFields,
+                        assignedIrmId: selId || undefined,
+                        assignedIrmName: irm?.name || undefined,
+                        assignedIrmAt: selId ? (prev.assignedIrmAt || new Date().toISOString()) : undefined,
+                      }
+                    }));
+                  }}
+                >
+                  <option value="">— Not Assigned to IRM —</option>
+                  {companyIrms.map(irm => (
+                    <option key={irm.id} value={irm.id}>
+                      {irm.name} ({irm.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
           {/* DYNAMIC TENANT CUSTOM FIELDS (Blueprint Section 7.3) */}
           <div className="lead-custom-schema-box">
             <div className="lead-custom-schema-title">
@@ -1483,6 +1744,67 @@ export const LeadsPage: React.FC = () => {
             ✓ On {tenant?.name}, this also automatically schedules a{' '}
             <strong>{tenant?.slug === 'jamin' ? 'Site Visit' : 'Wealth Consultation'}</strong> step!
           </div>
+        </div>
+      </Modal>
+
+      {/* Assign Lead to IRM Modal */}
+      <Modal
+        isOpen={isAssignIrmModalOpen && !!leadToAssignIrm}
+        onClose={() => setIsAssignIrmModalOpen(false)}
+        title="Assign Lead to IRM"
+        subtitle={`Assigning ${leadToAssignIrm?.name} to an Investment Relationship Manager`}
+        footer={
+          <>
+            <button className="btn btn-secondary" onClick={() => setIsAssignIrmModalOpen(false)}>
+              Cancel
+            </button>
+            <button
+              className="btn btn-primary"
+              disabled={!selectedIrmForLead}
+              onClick={handleConfirmAssignIrm}
+            >
+              Confirm IRM Assignment
+            </button>
+          </>
+        }
+      >
+        <div className="lead-modal-content">
+          <p className="lead-irm-modal-desc">
+            Select an active IRM from the company database. Once assigned, this lead will be routed directly to the IRM&apos;s portal and consultations dashboard.
+          </p>
+
+          {companyIrms.length === 0 ? (
+            <div className="lead-irm-empty" style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>
+              No active IRMs found for this organization.
+            </div>
+          ) : (
+            <div className="lead-irm-agent-list">
+              {companyIrms.map(irm => {
+                const isSelected = String(selectedIrmForLead) === String(irm.id);
+                return (
+                  <div
+                    key={irm.id}
+                    className={`lead-irm-agent-row ${isSelected ? 'selected' : ''}`}
+                    onClick={() => setSelectedIrmForLead(String(irm.id))}
+                  >
+                    <input
+                      type="radio"
+                      name="selectedLeadIrm"
+                      checked={isSelected}
+                      onChange={() => setSelectedIrmForLead(String(irm.id))}
+                    />
+                    <div className="lead-irm-agent-avatar">
+                      {irm.name[0]?.toUpperCase()}
+                    </div>
+                    <div className="lead-irm-agent-details">
+                      <div className="lead-irm-agent-name">{irm.name}</div>
+                      <div className="lead-irm-agent-email">{irm.email}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </Modal>
 
@@ -1677,7 +1999,7 @@ export const LeadsPage: React.FC = () => {
               <>
                 <p className="assign-modal-sub">Select an agent to assign the {selectedLeadIds.size} selected lead{selectedLeadIds.size !== 1 ? 's' : ''} to:</p>
                 <div className="assign-agent-list">
-                  {MOCK_AGENTS.map(agent => (
+                  {availableAgents.map(agent => (
                     <label key={agent.id} className={`assign-agent-row${assignSelectedAgent?.id === agent.id ? ' selected' : ''}`}>
                       <input
                         type="radio"
@@ -1730,7 +2052,7 @@ export const LeadsPage: React.FC = () => {
               <div>
                 <h3 className="assign-modal-title">✦ AI Suggestion — Round Robin</h3>
                 <p className="assign-modal-sub" style={{ margin: '2px 0 0' }}>
-                  {Object.values(aiDistribution).flat().length} leads distributed across {MOCK_AGENTS.length} agents
+                  {Object.values(aiDistribution).flat().length} leads distributed across {availableAgents.length} agents
                 </p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1745,7 +2067,7 @@ export const LeadsPage: React.FC = () => {
             </div>
 
             <div className="ai-dist-grid">
-              {MOCK_AGENTS.map((agent, agentIdx) => {
+              {availableAgents.map((agent, agentIdx) => {
                 const agentLeads = aiDistribution[agent.id] || [];
                 return (
                   <div key={agent.id} className="ai-dist-col">
@@ -1765,14 +2087,16 @@ export const LeadsPage: React.FC = () => {
                             {isAiEditMode && (
                               <div className="ai-dist-move-btns">
                                 <button
+                                  type="button"
                                   className="ai-move-btn"
                                   disabled={agentIdx === 0}
                                   onClick={() => handleAiMoveLead(lead.id, agent.id, 'left')}
                                   title="Move left"
                                 >◀</button>
                                 <button
+                                  type="button"
                                   className="ai-move-btn"
-                                  disabled={agentIdx === MOCK_AGENTS.length - 1}
+                                  disabled={agentIdx === availableAgents.length - 1}
                                   onClick={() => handleAiMoveLead(lead.id, agent.id, 'right')}
                                   title="Move right"
                                 >▶</button>

@@ -156,6 +156,10 @@ using (var scope = app.Services.CreateScope())
                     ALTER TABLE followups ALTER COLUMN ""Status"" SET DEFAULT 'Pending';
                     ALTER TABLE followups ALTER COLUMN ""Priority"" DROP NOT NULL;
                     ALTER TABLE followups ALTER COLUMN ""Priority"" SET DEFAULT 'Medium';
+
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'consultations') THEN
+                        ALTER TABLE consultations ALTER COLUMN ""InvestorId"" DROP NOT NULL;
+                    END IF;
                 END $$;
             ";
             db.Database.ExecuteSqlRaw(sql);
@@ -252,6 +256,8 @@ using (var scope = app.Services.CreateScope())
         {
             Console.WriteLine($"[Role Permissions Patch Warning] {ex.Message}");
         }
+
+        // Inbuilt lead seeding removed: all leads come from DB via API / frontend creation.
     }
 }
 

@@ -16,16 +16,16 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
         var query = context.Set<CallRecord>().AsNoTracking().Where(x => x.CompanyId == currentUser.CompanyId && x.AgentId == currentUser.UserId);
         if (!string.IsNullOrWhiteSpace(direction)) query = query.Where(x => x.Direction == direction.ToLower());
         if (!string.IsNullOrWhiteSpace(disposition)) query = query.Where(x => x.Disposition == disposition);
-        if (from.HasValue) query = query.Where(x => x.Timestamp >= from.Value.ToUniversalTime());
-        if (to.HasValue) query = query.Where(x => x.Timestamp <= to.Value.ToUniversalTime());
+        if (from.HasValue) query = query.Where(x => x.StartedAt >= from.Value.ToUniversalTime());
+        if (to.HasValue) query = query.Where(x => x.StartedAt <= to.Value.ToUniversalTime());
         var total = await query.CountAsync(cancellationToken);
-        var items = await query.OrderByDescending(x => x.Timestamp).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new CallRecordDto { Id = x.Id, CompanyId = x.CompanyId, AgentId = x.AgentId, ContactName = x.ContactName, ContactPhone = x.ContactPhone, Direction = x.Direction, Duration = x.Duration, Disposition = x.Disposition, Notes = x.Notes, LeadId = x.LeadId, CustomerId = x.CustomerId, Timestamp = x.Timestamp, CreatedAt = x.CreatedAt }).ToListAsync(cancellationToken);
+        var items = await query.OrderByDescending(x => x.StartedAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new CallRecordDto { Id = x.Id, CompanyId = x.CompanyId, AgentId = x.AgentId, ContactName = x.ContactName, ContactPhone = x.ContactPhone, Direction = x.Direction, Duration = x.DurationSeconds, Disposition = x.Disposition, Notes = x.Notes, LeadId = x.LeadId, CustomerId = x.CustomerId, Timestamp = x.StartedAt, CreatedAt = x.CreatedAt }).ToListAsync(cancellationToken);
         return new PagedResult<CallRecordDto> { Items = items, Page = page, PageSize = pageSize, TotalCount = total };
     }
 
     public async Task<ApiResponse<CallRecordDto>> LogAsync(LogCallDto request, CancellationToken cancellationToken)
     {
-        var record = new CallRecord { CompanyId = currentUser.CompanyId ?? 1, AgentId = currentUser.UserId ?? 1, ContactName = request.ContactName, ContactPhone = request.ContactPhone, Direction = request.Direction.ToLowerInvariant(), Duration = request.Duration, Disposition = request.Disposition, Notes = request.Notes, LeadId = request.LeadId, CustomerId = request.CustomerId };
+        var record = new CallRecord { CompanyId = currentUser.CompanyId ?? 1, AgentId = currentUser.UserId ?? 1, ContactName = request.ContactName, ContactPhone = request.ContactPhone, Direction = request.Direction.ToLowerInvariant(), DurationSeconds = request.Duration, Disposition = request.Disposition, Notes = request.Notes, LeadId = request.LeadId, CustomerId = request.CustomerId, StartedAt = DateTime.UtcNow };
         context.Set<CallRecord>().Add(record); await context.SaveChangesAsync(cancellationToken);
         return ApiResponse<CallRecordDto>.SuccessResult(Map(record), "Call logged");
     }
@@ -35,7 +35,7 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
         CallRecord? record = request.CallId.HasValue ? await context.Set<CallRecord>().FirstOrDefaultAsync(x => x.Id == request.CallId && x.CompanyId == currentUser.CompanyId && x.AgentId == currentUser.UserId, cancellationToken) : null;
         if (record == null)
         {
-            record = new CallRecord { CompanyId = currentUser.CompanyId ?? 1, AgentId = currentUser.UserId ?? 1, ContactName = request.ContactName, ContactPhone = request.ContactPhone, Direction = request.Direction.ToLowerInvariant(), Duration = request.Duration, LeadId = request.LeadId, CustomerId = request.CustomerId };
+            record = new CallRecord { CompanyId = currentUser.CompanyId ?? 1, AgentId = currentUser.UserId ?? 1, ContactName = request.ContactName, ContactPhone = request.ContactPhone, Direction = request.Direction.ToLowerInvariant(), DurationSeconds = request.Duration, LeadId = request.LeadId, CustomerId = request.CustomerId, StartedAt = DateTime.UtcNow };
             context.Set<CallRecord>().Add(record);
         }
         record.Disposition = request.Disposition; record.Notes = request.Notes;
@@ -49,5 +49,5 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
         return ApiResponse<CallRecordDto>.SuccessResult(Map(record), "Disposition processed");
     }
 
-    private static CallRecordDto Map(CallRecord x) => new() { Id = x.Id, CompanyId = x.CompanyId, AgentId = x.AgentId, ContactName = x.ContactName, ContactPhone = x.ContactPhone, Direction = x.Direction, Duration = x.Duration, Disposition = x.Disposition, Notes = x.Notes, LeadId = x.LeadId, CustomerId = x.CustomerId, Timestamp = x.Timestamp, CreatedAt = x.CreatedAt };
+    private static CallRecordDto Map(CallRecord x) => new() { Id = x.Id, CompanyId = x.CompanyId, AgentId = x.AgentId, ContactName = x.ContactName, ContactPhone = x.ContactPhone, Direction = x.Direction, Duration = x.DurationSeconds, Disposition = x.Disposition, Notes = x.Notes, LeadId = x.LeadId, CustomerId = x.CustomerId, Timestamp = x.StartedAt, CreatedAt = x.CreatedAt };
 }

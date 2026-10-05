@@ -125,16 +125,16 @@ public class CustomerService : ICustomerService
             .AsNoTracking()
             .Where(cr => cr.CompanyId == customer.CompanyId &&
                          (cr.CustomerId == customer.Id || cr.ContactPhone == customer.Phone))
-            .OrderByDescending(cr => cr.Timestamp)
+            .OrderByDescending(cr => cr.StartedAt)
             .Take(50)
             .Select(cr => new Customer360CallSummaryDto
             {
                 Id = cr.Id,
                 Direction = cr.Direction,
-                Duration = cr.Duration,
+                Duration = cr.DurationSeconds,
                 Disposition = cr.Disposition,
                 Notes = cr.Notes ?? string.Empty,
-                Timestamp = cr.Timestamp
+                Timestamp = cr.StartedAt
             })
             .ToListAsync(ct);
 

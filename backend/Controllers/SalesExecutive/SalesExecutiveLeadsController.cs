@@ -9,7 +9,7 @@ namespace backend.Controllers.SalesExecutive;
 
 [ApiController]
 [Route("api/sales-executive/leads")]
-//[Authorize]
+[Authorize(Roles = "sales_executive,company_admin,super_admin,irm,sales_manager")]
 public class SalesExecutiveLeadsController : ControllerBase
 {
     private readonly ILeadService _leadService;
@@ -66,7 +66,6 @@ public class SalesExecutiveLeadsController : ControllerBase
         [FromBody] CreateLeadDto dto,
         CancellationToken ct)
     {
-        Console.WriteLine("CREATE LEAD CALLED with Name: " + dto.Name);
         var validation = await _createValidator.ValidateAsync(dto, ct);
         if (!validation.IsValid)
         {

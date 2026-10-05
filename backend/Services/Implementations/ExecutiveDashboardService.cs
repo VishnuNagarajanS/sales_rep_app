@@ -30,9 +30,9 @@ public sealed class ExecutiveDashboardService(ApplicationDbContext context, ICur
         }
 
         var active = leads.Where(x => x.Status != "Converted" && x.Status != "Junk" && x.Status != "Not Interested");
-        var todayCalls = calls.Where(x => x.Timestamp >= today);
+        var todayCalls = calls.Where(x => x.StartedAt >= today);
         var hasCalls = await todayCalls.AnyAsync(cancellationToken);
-        var avgTalkTime = hasCalls ? (await todayCalls.Select(x => (double?)x.Duration).AverageAsync(cancellationToken) ?? 0) : 0;
+        var avgTalkTime = hasCalls ? (await todayCalls.Select(x => (double?)x.DurationSeconds).AverageAsync(cancellationToken) ?? 0) : 0;
 
         var recentLeads = await leads
             .OrderByDescending(x => x.CreatedAt)
@@ -63,7 +63,7 @@ public sealed class ExecutiveDashboardService(ApplicationDbContext context, ICur
             },
             OverdueFollowups = await followups.CountAsync(x => x.Status == FollowupStatus.Pending && x.ScheduledAt < today, cancellationToken),
             CallsLoggedToday = await todayCalls.CountAsync(cancellationToken),
-            ConnectedCallsToday = await todayCalls.CountAsync(x => x.Duration > 0 && x.Disposition != "No Answer", cancellationToken),
+            ConnectedCallsToday = await todayCalls.CountAsync(x => x.DurationSeconds > 0 && x.Disposition != "No Answer", cancellationToken),
             AverageTalkTimeSeconds = avgTalkTime,
             RecentLeads = recentLeads,
             UpcomingFollowups = upcomingFollowups

@@ -33,7 +33,7 @@ const getCallPreferences = (): CallPreferences => {
     return DEFAULT_CALL_PREFS;
   }
 };
-import { MOCK_AGENTS, MOCK_IRMS } from '../../mock_data/mockData';
+// MOCK_AGENTS / MOCK_IRMS removed — storageService.getAgents()/getIrms() is the source of truth.
 
 import {
   Phone,
@@ -63,7 +63,7 @@ import {
 import { useCall, AgentAvailability } from '../../context/CallContext';
 import { useAuth } from '../../context/AuthContext';
 import { CallDisposition, Lead, Consultation, CallRecord } from '../../types';
-import { logCall, saveConsultation } from '../../services/ghlApiService';
+import { logCall, saveConsultation, saveLead, getCompanyIrms } from '../../services/ghlApiService';
 import { Modal } from '../common/Modal';
 import { Drawer } from '../common/Drawer';
 import { DocumentUploader } from '../common/DocumentUploader';
@@ -254,13 +254,28 @@ export const InCallBar: React.FC = () => {
   const [irmButtonRect, setIrmButtonRect] = useState<DOMRect | null>(null);
   const [irmSearchQuery, setIrmSearchQuery] = useState('');
   const [connectingIrm, setConnectingIrm] = useState<string | null>(null);
-  const [pendingIrm, setPendingIrm] = useState<{ name: string; status: string; isPrevious?: boolean } | null>(null);
+  const [pendingIrm, setPendingIrm] = useState<{ id?: string | number; name: string; status: string; isPrevious?: boolean } | null>(null);
   const [consultationReason, setConsultationReason] = useState('');
+  const [dbIrms, setDbIrms] = useState<any[]>([]);
 
   const irmPortalRef = useRef<HTMLDivElement>(null);
   const irmButtonRef = useRef<HTMLButtonElement>(null);
 
   const isIrm = user?.role?.code === 'irm';
+
+  const loadIrms = () => {
+    if (!isIrm) {
+      getCompanyIrms(tenant?.id).then(list => {
+        if (list && list.length > 0) {
+          setDbIrms(list);
+        }
+      }).catch(console.error);
+    }
+  };
+
+  useEffect(() => {
+    loadIrms();
+  }, [tenant?.id, isIrm]);
 
   // Look up the full lead record to find who previously handled this contact
   const matchedLead = activeCall?.matchedRecord?.type === 'lead'
@@ -276,13 +291,13 @@ export const InCallBar: React.FC = () => {
         const rest = base.filter((a: { name: string }) => a.name !== previousAgentName);
         return [{ name: previousAgentName, status: 'Available' as const, isPrevious: true }, ...rest];
       })()
-    : storageService.getIrms(tenant?.id);
+    : (dbIrms.length > 0 ? dbIrms : storageService.getIrms(tenant?.id));
 
   const filteredConnectOptions = connectOptions.filter((o: any) =>
     o.name.toLowerCase().includes(irmSearchQuery.toLowerCase())
   );
 
-  const handleConnectIrm = (irm: { name: string; status: string } | null, reason: string) => {
+  const handleConnectIrm = async (irm: { id?: string | number; name: string; status: string } | null, reason: string) => {
     if (!activeCall || !irm || !tenant || !user) return;
 
     const callId = `call-${Date.now()}`;
@@ -295,7 +310,7 @@ export const InCallBar: React.FC = () => {
       duration: activeCall.duration,
       agentId: user.id,
       agentName: user.name,
-      disposition: 'Converted',
+      disposition: 'Interested',
       timestamp: new Date().toISOString(),
       notes: isIrm
         ? `Connected to Agent: ${irm.name}. Reason: ${reason}`
@@ -303,16 +318,13 @@ export const InCallBar: React.FC = () => {
       leadId: activeCall.matchedRecord?.id,
     };
 
-    if (tenant.slug === 'ghl' || tenant.id === 't-ghl-01') {
-      logCall(callRecord).catch(console.error);
-    } else {
-      try {
-        const calls = JSON.parse(localStorage.getItem('nexus_calls') || '[]');
-        calls.unshift(callRecord);
-        localStorage.setItem('nexus_calls', JSON.stringify(calls));
-        window.dispatchEvent(new Event('nexus_storage_updated'));
-      } catch { }
-    }
+    // Log call via API and storage
+    logCall(callRecord).catch(console.error);
+    try {
+      const calls = JSON.parse(localStorage.getItem('nexus_calls') || '[]');
+      calls.unshift(callRecord);
+      localStorage.setItem('nexus_calls', JSON.stringify(calls));
+    } catch { }
 
     const consult: Consultation = {
       id: `cns-${Date.now()}`,
@@ -321,22 +333,48 @@ export const InCallBar: React.FC = () => {
       investorName: activeCall.contactName,
       investorPhone: activeCall.contactPhone,
       scheduledAt: new Date().toISOString(),
-      consultantId: irm.name,
+      consultantId: String(irm.id || irm.name),
       consultantName: irm.name,
+      referredByAgentName: user.name,
       status: 'Scheduled',
-      agenda: isIrm ? `Connected to Agent: ${reason}` : reason,
+      agenda: isIrm ? `Connected to Agent: ${reason}` : (reason || 'Connected to IRM via live call'),
     };
 
-    if (tenant.slug === 'ghl' || tenant.id === 't-ghl-01') {
-      saveConsultation(consult).catch(console.error);
+    // Persist Consultation to database via API & mirror to storage
+    try {
+      await saveConsultation(consult);
+    } catch (err) {
+      console.error('[CallCenter] Error saving consultation to database:', err);
     }
-    storageService.saveConsultation(consult);
+
+    // If calling an active lead, update lead status to Interested & tag as transferred to IRM
+    const targetLead = matchedLead || (activeCall.matchedRecord?.id ? storageService.getLeads(tenant?.id).find((l: Lead) => l.id === activeCall.matchedRecord?.id) : undefined);
+    if (targetLead) {
+      targetLead.status = 'Interested';
+      if (!targetLead.customFields) targetLead.customFields = {};
+      targetLead.customFields.transferredToIrm = 'true';
+      targetLead.customFields.assignedIrmName = irm.name;
+      if (irm.id) targetLead.customFields.assignedIrmId = String(irm.id);
+      targetLead.assignedIrmId = String(irm.id || '');
+      targetLead.assignedIrmName = irm.name;
+      const nowIso = new Date().toISOString();
+      targetLead.assignedIrmAt = nowIso;
+      targetLead.customFields.assignedIrmAt = nowIso;
+      targetLead.notes = `${targetLead.notes ? targetLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}]: Connected to IRM ${irm.name}. Reason: ${reason}`;
+      try {
+        await saveLead(targetLead);
+      } catch (err) {
+        console.error('[CallCenter] Error updating lead after IRM connect:', err);
+      }
+      storageService.saveLead(targetLead);
+    }
 
     endCall(true);
 
     setConnectingIrm(irm.name);
     setPendingIrm(null);
     setConsultationReason('');
+    window.dispatchEvent(new Event('nexus_storage_updated'));
     setTimeout(() => setConnectingIrm(null), 3000);
   };
 
@@ -702,19 +740,30 @@ export const InCallBar: React.FC = () => {
               <ExternalLink size={13} /> Meet
             </button>
 
-            {/* Connect IRM / Connect Agent */}
+            {/* Connect IRM / Connect Agent (Purple Button) */}
             <button
               ref={irmButtonRef}
               className="btn btn-sm incall-btn-action incall-btn-irm"
+              style={{
+                background: 'linear-gradient(135deg, #8b5cf6, #7c3aed)',
+                border: '1px solid #a78bfa',
+                color: '#ffffff',
+                boxShadow: '0 2px 10px rgba(139, 92, 246, 0.45)',
+                fontWeight: 600,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+              }}
               title={isIrm ? 'Connect to an Agent' : 'Connect to an IRM'}
               onClick={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 setIrmButtonRect(rect);
                 setIrmMenuOpen(prev => !prev);
                 setIrmSearchQuery('');
+                loadIrms();
               }}
             >
-              <Users size={13} /> {isIrm ? 'Connect Agent' : 'Connect IRM'}
+              <Users size={13} style={{ color: '#ffffff' }} /> {isIrm ? 'Connect Agent' : 'Connect IRM'}
             </button>
 
             {irmMenuOpen && irmButtonRect && ReactDOM.createPortal(
@@ -723,17 +772,21 @@ export const InCallBar: React.FC = () => {
                 style={{
                   position: 'fixed',
                   top: irmButtonRect.bottom + 6,
-                  left: irmButtonRect.left,
+                  left: Math.max(12, Math.min(irmButtonRect.left, window.innerWidth - 270)),
                   background: '#1e293b',
-                  border: '1px solid #334155',
+                  border: '1px solid #475569',
                   borderRadius: 8,
-                  padding: 6,
-                  minWidth: 200,
+                  padding: 8,
+                  minWidth: 250,
+                  maxWidth: 320,
                   zIndex: 9999,
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#c084fc', marginBottom: 6 }}>
+                  {isIrm ? 'Available Agents' : 'Active IRM Consultants'}
+                </div>
                 <input
                   type="text"
                   autoFocus
@@ -743,7 +796,7 @@ export const InCallBar: React.FC = () => {
                   style={{
                     width: '100%',
                     padding: '6px 8px',
-                    marginBottom: 6,
+                    marginBottom: 8,
                     fontSize: 13,
                     background: '#0f172a',
                     border: '1px solid #334155',
@@ -755,14 +808,14 @@ export const InCallBar: React.FC = () => {
                 />
 
                 {filteredConnectOptions.length === 0 && (
-                  <div style={{ padding: '8px', fontSize: 12, color: '#64748b', textAlign: 'center' }}>
-                    {isIrm ? 'No agent found' : 'No IRM found'}
+                  <div style={{ padding: '12px 8px', fontSize: 12, color: '#94a3b8', textAlign: 'center' }}>
+                    {isIrm ? 'No agent found' : 'No IRMs found in database'}
                   </div>
                 )}
 
                 {filteredConnectOptions.map((o: any) => (
                   <div
-                    key={o.name}
+                    key={o.id || o.name}
                     onClick={() => {
                       setPendingIrm(o);
                       setIrmMenuOpen(false);
@@ -777,6 +830,7 @@ export const InCallBar: React.FC = () => {
                       cursor: 'pointer',
                       fontSize: 13,
                       color: '#e2e8f0',
+                      transition: 'background 0.15s ease',
                     }}
                     onMouseEnter={e => (e.currentTarget.style.background = '#334155')}
                     onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
@@ -787,13 +841,21 @@ export const InCallBar: React.FC = () => {
                         height: 8,
                         borderRadius: '50%',
                         background: o.status === 'Available' ? '#22c55e' : '#d97706',
+                        flexShrink: 0,
                       }}
                     />
-                    {o.name}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, color: '#f8fafc' }}>{o.name}</div>
+                      {o.specialization && (
+                        <div style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {o.specialization}
+                        </div>
+                      )}
+                    </div>
                     {isIrm && (o as any).isPrevious && (
                       <span
                         style={{
-                          marginLeft: 6,
+                          marginLeft: 4,
                           fontSize: 10,
                           color: 'var(--primary-600, #38bdf8)',
                           background: 'rgba(56, 189, 248, 0.12)',
@@ -802,10 +864,10 @@ export const InCallBar: React.FC = () => {
                           fontWeight: 500,
                         }}
                       >
-                        Previously handled
+                        Previous
                       </span>
                     )}
-                    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94a3b8' }}>{o.status}</span>
+                    <span style={{ fontSize: 11, color: '#94a3b8' }}>{o.status}</span>
                   </div>
                 ))}
               </div>,
