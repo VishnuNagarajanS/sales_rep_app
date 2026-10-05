@@ -1,6 +1,5 @@
 import { Role } from '../../types';
 import { PERMISSIONS } from '../../constants/permissions';
-import { SYSTEM_ROLES } from '../../constants/roles';
 
 export const MOCK_ROLES: Record<string, Role> = {
   super_admin: {

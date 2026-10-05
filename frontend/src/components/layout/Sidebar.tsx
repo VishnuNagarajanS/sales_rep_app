@@ -27,6 +27,7 @@ import {
   User as UserIcon,
   UserCheck,
   Clock,
+  Server,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
@@ -139,6 +140,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
         { id: 'admin-features', label: 'Feature Packages', icon: <Sparkles size={18} /> },
         { id: 'admin-call-config', label: 'Call Configuration', icon: <PhoneCall size={18} /> },
         { id: 'admin-audit', label: 'Platform Audit Logs', icon: <FileCheck size={18} /> },
+        { id: 'admin-system', label: 'System & Health', icon: <Server size={18} /> },
       ],
     },
   ];
@@ -354,14 +356,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
           alignItems: 'center',
           justifyContent: collapsed
             ? 'center'
-            : tenant?.slug === 'ghl'
-              ? 'center'
-              : 'space-between',
+            : isSuperAdmin
+              ? 'space-between'
+              : tenant?.slug === 'ghl'
+                ? 'center'
+                : 'space-between',
           padding: collapsed
             ? '0'
-            : tenant?.slug === 'ghl'
-              ? '0 48px'
-              : '0 20px',
+            : isSuperAdmin
+              ? '0 20px'
+              : tenant?.slug === 'ghl'
+                ? '0 48px'
+                : '0 20px',
           borderBottom: `1px solid ${isSuperAdmin ? '#1e293b' : 'var(--border-base)'}`,
           position: 'relative',
         }}

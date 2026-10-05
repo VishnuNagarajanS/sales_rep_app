@@ -137,6 +137,7 @@ import { PlatformRolesPage } from './pages/Admin/Roles/PlatformRolesPage';
 import { PlatformFeaturesPage } from './pages/Admin/Features/PlatformFeaturesPage';
 import { PlatformCallConfigPage } from './pages/Admin/CallConfig/PlatformCallConfigPage';
 import { PlatformAuditPage } from './pages/Admin/Audit/PlatformAuditPage';
+import { PlatformSystemPage } from './pages/Admin/System/PlatformSystemPage';
 
 import { ProtectedRoute } from './components/common/Guards';
 import { Modal } from './components/common/Modal';
@@ -571,7 +572,10 @@ export const App: React.FC = () => {
         {currentRoute === 'admin-dashboard' || currentRoute === 'dashboard' ? (
           <PlatformDashboardPage onNavigate={navigate} />
         ) : currentRoute === 'admin-companies' ? (
-          <CompaniesPage />
+          <CompaniesPage
+            initialOpenWizard={Boolean(navExtraState?.openWizard)}
+            selectedTenantId={navExtraState?.selectedTenantId}
+          />
         ) : currentRoute === 'admin-users' ? (
           <PlatformUsersPage />
         ) : currentRoute === 'admin-roles' ? (
@@ -582,6 +586,8 @@ export const App: React.FC = () => {
           <PlatformCallConfigPage />
         ) : currentRoute === 'admin-audit' ? (
           <PlatformAuditPage />
+        ) : currentRoute === 'admin-system' ? (
+          <PlatformSystemPage />
         ) : (
           <PlatformDashboardPage onNavigate={navigate} />
         )}

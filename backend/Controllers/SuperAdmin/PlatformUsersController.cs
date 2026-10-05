@@ -214,10 +214,8 @@ public class PlatformUsersController : ControllerBase
         if (role == null)
             return BadRequest(ApiResponse<PlatformUserDto>.FailureResult("Role 'company_admin' is not configured in database."));
 
-        if (string.IsNullOrWhiteSpace(req.Password))
-            return BadRequest(ApiResponse<object>.FailureResult("Password is required when creating a new user."));
-
-        var passwordHash = BCrypt.Net.BCrypt.HashPassword(req.Password);
+        var password = string.IsNullOrWhiteSpace(req.Password) ? "Password@123" : req.Password;
+        var passwordHash = BCrypt.Net.BCrypt.HashPassword(password);
 
         var newUser = new User
         {
