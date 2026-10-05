@@ -101,6 +101,6 @@ export function getMockCustomerKycStatus(dealId: string, currentStatus?: string)
 }
 
 export const mockKycProvider: MockKycProvider = {
-  getReviewData: createMockKycReviewData,
+  getReviewData: () => null,
   getCustomerStatus: getMockCustomerKycStatus,
 };

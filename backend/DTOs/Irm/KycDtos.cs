@@ -149,6 +149,7 @@ public class SendKycLinkDto
     public string Channel { get; set; } = "email";
     public string Expiry { get; set; } = "48h";
     public string? BaseUrl { get; set; }
+    public bool ForceNewToken { get; set; } = false;
 }
 
 public class SendKycLinkResponseDto
@@ -231,6 +232,7 @@ public class KycReviewDto
     /// <summary>Approved | Rejected | ReuploadRequested</summary>
     public string Action { get; set; } = string.Empty;
     public string? Remarks { get; set; }
+    public KycChecklistDto? Checklist { get; set; }
 }
 
 // ── KYC OTP DTOs ─────────────────────────────────────────────────────────────

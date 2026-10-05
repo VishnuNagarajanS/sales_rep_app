@@ -94,10 +94,7 @@ export function registerMockKycProvider(provider: MockKycProvider): void {
   mockKycProviderInstance = provider;
 }
 
-export function getKycReviewData(deal: any): KycReviewData | null {
-  if (isMockMode() && mockKycProviderInstance) {
-    return mockKycProviderInstance.getReviewData(deal);
-  }
+export function getKycReviewData(_deal: any): KycReviewData | null {
   return null;
 }
 

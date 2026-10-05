@@ -346,15 +346,18 @@ public class IrmKycController : ControllerBase
 
         if (dto.Status == "Verified")
         {
-            bool hasSubmitted = kyc.SubmittedAt != null || kyc.Status == KycStatus.PendingReview || kyc.Status == KycStatus.Approved || !string.IsNullOrEmpty(kyc.PanNumber);
-            if (!hasSubmitted)
+            bool hasRealSubmission = kyc.SubmittedAt != null 
+                || kyc.Status == KycStatus.PendingReview 
+                || (kyc.IsAssisted && kyc.CustomerConsentObtained);
+
+            if (!hasRealSubmission)
             {
-                return StatusCode(StatusCodes.Status409Conflict, ApiResponse<bool>.ErrorResponse("Customer has not submitted KYC yet."));
+                return StatusCode(StatusCodes.Status409Conflict, ApiResponse<bool>.ErrorResponse("Cannot confirm KYC: No genuine customer submission exists for this record."));
             }
 
-            if (dto.Checklist != null && !dto.Checklist.IsAllChecked)
+            if (dto.Checklist == null || !dto.Checklist.IsAllChecked)
             {
-                return BadRequest(ApiResponse<bool>.ErrorResponse("All checklist items (Identity, Bank, Documents, Nominee, Demat) must be verified."));
+                return BadRequest(ApiResponse<bool>.ErrorResponse("All 5 required checklist items (Identity, Bank, Documents, Nominee, Demat) must be manually verified and confirmed."));
             }
         }
         else if (dto.Status == "Wrong")

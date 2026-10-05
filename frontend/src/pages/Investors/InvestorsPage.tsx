@@ -89,8 +89,6 @@ export const InvestorsPage: React.FC = () => {
 
   // ── Data loading ──────────────────────────────────────────────────────────
   const loadData = async () => {
-    // Load investors and deals from the backend; fall back to localStorage
-    // only on a complete network failure.
     try {
       const [apiInvestors, apiDeals] = await Promise.all([
         getInvestors(tenant?.id),
@@ -102,26 +100,10 @@ export const InvestorsPage: React.FC = () => {
       setInvestors(storageService.getInvestors(tenant?.id));
       setDeals(storageService.getDeals(tenant?.id));
     }
-    // Load linked activity data from the real API so IDs agree with
-    // the backend investor IDs, not with stale localStorage entries.
-    try {
-      const [apiCalls, apiConsultations, apiOpportunities, apiFollowups] = await Promise.all([
-        getCalls(tenant?.id),
-        getConsultations(tenant?.id),
-        getOpportunities(tenant?.id),
-        getFollowups(tenant?.id),
-      ]);
-      setAllCalls(apiCalls || []);
-      setAllConsultations(apiConsultations || []);
-      setAllOpportunities(apiOpportunities || []);
-      setAllFollowups(apiFollowups || []);
-    } catch {
-      // Graceful degradation — activity tabs will show empty if API is unreachable
-      setAllCalls([]);
-      setAllConsultations([]);
-      setAllOpportunities([]);
-      setAllFollowups([]);
-    }
+    setAllCalls(storageService.getCalls(tenant?.id));
+    setAllConsultations(storageService.getConsultations(tenant?.id));
+    setAllOpportunities(storageService.getOpportunities(tenant?.id));
+    setAllFollowups(storageService.getFollowups(tenant?.id));
   };
 
   useEffect(() => {
@@ -137,19 +119,15 @@ export const InvestorsPage: React.FC = () => {
   }, [selectedInvestor?.id]);
 
   // ── Role-based scoping ────────────────────────────────────────────────────
-  // Investor records come directly from the backend (GhlInvestorsController).
-  // The backend already scopes by assigned IRM for irm role via ScopedQuery().
-  // Do NOT synthesize fake investor objects from deal records — they carry
-  // invented IDs, hardcoded asset classes, and invented statuses.
-  const convertedDeals = deals.filter(d => d.stage === 'converted');
-
-  const scopedInvestors = isExec
+  // sales_executive and IRM see only their own investors; managers/admins see all
+  const isScopedUser = isExec || isGhlIrm || isIrm;
+  const scopedInvestors = isScopedUser
     ? investors.filter(
         inv =>
-          (inv.assignedAgentId && inv.assignedAgentId === user?.id) ||
-          (inv.assignedAgentName && inv.assignedAgentName === user?.name),
+          (inv.assignedAgentId && String(inv.assignedAgentId) === String(user?.id)) ||
+          (inv.assignedAgentName && inv.assignedAgentName === user?.name)
       )
-    : investors; // IRM, Admin, Super Admin: backend already scopes for the role
+    : investors;
 
   // ── Filter options ────────────────────────────────────────────────────────
   const assetClassOptions = Array.from(new Set(scopedInvestors.map(inv => inv.preferredAssetClass)))
@@ -249,18 +227,14 @@ export const InvestorsPage: React.FC = () => {
     }
 
     const now = new Date().toISOString().split('T')[0];
-    // Use editingInvestor.id for updates; for new records pass a temporary
-    // client-side id — the API will return the real backend ID which we use.
     const investorPayload: Investor = {
-      id: editingInvestor ? editingInvestor.id : `inv-${Date.now()}`,
+      id: editingInvestor ? editingInvestor.id : '',
       companyId: tenant?.id ?? '',
       name: form.name.trim(),
       phone: form.phone.trim(),
       email: form.email.trim(),
       status: form.status,
       investmentCapacity: form.investmentCapacity.trim(),
-      // Only persist an asset class if the IRM actually provided one;
-      // do not default to any value.
       preferredAssetClass: form.preferredAssetClass.trim(),
       assignedAgentId: form.assignedAgentId.trim() || (user?.id ?? ''),
       assignedAgentName: form.assignedAgentName.trim() || (user?.name ?? ''),
@@ -272,15 +246,12 @@ export const InvestorsPage: React.FC = () => {
       ...(form.riskTolerance ? { riskTolerance: form.riskTolerance as Investor['riskTolerance'] } : {}),
     };
 
-    closeModal();
     try {
-      // Await the API call so the returned record carries the real backend ID.
       const saved = await apiSaveInvestor(investorPayload);
-      // Reload the full list so stage counts and ownership stay in sync.
-      await loadData();
-      // Select the real saved record (with backend ID), not the local placeholder.
+      closeModal();
       setSelectedInvestor(saved);
-    } catch (err: any) {
+      loadData();
+    } catch (err) {
       console.error('[InvestorsPage] Failed to save investor:', err);
     }
   };
@@ -348,14 +319,14 @@ export const InvestorsPage: React.FC = () => {
       key: 'preferredAssetClass',
       header: 'Preferred Asset Class',
       sortable: true,
-      render: (inv: Investor) => <span style={{ fontSize: 12 }}>{inv.preferredAssetClass}</span>,
+      render: (inv: Investor) => <span style={{ fontSize: 12 }}>{inv.preferredAssetClass || '—'}</span>,
     } as Column<Investor>]),
     ...(isGhlIrm ? [{
       key: 'investmentAmount' as any,
       header: 'Investment Amount',
       sortable: true,
       render: (inv: Investor) => {
-        const matchingDeal = convertedDeals.find(d => d.customerId === inv.id || d.customerName.toLowerCase() === inv.name.toLowerCase());
+        const matchingDeal = deals.find(d => d.customerId === inv.id || (d.phone && inv.phone && d.phone.replace(/\D/g, '').slice(-10) === inv.phone.replace(/\D/g, '').slice(-10)) || d.customerName.toLowerCase() === inv.name.toLowerCase());
         const amt = matchingDeal?.value || (inv.committedAUM && !isNaN(Number(inv.committedAUM)) && Number(inv.committedAUM) > 0 ? Number(inv.committedAUM) : null);
         return (
           <span style={{ fontWeight: 700, color: amt ? '#059669' : 'var(--text-muted)', fontSize: 13 }}>
@@ -513,7 +484,7 @@ export const InvestorsPage: React.FC = () => {
         isOpen={!!selectedInvestor}
         onClose={() => setSelectedInvestor(null)}
         title={selectedInvestor?.name || 'Investor Overview'}
-        subtitle={isExec || !selectedInvestor?.preferredAssetClass ? undefined : `Mandate: ${selectedInvestor.preferredAssetClass}`}
+        subtitle={isExec ? undefined : (selectedInvestor?.preferredAssetClass ? `Mandate: ${selectedInvestor.preferredAssetClass}` : undefined)}
         width={720}
       >
         {selectedInvestor && (
@@ -523,6 +494,9 @@ export const InvestorsPage: React.FC = () => {
                 <StatusChip status={selectedInvestor.status} />
                 <div className="investor-partner-label">
                   Lead Wealth Partner: <strong>{selectedInvestor.assignedAgentName}</strong>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, fontFamily: 'monospace' }}>
+                  ID: #{selectedInvestor.id}
                 </div>
               </div>
 
@@ -542,11 +516,29 @@ export const InvestorsPage: React.FC = () => {
                 <div>
                   <span style={{ color: 'var(--text-secondary)' }}>Capital Ticket:</span>
                   <div className="investor-ticket-val">
-                    {selectedInvestor.investmentCapacity}
+                    {selectedInvestor.investmentCapacity || '—'}
+                  </div>
+                </div>
+                <div>
+                  <span style={{ color: 'var(--text-secondary)' }}>Preferred Asset Class:</span>
+                  <div style={{ fontWeight: 600, marginTop: 4, fontSize: 14 }}>
+                    {selectedInvestor.preferredAssetClass || '—'}
+                  </div>
+                </div>
+                <div>
+                  <span style={{ color: 'var(--text-secondary)' }}>Investment Mandate:</span>
+                  <div style={{ fontWeight: 600, marginTop: 4, fontSize: 14 }}>
+                    {selectedInvestor.investmentMandate || '—'}
+                  </div>
+                </div>
+                <div>
+                  <span style={{ color: 'var(--text-secondary)' }}>Risk Tolerance:</span>
+                  <div style={{ fontWeight: 600, marginTop: 4, fontSize: 14 }}>
+                    {selectedInvestor.riskTolerance || '—'}
                   </div>
                 </div>
                 {(() => {
-                  const matchingDeal = convertedDeals.find(d => d.customerId === selectedInvestor.id || d.customerName.toLowerCase() === selectedInvestor.name.toLowerCase());
+                  const matchingDeal = deals.find(d => d.customerId === selectedInvestor.id || (d.phone && selectedInvestor.phone && d.phone.replace(/\D/g, '').slice(-10) === selectedInvestor.phone.replace(/\D/g, '').slice(-10)) || d.customerName.toLowerCase() === selectedInvestor.name.toLowerCase());
                   const amt = matchingDeal?.value || (selectedInvestor.committedAUM && !isNaN(Number(selectedInvestor.committedAUM)) && Number(selectedInvestor.committedAUM) > 0 ? Number(selectedInvestor.committedAUM) : null);
                   return (
                     <div>

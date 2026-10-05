@@ -269,6 +269,46 @@ const KYCUploadCard: React.FC<KYCUploadProps> = ({
 };
 
 // ==============================================================================
+// PREFERRED ASSET CLASS RESOLVER (Only display if confirmed from real customer/IRM input)
+// ==============================================================================
+const resolvePreferredAssetClass = (deal: Deal, leadsList: Lead[] = [], customersList: Customer[] = []) => {
+  const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+  let savedLocal: any = null;
+  try {
+    const raw =
+      (deal.customerId ? localStorage.getItem(`nexus_irm_pref_${deal.customerId}`) : null) ||
+      (fDigits ? localStorage.getItem(`nexus_irm_pref_${fDigits}`) : null) ||
+      localStorage.getItem(`nexus_irm_pref_${deal.id}`);
+    if (raw) savedLocal = JSON.parse(raw);
+  } catch { }
+
+  const matchingLead = leadsList.find(l => {
+    if (deal.customerId && l.id === deal.customerId) return true;
+    const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+    return Boolean(lDigits && fDigits && lDigits === fDigits);
+  });
+  const matchingCustomer = customersList.find(c => {
+    if (deal.customerId && c.id === deal.customerId) return true;
+    const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
+    return Boolean(cDigits && fDigits && cDigits === fDigits);
+  });
+
+  const isConfirmed =
+    savedLocal?.confirmed === true ||
+    matchingLead?.customFields?.irmPreferencesConfirmed === true ||
+    matchingCustomer?.customFields?.irmPreferencesConfirmed === true;
+
+  if (savedLocal?.preferredAssetClass && savedLocal.confirmed) return savedLocal.preferredAssetClass;
+  if (matchingLead?.customFields?.preferredAssetClass && isConfirmed) return matchingLead.customFields.preferredAssetClass;
+  if (matchingCustomer?.customFields?.preferredAssetClass && isConfirmed) return matchingCustomer.customFields.preferredAssetClass;
+  if (deal.preferredAssetClass) {
+    return deal.preferredAssetClass;
+  }
+
+  return '—';
+};
+
+// ==============================================================================
 // GHL INDIA VENTURES -> IRM KYC EXPERIENCE
 // ==============================================================================
 const GhlIrmKycView: React.FC = () => {
@@ -570,40 +610,7 @@ const GhlIrmKycView: React.FC = () => {
   };
 
   const getIrmPreferredAssetClass = (deal: Deal) => {
-    const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
-    let savedLocal: any = null;
-    try {
-      const raw =
-        (deal.customerId ? localStorage.getItem(`nexus_irm_pref_${deal.customerId}`) : null) ||
-        (fDigits ? localStorage.getItem(`nexus_irm_pref_${fDigits}`) : null) ||
-        localStorage.getItem(`nexus_irm_pref_${deal.id}`);
-      if (raw) savedLocal = JSON.parse(raw);
-    } catch { }
-
-    const matchingLead = leads.find(l => {
-      if (deal.customerId && l.id === deal.customerId) return true;
-      const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
-      return Boolean(lDigits && fDigits && lDigits === fDigits);
-    });
-    const matchingCustomer = customers.find(c => {
-      if (deal.customerId && c.id === deal.customerId) return true;
-      const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
-      return Boolean(cDigits && fDigits && cDigits === fDigits);
-    });
-
-    const isConfirmed =
-      savedLocal?.confirmed === true ||
-      matchingLead?.customFields?.irmPreferencesConfirmed === true ||
-      matchingCustomer?.customFields?.irmPreferencesConfirmed === true;
-
-    if (savedLocal?.preferredAssetClass) return savedLocal.preferredAssetClass;
-    if (matchingLead?.customFields?.preferredAssetClass && isConfirmed) return matchingLead.customFields.preferredAssetClass;
-    if (matchingCustomer?.customFields?.preferredAssetClass && isConfirmed) return matchingCustomer.customFields.preferredAssetClass;
-    if (deal.preferredAssetClass && (deal.preferredAssetClass === 'CO-AIF' || deal.preferredAssetClass === 'AIF' || isConfirmed)) {
-      return deal.preferredAssetClass;
-    }
-
-    return '—';
+    return resolvePreferredAssetClass(deal, leads, customers);
   };
 
   const getDynamicKycStatus = (deal: Deal): 'completed' | 'continue' | 'pending' => {
@@ -854,7 +861,7 @@ const GhlIrmKycView: React.FC = () => {
       ifscCode: dbKyc?.ifscCode || savedNonEmpty.ifscCode || '',
       swiftCode: dbKyc?.swiftCode || savedNonEmpty.swiftCode || '',
       accountHolderName: dbKyc?.accountHolderName || dbKyc?.investorName || savedNonEmpty.accountHolderName || deal.customerName || '',
-      accountType: dbKyc?.accountType || savedNonEmpty.accountType || 'Savings Account',
+      accountType: dbKyc?.accountType || savedNonEmpty.accountType || '',
       branchName: dbKyc?.branchName || savedNonEmpty.branchName || '',
       hasNoDemat: dbKyc?.hasNoDemat !== undefined ? Boolean(dbKyc.hasNoDemat) : Boolean(savedNonEmpty.hasNoDemat),
       dematAccountNumber: dbKyc?.dematAccountNumber || savedNonEmpty.dematAccountNumber || '',
@@ -1118,10 +1125,10 @@ const GhlIrmKycView: React.FC = () => {
         city: current.city || (deal ? getResolvedLocation(deal) : '') || '',
         dob: current.dob || '',
         occupation: current.occupation || '',
-        gender: current.gender || 'Male',
-        investorType: current.investorType || 'Individual / Retail HNW',
-        residentType: current.residentType || 'Resident Indian (RI)',
-        preferredAssetClass: deal ? getIrmPreferredAssetClass(deal) : 'CO-AIF',
+        gender: current.gender || '',
+        investorType: current.investorType || '',
+        residentType: current.residentType || '',
+        preferredAssetClass: deal ? (getIrmPreferredAssetClass(deal) === '—' ? '' : getIrmPreferredAssetClass(deal)) : '',
       });
     } else {
       setSectionFormData({
@@ -1187,11 +1194,12 @@ const GhlIrmKycView: React.FC = () => {
     }
 
     // Save preferred asset class if changed
-    if (editingSection === 'personal' && sectionFormData.preferredAssetClass) {
+    if (editingSection === 'personal') {
       const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+      const val = sectionFormData.preferredAssetClass?.trim() || '';
       const prefObj = {
-        preferredAssetClass: sectionFormData.preferredAssetClass,
-        confirmed: true,
+        preferredAssetClass: val,
+        confirmed: Boolean(val),
       };
       if (deal.customerId) localStorage.setItem(`nexus_irm_pref_${deal.customerId}`, JSON.stringify(prefObj));
       if (fDigits) localStorage.setItem(`nexus_irm_pref_${fDigits}`, JSON.stringify(prefObj));
@@ -1267,11 +1275,20 @@ const GhlIrmKycView: React.FC = () => {
           });
 
           if (!res.ok) {
-            console.warn(`[KYCPage] PATCH status API returned ${res.status}`);
+            const errData = await res.json().catch(() => ({}));
+            const errMsg = errData.message || `KYC status update rejected by backend (${res.status})`;
+            showToast(errMsg);
+            throw new Error(errMsg);
           }
-        } catch (err) {
-          console.warn('[KYCPage] PATCH status network error:', err);
+        } catch (err: any) {
+          console.warn('[KYCPage] PATCH status error:', err);
+          showToast(err?.message || 'Error updating KYC status in backend.');
+          throw err;
         }
+      } else if (newStatus === 'Verified') {
+        const errMsg = 'Cannot verify KYC: No valid backend KYC submission found for this customer.';
+        showToast(errMsg);
+        throw new Error(errMsg);
       }
 
       // Also persist to local mock record as bulletproof fallback
@@ -3639,9 +3656,10 @@ const GhlIrmKycView: React.FC = () => {
                   <label className="form-label">Preferred Asset Class</label>
                   <select
                     className="form-select"
-                    value={sectionFormData.preferredAssetClass || 'CO-AIF'}
+                    value={sectionFormData.preferredAssetClass || ''}
                     onChange={e => setSectionFormData({ ...sectionFormData, preferredAssetClass: e.target.value })}
                   >
+                    <option value="">— Select Preferred Asset Class —</option>
                     <option value="CO-AIF">CO-AIF</option>
                     <option value="AIF">AIF</option>
                   </select>
@@ -4068,7 +4086,7 @@ const OriginalKYCView: React.FC = () => {
       header: 'Preferred Asset Class',
       render: deal => (
         <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-          {deal.preferredAssetClass || '—'}
+          {resolvePreferredAssetClass(deal)}
         </span>
       ),
     },

@@ -365,7 +365,14 @@ export const OpportunitiesPage: React.FC = () => {
   ];
 
   // ── IRM Stage & Investor Type Handlers ─────────────────────────────────────
-  const irmDeals = deals.filter(d => d.stage === 'investment_opportunity');
+  const isScopedAgent = isIrm || isExec;
+  const scopedOpportunitiesDeals = isScopedAgent
+    ? deals.filter(d =>
+        (d.assignedAgentId && String(d.assignedAgentId) === String(user?.id)) ||
+        (d.assignedAgentName && d.assignedAgentName === user?.name)
+      )
+    : deals;
+  const irmDeals = scopedOpportunitiesDeals.filter(d => d.stage === 'investment_opportunity');
 
   const handleSetInvestorType = async (deal: Deal, type: 'AIF' | 'Co-AIF') => {
     const updatedDeal: Deal = {
@@ -401,10 +408,52 @@ export const OpportunitiesPage: React.FC = () => {
   };
 
   const handleAdvanceToConverted = async (deal: Deal) => {
-    // 1. Update deal to 'converted' stage in DB
+    // 1. Create or link Investor record in DB with stable ID
+    let linkedInvestorId = deal.customerId && !deal.customerId.startsWith('lead-') && !deal.customerId.startsWith('cust-') ? deal.customerId : '';
+
+    // Check if an investor already exists with this phone or email or customerId
+    const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+    const existingInv = investors.find(inv => {
+      if (linkedInvestorId && String(inv.id) === String(linkedInvestorId)) return true;
+      const invDigits = (inv.phone || '').replace(/\D/g, '').slice(-10);
+      if (fDigits && invDigits && invDigits === fDigits) return true;
+      if (deal.email && inv.email && inv.email.toLowerCase() === deal.email.toLowerCase()) return true;
+      return false;
+    });
+
+    const investorPayload: Investor = {
+      id: existingInv ? existingInv.id : linkedInvestorId,
+      companyId: tenant?.id || '',
+      name: deal.customerName,
+      phone: deal.phone || '',
+      email: deal.email || '',
+      status: 'Active Investor',
+      investmentCapacity: deal.investmentRange || '',
+      preferredAssetClass: deal.preferredAssetClass || '',
+      assignedAgentId: deal.assignedAgentId || user?.id || '',
+      assignedAgentName: deal.assignedAgentName || user?.name || '',
+      referralSource: 'IRM Pipeline',
+      notes: deal.notes || (deal.value ? `Converted from Investment Opportunity. Investment Amount: ₹${(deal.value || 0).toLocaleString('en-IN')}` : ''),
+      committedAUM: deal.value ? String(deal.value) : (deal.investmentRange || ''),
+      investmentMandate: deal.investorType || '',
+      riskTolerance: undefined,
+      createdAt: existingInv?.createdAt || new Date().toISOString(),
+    };
+
+    let savedInvestor: Investor | null = null;
+    try {
+      savedInvestor = await apiSaveInvestor(investorPayload);
+    } catch (err) {
+      console.warn('[OpportunitiesPage] API saveInvestor failed:', err);
+    }
+
+    const finalCustomerId = savedInvestor?.id ? String(savedInvestor.id) : (existingInv?.id ? String(existingInv.id) : deal.customerId);
+
+    // 2. Update deal to 'converted' stage with stable linked customerId
     const updatedDeal: Deal = {
       ...deal,
       stage: 'converted',
+      customerId: finalCustomerId,
       stageEnteredAt: new Date().toISOString(),
     };
     try {
@@ -415,7 +464,7 @@ export const OpportunitiesPage: React.FC = () => {
       return;
     }
 
-    // 2. Log activity
+    // 3. Log activity
     const activity: DealActivity = {
       id: `act-${Date.now()}`,
       dealId: deal.id,
@@ -433,32 +482,6 @@ export const OpportunitiesPage: React.FC = () => {
     } catch (err) {
       console.warn('[OpportunitiesPage] API addDealActivity failed:', err);
       storageService.addDealActivity(activity);
-    }
-
-    // 3. Create Investor record in DB (moves to Investors 360)
-    const newInvestor: Investor = {
-      id: `inv-${Date.now()}`,
-      companyId: tenant?.id || '',
-      name: deal.customerName,
-      phone: deal.phone || '',
-      email: deal.email || '',
-      status: 'Active Investor',
-      investmentCapacity: deal.investmentRange || '',
-      preferredAssetClass: deal.preferredAssetClass || deal.investorType || 'AIF',
-      assignedAgentId: deal.assignedAgentId || user?.id || '',
-      assignedAgentName: deal.assignedAgentName || user?.name || '',
-      referralSource: 'IRM Pipeline',
-      notes: `Converted from Investment Opportunity. Investment Amount: ₹${(deal.value || 0).toLocaleString('en-IN')}`,
-      committedAUM: String(deal.value || 0),
-      investmentMandate: deal.investorType || 'AIF',
-      riskTolerance: 'Moderate',
-      createdAt: new Date().toISOString(),
-    };
-    try {
-      await apiSaveInvestor(newInvestor);
-    } catch (err) {
-      console.warn('[OpportunitiesPage] API saveInvestor failed, saving locally:', err);
-      storageService.saveInvestor(newInvestor);
     }
 
     loadData();
@@ -666,7 +689,7 @@ export const OpportunitiesPage: React.FC = () => {
       header: 'Preferred Asset Class',
       render: deal => (
         <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-          {deal.preferredAssetClass || 'Commercial Pre-Leased'}
+          {deal.preferredAssetClass || '—'}
         </span>
       ),
     },
@@ -674,7 +697,7 @@ export const OpportunitiesPage: React.FC = () => {
       key: 'investorType',
       header: 'Investor Structure (AIF / Co-AIF)',
       render: deal => {
-        const currentType = deal.investorType || 'AIF';
+        const currentType = deal.investorType || '';
         return (
           <div className="irm-investor-type-toggle" onClick={e => e.stopPropagation()}>
             <button
@@ -1146,6 +1169,20 @@ export const OpportunitiesPage: React.FC = () => {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <Mail size={13} color="var(--text-muted)" />
                           <span>{detailDeal.email}</span>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Assigned Owner:</span>
+                        <strong style={{ color: 'var(--text-primary)' }}>{detailDeal.assignedAgentName || 'Unassigned'}</strong>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Preferred Asset Class:</span>
+                        <strong style={{ color: 'var(--text-primary)' }}>{detailDeal.preferredAssetClass || '—'}</strong>
+                      </div>
+                      {detailDeal.customerId && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ color: 'var(--text-muted)' }}>Customer ID:</span>
+                          <strong style={{ fontFamily: 'monospace' }}>#{detailDeal.customerId}</strong>
                         </div>
                       )}
                     </div>

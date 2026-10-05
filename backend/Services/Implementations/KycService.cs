@@ -95,14 +95,17 @@ public class KycService : IKycService
             investor = await _investorRepo.CreateAsync(investor, ct);
         }
 
-        // Cryptographically secure token (32 random bytes -> 64 hex characters)
-        var rawToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
-        var tokenHash = HashToken(rawToken);
+        var isLinkOnly = string.Equals(dto.Channel, "link", StringComparison.OrdinalIgnoreCase) || 
+                         string.Equals(dto.Channel, "generate", StringComparison.OrdinalIgnoreCase);
+        var isEmailChannel = string.IsNullOrWhiteSpace(dto.Channel) || dto.Channel.Equals("email", StringComparison.OrdinalIgnoreCase);
+        var isWhatsApp = string.Equals(dto.Channel, "whatsapp", StringComparison.OrdinalIgnoreCase);
+        var isSms = string.Equals(dto.Channel, "sms", StringComparison.OrdinalIgnoreCase);
 
         var days = dto.Expiry?.ToLower() switch
         {
             "24h" => 1,
             "48h" => 2,
+            "72h" => 3,
             "7d" => 7,
             _ => 2
         };
@@ -120,6 +123,83 @@ public class KycService : IKycService
             existing = all.FirstOrDefault(k => string.Equals(k.Email, recipientEmail, StringComparison.OrdinalIgnoreCase));
         }
 
+        if (existing == null && !string.IsNullOrWhiteSpace(recipientPhone))
+        {
+            var phoneDigits = new string(recipientPhone.Where(char.IsDigit).ToArray());
+            if (phoneDigits.Length >= 10)
+            {
+                var last10 = phoneDigits[^10..];
+                var all = await _kycRepo.GetAllAsync(companyId, null, ct);
+                existing = all.FirstOrDefault(k => (k.Phone ?? string.Empty).Replace("-", "").Replace(" ", "").EndsWith(last10));
+            }
+        }
+
+        string rawToken;
+        string tokenHash;
+
+        // Check if existing record already has an active, valid, non-expired token
+        bool hasActiveToken = existing != null 
+            && !string.IsNullOrWhiteSpace(existing.KycLinkToken) 
+            && !existing.IsRevoked 
+            && existing.KycLinkExpiresAt.HasValue 
+            && existing.KycLinkExpiresAt.Value > DateTime.UtcNow.AddMinutes(5);
+
+        if (isLinkOnly && hasActiveToken && !dto.ForceNewToken)
+        {
+            // Reuse active token so viewing or copying the link does not invalidate already delivered customer links
+            rawToken = existing!.KycLinkToken!;
+            tokenHash = existing.KycTokenHash ?? HashToken(rawToken);
+            expiresAt = existing.KycLinkExpiresAt!.Value;
+        }
+        else
+        {
+            // Cryptographically secure token (32 random bytes -> 64 hex characters)
+            rawToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+            tokenHash = HashToken(rawToken);
+
+            // Invalidate pending OTPs for the old token if resending
+            if (existing != null && !string.IsNullOrWhiteSpace(existing.KycLinkToken))
+            {
+                await _otpService.InvalidateOtpAsync(existing.KycLinkToken, existing.Email, ct);
+            }
+        }
+
+        var baseUrl = !string.IsNullOrWhiteSpace(dto.BaseUrl) ? dto.BaseUrl.TrimEnd('/') : "http://localhost:5173";
+        var fullKycLink = $"{baseUrl}/kyc/{rawToken}";
+
+        bool emailSent = false;
+        string deliveryStatus = "Generated";
+
+        if (isEmailChannel)
+        {
+            if (string.IsNullOrWhiteSpace(recipientEmail))
+            {
+                deliveryStatus = "Email not sent: no email address was found for this investor.";
+            }
+            else
+            {
+                emailSent = await _emailService.SendKycVerificationLinkAsync(
+                    recipientEmail,
+                    investorName,
+                    fullKycLink,
+                    dto.Expiry ?? "48 Hours",
+                    ct);
+
+                deliveryStatus = emailSent 
+                    ? $"Email delivered successfully to {recipientEmail} via configured SMTP" 
+                    : $"Email could not be sent: {_emailService.LastError ?? "SMTP service delivery failed"}";
+            }
+        }
+        else if (isLinkOnly)
+        {
+            deliveryStatus = "Secure KYC verification link generated successfully.";
+        }
+        else
+        {
+            deliveryStatus = $"Link dispatched via {dto.Channel.ToUpper()}";
+        }
+
+        // Persist real KYC record safely based on actual dispatch outcome
         if (existing == null)
         {
             existing = new InvestorKyc
@@ -130,13 +210,12 @@ public class KycService : IKycService
                 InvestorName = investorName,
                 Phone = recipientPhone,
                 Email = recipientEmail,
-                // LinkSent: link dispatched, customer has NOT yet submitted
-                Status = KycStatus.LinkSent,
+                Status = (emailSent || isWhatsApp || isSms) ? KycStatus.LinkSent : KycStatus.Draft,
                 KycLinkToken = rawToken,
                 KycTokenHash = tokenHash,
                 IsRevoked = false,
-                KycLinkSent = true,
-                KycLinkSentAt = DateTime.UtcNow,
+                KycLinkSent = (emailSent || isWhatsApp || isSms),
+                KycLinkSentAt = (emailSent || isWhatsApp || isSms) ? DateTime.UtcNow : null,
                 KycLinkExpiresAt = expiresAt,
                 CreatedAt = DateTime.UtcNow
             };
@@ -144,57 +223,31 @@ public class KycService : IKycService
         }
         else
         {
-            // Resend: Invalidate and revoke the previous link and pending OTPs
-            if (!string.IsNullOrWhiteSpace(existing.KycLinkToken))
-            {
-                await _otpService.InvalidateOtpAsync(existing.KycLinkToken, existing.Email, ct);
-            }
-
             existing.KycLinkToken = rawToken;
             existing.KycTokenHash = tokenHash;
             existing.IsRevoked = false;
             existing.RevokedAt = null;
-            existing.KycLinkSent = true;
-            existing.KycLinkSentAt = DateTime.UtcNow;
             existing.KycLinkExpiresAt = expiresAt;
             if (!string.IsNullOrWhiteSpace(recipientEmail)) existing.Email = recipientEmail;
             if (!string.IsNullOrWhiteSpace(recipientPhone)) existing.Phone = recipientPhone;
             if (!string.IsNullOrWhiteSpace(investorName)) existing.InvestorName = investorName;
 
-            // Upgrade Draft/LinkSent to LinkSent; do NOT mark Completed or downgrade an already reviewed record
-            if (existing.Status == KycStatus.Draft || existing.Status == KycStatus.LinkSent)
-                existing.Status = KycStatus.LinkSent;
+            if (emailSent || isWhatsApp || isSms)
+            {
+                existing.KycLinkSent = true;
+                existing.KycLinkSentAt = DateTime.UtcNow;
+                if (existing.Status == KycStatus.Draft || existing.Status == KycStatus.LinkSent)
+                    existing.Status = KycStatus.LinkSent;
+            }
+            else if (isEmailChannel && !emailSent)
+            {
+                // Email delivery failed: do not falsely claim the link was dispatched
+                existing.KycLinkSent = false;
+                if (existing.Status == KycStatus.LinkSent)
+                    existing.Status = KycStatus.Draft;
+            }
 
             await _kycRepo.UpdateAsync(existing, ct);
-        }
-
-        var baseUrl = !string.IsNullOrWhiteSpace(dto.BaseUrl) ? dto.BaseUrl.TrimEnd('/') : "http://localhost:5173";
-        var fullKycLink = $"{baseUrl}/kyc/{rawToken}";
-
-        bool emailSent = false;
-        string deliveryStatus = "Generated";
-
-        if ((string.IsNullOrWhiteSpace(dto.Channel) || dto.Channel.Equals("email", StringComparison.OrdinalIgnoreCase)) 
-            && !string.IsNullOrWhiteSpace(recipientEmail))
-        {
-            emailSent = await _emailService.SendKycVerificationLinkAsync(
-                recipientEmail,
-                investorName,
-                fullKycLink,
-                dto.Expiry ?? "48 Hours",
-                ct);
-
-            deliveryStatus = emailSent 
-                ? $"Email delivered successfully to {recipientEmail} via Gmail SMTP" 
-                : $"Email could not be sent: {_emailService.LastError ?? "SMTP service delivery failed"}";
-        }
-        else if (string.Equals(dto.Channel, "email", StringComparison.OrdinalIgnoreCase))
-        {
-            deliveryStatus = "Email not sent: no email address was found for this investor.";
-        }
-        else
-        {
-            deliveryStatus = $"Link dispatched via {dto.Channel?.ToUpper() ?? "SMS"}";
         }
 
         var responseData = new SendKycLinkResponseDto
@@ -206,9 +259,15 @@ public class KycService : IKycService
             DeliveryStatus = deliveryStatus
         };
 
-        if ((string.IsNullOrWhiteSpace(dto.Channel) || dto.Channel.Equals("email", StringComparison.OrdinalIgnoreCase)) && !emailSent)
+        if (isEmailChannel && string.IsNullOrWhiteSpace(recipientEmail))
         {
-            return ApiResponse<SendKycLinkResponseDto>.SuccessResponse(responseData, $"KYC verification link generated, but email delivery failed: {_emailService.LastError ?? "SMTP delivery failed"}. Please check email configuration.");
+            return ApiResponse<SendKycLinkResponseDto>.FailureResult("No recipient email address was found for this investor.", responseData);
+        }
+
+        if (isEmailChannel && !emailSent)
+        {
+            var errReason = _emailService.LastError ?? "SMTP delivery failed";
+            return ApiResponse<SendKycLinkResponseDto>.FailureResult($"Email delivery failed: {errReason}", responseData);
         }
 
         return ApiResponse<SendKycLinkResponseDto>.SuccessResponse(responseData, emailSent ? "KYC verification email dispatched successfully!" : "KYC verification link generated successfully");
@@ -314,15 +373,31 @@ public class KycService : IKycService
         if (kyc == null)
             return ApiResponse<KycDto>.ErrorResponse("KYC record not found");
 
-        if (Enum.TryParse<KycStatus>(dto.Action, true, out var status))
-        {
-            kyc.Status = status;
-        }
-        else
+        if (!Enum.TryParse<KycStatus>(dto.Action, true, out var status))
         {
             return ApiResponse<KycDto>.ErrorResponse("Invalid review action. Allowed: Approved, Rejected, ReuploadRequested");
         }
 
+        if (status == KycStatus.Approved)
+        {
+            bool hasRealSubmission = kyc.SubmittedAt != null 
+                || kyc.Status == KycStatus.PendingReview 
+                || (kyc.IsAssisted && kyc.CustomerConsentObtained);
+
+            if (!hasRealSubmission)
+            {
+                return ApiResponse<KycDto>.ErrorResponse("Cannot approve KYC: No genuine customer submission exists for this record.");
+            }
+
+            if (dto.Checklist != null && !dto.Checklist.IsAllChecked)
+            {
+                return ApiResponse<KycDto>.ErrorResponse("All 5 required checklist items (Identity, Bank, Documents, Nominee, Demat) must be verified.");
+            }
+
+            kyc.VerifiedAt = DateTime.UtcNow;
+        }
+
+        kyc.Status = status;
         kyc.ReviewRemarks = dto.Remarks;
         kyc.ReviewedAt = DateTime.UtcNow;
 

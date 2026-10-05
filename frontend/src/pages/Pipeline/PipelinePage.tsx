@@ -86,12 +86,13 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   // IRM-specific state
   const [irmDetailDeal, setIrmDetailDeal] = useState<Deal | null>(null);
 
-  // Role-based scoping: Sales Executives see only their own deals.
+  // Role-based scoping: Sales Executives and IRMs see only their own deals.
   // Managers / Admins / Super Admins see every deal in the company (no filter).
   const isExec = roleCode === 'sales_executive';
-  const scopedDeals = isExec
+  const isScopedAgent = isExec || isGhlIrm || isIrm;
+  const scopedDeals = isScopedAgent
     ? deals.filter(d =>
-      (d.assignedAgentId && d.assignedAgentId === user?.id) ||
+      (d.assignedAgentId && String(d.assignedAgentId) === String(user?.id)) ||
       (d.assignedAgentName && d.assignedAgentName === user?.name)
     )
     : deals;
@@ -112,7 +113,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
             .map(f => (f.contactPhone || '').replace(/\D/g, '').slice(-10))
             .filter(Boolean)
         );
-        return leads
+        const raw = leads
           .filter(l => !l.companyId || isTenantMatch(l.companyId, tenant?.id))
           // Same rule as IRM "My Leads": only 'Interested' leads assigned to THIS IRM
           .filter(l => l.status === 'Interested')
@@ -128,19 +129,39 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
             if (lPhone && pendingFuPhones.has(lPhone)) return false;
             return true;
           });
+        // Deduplicate by phone to match LeadsPage
+        const seen = new Set<string>();
+        return raw.filter(l => {
+          const phone = (l.phone || '').replace(/\D/g, '').slice(-10);
+          if (phone) {
+            if (seen.has(phone)) return false;
+            seen.add(phone);
+          }
+          return true;
+        });
       })()
     : [];
 
   const scopedFollowups = isGhlIrm
-    ? followups
-        .filter(f => !f.companyId || isTenantMatch(f.companyId, tenant?.id))
-        .filter(f => f.status === 'Pending')
-        .filter(
-          f =>
-            (f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
-            (f.assignedAgentName && f.assignedAgentName === user?.name) ||
-            !f.assignedAgentId
-        )
+    ? (() => {
+        const raw = followups
+          .filter(f => !f.companyId || isTenantMatch(f.companyId, tenant?.id))
+          .filter(f => f.status === 'Pending')
+          .filter(
+            f =>
+              (f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
+              (f.assignedAgentName && f.assignedAgentName === user?.name)
+          );
+        const seen = new Set<string>();
+        return raw.filter(f => {
+          const key = String(f.id);
+          if (!seen.has(key)) {
+            seen.add(key);
+            return true;
+          }
+          return false;
+        });
+      })()
     : [];
 
   const leadToPipelineCard = (lead: Lead): Deal => ({
@@ -168,6 +189,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       (lead as any).investmentRange ||
       undefined,
     investorType: lead.customFields?.investorType || undefined,
+    preferredAssetClass: lead.customFields?.preferredAssetClass || undefined,
   });
 
   const followupToPipelineCard = (followup: Followup): Deal => ({
@@ -191,6 +213,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       (followup as any).investmentCapacity ||
       (followup as any).investmentRange ||
       undefined,
+    preferredAssetClass: (followup as any).preferredAssetClass || (followup as any).customFields?.preferredAssetClass || undefined,
   });
 
   // Agent filter options — derived from the already-scoped pool so execs never see this.
@@ -305,7 +328,47 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   };
 
   const handleMarkWon = async (deal: Deal) => {
-    const updated = { ...deal, stage: wonStageId, stageEnteredAt: new Date().toISOString() };
+    let updated = { ...deal, stage: wonStageId, stageEnteredAt: new Date().toISOString() };
+    if (isGhlIrm || isIrm) {
+      try {
+        let linkedInvestorId = deal.customerId && !deal.customerId.startsWith('lead-') && !deal.customerId.startsWith('cust-') ? deal.customerId : '';
+        const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+        const existingInv = investors.find(inv => {
+          if (linkedInvestorId && String(inv.id) === String(linkedInvestorId)) return true;
+          const invDigits = (inv.phone || '').replace(/\D/g, '').slice(-10);
+          if (fDigits && invDigits && invDigits === fDigits) return true;
+          if (deal.email && inv.email && inv.email.toLowerCase() === deal.email.toLowerCase()) return true;
+          return false;
+        });
+
+        const invPayload: Investor = {
+          id: existingInv ? existingInv.id : linkedInvestorId,
+          companyId: tenant?.id || '',
+          name: deal.customerName,
+          phone: deal.phone || '',
+          email: deal.email || '',
+          status: 'Active Investor',
+          investmentCapacity: deal.investmentRange || '',
+          preferredAssetClass: deal.preferredAssetClass || '',
+          assignedAgentId: deal.assignedAgentId || user?.id || '',
+          assignedAgentName: deal.assignedAgentName || user?.name || '',
+          referralSource: 'IRM Pipeline',
+          notes: deal.notes || (deal.value ? `Converted from Pipeline. Investment Amount: ₹${(deal.value || 0).toLocaleString('en-IN')}` : ''),
+          committedAUM: deal.value ? String(deal.value) : (deal.investmentRange || ''),
+          investmentMandate: deal.investorType || '',
+          riskTolerance: undefined,
+          createdAt: existingInv?.createdAt || new Date().toISOString(),
+        };
+        const savedInv = await apiSaveInvestor(invPayload);
+        if (savedInv?.id) {
+          updated.customerId = String(savedInv.id);
+        } else if (existingInv?.id) {
+          updated.customerId = String(existingInv.id);
+        }
+      } catch (err) {
+        console.warn('[PipelinePage] Error syncing investor on mark won:', err);
+      }
+    }
     try {
       await persistDeal(updated);
     } catch (e) {
@@ -548,7 +611,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                           {/* Footer: Investment range */}
                           <div className="irm-card-footer">
                             <span className="irm-card-investment-range">
-                              {deal.investmentRange || formatCurrency(deal.value)}
+                              {deal.investmentRange || (deal.value > 0 ? formatCurrency(deal.value) : '—')}
                             </span>
                           </div>
                         </div>
@@ -778,10 +841,35 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                     <TrendingUp size={12} /> Investment Capacity / Size
                   </span>
                   <span className="irm-detail-grid-value" style={{ color: '#10b981', fontWeight: 800 }}>
-                    {irmDetailDeal.investmentRange || formatCurrency(irmDetailDeal.value)}
+                    {irmDetailDeal.investmentRange || (irmDetailDeal.value > 0 ? formatCurrency(irmDetailDeal.value) : '—')}
                   </span>
                 </div>
-
+                <div className="irm-detail-grid-item">
+                  <span className="irm-detail-grid-label">
+                    Preferred Asset Class
+                  </span>
+                  <span className="irm-detail-grid-value">
+                    {irmDetailDeal.preferredAssetClass || '—'}
+                  </span>
+                </div>
+                <div className="irm-detail-grid-item">
+                  <span className="irm-detail-grid-label">
+                    Investor Structure / Mandate
+                  </span>
+                  <span className="irm-detail-grid-value">
+                    {irmDetailDeal.investorType || '—'}
+                  </span>
+                </div>
+                {irmDetailDeal.customerId && (
+                  <div className="irm-detail-grid-item">
+                    <span className="irm-detail-grid-label">
+                      Customer ID
+                    </span>
+                    <span className="irm-detail-grid-value" style={{ fontFamily: 'monospace' }}>
+                      #{irmDetailDeal.customerId}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 

@@ -321,35 +321,68 @@ public class EmailService : IEmailService
     {
         LastError = null;
 
-        if (string.IsNullOrWhiteSpace(toEmail))
+        // 1. Validate recipient email address format
+        var trimmedRecipient = toEmail?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(trimmedRecipient) || !MailAddress.TryCreate(trimmedRecipient, out var recipientAddr) || string.IsNullOrWhiteSpace(recipientAddr.Host) || !recipientAddr.Address.Contains('@'))
         {
-            _logger.LogWarning("Email sending skipped: recipient email is empty.");
-            LastError = "No recipient email address was provided.";
+            _logger.LogWarning("Email sending skipped: recipient email '{Recipient}' is invalid.", toEmail);
+            LastError = $"The specified recipient email address '{toEmail}' is not in the form required for an email address.";
             return false;
         }
 
         var cfg = Settings;
 
-        // Auto-resolve username: If user entered display name or username lacks @, use SenderEmail if it has @
-        var effectiveUsername = cfg.Username?.Trim() ?? string.Empty;
-        if (!effectiveUsername.Contains('@') && !string.IsNullOrWhiteSpace(cfg.SenderEmail) && cfg.SenderEmail.Contains('@'))
+        // Resolve SMTP configuration, prioritizing secure environment-based secrets
+        var effectiveUsername = (!string.IsNullOrWhiteSpace(cfg.Username) ? cfg.Username : (Environment.GetEnvironmentVariable("SMTP_USERNAME") ?? Environment.GetEnvironmentVariable("SmtpSettings__Username")))?.Trim() ?? string.Empty;
+        var effectivePassword = (!string.IsNullOrWhiteSpace(cfg.Password) ? cfg.Password : (Environment.GetEnvironmentVariable("SMTP_PASSWORD") ?? Environment.GetEnvironmentVariable("SmtpSettings__Password")))?.Replace(" ", "").Trim() ?? string.Empty;
+        var effectiveSender = (!string.IsNullOrWhiteSpace(cfg.SenderEmail) ? cfg.SenderEmail : (Environment.GetEnvironmentVariable("SMTP_SENDER_EMAIL") ?? Environment.GetEnvironmentVariable("SmtpSettings__SenderEmail")))?.Trim() ?? string.Empty;
+        var effectiveHost = (!string.IsNullOrWhiteSpace(cfg.Host) ? cfg.Host : (Environment.GetEnvironmentVariable("SMTP_HOST") ?? Environment.GetEnvironmentVariable("SmtpSettings__Host")))?.Trim() ?? "smtp.gmail.com";
+        var portVal = Environment.GetEnvironmentVariable("SMTP_PORT") ?? Environment.GetEnvironmentVariable("SmtpSettings__Port");
+        var effectivePort = int.TryParse(portVal, out var p) && p > 0 ? p : (cfg.Port > 0 ? cfg.Port : 587);
+        var senderDisplayName = (!string.IsNullOrWhiteSpace(cfg.SenderName) ? cfg.SenderName : (Environment.GetEnvironmentVariable("SMTP_SENDER_NAME") ?? Environment.GetEnvironmentVariable("SmtpSettings__SenderName")))?.Trim() ?? "NexusSales IRM Compliance";
+
+        // If Username is empty but SenderEmail is provided (or vice-versa), unify them
+        if (string.IsNullOrWhiteSpace(effectiveUsername) && !string.IsNullOrWhiteSpace(effectiveSender))
         {
-            effectiveUsername = cfg.SenderEmail.Trim();
+            effectiveUsername = effectiveSender;
+        }
+        else if (string.IsNullOrWhiteSpace(effectiveSender) && !string.IsNullOrWhiteSpace(effectiveUsername))
+        {
+            effectiveSender = effectiveUsername;
         }
 
-        var effectivePassword = cfg.Password?.Replace(" ", "").Trim() ?? string.Empty;
-
-        // Validate SMTP credentials
-        if (string.IsNullOrWhiteSpace(effectiveUsername) || string.IsNullOrWhiteSpace(effectivePassword))
+        // 2. Validate SMTP credentials configuration (detect empty or placeholder values)
+        if (string.IsNullOrWhiteSpace(effectiveUsername) || 
+            effectiveUsername.StartsWith("YOUR_SMTP", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(effectivePassword) ||
+            effectivePassword.StartsWith("YOUR_SMTP", StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogWarning("Real-time email sending simulated: SmtpSettings:Username or Password is not set in appsettings.json. Simulated dispatch to {Recipient}.", toEmail);
-            LastError = "The server has no SMTP username/password configured (SmtpSettings:Username / SmtpSettings:Password).";
+            _logger.LogWarning("Email delivery failed: SMTP credentials are not configured in environment secrets or SmtpSettings.");
+            LastError = "SMTP service is not configured. Please configure valid SMTP credentials via environment secrets (SMTP_USERNAME and SMTP_PASSWORD or SmtpSettings:Username and SmtpSettings:Password).";
+            return false;
+        }
+
+        // 3. Resolve and validate sender email address format
+        MailAddress? fromAddr = null;
+        if (!string.IsNullOrWhiteSpace(effectiveSender) && MailAddress.TryCreate(effectiveSender, out var parsedSender) && !string.IsNullOrWhiteSpace(parsedSender.Host) && parsedSender.Address.Contains('@'))
+        {
+            fromAddr = parsedSender;
+        }
+        else if (MailAddress.TryCreate(effectiveUsername, out var parsedUser) && !string.IsNullOrWhiteSpace(parsedUser.Host) && parsedUser.Address.Contains('@'))
+        {
+            fromAddr = parsedUser;
+        }
+
+        if (fromAddr == null)
+        {
+            _logger.LogWarning("Email delivery failed: neither SmtpSettings:SenderEmail / SMTP_SENDER_EMAIL ('{Sender}') nor Username ('{User}') is a valid email address.", effectiveSender, effectiveUsername);
+            LastError = $"The configured SMTP sender address is not in the form required for an email address. Please configure a valid email in environment secrets (SMTP_SENDER_EMAIL / SMTP_USERNAME).";
             return false;
         }
 
         try
         {
-            using var client = new SmtpClient(cfg.Host, cfg.Port)
+            using var client = new SmtpClient(effectiveHost, effectivePort)
             {
                 EnableSsl = cfg.EnableSsl,
                 Credentials = new NetworkCredential(effectiveUsername, effectivePassword),
@@ -357,28 +390,24 @@ public class EmailService : IEmailService
                 Timeout = 15000 // 15 seconds
             };
 
-            var senderEmail = !string.IsNullOrWhiteSpace(cfg.SenderEmail) && cfg.SenderEmail.Contains('@')
-                ? cfg.SenderEmail.Trim() 
-                : effectiveUsername;
-
             using var mail = new MailMessage
             {
-                From = new MailAddress(senderEmail, string.IsNullOrWhiteSpace(cfg.SenderName) ? "NexusSales IRM Compliance" : cfg.SenderName),
+                From = new MailAddress(fromAddr.Address, senderDisplayName),
                 Subject = subject,
                 Body = htmlBody,
                 IsBodyHtml = true
             };
 
-            mail.To.Add(new MailAddress(toEmail));
+            mail.To.Add(recipientAddr);
 
-            _logger.LogInformation("Dispatching real-time email via {Host}:{Port} as {Username} to {Recipient}...", cfg.Host, cfg.Port, effectiveUsername, toEmail);
+            _logger.LogInformation("Dispatching real-time email via {Host}:{Port} as {Sender} to {Recipient}...", cfg.Host, cfg.Port, fromAddr.Address, recipientAddr.Address);
             await client.SendMailAsync(mail, ct);
-            _logger.LogInformation("Email successfully delivered to {Recipient}!", toEmail);
+            _logger.LogInformation("Email successfully delivered to {Recipient}!", recipientAddr.Address);
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to deliver email to {Recipient} via {Host}:{Port} (User: {User})", toEmail, cfg.Host, cfg.Port, effectiveUsername);
+            _logger.LogError(ex, "Failed to deliver email to {Recipient} via {Host}:{Port} (User: {User})", recipientAddr.Address, cfg.Host, cfg.Port, effectiveUsername);
             var raw = ex.Message ?? string.Empty;
             var looksLikeAuth = raw.Contains("5.7.", StringComparison.OrdinalIgnoreCase)
                 || raw.Contains("535", StringComparison.OrdinalIgnoreCase)

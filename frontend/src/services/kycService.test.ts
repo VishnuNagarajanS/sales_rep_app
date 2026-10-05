@@ -82,4 +82,11 @@ describe('kycService', () => {
       expect(normalizeLegacyKycStatus('Assisted Draft')).toBe('Pending');
     });
   });
+
+  describe('getKycReviewData', () => {
+    it('returns null without returning fabricated mock fixtures or fallback data', async () => {
+      const { getKycReviewData } = await import('./kycService');
+      expect(getKycReviewData({ id: 'deal-123', customerName: 'Test Customer' })).toBeNull();
+    });
+  });
 });
