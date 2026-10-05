@@ -18,7 +18,7 @@ namespace backend.Controllers.GhlAdmin;
 /// </summary>
 [ApiController]
 [Route("api/ghl/deals")]
-[Authorize(Roles = "sales_executive,company_admin,sales_manager,super_admin,irm")]
+[Authorize(Roles = "sales_executive,company_admin,super_admin,irm")]
 public class GhlDealsController : ControllerBase
 {
     private static readonly HashSet<string> IrmStages = new(StringComparer.OrdinalIgnoreCase)
@@ -233,7 +233,7 @@ public class GhlDealsController : ControllerBase
             .Include(d => d.AssignedAgent)
             .ThenInclude(a => a.Role)
             .Include(d => d.Customer)
-            .FirstOrDefaultAsync(d => d.Id == id && d.CompanyId == _currentUser.CompanyId, ct);
+            .FirstOrDefaultAsync(d => d.Id == id && (!_currentUser.CompanyId.HasValue || d.CompanyId == _currentUser.CompanyId.Value), ct);
 
         if (deal == null)
             return NotFound(ApiResponse<GhlDealResponseDto>.FailureResult("Deal not found."));
@@ -276,7 +276,7 @@ public class GhlDealsController : ControllerBase
         var deal = await _db.GhlDeals
             .Include(d => d.AssignedAgent)
             .ThenInclude(a => a.Role)
-            .FirstOrDefaultAsync(d => d.Id == id && (isSuperAdmin || d.CompanyId == _currentUser.CompanyId), ct);
+            .FirstOrDefaultAsync(d => d.Id == id && (isSuperAdmin || !_currentUser.CompanyId.HasValue || d.CompanyId == _currentUser.CompanyId.Value), ct);
 
         if (deal == null)
             return NotFound(ApiResponse<bool>.FailureResult("Deal not found."));

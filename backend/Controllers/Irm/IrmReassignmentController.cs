@@ -64,7 +64,7 @@ internal class ReassignedIdsPayload
 
 [ApiController]
 [Route("api/irm/admin")]
-[Authorize(Roles = "company_admin,super_admin,sales_manager,admin")]
+[Authorize(Roles = "company_admin,super_admin,admin")]
 public class IrmReassignmentController : ControllerBase
 {
     private readonly ApplicationDbContext _db;

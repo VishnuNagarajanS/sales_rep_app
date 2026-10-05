@@ -5,7 +5,37 @@ public class PlatformRoleDto
     public string Id { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string Code { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public bool IsSystemRole { get; set; }
+    public bool IsActive { get; set; } = true;
     public List<string> Permissions { get; set; } = new();
+    public int PermissionsCount => Permissions?.Count ?? 0;
+    public int UsersCount { get; set; }
+    public string? CreatedBy { get; set; }
+    public string CreatedAt { get; set; } = string.Empty;
+    public string? UpdatedAt { get; set; }
+}
+
+public class CreateRoleRequestDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public bool IsActive { get; set; } = true;
+    public List<string> Permissions { get; set; } = new();
+}
+
+public class UpdateRoleRequestDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public bool? IsActive { get; set; }
+    public List<string>? Permissions { get; set; }
+}
+
+public class UpdateRoleStatusDto
+{
+    public bool IsActive { get; set; }
 }
 
 public class PlatformUserDto
@@ -49,4 +79,23 @@ public class UpdatePlatformUserDto
     public string? CompanyId { get; set; }
     public string? Designation { get; set; }
     public string? Status { get; set; }
+    public string? Password { get; set; }
+}
+
+public class AdminResetPasswordRequestDto
+{
+    public string? NewPassword { get; set; }
+}
+
+public class PermissionItemDto
+{
+    public string Key { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public string? Description { get; set; }
+}
+
+public class PermissionGroupDto
+{
+    public string Group { get; set; } = string.Empty;
+    public List<PermissionItemDto> Items { get; set; } = new();
 }

@@ -36,22 +36,40 @@ export const PlatformAuditPage: React.FC = () => {
   // Selected Log for Inspection
   const [inspectedLog, setInspectedLog] = useState<AuditLog | null>(null);
   const [isInspectDrawerOpen, setIsInspectDrawerOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const loadData = () => {
-    setTenants(superAdminService.getTenants());
-    applyFilters();
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadData = async () => {
+    try {
+      const allTenants = await superAdminService.fetchTenantsFromApi();
+      setTenants(allTenants);
+    } catch (err: any) {
+      console.warn('Could not load tenants for audit filters:', err);
+    }
+    await applyFilters();
   };
 
-  const applyFilters = () => {
-    const list = superAdminService.getAuditLogs({
-      companyId: selectedCompanyFilter,
-      action: selectedActionFilter,
-      module: selectedModuleFilter,
-      search: searchQuery,
-      from: fromDate ? new Date(fromDate).toISOString() : undefined,
-      to: toDate ? new Date(toDate + 'T23:59:59').toISOString() : undefined,
-    });
-    setLogs(list);
+  const applyFilters = async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const list = await superAdminService.fetchAuditLogsFromApi({
+        companyId: selectedCompanyFilter,
+        action: selectedActionFilter,
+        module: selectedModuleFilter,
+        search: searchQuery,
+        from: fromDate ? new Date(fromDate).toISOString() : undefined,
+        to: toDate ? new Date(toDate + 'T23:59:59').toISOString() : undefined,
+      });
+      setLogs(list);
+    } catch (err: any) {
+      console.error('Failed to load audit logs from API:', err);
+      setLoadError(err?.message || 'Failed to load audit logs from backend server.');
+      setLogs([]);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {

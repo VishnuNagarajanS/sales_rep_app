@@ -17,6 +17,7 @@ import { storageService } from '../../services/storageService';
 import { FEATURES } from '../../constants/features';
 import './TopBar.css';
 
+
 interface TopBarProps {
   onNavigate: (route: string, extraState?: any) => void;
   onOpenQuickCreate: (type: 'lead' | 'followup' | 'deal' | 'visit' | 'consultation') => void;
@@ -47,6 +48,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
 
   // User menu
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+
 
 
   // Sync notifications with tenant and user scoping
@@ -92,18 +94,18 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
     const scopedLeads = isIrm
       ? []
       : isExec
-      ? leads.filter(l => l.assignedAgentId === user?.id || l.assignedAgentName === user?.name)
-      : leads;
+        ? leads.filter(l => l.assignedAgentId === user?.id || l.assignedAgentName === user?.name)
+        : leads;
     const scopedCustomers = isIrm
       ? []
       : isExec
-      ? customers.filter(c => c.assignedAgentId === user?.id || c.assignedAgentName === user?.name)
-      : customers;
+        ? customers.filter(c => c.assignedAgentId === user?.id || c.assignedAgentName === user?.name)
+        : customers;
     const scopedDeals = isIrm
       ? []
       : isExec
-      ? deals.filter(d => d.assignedAgentId === user?.id || d.assignedAgentName === user?.name)
-      : deals;
+        ? deals.filter(d => d.assignedAgentId === user?.id || d.assignedAgentName === user?.name)
+        : deals;
     const scopedInvestors = (isExec || isIrm)
       ? investors.filter(i => i.assignedAgentId === user?.id || i.assignedAgentName === user?.name)
       : investors;
@@ -126,20 +128,6 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
       </svg>
       {/* Left: Global Search Input */}
       <div className="topbar-search-container" ref={searchRef}>
-        <div className="topbar-search-input-wrapper">
-          <Search size={16} className="topbar-search-icon" />
-          <input
-            type="text"
-            className="form-input topbar-search-input"
-            placeholder="Search leads, customers, deals, plots... (Press /)"
-            value={searchQuery}
-            onFocus={() => setIsSearchOpen(true)}
-            onChange={e => {
-              setSearchQuery(e.target.value);
-              setIsSearchOpen(true);
-            }}
-          />
-        </div>
 
         {/* Global Search Results Dropdown */}
         {isSearchOpen && searchResults && (

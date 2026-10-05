@@ -52,6 +52,28 @@ public class TenantConfiguration : IEntityTypeConfiguration<Tenant>
         builder.Property(t => t.IsActive)
             .HasDefaultValue(true);
 
+        builder.Property(t => t.Status)
+            .HasMaxLength(32)
+            .HasDefaultValue("Active");
+
+        builder.Property(t => t.LegalName)
+            .HasMaxLength(255);
+
+        builder.Property(t => t.Industry)
+            .HasMaxLength(128);
+
+        builder.Property(t => t.SubscriptionPlan)
+            .HasMaxLength(128);
+
+        builder.Property(t => t.CallEnabled)
+            .HasDefaultValue(true);
+
+        builder.Property(t => t.RecordingEnabled)
+            .HasDefaultValue(true);
+
+        builder.Property(t => t.TranscriptionEnabled)
+            .HasDefaultValue(true);
+
         builder.Property(t => t.CreatedAt)
             .HasDefaultValueSql("NOW()");
     }

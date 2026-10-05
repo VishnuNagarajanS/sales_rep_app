@@ -26,19 +26,29 @@ import './PlatformCallConfigPage.css';
 export const PlatformCallConfigPage: React.FC = () => {
   const [dids, setDids] = useState<TenantDidMapping[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [carrierSettings, setCarrierSettings] = useState<PlatformCarrierSettings>(() =>
-    superAdminService.getCarrierSettings()
-  );
+  const [carrierSettings, setCarrierSettings] = useState<PlatformCarrierSettings>({
+    primaryCarrier: '',
+    secondaryCarrier: '',
+    sipRealm: '',
+    webrtcGatewayUrl: '',
+    recordingRetentionDays: 0,
+    maxConcurrentChannels: 0,
+    emergencyRoutingEnabled: true,
+    whisperAiModel: '',
+  });
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isSavingCarrier, setIsSavingCarrier] = useState(false);
 
   // Modal State for DID Allocation
   const [isDidModalOpen, setIsDidModalOpen] = useState(false);
   const [editingDidId, setEditingDidId] = useState<string | null>(null);
-  const [didPhone, setDidPhone] = useState('+91 80 4700 800');
+  const [didPhone, setDidPhone] = useState('');
   const [didTenantId, setDidTenantId] = useState('');
   const [didRoutingStrategy, setDidRoutingStrategy] = useState<
     'Round-Robin' | 'Skill/Priority' | 'Least-Busy Rep' | 'Direct Extension'
   >('Round-Robin');
-  const [didQueueName, setDidQueueName] = useState('Inbound Queue');
+  const [didQueueName, setDidQueueName] = useState('');
   const [didEnableRecording, setDidEnableRecording] = useState(true);
   const [didEnableAiWhisper, setDidEnableAiWhisper] = useState(true);
   const [didChannels, setDidChannels] = useState(8);
@@ -55,10 +65,29 @@ export const PlatformCallConfigPage: React.FC = () => {
   // Success Feedback
   const [successMsg, setSuccessMsg] = useState('');
 
-  const loadData = () => {
-    setDids(superAdminService.getDidMappings());
-    setTenants(superAdminService.getTenants());
-    setCarrierSettings(superAdminService.getCarrierSettings());
+  const loadData = async () => {
+    setIsLoading(true);
+    setErrorMsg(null);
+    try {
+      const [allDids, allTenants, carrier] = await Promise.all([
+        superAdminService.fetchDidMappingsFromApi(),
+        superAdminService.fetchTenantsFromApi(),
+        superAdminService.fetchCarrierSettingsFromApi(),
+      ]);
+      setDids(allDids || []);
+      setTenants(allTenants || []);
+      if (carrier) {
+        setCarrierSettings(carrier);
+      }
+      if (allDids && allDids.length > 0) {
+        setSimulatedDid(prev => prev || allDids[0].phoneNumber);
+      }
+    } catch (err: any) {
+      console.error('Error fetching telephony config from API:', err);
+      setErrorMsg(err.message || 'Failed to load telephony configuration from backend database.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -74,10 +103,10 @@ export const PlatformCallConfigPage: React.FC = () => {
 
   const handleOpenAddDid = () => {
     setEditingDidId(null);
-    setDidPhone(`+91 80 4700 800${dids.length + 1}`);
-    setDidTenantId(tenants[0]?.id || '');
+    setDidPhone('');
+    setDidTenantId(tenants[0]?.id ? String(tenants[0].id) : '');
     setDidRoutingStrategy('Round-Robin');
-    setDidQueueName('Inbound Sales Queue');
+    setDidQueueName('');
     setDidEnableRecording(true);
     setDidEnableAiWhisper(true);
     setDidChannels(8);
@@ -96,88 +125,111 @@ export const PlatformCallConfigPage: React.FC = () => {
     setIsDidModalOpen(true);
   };
 
-  const handleSaveDid = () => {
+  const handleSaveDid = async () => {
     if (!didPhone.trim()) return;
 
-    const tenantObj = tenants.find(t => t.id === didTenantId);
-
-    if (editingDidId) {
-      superAdminService.updateDidMapping(editingDidId, {
-        phoneNumber: didPhone,
-        tenantId: didTenantId,
-        tenantName: tenantObj ? tenantObj.name : 'Unassigned Pool',
-        tenantSlug: tenantObj ? tenantObj.slug : '',
-        routingStrategy: didRoutingStrategy,
-        queueName: didQueueName,
-        enableRecording: didEnableRecording,
-        enableAiWhisper: didEnableAiWhisper,
-        channelsCount: didChannels,
-        status: didTenantId ? 'Online' : 'Reserved',
-      });
-      showSuccess(`DID hotline ${didPhone} configuration updated.`);
-    } else {
-      superAdminService.createDidMapping({
-        phoneNumber: didPhone,
-        tenantId: didTenantId,
-        tenantName: tenantObj ? tenantObj.name : 'Unassigned Pool',
-        tenantSlug: tenantObj ? tenantObj.slug : '',
-        routingStrategy: didRoutingStrategy,
-        queueName: didQueueName,
-        enableRecording: didEnableRecording,
-        enableAiWhisper: didEnableAiWhisper,
-        channelsCount: didChannels,
-        status: didTenantId ? 'Online' : 'Reserved',
-      });
-      showSuccess(`Virtual DID hotline ${didPhone} allocated.`);
+    try {
+      if (editingDidId) {
+        const updated = await superAdminService.updateDidMappingApi(editingDidId, {
+          phoneNumber: didPhone.trim(),
+          tenantId: didTenantId,
+          routingStrategy: didRoutingStrategy,
+          queueName: didQueueName.trim() || 'Inbound Queue',
+          enableRecording: didEnableRecording,
+          enableAiWhisper: didEnableAiWhisper,
+          channelsCount: didChannels,
+          status: didTenantId ? 'Online' : 'Reserved',
+        });
+        setDids(prev => prev.map(d => d.id === updated.id ? updated : d));
+        showSuccess(`DID hotline ${didPhone} configuration updated.`);
+      } else {
+        const created = await superAdminService.createDidMappingApi({
+          phoneNumber: didPhone.trim(),
+          tenantId: didTenantId,
+          routingStrategy: didRoutingStrategy,
+          queueName: didQueueName.trim() || 'Inbound Queue',
+          enableRecording: didEnableRecording,
+          enableAiWhisper: didEnableAiWhisper,
+          channelsCount: didChannels,
+          status: didTenantId ? 'Online' : 'Reserved',
+        });
+        setDids(prev => [...prev, created]);
+        showSuccess(`Virtual DID hotline ${didPhone} allocated.`);
+      }
+      setIsDidModalOpen(false);
+    } catch (err: any) {
+      alert(err.message || 'Failed to save virtual DID');
     }
-
-    setIsDidModalOpen(false);
   };
 
-  const handleDeleteDid = (did: TenantDidMapping) => {
+  const handleDeleteDid = async (did: TenantDidMapping) => {
     if (confirm(`Release virtual DID number "${did.phoneNumber}" back to reserve pool?`)) {
-      superAdminService.deleteDidMapping(did.id);
-      showSuccess(`DID ${did.phoneNumber} released.`);
+      try {
+        await superAdminService.deleteDidMappingApi(did.id);
+        setDids(prev => prev.filter(d => d.id !== did.id));
+        showSuccess(`DID ${did.phoneNumber} released.`);
+      } catch (err: any) {
+        alert(err.message || 'Failed to release DID');
+      }
     }
   };
 
-  const handleSaveCarrierSettings = () => {
-    superAdminService.updateCarrierSettings(carrierSettings);
-    showSuccess('Platform SIP Trunk carrier settings saved.');
+  const handleSaveCarrierSettings = async () => {
+    setIsSavingCarrier(true);
+    setErrorMsg(null);
+    try {
+      const saved = await superAdminService.updateCarrierSettingsApi(carrierSettings);
+      setCarrierSettings(saved);
+      showSuccess('Platform SIP Trunk carrier settings saved to PostgreSQL.');
+    } catch (err: any) {
+      alert(err.message || 'Failed to save carrier settings');
+    } finally {
+      setIsSavingCarrier(false);
+    }
   };
 
   const handleTestCarrier = async () => {
     setIsTestingCarrier(true);
     setTestResult(null);
-    const res = await superAdminService.testCarrierConnection();
-    setIsTestingCarrier(false);
-    setTestResult(res);
+    try {
+      const res = await superAdminService.testCarrierConnection();
+      setTestResult(res);
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        latencyMs: 0,
+        message: err.message || 'Telephony gateway connection failed.'
+      });
+    } finally {
+      setIsTestingCarrier(false);
+    }
   };
 
-  const handleRunSimulation = () => {
+  const handleRunSimulation = async () => {
     const targetDid = dids.find(d => d.phoneNumber === simulatedDid) || dids[0];
     if (!targetDid) return;
 
     setIsSimulating(true);
     setSimulationLog([]);
 
-    const steps = [
-      `[T+0.0s] Inbound call received on DID: ${targetDid.phoneNumber} from +91 98450 99881 (Bangalore caller ID)`,
-      `[T+0.2s] Carrier Gateway: Handshake verified with ${carrierSettings.primaryCarrier}`,
-      `[T+0.4s] Tenant Resolution: Mapping matched tenant organization -> "${targetDid.tenantName}" (ID: ${targetDid.tenantId || 'GLOBAL'})`,
-      `[T+0.6s] Queue Execution: Routing Strategy [${targetDid.routingStrategy}] dispatched to "${targetDid.queueName}"`,
-      `[T+0.8s] Speech Intelligence: Initializing Whisper-Large AI transcription stream and cloud voice recorder`,
-      `[T+1.0s] Agent Allocation: Candidate Rep found (Available, Priority #1). Ringing target WebRTC softphone... Call Connected!`,
-    ];
-
-    steps.forEach((msg, idx) => {
-      setTimeout(() => {
-        setSimulationLog(prev => [...prev, msg]);
-        if (idx === steps.length - 1) {
-          setIsSimulating(false);
-        }
-      }, (idx + 1) * 450);
-    });
+    try {
+      const res = await superAdminService.simulateInboundCall(targetDid.phoneNumber);
+      if (res && res.traceLogs && res.traceLogs.length > 0) {
+        res.traceLogs.forEach((msg, idx) => {
+          setTimeout(() => {
+            setSimulationLog(prev => [...prev, msg]);
+            if (idx === res.traceLogs.length - 1) {
+              setIsSimulating(false);
+            }
+          }, (idx + 1) * 350);
+        });
+      } else {
+        setIsSimulating(false);
+      }
+    } catch (err: any) {
+      setIsSimulating(false);
+      setSimulationLog([`[ERROR] Simulation failed: ${err.message || 'Carrier gateway trace unreachable'}`]);
+    }
   };
 
   return (
@@ -198,6 +250,12 @@ export const PlatformCallConfigPage: React.FC = () => {
           <Plus size={14} /> Allocate Virtual DID
         </button>
       </div>
+
+      {errorMsg && (
+        <div className="callconfig-success-alert animate-fade-in" style={{ background: 'rgba(239, 68, 68, 0.15)', borderColor: 'rgba(239, 68, 68, 0.35)', color: '#f87171' }}>
+          <AlertTriangle size={16} /> {errorMsg}
+        </div>
+      )}
 
       {successMsg && (
         <div className="callconfig-success-alert animate-fade-in">
@@ -231,7 +289,21 @@ export const PlatformCallConfigPage: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {dids.map(d => (
+              {isLoading && dids.length === 0 ? (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: '32px', color: '#94a3b8' }}>
+                    <Activity size={16} className="animate-spin" style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: '8px' }} />
+                    Loading virtual DIDs from database...
+                  </td>
+                </tr>
+              ) : dids.length === 0 ? (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: '32px', color: '#94a3b8' }}>
+                    No virtual DID hotlines allocated yet. Click 'Allocate Virtual DID' to add one.
+                  </td>
+                </tr>
+              ) : (
+                dids.map(d => (
                 <tr key={d.id} className="did-row">
                   <td>
                     <div className="did-phone-cell">
@@ -294,8 +366,9 @@ export const PlatformCallConfigPage: React.FC = () => {
                     </div>
                   </td>
                 </tr>
-              ))}
-            </tbody>
+              ))
+            )}
+          </tbody>
           </table>
         </div>
       </div>
@@ -322,10 +395,17 @@ export const PlatformCallConfigPage: React.FC = () => {
           </div>
 
           {testResult && (
-            <div className="test-result-banner animate-fade-in">
-              <CheckCircle2 size={16} color="#10b981" />
+            <div
+              className="test-result-banner animate-fade-in"
+              style={!testResult.success ? { background: 'rgba(239, 68, 68, 0.12)', borderColor: 'rgba(239, 68, 68, 0.35)', color: '#fca5a5' } : undefined}
+            >
+              {testResult.success ? (
+                <CheckCircle2 size={16} color="#10b981" />
+              ) : (
+                <AlertTriangle size={16} color="#ef4444" />
+              )}
               <div>
-                <strong>Handshake Verified ({testResult.latencyMs}ms):</strong> {testResult.message}
+                <strong>{testResult.success ? `Handshake Verified (${testResult.latencyMs}ms):` : `Gateway Unreachable (${testResult.latencyMs}ms):`}</strong> {testResult.message}
               </div>
             </div>
           )}
@@ -408,8 +488,13 @@ export const PlatformCallConfigPage: React.FC = () => {
           </div>
 
           <div className="carrier-footer-action">
-            <button className="btn btn-primary btn-sm" onClick={handleSaveCarrierSettings}>
-              <Save size={14} /> Save Carrier Configuration
+            <button
+              className="btn btn-primary btn-sm"
+              disabled={isSavingCarrier}
+              onClick={handleSaveCarrierSettings}
+            >
+              <Save size={14} className={isSavingCarrier ? 'animate-spin' : ''} />
+              {isSavingCarrier ? 'Saving Carrier...' : 'Save Carrier Configuration'}
             </button>
           </div>
         </div>

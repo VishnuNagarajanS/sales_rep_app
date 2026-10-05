@@ -213,6 +213,106 @@ public class EmailService : IEmailService
         return await SendEmailAsync(recipientEmail, subject, body, ct);
     }
 
+    public async Task<bool> SendPasswordResetEmailAsync(
+        string recipientEmail,
+        string recipientName,
+        string resetLink,
+        int expiryMinutes = 60,
+        CancellationToken ct = default)
+    {
+        var subject = "Reset Your Password - NexusSales Platform";
+        var displayName = string.IsNullOrWhiteSpace(recipientName) ? "there" : recipientName.Trim();
+
+        var body = $@"
+<!DOCTYPE html>
+<html lang=""en"">
+<head>
+  <meta charset=""UTF-8"">
+  <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
+  <title>Reset Your Password</title>
+</head>
+<body style=""margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;"">
+  <table role=""presentation"" border=""0"" cellpadding=""0"" cellspacing=""0"" width=""100%"" style=""background-color: #f1f5f9; padding: 40px 10px;"">
+    <tr>
+      <td align=""center"">
+        <table role=""presentation"" border=""0"" cellpadding=""0"" cellspacing=""0"" width=""100%"" style=""max-width: 580px; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);"">
+          <!-- Header -->
+          <tr>
+            <td style=""background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 32px 40px; text-align: left; border-bottom: 3px solid #0284c7;"">
+              <div style=""display: inline-block; background-color: #0284c7; color: #ffffff; font-weight: 800; font-size: 13px; padding: 4px 10px; border-radius: 6px; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px;"">
+                NexusSales Security
+              </div>
+              <h1 style=""margin: 0; color: #ffffff; font-size: 22px; font-weight: 700; letter-spacing: -0.5px;"">
+                Password Reset Request
+              </h1>
+              <p style=""margin: 6px 0 0 0; color: #94a3b8; font-size: 13px;"">
+                Secure Account Recovery
+              </p>
+            </td>
+          </tr>
+
+          <!-- Content Body -->
+          <tr>
+            <td style=""padding: 36px 40px;"">
+              <h2 style=""margin: 0 0 16px 0; color: #0f172a; font-size: 18px; font-weight: 600;"">
+                Hello {WebUtility.HtmlEncode(displayName)},
+              </h2>
+              <p style=""margin: 0 0 16px 0; color: #475569; font-size: 15px; line-height: 1.6;"">
+                We received a request to reset the password for your NexusSales Platform account associated with <strong>{WebUtility.HtmlEncode(recipientEmail)}</strong>.
+              </p>
+              <p style=""margin: 0 0 28px 0; color: #475569; font-size: 15px; line-height: 1.6;"">
+                Click the button below to choose a new password. This link is single-use and will expire in <strong>{expiryMinutes} minutes</strong>.
+              </p>
+
+              <!-- Button CTA -->
+              <table role=""presentation"" border=""0"" cellpadding=""0"" cellspacing=""0"" width=""100%"" style=""margin-bottom: 28px;"">
+                <tr>
+                  <td align=""center"">
+                    <a href=""{resetLink}"" target=""_blank"" style=""display: inline-block; background-color: #0284c7; color: #ffffff; font-size: 15px; font-weight: 600; text-decoration: none; padding: 14px 34px; border-radius: 8px; box-shadow: 0 2px 4px rgba(2, 132, 199, 0.4);"">
+                      Reset Password &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style=""margin: 0 0 8px 0; color: #64748b; font-size: 13px;"">
+                If the button above does not work, copy and paste this link into your browser:
+              </p>
+              <p style=""margin: 0 0 24px 0; word-break: break-all; background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 10px 14px; border-radius: 6px; font-size: 12px; color: #0284c7;"">
+                <a href=""{resetLink}"" style=""color: #0284c7; text-decoration: none;"">{resetLink}</a>
+              </p>
+
+              <!-- Security Notice -->
+              <div style=""background-color: #fef2f2; border: 1px solid #fee2e2; border-radius: 8px; padding: 14px 16px; margin-top: 24px;"">
+                <p style=""margin: 0; color: #991b1b; font-size: 13px; line-height: 1.5;"">
+                  <strong>Did not request this?</strong> If you didn't ask to reset your password, you can safely ignore this email. Your current password will remain unchanged and your account is secure.
+                </p>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style=""background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 20px 40px; text-align: center;"">
+              <p style=""margin: 0 0 4px 0; color: #64748b; font-size: 12px;"">
+                NexusSales Multi-Tenant Platform &bull; Automated Security Service
+              </p>
+              <p style=""margin: 0; color: #94a3b8; font-size: 11px;"">
+                This is an automated system email. Please do not reply directly to this message.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+";
+
+        return await SendEmailAsync(recipientEmail, subject, body, ct);
+    }
+
     public async Task<bool> SendEmailAsync(
         string toEmail,
         string subject,

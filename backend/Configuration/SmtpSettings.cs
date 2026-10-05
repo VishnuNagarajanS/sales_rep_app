@@ -11,4 +11,5 @@ public class SmtpSettings
     public string SenderEmail { get; set; } = string.Empty;
     public string Username { get; set; } = string.Empty;
     public string Password { get; set; } = string.Empty;
+    public string ClientBaseUrl { get; set; } = "http://localhost:5173";
 }

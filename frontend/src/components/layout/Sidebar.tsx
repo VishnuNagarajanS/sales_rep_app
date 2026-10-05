@@ -135,7 +135,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
         { id: 'admin-dashboard', label: 'Platform Console', icon: <LayoutDashboard size={18} /> },
         { id: 'admin-companies', label: 'Companies (Tenants)', icon: <Building2 size={18} /> },
         { id: 'admin-users', label: 'Cross-Tenant Users', icon: <Users size={18} /> },
-        { id: 'admin-roles', label: 'Roles & Matrix', icon: <Shield size={18} /> },
+        { id: 'admin-roles', label: 'Role Management', icon: <Shield size={18} /> },
         { id: 'admin-features', label: 'Feature Packages', icon: <Sparkles size={18} /> },
         { id: 'admin-call-config', label: 'Call Configuration', icon: <PhoneCall size={18} /> },
         { id: 'admin-audit', label: 'Platform Audit Logs', icon: <FileCheck size={18} /> },
@@ -444,6 +444,48 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
               {tenant?.name?.charAt(0) || 'T'}
             </div>
           )
+        ) : isSuperAdmin ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden' }}>
+            <div
+              style={{
+                width: 45,
+                height: 45,
+                borderRadius: 16,
+                background: 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 20,
+              }}
+            >
+              ⚡
+            </div>
+            <div style={{ overflow: 'hidden', whiteSpace: 'nowrap' }}>
+              <div
+                style={{
+                  fontFamily: 'var(--font-display)',
+                  fontWeight: 800,
+                  fontSize: 15,
+                  color: '#ffffff',
+                  letterSpacing: '-0.02em',
+                }}
+              >
+                Platform Operator
+              </div>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: '#94a3b8',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  fontWeight: 600,
+                }}
+              >
+                SUPER ADMIN CONSOLE
+              </div>
+            </div>
+          </div>
         ) : tenant?.slug === 'jamin' ? (
           <div style={{ display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
             <img

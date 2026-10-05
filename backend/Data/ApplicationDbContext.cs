@@ -42,6 +42,13 @@ public class ApplicationDbContext : DbContext
     /// <summary>Immutable audit log of every create/update/delete action across all tenants.</summary>
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
+    // ── Super Admin Platform Management Entities ─────────────────────────────
+    public DbSet<SubscriptionPackage> SubscriptionPackages => Set<SubscriptionPackage>();
+    public DbSet<CarrierSettings> CarrierSettings => Set<CarrierSettings>();
+    public DbSet<TenantDidMapping> TenantDidMappings => Set<TenantDidMapping>();
+    public DbSet<BroadcastAnnouncement> BroadcastAnnouncements => Set<BroadcastAnnouncement>();
+    public DbSet<PlatformSetting> PlatformSettings => Set<PlatformSetting>();
+
     // IRM Entities
     public DbSet<Investor> Investors => Set<Investor>();
     public DbSet<InvestorKyc> InvestorKycs => Set<InvestorKyc>();
@@ -98,12 +105,11 @@ public class ApplicationDbContext : DbContext
 
     private static void SeedData(ModelBuilder modelBuilder)
     {
-        // 1. Roles (Integer IDs 1, 2, 3, 4, 5)
+        // 1. Roles (Integer IDs 1, 2, 3, 4)
         var superAdminRoleId = 1;
         var companyAdminRoleId = 2;
         var salesExecutiveRoleId = 3;
         var irmRoleId = 4;
-        var salesManagerRoleId = 5;
 
         modelBuilder.Entity<Role>().HasData(
             new Role
@@ -111,6 +117,9 @@ public class ApplicationDbContext : DbContext
                 Id = superAdminRoleId,
                 Name = "Super Admin",
                 Code = "super_admin",
+                Description = "Platform operator with unrestricted access across all tenants.",
+                IsSystemRole = true,
+                IsActive = true,
                 Permissions = new List<string>
                 {
                     "leads.view", "leads.create", "leads.update", "leads.delete", "leads.assign", "leads.export", "leads.import", "leads.convert",
@@ -132,6 +141,9 @@ public class ApplicationDbContext : DbContext
                 Id = companyAdminRoleId,
                 Name = "Company Admin",
                 Code = "company_admin",
+                Description = "Tenant root administrator managing team users and company setup.",
+                IsSystemRole = true,
+                IsActive = true,
                 Permissions = new List<string>
                 {
                     "leads.view", "leads.create", "leads.update", "leads.delete", "leads.assign", "leads.export", "leads.import", "leads.convert",
@@ -149,27 +161,12 @@ public class ApplicationDbContext : DbContext
             },
             new Role
             {
-                Id = salesManagerRoleId,
-                Name = "Sales Manager",
-                Code = "sales_manager",
-                Permissions = new List<string>
-                {
-                    "leads.view", "leads.create", "leads.update", "leads.assign", "leads.export", "leads.convert",
-                    "customers.view", "customers.create", "customers.update",
-                    "deals.view", "deals.create", "deals.update",
-                    "calls.make", "calls.receive", "calls.view", "calls.recordings.play",
-                    "followups.view", "followups.create", "followups.update",
-                    "properties.view", "properties.update", "site_visits.view", "site_visits.create", "bookings.view", "bookings.create",
-                    "investors.view", "investors.create", "consultations.view", "consultations.create", "opportunities.view", "opportunities.create",
-                    "reports.view", "reports.export", "users.view"
-                },
-                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-            },
-            new Role
-            {
                 Id = salesExecutiveRoleId,
                 Name = "Sales Executive",
                 Code = "sales_executive",
+                Description = "Frontline sales representative executing dialer outreach.",
+                IsSystemRole = true,
+                IsActive = true,
                 Permissions = new List<string>
                 {
                     "leads.view", "leads.create", "leads.update", "leads.convert",
@@ -188,6 +185,9 @@ public class ApplicationDbContext : DbContext
                 Id = irmRoleId,
                 Name = "IRM",
                 Code = "irm",
+                Description = "Institutional Relationship Manager for HNW wealth & CRE.",
+                IsSystemRole = true,
+                IsActive = true,
                 Permissions = new List<string>
                 {
                     "leads.view", "leads.create", "followups.view", "followups.create", "followups.update",
@@ -427,6 +427,155 @@ public class ApplicationDbContext : DbContext
                 InvestmentAmount = "₹10 Cr",
                 PreferredAssetClass = "Commercial AIF",
                 CreatedAt = new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc)
+            }
+        );
+
+        // ── Super Admin Initial Seed Data ─────────────────────────────────────
+        modelBuilder.Entity<SubscriptionPackage>().HasData(
+            new SubscriptionPackage
+            {
+                Id = 1,
+                Name = "Starter CRM Tier",
+                Code = "starter_crm",
+                Description = "Essential inbound leads, customer directory, softphone calling, and follow-ups.",
+                Tier = "Starter",
+                PriceMonthly = 14999m,
+                Currency = "₹",
+                MaxUsers = 15,
+                MaxStorageGb = 50,
+                Features = new List<string> { "leads", "customers", "followups", "calls", "reports" },
+                IsPopular = false,
+                IsActive = true,
+                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            },
+            new SubscriptionPackage
+            {
+                Id = 2,
+                Name = "Plotted Land Operations Pro",
+                Code = "jamin_real_estate_pro",
+                Description = "Tailored for plotted development builders with interactive plot layouts, site visit logistics, and token bookings.",
+                Tier = "Growth",
+                PriceMonthly = 39999m,
+                Currency = "₹",
+                MaxUsers = 50,
+                MaxStorageGb = 250,
+                Features = new List<string> { "leads", "customers", "deals", "followups", "calls", "call-recording", "call-transcription", "properties", "site-visits", "bookings", "reports" },
+                IsPopular = true,
+                IsActive = true,
+                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            },
+            new SubscriptionPackage
+            {
+                Id = 3,
+                Name = "Wealth Advisory Enterprise Suite",
+                Code = "ghl_wealth_enterprise",
+                Description = "Engineered for institutional capital syndicates, private family offices, and CRE investment opportunities.",
+                Tier = "Enterprise",
+                PriceMonthly = 79999m,
+                Currency = "₹",
+                MaxUsers = 150,
+                MaxStorageGb = 1000,
+                Features = new List<string> { "leads", "customers", "deals", "followups", "calls", "call-recording", "call-transcription", "investors", "consultations", "investment-opportunities", "reports" },
+                IsPopular = false,
+                IsActive = true,
+                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            }
+        );
+
+        modelBuilder.Entity<CarrierSettings>().HasData(
+            new CarrierSettings
+            {
+                Id = 1,
+                PrimaryCarrier = "Twilio Elastic SIP Trunking (Mumbai AP-South)",
+                SecondaryCarrier = "Exotel Cloud Gateway (Failover Redundant)",
+                SipRealm = "sip.trunk.nexusplatform.io:5060",
+                WebrtcGatewayUrl = "wss://webrtc.nexusplatform.io/gateway",
+                RecordingRetentionDays = 180,
+                MaxConcurrentChannels = 100,
+                EmergencyRoutingEnabled = true,
+                WhisperAiModel = "OpenAI Whisper-Large-v3 (Self-Hosted on GPU cluster)",
+                PrimaryGatewayHost = "sip.trunk.nexusplatform.io",
+                FailoverGatewayHost = "gateway.exotel.com",
+                Status = "Active",
+                TestStatus = "Success",
+                LastTestedAt = new DateTime(2026, 9, 26, 10, 0, 0, DateTimeKind.Utc),
+                UpdatedAt = new DateTime(2026, 9, 26, 10, 0, 0, DateTimeKind.Utc)
+            }
+        );
+
+        modelBuilder.Entity<TenantDidMapping>().HasData(
+            new TenantDidMapping
+            {
+                Id = 1,
+                PhoneNumber = "+91 80 4700 8001",
+                TenantId = 1,
+                RoutingStrategy = "Skill/Priority",
+                QueueName = "HNW Wealth Advisory Queue",
+                EnableRecording = true,
+                EnableAiWhisper = true,
+                Status = "Online",
+                ChannelsCount = 8,
+                Notes = "Primary inbound trunk for HNW wealth consultations",
+                AllocatedAt = new DateTime(2026, 1, 10, 10, 0, 0, DateTimeKind.Utc),
+                CreatedAt = new DateTime(2026, 1, 10, 10, 0, 0, DateTimeKind.Utc)
+            },
+            new TenantDidMapping
+            {
+                Id = 2,
+                PhoneNumber = "+91 80 4700 8002",
+                TenantId = 2,
+                RoutingStrategy = "Round-Robin",
+                QueueName = "Plotted Enclaves Telecallers",
+                EnableRecording = true,
+                EnableAiWhisper = true,
+                Status = "Online",
+                ChannelsCount = 12,
+                Notes = "Buyer inquiry hotline for gated community layouts",
+                AllocatedAt = new DateTime(2026, 1, 15, 14, 30, 0, DateTimeKind.Utc),
+                CreatedAt = new DateTime(2026, 1, 15, 14, 30, 0, DateTimeKind.Utc)
+            },
+            new TenantDidMapping
+            {
+                Id = 3,
+                PhoneNumber = "+91 80 4700 8003",
+                TenantId = null,
+                RoutingStrategy = "Round-Robin",
+                QueueName = "Available DID Reserve",
+                EnableRecording = false,
+                EnableAiWhisper = false,
+                Status = "Reserved",
+                ChannelsCount = 4,
+                Notes = "Spare DID number for next enterprise onboarding",
+                AllocatedAt = new DateTime(2026, 2, 1, 9, 0, 0, DateTimeKind.Utc),
+                CreatedAt = new DateTime(2026, 2, 1, 9, 0, 0, DateTimeKind.Utc)
+            }
+        );
+
+        modelBuilder.Entity<BroadcastAnnouncement>().HasData(
+            new BroadcastAnnouncement
+            {
+                Id = 1,
+                Title = "Platform Infrastructure Upgrade",
+                Message = "Scheduled zero-downtime database optimization today at 11:30 PM IST. Telephony routing will not be interrupted.",
+                Priority = "info",
+                TargetAudience = "all",
+                TargetTenantId = null,
+                IsActive = true,
+                CreatedBy = "Yanosh",
+                CreatedAt = new DateTime(2026, 9, 26, 8, 0, 0, DateTimeKind.Utc),
+                ExpiresAt = new DateTime(2026, 12, 31, 23, 59, 59, DateTimeKind.Utc)
+            }
+        );
+
+        modelBuilder.Entity<PlatformSetting>().HasData(
+            new PlatformSetting
+            {
+                Id = 1,
+                Key = "maintenance_mode",
+                Value = "{\"enabled\":false,\"message\":\"Platform under scheduled maintenance.\",\"bypassSecret\":\"nexus-admin-2026\"}",
+                Description = "Global platform maintenance mode switch",
+                UpdatedBy = "Super Admin",
+                UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             }
         );
     }

@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sidebar } from '../components/layout/Sidebar';
 import { TopBar } from '../components/layout/TopBar';
 import { useTheme } from '../context/ThemeContext';
+import { superAdminService } from '../services/superAdminService';
+import { BroadcastAnnouncement } from '../types';
 import {
   IncomingCallPopup,
   InCallBar,
@@ -22,6 +24,38 @@ export const SalesLayout: React.FC<SalesLayoutProps> = ({
   children,
 }) => {
   const { theme } = useTheme();
+  const [announcements, setAnnouncements] = useState<BroadcastAnnouncement[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadAnnouncements = async () => {
+      try {
+        const live = await superAdminService.fetchActiveAnnouncementsFromApi();
+        if (isMounted) {
+          if (live && live.length > 0) {
+            setAnnouncements(live);
+            return;
+          }
+          const raw = localStorage.getItem('nexus_admin_announcements');
+          const anns = raw ? JSON.parse(raw) : [];
+          setAnnouncements(anns.filter((a: any) => a.isActive));
+        }
+      } catch {
+        if (isMounted) {
+          const raw = localStorage.getItem('nexus_admin_announcements');
+          const anns = raw ? JSON.parse(raw) : [];
+          setAnnouncements(anns.filter((a: any) => a.isActive));
+        }
+      }
+    };
+
+    loadAnnouncements();
+    window.addEventListener('nexus_admin_updated', loadAnnouncements);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('nexus_admin_updated', loadAnnouncements);
+    };
+  }, []);
 
   return (
     <div className={`app-container ${theme === 'dark' ? 'dark-theme' : ''}`}>
@@ -35,19 +69,13 @@ export const SalesLayout: React.FC<SalesLayoutProps> = ({
 
         {/* Global Broadcast Announcement Banner (from Super Admin) */}
         {(() => {
-          try {
-            const raw = localStorage.getItem('nexus_admin_announcements');
-            const anns = raw ? JSON.parse(raw) : [];
-            const active = anns.find((a: any) => a.isActive);
-            if (!active) return null;
-            return (
-              <div className={`platform-broadcast-banner priority-${active.priority}`}>
-                <span>📢 <strong>{active.title}:</strong> {active.message}</span>
-              </div>
-            );
-          } catch {
-            return null;
-          }
+          const active = announcements.find(a => a.isActive) || announcements[0];
+          if (!active) return null;
+          return (
+            <div className={`platform-broadcast-banner priority-${active.priority}`}>
+              <span>📢 <strong>{active.title}:</strong> {active.message}</span>
+            </div>
+          );
         })()}
 
         {/* Support Impersonation Mode Banner (Super Admin "View as Company") */}
