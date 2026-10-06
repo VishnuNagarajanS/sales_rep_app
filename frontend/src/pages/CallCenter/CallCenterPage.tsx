@@ -322,7 +322,11 @@ export const CallCenterPage: React.FC = () => {
           </div>
 
           <div className="form-group">
+            <label htmlFor="softphone-dial-number" style={{ display: 'none' }}>Dial Phone Number</label>
             <input
+              id="softphone-dial-number"
+              name="dialNumber"
+              aria-label="Dial Phone Number"
               type="text"
               className="form-input"
               style={{ height: 42, fontSize: 16, fontWeight: 700, textAlign: 'center', letterSpacing: '0.05em' }}
@@ -333,7 +337,11 @@ export const CallCenterPage: React.FC = () => {
           </div>
 
           <div className="form-group">
+            <label htmlFor="softphone-contact-name" style={{ display: 'none' }}>Contact Name</label>
             <input
+              id="softphone-contact-name"
+              name="contactName"
+              aria-label="Contact Name (optional)"
               type="text"
               className="form-input"
               style={{ fontSize: 12 }}

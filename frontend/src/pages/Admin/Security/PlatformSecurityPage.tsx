@@ -508,12 +508,16 @@ export const PlatformSecurityPage: React.FC = () => {
                   ) : (
                     <form onSubmit={handleDisableMfa} style={{ display: 'flex', gap: 10, alignItems: 'center', maxWidth: 420 }}>
                       <input
+                        id="mfa-disable-code"
+                        name="disableCode"
                         type="text"
+                        aria-label="Current 6-digit code or recovery code"
                         placeholder="Current 6-digit code or recovery code"
                         className="form-control"
                         value={disableCode}
                         onChange={(e) => setDisableCode(e.target.value)}
                         required
+                        autoComplete="one-time-code"
                         style={{ background: '#090d16', border: '1px solid #334155', color: '#fff', padding: '8px 12px', borderRadius: 6 }}
                       />
                       <button type="submit" className="btn btn-danger btn-sm" style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: 6 }}>
@@ -552,13 +556,17 @@ export const PlatformSecurityPage: React.FC = () => {
                       <h4 style={{ color: '#f8fafc', margin: '8px 0 0 0' }}>Step 2: Enter 6-digit Code to Confirm</h4>
                       <div style={{ display: 'flex', gap: 10, maxWidth: 360 }}>
                         <input
+                          id="mfa-verify-code"
+                          name="mfaVerifyCode"
                           type="text"
+                          aria-label="6-digit verification code"
                           maxLength={6}
                           placeholder="123456"
                           className="form-control"
                           value={mfaVerifyCode}
                           onChange={(e) => setMfaVerifyCode(e.target.value.replace(/\D/g, ''))}
                           required
+                          autoComplete="one-time-code"
                           style={{
                             background: '#090d16',
                             border: '1px solid #38bdf8',
@@ -591,7 +599,10 @@ export const PlatformSecurityPage: React.FC = () => {
               <div style={{ position: 'relative', width: 280 }}>
                 <Search size={14} style={{ position: 'absolute', left: 10, top: 11, color: '#64748b' }} />
                 <input
+                  id="security-event-search"
+                  name="eventSearch"
                   type="text"
+                  aria-label="Search security events"
                   placeholder="Search events, emails, IPs..."
                   className="form-control"
                   value={eventSearch}
@@ -612,6 +623,9 @@ export const PlatformSecurityPage: React.FC = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Filter size={14} style={{ color: '#64748b' }} />
                 <select
+                  id="security-event-severity-filter"
+                  name="eventSeverity"
+                  aria-label="Filter by event severity"
                   value={eventSeverity}
                   onChange={(e) => {
                     setEventSeverity(e.target.value);

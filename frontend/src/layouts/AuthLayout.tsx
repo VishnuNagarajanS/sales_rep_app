@@ -107,11 +107,14 @@ export const AuthLayout: React.FC = () => {
               ) : (
                 <form onSubmit={handleForgotSubmit} className="auth-form">
                   <div className="form-group">
-                    <label className="form-label auth-form-label">Registered Work Email</label>
+                    <label htmlFor="forgot-email" className="form-label auth-form-label">Registered Work Email</label>
                     <div className="auth-input-wrapper">
                       <Mail size={15} className="auth-input-icon" />
                       <input
+                        id="forgot-email"
+                        name="email"
                         type="email"
+                        autoComplete="email"
                         className="form-input auth-input-field"
                         placeholder="name@company.com"
                         value={forgotEmail}
@@ -243,11 +246,14 @@ export const AuthLayout: React.FC = () => {
               {/* Standard Form */}
               <form onSubmit={handleSubmit} className="auth-form">
                 <div className="form-group">
-                  <label className="form-label auth-form-label">Work Email</label>
+                  <label htmlFor="login-email" className="form-label auth-form-label">Work Email</label>
                   <div className="auth-input-wrapper">
                     <Mail size={15} className="auth-input-icon" />
                     <input
+                      id="login-email"
+                      name="email"
                       type="email"
+                      autoComplete="username"
                       className="form-input auth-input-field"
                       placeholder="name@company.com"
                       value={email}
@@ -259,7 +265,7 @@ export const AuthLayout: React.FC = () => {
 
                 <div className="form-group">
                   <div className="auth-password-header">
-                    <label className="form-label auth-form-label">Password</label>
+                    <label htmlFor="login-password" className="form-label auth-form-label">Password</label>
                     <button
                       type="button"
                       className="auth-forgot-link"
@@ -278,7 +284,10 @@ export const AuthLayout: React.FC = () => {
                   <div className="auth-input-wrapper">
                     <Lock size={15} className="auth-input-icon" />
                     <input
+                      id="login-password"
+                      name="password"
                       type="password"
+                      autoComplete="current-password"
                       className="form-input auth-input-field"
                       placeholder="••••••••••••"
                       value={password}

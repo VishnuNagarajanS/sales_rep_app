@@ -369,10 +369,12 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
 
             {/* Recipient Selection */}
             <div className="form-group">
-              <label className="form-label">
+              <label htmlFor="notif-target-recipient" className="form-label">
                 <UserCheck size={14} color="var(--primary-600)" /> Target Recipient (Within {tenant?.name})
               </label>
               <select
+                id="notif-target-recipient"
+                name="targetRecipient"
                 className="form-select alert-form-input"
                 value={targetRecipient}
                 onChange={e => setTargetRecipient(e.target.value)}
@@ -396,7 +398,7 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
 
             {/* Priority Selector Cards */}
             <div className="form-group">
-              <label className="form-label">Priority / Alert Level</label>
+              <div className="form-label">Priority / Alert Level</div>
               <div className="alert-priority-cards-grid">
                 <div
                   className={`priority-card urgent ${priority === 'urgent' ? 'selected' : ''}`}
@@ -426,8 +428,10 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
 
             {/* Category / Type */}
             <div className="form-group">
-              <label className="form-label">Notification Category</label>
+              <label htmlFor="notif-category" className="form-label">Notification Category</label>
               <select
+                id="notif-category"
+                name="category"
                 className="form-select alert-form-input"
                 value={category}
                 onChange={e => setCategory(e.target.value as any)}
@@ -442,10 +446,12 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
 
             {/* Title */}
             <div className="form-group">
-              <label className="form-label">
+              <label htmlFor="notif-title" className="form-label">
                 Alert Title <span style={{ color: '#dc2626' }}>*</span>
               </label>
               <input
+                id="notif-title"
+                name="title"
                 type="text"
                 className="form-input alert-form-input"
                 placeholder="e.g. Urgent: Complete all overdue follow-ups by 5:00 PM"
@@ -459,10 +465,12 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
 
             {/* Message Body */}
             <div className="form-group">
-              <label className="form-label">
+              <label htmlFor="notif-message" className="form-label">
                 Detailed Message <span style={{ color: '#dc2626' }}>*</span>
               </label>
               <textarea
+                id="notif-message"
+                name="message"
                 className="form-textarea alert-form-input"
                 rows={3}
                 placeholder="Write the full message or instructions for the team..."
@@ -476,10 +484,12 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
 
             {/* Action Link Preset */}
             <div className="form-group">
-              <label className="form-label">
+              <label htmlFor="notif-action-link" className="form-label">
                 <FileText size={14} color="var(--text-muted)" /> Action Destination Link (Optional)
               </label>
               <select
+                id="notif-action-link"
+                name="actionLink"
                 className="form-select alert-form-input"
                 value={actionLink}
                 onChange={e => setActionLink(e.target.value)}

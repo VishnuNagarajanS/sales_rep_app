@@ -698,12 +698,14 @@ export const CompanyUsersPage: React.FC = () => {
           <form onSubmit={handleCreateOrInvite} className="company-user-form">
             <div className="company-user-form-row">
               <div className="form-group">
-                <label className="form-label">Full Name *</label>
+                <label htmlFor="invite-name" className="form-label">Full Name *</label>
                 <input
                   id="invite-name"
+                  name="name"
                   type="text"
                   className="form-input"
                   required
+                  autoComplete="name"
                   value={inviteName}
                   onChange={e => setInviteName(e.target.value)}
                   placeholder="e.g. Sumanth Hegde"
@@ -711,12 +713,14 @@ export const CompanyUsersPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Corporate Email Address *</label>
+                <label htmlFor="invite-email" className="form-label">Corporate Email Address *</label>
                 <input
                   id="invite-email"
+                  name="email"
                   type="email"
                   className={`form-input${inviteError ? ' is-invalid' : ''}`}
                   required
+                  autoComplete="email"
                   value={inviteEmail}
                   onChange={e => {
                     setInviteEmail(e.target.value);
@@ -730,10 +734,13 @@ export const CompanyUsersPage: React.FC = () => {
 
             <div className="company-user-form-row">
               <div className="form-group">
-                <label className="form-label">Contact Phone</label>
+                <label htmlFor="invite-phone" className="form-label">Contact Phone</label>
                 <input
+                  id="invite-phone"
+                  name="phone"
                   type="text"
                   className="form-input"
+                  autoComplete="tel"
                   value={invitePhone}
                   onChange={e => setInvitePhone(e.target.value)}
                   placeholder="+91 98450 00000"
@@ -741,8 +748,10 @@ export const CompanyUsersPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Designation / Title</label>
+                <label htmlFor="invite-designation" className="form-label">Designation / Title</label>
                 <input
+                  id="invite-designation"
+                  name="designation"
                   type="text"
                   className="form-input"
                   value={inviteDesignation}
@@ -753,9 +762,10 @@ export const CompanyUsersPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Assign Operational Role *</label>
+              <label htmlFor="invite-role" className="form-label">Assign Operational Role *</label>
               <select
                 id="invite-role"
+                name="role"
                 className="form-select"
                 value={inviteRole}
                 onChange={e => setInviteRole(e.target.value as RoleCode)}
@@ -769,10 +779,11 @@ export const CompanyUsersPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Onboarding & Credential Mode</label>
+              <div className="form-label">Onboarding & Credential Mode</div>
               <div style={{ display: 'flex', gap: '16px', marginTop: '4px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
+                <label htmlFor="creation-mode-invite" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
                   <input
+                    id="creation-mode-invite"
                     type="radio"
                     name="creationMode"
                     value="invite"
@@ -781,8 +792,9 @@ export const CompanyUsersPage: React.FC = () => {
                   />
                   Send Email Invitation Link
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
+                <label htmlFor="creation-mode-instant" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
                   <input
+                    id="creation-mode-instant"
                     type="radio"
                     name="creationMode"
                     value="instant_password"
@@ -841,20 +853,26 @@ export const CompanyUsersPage: React.FC = () => {
         {editingUser && (
           <div className="company-user-form">
             <div className="form-group">
-              <label className="form-label">Full Name</label>
+              <label htmlFor="edit-user-fullname" className="form-label">Full Name</label>
               <input
+                id="edit-user-fullname"
+                name="name"
                 type="text"
                 className="form-input"
+                autoComplete="name"
                 value={editName}
                 onChange={e => setEditName(e.target.value)}
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label">Corporate Email (Read Only)</label>
+              <label htmlFor="edit-user-corp-email" className="form-label">Corporate Email (Read Only)</label>
               <input
+                id="edit-user-corp-email"
+                name="email"
                 type="email"
                 className="form-input"
+                autoComplete="email"
                 value={editingUser.email}
                 disabled
                 style={{ opacity: 0.7 }}
@@ -863,18 +881,23 @@ export const CompanyUsersPage: React.FC = () => {
 
             <div className="company-user-form-row">
               <div className="form-group">
-                <label className="form-label">Contact Phone</label>
+                <label htmlFor="edit-user-contact-phone" className="form-label">Contact Phone</label>
                 <input
+                  id="edit-user-contact-phone"
+                  name="phone"
                   type="text"
                   className="form-input"
+                  autoComplete="tel"
                   value={editPhone}
                   onChange={e => setEditPhone(e.target.value)}
                 />
               </div>
 
               <div className="form-group">
-                <label className="form-label">Designation / Title</label>
+                <label htmlFor="edit-user-title" className="form-label">Designation / Title</label>
                 <input
+                  id="edit-user-title"
+                  name="designation"
                   type="text"
                   className="form-input"
                   value={editDesignation}
@@ -884,9 +907,10 @@ export const CompanyUsersPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Assigned Role</label>
+              <label htmlFor="edit-user-role-select" className="form-label">Assigned Role</label>
               <select
                 id="edit-user-role-select"
+                name="roleCode"
                 className="form-select"
                 value={editRoleCode}
                 onChange={e => setEditRoleCode(e.target.value as RoleCode)}

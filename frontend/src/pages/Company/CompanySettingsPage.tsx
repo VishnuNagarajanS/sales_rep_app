@@ -85,8 +85,10 @@ export const CompanySettingsPage: React.FC = () => {
           <h3 className="company-settings-card-title">General Organization Profile</h3>
 
           <div className="form-group">
-            <label className="form-label">Legal Organization Name</label>
+            <label htmlFor="company-settings-name" className="form-label">Legal Organization Name</label>
             <input
+              id="company-settings-name"
+              name="companyName"
               type="text"
               className="form-input"
               value={companyName}
@@ -95,8 +97,10 @@ export const CompanySettingsPage: React.FC = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Industry Subtitle / Tagline</label>
+            <label htmlFor="company-settings-tagline" className="form-label">Industry Subtitle / Tagline</label>
             <input
+              id="company-settings-tagline"
+              name="tagline"
               type="text"
               className="form-input"
               value={tagline}
@@ -106,8 +110,10 @@ export const CompanySettingsPage: React.FC = () => {
 
           <div className="company-settings-grid-2">
             <div className="form-group">
-              <label className="form-label">Primary Timezone</label>
+              <label htmlFor="company-settings-timezone" className="form-label">Primary Timezone</label>
               <input
+                id="company-settings-timezone"
+                name="timezone"
                 type="text"
                 className="form-input"
                 value={timezone}
@@ -115,8 +121,10 @@ export const CompanySettingsPage: React.FC = () => {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Calling Business Hours</label>
+              <label htmlFor="company-settings-hours" className="form-label">Calling Business Hours</label>
               <input
+                id="company-settings-hours"
+                name="businessHours"
                 type="text"
                 className="form-input"
                 value={businessHours}

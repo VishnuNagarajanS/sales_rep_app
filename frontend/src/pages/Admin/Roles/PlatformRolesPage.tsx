@@ -607,8 +607,11 @@ export const PlatformRolesPage: React.FC = () => {
             <div className="roles-search-box">
               <Search size={16} className="search-icon" />
               <input
+                id="roles-search-input"
+                name="searchQuery"
                 type="text"
                 className="roles-search-input"
+                aria-label="Search roles by name, code, or description"
                 placeholder="Search roles by name, code, or description..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
@@ -810,8 +813,11 @@ export const PlatformRolesPage: React.FC = () => {
             <div className="roles-search-box">
               <Search size={16} className="search-icon" />
               <input
+                id="roles-matrix-search"
+                name="matrixSearchQuery"
                 type="text"
                 className="roles-search-input"
+                aria-label="Search permissions by name, key, or description"
                 placeholder="Search permissions by name, key, or description..."
                 value={matrixSearchQuery}
                 onChange={e => setMatrixSearchQuery(e.target.value)}
@@ -819,7 +825,10 @@ export const PlatformRolesPage: React.FC = () => {
             </div>
 
             <select
+              id="roles-matrix-group-filter"
+              name="matrixGroupFilter"
               className="roles-group-select"
+              aria-label="Filter by functional module"
               value={matrixGroupFilter}
               onChange={e => setMatrixGroupFilter(e.target.value)}
             >
@@ -871,8 +880,11 @@ export const PlatformRolesPage: React.FC = () => {
 
                             return (
                               <td key={r.code} className="matrix-checkbox-cell">
-                                <label className={`matrix-toggle-label ${isSuperAdmin ? 'locked' : ''}`}>
+                                <label htmlFor={`perm-matrix-${r.code}-${item.key}`} className={`matrix-toggle-label ${isSuperAdmin ? 'locked' : ''}`}>
                                   <input
+                                    id={`perm-matrix-${r.code}-${item.key}`}
+                                    name={`perm_${r.code}_${item.key}`}
+                                    aria-label={`Permission ${item.label} for role ${r.name}`}
                                     type="checkbox"
                                     checked={isGranted || isSuperAdmin}
                                     disabled={isSuperAdmin}
@@ -951,8 +963,10 @@ export const PlatformRolesPage: React.FC = () => {
             {/* General Info Grid */}
             <div className="role-form-grid">
               <div className="form-group">
-                <label className="form-label required">Role Name</label>
+                <label htmlFor="role-create-name" className="form-label required">Role Name</label>
                 <input
+                  id="role-create-name"
+                  name="name"
                   type="text"
                   className="form-control"
                   placeholder="e.g. Sales Team Lead"
@@ -963,8 +977,10 @@ export const PlatformRolesPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label required">Role Code (Stable Identifier)</label>
+                <label htmlFor="role-create-code" className="form-label required">Role Code (Stable Identifier)</label>
                 <input
+                  id="role-create-code"
+                  name="code"
                   type="text"
                   className="form-control font-mono"
                   placeholder="SALES_TEAM_LEAD"
@@ -978,8 +994,10 @@ export const PlatformRolesPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Role Description</label>
+              <label htmlFor="role-create-description" className="form-label">Role Description</label>
               <textarea
+                id="role-create-description"
+                name="description"
                 className="form-control"
                 rows={2}
                 placeholder="Team lead responsible for managing sales representatives and assigned leads."
@@ -989,10 +1007,11 @@ export const PlatformRolesPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Status</label>
+              <div className="form-label">Status</div>
               <div className="role-status-radio-group">
-                <label className="radio-option">
+                <label htmlFor="role-create-status-active" className="radio-option">
                   <input
+                    id="role-create-status-active"
                     type="radio"
                     name="createStatus"
                     checked={createIsActive}
@@ -1000,8 +1019,9 @@ export const PlatformRolesPage: React.FC = () => {
                   />
                   <span>Active (Assignable to users)</span>
                 </label>
-                <label className="radio-option">
+                <label htmlFor="role-create-status-inactive" className="radio-option">
                   <input
+                    id="role-create-status-inactive"
                     type="radio"
                     name="createStatus"
                     checked={!createIsActive}
@@ -1026,8 +1046,11 @@ export const PlatformRolesPage: React.FC = () => {
                   <div className="permissions-filter-input-wrap">
                     <Search size={14} className="text-muted" />
                     <input
+                      id="role-create-perm-filter"
+                      name="permFilter"
                       type="text"
                       className="permissions-filter-input"
+                      aria-label="Filter permissions"
                       placeholder="Filter permissions..."
                       value={permModalSearch}
                       onChange={e => setPermModalSearch(e.target.value)}
@@ -1110,8 +1133,10 @@ export const PlatformRolesPage: React.FC = () => {
                           {group.items.map(item => {
                             const isChecked = createSelectedPermissions.includes(item.key);
                             return (
-                              <label key={item.key} className={`perm-checkbox-item ${isChecked ? 'checked' : ''}`}>
+                              <label key={item.key} htmlFor={`role-create-perm-${item.key}`} className={`perm-checkbox-item ${isChecked ? 'checked' : ''}`}>
                                 <input
+                                  id={`role-create-perm-${item.key}`}
+                                  name={`perm_${item.key}`}
                                   type="checkbox"
                                   checked={isChecked}
                                   onChange={() => handleToggleCreatePermission(item.key)}
@@ -1196,8 +1221,10 @@ export const PlatformRolesPage: React.FC = () => {
             {/* General Info Grid */}
             <div className="role-form-grid">
               <div className="form-group">
-                <label className="form-label required">Role Name</label>
+                <label htmlFor="role-edit-name" className="form-label required">Role Name</label>
                 <input
+                  id="role-edit-name"
+                  name="name"
                   type="text"
                   className="form-control"
                   value={editName}
@@ -1207,9 +1234,11 @@ export const PlatformRolesPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Role Code (Immutable)</label>
+                <label htmlFor="role-edit-code" className="form-label">Role Code (Immutable)</label>
                 <div className="input-locked-group">
                   <input
+                    id="role-edit-code"
+                    name="code"
                     type="text"
                     className="form-control font-mono"
                     value={editingRole.code}
@@ -1222,8 +1251,10 @@ export const PlatformRolesPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Role Description</label>
+              <label htmlFor="role-edit-description" className="form-label">Role Description</label>
               <textarea
+                id="role-edit-description"
+                name="description"
                 className="form-control"
                 rows={2}
                 value={editDescription}
@@ -1233,10 +1264,11 @@ export const PlatformRolesPage: React.FC = () => {
 
             {!editingRole.isSystemRole && (
               <div className="form-group">
-                <label className="form-label">Status</label>
+                <div className="form-label">Status</div>
                 <div className="role-status-radio-group">
-                  <label className="radio-option">
+                  <label htmlFor="role-edit-status-active" className="radio-option">
                     <input
+                      id="role-edit-status-active"
                       type="radio"
                       name="editStatus"
                       checked={editIsActive}
@@ -1244,8 +1276,9 @@ export const PlatformRolesPage: React.FC = () => {
                     />
                     <span>Active (Assignable to users)</span>
                   </label>
-                  <label className="radio-option">
+                  <label htmlFor="role-edit-status-inactive" className="radio-option">
                     <input
+                      id="role-edit-status-inactive"
                       type="radio"
                       name="editStatus"
                       checked={!editIsActive}
@@ -1271,8 +1304,11 @@ export const PlatformRolesPage: React.FC = () => {
                   <div className="permissions-filter-input-wrap">
                     <Search size={14} className="text-muted" />
                     <input
+                      id="role-edit-perm-filter"
+                      name="permFilter"
                       type="text"
                       className="permissions-filter-input"
+                      aria-label="Filter permissions"
                       placeholder="Filter permissions..."
                       value={permModalSearch}
                       onChange={e => setPermModalSearch(e.target.value)}
@@ -1355,8 +1391,10 @@ export const PlatformRolesPage: React.FC = () => {
                           {group.items.map(item => {
                             const isChecked = editSelectedPermissions.includes(item.key);
                             return (
-                              <label key={item.key} className={`perm-checkbox-item ${isChecked ? 'checked' : ''}`}>
+                              <label key={item.key} htmlFor={`role-edit-perm-${item.key}`} className={`perm-checkbox-item ${isChecked ? 'checked' : ''}`}>
                                 <input
+                                  id={`role-edit-perm-${item.key}`}
+                                  name={`edit_perm_${item.key}`}
                                   type="checkbox"
                                   checked={isChecked}
                                   onChange={() => handleToggleEditPermission(item.key)}

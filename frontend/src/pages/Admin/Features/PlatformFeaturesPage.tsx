@@ -333,8 +333,11 @@ export const PlatformFeaturesPage: React.FC = () => {
           <div className="card catalog-search-card">
             <Search size={16} className="search-icon" />
             <input
+              id="feature-catalog-search"
+              name="catalogSearch"
               type="text"
               className="catalog-search-input"
+              aria-label="Search feature catalog"
               placeholder="Search feature catalog by keyword or operational category..."
               value={searchCatalogQuery}
               onChange={e => setSearchCatalogQuery(e.target.value)}
@@ -377,8 +380,10 @@ export const PlatformFeaturesPage: React.FC = () => {
           <div className="pkg-modal-content">
             <div className="form-grid-two">
               <div className="form-group">
-                <label className="form-label required">Package Name</label>
+                <label htmlFor="package-name" className="form-label required">Package Name</label>
                 <input
+                  id="package-name"
+                  name="packageName"
                   type="text"
                   className="form-control"
                   placeholder="e.g. Commercial Brokerage Pro"
@@ -393,8 +398,10 @@ export const PlatformFeaturesPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label required">Unique Package Code</label>
+                <label htmlFor="package-code" className="form-label required">Unique Package Code</label>
                 <input
+                  id="package-code"
+                  name="packageCode"
                   type="text"
                   className="form-control font-mono"
                   placeholder="commercial_brokerage_pro"
@@ -404,8 +411,10 @@ export const PlatformFeaturesPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Commercial Tier</label>
+                <label htmlFor="package-tier" className="form-label">Commercial Tier</label>
                 <select
+                  id="package-tier"
+                  name="packageTier"
                   className="form-control"
                   value={pkgTier}
                   onChange={e => setPkgTier(e.target.value as any)}
@@ -417,8 +426,10 @@ export const PlatformFeaturesPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label required">Monthly Price (₹ INR)</label>
+                <label htmlFor="package-price" className="form-label required">Monthly Price (₹ INR)</label>
                 <input
+                  id="package-price"
+                  name="packagePrice"
                   type="number"
                   className="form-control"
                   value={pkgPrice}
@@ -427,8 +438,10 @@ export const PlatformFeaturesPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Maximum Users Cap</label>
+                <label htmlFor="package-max-users" className="form-label">Maximum Users Cap</label>
                 <input
+                  id="package-max-users"
+                  name="maxUsers"
                   type="number"
                   className="form-control"
                   value={pkgMaxUsers}
@@ -437,8 +450,10 @@ export const PlatformFeaturesPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Max Cloud Storage (GB)</label>
+                <label htmlFor="package-max-storage" className="form-label">Max Cloud Storage (GB)</label>
                 <input
+                  id="package-max-storage"
+                  name="maxStorage"
                   type="number"
                   className="form-control"
                   value={pkgMaxStorage}
@@ -447,8 +462,10 @@ export const PlatformFeaturesPage: React.FC = () => {
               </div>
 
               <div className="form-group span-2">
-                <label className="form-label">Package Description</label>
+                <label htmlFor="package-description" className="form-label">Package Description</label>
                 <textarea
+                  id="package-description"
+                  name="packageDescription"
                   className="form-control"
                   rows={2}
                   value={pkgDesc}
@@ -459,13 +476,15 @@ export const PlatformFeaturesPage: React.FC = () => {
 
             {/* Feature Checklist */}
             <div className="modal-feature-checklist-section">
-              <label className="form-label required">Bundle Modules Included in this Package</label>
+              <div className="form-label required">Bundle Modules Included in this Package</div>
               <div className="modal-checklist-grid">
                 {featureCatalog.map(f => {
                   const isChecked = pkgSelectedFeatures.includes(f.key);
                   return (
-                    <label key={f.key} className="modal-check-item">
+                    <label key={f.key} htmlFor={`pkg-feature-${f.key}`} className="modal-check-item">
                       <input
+                        id={`pkg-feature-${f.key}`}
+                        name={`feature_${f.key}`}
                         type="checkbox"
                         checked={isChecked}
                         onChange={() => {

@@ -797,8 +797,10 @@ export const PlatformSystemPage: React.FC = () => {
                   </h4>
                   <div className="config-grid-two">
                     <div className="form-group">
-                      <label className="form-label required">Platform Display Name</label>
+                      <label htmlFor="config-platform-name" className="form-label required">Platform Display Name</label>
                       <input
+                        id="config-platform-name"
+                        name="platformName"
                         type="text"
                         className="form-control"
                         value={configForm.platformName || ''}
@@ -810,8 +812,10 @@ export const PlatformSystemPage: React.FC = () => {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label required">Global Support Email</label>
+                      <label htmlFor="config-support-email" className="form-label required">Global Support Email</label>
                       <input
+                        id="config-support-email"
+                        name="supportEmail"
                         type="email"
                         className="form-control"
                         value={configForm.supportEmail || ''}
@@ -823,8 +827,10 @@ export const PlatformSystemPage: React.FC = () => {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label required">Default Timezone</label>
+                      <label htmlFor="config-default-timezone" className="form-label required">Default Timezone</label>
                       <select
+                        id="config-default-timezone"
+                        name="defaultTimezone"
                         className="form-control"
                         value={configForm.defaultTimezone || 'Asia/Kolkata (IST)'}
                         onChange={e => setConfigForm({ ...configForm, defaultTimezone: e.target.value })}
@@ -840,8 +846,10 @@ export const PlatformSystemPage: React.FC = () => {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label required">Inactivity Session Timeout (Minutes)</label>
+                      <label htmlFor="config-session-timeout" className="form-label required">Inactivity Session Timeout (Minutes)</label>
                       <input
+                        id="config-session-timeout"
+                        name="sessionTimeoutMinutes"
                         type="number"
                         min="5"
                         max="1440"
@@ -862,8 +870,10 @@ export const PlatformSystemPage: React.FC = () => {
                   </h4>
                   <div className="config-grid-two">
                     <div className="form-group">
-                      <label className="form-label required">Max KYC & Media Upload Size (MB)</label>
+                      <label htmlFor="config-max-upload-size" className="form-label required">Max KYC & Media Upload Size (MB)</label>
                       <input
+                        id="config-max-upload-size"
+                        name="maxUploadSizeMb"
                         type="number"
                         min="1"
                         max="100"
@@ -876,8 +886,10 @@ export const PlatformSystemPage: React.FC = () => {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label required">JWT Token Expiration (Minutes)</label>
+                      <label htmlFor="config-token-expiration" className="form-label required">JWT Token Expiration (Minutes)</label>
                       <input
+                        id="config-token-expiration"
+                        name="tokenExpirationMinutes"
                         type="number"
                         min="15"
                         max="480"
@@ -890,8 +902,10 @@ export const PlatformSystemPage: React.FC = () => {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label required">Minimum Password Length</label>
+                      <label htmlFor="config-password-min-length" className="form-label required">Minimum Password Length</label>
                       <input
+                        id="config-password-min-length"
+                        name="passwordMinLength"
                         type="number"
                         min="8"
                         max="32"
@@ -904,8 +918,10 @@ export const PlatformSystemPage: React.FC = () => {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label required">Call Recording Retention Window (Days)</label>
+                      <label htmlFor="config-recording-retention" className="form-label required">Call Recording Retention Window (Days)</label>
                       <input
+                        id="config-recording-retention"
+                        name="recordingRetentionDays"
                         type="number"
                         min="7"
                         max="365"
@@ -1114,10 +1130,13 @@ export const PlatformSystemPage: React.FC = () => {
                                 return (
                                   <div className="ann-switch-cell" title={tooltipText}>
                                     <label
+                                      htmlFor={`ann-toggle-${ann.id}`}
                                       className={`switch-control ${isLocked ? 'switch-disabled' : ''}`}
                                       title={tooltipText}
                                     >
                                       <input
+                                        id={`ann-toggle-${ann.id}`}
+                                        name={`ann-toggle-${ann.id}`}
                                         type="checkbox"
                                         checked={ann.isActive}
                                         disabled={isActionInProgress || isLocked}
@@ -1170,8 +1189,10 @@ export const PlatformSystemPage: React.FC = () => {
         >
           <div className="ann-modal-form">
             <div className="form-group">
-              <label className="form-label required">Announcement Headline</label>
+              <label htmlFor="ann-title" className="form-label required">Announcement Headline</label>
               <input
+                id="ann-title"
+                name="annTitle"
                 type="text"
                 className="form-control"
                 placeholder="e.g. Scheduled Infrastructure Maintenance Notice"
@@ -1181,8 +1202,10 @@ export const PlatformSystemPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label required">Broadcast Message Text</label>
+              <label htmlFor="ann-message" className="form-label required">Broadcast Message Text</label>
               <textarea
+                id="ann-message"
+                name="annMessage"
                 className="form-control"
                 rows={3}
                 placeholder="Database maintenance scheduled at 11:30 PM IST. Telephony routing will not be interrupted."
@@ -1193,8 +1216,10 @@ export const PlatformSystemPage: React.FC = () => {
 
             <div className="form-grid-two">
               <div className="form-group">
-                <label className="form-label">Banner Priority Level</label>
+                <label htmlFor="ann-priority" className="form-label">Banner Priority Level</label>
                 <select
+                  id="ann-priority"
+                  name="annPriority"
                   className="form-control"
                   value={annPriority}
                   onChange={e => setAnnPriority(e.target.value as any)}
@@ -1206,8 +1231,10 @@ export const PlatformSystemPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Target Audience</label>
+                <label htmlFor="ann-audience" className="form-label">Target Audience</label>
                 <select
+                  id="ann-audience"
+                  name="annAudience"
                   className="form-control"
                   value={annAudience}
                   onChange={e => setAnnAudience(e.target.value as any)}

@@ -663,6 +663,9 @@ export const InCallBar: React.FC = () => {
           {/* ── Quick notes ── */}
           <div className="incall-notes-container">
             <input
+              id="active-call-quick-note"
+              name="quickNote"
+              aria-label="Quick call note"
               type="text"
               className="form-input incall-notes-input"
               placeholder="Quick call note..."
@@ -735,6 +738,9 @@ export const InCallBar: React.FC = () => {
                 onClick={(e) => e.stopPropagation()}
               >
                 <input
+                  id="transfer-search-agent"
+                  name="searchAgent"
+                  aria-label={isIrm ? 'Search agent by name' : 'Search IRM by name'}
                   type="text"
                   autoFocus
                   placeholder={isIrm ? 'Search agent by name...' : 'Search IRM by name...'}
@@ -849,10 +855,12 @@ export const InCallBar: React.FC = () => {
                   <div style={{ fontSize: 15, fontWeight: 600, color: '#f8fafc', marginBottom: 12 }}>
                     Connect {pendingIrm.name} to this call
                   </div>
-                  <label style={{ display: 'block', fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>
+                  <label htmlFor="transfer-reason" style={{ display: 'block', fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>
                     {isIrm ? 'Reason for Connecting Agent *' : 'Reason for Consultation *'}
                   </label>
                   <textarea
+                    id="transfer-reason"
+                    name="transferReason"
                     autoFocus
                     rows={3}
                     placeholder={isIrm ? 'Enter reason for connecting agent...' : 'Enter reason for consultation...'}
@@ -949,6 +957,9 @@ export const InCallBar: React.FC = () => {
             <div className="incall-meet-link-box">
               <div className="incall-meet-link-input-row">
                 <input
+                  id="conference-meet-link"
+                  name="meetLink"
+                  aria-label="Google Meet link"
                   type="text"
                   className="form-input incall-meet-input"
                   placeholder="Paste the Meet link here to share it"
@@ -1179,7 +1190,7 @@ export const DispositionModal: React.FC = () => {
       <div className="disposition-form-container">
         {/* Disposition Selector */}
         <div className="form-group">
-          <label className="form-label">Call Outcome / Disposition *</label>
+          <div className="form-label">Call Outcome / Disposition *</div>
           {isFollowupCall && (
             <p className="disposition-followup-context-hint">
               Follow-up call — outcomes restricted to relevant results.
@@ -1213,8 +1224,10 @@ export const DispositionModal: React.FC = () => {
         {/* Call Notes */}
         {!(disposition === 'Not Interested' || disposition === 'Wrong Number') && (
           <div className="form-group">
-            <label className="form-label">Call Discussion Summary & Notes</label>
+            <label htmlFor="disposition-call-notes" className="form-label">Call Discussion Summary & Notes</label>
             <textarea
+              id="disposition-call-notes"
+              name="callNotes"
               className="form-textarea"
               rows={3}
               placeholder="Key discussion points, customer objections, next steps..."
@@ -1227,8 +1240,10 @@ export const DispositionModal: React.FC = () => {
         {/* Reason Box for Not Interested / Wrong Number */}
         {(disposition === 'Not Interested' || disposition === 'Wrong Number') && (
           <div className="form-group">
-            <label className="form-label">Reason *</label>
+            <label htmlFor="disposition-specific-reason" className="form-label">Reason *</label>
             <textarea
+              id="disposition-specific-reason"
+              name="dispositionReason"
               className="form-textarea"
               rows={2}
               placeholder={disposition === 'Not Interested' ? 'Why are they not interested?' : 'Details about the wrong number...'}
@@ -1246,8 +1261,10 @@ export const DispositionModal: React.FC = () => {
               className="disposition-followup-header"
               style={{ marginBottom: scheduleFollowup ? 12 : 0 }}
             >
-              <label className="disposition-followup-label">
+              <label htmlFor="disposition-schedule-followup" className="disposition-followup-label">
                 <input
+                  id="disposition-schedule-followup"
+                  name="scheduleFollowup"
                   type="checkbox"
                   checked={scheduleFollowup}
                   onChange={e => setScheduleFollowup(e.target.checked)}
@@ -1261,8 +1278,10 @@ export const DispositionModal: React.FC = () => {
             {scheduleFollowup && (
               <div className="disposition-followup-fields">
                 <div className="form-group">
-                  <label className="form-label">Follow-up Date</label>
+                  <label htmlFor="disposition-followup-date" className="form-label">Follow-up Date</label>
                   <input
+                    id="disposition-followup-date"
+                    name="followupDate"
                     type="date"
                     className="form-input"
                     value={followupDate}
@@ -1270,8 +1289,10 @@ export const DispositionModal: React.FC = () => {
                   />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Follow-up Time</label>
+                  <label htmlFor="disposition-followup-time" className="form-label">Follow-up Time</label>
                   <input
+                    id="disposition-followup-time"
+                    name="followupTime"
                     type="time"
                     className="form-input"
                     value={followupTime}
@@ -1279,8 +1300,10 @@ export const DispositionModal: React.FC = () => {
                   />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Priority</label>
+                  <label htmlFor="disposition-followup-priority" className="form-label">Priority</label>
                   <select
+                    id="disposition-followup-priority"
+                    name="followupPriority"
                     className="form-select"
                     value={followupPriority}
                     onChange={e => setFollowupPriority(e.target.value as any)}

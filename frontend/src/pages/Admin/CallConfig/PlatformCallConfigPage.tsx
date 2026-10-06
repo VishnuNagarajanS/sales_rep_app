@@ -430,8 +430,10 @@ export const PlatformCallConfigPage: React.FC = () => {
 
           <div className="carrier-form-grid">
             <div className="form-group">
-              <label className="form-label">Primary SIP Carrier Gateway</label>
+              <label htmlFor="carrier-primary" className="form-label">Primary SIP Carrier Gateway</label>
               <input
+                id="carrier-primary"
+                name="primaryCarrier"
                 type="text"
                 className="form-control"
                 value={carrierSettings.primaryCarrier}
@@ -442,8 +444,10 @@ export const PlatformCallConfigPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Failover Backup Gateway</label>
+              <label htmlFor="carrier-secondary" className="form-label">Failover Backup Gateway</label>
               <input
+                id="carrier-secondary"
+                name="secondaryCarrier"
                 type="text"
                 className="form-control"
                 value={carrierSettings.secondaryCarrier}
@@ -454,8 +458,10 @@ export const PlatformCallConfigPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">SIP Realm & Domain</label>
+              <label htmlFor="carrier-sip-realm" className="form-label">SIP Realm & Domain</label>
               <input
+                id="carrier-sip-realm"
+                name="sipRealm"
                 type="text"
                 className="form-control font-mono"
                 value={carrierSettings.sipRealm}
@@ -466,8 +472,10 @@ export const PlatformCallConfigPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">WebRTC Signaling Gateway</label>
+              <label htmlFor="carrier-webrtc-gateway" className="form-label">WebRTC Signaling Gateway</label>
               <input
+                id="carrier-webrtc-gateway"
+                name="webrtcGatewayUrl"
                 type="text"
                 className="form-control font-mono"
                 value={carrierSettings.webrtcGatewayUrl}
@@ -478,8 +486,10 @@ export const PlatformCallConfigPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Cloud Call Recording Retention (Days)</label>
+              <label htmlFor="carrier-recording-retention" className="form-label">Cloud Call Recording Retention (Days)</label>
               <input
+                id="carrier-recording-retention"
+                name="recordingRetentionDays"
                 type="number"
                 className="form-control"
                 value={carrierSettings.recordingRetentionDays}
@@ -493,8 +503,10 @@ export const PlatformCallConfigPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Speech-to-Text Transcription AI Model</label>
+              <label htmlFor="carrier-whisper-model" className="form-label">Speech-to-Text Transcription AI Model</label>
               <input
+                id="carrier-whisper-model"
+                name="whisperAiModel"
                 type="text"
                 className="form-control"
                 value={carrierSettings.whisperAiModel}
@@ -529,8 +541,10 @@ export const PlatformCallConfigPage: React.FC = () => {
 
           <div className="simulator-controls">
             <div className="form-group">
-              <label className="form-label">Select Inbound DID to Test</label>
+              <label htmlFor="simulator-did" className="form-label">Select Inbound DID to Test</label>
               <select
+                id="simulator-did"
+                name="simulatedDid"
                 className="form-control"
                 value={simulatedDid}
                 onChange={e => setSimulatedDid(e.target.value)}
@@ -592,8 +606,10 @@ export const PlatformCallConfigPage: React.FC = () => {
         >
           <div className="did-modal-content">
             <div className="form-group">
-              <label className="form-label required">Inbound DID Number (E.164 Format)</label>
+              <label htmlFor="did-phone-number" className="form-label required">Inbound DID Number (E.164 Format)</label>
               <input
+                id="did-phone-number"
+                name="phoneNumber"
                 type="text"
                 className="form-control font-mono"
                 placeholder="+91 80 4700 8004"
@@ -603,8 +619,10 @@ export const PlatformCallConfigPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Assign to Tenant Organization</label>
+              <label htmlFor="did-tenant-id" className="form-label">Assign to Tenant Organization</label>
               <select
+                id="did-tenant-id"
+                name="tenantId"
                 className="form-control"
                 value={didTenantId}
                 onChange={e => setDidTenantId(e.target.value)}
@@ -620,8 +638,10 @@ export const PlatformCallConfigPage: React.FC = () => {
 
             <div className="form-grid-two">
               <div className="form-group">
-                <label className="form-label">Routing Strategy</label>
+                <label htmlFor="did-routing-strategy" className="form-label">Routing Strategy</label>
                 <select
+                  id="did-routing-strategy"
+                  name="routingStrategy"
                   className="form-control"
                   value={didRoutingStrategy}
                   onChange={e => setDidRoutingStrategy(e.target.value as any)}
@@ -634,8 +654,10 @@ export const PlatformCallConfigPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Concurrent SIP Trunks</label>
+                <label htmlFor="did-concurrent-channels" className="form-label">Concurrent SIP Trunks</label>
                 <input
+                  id="did-concurrent-channels"
+                  name="channels"
                   type="number"
                   className="form-control"
                   value={didChannels}
@@ -645,8 +667,10 @@ export const PlatformCallConfigPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Queue Name</label>
+              <label htmlFor="did-queue-name" className="form-label">Queue Name</label>
               <input
+                id="did-queue-name"
+                name="queueName"
                 type="text"
                 className="form-control"
                 value={didQueueName}
@@ -655,18 +679,22 @@ export const PlatformCallConfigPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Telephony Features</label>
+              <div className="form-label">Telephony Features</div>
               <div className="checkbox-stack">
-                <label className="checkbox-row">
+                <label htmlFor="did-enable-recording" className="checkbox-row">
                   <input
+                    id="did-enable-recording"
+                    name="enableRecording"
                     type="checkbox"
                     checked={didEnableRecording}
                     onChange={e => setDidEnableRecording(e.target.checked)}
                   />
                   <span>Enable Cloud Voice Call Recording</span>
                 </label>
-                <label className="checkbox-row">
+                <label htmlFor="did-enable-ai-whisper" className="checkbox-row">
                   <input
+                    id="did-enable-ai-whisper"
+                    name="enableAiWhisper"
                     type="checkbox"
                     checked={didEnableAiWhisper}
                     onChange={e => setDidEnableAiWhisper(e.target.checked)}

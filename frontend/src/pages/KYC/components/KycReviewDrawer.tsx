@@ -745,7 +745,12 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
               <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)' }}>
                 Explain to <strong>{deal.customerName}</strong> what needs to be updated or re-uploaded. An SMS &amp; WhatsApp link will be dispatched automatically.
               </p>
+              <label htmlFor="kyc-correction-instructions" className="sr-only">
+                Correction Instructions
+              </label>
               <textarea
+                id="kyc-correction-instructions"
+                name="correctionInstructions"
                 className="kyc-link-textarea"
                 value={correctionNote}
                 onChange={e => setCorrectionNote(e.target.value)}

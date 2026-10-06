@@ -985,6 +985,8 @@ export const CustomerKycApp: React.FC = () => {
               {otpDigits.map((digit, idx) => (
                 <input
                   key={idx}
+                  id={`ckyc-otp-digit-${idx + 1}`}
+                  name={`otpDigit${idx + 1}`}
                   ref={el => {
                     otpInputRefs.current[idx] = el;
                   }}
@@ -1132,7 +1134,9 @@ export const CustomerKycApp: React.FC = () => {
                   <label className="ckyc-form-label" htmlFor="w-name">Investor Full Name *</label>
                   <input
                     id="w-name"
+                    name="investorName"
                     type="text"
+                    autoComplete="name"
                     className={`ckyc-input${formErrors.investorName ? ' ckyc-input-error' : ''}`}
                     value={formData.investorName}
                     onChange={e => handleInputChange('investorName', e.target.value)}
@@ -1144,7 +1148,9 @@ export const CustomerKycApp: React.FC = () => {
                   <label className="ckyc-form-label" htmlFor="w-phone">Phone Number *</label>
                   <input
                     id="w-phone"
+                    name="phone"
                     type="text"
+                    autoComplete="tel"
                     placeholder="10-digit mobile number"
                     className={`ckyc-input${formErrors.phone ? ' ckyc-input-error' : ''}`}
                     value={formData.phone}
@@ -1157,7 +1163,9 @@ export const CustomerKycApp: React.FC = () => {
                   <label className="ckyc-form-label" htmlFor="w-email">Email Address *</label>
                   <input
                     id="w-email"
+                    name="email"
                     type="email"
+                    autoComplete="email"
                     className={`ckyc-input${formErrors.email ? ' ckyc-input-error' : ''}`}
                     value={formData.email}
                     onChange={e => handleInputChange('email', e.target.value)}
@@ -1169,6 +1177,7 @@ export const CustomerKycApp: React.FC = () => {
                   <label className="ckyc-form-label" htmlFor="w-gender">Gender</label>
                   <select
                     id="w-gender"
+                    name="gender"
                     className="ckyc-input"
                     value={formData.gender}
                     onChange={e => handleInputChange('gender', e.target.value)}
@@ -1183,6 +1192,7 @@ export const CustomerKycApp: React.FC = () => {
                   <label className="ckyc-form-label" htmlFor="w-occ">Occupation / Source of Wealth *</label>
                   <input
                     id="w-occ"
+                    name="occupation"
                     type="text"
                     className={`ckyc-input${formErrors.occupation ? ' ckyc-input-error' : ''}`}
                     value={formData.occupation}
@@ -1205,6 +1215,7 @@ export const CustomerKycApp: React.FC = () => {
                   <label className="ckyc-form-label" htmlFor="w-pan">Permanent Account Number (PAN) *</label>
                   <input
                     id="w-pan"
+                    name="panNumber"
                     type="text"
                     maxLength={10}
                     autoCapitalize="characters"
@@ -1225,6 +1236,7 @@ export const CustomerKycApp: React.FC = () => {
                   <label className="ckyc-form-label" htmlFor="w-pan-name">Full Name as per PAN *</label>
                   <input
                     id="w-pan-name"
+                    name="nameAsPerPan"
                     type="text"
                     placeholder="Full name as printed on PAN card"
                     className={`ckyc-input${formErrors.nameAsPerPan ? ' ckyc-input-error' : ''}`}
@@ -1238,6 +1250,7 @@ export const CustomerKycApp: React.FC = () => {
                   <label className="ckyc-form-label" htmlFor="w-father-name">Father's Full Name</label>
                   <input
                     id="w-father-name"
+                    name="fatherName"
                     type="text"
                     placeholder="Father's full name"
                     className="ckyc-input"
@@ -1252,6 +1265,7 @@ export const CustomerKycApp: React.FC = () => {
                   </label>
                   <input
                     id="w-aadhaar"
+                    name="aadhaarNumber"
                     type="text"
                     maxLength={14}
                     placeholder="12-digit Aadhaar UID"
@@ -1266,7 +1280,9 @@ export const CustomerKycApp: React.FC = () => {
                   <label className="ckyc-form-label" htmlFor="w-dob">Date of Birth * (must be 18+)</label>
                   <input
                     id="w-dob"
+                    name="dob"
                     type="date"
+                    autoComplete="bday"
                     className={`ckyc-input${formErrors.dob ? ' ckyc-input-error' : ''}`}
                     value={formData.dob}
                     onChange={e => handleInputChange('dob', e.target.value)}
@@ -1278,6 +1294,8 @@ export const CustomerKycApp: React.FC = () => {
                   <label className="ckyc-form-label" htmlFor="w-addr">Permanent Address *</label>
                   <textarea
                     id="w-addr"
+                    name="address"
+                    autoComplete="street-address"
                     className={`ckyc-input${formErrors.address ? ' ckyc-input-error' : ''}`}
                     placeholder="Door / Flat No., Building, Street, Locality"
                     style={{ minHeight: 70, resize: 'vertical' }}
@@ -1292,7 +1310,9 @@ export const CustomerKycApp: React.FC = () => {
                     <label className="ckyc-form-label" htmlFor="w-city">City</label>
                     <input
                       id="w-city"
+                      name="city"
                       type="text"
+                      autoComplete="address-level2"
                       placeholder="e.g. Mumbai"
                       className="ckyc-input"
                       value={formData.city}
@@ -1303,7 +1323,9 @@ export const CustomerKycApp: React.FC = () => {
                     <label className="ckyc-form-label" htmlFor="w-state">State</label>
                     <input
                       id="w-state"
+                      name="state"
                       type="text"
+                      autoComplete="address-level1"
                       placeholder="e.g. Maharashtra"
                       className="ckyc-input"
                       value={formData.state}
@@ -1316,7 +1338,9 @@ export const CustomerKycApp: React.FC = () => {
                   <label className="ckyc-form-label" htmlFor="w-pin">PIN Code *</label>
                   <input
                     id="w-pin"
+                    name="pincode"
                     type="text"
+                    autoComplete="postal-code"
                     maxLength={6}
                     placeholder="e.g. 560103"
                     className={`ckyc-input${formErrors.pincode ? ' ckyc-input-error' : ''}`}
@@ -1340,6 +1364,7 @@ export const CustomerKycApp: React.FC = () => {
                   <label className="ckyc-form-label" htmlFor="w-bank-name">Bank Name *</label>
                   <input
                     id="w-bank-name"
+                    name="bankName"
                     type="text"
                     placeholder="e.g. HDFC Bank, ICICI Bank, SBI"
                     className={`ckyc-input${formErrors.bankName ? ' ckyc-input-error' : ''}`}
@@ -1353,6 +1378,7 @@ export const CustomerKycApp: React.FC = () => {
                   <label className="ckyc-form-label" htmlFor="w-acc-no">Bank Account Number *</label>
                   <input
                     id="w-acc-no"
+                    name="accountNumber"
                     type="text"
                     placeholder="9–18 digit account number"
                     className={`ckyc-input${formErrors.accountNumber ? ' ckyc-input-error' : ''}`}
@@ -1366,6 +1392,7 @@ export const CustomerKycApp: React.FC = () => {
                   <label className="ckyc-form-label" htmlFor="w-ifsc">IFSC Code *</label>
                   <input
                     id="w-ifsc"
+                    name="ifscCode"
                     type="text"
                     maxLength={11}
                     placeholder="e.g. HDFC0000240"
@@ -1380,6 +1407,7 @@ export const CustomerKycApp: React.FC = () => {
                   <label className="ckyc-form-label" htmlFor="w-acc-type">Account Type</label>
                   <select
                     id="w-acc-type"
+                    name="accountType"
                     className="ckyc-input"
                     value={formData.accountType}
                     onChange={e => handleInputChange('accountType', e.target.value)}
@@ -1401,8 +1429,10 @@ export const CustomerKycApp: React.FC = () => {
                   <p className="ckyc-card-desc">For holding AIF unit certificates in dematerialized form.</p>
                 </div>
 
-                <label className="ckyc-checkbox-row">
+                <label className="ckyc-checkbox-row" htmlFor="w-has-no-demat">
                   <input
+                    id="w-has-no-demat"
+                    name="hasNoDemat"
                     type="checkbox"
                     className="ckyc-checkbox"
                     checked={formData.hasNoDemat}
@@ -1419,6 +1449,7 @@ export const CustomerKycApp: React.FC = () => {
                       <label className="ckyc-form-label" htmlFor="w-depository">Depository *</label>
                       <select
                         id="w-depository"
+                        name="dematDepository"
                         className="ckyc-input"
                         value={formData.dematDepository}
                         onChange={e => handleInputChange('dematDepository', e.target.value)}
@@ -1432,6 +1463,7 @@ export const CustomerKycApp: React.FC = () => {
                       <label className="ckyc-form-label" htmlFor="w-demat-num">16-Digit Demat Beneficiary ID *</label>
                       <input
                         id="w-demat-num"
+                        name="dematAccountNumber"
                         type="text"
                         maxLength={16}
                         placeholder="16-digit Demat Account Number / BO ID"
@@ -1461,6 +1493,7 @@ export const CustomerKycApp: React.FC = () => {
                   </label>
                   <input
                     id="w-nom-name"
+                    name="nomineeName"
                     type="text"
                     placeholder="Nominee full legal name (optional)"
                     className={`ckyc-input${formErrors.nomineeName ? ' ckyc-input-error' : ''}`}
@@ -1476,6 +1509,7 @@ export const CustomerKycApp: React.FC = () => {
                       <label className="ckyc-form-label" htmlFor="w-nom-rel">Relationship *</label>
                       <select
                         id="w-nom-rel"
+                        name="nomineeRelationship"
                         className="ckyc-input"
                         value={formData.nomineeRelationship}
                         onChange={e => handleInputChange('nomineeRelationship', e.target.value)}
@@ -1494,6 +1528,7 @@ export const CustomerKycApp: React.FC = () => {
                       <label className="ckyc-form-label" htmlFor="w-nom-dob">Date of Birth *</label>
                       <input
                         id="w-nom-dob"
+                        name="nomineeDob"
                         type="date"
                         className={`ckyc-input${formErrors.nomineeDob ? ' ckyc-input-error' : ''}`}
                         value={formData.nomineeDob}
@@ -1506,6 +1541,7 @@ export const CustomerKycApp: React.FC = () => {
                       <label className="ckyc-form-label" htmlFor="w-nom-share">Allocation Percentage (%) *</label>
                       <input
                         id="w-nom-share"
+                        name="nomineeAllocation"
                         type="number"
                         min={1}
                         max={100}
@@ -1569,6 +1605,9 @@ export const CustomerKycApp: React.FC = () => {
 
             {/* Hidden file inputs */}
             <input
+              id="ckyc-file-pan"
+              name="panDocument"
+              aria-label="Upload PAN Card document"
               type="file"
               ref={panInputRef}
               accept="image/png,image/jpeg,image/webp,application/pdf"
@@ -1576,6 +1615,9 @@ export const CustomerKycApp: React.FC = () => {
               onChange={e => handleFileSelected('pan', e.target.files?.[0] || null)}
             />
             <input
+              id="ckyc-file-aadhaar"
+              name="aadhaarDocument"
+              aria-label="Upload Aadhaar Card document"
               type="file"
               ref={aadhaarInputRef}
               accept="image/png,image/jpeg,image/webp,application/pdf"
@@ -1583,6 +1625,9 @@ export const CustomerKycApp: React.FC = () => {
               onChange={e => handleFileSelected('aadhaar', e.target.files?.[0] || null)}
             />
             <input
+              id="ckyc-file-bank"
+              name="bankDocument"
+              aria-label="Upload Bank Proof / Cancelled Cheque document"
               type="file"
               ref={bankInputRef}
               accept="image/png,image/jpeg,image/webp,application/pdf"
@@ -1590,6 +1635,9 @@ export const CustomerKycApp: React.FC = () => {
               onChange={e => handleFileSelected('bank', e.target.files?.[0] || null)}
             />
             <input
+              id="ckyc-file-demat"
+              name="dematDocument"
+              aria-label="Upload Demat Statement document"
               type="file"
               ref={dematInputRef}
               accept="image/png,image/jpeg,image/webp,application/pdf"
@@ -2059,8 +2107,10 @@ export const CustomerKycApp: React.FC = () => {
               </p>
             </div>
 
-            <label className="ckyc-checkbox-row">
+            <label className="ckyc-checkbox-row" htmlFor="ckyc-consent-agreed">
               <input
+                id="ckyc-consent-agreed"
+                name="hasAgreedConsent"
                 type="checkbox"
                 className="ckyc-checkbox"
                 checked={hasAgreedConsent}
@@ -2107,6 +2157,9 @@ export const CustomerKycApp: React.FC = () => {
 
             {/* Hidden fallback file input for selfie */}
             <input
+              id="ckyc-selfie-upload"
+              name="selfieUpload"
+              aria-label="Upload selfie photograph"
               type="file"
               ref={selfieInputRef}
               accept="image/*"
@@ -2356,6 +2409,9 @@ export const CustomerKycApp: React.FC = () => {
       <div className="ckyc-preview-bar">
         <span>⚡ Dev Preview:</span>
         <select
+          id="ckyc-dev-screen-select"
+          name="devScreenSelect"
+          aria-label="Dev preview screen switcher"
           className="ckyc-preview-select"
           value={currentScreen}
           onChange={e => setCurrentScreen(e.target.value as ScreenId)}
@@ -2371,6 +2427,9 @@ export const CustomerKycApp: React.FC = () => {
         </select>
         {currentScreen === 'wizard' && (
           <select
+            id="ckyc-dev-wizard-step-select"
+            name="devWizardStepSelect"
+            aria-label="Dev preview wizard step switcher"
             className="ckyc-preview-select"
             value={wizardStep}
             onChange={e => setWizardStep(Number(e.target.value) as WizardStep)}

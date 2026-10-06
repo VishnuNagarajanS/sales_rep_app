@@ -469,9 +469,10 @@ export const ConsultationsPage: React.FC = () => {
         <form onSubmit={handleSaveConsultation} className="consultation-form">
           {/* Investor Dropdown */}
           <div className="form-group">
-            <label className="form-label">Investor *</label>
+            <label htmlFor="consultation-form-investor" className="form-label">Investor *</label>
             <select
               id="consultation-form-investor"
+              name="investorId"
               className={`form-select${formErrors.investorId ? ' is-invalid' : ''}`}
               value={form.investorId}
               onChange={e => {
@@ -500,9 +501,11 @@ export const ConsultationsPage: React.FC = () => {
 
           <div className="consultation-form-grid-2">
             <div className="form-group">
-              <label className="form-label">Investor Phone</label>
+              <label htmlFor="consultation-form-phone" className="form-label">Investor Phone</label>
               <input
                 id="consultation-form-phone"
+                name="investorPhone"
+                autoComplete="tel"
                 type="text"
                 className="form-input"
                 placeholder="+91 98800 00000"
@@ -512,9 +515,10 @@ export const ConsultationsPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Consultation Slot *</label>
+              <label htmlFor="consultation-form-slot" className="form-label">Consultation Slot *</label>
               <input
                 id="consultation-form-slot"
+                name="scheduledAt"
                 type="text"
                 className={`form-input${formErrors.scheduledAt ? ' is-invalid' : ''}`}
                 placeholder="e.g. Thursday, 04:00 PM"
@@ -530,7 +534,7 @@ export const ConsultationsPage: React.FC = () => {
           {/* Row: Advisor / Consultant & Status */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="form-group">
-              <label className="form-label">
+              <label htmlFor="consultation-form-consultant" className="form-label">
                 Private Wealth Advisor
                 {isExec && (
                   <span
@@ -547,6 +551,8 @@ export const ConsultationsPage: React.FC = () => {
               </label>
               {isExec ? (
                 <input
+                  id="consultation-form-consultant"
+                  name="consultantName"
                   className="form-input"
                   value={form.consultantName}
                   readOnly
@@ -559,6 +565,7 @@ export const ConsultationsPage: React.FC = () => {
               ) : (
                 <input
                   id="consultation-form-consultant"
+                  name="consultantName"
                   className="form-input"
                   placeholder="e.g. Vikram Malhotra"
                   value={form.consultantName}
@@ -571,9 +578,10 @@ export const ConsultationsPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Status</label>
+              <label htmlFor="consultation-form-status" className="form-label">Status</label>
               <select
                 id="consultation-form-status"
+                name="status"
                 className="form-select"
                 value={form.status}
                 onChange={e =>
@@ -591,9 +599,10 @@ export const ConsultationsPage: React.FC = () => {
 
           {/* Referred By */}
           <div className="form-group">
-            <label className="form-label">Referred By (Sales Agent)</label>
+            <label htmlFor="consultation-form-referredby" className="form-label">Referred By (Sales Agent)</label>
             <input
               id="consultation-form-referredby"
+              name="referredByAgentName"
               className="form-input"
               placeholder="e.g. Suresh Kumar"
               value={form.referredByAgentName || ''}
@@ -603,9 +612,10 @@ export const ConsultationsPage: React.FC = () => {
 
           {/* Discussion Agenda */}
           <div className="form-group">
-            <label className="form-label">Discussion Agenda & Objectives</label>
+            <label htmlFor="consultation-form-agenda" className="form-label">Discussion Agenda & Objectives</label>
             <textarea
               id="consultation-form-agenda"
+              name="agenda"
               className="form-textarea"
               rows={3}
               placeholder="e.g. Commercial REIT yield analysis & pass-through taxation discussion."
@@ -617,7 +627,7 @@ export const ConsultationsPage: React.FC = () => {
 
           {/* Outcome Notes */}
           <div className="form-group">
-            <label className="form-label">
+            <label htmlFor="consultation-form-outcome" className="form-label">
               Outcome Notes & Recommendations
               <span
                 style={{
@@ -632,6 +642,7 @@ export const ConsultationsPage: React.FC = () => {
             </label>
             <textarea
               id="consultation-form-outcome"
+              name="outcomeNotes"
               className="form-textarea"
               rows={3}
               placeholder="Record key takeaways, investor interest level, follow-up requirements..."

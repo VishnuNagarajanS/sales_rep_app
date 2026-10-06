@@ -207,9 +207,12 @@ export const SiteVisitsPage: React.FC = () => {
       >
         <form onSubmit={handleScheduleVisit} className="sitevisit-form">
           <div className="form-group">
-            <label className="form-label">Client Name *</label>
+            <label htmlFor="sitevisit-customer-name" className="form-label">Client Name *</label>
             <input
+              id="sitevisit-customer-name"
+              name="customerName"
               type="text"
+              autoComplete="name"
               className="form-input"
               required
               value={customerName}
@@ -220,9 +223,12 @@ export const SiteVisitsPage: React.FC = () => {
 
           <div className="sitevisit-form-grid-2">
             <div className="form-group">
-              <label className="form-label">Client Phone *</label>
+              <label htmlFor="sitevisit-customer-phone" className="form-label">Client Phone *</label>
               <input
+                id="sitevisit-customer-phone"
+                name="customerPhone"
                 type="text"
+                autoComplete="tel"
                 className="form-input"
                 required
                 value={customerPhone}
@@ -231,8 +237,10 @@ export const SiteVisitsPage: React.FC = () => {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Visit Slot *</label>
+              <label htmlFor="sitevisit-scheduled-at" className="form-label">Visit Slot *</label>
               <input
+                id="sitevisit-scheduled-at"
+                name="scheduledAt"
                 type="text"
                 className="form-input"
                 required
@@ -245,8 +253,10 @@ export const SiteVisitsPage: React.FC = () => {
 
           <div className="sitevisit-form-grid-2">
             <div className="form-group">
-              <label className="form-label">Project</label>
+              <label htmlFor="sitevisit-project-name" className="form-label">Project</label>
               <select
+                id="sitevisit-project-name"
+                name="projectName"
                 className="form-select"
                 value={projectName}
                 onChange={e => setProjectName(e.target.value)}
@@ -257,8 +267,10 @@ export const SiteVisitsPage: React.FC = () => {
               </select>
             </div>
             <div className="form-group">
-              <label className="form-label">Plot Number Target</label>
+              <label htmlFor="sitevisit-plot-number" className="form-label">Plot Number Target</label>
               <input
+                id="sitevisit-plot-number"
+                name="plotNumber"
                 type="text"
                 className="form-input"
                 value={plotNumber}
@@ -269,8 +281,10 @@ export const SiteVisitsPage: React.FC = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Logistics / Pickup Notes</label>
+            <label htmlFor="sitevisit-notes" className="form-label">Logistics / Pickup Notes</label>
             <textarea
+              id="sitevisit-notes"
+              name="notes"
               className="form-textarea"
               rows={2}
               value={notes}

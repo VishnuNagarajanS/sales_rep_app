@@ -667,8 +667,10 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
         }
       >
         <div className="form-group">
-          <label className="form-label">Reason for Loss *</label>
+          <label htmlFor="pipeline-loss-reason" className="form-label">Reason for Loss *</label>
           <select
+            id="pipeline-loss-reason"
+            name="lossReason"
             className="form-select"
             value={lossReason}
             onChange={e => setLossReason(e.target.value)}

@@ -393,6 +393,9 @@ export const CallHistoryPage: React.FC = () => {
         {datePreset === 'custom' && (
           <div style={{ padding: '0 24px', display: 'flex', gap: 12, alignItems: 'center', marginTop: '-12px', marginBottom: 12 }}>
             <input
+              id="callhistory-date-from"
+              name="dateFrom"
+              aria-label="Start date"
               type="date"
               className="form-input"
               value={dateFrom}
@@ -400,6 +403,9 @@ export const CallHistoryPage: React.FC = () => {
             />
             <span style={{ color: 'var(--text-muted)' }}>to</span>
             <input
+              id="callhistory-date-to"
+              name="dateTo"
+              aria-label="End date"
               type="date"
               className="form-input"
               value={dateTo}

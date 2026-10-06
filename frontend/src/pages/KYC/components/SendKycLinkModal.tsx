@@ -275,7 +275,7 @@ Please click the secure link below to complete your verification:
 
           {/* Delivery Channel Selector */}
           <div className="kyc-link-form-group">
-            <label className="kyc-link-form-label">Delivery Channel</label>
+            <div className="kyc-link-form-label">Delivery Channel</div>
             <div className="kyc-link-channel-chips">
               <button
                 type="button"
@@ -337,6 +337,7 @@ Please click the secure link below to complete your verification:
             <div style={{ position: 'relative' }}>
               <select
                 id="kyc-expiry-select"
+                name="expiry"
                 className="form-select"
                 value={expiry}
                 onChange={e => setExpiry(e.target.value)}
@@ -352,7 +353,7 @@ Please click the secure link below to complete your verification:
           {/* Generated Customer KYC Link Box */}
           <div className="kyc-link-form-group">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label className="kyc-link-form-label">Generated Secure Link</label>
+              <div className="kyc-link-form-label">Generated Secure Link</div>
               <span style={{ fontSize: 11, color: '#10b981', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                 <Shield size={11} /> 256-bit Encrypted
               </span>

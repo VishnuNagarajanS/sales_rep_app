@@ -459,10 +459,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
               <h4 className="settings-section-title" style={{ marginTop: 20 }}>Application</h4>
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">Auto-start application</div>
+                  <label htmlFor="settings-general-autoStartApp" className="settings-toggle-label">Auto-start application</label>
                   <div className="settings-toggle-desc">Launch chat automatically upon logging into Windows.</div>
                 </div>
                 <input
+                  id="settings-general-autoStartApp"
+                  name="autoStartApp"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.general?.autoStartApp ?? true}
@@ -472,10 +474,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">Open application in background</div>
+                  <label htmlFor="settings-general-openInBackground" className="settings-toggle-label">Open application in background</label>
                   <div className="settings-toggle-desc">Start minimized to the system tray without taking focus.</div>
                 </div>
                 <input
+                  id="settings-general-openInBackground"
+                  name="openInBackground"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.general?.openInBackground ?? false}
@@ -485,10 +489,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">On close, keep the application running</div>
+                  <label htmlFor="settings-general-onCloseKeepRunning" className="settings-toggle-label">On close, keep the application running</label>
                   <div className="settings-toggle-desc">Closing the window will minimize to the notification tray.</div>
                 </div>
                 <input
+                  id="settings-general-onCloseKeepRunning"
+                  name="onCloseKeepRunning"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.general?.onCloseKeepRunning ?? true}
@@ -498,10 +504,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">Turn on GPU hardware acceleration</div>
+                  <label htmlFor="settings-general-gpuHardwareAcceleration" className="settings-toggle-label">Turn on GPU hardware acceleration</label>
                   <div className="settings-toggle-desc">Improves rendering speed and reduces CPU consumption.</div>
                 </div>
                 <input
+                  id="settings-general-gpuHardwareAcceleration"
+                  name="gpuHardwareAcceleration"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.general?.gpuHardwareAcceleration ?? true}
@@ -511,10 +519,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">Register as chat app for Microsoft 365</div>
+                  <label htmlFor="settings-general-registerAsDefaultChatApp" className="settings-toggle-label">Register as chat app for Microsoft 365</label>
                   <div className="settings-toggle-desc">Integrates presence and status with Office desktop tools.</div>
                 </div>
                 <input
+                  id="settings-general-registerAsDefaultChatApp"
+                  name="registerAsDefaultChatApp"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.general?.registerAsDefaultChatApp ?? true}
@@ -524,8 +534,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <h4 className="settings-section-title" style={{ marginTop: 24 }}>Language & Display</h4>
               <div className="settings-select-group">
-                <label className="settings-label">App Language</label>
+                <label htmlFor="settings-general-language" className="settings-label">App Language</label>
                 <select
+                  id="settings-general-language"
+                  name="language"
                   className="form-input"
                   value={settings.general?.language || 'English (United States)'}
                   onChange={e => handleSelectChange('general', 'language', e.target.value)}
@@ -542,10 +554,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row" style={{ marginTop: 12 }}>
                 <div>
-                  <div className="settings-toggle-label">Turn off animations</div>
+                  <label htmlFor="settings-general-turnOffAnimations" className="settings-toggle-label">Turn off animations</label>
                   <div className="settings-toggle-desc">Disables transitions to maximize interface responsiveness.</div>
                 </div>
                 <input
+                  id="settings-general-turnOffAnimations"
+                  name="turnOffAnimations"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.general?.turnOffAnimations ?? false}
@@ -556,10 +570,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
               <h4 className="settings-section-title" style={{ marginTop: 24 }}>Out of Office</h4>
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">Automatic replies</div>
+                  <label htmlFor="settings-general-outOfOfficeReply" className="settings-toggle-label">Automatic replies</label>
                   <div className="settings-toggle-desc">Send automated responses to teammates when you are away.</div>
                 </div>
                 <input
+                  id="settings-general-outOfOfficeReply"
+                  name="outOfOfficeReply"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.general?.outOfOfficeReply ?? false}
@@ -569,8 +585,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               {settings.general?.outOfOfficeReply && (
                 <div style={{ marginTop: 10 }}>
-                  <label className="settings-label">Out of Office Message</label>
+                  <label htmlFor="settings-general-outOfOfficeMessage" className="settings-label">Out of Office Message</label>
                   <textarea
+                    id="settings-general-outOfOfficeMessage"
+                    name="outOfOfficeMessage"
                     className="form-textarea"
                     rows={2}
                     value={settings.general?.outOfOfficeMessage || ''}
@@ -630,8 +648,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
               </div>
 
               <div className="settings-select-group">
-                <label className="settings-label">Active Workspace Tenancy</label>
+                <label htmlFor="settings-accounts-activeTenant" className="settings-label">Active Workspace Tenancy</label>
                 <select
+                  id="settings-accounts-activeTenant"
+                  name="activeTenant"
                   className="form-input"
                   value={settings.accounts?.activeTenant || companyId}
                   onChange={e => handleSelectChange('accounts', 'activeTenant', e.target.value)}
@@ -650,10 +670,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">Read Receipts</div>
+                  <label htmlFor="settings-privacy-readReceipts" className="settings-toggle-label">Read Receipts</label>
                   <div className="settings-toggle-desc">Let people know when you've seen their messages and see when they've seen yours.</div>
                 </div>
                 <input
+                  id="settings-privacy-readReceipts"
+                  name="readReceipts"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.privacy.readReceipts}
@@ -663,10 +685,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">Typing Indicator</div>
+                  <label htmlFor="settings-privacy-typingIndicator" className="settings-toggle-label">Typing Indicator</label>
                   <div className="settings-toggle-desc">Display animated "typing…" indicators while you compose messages.</div>
                 </div>
                 <input
+                  id="settings-privacy-typingIndicator"
+                  name="typingIndicator"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.privacy.typingIndicator}
@@ -675,8 +699,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
               </div>
 
               <div className="settings-select-group">
-                <label className="settings-label">Who Can Direct Message (DM) Me</label>
+                <label htmlFor="settings-privacy-whoCanDm" className="settings-label">Who Can Direct Message (DM) Me</label>
                 <select
+                  id="settings-privacy-whoCanDm"
+                  name="whoCanDm"
                   className="form-input"
                   value={settings.privacy.whoCanDm}
                   onChange={e => handleSelectChange('privacy', 'whoCanDm', e.target.value)}
@@ -693,7 +719,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
               </p>
               <form onSubmit={handleAddPriorityContact} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                 <input
+                  id="settings-privacy-newPriorityContact"
+                  name="newPriorityContact"
                   type="text"
+                  aria-label="Enter colleague name for priority access"
                   className="form-input"
                   placeholder="Enter colleague name..."
                   value={newPriorityContact}
@@ -720,7 +749,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
               </p>
               <form onSubmit={handleAddBlockedContact} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                 <input
+                  id="settings-privacy-newBlockedContact"
+                  name="newBlockedContact"
                   type="text"
+                  aria-label="Enter name or phone to block"
                   className="form-input"
                   placeholder="Enter name or phone to block..."
                   value={newBlockedContact}
@@ -747,10 +779,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row" style={{ marginTop: 18 }}>
                 <div>
-                  <div className="settings-toggle-label">Surveys & Telemetry Feedback</div>
+                  <label htmlFor="settings-privacy-participateInSurveys" className="settings-toggle-label">Surveys & Telemetry Feedback</label>
                   <div className="settings-toggle-desc">Participate in Microsoft Teams platform satisfaction feedback.</div>
                 </div>
                 <input
+                  id="settings-privacy-participateInSurveys"
+                  name="participateInSurveys"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.privacy.participateInSurveys ?? true}
@@ -766,8 +800,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
               <h4 className="settings-section-title">Appearance and Sound</h4>
 
               <div className="settings-select-group">
-                <label className="settings-label">Notification Style</label>
+                <label htmlFor="settings-notifications-notificationStyle" className="settings-label">Notification Style</label>
                 <select
+                  id="settings-notifications-notificationStyle"
+                  name="notificationStyle"
                   className="form-input"
                   value={settings.notifications.notificationStyle || 'teams'}
                   onChange={e => handleSelectChange('notifications', 'notificationStyle', e.target.value)}
@@ -779,10 +815,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">Play Sound for Incoming Calls & Alerts</div>
+                  <label htmlFor="settings-notifications-sound" className="settings-toggle-label">Play Sound for Incoming Calls & Alerts</label>
                   <div className="settings-toggle-desc">Play audible chime whenever messages or meetings ring.</div>
                 </div>
                 <input
+                  id="settings-notifications-sound"
+                  name="sound"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.notifications.sound}
@@ -792,10 +830,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">Show Message Preview</div>
+                  <label htmlFor="settings-notifications-showPreview" className="settings-toggle-label">Show Message Preview</label>
                   <div className="settings-toggle-desc">Include message snippets in popup desktop notifications.</div>
                 </div>
                 <input
+                  id="settings-notifications-showPreview"
+                  name="showPreview"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.notifications.showPreview ?? true}
@@ -805,10 +845,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">Desktop & Push Notifications</div>
+                  <label htmlFor="settings-notifications-desktopPush" className="settings-toggle-label">Desktop & Push Notifications</label>
                   <div className="settings-toggle-desc">Deliver instant popup alerts across devices.</div>
                 </div>
                 <input
+                  id="settings-notifications-desktopPush"
+                  name="desktopPush"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.notifications.desktopPush}
@@ -818,8 +860,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <h4 className="settings-section-title" style={{ marginTop: 24 }}>Chats and Channels</h4>
               <div className="settings-select-group">
-                <label className="settings-label">Chat Messages & @Mentions</label>
+                <label htmlFor="settings-notifications-chatsAndChannels" className="settings-label">Chat Messages & @Mentions</label>
                 <select
+                  id="settings-notifications-chatsAndChannels"
+                  name="chatsAndChannels"
                   className="form-input"
                   value={settings.notifications.chatsAndChannels || 'banner_feed'}
                   onChange={e => handleSelectChange('notifications', 'chatsAndChannels', e.target.value)}
@@ -832,10 +876,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row" style={{ marginTop: 12 }}>
                 <div>
-                  <div className="settings-toggle-label">@Mentions Only Mode</div>
+                  <label htmlFor="settings-notifications-mentionOnly" className="settings-toggle-label">@Mentions Only Mode</label>
                   <div className="settings-toggle-desc">Only alert me when someone explicitly tags @me or calls me directly.</div>
                 </div>
                 <input
+                  id="settings-notifications-mentionOnly"
+                  name="mentionOnly"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.notifications.mentionOnly}
@@ -845,8 +891,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <h4 className="settings-section-title" style={{ marginTop: 24 }}>Meetings and Calls</h4>
               <div className="settings-select-group">
-                <label className="settings-label">Meeting Start Notification</label>
+                <label htmlFor="settings-notifications-meetingsAndCalls" className="settings-label">Meeting Start Notification</label>
                 <select
+                  id="settings-notifications-meetingsAndCalls"
+                  name="meetingsAndCalls"
                   className="form-input"
                   value={settings.notifications.meetingsAndCalls || 'banner'}
                   onChange={e => handleSelectChange('notifications', 'meetingsAndCalls', e.target.value)}
@@ -857,8 +905,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
               </div>
 
               <div className="settings-select-group">
-                <label className="settings-label">Missed Activity Emails</label>
+                <label htmlFor="settings-notifications-missedActivityEmails" className="settings-label">Missed Activity Emails</label>
                 <select
+                  id="settings-notifications-missedActivityEmails"
+                  name="missedActivityEmails"
                   className="form-input"
                   value={settings.notifications.missedActivityEmails || 'hourly'}
                   onChange={e => handleSelectChange('notifications', 'missedActivityEmails', e.target.value)}
@@ -882,10 +932,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">Automatically identify me in meeting captions</div>
+                  <label htmlFor="settings-captions-autoIdentifyMe" className="settings-toggle-label">Automatically identify me in meeting captions</label>
                   <div className="settings-toggle-desc">Attach your speaker name tag to spoken transcript segments.</div>
                 </div>
                 <input
+                  id="settings-captions-autoIdentifyMe"
+                  name="autoIdentifyMe"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.captions?.autoIdentifyMe ?? true}
@@ -895,10 +947,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">Automatically start transcription for meetings</div>
+                  <label htmlFor="settings-captions-autoStartTranscription" className="settings-toggle-label">Automatically start transcription for meetings</label>
                   <div className="settings-toggle-desc">Begin recording real-time meeting notes as soon as you join.</div>
                 </div>
                 <input
+                  id="settings-captions-autoStartTranscription"
+                  name="autoStartTranscription"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.captions?.autoStartTranscription ?? false}
@@ -907,8 +961,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
               </div>
 
               <div className="settings-select-group">
-                <label className="settings-label">Spoken Language for Live Captions</label>
+                <label htmlFor="settings-captions-spokenLanguage" className="settings-label">Spoken Language for Live Captions</label>
                 <select
+                  id="settings-captions-spokenLanguage"
+                  name="spokenLanguage"
                   className="form-input"
                   value={settings.captions?.spokenLanguage || 'English (United States)'}
                   onChange={e => handleSelectChange('captions', 'spokenLanguage', e.target.value)}
@@ -932,8 +988,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
               </p>
 
               <div className="settings-select-group">
-                <label className="settings-label">File Open Preference</label>
+                <label htmlFor="settings-files-fileOpenPreference" className="settings-label">File Open Preference</label>
                 <select
+                  id="settings-files-fileOpenPreference"
+                  name="fileOpenPreference"
                   className="form-input"
                   value={settings.files?.fileOpenPreference || 'teams'}
                   onChange={e => handleSelectChange('files', 'fileOpenPreference', e.target.value)}
@@ -946,9 +1004,11 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <h4 className="settings-section-title" style={{ marginTop: 24 }}>Downloads</h4>
               <div className="settings-select-group">
-                <label className="settings-label">Always Download Files To</label>
+                <label htmlFor="settings-files-downloadLocation" className="settings-label">Always Download Files To</label>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input
+                    id="settings-files-downloadLocation"
+                    name="downloadLocation"
                     type="text"
                     className="form-input"
                     value={settings.files?.downloadLocation || 'C:\\Users\\NexusSales\\Downloads'}
@@ -966,10 +1026,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row" style={{ marginTop: 12 }}>
                 <div>
-                  <div className="settings-toggle-label">Always ask where to save each file before downloading</div>
+                  <label htmlFor="settings-files-alwaysAskWhereToSave" className="settings-toggle-label">Always ask where to save each file before downloading</label>
                   <div className="settings-toggle-desc">Prompts for directory path every time a file attachment is downloaded.</div>
                 </div>
                 <input
+                  id="settings-files-alwaysAskWhereToSave"
+                  name="alwaysAskWhereToSave"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.files?.alwaysAskWhereToSave ?? false}
@@ -985,8 +1047,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
               <h4 className="settings-section-title">Audio Devices</h4>
 
               <div className="settings-select-group">
-                <label className="settings-label">Speaker (Audio Output)</label>
+                <label htmlFor="settings-calls-defaultSpeaker" className="settings-label">Speaker (Audio Output)</label>
                 <select
+                  id="settings-calls-defaultSpeaker"
+                  name="defaultSpeaker"
                   className="form-input"
                   value={settings.calls.defaultSpeaker || 'default'}
                   onChange={e => handleSelectChange('calls', 'defaultSpeaker', e.target.value)}
@@ -1016,8 +1080,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
               </div>
 
               <div className="settings-select-group" style={{ marginTop: 18 }}>
-                <label className="settings-label">Microphone (Audio Input)</label>
+                <label htmlFor="settings-calls-defaultMic" className="settings-label">Microphone (Audio Input)</label>
                 <select
+                  id="settings-calls-defaultMic"
+                  name="defaultMic"
                   className="form-input"
                   value={settings.calls.defaultMic}
                   onChange={e => handleSelectChange('calls', 'defaultMic', e.target.value)}
@@ -1037,8 +1103,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
               </div>
 
               <div className="settings-select-group">
-                <label className="settings-label">Noise Suppression</label>
+                <label htmlFor="settings-calls-noiseSuppression" className="settings-label">Noise Suppression</label>
                 <select
+                  id="settings-calls-noiseSuppression"
+                  name="noiseSuppression"
                   className="form-input"
                   value={settings.calls.noiseSuppression || 'auto'}
                   onChange={e => handleSelectChange('calls', 'noiseSuppression', e.target.value)}
@@ -1051,8 +1119,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
               </div>
 
               <div className="settings-select-group">
-                <label className="settings-label">Secondary Ringer</label>
+                <label htmlFor="settings-calls-secondaryRinger" className="settings-label">Secondary Ringer</label>
                 <select
+                  id="settings-calls-secondaryRinger"
+                  name="secondaryRinger"
                   className="form-input"
                   value={settings.calls.secondaryRinger || 'none'}
                   onChange={e => handleSelectChange('calls', 'secondaryRinger', e.target.value)}
@@ -1065,8 +1135,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <h4 className="settings-section-title" style={{ marginTop: 24 }}>Camera (Video)</h4>
               <div className="settings-select-group">
-                <label className="settings-label">Camera</label>
+                <label htmlFor="settings-calls-defaultCamera" className="settings-label">Camera</label>
                 <select
+                  id="settings-calls-defaultCamera"
+                  name="defaultCamera"
                   className="form-input"
                   value={settings.calls.defaultCamera}
                   onChange={e => handleSelectChange('calls', 'defaultCamera', e.target.value)}
@@ -1105,10 +1177,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row" style={{ marginTop: 14 }}>
                 <div>
-                  <div className="settings-toggle-label">Turn Camera Off When Joining Meetings</div>
+                  <label htmlFor="settings-calls-cameraOffOnJoin" className="settings-toggle-label">Turn Camera Off When Joining Meetings</label>
                   <div className="settings-toggle-desc">Join conference rooms with video muted by default.</div>
                 </div>
                 <input
+                  id="settings-calls-cameraOffOnJoin"
+                  name="cameraOffOnJoin"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.calls.cameraOffOnJoin}
@@ -1118,10 +1192,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">Automatically Adjust Camera Controls</div>
+                  <label htmlFor="settings-calls-autoAdjustCamera" className="settings-toggle-label">Automatically Adjust Camera Controls</label>
                   <div className="settings-toggle-desc">Enables automatic lighting compensation and soft focus.</div>
                 </div>
                 <input
+                  id="settings-calls-autoAdjustCamera"
+                  name="autoAdjustCamera"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={true}
@@ -1141,10 +1217,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">Media (Camera, Microphone, Speakers)</div>
+                  <label htmlFor="settings-permissions-media" className="settings-toggle-label">Media (Camera, Microphone, Speakers)</label>
                   <div className="settings-toggle-desc">Permits participation in audio calls and WebRTC video conferences.</div>
                 </div>
                 <input
+                  id="settings-permissions-media"
+                  name="permissionsMedia"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.appPermissions?.media ?? true}
@@ -1154,10 +1232,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">Location Services</div>
+                  <label htmlFor="settings-permissions-location" className="settings-toggle-label">Location Services</label>
                   <div className="settings-toggle-desc">Allows showing local timezone and proximity-based meeting rooms.</div>
                 </div>
                 <input
+                  id="settings-permissions-location"
+                  name="permissionsLocation"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.appPermissions?.location ?? true}
@@ -1167,10 +1247,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">Desktop Notifications</div>
+                  <label htmlFor="settings-permissions-notifications" className="settings-toggle-label">Desktop Notifications</label>
                   <div className="settings-toggle-desc">Allows displaying native desktop popup banners for incoming calls.</div>
                 </div>
                 <input
+                  id="settings-permissions-notifications"
+                  name="permissionsNotifications"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.appPermissions?.notifications ?? true}
@@ -1180,10 +1262,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">External Links</div>
+                  <label htmlFor="settings-permissions-externalLinks" className="settings-toggle-label">External Links</label>
                   <div className="settings-toggle-desc">Permits opening safe external URLs shared by colleagues in default browser.</div>
                 </div>
                 <input
+                  id="settings-permissions-externalLinks"
+                  name="permissionsExternalLinks"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.appPermissions?.externalLinks ?? true}
@@ -1193,10 +1277,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">MIDI Devices</div>
+                  <label htmlFor="settings-permissions-midiDevices" className="settings-toggle-label">MIDI Devices</label>
                   <div className="settings-toggle-desc">Allows interacting with hardware control boards and audio decks.</div>
                 </div>
                 <input
+                  id="settings-permissions-midiDevices"
+                  name="permissionsMidiDevices"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.appPermissions?.midiDevices ?? false}
@@ -1213,10 +1299,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">Sign Language View</div>
+                  <label htmlFor="settings-accessibility-signLanguageView" className="settings-toggle-label">Sign Language View</label>
                   <div className="settings-toggle-desc">Automatically prioritize and enlarge video feeds of designated signers.</div>
                 </div>
                 <input
+                  id="settings-accessibility-signLanguageView"
+                  name="signLanguageView"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.accessibility?.signLanguageView ?? false}
@@ -1226,10 +1314,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">Always Show Meeting Controls</div>
+                  <label htmlFor="settings-accessibility-alwaysShowMeetingControls" className="settings-toggle-label">Always Show Meeting Controls</label>
                   <div className="settings-toggle-desc">Keep toolbar visible at the top during calls rather than auto-hiding.</div>
                 </div>
                 <input
+                  id="settings-accessibility-alwaysShowMeetingControls"
+                  name="alwaysShowMeetingControls"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.accessibility?.alwaysShowMeetingControls ?? true}
@@ -1239,10 +1329,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row">
                 <div>
-                  <div className="settings-toggle-label">High Contrast Mode</div>
+                  <label htmlFor="settings-accessibility-highContrast" className="settings-toggle-label">High Contrast Mode</label>
                   <div className="settings-toggle-desc">Maximizes color contrast across elements for improved visual clarity.</div>
                 </div>
                 <input
+                  id="settings-accessibility-highContrast"
+                  name="highContrast"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.accessibility?.highContrast ?? false}
@@ -1290,10 +1382,11 @@ export const ChatSettingsModal: React.FC<Props> = ({
               <h4 className="settings-section-title">Call Answering Rules</h4>
 
               <div className="settings-select-group">
-                <label className="settings-label">Incoming Calls Policy</label>
+                <div className="settings-label">Incoming Calls Policy</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                  <label htmlFor="settings-calls-policy-ringme" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
                     <input
+                      id="settings-calls-policy-ringme"
                       type="radio"
                       name="callAnsweringRules"
                       checked={(settings.calls.callAnsweringRules || 'ring_me') === 'ring_me'}
@@ -1301,8 +1394,9 @@ export const ChatSettingsModal: React.FC<Props> = ({
                     />
                     <span>Calls ring me</span>
                   </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                  <label htmlFor="settings-calls-policy-forward" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
                     <input
+                      id="settings-calls-policy-forward"
                       type="radio"
                       name="callAnsweringRules"
                       checked={settings.calls.callAnsweringRules === 'forward'}
@@ -1315,8 +1409,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               {settings.calls.callAnsweringRules === 'forward' ? (
                 <div className="settings-select-group">
-                  <label className="settings-label">Forward To</label>
+                  <label htmlFor="settings-calls-forwardTo" className="settings-label">Forward To</label>
                   <select
+                    id="settings-calls-forwardTo"
+                    name="forwardTo"
                     className="form-input"
                     value={settings.calls.forwardTo || 'voicemail'}
                     onChange={e => handleSelectChange('calls', 'forwardTo', e.target.value)}
@@ -1327,8 +1423,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
                 </div>
               ) : (
                 <div className="settings-select-group">
-                  <label className="settings-label">If Unanswered</label>
+                  <label htmlFor="settings-calls-ifUnanswered" className="settings-label">If Unanswered</label>
                   <select
+                    id="settings-calls-ifUnanswered"
+                    name="forwardTo"
                     className="form-input"
                     value={settings.calls.forwardTo || 'voicemail'}
                     onChange={e => handleSelectChange('calls', 'forwardTo', e.target.value)}
@@ -1340,8 +1438,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
               )}
 
               <div className="settings-select-group">
-                <label className="settings-label">Ring Duration Before Redirecting</label>
+                <label htmlFor="settings-calls-ringDuration" className="settings-label">Ring Duration Before Redirecting</label>
                 <select
+                  id="settings-calls-ringDuration"
+                  name="ringDurationBeforeRedirect"
                   className="form-input"
                   value={settings.calls.ringDurationBeforeRedirect || 20}
                   onChange={e => handleSelectChange('calls', 'ringDurationBeforeRedirect', Number(e.target.value))}
@@ -1356,10 +1456,12 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <div className="settings-toggle-row" style={{ marginTop: 14 }}>
                 <div>
-                  <div className="settings-toggle-label">Auto-Answer Incoming Calls</div>
+                  <label htmlFor="settings-calls-autoAnswer" className="settings-toggle-label">Auto-Answer Incoming Calls</label>
                   <div className="settings-toggle-desc">Automatically accept direct calls from authorized teammates.</div>
                 </div>
                 <input
+                  id="settings-calls-autoAnswer"
+                  name="autoAnswer"
                   type="checkbox"
                   className="settings-toggle-input"
                   checked={settings.calls.autoAnswer}
@@ -1369,8 +1471,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               <h4 className="settings-section-title" style={{ marginTop: 24 }}>Ringtones</h4>
               <div className="settings-select-group">
-                <label className="settings-label">Calls For You</label>
+                <label htmlFor="settings-calls-ringtone" className="settings-label">Calls For You</label>
                 <select
+                  id="settings-calls-ringtone"
+                  name="ringtone"
                   className="form-input"
                   value={settings.calls.ringtone || 'Bop'}
                   onChange={e => handleSelectChange('calls', 'ringtone', e.target.value)}
@@ -1398,9 +1502,11 @@ export const ChatSettingsModal: React.FC<Props> = ({
                 <>
                   {activeConversation.type === 'group' && isManagerOrAdmin && (
                     <form onSubmit={handleRenameGroup} className="settings-form-row">
-                      <label className="settings-label">Rename Group Chat</label>
+                      <label htmlFor="settings-conversation-rename" className="settings-label">Rename Group Chat</label>
                       <div style={{ display: 'flex', gap: 8 }}>
                         <input
+                          id="settings-conversation-rename"
+                          name="renameGroupChat"
                           type="text"
                           className="form-input"
                           value={renameValue}
@@ -1486,8 +1592,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
               </div>
 
               <div className="settings-select-group" style={{ marginTop: 16 }}>
-                <label className="settings-label">Message Retention Policy</label>
+                <label htmlFor="settings-admin-retentionDays" className="settings-label">Message Retention Policy</label>
                 <select
+                  id="settings-admin-retentionDays"
+                  name="retentionDays"
                   className="form-input"
                   value={settings.adminGovernance?.retentionDays ?? 0}
                   onChange={e => handleSelectChange('adminGovernance', 'retentionDays', Number(e.target.value))}
@@ -1500,8 +1608,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
               </div>
 
               <div className="settings-select-group">
-                <label className="settings-label">File Share Retention Policy</label>
+                <label htmlFor="settings-admin-fileRetentionDays" className="settings-label">File Share Retention Policy</label>
                 <select
+                  id="settings-admin-fileRetentionDays"
+                  name="fileRetentionDays"
                   className="form-input"
                   value={settings.adminGovernance?.fileRetentionDays ?? 0}
                   onChange={e => handleSelectChange('adminGovernance', 'fileRetentionDays', Number(e.target.value))}
@@ -1513,8 +1623,10 @@ export const ChatSettingsModal: React.FC<Props> = ({
               </div>
 
               <div className="settings-select-group">
-                <label className="settings-label">Group Chat Creation Permissions</label>
+                <label htmlFor="settings-admin-whoCanCreateGroups" className="settings-label">Group Chat Creation Permissions</label>
                 <select
+                  id="settings-admin-whoCanCreateGroups"
+                  name="whoCanCreateGroups"
                   className="form-input"
                   value={settings.adminGovernance?.whoCanCreateGroups ?? 'everyone'}
                   onChange={e => handleSelectChange('adminGovernance', 'whoCanCreateGroups', e.target.value)}

@@ -409,8 +409,11 @@ export const PlatformUsersPage: React.FC = () => {
         <div className="users-search-box">
           <Search size={16} className="search-icon" />
           <input
+            id="platform-users-search"
+            name="searchQuery"
             type="text"
             className="users-search-input"
+            aria-label="Search users by name, email, phone, or organization"
             placeholder="Search by name, email, phone, or organization..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
@@ -420,7 +423,10 @@ export const PlatformUsersPage: React.FC = () => {
         <div className="users-dropdown-filters">
           {/* Organization Filter */}
           <select
+            id="platform-users-filter-company"
+            name="companyFilter"
             className="filter-select"
+            aria-label="Filter by organization"
             value={selectedCompanyFilter}
             onChange={e => setSelectedCompanyFilter(e.target.value)}
           >
@@ -435,7 +441,10 @@ export const PlatformUsersPage: React.FC = () => {
 
           {/* Role Filter */}
           <select
+            id="platform-users-filter-role"
+            name="roleFilter"
             className="filter-select"
+            aria-label="Filter by role"
             value={selectedRoleFilter}
             onChange={e => setSelectedRoleFilter(e.target.value)}
           >
@@ -449,7 +458,10 @@ export const PlatformUsersPage: React.FC = () => {
 
           {/* Status Filter */}
           <select
+            id="platform-users-filter-status"
+            name="statusFilter"
             className="filter-select"
+            aria-label="Filter by status"
             value={selectedStatusFilter}
             onChange={e => setSelectedStatusFilter(e.target.value)}
           >
@@ -637,22 +649,28 @@ export const PlatformUsersPage: React.FC = () => {
         >
           <div className="provision-modal-content">
             <div className="form-group">
-              <label className="form-label required">Full Name</label>
+              <label htmlFor="provision-user-name" className="form-label required">Full Name</label>
               <input
+                id="provision-user-name"
+                name="name"
                 type="text"
                 className="form-control"
                 placeholder="e.g. Rahul Sen"
+                autoComplete="name"
                 value={newName}
                 onChange={e => setNewName(e.target.value)}
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label required">Official Work Email</label>
+              <label htmlFor="provision-user-email" className="form-label required">Official Work Email</label>
               <input
+                id="provision-user-email"
+                name="email"
                 type="email"
                 className="form-control"
                 placeholder="rahul@ghlindiatrust.com"
+                autoComplete="email"
                 value={newEmail}
                 onChange={e => setNewEmail(e.target.value)}
               />
@@ -660,18 +678,23 @@ export const PlatformUsersPage: React.FC = () => {
 
             <div className="form-grid-two">
               <div className="form-group">
-                <label className="form-label">Contact Number</label>
+                <label htmlFor="provision-user-phone" className="form-label">Contact Number</label>
                 <input
+                  id="provision-user-phone"
+                  name="phone"
                   type="text"
                   className="form-control"
+                  autoComplete="tel"
                   value={newPhone}
                   onChange={e => setNewPhone(e.target.value)}
                 />
               </div>
 
               <div className="form-group">
-                <label className="form-label">Employee Code</label>
+                <label htmlFor="provision-user-empcode" className="form-label">Employee Code</label>
                 <input
+                  id="provision-user-empcode"
+                  name="employeeCode"
                   type="text"
                   className="form-control"
                   placeholder="EMP-1042"
@@ -682,8 +705,10 @@ export const PlatformUsersPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label required">Assign Tenant Organization</label>
+              <label htmlFor="provision-user-company" className="form-label required">Assign Tenant Organization</label>
               <select
+                id="provision-user-company"
+                name="companyId"
                 className="form-control"
                 value={newCompanyId}
                 onChange={e => setNewCompanyId(e.target.value)}
@@ -698,8 +723,10 @@ export const PlatformUsersPage: React.FC = () => {
 
             <div className="form-grid-two">
               <div className="form-group">
-                <label className="form-label required">Role Scope</label>
+                <label htmlFor="provision-user-role" className="form-label required">Role Scope</label>
                 <select
+                  id="provision-user-role"
+                  name="role"
                   className="form-control"
                   value="company_admin"
                   disabled
@@ -712,8 +739,10 @@ export const PlatformUsersPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Designation / Title</label>
+                <label htmlFor="provision-user-designation" className="form-label">Designation / Title</label>
                 <input
+                  id="provision-user-designation"
+                  name="designation"
                   type="text"
                   className="form-control"
                   value={newDesignation}
@@ -750,38 +779,49 @@ export const PlatformUsersPage: React.FC = () => {
         >
           <div className="edit-drawer-content">
             <div className="form-group">
-              <label className="form-label">Full Name</label>
+              <label htmlFor="edit-user-name" className="form-label">Full Name</label>
               <input
+                id="edit-user-name"
+                name="name"
                 type="text"
                 className="form-control"
+                autoComplete="name"
                 value={editName}
                 onChange={e => setEditName(e.target.value)}
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label">Work Email</label>
+              <label htmlFor="edit-user-email" className="form-label">Work Email</label>
               <input
+                id="edit-user-email"
+                name="email"
                 type="email"
                 className="form-control"
+                autoComplete="email"
                 value={editEmail}
                 onChange={e => setEditEmail(e.target.value)}
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label">Phone Number</label>
+              <label htmlFor="edit-user-phone" className="form-label">Phone Number</label>
               <input
+                id="edit-user-phone"
+                name="phone"
                 type="text"
                 className="form-control"
+                autoComplete="tel"
                 value={editPhone}
                 onChange={e => setEditPhone(e.target.value)}
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label">Designation</label>
+              <label htmlFor="edit-user-designation" className="form-label">Designation</label>
               <input
+                id="edit-user-designation"
+                name="designation"
                 type="text"
                 className="form-control"
                 value={editDesignation}
@@ -790,8 +830,10 @@ export const PlatformUsersPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Organization Assignment</label>
+              <label htmlFor="edit-user-company" className="form-label">Organization Assignment</label>
               <select
+                id="edit-user-company"
+                name="companyId"
                 className="form-control"
                 value={editCompanyId}
                 onChange={e => setEditCompanyId(e.target.value)}
@@ -806,8 +848,10 @@ export const PlatformUsersPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Assigned Role</label>
+              <label htmlFor="edit-user-role" className="form-label">Assigned Role</label>
               <select
+                id="edit-user-role"
+                name="roleCode"
                 className="form-control"
                 value={editRoleCode}
                 onChange={e => setEditRoleCode(e.target.value)}

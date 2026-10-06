@@ -616,9 +616,11 @@ export const InvestorsPage: React.FC = () => {
           {/* Row: Name + Phone */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="form-group">
-              <label className="form-label">Name *</label>
+              <label htmlFor="inv-form-name" className="form-label">Name *</label>
               <input
                 id="inv-form-name"
+                name="name"
+                autoComplete="name"
                 className={`form-input${formErrors.name ? ' is-invalid' : ''}`}
                 placeholder="e.g. Rajiv Mehta"
                 value={form.name}
@@ -627,9 +629,11 @@ export const InvestorsPage: React.FC = () => {
               {formErrors.name && <div className="form-error">{formErrors.name}</div>}
             </div>
             <div className="form-group">
-              <label className="form-label">Phone *</label>
+              <label htmlFor="inv-form-phone" className="form-label">Phone *</label>
               <input
                 id="inv-form-phone"
+                name="phone"
+                autoComplete="tel"
                 className={`form-input${formErrors.phone ? ' is-invalid' : ''}`}
                 placeholder="e.g. +91 98765 43210"
                 value={form.phone}
@@ -642,9 +646,11 @@ export const InvestorsPage: React.FC = () => {
           {/* Row: Email + Status */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="form-group">
-              <label className="form-label">Email</label>
+              <label htmlFor="inv-form-email" className="form-label">Email</label>
               <input
                 id="inv-form-email"
+                name="email"
+                autoComplete="email"
                 className="form-input"
                 placeholder="e.g. rajiv@example.com"
                 value={form.email}
@@ -652,9 +658,10 @@ export const InvestorsPage: React.FC = () => {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Status</label>
+              <label htmlFor="inv-form-status" className="form-label">Status</label>
               <select
                 id="inv-form-status"
+                name="status"
                 className="form-select"
                 value={form.status}
                 onChange={e => setField('status', e.target.value as InvestorForm['status'])}
@@ -670,9 +677,10 @@ export const InvestorsPage: React.FC = () => {
           {/* Row: Capital Capacity + Preferred Asset Class */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="form-group">
-              <label className="form-label">Investment Capacity</label>
+              <label htmlFor="inv-form-capacity" className="form-label">Investment Capacity</label>
               <input
                 id="inv-form-capacity"
+                name="investmentCapacity"
                 className="form-input"
                 placeholder="e.g. ₹5 Cr"
                 value={form.investmentCapacity}
@@ -681,9 +689,10 @@ export const InvestorsPage: React.FC = () => {
             </div>
             {!isExec && (
               <div className="form-group">
-                <label className="form-label">Preferred Asset Class</label>
+                <label htmlFor="inv-form-asset-class" className="form-label">Preferred Asset Class</label>
                 <input
                   id="inv-form-asset-class"
+                  name="preferredAssetClass"
                   className="form-input"
                   placeholder="e.g. Residential, Commercial"
                   value={form.preferredAssetClass}
@@ -696,9 +705,10 @@ export const InvestorsPage: React.FC = () => {
           {/* Row: Committed AUM + Risk Tolerance */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="form-group">
-              <label className="form-label">Committed AUM</label>
+              <label htmlFor="inv-form-aum" className="form-label">Committed AUM</label>
               <input
                 id="inv-form-aum"
+                name="committedAUM"
                 className="form-input"
                 placeholder="e.g. ₹2.5 Cr"
                 value={form.committedAUM}
@@ -706,9 +716,10 @@ export const InvestorsPage: React.FC = () => {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Risk Tolerance</label>
+              <label htmlFor="inv-form-risk" className="form-label">Risk Tolerance</label>
               <select
                 id="inv-form-risk"
+                name="riskTolerance"
                 className="form-select"
                 value={form.riskTolerance}
                 onChange={e =>
@@ -728,9 +739,10 @@ export const InvestorsPage: React.FC = () => {
 
           {/* Investment Mandate */}
           <div className="form-group">
-            <label className="form-label">Investment Mandate</label>
+            <label htmlFor="inv-form-mandate" className="form-label">Investment Mandate</label>
             <input
               id="inv-form-mandate"
+              name="investmentMandate"
               className="form-input"
               placeholder="e.g. Long-term capital appreciation in Tier-1 commercial assets"
               value={form.investmentMandate}
@@ -741,9 +753,10 @@ export const InvestorsPage: React.FC = () => {
           {/* Row: Referral Source + Assigned Consultant */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="form-group">
-              <label className="form-label">Referral Source</label>
+              <label htmlFor="inv-form-referral" className="form-label">Referral Source</label>
               <input
                 id="inv-form-referral"
+                name="referralSource"
                 className="form-input"
                 placeholder="e.g. Private Network, Bank"
                 value={form.referralSource}
@@ -751,7 +764,7 @@ export const InvestorsPage: React.FC = () => {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">
+              <label htmlFor="inv-form-consultant" className="form-label">
                 Assigned Consultant
                 {isExec && (
                   <span
@@ -768,6 +781,8 @@ export const InvestorsPage: React.FC = () => {
               </label>
               {isExec ? (
                 <input
+                  id="inv-form-consultant"
+                  name="assignedAgentName"
                   className="form-input"
                   value={form.assignedAgentName}
                   readOnly
@@ -780,6 +795,7 @@ export const InvestorsPage: React.FC = () => {
               ) : (
                 <input
                   id="inv-form-consultant"
+                  name="assignedAgentName"
                   className="form-input"
                   placeholder="e.g. Ananya Iyer"
                   value={form.assignedAgentName}
@@ -794,9 +810,10 @@ export const InvestorsPage: React.FC = () => {
 
           {/* Notes */}
           <div className="form-group">
-            <label className="form-label">Notes</label>
+            <label htmlFor="inv-form-notes" className="form-label">Notes</label>
             <textarea
               id="inv-form-notes"
+              name="notes"
               className="form-input"
               rows={3}
               placeholder="Advisory notes, risk profile summary, key investment preferences…"

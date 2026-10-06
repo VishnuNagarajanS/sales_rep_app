@@ -97,7 +97,11 @@ export const NewConversationModal: React.FC<Props> = ({
         {/* Group name input */}
         {tab === 'group' && (
           <div className="chat-group-name-wrap">
+            <label htmlFor="chat-new-group-name-input" style={{ display: 'none' }}>Group Name</label>
             <input
+              id="chat-new-group-name-input"
+              name="groupName"
+              aria-label="Group name"
               className="chat-group-name-input"
               placeholder="Group name (e.g. Q4 Sales Team)…"
               value={groupName}

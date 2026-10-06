@@ -828,8 +828,10 @@ export const App: React.FC = () => {
             <>
               {/* Full Name */}
               <div className="form-group">
-                <label className="form-label">Full Name *</label>
+                <label htmlFor="quick-lead-name" className="form-label">Full Name *</label>
                 <input
+                  id="quick-lead-name"
+                  name="fullName"
                   type="text"
                   className="form-input"
                   required
@@ -842,8 +844,10 @@ export const App: React.FC = () => {
               {/* Phone + Email */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group">
-                  <label className="form-label">Phone Number *</label>
+                  <label htmlFor="quick-lead-phone" className="form-label">Phone Number *</label>
                   <input
+                    id="quick-lead-phone"
+                    name="phone"
                     type="text"
                     className="form-input"
                     required
@@ -853,9 +857,12 @@ export const App: React.FC = () => {
                   />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Email Address</label>
+                  <label htmlFor="quick-lead-email" className="form-label">Email Address</label>
                   <input
+                    id="quick-lead-email"
+                    name="email"
                     type="email"
+                    autoComplete="email"
                     className="form-input"
                     value={quickEmail}
                     onChange={e => setQuickEmail(e.target.value)}
@@ -867,8 +874,10 @@ export const App: React.FC = () => {
               {/* Location + Source */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group">
-                  <label className="form-label">Location / City</label>
+                  <label htmlFor="quick-lead-location" className="form-label">Location / City</label>
                   <input
+                    id="quick-lead-location"
+                    name="location"
                     type="text"
                     className="form-input"
                     value={quickLocation}
@@ -877,8 +886,10 @@ export const App: React.FC = () => {
                   />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Source</label>
+                  <label htmlFor="quick-lead-source" className="form-label">Source</label>
                   <select
+                    id="quick-lead-source"
+                    name="source"
                     className="form-select"
                     value={quickSource}
                     onChange={e => setQuickSource(e.target.value)}
@@ -900,8 +911,10 @@ export const App: React.FC = () => {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   {user?.role?.code !== 'sales_executive' && (
                     <div className="form-group">
-                      <label className="form-label">Asset Class</label>
+                      <label htmlFor="quick-lead-asset-class" className="form-label">Asset Class</label>
                       <select
+                        id="quick-lead-asset-class"
+                        name="assetClass"
                         className="form-select"
                         value={quickAssetClass}
                         onChange={e => setQuickAssetClass(e.target.value)}
@@ -913,8 +926,10 @@ export const App: React.FC = () => {
                     </div>
                   )}
                   <div className="form-group">
-                    <label className="form-label">Investment Capacity</label>
+                    <label htmlFor="quick-lead-capacity" className="form-label">Investment Capacity</label>
                     <select
+                      id="quick-lead-capacity"
+                      name="investmentCapacity"
                       className="form-select"
                       value={quickInvestmentCapacity}
                       onChange={e => setQuickInvestmentCapacity(e.target.value)}
@@ -936,8 +951,10 @@ export const App: React.FC = () => {
 
               {/* Notes & Requirements */}
               <div className="form-group">
-                <label className="form-label">Notes & Requirements</label>
+                <label htmlFor="quick-lead-notes" className="form-label">Notes & Requirements</label>
                 <textarea
+                  id="quick-lead-notes"
+                  name="notes"
                   className="form-textarea"
                   rows={3}
                   value={quickNotes}
@@ -953,8 +970,10 @@ export const App: React.FC = () => {
                 return (
                   <>
                     <div className="form-group">
-                      <label className="form-label">Investor *</label>
+                      <label htmlFor="quick-cons-investor" className="form-label">Investor *</label>
                       <select
+                        id="quick-cons-investor"
+                        name="investorId"
                         className="form-select"
                         value={consInvestorId}
                         required
@@ -976,8 +995,10 @@ export const App: React.FC = () => {
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                       <div className="form-group">
-                        <label className="form-label">Investor Phone</label>
+                        <label htmlFor="quick-cons-phone" className="form-label">Investor Phone</label>
                         <input
+                          id="quick-cons-phone"
+                          name="investorPhone"
                           type="text"
                           className="form-input"
                           placeholder="+91 98800 00000"
@@ -986,8 +1007,10 @@ export const App: React.FC = () => {
                         />
                       </div>
                       <div className="form-group">
-                        <label className="form-label">Consultation Slot *</label>
+                        <label htmlFor="quick-cons-slot" className="form-label">Consultation Slot *</label>
                         <input
+                          id="quick-cons-slot"
+                          name="consultationSlot"
                           type="text"
                           className="form-input"
                           required
@@ -1000,7 +1023,7 @@ export const App: React.FC = () => {
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                       <div className="form-group">
-                        <label className="form-label">
+                        <label htmlFor="quick-cons-advisor" className="form-label">
                           Private Wealth Advisor
                           {user?.role?.code === 'sales_executive' && (
                             <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--text-muted)' }}>
@@ -1010,6 +1033,8 @@ export const App: React.FC = () => {
                         </label>
                         {user?.role?.code === 'sales_executive' ? (
                           <input
+                            id="quick-cons-advisor"
+                            name="advisorName"
                             className="form-input"
                             value={consConsultantName}
                             readOnly
@@ -1017,6 +1042,8 @@ export const App: React.FC = () => {
                           />
                         ) : (
                           <input
+                            id="quick-cons-advisor"
+                            name="advisorName"
                             className="form-input"
                             placeholder="e.g. Vikram Malhotra"
                             value={consConsultantName}
@@ -1025,8 +1052,10 @@ export const App: React.FC = () => {
                         )}
                       </div>
                       <div className="form-group">
-                        <label className="form-label">Status</label>
+                        <label htmlFor="quick-cons-status" className="form-label">Status</label>
                         <select
+                          id="quick-cons-status"
+                          name="status"
                           className="form-select"
                           value={consStatus}
                           onChange={e => setConsStatus(e.target.value as any)}
@@ -1039,8 +1068,10 @@ export const App: React.FC = () => {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label">Discussion Agenda & Objectives</label>
+                      <label htmlFor="quick-cons-agenda" className="form-label">Discussion Agenda & Objectives</label>
                       <textarea
+                        id="quick-cons-agenda"
+                        name="agenda"
                         className="form-textarea"
                         rows={3}
                         placeholder="e.g. Commercial REIT yield analysis & pass-through taxation discussion."
@@ -1050,8 +1081,10 @@ export const App: React.FC = () => {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label">Outcome Notes & Recommendations</label>
+                      <label htmlFor="quick-cons-outcome" className="form-label">Outcome Notes & Recommendations</label>
                       <textarea
+                        id="quick-cons-outcome"
+                        name="outcome"
                         className="form-textarea"
                         rows={3}
                         placeholder="Record key takeaways, investor interest level, follow-up requirements..."
@@ -1071,7 +1104,7 @@ export const App: React.FC = () => {
                 const hasCustomers = tenantCustomers.length > 0;
                 return (
                   <div className="form-group">
-                    <label className="form-label">Link to Customer</label>
+                    <label htmlFor={dealCustomerMode === 'existing' && hasCustomers ? 'quick-deal-customer' : 'quick-deal-new-customer'} className="form-label">Link to Customer</label>
 
                     {/* Segmented toggle — same style as Reports page period toggle */}
                     <div className="app-segmented-toggle">
@@ -1096,6 +1129,9 @@ export const App: React.FC = () => {
 
                     {dealCustomerMode === 'existing' && hasCustomers ? (
                       <select
+                        id="quick-deal-customer"
+                        name="customerId"
+                        aria-label="Link to existing customer"
                         className="form-select"
                         value={selectedCustomerId}
                         onChange={e => setSelectedCustomerId(e.target.value)}
@@ -1109,10 +1145,12 @@ export const App: React.FC = () => {
                       </select>
                     ) : (
                       <div>
-                        <label className="form-label app-new-customer-label">
+                        <label htmlFor="quick-deal-new-customer" className="form-label app-new-customer-label">
                           New Customer Name * — a new Customer record will be created
                         </label>
                         <input
+                          id="quick-deal-new-customer"
+                          name="newCustomerName"
                           type="text"
                           className="form-input"
                           required
@@ -1129,8 +1167,10 @@ export const App: React.FC = () => {
               {/* ── Phone (non-lead, non-deal-existing) ── */}
               {!(quickCreateType === 'deal' && dealCustomerMode === 'existing') && (
                 <div className="form-group">
-                  <label className="form-label">Phone Number</label>
+                  <label htmlFor="quick-generic-phone" className="form-label">Phone Number</label>
                   <input
+                    id="quick-generic-phone"
+                    name="phone"
                     type="text"
                     className="form-input"
                     value={quickPhone}
@@ -1143,8 +1183,10 @@ export const App: React.FC = () => {
               {(quickCreateType === 'followup' || quickCreateType === 'visit') && (
                 <div className="app-schedule-grid">
                   <div className="form-group">
-                    <label className="form-label">Scheduled Date *</label>
+                    <label htmlFor="quick-schedule-date" className="form-label">Scheduled Date *</label>
                     <input
+                      id="quick-schedule-date"
+                      name="scheduledDate"
                       type="date"
                       className="form-input"
                       required
@@ -1153,8 +1195,10 @@ export const App: React.FC = () => {
                     />
                   </div>
                   <div className="form-group">
-                    <label className="form-label">Scheduled Time *</label>
+                    <label htmlFor="quick-schedule-time" className="form-label">Scheduled Time *</label>
                     <input
+                      id="quick-schedule-time"
+                      name="scheduledTime"
                       type="time"
                       className="form-input"
                       required
@@ -1167,8 +1211,10 @@ export const App: React.FC = () => {
 
               {/* ── Notes/Agenda (non-lead types) ── */}
               <div className="form-group">
-                <label className="form-label">Quick Notes</label>
+                <label htmlFor="quick-generic-notes" className="form-label">Quick Notes</label>
                 <textarea
+                  id="quick-generic-notes"
+                  name="notes"
                   className="form-textarea"
                   rows={2}
                   value={quickNotes}

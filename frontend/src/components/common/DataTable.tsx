@@ -212,10 +212,13 @@ export function DataTable<T>({
                 style={{ position: 'absolute', left: 12, color: 'var(--text-muted)' }}
               />
               <input
+                id="datatable-search-input"
+                name="search"
                 type="text"
                 className="form-input"
                 style={{ paddingLeft: 36, height: 38 }}
                 placeholder={searchPlaceholder}
+                aria-label={searchPlaceholder}
                 value={searchQuery}
                 onChange={e => {
                   setSearchQuery(e.target.value);
@@ -309,7 +312,10 @@ export function DataTable<T>({
                     }}
                   >
                     <input
+                      id="datatable-select-all"
+                      name="selectAll"
                       type="checkbox"
+                      aria-label="Select all rows"
                       checked={
                         paginatedData.length > 0 &&
                         selectedKeys.size === paginatedData.length
@@ -431,7 +437,10 @@ export function DataTable<T>({
                         onClick={e => e.stopPropagation()}
                       >
                         <input
+                          id={`datatable-select-row-${rowKey}`}
+                          name={`selectRow-${rowKey}`}
                           type="checkbox"
+                          aria-label={`Select row ${rowKey}`}
                           checked={isSelected}
                           onChange={e => toggleSelectRow(rowKey, e as any)}
                           style={{ cursor: 'pointer', width: 15, height: 15 }}

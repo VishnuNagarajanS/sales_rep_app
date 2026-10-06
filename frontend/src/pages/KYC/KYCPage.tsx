@@ -200,9 +200,11 @@ const KYCUploadCard: React.FC<KYCUploadProps> = ({
     });
   };
 
+  const inputId = `kyc-upload-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+
   return (
     <div className="form-group" style={{ marginBottom: 12 }}>
-      <label className="form-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <label htmlFor={inputId} className="form-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span>{label} {required && <span style={{ color: '#ef4444' }}>*</span>}</span>
         {doc && <span style={{ color: '#10b981', fontSize: 11, fontWeight: 700 }}>✓ Uploaded</span>}
       </label>
@@ -246,6 +248,9 @@ const KYCUploadCard: React.FC<KYCUploadProps> = ({
             </div>
           </div>
           <input
+            id={inputId}
+            name={inputId}
+            aria-label={`Upload ${label}`}
             ref={inputRef}
             type="file"
             accept=".pdf,.jpg,.jpeg,.png"
@@ -2201,9 +2206,12 @@ const GhlIrmKycView: React.FC = () => {
 
                 <div className="kyc-form-grid">
                   <div className="form-group">
-                    <label className="form-label">Investor Name *</label>
+                    <label htmlFor="assisted-kyc-investor-name" className="form-label">Investor Name *</label>
                     <input
+                      id="assisted-kyc-investor-name"
+                      name="investorName"
                       type="text"
+                      autoComplete="name"
                       className={`form-input ${formErrors.investorName ? 'kyc-input-error' : ''}`}
                       placeholder="e.g. Ramesh Chandra Verma"
                       value={formData.investorName}
@@ -2218,9 +2226,12 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Phone Number *</label>
+                    <label htmlFor="assisted-kyc-phone" className="form-label">Phone Number *</label>
                     <input
+                      id="assisted-kyc-phone"
+                      name="phone"
                       type="text"
+                      autoComplete="tel"
                       className={`form-input ${formErrors.phone ? 'kyc-input-error' : ''}`}
                       placeholder="+91 98765 43210"
                       value={formData.phone}
@@ -2235,9 +2246,12 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Email *</label>
+                    <label htmlFor="assisted-kyc-email" className="form-label">Email *</label>
                     <input
+                      id="assisted-kyc-email"
+                      name="email"
                       type="email"
+                      autoComplete="email"
                       className={`form-input ${formErrors.email ? 'kyc-input-error' : ''}`}
                       placeholder="e.g. ramesh.verma@example.com"
                       value={formData.email}
@@ -2252,8 +2266,10 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Gender *</label>
+                    <label htmlFor="assisted-kyc-gender" className="form-label">Gender *</label>
                     <select
+                      id="assisted-kyc-gender"
+                      name="gender"
                       className={`form-select ${formErrors.gender ? 'kyc-input-error' : ''}`}
                       value={formData.gender}
                       onChange={e => setFormData({ ...formData, gender: e.target.value })}
@@ -2266,8 +2282,10 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Investor Type *</label>
+                    <label htmlFor="assisted-kyc-investor-type" className="form-label">Investor Type *</label>
                     <select
+                      id="assisted-kyc-investor-type"
+                      name="investorType"
                       className={`form-select ${formErrors.investorType ? 'kyc-input-error' : ''}`}
                       value={formData.investorType}
                       onChange={e => setFormData({ ...formData, investorType: e.target.value })}
@@ -2283,8 +2301,10 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Resident Type *</label>
+                    <label htmlFor="assisted-kyc-resident-type" className="form-label">Resident Type *</label>
                     <select
+                      id="assisted-kyc-resident-type"
+                      name="residentType"
                       className={`form-select ${formErrors.residentType ? 'kyc-input-error' : ''}`}
                       value={formData.residentType}
                       onChange={e => setFormData({ ...formData, residentType: e.target.value })}
@@ -2315,8 +2335,10 @@ const GhlIrmKycView: React.FC = () => {
 
                 <div className="kyc-form-grid">
                   <div className="form-group">
-                    <label className="form-label">PAN Number *</label>
+                    <label htmlFor="assisted-kyc-pan" className="form-label">PAN Number *</label>
                     <input
+                      id="assisted-kyc-pan"
+                      name="panNumber"
                       type="text"
                       className={`form-input ${formErrors.panNumber ? 'kyc-input-error' : ''}`}
                       placeholder="e.g. ABCDE1234F"
@@ -2334,8 +2356,10 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Name (As per PAN) *</label>
+                    <label htmlFor="assisted-kyc-pan-name" className="form-label">Name (As per PAN) *</label>
                     <input
+                      id="assisted-kyc-pan-name"
+                      name="nameAsPerPan"
                       type="text"
                       className={`form-input ${formErrors.nameAsPerPan ? 'kyc-input-error' : ''}`}
                       placeholder="Full legal name"
@@ -2351,8 +2375,10 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Aadhaar Number *</label>
+                    <label htmlFor="assisted-kyc-aadhaar" className="form-label">Aadhaar Number *</label>
                     <input
+                      id="assisted-kyc-aadhaar"
+                      name="aadhaarNumber"
                       type="text"
                       className={`form-input ${formErrors.aadhaarNumber ? 'kyc-input-error' : ''}`}
                       placeholder="12-digit Aadhaar number"
@@ -2369,8 +2395,10 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Father's Name *</label>
+                    <label htmlFor="assisted-kyc-father-name" className="form-label">Father's Name *</label>
                     <input
+                      id="assisted-kyc-father-name"
+                      name="fatherName"
                       type="text"
                       className={`form-input ${formErrors.fatherName ? 'kyc-input-error' : ''}`}
                       placeholder="Father's full name"
@@ -2386,9 +2414,12 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Date of Birth (DOB) *</label>
+                    <label htmlFor="assisted-kyc-dob" className="form-label">Date of Birth (DOB) *</label>
                     <input
+                      id="assisted-kyc-dob"
+                      name="dob"
                       type="date"
+                      autoComplete="bday"
                       className={`form-input ${formErrors.dob ? 'kyc-input-error' : ''}`}
                       value={formData.dob}
                       onChange={e => {
@@ -2402,8 +2433,10 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Country *</label>
+                    <label htmlFor="assisted-kyc-country" className="form-label">Country *</label>
                     <input
+                      id="assisted-kyc-country"
+                      name="country"
                       type="text"
                       className={`form-input ${formErrors.country ? 'kyc-input-error' : ''}`}
                       placeholder="India"
@@ -2414,8 +2447,11 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
 
                   <div className="form-group kyc-form-grid-full">
-                    <label className="form-label">Permanent Address *</label>
+                    <label htmlFor="assisted-kyc-permanent-address" className="form-label">Permanent Address *</label>
                     <textarea
+                      id="assisted-kyc-permanent-address"
+                      name="address"
+                      autoComplete="street-address"
                       rows={2}
                       className={`form-textarea ${formErrors.address ? 'kyc-input-error' : ''}`}
                       placeholder="Flat/House No, Building, Street, Area"
@@ -2437,9 +2473,11 @@ const GhlIrmKycView: React.FC = () => {
 
                   <div className="form-group kyc-form-grid-full">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                      <label className="form-label" style={{ margin: 0 }}>Courier Address (Current Address) *</label>
-                      <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: 'var(--text-secondary)' }}>
+                      <label htmlFor="assisted-kyc-courier-address" className="form-label" style={{ margin: 0 }}>Courier Address (Current Address) *</label>
+                      <label htmlFor="assisted-kyc-same-as-permanent" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: 'var(--text-secondary)' }}>
                         <input
+                          id="assisted-kyc-same-as-permanent"
+                          name="sameAsPermanent"
                           type="checkbox"
                           checked={sameAsPermanent}
                           onChange={e => {
@@ -2454,6 +2492,8 @@ const GhlIrmKycView: React.FC = () => {
                       </label>
                     </div>
                     <textarea
+                      id="assisted-kyc-courier-address"
+                      name="courierAddress"
                       rows={2}
                       className={`form-textarea ${formErrors.courierAddress ? 'kyc-input-error' : ''}`}
                       placeholder="Delivery & physical documentation address"
@@ -2471,9 +2511,12 @@ const GhlIrmKycView: React.FC = () => {
 
                 <div className="kyc-form-grid-3">
                   <div className="form-group">
-                    <label className="form-label">State *</label>
+                    <label htmlFor="assisted-kyc-state" className="form-label">State *</label>
                     <input
+                      id="assisted-kyc-state"
+                      name="state"
                       type="text"
+                      autoComplete="address-level1"
                       className={`form-input ${formErrors.state ? 'kyc-input-error' : ''}`}
                       placeholder="e.g. Karnataka"
                       value={formData.state}
@@ -2488,9 +2531,12 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">City *</label>
+                    <label htmlFor="assisted-kyc-city" className="form-label">City *</label>
                     <input
+                      id="assisted-kyc-city"
+                      name="city"
                       type="text"
+                      autoComplete="address-level2"
                       className={`form-input ${formErrors.city ? 'kyc-input-error' : ''}`}
                       placeholder="e.g. Bengaluru"
                       value={formData.city}
@@ -2505,9 +2551,12 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Pincode *</label>
+                    <label htmlFor="assisted-kyc-pincode" className="form-label">Pincode *</label>
                     <input
+                      id="assisted-kyc-pincode"
+                      name="pincode"
                       type="text"
+                      autoComplete="postal-code"
                       maxLength={6}
                       className={`form-input ${formErrors.pincode ? 'kyc-input-error' : ''}`}
                       placeholder="6-digit PIN code"
@@ -2575,8 +2624,10 @@ const GhlIrmKycView: React.FC = () => {
 
                 <div className="kyc-form-grid">
                   <div className="form-group">
-                    <label className="form-label">Account Type *</label>
+                    <label htmlFor="assisted-kyc-account-type" className="form-label">Account Type *</label>
                     <select
+                      id="assisted-kyc-account-type"
+                      name="accountType"
                       className={`form-select ${formErrors.accountType ? 'kyc-input-error' : ''}`}
                       value={formData.accountType}
                       onChange={e => setFormData({ ...formData, accountType: e.target.value })}
@@ -2590,8 +2641,10 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Account Number *</label>
+                    <label htmlFor="assisted-kyc-account-number" className="form-label">Account Number *</label>
                     <input
+                      id="assisted-kyc-account-number"
+                      name="accountNumber"
                       type="text"
                       className={`form-input ${formErrors.accountNumber ? 'kyc-input-error' : ''}`}
                       placeholder="Bank account number"
@@ -2607,8 +2660,10 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">IFSC Code *</label>
+                    <label htmlFor="assisted-kyc-ifsc" className="form-label">IFSC Code *</label>
                     <input
+                      id="assisted-kyc-ifsc"
+                      name="ifscCode"
                       type="text"
                       className={`form-input ${formErrors.ifscCode ? 'kyc-input-error' : ''}`}
                       placeholder="e.g. HDFC0001234"
@@ -2620,8 +2675,10 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">SWIFT / IBAN Code</label>
+                    <label htmlFor="assisted-kyc-swift" className="form-label">SWIFT / IBAN Code</label>
                     <input
+                      id="assisted-kyc-swift"
+                      name="swiftCode"
                       type="text"
                       className="form-input"
                       placeholder="For international / NRI wires"
@@ -2631,8 +2688,10 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Account Holder Name *</label>
+                    <label htmlFor="assisted-kyc-account-holder" className="form-label">Account Holder Name *</label>
                     <input
+                      id="assisted-kyc-account-holder"
+                      name="accountHolderName"
                       type="text"
                       className={`form-input ${formErrors.accountHolderName ? 'kyc-input-error' : ''}`}
                       placeholder="Name as registered with the bank"
@@ -2648,8 +2707,10 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Bank Name *</label>
+                    <label htmlFor="assisted-kyc-bank-name" className="form-label">Bank Name *</label>
                     <input
+                      id="assisted-kyc-bank-name"
+                      name="bankName"
                       type="text"
                       className={`form-input ${formErrors.bankName ? 'kyc-input-error' : ''}`}
                       placeholder="e.g. HDFC Bank Ltd"
@@ -2665,8 +2726,10 @@ const GhlIrmKycView: React.FC = () => {
                   </div>
 
                   <div className="form-group kyc-form-grid-full">
-                    <label className="form-label">Branch Name</label>
+                    <label htmlFor="assisted-kyc-branch-name" className="form-label">Branch Name</label>
                     <input
+                      id="assisted-kyc-branch-name"
+                      name="branchName"
                       type="text"
                       className="form-input"
                       placeholder="e.g. Koramangala 5th Block Branch"
@@ -2709,8 +2772,10 @@ const GhlIrmKycView: React.FC = () => {
 
                 {/* Skip Checkbox */}
                 <div className="kyc-demat-card">
-                  <label className="kyc-checkbox-label">
+                  <label htmlFor="assisted-kyc-has-no-demat" className="kyc-checkbox-label">
                     <input
+                      id="assisted-kyc-has-no-demat"
+                      name="hasNoDemat"
                       type="checkbox"
                       className="kyc-checkbox-input"
                       checked={formData.hasNoDemat}
@@ -2731,7 +2796,7 @@ const GhlIrmKycView: React.FC = () => {
                   </label>
                   {formData.hasNoDemat && (
                     <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
-                      ℹï¸ <em>You have elected to skip the Demat step. Physical investment certificate & holding statement will be issued instead. You may proceed directly to Nominee Details.</em>
+                      ℹï¸  <em>You have elected to skip the Demat step. Physical investment certificate & holding statement will be issued instead. You may proceed directly to Nominee Details.</em>
                     </div>
                   )}
                 </div>
@@ -2740,8 +2805,10 @@ const GhlIrmKycView: React.FC = () => {
                 {!formData.hasNoDemat && (
                   <div className="kyc-form-grid">
                     <div className="form-group kyc-form-grid-full">
-                      <label className="form-label">Demat Account Number (16-digit BO ID / DP ID) *</label>
+                      <label htmlFor="assisted-kyc-demat-account-number" className="form-label">Demat Account Number (16-digit BO ID / DP ID) *</label>
                       <input
+                        id="assisted-kyc-demat-account-number"
+                        name="dematAccountNumber"
                         type="text"
                         className={`form-input ${formErrors.dematAccountNumber ? 'kyc-input-error' : ''}`}
                         placeholder="e.g. 1208160012345678 or IN30012345678901"
@@ -2826,8 +2893,10 @@ const GhlIrmKycView: React.FC = () => {
 
                     <div className="kyc-form-grid">
                       <div className="form-group">
-                        <label className="form-label">Nominee Name *</label>
+                        <label htmlFor={`assisted-kyc-nominee-${idx}-name`} className="form-label">Nominee Name *</label>
                         <input
+                          id={`assisted-kyc-nominee-${idx}-name`}
+                          name={`nominee_${idx}_name`}
                           type="text"
                           className={`form-input ${formErrors[`nominee_${idx}_name`] ? 'kyc-input-error' : ''}`}
                           placeholder="Nominee full name"
@@ -2840,8 +2909,10 @@ const GhlIrmKycView: React.FC = () => {
                       </div>
 
                       <div className="form-group">
-                        <label className="form-label">Relationship with Investor *</label>
+                        <label htmlFor={`assisted-kyc-nominee-${idx}-relationship`} className="form-label">Relationship with Investor *</label>
                         <select
+                          id={`assisted-kyc-nominee-${idx}-relationship`}
+                          name={`nominee_${idx}_relationship`}
                           className="form-select"
                           value={nom.relationship}
                           onChange={e => handleNomineeChange(nom.id, 'relationship', e.target.value)}
@@ -2858,8 +2929,10 @@ const GhlIrmKycView: React.FC = () => {
                       </div>
 
                       <div className="form-group">
-                        <label className="form-label">Date of Birth / Age *</label>
+                        <label htmlFor={`assisted-kyc-nominee-${idx}-dob`} className="form-label">Date of Birth / Age *</label>
                         <input
+                          id={`assisted-kyc-nominee-${idx}-dob`}
+                          name={`nominee_${idx}_dob`}
                           type="date"
                           className={`form-input ${formErrors[`nominee_${idx}_dob`] ? 'kyc-input-error' : ''}`}
                           value={nom.dob}
@@ -2871,8 +2944,10 @@ const GhlIrmKycView: React.FC = () => {
                       </div>
 
                       <div className="form-group">
-                        <label className="form-label">Allocation Percentage (%) *</label>
+                        <label htmlFor={`assisted-kyc-nominee-${idx}-pct`} className="form-label">Allocation Percentage (%) *</label>
                         <input
+                          id={`assisted-kyc-nominee-${idx}-pct`}
+                          name={`nominee_${idx}_pct`}
                           type="number"
                           min={1}
                           max={100}
@@ -2886,8 +2961,10 @@ const GhlIrmKycView: React.FC = () => {
                       </div>
 
                       <div className="form-group kyc-form-grid-full">
-                        <label className="form-label">Nominee Address</label>
+                        <label htmlFor={`assisted-kyc-nominee-${idx}-address`} className="form-label">Nominee Address</label>
                         <input
+                          id={`assisted-kyc-nominee-${idx}-address`}
+                          name={`nominee_${idx}_address`}
                           type="text"
                           className="form-input"
                           placeholder="Address (Leave blank if same as investor)"
@@ -2897,8 +2974,10 @@ const GhlIrmKycView: React.FC = () => {
                       </div>
 
                       <div className="form-group kyc-form-grid-full">
-                        <label className="form-label">Guardian Name (If nominee is a minor under 18)</label>
+                        <label htmlFor={`assisted-kyc-nominee-${idx}-guardian`} className="form-label">Guardian Name (If nominee is a minor under 18)</label>
                         <input
+                          id={`assisted-kyc-nominee-${idx}-guardian`}
+                          name={`nominee_${idx}_guardian`}
                           type="text"
                           className="form-input"
                           placeholder="Guardian full name"
@@ -3107,8 +3186,10 @@ const GhlIrmKycView: React.FC = () => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Full Name *</label>
+                  <label htmlFor="edit-sec-investor-name" className="form-label">Full Name *</label>
                   <input
+                    id="edit-sec-investor-name"
+                    name="investorName"
                     type="text"
                     className="form-input"
                     value={sectionFormData.investorName || ''}
@@ -3116,8 +3197,10 @@ const GhlIrmKycView: React.FC = () => {
                   />
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Email</label>
+                  <label htmlFor="edit-sec-email" className="form-label">Email</label>
                   <input
+                    id="edit-sec-email"
+                    name="email"
                     type="email"
                     className="form-input"
                     value={sectionFormData.email || ''}
@@ -3125,8 +3208,10 @@ const GhlIrmKycView: React.FC = () => {
                   />
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Phone</label>
+                  <label htmlFor="edit-sec-phone" className="form-label">Phone</label>
                   <input
+                    id="edit-sec-phone"
+                    name="phone"
                     type="text"
                     className="form-input"
                     value={sectionFormData.phone || ''}
@@ -3134,8 +3219,10 @@ const GhlIrmKycView: React.FC = () => {
                   />
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">PAN Number</label>
+                  <label htmlFor="edit-sec-pan" className="form-label">PAN Number</label>
                   <input
+                    id="edit-sec-pan"
+                    name="panNumber"
                     type="text"
                     className="form-input"
                     maxLength={10}
@@ -3145,8 +3232,10 @@ const GhlIrmKycView: React.FC = () => {
                   />
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">City</label>
+                  <label htmlFor="edit-sec-city" className="form-label">City</label>
                   <input
+                    id="edit-sec-city"
+                    name="city"
                     type="text"
                     className="form-input"
                     value={sectionFormData.city || ''}
@@ -3154,8 +3243,10 @@ const GhlIrmKycView: React.FC = () => {
                   />
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Date of Birth</label>
+                  <label htmlFor="edit-sec-dob" className="form-label">Date of Birth</label>
                   <input
+                    id="edit-sec-dob"
+                    name="dob"
                     type="date"
                     className="form-input"
                     value={sectionFormData.dob || ''}
@@ -3163,8 +3254,10 @@ const GhlIrmKycView: React.FC = () => {
                   />
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Occupation</label>
+                  <label htmlFor="edit-sec-occupation" className="form-label">Occupation</label>
                   <input
+                    id="edit-sec-occupation"
+                    name="occupation"
                     type="text"
                     className="form-input"
                     placeholder="e.g. Business Owner / Executive"
@@ -3173,8 +3266,10 @@ const GhlIrmKycView: React.FC = () => {
                   />
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Gender</label>
+                  <label htmlFor="edit-sec-gender" className="form-label">Gender</label>
                   <select
+                    id="edit-sec-gender"
+                    name="gender"
                     className="form-select"
                     value={sectionFormData.gender || 'Male'}
                     onChange={e => setSectionFormData({ ...sectionFormData, gender: e.target.value })}
@@ -3185,8 +3280,10 @@ const GhlIrmKycView: React.FC = () => {
                   </select>
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Investor Type</label>
+                  <label htmlFor="edit-sec-investor-type" className="form-label">Investor Type</label>
                   <select
+                    id="edit-sec-investor-type"
+                    name="investorType"
                     className="form-select"
                     value={sectionFormData.investorType || 'Individual / Retail HNW'}
                     onChange={e => setSectionFormData({ ...sectionFormData, investorType: e.target.value })}
@@ -3200,8 +3297,10 @@ const GhlIrmKycView: React.FC = () => {
                   </select>
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Resident Type</label>
+                  <label htmlFor="edit-sec-resident-type" className="form-label">Resident Type</label>
                   <select
+                    id="edit-sec-resident-type"
+                    name="residentType"
                     className="form-select"
                     value={sectionFormData.residentType || 'Resident Indian (RI)'}
                     onChange={e => setSectionFormData({ ...sectionFormData, residentType: e.target.value })}
@@ -3214,8 +3313,10 @@ const GhlIrmKycView: React.FC = () => {
                   </select>
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Preferred Asset Class</label>
+                  <label htmlFor="edit-sec-preferred-asset-class" className="form-label">Preferred Asset Class</label>
                   <select
+                    id="edit-sec-preferred-asset-class"
+                    name="preferredAssetClass"
                     className="form-select"
                     value={sectionFormData.preferredAssetClass || 'CO-AIF'}
                     onChange={e => setSectionFormData({ ...sectionFormData, preferredAssetClass: e.target.value })}
@@ -3230,8 +3331,10 @@ const GhlIrmKycView: React.FC = () => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Name on Document</label>
+                  <label htmlFor="edit-sec-doc-name" className="form-label">Name on Document</label>
                   <input
+                    id="edit-sec-doc-name"
+                    name="nameAsPerPan"
                     type="text"
                     className="form-input"
                     value={sectionFormData.nameAsPerPan || ''}
@@ -3239,8 +3342,10 @@ const GhlIrmKycView: React.FC = () => {
                   />
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Father's Name</label>
+                  <label htmlFor="edit-sec-father-name" className="form-label">Father's Name</label>
                   <input
+                    id="edit-sec-father-name"
+                    name="fatherName"
                     type="text"
                     className="form-input"
                     value={sectionFormData.fatherName || ''}
@@ -3248,8 +3353,10 @@ const GhlIrmKycView: React.FC = () => {
                   />
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Aadhaar Number</label>
+                  <label htmlFor="edit-sec-aadhaar" className="form-label">Aadhaar Number</label>
                   <input
+                    id="edit-sec-aadhaar"
+                    name="aadhaarNumber"
                     type="text"
                     className="form-input"
                     maxLength={14}
@@ -3259,8 +3366,10 @@ const GhlIrmKycView: React.FC = () => {
                   />
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">City</label>
+                  <label htmlFor="edit-sec-ident-city" className="form-label">City</label>
                   <input
+                    id="edit-sec-ident-city"
+                    name="city"
                     type="text"
                     className="form-input"
                     value={sectionFormData.city || ''}
@@ -3268,8 +3377,10 @@ const GhlIrmKycView: React.FC = () => {
                   />
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">State</label>
+                  <label htmlFor="edit-sec-ident-state" className="form-label">State</label>
                   <input
+                    id="edit-sec-ident-state"
+                    name="state"
                     type="text"
                     className="form-input"
                     value={sectionFormData.state || ''}
@@ -3277,8 +3388,10 @@ const GhlIrmKycView: React.FC = () => {
                   />
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Pincode</label>
+                  <label htmlFor="edit-sec-ident-pincode" className="form-label">Pincode</label>
                   <input
+                    id="edit-sec-ident-pincode"
+                    name="pincode"
                     type="text"
                     className="form-input"
                     maxLength={6}
@@ -3287,8 +3400,10 @@ const GhlIrmKycView: React.FC = () => {
                   />
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Country</label>
+                  <label htmlFor="edit-sec-ident-country" className="form-label">Country</label>
                   <input
+                    id="edit-sec-ident-country"
+                    name="country"
                     type="text"
                     className="form-input"
                     value={sectionFormData.country || 'India'}
@@ -3297,8 +3412,10 @@ const GhlIrmKycView: React.FC = () => {
                 </div>
               </div>
               <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Permanent Address</label>
+                <label htmlFor="edit-sec-permanent-address" className="form-label">Permanent Address</label>
                 <textarea
+                  id="edit-sec-permanent-address"
+                  name="address"
                   className="form-textarea"
                   rows={2}
                   value={sectionFormData.address || ''}
@@ -3306,8 +3423,10 @@ const GhlIrmKycView: React.FC = () => {
                 />
               </div>
               <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Courier Address</label>
+                <label htmlFor="edit-sec-courier-address" className="form-label">Courier Address</label>
                 <textarea
+                  id="edit-sec-courier-address"
+                  name="courierAddress"
                   className="form-textarea"
                   rows={2}
                   value={sectionFormData.courierAddress || ''}
@@ -3455,8 +3574,10 @@ const GhlIrmKycView: React.FC = () => {
             borderRadius: 8,
             padding: 14,
           }}>
-            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', fontSize: 13, lineHeight: '1.4' }}>
+            <label htmlFor="assisted-kyc-customer-consent" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', fontSize: 13, lineHeight: '1.4' }}>
               <input
+                id="assisted-kyc-customer-consent"
+                name="customerConsent"
                 type="checkbox"
                 checked={customerConsentChecked}
                 onChange={e => setCustomerConsentChecked(e.target.checked)}

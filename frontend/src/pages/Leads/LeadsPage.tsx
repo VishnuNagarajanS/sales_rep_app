@@ -871,7 +871,10 @@ export const LeadsPage: React.FC = () => {
       key: 'select',
       header: (
         <input
+          id="leads-select-all"
+          name="selectAllLeads"
           type="checkbox"
+          aria-label="Select all leads"
           className="assign-checkbox"
           checked={filteredLeads.length > 0 && filteredLeads.every(l => selectedLeadIds.has(l.id))}
           onChange={e => {
@@ -883,7 +886,10 @@ export const LeadsPage: React.FC = () => {
       align: 'center' as const,
       render: (l: Lead) => (
         <input
+          id={`leads-select-row-${l.id}`}
+          name={`selectLead_${l.id}`}
           type="checkbox"
+          aria-label={`Select lead ${l.name || l.id}`}
           className="assign-checkbox"
           checked={selectedLeadIds.has(l.id)}
           onChange={e => {
@@ -1320,13 +1326,14 @@ export const LeadsPage: React.FC = () => {
       >
         <form onSubmit={handleSaveLead} className="lead-edit-form">
           <div className="form-group">
-            <label className="form-label">Full Name *</label>
+            <label htmlFor="lead-form-name" className="form-label">Full Name *</label>
             <input
+              id="lead-form-name"
               type="text"
               className="form-input"
               required
-              autoComplete="off"
-              name="fld-fullname-nexus"
+              autoComplete="name"
+              name="name"
               value={formData.name || ''}
               onChange={e => setFormData({ ...formData, name: e.target.value })}
               placeholder="e.g. Ramesh Chandra"
@@ -1335,25 +1342,27 @@ export const LeadsPage: React.FC = () => {
 
           <div className="lead-form-grid-2">
             <div className="form-group">
-              <label className="form-label">Phone Number *</label>
+              <label htmlFor="lead-form-phone" className="form-label">Phone Number *</label>
               <input
+                id="lead-form-phone"
                 type="text"
                 className="form-input"
                 required
-                autoComplete="off"
-                name="fld-phone-nexus"
+                autoComplete="tel"
+                name="phone"
                 value={formData.phone || ''}
                 onChange={e => setFormData({ ...formData, phone: e.target.value })}
                 placeholder="+91 98800 00000"
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Email Address</label>
+              <label htmlFor="lead-form-email" className="form-label">Email Address</label>
               <input
+                id="lead-form-email"
                 type="email"
                 className="form-input"
-                autoComplete="off"
-                name="fld-email-nexus"
+                autoComplete="email"
+                name="email"
                 value={formData.email || ''}
                 onChange={e => setFormData({ ...formData, email: e.target.value })}
                 placeholder="ramesh@example.com"
@@ -1363,20 +1372,23 @@ export const LeadsPage: React.FC = () => {
 
           <div className="lead-form-grid-2">
             <div className="form-group">
-              <label className="form-label">Location / City</label>
+              <label htmlFor="lead-form-location" className="form-label">Location / City</label>
               <input
+                id="lead-form-location"
                 type="text"
                 className="form-input"
-                autoComplete="off"
-                name="fld-location-nexus"
+                autoComplete="address-level2"
+                name="location"
                 value={formData.location || ''}
                 onChange={e => setFormData({ ...formData, location: e.target.value })}
                 placeholder="e.g. Bengaluru, Indiranagar"
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Source</label>
+              <label htmlFor="lead-form-source" className="form-label">Source</label>
               <select
+                id="lead-form-source"
+                name="source"
                 className="form-select"
                 value={formData.source || 'Website Inbound'}
                 onChange={e => setFormData({ ...formData, source: e.target.value })}
@@ -1399,8 +1411,10 @@ export const LeadsPage: React.FC = () => {
             {tenant?.slug === 'jamin' ? (
               <div className="lead-form-grid-2">
                 <div className="form-group">
-                  <label className="form-label">Plot Budget Range</label>
+                  <label htmlFor="lead-form-budget-range" className="form-label">Plot Budget Range</label>
                   <select
+                    id="lead-form-budget-range"
+                    name="budgetRange"
                     className="form-select"
                     value={formData.customFields?.budgetRange || '₹45L - ₹65L'}
                     onChange={e =>
@@ -1417,8 +1431,10 @@ export const LeadsPage: React.FC = () => {
                   </select>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Preferred Micro-Market</label>
+                  <label htmlFor="lead-form-micro-market" className="form-label">Preferred Micro-Market</label>
                   <select
+                    id="lead-form-micro-market"
+                    name="preferredLocation"
                     className="form-select"
                     value={formData.customFields?.preferredLocation || 'Devanahalli North'}
                     onChange={e =>
@@ -1438,8 +1454,10 @@ export const LeadsPage: React.FC = () => {
               <div className="lead-form-grid-2">
                 {!isExec && (
                   <div className="form-group">
-                    <label className="form-label">Asset Class</label>
+                    <label htmlFor="lead-form-asset-class" className="form-label">Asset Class</label>
                     <select
+                      id="lead-form-asset-class"
+                      name="assetClass"
                       className="form-select"
                       value={currentAssetClass}
                       onChange={e => handleAssetClassChange(e.target.value)}
@@ -1451,8 +1469,10 @@ export const LeadsPage: React.FC = () => {
                   </div>
                 )}
                 <div className="form-group">
-                  <label className="form-label">Investment Capacity</label>
+                  <label htmlFor="lead-form-capacity" className="form-label">Investment Capacity</label>
                   <select
+                    id="lead-form-capacity"
+                    name="investmentCapacity"
                     className="form-select"
                     value={formData.customFields?.investmentCapacity || ''}
                     onChange={e =>
@@ -1475,8 +1495,10 @@ export const LeadsPage: React.FC = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Notes & Requirements</label>
+            <label htmlFor="lead-form-notes" className="form-label">Notes & Requirements</label>
             <textarea
+              id="lead-form-notes"
+              name="notes"
               className="form-textarea"
               rows={3}
               value={formData.notes || ''}
@@ -1525,24 +1547,26 @@ export const LeadsPage: React.FC = () => {
           </p>
 
           <div className="form-group">
-            <label className="form-label">Initial Deal Title *</label>
+            <label htmlFor="lead-convert-deal-title" className="form-label">Initial Deal Title *</label>
             <input
+              id="lead-convert-deal-title"
               type="text"
               className="form-input"
               autoComplete="off"
-              name="fld-deal-title-nexus"
+              name="dealTitle"
               value={convertDealTitle}
               onChange={e => setConvertDealTitle(e.target.value)}
             />
           </div>
 
           <div className="form-group">
-            <label className="form-label">Estimated Deal Value (₹)</label>
+            <label htmlFor="lead-convert-deal-value" className="form-label">Estimated Deal Value (₹)</label>
             <input
+              id="lead-convert-deal-value"
               type="number"
               className="form-input"
               autoComplete="off"
-              name="fld-deal-value-nexus"
+              name="dealValue"
               value={convertDealValue}
               onChange={e => setConvertDealValue(Number(e.target.value))}
             />
@@ -1614,10 +1638,13 @@ export const LeadsPage: React.FC = () => {
                 <div className="lead-form-grid-2">
                   {['name', 'phone', 'email', 'location', 'source', 'priority'].map(tf => (
                     <div key={tf} className="lead-mapping-row">
-                      <span className="lead-mapping-label">
+                      <label htmlFor={`lead-csv-map-${tf}`} className="lead-mapping-label">
                         {tf}{['name', 'phone'].includes(tf) ? ' *' : ''}
-                      </span>
+                      </label>
                       <select
+                        id={`lead-csv-map-${tf}`}
+                        name={`map_${tf}`}
+                        aria-label={`Map column for ${tf}`}
                         className="form-select lead-mapping-select"
                         value={columnMap[tf] || ''}
                         onChange={e => setColumnMap(prev => ({ ...prev, [tf]: e.target.value }))}
@@ -1662,6 +1689,9 @@ export const LeadsPage: React.FC = () => {
           ) : (
             <>
               <input
+                id="lead-csv-file-input"
+                name="csvFile"
+                aria-label="Upload CSV file"
                 type="file"
                 accept=".csv"
                 style={{ display: 'none' }}
@@ -1747,8 +1777,9 @@ export const LeadsPage: React.FC = () => {
                 <p className="assign-modal-sub">Select an agent to assign the {selectedLeadIds.size} selected lead{selectedLeadIds.size !== 1 ? 's' : ''} to:</p>
                 <div className="assign-agent-list">
                   {agentsList.map((agent: any) => (
-                    <label key={agent.id} className={`assign-agent-row${assignSelectedAgent?.id === agent.id ? ' selected' : ''}`}>
+                    <label htmlFor={`assign-agent-${agent.id}`} key={agent.id} className={`assign-agent-row${assignSelectedAgent?.id === agent.id ? ' selected' : ''}`}>
                       <input
+                        id={`assign-agent-${agent.id}`}
                         type="radio"
                         name="assignAgent"
                         value={agent.id}

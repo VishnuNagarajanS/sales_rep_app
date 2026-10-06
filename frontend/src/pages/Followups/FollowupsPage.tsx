@@ -801,11 +801,13 @@ export const FollowupsPage: React.FC = () => {
           <div className="admin-followup-filter-group">
             {/* 1. Role Filter */}
             <div className="followup-filter-item">
-              <span className="followup-filter-label">
+              <label htmlFor="admin-followup-role" className="followup-filter-label">
                 <Briefcase size={14} color="var(--primary-600)" />
                 Role:
-              </span>
+              </label>
               <select
+                id="admin-followup-role"
+                name="roleFilter"
                 className="followup-filter-select"
                 value={selectedRole}
                 onChange={e => handleRoleChange(e.target.value as FollowupRoleFilter)}
@@ -817,11 +819,13 @@ export const FollowupsPage: React.FC = () => {
 
             {/* 2. Person Filter (Dynamic based on Role) */}
             <div className="followup-filter-item">
-              <span className="followup-filter-label">
+              <label htmlFor="admin-followup-person" className="followup-filter-label">
                 <User size={14} color="var(--text-muted)" />
                 Person:
-              </span>
+              </label>
               <select
+                id="admin-followup-person"
+                name="personFilter"
                 className="followup-filter-select"
                 value={selectedPerson}
                 onChange={e => setSelectedPerson(e.target.value)}
@@ -839,11 +843,13 @@ export const FollowupsPage: React.FC = () => {
 
             {/* 3. Date Range Filter */}
             <div className="followup-filter-item">
-              <span className="followup-filter-label">
+              <label htmlFor="admin-followup-date-range" className="followup-filter-label">
                 <Calendar size={14} color="var(--text-muted)" />
                 Date Range:
-              </span>
+              </label>
               <select
+                id="admin-followup-date-range"
+                name="dateRangePreset"
                 className="followup-filter-select"
                 value={dateRangePreset}
                 onChange={e => setDateRangePreset(e.target.value as DateRangePreset)}
@@ -859,6 +865,9 @@ export const FollowupsPage: React.FC = () => {
             {dateRangePreset === 'custom' && (
               <div className="followup-date-custom-inputs">
                 <input
+                  id="admin-followup-start-date"
+                  name="customStartDate"
+                  aria-label="Start Date"
                   type="date"
                   className="followup-date-input"
                   value={customStartDate}
@@ -867,6 +876,9 @@ export const FollowupsPage: React.FC = () => {
                 />
                 <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>to</span>
                 <input
+                  id="admin-followup-end-date"
+                  name="customEndDate"
+                  aria-label="End Date"
                   type="date"
                   className="followup-date-input"
                   value={customEndDate}
@@ -1069,8 +1081,10 @@ export const FollowupsPage: React.FC = () => {
         }
       >
         <div className="form-group">
-          <label className="form-label">New Date & Time</label>
+          <label htmlFor="followup-reschedule-datetime" className="form-label">New Date & Time</label>
           <input
+            id="followup-reschedule-datetime"
+            name="newDateTime"
             type="text"
             className="form-input"
             value={newDate}
@@ -1356,10 +1370,12 @@ export const FollowupsPage: React.FC = () => {
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     <div>
-                      <span className="lead-detail-label">Investment Capacity:</span>
+                      <label htmlFor="followup-drawer-capacity" className="lead-detail-label">Investment Capacity:</label>
                       {isEditingCapacity ? (
                         <div style={{ marginTop: 6 }}>
                           <select
+                            id="followup-drawer-capacity"
+                            name="capacityValue"
                             className="form-select"
                             value={capacityValue}
                             onChange={e => setCapacityValue(e.target.value)}
@@ -1412,7 +1428,7 @@ export const FollowupsPage: React.FC = () => {
                     {/* ── Investment Amount (Separate from Capacity & Asset Class) ── */}
                     <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-color)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span className="lead-detail-label">Investment Amount:</span>
+                        <label htmlFor="followup-drawer-investment-amount" className="lead-detail-label">Investment Amount:</label>
                         {isIrm && (
                           <button
                             type="button"
@@ -1428,6 +1444,8 @@ export const FollowupsPage: React.FC = () => {
                       {isEditingAmount ? (
                         <div style={{ marginTop: 6 }}>
                           <input
+                            id="followup-drawer-investment-amount"
+                            name="investmentAmount"
                             type="number"
                             className="form-input"
                             placeholder="e.g. 5000000"
@@ -1480,8 +1498,10 @@ export const FollowupsPage: React.FC = () => {
                       <h4 className="lead-custom-title" style={{ margin: 0 }}>
                         {tenant?.name || 'GHL India Ventures'} Custom Attributes
                       </h4>
-                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', fontWeight: 600, color: 'var(--text-primary)' }}>
+                      <label htmlFor="followup-drawer-set-by-irm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', fontWeight: 600, color: 'var(--text-primary)' }}>
                         <input
+                          id="followup-drawer-set-by-irm"
+                          name="setByIrm"
                           type="checkbox"
                           checked={Boolean(isPrefConfirmed)}
                           onChange={e => handleTogglePrefCheckbox(e.target.checked, matchingLead, matchingCustomer)}
@@ -1495,10 +1515,12 @@ export const FollowupsPage: React.FC = () => {
                       <div>
                         <div className="lead-detail-grid" style={{ gap: 14 }}>
                           <div>
-                            <label className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                            <label htmlFor="followup-drawer-pref-asset-class" className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
                               Preferred Asset Class:
                             </label>
                             <select
+                              id="followup-drawer-pref-asset-class"
+                              name="preferredAssetClass"
                               className="form-select"
                               value={prefAssetClass}
                               onChange={e => setPrefAssetClass(e.target.value)}
@@ -1510,10 +1532,12 @@ export const FollowupsPage: React.FC = () => {
                             </select>
                           </div>
                           <div>
-                            <label className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                            <label htmlFor="followup-drawer-pref-horizon" className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
                               Investment Horizon:
                             </label>
                             <select
+                              id="followup-drawer-pref-horizon"
+                              name="investmentHorizon"
                               className="form-select"
                               value={prefHorizon}
                               onChange={e => setPrefHorizon(e.target.value)}
