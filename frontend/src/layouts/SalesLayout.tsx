@@ -13,6 +13,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { workHandoverService, WorkHandoverDto } from '../services/workHandoverService';
 import { Modal } from '../components/common/Modal';
+import { AiAssistant } from '../components/ai/AiAssistant';
 
 interface SalesLayoutProps {
   currentRoute: string;
@@ -303,6 +304,8 @@ export const SalesLayout: React.FC<SalesLayoutProps> = ({
           </div>
         </Modal>
       )}
+
+      <AiAssistant />
     </div>
   );
 };

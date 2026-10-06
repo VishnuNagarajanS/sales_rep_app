@@ -78,6 +78,31 @@ public static class ServiceExtensions
         services.AddScoped<IWorkHandoverService, WorkHandoverService>();
         services.AddScoped<ILeaveRequestService, LeaveRequestService>();
 
+        // AI Services
+        services.Configure<backend.Services.Ai.AiSettings>(configuration.GetSection("Ai"));
+        services.AddHttpClient<backend.Services.Ai.ILlmClient, backend.Services.Ai.OpenAiCompatibleLlmClient>((sp, client) =>
+        {
+            var settings = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<backend.Services.Ai.AiSettings>>().Value;
+            if (!string.IsNullOrEmpty(settings.Primary.BaseUrl))
+            {
+                client.BaseAddress = new Uri(settings.Primary.BaseUrl);
+                if (!client.BaseAddress.AbsoluteUri.EndsWith("/"))
+                    client.BaseAddress = new Uri(client.BaseAddress.AbsoluteUri + "/");
+            }
+            if (!string.IsNullOrEmpty(settings.Primary.ApiKey))
+            {
+                client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", settings.Primary.ApiKey);
+            }
+        });
+        services.AddScoped<backend.Services.Ai.AiToolRegistry>(sp =>
+        {
+            var registry = new backend.Services.Ai.AiToolRegistry();
+            registry.Register(new backend.Services.Ai.Tools.DeclineOutOfScopeTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchLeadsTool());
+            return registry;
+        });
+        services.AddScoped<backend.Services.Ai.AiAssistantService>();
+
         // Background job: notify admins when a handover's PlannedEndAt has passed (never auto-reverts)
         services.AddHostedService<backend.Services.BackgroundJobs.HandoverDueDateCheckerService>();
         services.AddHostedService<backend.Services.BackgroundJobs.LeaveReminderBackgroundService>();

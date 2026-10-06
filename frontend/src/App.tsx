@@ -140,6 +140,7 @@ import { LeaveRequestsPage } from './pages/Company/LeaveRequestsPage';
 import { WorkHandoverPage } from './pages/Company/WorkHandoverPage';
 import { CompanySettingsPage } from './pages/Company/CompanySettingsPage';
 import { CompanyAuditPage } from './pages/Company/CompanyAuditPage';
+import { SmartyAIPage } from './pages/AI/SmartyAIPage';
 
 // Super Admin Platform Pages
 import { PlatformDashboardPage } from './pages/Admin/Dashboard/PlatformDashboardPage';
@@ -717,7 +718,7 @@ export const App: React.FC = () => {
       ) : currentRoute === 'chat' ? (
         <ChatPage onNavigate={navigate} />
       ) : currentRoute === 'smarty-ai' ? (
-        <PlaceholderPage title="Smarty AI" />
+        <SmartyAIPage />
       ) : currentRoute === 'profile' ? (
         <ProfilePage />
       ) : currentRoute === 'reports' ? (

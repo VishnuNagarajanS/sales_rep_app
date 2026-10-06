@@ -63,6 +63,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<LeaveRequest> LeaveRequests => Set<LeaveRequest>();
     public DbSet<LeavePolicy> LeavePolicies => Set<LeavePolicy>();
     public DbSet<LeaveRequestEvent> LeaveRequestEvents => Set<LeaveRequestEvent>();
+    public DbSet<AiChatLog> AiChatLogs => Set<AiChatLog>();
 
     public override int SaveChanges()
     {
@@ -100,6 +101,12 @@ public class ApplicationDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<AiChatLog>()
+            .HasIndex(a => new { a.CompanyId, a.AskedAt });
+        modelBuilder.Entity<AiChatLog>()
+            .Property(a => a.Question)
+            .HasMaxLength(500);
 
         // Apply entity configurations
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
