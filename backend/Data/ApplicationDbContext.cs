@@ -32,9 +32,6 @@ public class ApplicationDbContext : DbContext
     /// <summary>Activity log entries for each GHL deal (notes, calls, stage changes).</summary>
     public DbSet<GhlDealActivity> GhlDealActivities => Set<GhlDealActivity>();
 
-    /// <summary>HNW investor profiles managed by GHL India Ventures.</summary>
-    public DbSet<GhlInvestor> GhlInvestors => Set<GhlInvestor>();
-
     /// <summary>Investment opportunity pipeline linked to GHL investors.</summary>
     public DbSet<GhlInvestmentOpportunity> GhlInvestmentOpportunities => Set<GhlInvestmentOpportunity>();
 
@@ -53,9 +50,6 @@ public class ApplicationDbContext : DbContext
     public DbSet<Investor> Investors => Set<Investor>();
     public DbSet<InvestorKyc> InvestorKycs => Set<InvestorKyc>();
     public DbSet<InvestmentOpportunity> InvestmentOpportunities => Set<InvestmentOpportunity>();
-    public DbSet<OpportunityPitch> OpportunityPitches => Set<OpportunityPitch>();
-    public DbSet<InvestorCall> InvestorCalls => Set<InvestorCall>();
-    public DbSet<IrmPipelineCard> IrmPipelineCards => Set<IrmPipelineCard>();
     public DbSet<KycOtpVerification> KycOtpVerifications => Set<KycOtpVerification>();
     public DbSet<IrmCoverageAssignment> IrmCoverageAssignments => Set<IrmCoverageAssignment>();
 
@@ -101,6 +95,12 @@ public class ApplicationDbContext : DbContext
 
         // Seed initial roles, tenants, and demo users
         SeedData(modelBuilder);
+
+        // Ignore dropped legacy tables so EF Core never queries or maps them
+        modelBuilder.Ignore<GhlInvestor>();
+        modelBuilder.Ignore<InvestorCall>();
+        modelBuilder.Ignore<OpportunityPitch>();
+        modelBuilder.Ignore<IrmPipelineCard>();
     }
 
     private static void SeedData(ModelBuilder modelBuilder)

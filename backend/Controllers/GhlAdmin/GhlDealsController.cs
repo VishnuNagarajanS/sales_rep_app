@@ -138,6 +138,13 @@ public class GhlDealsController : ControllerBase
                 ApiResponse<GhlDealResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM deal data."));
         }
 
+        var role = _currentUser.Role?.ToLowerInvariant();
+        if (role == "irm")
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<GhlDealResponseDto>.FailureResult("Access denied: IRM users cannot create deals directly."));
+        }
+
         var agentId = _currentUser.UserId;
         if (!agentId.HasValue || agentId.Value <= 0)
             return Unauthorized(ApiResponse<GhlDealResponseDto>.FailureResult("Unauthorized: User ID is missing."));

@@ -38,10 +38,10 @@ public class IrmDashboardService : IIrmDashboardService
 
         var opportunitiesOpen = await _db.InvestmentOpportunities.CountAsync(o => o.CompanyId == companyId && o.IsActive, ct);
 
-        // Sum committed amount from opportunity pitches
-        var totalCommittedAum = await _db.OpportunityPitches
-            .Where(p => p.IsCommitted && p.CommittedAmount.HasValue)
-            .SumAsync(p => p.CommittedAmount!.Value, ct);
+        // Sum committed amount from active investment opportunities
+        var totalCommittedAum = await _db.GhlInvestmentOpportunities
+            .Where(o => o.CompanyId == companyId && (o.Stage == "Committed" || o.Stage == "Closed Won") && o.CommittedAmount > 0)
+            .SumAsync(o => o.CommittedAmount, ct);
 
         var metrics = new IrmDashboardMetricsDto
         {

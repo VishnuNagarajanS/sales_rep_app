@@ -535,11 +535,16 @@ public class KycService : IKycService
     {
         InvestorKyc? kyc = null;
 
-        if (dto.InvestorId > 0)
+        if (dto.KycId.HasValue && dto.KycId.Value > 0)
+        {
+            kyc = await _kycRepo.GetByIdAsync(dto.KycId.Value, companyId, ct);
+        }
+
+        if (kyc == null && dto.InvestorId > 0)
         {
             kyc = await _kycRepo.GetByInvestorIdAsync(dto.InvestorId, companyId, ct);
         }
-        else if (!string.IsNullOrWhiteSpace(dto.Email))
+        else if (kyc == null && !string.IsNullOrWhiteSpace(dto.Email))
         {
             var all = await _kycRepo.GetAllAsync(companyId, null, ct);
             kyc = all.FirstOrDefault(k => string.Equals(k.Email, dto.Email, StringComparison.OrdinalIgnoreCase));
@@ -568,22 +573,71 @@ public class KycService : IKycService
             return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc), "KYC is already submitted for review.");
         }
 
+        // Resolve or create corresponding Investor record to satisfy FK_InvestorKycs_Investors_InvestorId
+        Investor? investor = null;
+        if (kyc != null && kyc.InvestorId > 0)
+        {
+            investor = await _investorRepo.GetByIdAsync(kyc.InvestorId, companyId, ct);
+        }
+
+        if (investor == null && dto.InvestorId > 0)
+        {
+            investor = await _investorRepo.GetByIdAsync(dto.InvestorId, companyId, ct);
+        }
+
+        var investorName = !string.IsNullOrWhiteSpace(dto.InvestorName) ? dto.InvestorName : (investor?.Name ?? "Valued Investor");
+        var recipientEmail = !string.IsNullOrWhiteSpace(dto.Email) ? dto.Email : (investor?.Email ?? string.Empty);
+        var recipientPhone = !string.IsNullOrWhiteSpace(dto.Phone) ? dto.Phone : (investor?.Phone ?? string.Empty);
+
+        if (investor == null && !string.IsNullOrWhiteSpace(recipientEmail))
+        {
+            var allInvestors = await _investorRepo.GetAllAsync(companyId, null, null, null, ct);
+            investor = allInvestors.FirstOrDefault(i => string.Equals(i.Email, recipientEmail, StringComparison.OrdinalIgnoreCase) ||
+                                                       (!string.IsNullOrWhiteSpace(recipientPhone) && i.Phone == recipientPhone));
+        }
+
+        if (investor == null)
+        {
+            investor = new Investor
+            {
+                CompanyId = companyId,
+                Name = investorName,
+                Email = recipientEmail,
+                Phone = recipientPhone,
+                Status = InvestorStatus.Lead,
+                AssignedIrmId = irmId > 0 ? irmId : null,
+                CreatedAt = DateTime.UtcNow
+            };
+            investor = await _investorRepo.CreateAsync(investor, ct);
+        }
+        else if (investor.AssignedIrmId == null && irmId > 0)
+        {
+            investor.AssignedIrmId = irmId;
+            await _investorRepo.UpdateAsync(investor, ct);
+        }
+
+        if (kyc == null)
+        {
+            kyc = await _kycRepo.GetByInvestorIdAsync(investor.Id, companyId, ct);
+        }
+
         if (kyc == null)
         {
             kyc = new InvestorKyc
             {
-                InvestorId = dto.InvestorId,
+                InvestorId = investor.Id,
                 CompanyId = companyId,
                 IrmId = irmId,
-                InvestorName = dto.InvestorName ?? string.Empty,
-                Phone = dto.Phone ?? string.Empty,
-                Email = dto.Email ?? string.Empty,
+                InvestorName = investorName,
+                Phone = recipientPhone,
+                Email = recipientEmail,
                 Status = dto.IsFinalSubmit ? KycStatus.PendingReview : KycStatus.Draft,
                 CreatedAt = DateTime.UtcNow
             };
         }
         else
         {
+            kyc.InvestorId = investor.Id;
             kyc.IrmId = irmId;
             if (dto.IsFinalSubmit)
             {

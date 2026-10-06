@@ -716,6 +716,7 @@ function mapCallRecord(c: Record<string, any>): CallRecord {
     reason: reason,
     recordingUrl: recordingUrl,
     transcription: transcription,
+    twilioCallSid: c.twilioCallSid || undefined,
     leadId: c.leadId ? sid(c.leadId) : undefined,
     customerId: c.customerId ? sid(c.customerId) : undefined,
   };
@@ -736,6 +737,7 @@ export async function logCall(call: CallRecord): Promise<CallRecord> {
     notes: call.notes,
     leadId: call.leadId ? nid(call.leadId) : undefined,
     customerId: call.customerId ? nid(call.customerId) : undefined,
+    twilioCallSid: call.twilioCallSid || undefined,
   };
   const res: ApiResponse<any> = await apiClient.post('/sales-executive/calls', payload);
   if (!res.success || !res.data) throw new Error(res.message);

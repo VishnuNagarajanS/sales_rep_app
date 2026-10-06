@@ -1,4 +1,5 @@
 using backend.Authentication.Interfaces;
+using backend.Configuration;
 using backend.Data;
 using backend.DTOs.Calls;
 using backend.DTOs.Common;
@@ -8,6 +9,7 @@ using backend.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace backend.Controllers.SalesExecutive;
 
@@ -20,17 +22,20 @@ public class SalesExecutiveCallsController : ControllerBase
     private readonly ICurrentUserService _currentUser;
     private readonly ICallService _callService;
     private readonly IEmailService _emailService;
+    private readonly IOptions<TwilioSettings> _twilioOptions;
 
     public SalesExecutiveCallsController(
         ApplicationDbContext context, 
         ICurrentUserService currentUser,
         ICallService callService,
-        IEmailService emailService)
+        IEmailService emailService,
+        IOptions<TwilioSettings> twilioOptions)
     {
         _context = context;
         _currentUser = currentUser;
         _callService = callService;
         _emailService = emailService;
+        _twilioOptions = twilioOptions;
     }
 
     [HttpGet]
@@ -179,19 +184,23 @@ public class SalesExecutiveCallsController : ControllerBase
     [HttpGet("carrier-status")]
     public async Task<ActionResult<ApiResponse<object>>> GetCarrierStatus(CancellationToken ct = default)
     {
+        var twilioConfigured = _twilioOptions.Value.IsConfigured;
         var carrier = await _context.CarrierSettings.AsNoTracking().FirstOrDefaultAsync(ct);
-        var isConfigured = carrier != null && 
+        var carrierConfigured = carrier != null && 
             !string.IsNullOrWhiteSpace(carrier.AccountSid) && 
             !string.IsNullOrWhiteSpace(carrier.AuthTokenEncrypted) &&
             carrier.Status == "Active";
 
+        var isConfigured = twilioConfigured || carrierConfigured;
+        var primaryCarrier = twilioConfigured ? "Twilio Programmable Voice" : (carrier?.PrimaryCarrier ?? "None");
+
         return Ok(ApiResponse<object>.SuccessResult(new
         {
             isConfigured,
-            primaryCarrier = carrier?.PrimaryCarrier ?? "None",
+            primaryCarrier,
             status = isConfigured ? "Connected" : "Not Configured / Unavailable",
             message = isConfigured 
-                ? "Carrier trunk connected." 
+                ? (twilioConfigured ? "Twilio Programmable Voice connected." : "Carrier trunk connected.") 
                 : "No active carrier trunk (Twilio / Exotel) credentials configured on the backend server. Live telephony calls unavailable."
         }, "Carrier status retrieved."));
     }
@@ -249,7 +258,8 @@ public class SalesExecutiveCallsController : ControllerBase
             Timestamp = c.Timestamp,
             CreatedAt = c.CreatedAt,
             RecordingUrl = c.RecordingUrl,
-            Transcript = c.Transcript
+            Transcript = c.Transcript,
+            TwilioCallSid = c.TwilioCallSid
         };
     }
 
@@ -308,13 +318,15 @@ public class SalesExecutiveCallsController : ControllerBase
             return Unauthorized(ApiResponse<CallRecordResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
 
         // Use actual provider results; do not mark simulated calls as connected or successful
+        var hasTwilioSid = !string.IsNullOrWhiteSpace(dto.TwilioCallSid);
+        var twilioConfigured = _twilioOptions.Value.IsConfigured;
         var carrier = await _context.CarrierSettings.AsNoTracking().FirstOrDefaultAsync(ct);
         var hasCarrier = carrier != null && 
             !string.IsNullOrWhiteSpace(carrier.AccountSid) && 
             !string.IsNullOrWhiteSpace(carrier.AuthTokenEncrypted) &&
             carrier.Status == "Active";
 
-        var isSimulated = !hasCarrier || (dto.Notes != null && dto.Notes.Contains("Simulated", StringComparison.OrdinalIgnoreCase));
+        var isSimulated = !hasTwilioSid && (!twilioConfigured && !hasCarrier || (dto.Notes != null && dto.Notes.Contains("Simulated", StringComparison.OrdinalIgnoreCase)));
         var effectiveDuration = isSimulated ? 0 : dto.Duration;
         var rawNotes = dto.Notes?.Trim() ?? string.Empty;
 
@@ -353,6 +365,7 @@ public class SalesExecutiveCallsController : ControllerBase
             Notes = rawNotes,
             LeadId = dto.LeadId,
             CustomerId = dto.CustomerId,
+            TwilioCallSid = dto.TwilioCallSid,
             Timestamp = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow
         };

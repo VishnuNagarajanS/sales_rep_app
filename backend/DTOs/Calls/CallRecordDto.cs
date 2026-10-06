@@ -19,6 +19,7 @@ public class CallRecordDto
     public string? Reason { get; set; }
     public string? RecordingUrl { get; set; }
     public string? Transcript { get; set; }
+    public string? TwilioCallSid { get; set; }
     public int? LeadId { get; set; }
     public int? CustomerId { get; set; }
     public DateTime Timestamp { get; set; }

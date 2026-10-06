@@ -261,14 +261,6 @@ export const KycStatusDropdown: React.FC<Props> = ({
     );
   };
 
-  const formattedVerifiedDate = deal.verifiedAt
-    ? new Date(deal.verifiedAt).toLocaleDateString('en-IN', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-      })
-    : null;
-
   return (
     <div style={{ position: 'relative', display: 'inline-flex', flexDirection: 'column', gap: 2 }}>
       {/* Status Pill / Dropdown Trigger */}
@@ -304,26 +296,6 @@ export const KycStatusDropdown: React.FC<Props> = ({
           {canVerify && !hideArrow && <ChevronDown size={12} style={{ marginLeft: 2, opacity: 0.8 }} />}
         </button>
       </div>
-
-      {/* Verified Attribution Line if verified */}
-      {showAttribution && displayStatus === 'Verified' && (
-        <span
-          style={{
-            fontSize: 10,
-            color: 'var(--text-muted, #64748b)',
-            lineHeight: 1.2,
-            display: 'block',
-            maxWidth: 160,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-          title={`Verified by ${deal.verifiedBy || 'IRM'}${formattedVerifiedDate ? ` on ${formattedVerifiedDate}` : ''}`}
-        >
-          by {deal.verifiedBy ? deal.verifiedBy.split('@')[0] : 'IRM'}
-          {formattedVerifiedDate && ` • ${formattedVerifiedDate}`}
-        </span>
-      )}
 
       {/* Dropdown Menu */}
       {isOpen && (

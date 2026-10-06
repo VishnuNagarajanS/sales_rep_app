@@ -1134,13 +1134,14 @@ export const DispositionModal: React.FC = () => {
     const freshTomorrow = d.toISOString().slice(0, 10);
     const isFollowup = !!lastCallRecord.sourceFollowupId;
     const isIrmLead = user?.role?.code === 'irm' && lastCallRecord.matchedRecord?.type === 'lead';
-    const isSimulated = !!lastCallRecord.isSimulated || lastCallRecord.status !== 'connected';
+    const isSimulated = !!lastCallRecord.isSimulated;
+    const isNotConnected = !isSimulated && lastCallRecord.duration === 0;
     // Use actual provider results; do not mark simulated calls as connected or successful
-    const defaultDispo: CallDisposition = isSimulated
+    const defaultDispo: CallDisposition = (isSimulated || isNotConnected)
       ? 'No Response'
       : (isIrmLead && !isFollowup ? 'Follow-up Required' : 'Interested');
     setDisposition(defaultDispo);
-    setNotes(isSimulated ? '[Provider Result: Simulated - Call Not Connected (0s)]' : '');
+    setNotes(isSimulated ? '[Provider Result: Simulated - Call Not Connected (0s)]' : (isNotConnected ? '[Twilio Voice: Call Not Answered (0s)]' : ''));
     setReason('');
     setScheduleFollowup(defaultDispo === 'Follow-up Required' || defaultDispo === 'No Response');
     setFollowupDate(freshTomorrow);
@@ -1183,7 +1184,8 @@ export const DispositionModal: React.FC = () => {
   const isFollowupCall = !!lastCallRecord.sourceFollowupId;
   const isIrm = user?.role?.code === 'irm';
   const isIrmLeadCall = isIrm && lastCallRecord.matchedRecord?.type === 'lead';
-  const isSimulated = !!lastCallRecord.isSimulated || lastCallRecord.status !== 'connected';
+  const isSimulated = !!lastCallRecord.isSimulated;
+  const isNotConnected = !isSimulated && lastCallRecord.duration === 0;
 
   const allDispositions: CallDisposition[] = [
     'Interested',
@@ -1219,13 +1221,15 @@ export const DispositionModal: React.FC = () => {
         : (isIrmLeadCall
             ? ['No Response', 'Follow-up Required']
             : SIMULATED_OUTCOMES))
-    : (isFollowupCall
-        ? (isIrm ? IRM_FOLLOWUP_CALL_OUTCOMES : FOLLOWUP_CALL_OUTCOMES)
-        : isIrmLeadCall
-          ? IRM_LEAD_OUTCOMES
-          : isGhlSalesExec
-            ? allDispositions.filter(d => d !== 'Converted')
-            : allDispositions);
+    : isNotConnected
+      ? ['No Response', 'Follow-up Required', 'Call Back', 'Not Interested', 'Wrong Number']
+      : (isFollowupCall
+          ? (isIrm ? IRM_FOLLOWUP_CALL_OUTCOMES : FOLLOWUP_CALL_OUTCOMES)
+          : isIrmLeadCall
+            ? IRM_LEAD_OUTCOMES
+            : isGhlSalesExec
+              ? allDispositions.filter(d => d !== 'Converted')
+              : allDispositions);
 
   const handleSave = async () => {
     if (isSubmitting) return;
@@ -1507,7 +1511,29 @@ export const DispositionModal: React.FC = () => {
             >
               <AlertCircle size={16} style={{ flexShrink: 0 }} />
               <span>
-                <strong>Provider Notice:</strong> Telephony gateway not connected. This was a simulated call event and cannot be marked as connected or successful. Call duration is recorded as 0s.
+                <strong>Simulation Notice:</strong> This was a simulated call event and cannot be marked as connected or successful. Call duration is recorded as 0s.
+              </span>
+            </div>
+          )}
+          {isNotConnected && (
+            <div
+              style={{
+                padding: '10px 14px',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                border: '1px solid rgba(59, 130, 246, 0.3)',
+                borderRadius: 8,
+                fontSize: 12,
+                color: '#60a5fa',
+                marginBottom: 16,
+                lineHeight: 1.5,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <AlertCircle size={16} style={{ flexShrink: 0 }} />
+              <span>
+                <strong>Call Notice:</strong> The call was not answered or ended before connection. Call duration is recorded as 0s.
               </span>
             </div>
           )}

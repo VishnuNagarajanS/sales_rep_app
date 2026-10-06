@@ -226,6 +226,22 @@ public class IrmKycController : ControllerBase
         if (!result.Success)
             return BadRequest(result);
 
+        if (result.Data != null)
+        {
+            var kycId = result.Data.Id;
+            var deal = await _db.GhlDeals
+                .Include(d => d.Customer)
+                .FirstOrDefaultAsync(d =>
+                    (d.KycId == kycId || (dto.DealId.HasValue && d.Id == dto.DealId.Value) || (dto.InvestorId > 0 && d.CustomerId == dto.InvestorId) || (!string.IsNullOrEmpty(dto.Email) && d.Customer != null && d.Customer.Email == dto.Email) || (!string.IsNullOrEmpty(dto.InvestorName) && d.CustomerName == dto.InvestorName)) &&
+                    d.CompanyId == companyId, ct);
+            if (deal != null && deal.KycId == null)
+            {
+                deal.KycId = kycId;
+                deal.UpdatedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync(ct);
+            }
+        }
+
         return Ok(result);
     }
 
@@ -264,9 +280,11 @@ public class IrmKycController : ControllerBase
         if (result.Data != null)
         {
             var kycId = result.Data.Id;
-            var deal = await _db.GhlDeals.FirstOrDefaultAsync(d =>
-                (d.KycId == kycId || (dto.InvestorId > 0 && d.CustomerId == dto.InvestorId) || (!string.IsNullOrEmpty(dto.Email) && d.CustomerName == dto.InvestorName)) &&
-                d.CompanyId == companyId, ct);
+            var deal = await _db.GhlDeals
+                .Include(d => d.Customer)
+                .FirstOrDefaultAsync(d =>
+                    (d.KycId == kycId || (dto.DealId.HasValue && d.Id == dto.DealId.Value) || (dto.InvestorId > 0 && d.CustomerId == dto.InvestorId) || (!string.IsNullOrEmpty(dto.Email) && d.Customer != null && d.Customer.Email == dto.Email) || (!string.IsNullOrEmpty(dto.InvestorName) && d.CustomerName == dto.InvestorName)) &&
+                    d.CompanyId == companyId, ct);
             if (deal != null)
             {
                 deal.KycId = kycId;

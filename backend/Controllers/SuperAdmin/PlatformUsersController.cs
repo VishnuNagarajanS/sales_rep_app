@@ -470,9 +470,7 @@ public class PlatformUsersController : ControllerBase
 
         var totalCustomers = await _context.Customers.CountAsync(ct);
         var ghlDealSum = await _context.GhlDeals.SumAsync(d => d.Value, ct);
-        var irmDealSum = await _context.IrmPipelineCards
-            .Where(c => c.Value.HasValue)
-            .SumAsync(c => c.Value!.Value, ct);
+        var irmDealSum = 0m;
         var totalPipelineValue = (long)Math.Round(ghlDealSum + irmDealSum);
 
         // Real system health score from persistent uptime telemetry

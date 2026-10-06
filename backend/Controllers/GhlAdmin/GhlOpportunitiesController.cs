@@ -120,7 +120,7 @@ public class GhlOpportunitiesController : ControllerBase
             return Unauthorized(ApiResponse<GhlOpportunityResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
 
         // Verify investor exists
-        var investorExists = await _db.GhlInvestors
+        var investorExists = await _db.Investors
             .AnyAsync(i => i.Id == dto.InvestorId && i.CompanyId == companyId.Value, ct);
 
         if (!investorExists)

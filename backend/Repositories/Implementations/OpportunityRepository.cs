@@ -38,27 +38,15 @@ public class OpportunityRepository : IOpportunityRepository
         return opportunity;
     }
 
-    public async Task<OpportunityPitch> AddPitchAsync(OpportunityPitch pitch, CancellationToken ct = default)
-    {
-        _db.OpportunityPitches.Add(pitch);
-        await _db.SaveChangesAsync(ct);
-        return pitch;
-    }
+    public Task<OpportunityPitch> AddPitchAsync(OpportunityPitch pitch, CancellationToken ct = default)
+        => Task.FromResult(pitch);
 
-    public async Task<OpportunityPitch?> GetPitchAsync(int opportunityId, int investorId, CancellationToken ct = default)
-        => await _db.OpportunityPitches.FirstOrDefaultAsync(p => p.OpportunityId == opportunityId && p.InvestorId == investorId, ct);
+    public Task<OpportunityPitch?> GetPitchAsync(int opportunityId, int investorId, CancellationToken ct = default)
+        => Task.FromResult<OpportunityPitch?>(null);
 
-    public async Task<OpportunityPitch> UpdatePitchAsync(OpportunityPitch pitch, CancellationToken ct = default)
-    {
-        _db.OpportunityPitches.Update(pitch);
-        await _db.SaveChangesAsync(ct);
-        return pitch;
-    }
+    public Task<OpportunityPitch> UpdatePitchAsync(OpportunityPitch pitch, CancellationToken ct = default)
+        => Task.FromResult(pitch);
 
-    public async Task<List<OpportunityPitch>> GetPitchesByOpportunityAsync(int opportunityId, CancellationToken ct = default)
-        => await _db.OpportunityPitches
-            .Include(p => p.Investor)
-            .Include(p => p.PitchedByIrm)
-            .Where(p => p.OpportunityId == opportunityId)
-            .OrderByDescending(p => p.PitchedAt).ToListAsync(ct);
+    public Task<List<OpportunityPitch>> GetPitchesByOpportunityAsync(int opportunityId, CancellationToken ct = default)
+        => Task.FromResult(new List<OpportunityPitch>());
 }

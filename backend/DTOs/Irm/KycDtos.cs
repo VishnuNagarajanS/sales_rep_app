@@ -165,6 +165,8 @@ public class SubmitKycDto
 {
     public string? Token { get; set; }
     public int InvestorId { get; set; }
+    public int? KycId { get; set; }
+    public int? DealId { get; set; }
 
     // Step 1
     public string InvestorName { get; set; } = string.Empty;

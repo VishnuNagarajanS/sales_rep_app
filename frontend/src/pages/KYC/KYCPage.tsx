@@ -471,7 +471,7 @@ const GhlIrmKycView: React.FC = () => {
       if (recStatus === 'draft') {
         if (rec.isAssisted) return 'Assisted Draft';
         if (rec.kycLinkSent) return 'Link Sent';
-        return 'Assisted Draft';
+        return 'Pending';
       }
       if (recStatus === 'linksent') return 'Link Sent';
     }
@@ -490,7 +490,7 @@ const GhlIrmKycView: React.FC = () => {
     if ((deal as any).customerKycStatus === 'Assisted Draft') {
       return 'Assisted Draft';
     }
-    if (rec && (rec.status || '').toLowerCase() === 'draft' && !rec.kycLinkSent) {
+    if (rec && (rec.status || '').toLowerCase() === 'draft' && !rec.kycLinkSent && rec.isAssisted) {
       return 'Assisted Draft';
     }
 
@@ -1074,6 +1074,8 @@ const GhlIrmKycView: React.FC = () => {
     try {
       const payload = {
         investorId: deal.customerId ? Number(deal.customerId) || 0 : 0,
+        kycId: deal.kycId || (deal as any).kycRecordId || undefined,
+        dealId: Number(deal.id) || undefined,
         investorName: data.investorName || deal.customerName,
         phone: data.phone || deal.phone,
         email: data.email || deal.email,
@@ -1121,6 +1123,8 @@ const GhlIrmKycView: React.FC = () => {
     try {
       const payload = {
         investorId: deal.customerId ? Number(deal.customerId) || 0 : 0,
+        kycId: deal.kycId || (deal as any).kycRecordId || undefined,
+        dealId: Number(deal.id) || undefined,
         investorName: data.investorName || deal.customerName,
         phone: data.phone || deal.phone,
         email: data.email || deal.email,

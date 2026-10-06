@@ -260,6 +260,7 @@ export interface CallRecord {
   notes?: string;
   reason?: string;
   providerCallId?: string;
+  twilioCallSid?: string;
   contactId?: string;
   leadId?: string;
   customerId?: string;

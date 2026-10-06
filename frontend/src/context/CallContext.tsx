@@ -11,9 +11,11 @@ import {
 } from '../services/ghlApiService';
 import { storageService } from '../services/storageService';
 import { useAuth } from './AuthContext';
+import { twilioVoiceService } from '../services/twilioVoiceService';
+import { Call } from '@twilio/voice-sdk';
 
 export type AgentAvailability = 'Available' | 'Busy' | 'Offline';
-export type CallStatus = 'idle' | 'ringing' | 'connected' | 'ended' | 'simulated';
+export type CallStatus = 'idle' | 'ringing' | 'connected' | 'ended' | 'simulated' | 'error' | 'unavailable';
 
 interface MatchedRecord {
   type: 'lead' | 'customer' | 'unknown';
@@ -43,6 +45,8 @@ interface ActiveCall {
   sourceFollowupId?: string;
   isSimulated?: boolean;
   providerStatus?: string;
+  twilioCallSid?: string;
+  errorMessage?: string;
 }
 
 interface CallContextType {
@@ -94,6 +98,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [leads, setLeads] = useState<Lead[]>([]);
 
   const timerRef = useRef<any>(null);
+  const twilioCallRef = useRef<Call | null>(null);
 
   // Sync leads for incoming call lookup
   useEffect(() => {
@@ -101,6 +106,113 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       apiGetLeads(tenant.id).then(setLeads).catch(console.error);
     }
   }, [tenant?.id]);
+
+  // Register Twilio Voice device and incoming call listener
+  useEffect(() => {
+    if (user?.id) {
+      twilioVoiceService.initializeDevice().catch(err => {
+        console.warn('[CallContext] Twilio Voice initialization notice:', err?.message || err);
+      });
+
+      const unsubIncoming = twilioVoiceService.onIncomingCall((incomingCall: Call) => {
+        if (availability === 'Offline' || availability === 'Busy') {
+          try { incomingCall.reject(); } catch {}
+          return;
+        }
+
+        twilioCallRef.current = incomingCall;
+        const phone = incomingCall.parameters.From || 'Unknown';
+        const sid = incomingCall.parameters.CallSid;
+
+        const matchedLead = leads.find(l => l.phone.includes(phone.slice(-5)) || l.name.toLowerCase().includes(phone.toLowerCase()));
+
+        const newCall: ActiveCall = {
+          id: `call-${Date.now()}`,
+          contactName: matchedLead ? matchedLead.name : (incomingCall.parameters.From || 'Incoming Caller'),
+          contactPhone: phone,
+          direction: 'inbound',
+          status: 'ringing',
+          isSimulated: false,
+          twilioCallSid: sid,
+          providerStatus: 'Incoming Twilio Voice Call',
+          duration: 0,
+          isMuted: false,
+          isOnHold: false,
+          quickNotes: '',
+          matchedRecord: matchedLead
+            ? { type: 'lead', id: matchedLead.id, name: matchedLead.name, meta: `Lead • Priority: ${matchedLead.priority}` }
+            : { type: 'unknown', name: 'Unknown Caller', meta: 'Unregistered Number' },
+          isExpanded: true,
+          isVideoMode: false,
+          meetingLink: null,
+        };
+        setActiveCall(newCall);
+
+        incomingCall.on('accept', () => {
+          setActiveCall(prev => (prev ? {
+            ...prev,
+            status: 'connected',
+            isSimulated: false,
+            twilioCallSid: incomingCall.parameters.CallSid || prev.twilioCallSid,
+            providerStatus: 'Twilio Call Connected',
+          } : null));
+        });
+
+        const handleEnded = () => {
+          setActiveCall(prev => {
+            if (prev) {
+              const finished: ActiveCall = {
+                ...prev,
+                status: 'ended',
+                twilioCallSid: incomingCall.parameters.CallSid || prev.twilioCallSid,
+                duration: prev.status === 'connected' ? prev.duration : 0,
+              };
+              setLastCallRecord(finished);
+              setShowDispositionModal(true);
+            }
+            return null;
+          });
+          twilioCallRef.current = null;
+        };
+
+        incomingCall.on('disconnect', handleEnded);
+        incomingCall.on('cancel', handleEnded);
+        incomingCall.on('reject', handleEnded);
+        incomingCall.on('error', (twErr: any) => {
+          console.error('[Twilio] Incoming call error:', twErr);
+          handleEnded();
+        });
+
+        const prefs = getCallPreferences();
+        if (prefs.soundEnabled) {
+          try {
+            const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+            if (AudioCtx) {
+              const ctx = new AudioCtx();
+              const osc = ctx.createOscillator();
+              osc.frequency.value = 880;
+              osc.type = 'sine';
+              osc.connect(ctx.destination);
+              osc.start();
+              osc.stop(ctx.currentTime + 0.3);
+            }
+          } catch {}
+        }
+        if (prefs.desktopNotifEnabled && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          try {
+            new Notification('Incoming Twilio Call', { body: `${newCall.contactName} — ${newCall.contactPhone}` });
+          } catch {}
+        }
+        if (prefs.autoBusyEnabled) {
+          setAvailability('Busy');
+        }
+      });
+
+      return () => {
+        unsubIncoming();
+      };
+    }
+  }, [user?.id, availability, leads]);
 
   // Timer for connected calls only (never increments for simulated/unconnected calls)
   useEffect(() => {
@@ -116,18 +228,22 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [activeCall?.status, activeCall?.isSimulated]);
 
-  const initiateCall = (name: string, phone: string, recordType: 'lead' | 'customer' = 'lead', recordId?: string, sourceFollowupId?: string) => {
-    // Actual provider results: carrier PBX trunk is not connected in this environment.
-    // Do not mark simulated calls as connected or successful.
-    const isSimulated = true;
+  const initiateCall = async (
+    name: string,
+    phone: string,
+    recordType: 'lead' | 'customer' = 'lead',
+    recordId?: string,
+    sourceFollowupId?: string
+  ) => {
+    const callId = `call-${Date.now()}`;
     const newCall: ActiveCall = {
-      id: `call-${Date.now()}`,
+      id: callId,
       contactName: name,
       contactPhone: phone,
       direction: 'outbound',
-      status: 'simulated', // Not marked as connected without real carrier trunk
-      isSimulated,
-      providerStatus: 'Simulated Call — Telephony Gateway Offline',
+      status: 'ringing',
+      isSimulated: false,
+      providerStatus: 'Connecting to Twilio Voice...',
       duration: 0,
       isMuted: false,
       isOnHold: false,
@@ -144,9 +260,80 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sourceFollowupId,
     };
     setActiveCall(newCall);
+
     const prefs = getCallPreferences();
     if (prefs.autoBusyEnabled && availability === 'Available') {
       setAvailability('Busy');
+    }
+
+    try {
+      const call = await twilioVoiceService.makeCall(phone);
+      twilioCallRef.current = call;
+
+      const sid = call.parameters.CallSid;
+      if (sid) {
+        setActiveCall(prev => (prev ? { ...prev, twilioCallSid: sid } : null));
+      }
+
+      call.on('ringing', () => {
+        setActiveCall(prev => (prev ? { ...prev, status: 'ringing', providerStatus: 'Twilio: Ringing...' } : null));
+      });
+
+      call.on('accept', () => {
+        const confirmedSid = call.parameters.CallSid || sid;
+        setActiveCall(prev => (prev ? {
+          ...prev,
+          status: 'connected',
+          isSimulated: false,
+          twilioCallSid: confirmedSid,
+          providerStatus: 'Twilio: Call Connected',
+        } : null));
+      });
+
+      const handleCallEnded = () => {
+        setActiveCall(prev => {
+          if (prev) {
+            const finished: ActiveCall = {
+              ...prev,
+              status: 'ended',
+              twilioCallSid: call.parameters.CallSid || prev.twilioCallSid,
+              duration: prev.status === 'connected' ? prev.duration : 0,
+            };
+            setLastCallRecord(finished);
+            setShowDispositionModal(true);
+          }
+          return null;
+        });
+        twilioCallRef.current = null;
+      };
+
+      call.on('disconnect', handleCallEnded);
+      call.on('cancel', handleCallEnded);
+      call.on('reject', handleCallEnded);
+      call.on('error', (twErr: any) => {
+        console.error('[TwilioCall] Call error:', twErr);
+        const errMsg = twErr?.message || 'Call failed';
+        setActiveCall(prev => (prev ? {
+          ...prev,
+          status: 'error',
+          providerStatus: `Twilio Error: ${errMsg}`,
+          errorMessage: errMsg,
+        } : null));
+      });
+
+      call.on('mute', (isMuted: boolean) => {
+        setActiveCall(prev => (prev ? { ...prev, isMuted } : null));
+      });
+    } catch (err: any) {
+      console.error('[TwilioCall] Outbound call initialization error:', err);
+      const errMsg = err?.message || 'Twilio Voice unavailable';
+      setActiveCall(prev => (prev ? {
+        ...prev,
+        status: 'unavailable',
+        isSimulated: false,
+        providerStatus: `Telephony Gateway Unavailable: ${errMsg}`,
+        errorMessage: errMsg,
+      } : null));
     }
   };
 
@@ -179,7 +366,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     setActiveCall(newCall);
     const prefs = getCallPreferences();
-    // Play ringtone via Web Audio API if sound is enabled
     if (prefs.soundEnabled) {
       try {
         const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -194,7 +380,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } catch { /* audio not available */ }
     }
-    // Desktop notification if enabled and permission granted
     if (prefs.desktopNotifEnabled && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       try {
         new Notification('Incoming Call', { body: `${newCall.contactName} — ${newCall.contactPhone}` });
@@ -206,8 +391,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const acceptCall = () => {
-    if (activeCall) {
-      // Do not mark simulated calls as connected or successful
+    if (twilioCallRef.current) {
+      try {
+        twilioCallRef.current.accept();
+      } catch (err) {
+        console.error('[TwilioCall] accept error:', err);
+      }
+    } else if (activeCall) {
       const status: CallStatus = activeCall.isSimulated ? 'simulated' : 'connected';
       setActiveCall({ 
         ...activeCall, 
@@ -221,22 +411,37 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const rejectCall = () => {
-    if (activeCall) {
-      setActiveCall(null);
-      setAvailability(prev => prev === 'Busy' ? 'Available' : prev);
+    if (twilioCallRef.current) {
+      try {
+        twilioCallRef.current.reject();
+      } catch (err) {
+        console.error('[TwilioCall] reject error:', err);
+      }
+      twilioCallRef.current = null;
     }
+    setActiveCall(null);
+    setAvailability(prev => prev === 'Busy' ? 'Available' : prev);
   };
 
   const endCall = (skipDisposition?: boolean | unknown) => {
+    if (twilioCallRef.current) {
+      try {
+        twilioCallRef.current.disconnect();
+      } catch (err) {
+        console.error('[TwilioCall] disconnect error:', err);
+      }
+      twilioCallRef.current = null;
+    }
     if (activeCall) {
-      const finishedCall = { 
+      const isConnectedReal = activeCall.status === 'connected' && !activeCall.isSimulated;
+      const finishedCall: ActiveCall = { 
         ...activeCall, 
         status: 'ended' as CallStatus,
-        duration: activeCall.isSimulated ? 0 : activeCall.duration
+        duration: isConnectedReal ? activeCall.duration : 0
       };
       setLastCallRecord(finishedCall);
       setActiveCall(null);
-      if (skipDisposition === true) {
+      if (skipDisposition === true || activeCall.status === 'error' || activeCall.status === 'unavailable') {
         setAvailability(prev => prev === 'Busy' ? 'Available' : prev);
       } else {
         setShowDispositionModal(true);
@@ -245,7 +450,17 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const toggleMute = () => {
-    if (activeCall) {
+    if (twilioCallRef.current) {
+      const nextMute = !activeCall?.isMuted;
+      try {
+        twilioCallRef.current.mute(nextMute);
+      } catch (err) {
+        console.error('[TwilioCall] mute error:', err);
+      }
+      if (activeCall) {
+        setActiveCall({ ...activeCall, isMuted: nextMute });
+      }
+    } else if (activeCall) {
       setActiveCall({ ...activeCall, isMuted: !activeCall.isMuted });
     }
   };
@@ -287,18 +502,19 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     reason?: string
   ) => {
     if (lastCallRecord && tenant && user) {
-      const isSim = !!lastCallRecord.isSimulated || lastCallRecord.status !== 'connected';
+      const isRealConnected = !lastCallRecord.isSimulated && lastCallRecord.status === 'connected';
+      const isSim = !isRealConnected;
       let finalNotes = notes || lastCallRecord.quickNotes || '';
-      if (isSim && !finalNotes.includes('Simulated')) {
+      if (isSim && !finalNotes.includes('Simulated') && !finalNotes.includes('Not Connected')) {
         finalNotes = finalNotes 
-          ? `[Provider Result: Simulated - Call Not Connected (0s)]\n${finalNotes}` 
-          : '[Provider Result: Simulated - Call Not Connected (0s)]';
+          ? `[Provider Result: Call Not Connected (0s)]\n${finalNotes}` 
+          : '[Provider Result: Call Not Connected (0s)]';
       }
       if (reason?.trim()) {
         finalNotes = finalNotes ? `${finalNotes}\n[Reason]: ${reason.trim()}` : `[Reason]: ${reason.trim()}`;
       }
 
-      // Do not mark simulated calls as connected or successful
+      // Do not mark simulated or unconfirmed calls as connected or successful
       let effectiveDispo = disposition;
       if (isSim && (effectiveDispo === 'Interested' || effectiveDispo === 'Converted')) {
         effectiveDispo = 'No Response';
@@ -319,6 +535,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         transcription: undefined,
         notes: finalNotes || undefined,
         reason: reason || undefined,
+        twilioCallSid: lastCallRecord.twilioCallSid,
       };
 
       await apiLogCall(callRecord);

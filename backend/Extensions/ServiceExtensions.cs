@@ -17,9 +17,12 @@ public static class ServiceExtensions
     public static IServiceCollection AddApplicationServices(this IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<SmtpSettings>(configuration.GetSection(SmtpSettings.SectionName));
+        services.Configure<TwilioSettings>(configuration.GetSection(TwilioSettings.SectionName));
 
         // 1. Database Context
         services.AddMemoryCache();
+        services.AddHttpClient("TwilioRecordings");
+
         var connectionString = configuration.GetConnectionString("DefaultConnection");
         if (string.IsNullOrWhiteSpace(connectionString))
         {

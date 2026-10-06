@@ -7,7 +7,6 @@ import {
   Clock,
   ChevronRight,
   ChevronLeft,
-  Plus,
   Phone,
   Mail,
   User,
@@ -26,9 +25,6 @@ import {
   getOpportunities,
   getConsultations,
   isTenantMatch,
-  saveDeal as apiSaveDeal,
-  saveFollowup as apiSaveFollowup,
-  saveLead as apiSaveLead,
   saveInvestor as apiSaveInvestor,
   persistDeal,
 } from '../../services/ghlApiService';
@@ -426,12 +422,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
               onClearAll={() => setAgentFilter('All')}
             />
           )}
-          <button
-            className="btn btn-primary pipeline-new-deal-btn"
-            onClick={() => onOpenQuickCreate('deal')}
-          >
-            <Plus size={15} /> New Deal
-          </button>
         </div>
       </div>
 

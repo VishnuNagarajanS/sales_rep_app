@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, Phone, ExternalLink, Edit2, Trash2, Download, Plus } from 'lucide-react';
+import { TrendingUp, Phone, ExternalLink, Edit2, Trash2, Download } from 'lucide-react';
 import { Investor, CallRecord, Consultation, InvestmentOpportunity, Followup, Deal } from '../../types';
 import Papa from 'papaparse';
 import { useAuth } from '../../context/AuthContext';
@@ -36,7 +36,7 @@ const BLANK_FORM: InvestorForm = {
   name: '',
   phone: '',
   email: '',
-  status: 'Lead',
+  status: 'Active Investor',
   investmentCapacity: '',
   preferredAssetClass: '',
   assignedAgentId: '',
@@ -151,17 +151,45 @@ export const InvestorsPage: React.FC = () => {
       )
     : investors;
 
+  // Helper: locate matching deal for an investor record
+  const getMatchingDeal = (inv: Investor): Deal | undefined => {
+    const fDigits = (inv.phone || '').replace(/\D/g, '').slice(-10);
+    return deals.find(d => {
+      if (d.customerId && String(d.customerId) === String(inv.id)) return true;
+      const dDigits = (d.phone || '').replace(/\D/g, '').slice(-10);
+      if (fDigits && dDigits && dDigits === fDigits) return true;
+      if (d.email && inv.email && d.email.trim().toLowerCase() === inv.email.trim().toLowerCase()) return true;
+      if (d.customerName && inv.name && d.customerName.trim().toLowerCase() === inv.name.trim().toLowerCase()) return true;
+      return false;
+    });
+  };
+
+  // Only converted customers/investors belong in Investor 360
+  const isConvertedInvestor = (inv: Investor): boolean => {
+    const norm = (inv.status || '').toLowerCase().replace(/[\s_-]/g, '');
+    if (norm === 'activeinvestor' || norm === 'hnwinvestor' || norm === 'active' || norm === 'converted') {
+      return true;
+    }
+    const match = getMatchingDeal(inv);
+    if (match && (match.stage === 'converted' || match.stage === 'won')) {
+      return true;
+    }
+    return false;
+  };
+
+  const convertedInvestors = scopedInvestors.filter(isConvertedInvestor);
+
   // ── Filter options ────────────────────────────────────────────────────────
-  const assetClassOptions = Array.from(new Set(scopedInvestors.map(inv => inv.preferredAssetClass)))
+  const assetClassOptions = Array.from(new Set(convertedInvestors.map(inv => inv.preferredAssetClass)))
     .filter(Boolean)
     .map(cls => ({ value: cls, label: cls }));
 
-  const consultantOptions = Array.from(new Set(scopedInvestors.map(inv => inv.assignedAgentName)))
+  const consultantOptions = Array.from(new Set(convertedInvestors.map(inv => inv.assignedAgentName)))
     .filter(Boolean)
     .map(name => ({ value: name, label: name }));
 
   // ── Filtered list ─────────────────────────────────────────────────────────
-  const filteredInvestors = scopedInvestors.filter(inv => {
+  const filteredInvestors = convertedInvestors.filter(inv => {
     if (statusFilter !== 'All' && inv.status !== statusFilter) return false;
     if (assetClassFilter !== 'All' && inv.preferredAssetClass !== assetClassFilter) return false;
     if (consultantFilter !== 'All' && inv.assignedAgentName !== consultantFilter) return false;
@@ -194,18 +222,6 @@ export const InvestorsPage: React.FC = () => {
   );
 
   // ── Modal helpers ─────────────────────────────────────────────────────────
-  const openNewModal = () => {
-    setEditingInvestor(null);
-    setForm({
-      ...BLANK_FORM,
-      // Lock exec to themselves
-      assignedAgentId: isExec ? (user?.id ?? '') : '',
-      assignedAgentName: isExec ? (user?.name ?? '') : '',
-    });
-    setFormErrors({});
-    setIsModalOpen(true);
-  };
-
   const openEditModal = (inv: Investor) => {
     setEditingInvestor(inv);
     setForm({
@@ -240,6 +256,8 @@ export const InvestorsPage: React.FC = () => {
   };
 
   const handleSaveInvestor = async () => {
+    if (!editingInvestor) return;
+
     const errors: Partial<Record<keyof InvestorForm, string>> = {};
     if (!form.name.trim()) errors.name = 'Name is required.';
     if (!form.phone.trim()) errors.phone = 'Phone is required.';
@@ -248,9 +266,8 @@ export const InvestorsPage: React.FC = () => {
       return;
     }
 
-    const now = new Date().toISOString().split('T')[0];
     const investorPayload: Investor = {
-      id: editingInvestor ? editingInvestor.id : '',
+      id: editingInvestor.id,
       companyId: tenant?.id ?? '',
       name: form.name.trim(),
       phone: form.phone.trim(),
@@ -261,7 +278,7 @@ export const InvestorsPage: React.FC = () => {
       assignedAgentId: form.assignedAgentId.trim() || (user?.id ?? ''),
       assignedAgentName: form.assignedAgentName.trim() || (user?.name ?? ''),
       referralSource: form.referralSource.trim() || undefined,
-      createdAt: editingInvestor ? editingInvestor.createdAt : now,
+      createdAt: editingInvestor.createdAt,
       notes: form.notes.trim(),
       ...(form.committedAUM.trim() ? { committedAUM: form.committedAUM.trim() } : {}),
       ...(form.investmentMandate.trim() ? { investmentMandate: form.investmentMandate.trim() } : {}),
@@ -348,7 +365,7 @@ export const InvestorsPage: React.FC = () => {
       header: 'Investment Amount',
       sortable: true,
       render: (inv: Investor) => {
-        const matchingDeal = deals.find(d => d.customerId === inv.id || (d.phone && inv.phone && d.phone.replace(/\D/g, '').slice(-10) === inv.phone.replace(/\D/g, '').slice(-10)) || d.customerName.toLowerCase() === inv.name.toLowerCase());
+        const matchingDeal = getMatchingDeal(inv);
         const amt = matchingDeal?.value || (inv.committedAUM && !isNaN(Number(inv.committedAUM)) && Number(inv.committedAUM) > 0 ? Number(inv.committedAUM) : null);
         return (
           <span style={{ fontWeight: 700, color: amt ? '#059669' : 'var(--text-muted)', fontSize: 13 }}>
@@ -361,7 +378,13 @@ export const InvestorsPage: React.FC = () => {
       key: 'status',
       header: 'KYC / Investor Status',
       sortable: true,
-      render: inv => <StatusChip status={inv.status} size="sm" />,
+      render: inv => {
+        const match = getMatchingDeal(inv);
+        const displayStatus = (match && (match.stage === 'converted' || match.stage === 'won') && inv.status === 'Lead')
+          ? 'Active Investor'
+          : inv.status;
+        return <StatusChip status={displayStatus} size="sm" />;
+      },
     },
     {
       key: 'assignedAgentName',
@@ -436,21 +459,6 @@ export const InvestorsPage: React.FC = () => {
           >
             <Download size={15} /> Export CSV
           </button>
-          {!isGhlAdmin && (
-            <button
-              id="investors-new-investor"
-              className="btn btn-primary"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                fontSize: 13,
-              }}
-              onClick={openNewModal}
-            >
-              <Plus size={15} /> New Investor
-            </button>
-          )}
         </div>
       </div>
 
@@ -490,7 +498,6 @@ export const InvestorsPage: React.FC = () => {
                 value: statusFilter,
                 onChange: setStatusFilter,
                 options: [
-                  { value: 'Lead', label: 'Lead' },
                   { value: 'Active Investor', label: 'Active Investor' },
                   { value: 'HNW Investor', label: 'HNW Investor' },
                   { value: 'Inactive', label: 'Inactive' },
@@ -671,15 +678,15 @@ export const InvestorsPage: React.FC = () => {
         )}
       </Drawer>
 
-      {/* ── Create / Edit Investor Modal ─────────────────────────────────── */}
+      {/* ── Edit Investor Modal ─────────────────────────────────────────── */}
       <Modal
-        isOpen={isModalOpen && !isGhlAdmin}
+        isOpen={isModalOpen && !!editingInvestor && !isGhlAdmin}
         onClose={closeModal}
-        title={editingInvestor ? 'Edit Investor' : 'New Investor'}
+        title="Edit Investor"
         subtitle={
           editingInvestor
             ? `Editing profile for ${editingInvestor.name}.`
-            : 'Create a new HNW investor profile for your firm.'
+            : ''
         }
         maxWidth={620}
         footer={
@@ -691,7 +698,7 @@ export const InvestorsPage: React.FC = () => {
               className="btn btn-primary"
               onClick={handleSaveInvestor}
             >
-              {editingInvestor ? 'Update Investor' : 'Save Investor'}
+              Update Investor
             </button>
           </>
         }
@@ -743,7 +750,6 @@ export const InvestorsPage: React.FC = () => {
                 value={form.status}
                 onChange={e => setField('status', e.target.value as InvestorForm['status'])}
               >
-                <option value="Lead">Lead</option>
                 <option value="Active Investor">Active Investor</option>
                 <option value="HNW Investor">HNW Investor</option>
                 <option value="Inactive">Inactive</option>

@@ -339,20 +339,7 @@ public class LeadService : ILeadService
                     return false;
                 });
 
-                // Fetch tenant-scoped IRM pipeline cards in qualified_investor stage
-                var companyCards = await _context.IrmPipelineCards
-                    .Include(c => c.AssignedIrm)
-                    .Where(c => c.CompanyId == companyId && c.StageId == "qualified_investor")
-                    .ToListAsync(ct);
-
-                matchingKycCard = companyCards.FirstOrDefault(c =>
-                {
-                    var cPhone = NormalizePhone(c.InvestorPhone);
-                    if (normPhone != null && cPhone != null && cPhone == normPhone) return true;
-                    var cEmail = NormalizeEmail(c.InvestorEmail);
-                    if (normEmail != null && cEmail != null && cEmail == normEmail) return true;
-                    return false;
-                });
+                // IRM pipeline cards merged into GhlDeals
             }
 
             // 1. Authoritative Stage Detection: Check if contact is currently in KYC

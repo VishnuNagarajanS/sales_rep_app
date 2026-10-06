@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.AddUserSecrets(typeof(Program).Assembly, optional: true);
 
 // 1. Add Controllers
 builder.Services.AddControllers()
@@ -192,6 +193,17 @@ using (var scope = app.Services.CreateScope())
                     ELSIF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'leads' AND column_name = 'AssignedAgentId') THEN
                         ALTER TABLE leads ALTER COLUMN ""AssignedAgentId"" DROP NOT NULL;
                     END IF;
+
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'call_records') THEN
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""TwilioCallSid"" character varying(64) NULL;
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""RecordingUrl"" character varying(256) NULL;
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""Transcript"" text NULL;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'CallRecords') THEN
+                        ALTER TABLE ""CallRecords"" ADD COLUMN IF NOT EXISTS ""TwilioCallSid"" character varying(64) NULL;
+                        ALTER TABLE ""CallRecords"" ADD COLUMN IF NOT EXISTS ""RecordingUrl"" character varying(256) NULL;
+                        ALTER TABLE ""CallRecords"" ADD COLUMN IF NOT EXISTS ""Transcript"" text NULL;
+                    END IF;
                 END $$;
             ";
             db.Database.ExecuteSqlRaw(sql);
@@ -326,6 +338,13 @@ using (var scope = app.Services.CreateScope())
     Console.WriteLine($"[DIAGNOSTIC] Count with help me decide: {helpMeDecide}");
     Console.WriteLine($"[DIAGNOSTIC] Count with asset class but not confirmed: {notConfirmed}");
 }
+
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor 
+                     | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto 
+                     | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost
+});
 
 // Global Exception Handling Middleware
 app.UseMiddleware<ExceptionHandlingMiddleware>();
