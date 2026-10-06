@@ -3,9 +3,7 @@ import { User, Tenant, TenantSlug, RoleCode } from '../types';
 import { DEFAULT_TENANTS } from '../constants/defaultTenants';
 import { SYSTEM_ROLES } from '../constants/roles';
 import { FEATURES } from '../constants/features';
-import { storageService } from '../services/storageService';
 import { apiClient } from '../services/apiClient';
-import { isMockMode } from '../config/environment';
 
 const getStoredTenants = (): Tenant[] => {
   try {
@@ -57,17 +55,6 @@ interface AuthContextType {
   setTenant: (tenant: Tenant | null) => void;
 }
 
-export interface MockAuthProvider {
-  getRoles: () => Record<string, any>;
-  getTenants: () => Record<string, any>;
-}
-
-let mockAuthProviderInstance: MockAuthProvider | null = null;
-
-export function registerMockAuthProvider(provider: MockAuthProvider): void {
-  mockAuthProviderInstance = provider;
-}
-
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -114,11 +101,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return JSON.parse(saved);
       } catch {}
     }
-    // In mock mode only, default to GHL demo tenant if available
-    if (isMockMode()) {
-      const mockTenants = storageService.getTenants();
-      return mockTenants.find(t => t.slug === 'ghl') || mockTenants[0] || null;
-    }
     return null;
   });
 
@@ -159,178 +141,56 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const systemRolePerms = user?.role?.code && SYSTEM_ROLES[user.role.code]?.permissions || [];
   const permissions = rawPermissions.length > 0 ? rawPermissions : systemRolePerms;
 
-  const switchPersona = async (roleCode: RoleCode, tenantSlug?: TenantSlug) => {
-    // In dev mode, persona switching is strictly disabled
-    if (!isMockMode()) {
-      console.warn('[Dev Mode] Persona switching is disabled in real API mode.');
-      return;
-    }
-
-    // In mock mode, retrieve mock fixtures from registered provider
-    const MOCK_ROLES = mockAuthProviderInstance?.getRoles() || SYSTEM_ROLES || {};
-    const MOCK_TENANTS = mockAuthProviderInstance?.getTenants() || DEFAULT_TENANTS || {};
-
-    if (roleCode === 'super_admin') {
-      const superUser: User = {
-        id: 'usr-super-01',
-        name: 'Yanosh',
-        email: 'yanosh@ghlindiaventures.com',
-        phone: '+91 98800 11000',
-        role: MOCK_ROLES.super_admin,
-        status: 'Active',
-        lastLogin: 'Just now',
-      };
-      setUser(superUser);
-      setTenant(null);
-      return;
-    }
-
-    const slug = tenantSlug || 'ghl';
-    const allTenants = storageService.getTenants();
-    const targetTenant =
-      allTenants.find(t => t.slug === slug || t.id === slug) ||
-      MOCK_TENANTS[slug] ||
-      MOCK_TENANTS.ghl;
-    setTenant(targetTenant);
-
-    // Check if a real user exists for this tenant and role in mock storage
-    const tenantUsers = storageService.getUsers(targetTenant.slug);
-    const existingUser = tenantUsers.find(u => u.role.code === roleCode);
-    if (existingUser) {
-      if (MOCK_ROLES[roleCode]) {
-        existingUser.role.permissions = MOCK_ROLES[roleCode].permissions;
-      }
-      setUser(existingUser);
-      return;
-    }
-
-    const targetUser: User = {
-      id: `usr-${slug}-${roleCode}`,
-      name:
-        roleCode === 'company_admin'
-          ? slug === 'ghl'
-            ? 'Vishnu'
-            : slug === 'jamin'
-              ? 'Mani'
-              : `${targetTenant.name} Admin`
-          : roleCode === 'irm'
-            ? 'Dhinakaran'
-            : slug === 'ghl'
-              ? 'Naveen'
-              : slug === 'jamin'
-                ? 'Pooja Hegde'
-                : `${targetTenant.name} Agent`,
-      email:
-        roleCode === 'company_admin'
-          ? slug === 'ghl'
-            ? 'vishnu@ghlindiaventures.com'
-            : 'mani@ghlindiaventures.com'
-          : roleCode === 'irm'
-            ? 'dhinakaran@ghlindiaventures.com'
-            : slug === 'ghl'
-              ? 'naveen@ghlindiaventures.com'
-              : `sales@${slug}.com`,
-      phone: '+91 98450 00000',
-      role: MOCK_ROLES[roleCode] || MOCK_ROLES.company_admin,
-      companyId: targetTenant.id,
-      companySlug: slug,
-      companyName: targetTenant.name,
-      status: 'Active',
-      lastLogin: 'Just now',
-    };
-
-    saveStoredUser(targetUser);
-    setUser(targetUser);
+  const switchPersona = async (_roleCode: RoleCode, _tenantSlug?: TenantSlug) => {
+    console.warn('Persona switching is disabled in production API mode.');
   };
 
   const login = async (
     email: string,
     password?: string,
-    roleCode: RoleCode = 'company_admin',
-    tenantSlug: TenantSlug = 'ghl'
+    _roleCode: RoleCode = 'company_admin',
+    _tenantSlug: TenantSlug = 'ghl'
   ): Promise<boolean> => {
     setLoginError(null);
 
-    // If running in dev mode, password is required and must hit backend API
-    if (!isMockMode()) {
-      if (!password || !password.trim()) {
-        setLoginError('Password is required in Dev / API mode.');
-        return false;
-      }
-
-      try {
-        const response: any = await apiClient.post('/auth/login', { email, password });
-
-        if (response && response.success && response.data) {
-          const { token, user: userData, tenant: tenantData } = response.data;
-
-          if (token) {
-            sessionStorage.setItem('nexus_auth_token', token);
-            localStorage.setItem('nexus_auth_token', token);
-          }
-
-          if (userData) {
-            setUser(userData);
-          }
-
-          if (tenantData) {
-            setTenant(tenantData);
-          }
-
-          return true;
-        } else {
-          setLoginError(response?.message || 'Login failed. Please check credentials.');
-          return false;
-        }
-      } catch (error: any) {
-        setLoginError(error.message || 'Unable to connect to backend API server.');
-        return false;
-      }
+    if (!email || !email.trim()) {
+      setLoginError('Email is required.');
+      return false;
     }
 
-    // ── MOCK MODE LOGIN ────────────────────────────────────────────────────────
-    // If password provided in mock mode, attempt backend API, but if it fails or no password, support demo login
-    if (password) {
-      try {
-        const response: any = await apiClient.post('/auth/login', { email, password });
-        if (response && response.success && response.data) {
-          const { token, user: userData, tenant: tenantData } = response.data;
-          if (token) sessionStorage.setItem('nexus_auth_token', token);
-          if (userData) setUser(userData);
-          if (tenantData) setTenant(tenantData);
-          return true;
-        }
-      } catch {
-        // In mock mode, continue to demo authentication fallback
-      }
+    if (!password || !password.trim()) {
+      setLoginError('Password is required.');
+      return false;
     }
 
-    const MOCK_ROLES = mockAuthProviderInstance?.getRoles() || SYSTEM_ROLES || {};
-    const MOCK_TENANTS = mockAuthProviderInstance?.getTenants() || DEFAULT_TENANTS || {};
+    try {
+      const response: any = await apiClient.post('/auth/login', { email, password });
 
-    const allTenants = storageService.getTenants();
-    const targetTenant =
-      allTenants.find(t => t.slug === tenantSlug || t.id === tenantSlug) ||
-      MOCK_TENANTS[tenantSlug] ||
-      MOCK_TENANTS.ghl;
-    setTenant(targetTenant);
+      if (response && response.success && response.data) {
+        const { token, user: userData, tenant: tenantData } = response.data;
 
-    const authenticatedUser: User = {
-      id: `usr-${Date.now()}`,
-      name: email.split('@')[0].replace('.', ' '),
-      email,
-      phone: '+91 98000 00000',
-      role: MOCK_ROLES[roleCode] || MOCK_ROLES.company_admin,
-      companyId: targetTenant.id,
-      companySlug: tenantSlug,
-      companyName: targetTenant.name,
-      status: 'Active',
-      lastLogin: 'Just now',
-    };
+        if (token) {
+          sessionStorage.setItem('nexus_auth_token', token);
+          localStorage.setItem('nexus_auth_token', token);
+        }
 
-    saveStoredUser(authenticatedUser);
-    setUser(authenticatedUser);
-    return true;
+        if (userData) {
+          setUser(userData);
+        }
+
+        if (tenantData) {
+          setTenant(tenantData);
+        }
+
+        return true;
+      } else {
+        setLoginError(response?.message || 'Login failed. Please check credentials.');
+        return false;
+      }
+    } catch (error: any) {
+      setLoginError(error.message || 'Unable to connect to backend API server.');
+      return false;
+    }
   };
 
   const logout = () => {

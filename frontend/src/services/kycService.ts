@@ -1,4 +1,3 @@
-import { isMockMode } from '../config/environment';
 import { getAuthHeaders } from '../utils/authHeaders';
 
 export interface KycReviewData {
@@ -83,25 +82,11 @@ export type CustomerKycStatus =
   | 'Assisted KYC – Submitted for Verification'
   | 'Pending';
 
-export interface MockKycProvider {
-  getReviewData: (deal: any) => KycReviewData | null;
-  getCustomerStatus: (dealId: string, currentStatus?: string) => CustomerKycStatus;
-}
-
-let mockKycProviderInstance: MockKycProvider | null = null;
-
-export function registerMockKycProvider(provider: MockKycProvider): void {
-  mockKycProviderInstance = provider;
-}
-
 export function getKycReviewData(_deal: any): KycReviewData | null {
   return null;
 }
 
-export function getCustomerKycStatus(dealId: string, currentStatus?: string): CustomerKycStatus {
-  if (isMockMode() && mockKycProviderInstance) {
-    return mockKycProviderInstance.getCustomerStatus(dealId, currentStatus);
-  }
+export function getCustomerKycStatus(_dealId: string, currentStatus?: string): CustomerKycStatus {
   if (currentStatus === 'completed') return 'Verified';
   return (currentStatus as CustomerKycStatus) || 'Pending';
 }

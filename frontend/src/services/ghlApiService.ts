@@ -20,7 +20,6 @@
 
 import { apiClient } from './apiClient';
 import { storageService } from './storageService';
-import { isMockMode } from '../config/environment';
 import type {
   Deal,
   DealActivity,
@@ -75,12 +74,14 @@ interface ApiResponse<T> {
   errors?: string[];
 }
 
-/** Fetch all pages and return flat array (backend defaults to pageSize=100). */
+/** Fetch all pages and return flat array (backend defaults to pageSize=100). Throws on API error so callers show error state instead of empty array. */
 async function fetchAll<T>(path: string, params: Record<string, string> = {}): Promise<T[]> {
   const qs = new URLSearchParams({ pageSize: '200', ...params }).toString();
   const res: ApiResponse<PagedResult<T>> = await apiClient.get(`${path}?${qs}`);
-  if (!res.success || !res.data) return [];
-  const items = res.data.items;
+  if (!res.success || !res.data) {
+    throw new Error(res?.message || `Failed to fetch data from ${path}`);
+  }
+  const items = res.data.items || [];
   const seen = new Set();
   const deduped = items.filter((item: any) => {
     const id = item.id;
@@ -175,12 +176,7 @@ export async function saveDeal(deal: Deal): Promise<Deal> {
 }
 
 export async function persistDeal(deal: Deal): Promise<Deal> {
-  if (isMockMode()) {
-    storageService.saveDeal(deal);
-    return deal;
-  } else {
-    return await saveDeal(deal);
-  }
+  return await saveDeal(deal);
 }
 
 export async function deleteDeal(dealId: string): Promise<void> {
@@ -209,7 +205,7 @@ export async function getDealActivities(dealId: string): Promise<DealActivity[]>
   const res: ApiResponse<DealActivity[]> = await apiClient.get(
     `/ghl/deals/${nid(dealId)}/activities`
   );
-  if (!res.success || !res.data) return [];
+  if (!res.success || !res.data) throw new Error(res?.message || 'Failed to fetch deal activities');
   return res.data.map(mapActivity);
 }
 
@@ -430,9 +426,6 @@ function mapLead(l: Record<string, any>): Lead {
 }
 
 export async function getLeads(companyId?: string): Promise<Lead[]> {
-  if (isMockMode()) {
-    return storageService.getLeads(companyId);
-  }
   const raw = await fetchAll<any>('/sales-executive/leads');
   return raw.map(mapLead);
 }
@@ -537,12 +530,6 @@ export async function getFollowups(companyId?: string): Promise<Followup[]> {
 export async function saveFollowup(followup: Followup): Promise<Followup> {
   const isNew =
     !followup.id || followup.id.startsWith('flw-') || followup.id.startsWith('fu-') || followup.id.startsWith('f-');
-
-  if (isMockMode()) {
-    storageService.saveFollowup(followup);
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-    return followup;
-  }
 
   try {
     if (isNew) {

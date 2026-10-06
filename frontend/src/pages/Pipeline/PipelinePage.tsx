@@ -32,7 +32,6 @@ import {
   saveInvestor as apiSaveInvestor,
   persistDeal,
 } from '../../services/ghlApiService';
-import { isMockMode } from '../../config/environment';
 import { PIPELINE_STAGES } from '../../constants/pipelineStages';
 import { Modal } from '../../components/common/Modal';
 import { FilterBar } from '../../components/common/FilterBar';
@@ -230,57 +229,35 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
 
   const loadData = async () => {
     const my = ++reqId.current;
-    if (isMockMode()) {
-      setIsLoading(true);
-      const latestDeals = storageService.getDeals(tenant?.id) || [];
-      const localLeads = storageService.getLeads(tenant?.id) || [];
-      const localFollowups = storageService.getFollowups(tenant?.id) || [];
-      const localInvs = storageService.getInvestors(tenant?.id) || [];
-      const localOpps = storageService.getOpportunities(tenant?.id) || [];
-      const localCons = storageService.getConsultations(tenant?.id) || [];
-      setDeals(latestDeals);
-      setLeads(localLeads);
-      setFollowups(localFollowups);
-      setInvestors(localInvs);
-      setOpportunities(localOpps);
-      setConsultations(localCons);
+    setIsLoading(true);
+    setLoadError(false);
+    try {
+      const [apiDeals, apiLeads, apiFollowups, apiInvs, apiOpps, apiCons] = await Promise.all([
+        getDeals(tenant?.id),
+        getLeads(tenant?.id),
+        getFollowups(tenant?.id),
+        getInvestors(tenant?.id),
+        getOpportunities(tenant?.id),
+        getConsultations(tenant?.id),
+      ]);
+      if (my !== reqId.current) return;
+      const dealsList = apiDeals || [];
+      setDeals(dealsList);
+      setLeads(apiLeads || []);
+      setFollowups(apiFollowups || []);
+      setInvestors(apiInvs || []);
+      setOpportunities(apiOpps || []);
+      setConsultations(apiCons || []);
       setIsLoading(false);
-      setLoadError(false);
       setIrmDetailDeal(prev => {
         if (!prev) return null;
-        return latestDeals.find(d => d.id === prev.id) || prev;
+        return dealsList.find(d => d.id === prev.id) || prev;
       });
-    } else {
-      setIsLoading(true);
-      setLoadError(false);
-      try {
-        const [apiDeals, apiLeads, apiFollowups, apiInvs, apiOpps, apiCons] = await Promise.all([
-          getDeals(tenant?.id),
-          getLeads(tenant?.id),
-          getFollowups(tenant?.id),
-          getInvestors(tenant?.id),
-          getOpportunities(tenant?.id),
-          getConsultations(tenant?.id),
-        ]);
-        if (my !== reqId.current) return;
-        const dealsList = apiDeals || [];
-        setDeals(dealsList);
-        setLeads(apiLeads || []);
-        setFollowups(apiFollowups || []);
-        setInvestors(apiInvs || []);
-        setOpportunities(apiOpps || []);
-        setConsultations(apiCons || []);
-        setIsLoading(false);
-        setIrmDetailDeal(prev => {
-          if (!prev) return null;
-          return dealsList.find(d => d.id === prev.id) || prev;
-        });
-      } catch (err) {
-        if (my !== reqId.current) return;
-        console.error('[PipelinePage] Failed to load pipeline data:', err);
-        setLoadError(true);
-        setIsLoading(false);
-      }
+    } catch (err) {
+      if (my !== reqId.current) return;
+      console.error('[PipelinePage] Failed to load pipeline data:', err);
+      setLoadError(true);
+      setIsLoading(false);
     }
   };
 

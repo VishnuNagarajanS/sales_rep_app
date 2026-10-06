@@ -84,7 +84,6 @@ import { useAuth } from './context/AuthContext';
 import { AuthLayout } from './layouts/AuthLayout';
 import { SalesLayout } from './layouts/SalesLayout';
 import { AdminLayout } from './layouts/AdminLayout';
-import { isMockMode } from './config/environment';
 
 // Sales Core Pages
 import { DashboardPage } from './pages/Dashboard/DashboardPage';
@@ -157,10 +156,8 @@ import './App.css';
 
 export const App: React.FC = () => {
   useEffect(() => {
-    if (!isMockMode()) {
-      localStorage.removeItem('nexus_dev_deals');
-      localStorage.removeItem('nexus_dev_leads');
-    }
+    localStorage.removeItem('nexus_dev_deals');
+    localStorage.removeItem('nexus_dev_leads');
   }, []);
 
   const { isAuthenticated, isSuperAdmin, tenant, user } = useAuth();
@@ -179,14 +176,6 @@ export const App: React.FC = () => {
   const isGhlAdmin =
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
-  // In mock mode only, run idempotent mock bootstrap if not yet initialized
-  useEffect(() => {
-    if (isMockMode()) {
-      import('./mock/runtime/mockBootstrap').then(({ runMockBootstrap }) => {
-        runMockBootstrap();
-      });
-    }
-  }, []);
 
   // Set default route for IRM user
   useEffect(() => {

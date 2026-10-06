@@ -120,15 +120,6 @@ export const AgentAvailabilityToggle: React.FC = () => {
         <span className="agent-availability-label">{availability}</span>
       </button>
 
-      {/* Demo helper: button to simulate incoming call */}
-      <button
-        className="btn btn-ghost btn-sm agent-availability-simulate-btn"
-        title="Simulate Inbound Call for Testing"
-        onClick={() => simulateIncomingCall()}
-      >
-        <PhoneCall size={13} /> Simulate Ring
-      </button>
-
       {isOpen && (
         <>
           <div

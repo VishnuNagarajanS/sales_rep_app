@@ -50,7 +50,6 @@ import {
   getCustomers,
   persistDeal,
 } from '../../services/ghlApiService';
-import { isMockMode } from '../../config/environment';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { Modal } from '../../components/common/Modal';
@@ -507,72 +506,46 @@ const GhlIrmKycView: React.FC = () => {
 
   const loadData = async () => {
     const my = ++reqId.current;
-    if (isMockMode()) {
-      setIsLoading(true);
-      const allDeals = storageService.getDeals(tenant?.id) || [];
-      const localLeads = storageService.getLeads(tenant?.id) || [];
-      const localCustomers = storageService.getCustomers(tenant?.id) || [];
-      const enriched = allDeals.map(d => enrichDealWithContact(d, localLeads, localCustomers));
+    setIsLoading(true);
+    setLoadError(false);
+    try {
+      const [allDeals, apiLeads, apiCustomers] = await Promise.all([
+        getDeals(tenant?.id),
+        getLeads(tenant?.id),
+        getCustomers(tenant?.id),
+      ]);
+      if (my !== reqId.current) return;
+      const leadsList = apiLeads || [];
+      const customersList = apiCustomers || [];
+      const enriched = (allDeals || []).map(d => enrichDealWithContact(d, leadsList, customersList));
+      const qualified = enriched.filter(d => d.stage === 'qualified_investor');
       const isIrmUser = user?.role?.code === 'irm';
-      const qualified = enriched
-        .filter(d => d.stage === 'qualified_investor')
-        .filter(d => !isIrmUser || (d.assignedAgentId && String(d.assignedAgentId) === String(user?.id)) || (d.assignedAgentName && d.assignedAgentName === user?.name));
+      const scopedQualified = isIrmUser
+        ? qualified.filter(d =>
+            (d.assignedAgentId && String(d.assignedAgentId) === String(user?.id)) ||
+            (d.assignedAgentName && d.assignedAgentName === user?.name)
+          )
+        : qualified;
+
       const seenCustomer = new Set<string>();
-      const dedupedDeals = qualified.filter(d => {
+      const dedupedDeals: Deal[] = [];
+      for (const d of scopedQualified) {
         const ph = (d.phone || '').replace(/\D/g, '').slice(-10);
         const em = (d.email || '').trim().toLowerCase();
         const key = ph ? `ph:${ph}` : em ? `em:${em}` : d.customerId ? `cid:${d.customerId}` : `id:${d.id}`;
-        if (seenCustomer.has(key)) return false;
-        seenCustomer.add(key);
-        return true;
-      });
-      setDeals(dedupedDeals);
-      setLeads(localLeads);
-      setCustomers(localCustomers);
-      setIsLoading(false);
-      setLoadError(false);
-    } else {
-      setIsLoading(true);
-      setLoadError(false);
-      try {
-        const [allDeals, apiLeads, apiCustomers] = await Promise.all([
-          getDeals(tenant?.id),
-          getLeads(tenant?.id),
-          getCustomers(tenant?.id),
-        ]);
-        if (my !== reqId.current) return;
-        const leadsList = apiLeads || [];
-        const customersList = apiCustomers || [];
-        const enriched = (allDeals || []).map(d => enrichDealWithContact(d, leadsList, customersList));
-        const qualified = enriched.filter(d => d.stage === 'qualified_investor');
-        const isIrmUser = user?.role?.code === 'irm';
-        const scopedQualified = isIrmUser
-          ? qualified.filter(d =>
-              (d.assignedAgentId && String(d.assignedAgentId) === String(user?.id)) ||
-              (d.assignedAgentName && d.assignedAgentName === user?.name)
-            )
-          : qualified;
-
-        const seenCustomer = new Set<string>();
-        const dedupedDeals: Deal[] = [];
-        for (const d of scopedQualified) {
-          const ph = (d.phone || '').replace(/\D/g, '').slice(-10);
-          const em = (d.email || '').trim().toLowerCase();
-          const key = ph ? `ph:${ph}` : em ? `em:${em}` : d.customerId ? `cid:${d.customerId}` : `id:${d.id}`;
-          if (!seenCustomer.has(key)) {
-            seenCustomer.add(key);
-            dedupedDeals.push(d);
-          }
+        if (!seenCustomer.has(key)) {
+          seenCustomer.add(key);
+          dedupedDeals.push(d);
         }
-        setDeals(dedupedDeals);
-        setLeads(leadsList);
-        setCustomers(customersList);
-        setIsLoading(false);
-      } catch {
-        if (my !== reqId.current) return;
-        setLoadError(true);
-        setIsLoading(false);
       }
+      setDeals(dedupedDeals);
+      setLeads(leadsList);
+      setCustomers(customersList);
+      setIsLoading(false);
+    } catch {
+      if (my !== reqId.current) return;
+      setLoadError(true);
+      setIsLoading(false);
     }
 
     fetch('/api/irm/kyc/all', {
@@ -676,8 +649,6 @@ const GhlIrmKycView: React.FC = () => {
   }, [tenant?.id]);
 
   useEffect(() => {
-    if (isMockMode()) return;
-
     const interval = setInterval(() => {
       refreshDbKycs();
     }, 15000);
@@ -1237,8 +1208,8 @@ const GhlIrmKycView: React.FC = () => {
       persistDeal(updatedDeal).catch(() => {});
     }
 
-    // 4. Save to backend if authenticated and not in mock mode
-    if (!isMockMode() && user) {
+    // 4. Save to backend if authenticated
+    if (user) {
       saveBackendDraft(selectedDeal, formData, currentStep).catch(() => {});
     }
 
@@ -1378,70 +1349,37 @@ const GhlIrmKycView: React.FC = () => {
       deal.customerId ||
       deal.id;
 
-    if (isMockMode()) {
+    if (typeof resolvedKycId === 'number' || /^\d+$/.test(String(resolvedKycId))) {
       try {
-        const raw = localStorage.getItem('nexus_mock_kyc_records');
-        const records = raw ? JSON.parse(raw) : {};
-        records[deal.id] = {
-          status: newCustStatus,
-          kycStatus: newStatus,
-          verifiedBy,
-          verifiedAt,
-          remarks: comment,
-          flaggedSections,
-        };
-        localStorage.setItem('nexus_mock_kyc_records', JSON.stringify(records));
-      } catch (e) {
-        console.error('Failed to update mock KYC record:', e);
-      }
-    } else {
-      if (typeof resolvedKycId === 'number' || /^\d+$/.test(String(resolvedKycId))) {
-        try {
-          const res = await fetch(`/api/irm/kyc/${resolvedKycId}/status`, {
-            method: 'PATCH',
-            headers: {
-              'Content-Type': 'application/json',
-              ...getAuthHeaders(),
-            },
-            body: JSON.stringify({
-              status: newStatus,
-              comment,
-              flaggedSections,
-              checklist,
-            }),
-          });
+        const res = await fetch(`/api/irm/kyc/${resolvedKycId}/status`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders(),
+          },
+          body: JSON.stringify({
+            status: newStatus,
+            comment,
+            flaggedSections,
+            checklist,
+          }),
+        });
 
-          if (!res.ok) {
-            const errData = await res.json().catch(() => ({}));
-            const errMsg = errData.message || `KYC status update rejected by backend (${res.status})`;
-            showToast(errMsg);
-            throw new Error(errMsg);
-          }
-        } catch (err: any) {
-          console.warn('[KYCPage] PATCH status error:', err);
-          showToast(err?.message || 'Error updating KYC status in backend.');
-          throw err;
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = errData.message || `KYC status update rejected by backend (${res.status})`;
+          showToast(errMsg);
+          throw new Error(errMsg);
         }
-      } else if (newStatus === 'Verified') {
-        const errMsg = 'Cannot verify KYC: No valid backend KYC submission found for this customer.';
-        showToast(errMsg);
-        throw new Error(errMsg);
+      } catch (err: any) {
+        console.warn('[KYCPage] PATCH status error:', err);
+        showToast(err?.message || 'Error updating KYC status in backend.');
+        throw err;
       }
-
-      // Also persist to local mock record as bulletproof fallback
-      try {
-        const raw = localStorage.getItem('nexus_mock_kyc_records');
-        const records = raw ? JSON.parse(raw) : {};
-        records[deal.id] = {
-          status: newCustStatus,
-          kycStatus: newStatus,
-          verifiedBy,
-          verifiedAt,
-          remarks: comment,
-          flaggedSections,
-        };
-        localStorage.setItem('nexus_mock_kyc_records', JSON.stringify(records));
-      } catch { }
+    } else if (newStatus === 'Verified') {
+      const errMsg = 'Cannot verify KYC: No valid backend KYC submission found for this customer.';
+      showToast(errMsg);
+      throw new Error(errMsg);
     }
 
     const updatedDeal: Deal = {
@@ -1653,7 +1591,7 @@ const GhlIrmKycView: React.FC = () => {
 
     let savedKycDto: any = null;
     // Await server submission first; never report success if backend save fails
-    if (!isMockMode() && user) {
+    if (user) {
       try {
         savedKycDto = await submitBackendAssistedKyc(selectedDeal, formData);
         if (savedKycDto?.id) {
