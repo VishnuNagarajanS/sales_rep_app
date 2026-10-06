@@ -175,15 +175,21 @@ public class PlatformTenantsController : ControllerBase
             var adminRole = await _context.Roles.FirstOrDefaultAsync(r => r.Code == "company_admin", ct);
             if (adminRole != null)
             {
+                var isGeneratedTemp = string.IsNullOrWhiteSpace(req.AdminUser.Password);
+                var tempPassword = isGeneratedTemp
+                    ? backend.Helpers.PasswordHasher.GenerateTemporaryPassword()
+                    : req.AdminUser.Password!.Trim();
+
                 var adminUser = new User
                 {
                     Name = req.AdminUser.Name.Trim(),
                     Email = req.AdminUser.Email.Trim().ToLowerInvariant(),
                     Phone = req.AdminUser.Phone?.Trim() ?? string.Empty,
-                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(string.IsNullOrWhiteSpace(req.AdminUser.Password) ? "Password@123" : req.AdminUser.Password),
+                    PasswordHash = backend.Helpers.PasswordHasher.HashPassword(tempPassword),
                     RoleId = adminRole.Id,
                     CompanyId = tenant.Id,
                     Status = UserStatus.Active,
+                    MustChangePassword = true,
                     CreatedAt = DateTime.UtcNow
                 };
 

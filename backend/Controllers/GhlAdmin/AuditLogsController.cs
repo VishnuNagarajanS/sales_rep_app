@@ -119,6 +119,79 @@ public class AuditLogsController : ControllerBase
             })
             .ToListAsync(ct);
 
+        // Resolve actor identities if stored as placeholder IDs (e.g. "IRM (ID: 5)") or if email/name is missing
+        var userIdsToFetch = new HashSet<int>();
+        var userEmailsToFetch = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in items)
+        {
+            if (string.IsNullOrWhiteSpace(item.ActorEmail) || (!string.IsNullOrWhiteSpace(item.ActorName) && item.ActorName.Contains("(ID:")))
+            {
+                var match = System.Text.RegularExpressions.Regex.Match(item.ActorName ?? string.Empty, @"\(ID:\s*(\d+)\)");
+                if (match.Success && int.TryParse(match.Groups[1].Value, out var uid))
+                {
+                    userIdsToFetch.Add(uid);
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(item.ActorEmail))
+            {
+                userEmailsToFetch.Add(item.ActorEmail.Trim());
+            }
+        }
+
+        var usersById = new Dictionary<int, (string Name, string Email)>();
+        if (userIdsToFetch.Count > 0)
+        {
+            var userList = await _db.Users
+                .Where(u => userIdsToFetch.Contains(u.Id))
+                .Select(u => new { u.Id, u.Name, u.Email })
+                .ToListAsync(ct);
+            foreach (var u in userList)
+            {
+                usersById[u.Id] = (u.Name, u.Email);
+            }
+        }
+
+        var usersByEmail = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (userEmailsToFetch.Count > 0)
+        {
+            var emailList = await _db.Users
+                .Where(u => userEmailsToFetch.Contains(u.Email))
+                .Select(u => new { u.Name, u.Email })
+                .ToListAsync(ct);
+            foreach (var u in emailList)
+            {
+                if (!string.IsNullOrWhiteSpace(u.Email) && !string.IsNullOrWhiteSpace(u.Name))
+                {
+                    usersByEmail[u.Email] = u.Name;
+                }
+            }
+        }
+
+        foreach (var item in items)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(item.ActorName ?? string.Empty, @"\(ID:\s*(\d+)\)");
+            if (match.Success && int.TryParse(match.Groups[1].Value, out var uid) && usersById.TryGetValue(uid, out var uById))
+            {
+                item.ActorName = !string.IsNullOrWhiteSpace(uById.Name) ? uById.Name : uById.Email;
+                if (string.IsNullOrWhiteSpace(item.ActorEmail))
+                {
+                    item.ActorEmail = uById.Email;
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(item.ActorEmail) && (string.IsNullOrWhiteSpace(item.ActorName) || item.ActorName == item.ActorEmail))
+            {
+                if (usersByEmail.TryGetValue(item.ActorEmail, out var resolvedName) && !string.IsNullOrWhiteSpace(resolvedName))
+                {
+                    item.ActorName = resolvedName;
+                }
+            }
+            else if (string.IsNullOrWhiteSpace(item.ActorEmail) && !string.IsNullOrWhiteSpace(item.ActorName) && item.ActorName.Contains("@"))
+            {
+                item.ActorEmail = item.ActorName;
+            }
+        }
+
         return Ok(ApiResponse<PagedResult<AuditLogResponseDto>>.SuccessResult(
             PagedResult<AuditLogResponseDto>.Create(items, total, page, pageSize),
             "Audit logs retrieved."));

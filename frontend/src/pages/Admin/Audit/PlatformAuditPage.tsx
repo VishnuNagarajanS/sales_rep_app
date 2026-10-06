@@ -277,8 +277,14 @@ export const PlatformAuditPage: React.FC = () => {
 
                     <td>
                       <div className="actor-cell">
-                        <div className="actor-name-text">{l.actorName}</div>
-                        <div className="actor-email-text">{l.actorEmail}</div>
+                        <div className="actor-name-text">
+                          {l.actorName && !l.actorName.includes('(ID:') && l.actorName.toLowerCase() !== (l.actorEmail || '').toLowerCase()
+                            ? l.actorName
+                            : (l.actorEmail || (l.actorName && !l.actorName.includes('(ID:') ? l.actorName : 'System User'))}
+                        </div>
+                        {l.actorEmail && l.actorName && !l.actorName.includes('(ID:') && l.actorName.toLowerCase() !== l.actorEmail.toLowerCase() && (
+                          <div className="actor-email-text">{l.actorEmail}</div>
+                        )}
                       </div>
                     </td>
 
@@ -343,7 +349,9 @@ export const PlatformAuditPage: React.FC = () => {
               <div className="meta-row">
                 <span className="meta-key">Actor Name & Email:</span>
                 <span className="meta-val font-bold">
-                  {inspectedLog.actorName} &lt;{inspectedLog.actorEmail}&gt;
+                  {inspectedLog.actorName && !inspectedLog.actorName.includes('(ID:') && inspectedLog.actorName.toLowerCase() !== (inspectedLog.actorEmail || '').toLowerCase()
+                    ? `${inspectedLog.actorName}${inspectedLog.actorEmail ? ` <${inspectedLog.actorEmail}>` : ''}`
+                    : (inspectedLog.actorEmail || (inspectedLog.actorName && !inspectedLog.actorName.includes('(ID:') ? inspectedLog.actorName : 'System User'))}
                 </span>
               </div>
               <div className="meta-row">
@@ -369,7 +377,7 @@ export const PlatformAuditPage: React.FC = () => {
             </div>
 
             {/* Visual JSON Before / After Diff */}
-            <div className="diff-section">
+            {/* <div className="diff-section">
               <h4 className="diff-heading">Payload State Diff (Before vs After)</h4>
               <div className="diff-grid">
                 <div className="diff-pane before-pane">
@@ -400,7 +408,7 @@ export const PlatformAuditPage: React.FC = () => {
                   </pre>
                 </div>
               </div>
-            </div>
+            </div> */}
 
             <div className="drawer-footer-actions">
               <button className="btn btn-primary" onClick={() => setIsInspectDrawerOpen(false)}>

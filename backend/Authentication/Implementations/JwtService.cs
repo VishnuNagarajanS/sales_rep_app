@@ -38,7 +38,8 @@ public class JwtService : IJwtService
             new(ClaimTypes.Name, user.Name),
             new(ClaimTypes.Email, user.Email),
             new(ClaimTypes.Role, user.Role.Code),
-            new("userId", user.Id.ToString())
+            new("userId", user.Id.ToString()),
+            new("must_change_password", user.MustChangePassword.ToString().ToLowerInvariant())
         };
 
         if (user.CompanyId.HasValue)

@@ -246,6 +246,8 @@ using (var scope = app.Services.CreateScope())
                     ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""UpdatedAt"" timestamp with time zone NULL;
                     ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""AssignedAgentId"" integer NOT NULL DEFAULT 1;
 
+                    ALTER TABLE users ADD COLUMN IF NOT EXISTS ""MustChangePassword"" boolean NOT NULL DEFAULT FALSE;
+
                     IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'followups' AND column_name = 'Status' AND data_type = 'integer') THEN
                         ALTER TABLE followups ALTER COLUMN ""Status"" TYPE character varying(50) USING CASE WHEN ""Status"" = 1 THEN 'Completed' WHEN ""Status"" = 2 THEN 'Cancelled' WHEN ""Status"" = 3 THEN 'Rescheduled' ELSE 'Pending' END;
                     END IF;
@@ -291,12 +293,12 @@ using (var scope = app.Services.CreateScope())
         try
         {
             var superAdmin = db.Users.FirstOrDefault(u => u.Id == 1 || u.Email == "yanosh@ghlindiaventures.com");
-            if (superAdmin != null && !backend.Helpers.PasswordHasher.VerifyPassword("Password@123", superAdmin.PasswordHash))
+            if (superAdmin != null && string.IsNullOrWhiteSpace(superAdmin.PasswordHash))
             {
                 superAdmin.PasswordHash = backend.Helpers.PasswordHasher.HashPassword("Password@123");
                 superAdmin.IsProtected = true;
                 db.SaveChanges();
-                Console.WriteLine("[Security Init] Super Admin password hash synchronized with PostgreSQL.");
+                Console.WriteLine("[Security Init] Initialized empty Super Admin password hash.");
             }
         }
         catch (Exception ex)

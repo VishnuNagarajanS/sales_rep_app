@@ -13,4 +13,5 @@ public class UserDto
     public string Status { get; set; } = "Active";
     public string? LastLogin { get; set; }
     public string? Avatar { get; set; }
+    public bool MustChangePassword { get; set; }
 }

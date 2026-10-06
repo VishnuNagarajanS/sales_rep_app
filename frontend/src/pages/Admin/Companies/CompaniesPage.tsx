@@ -1054,8 +1054,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   <div className="form-group">
                     <label className="form-label">Initial Password Strategy</label>
                     <select className="form-control" defaultValue="auto">
-                      <option value="auto">Generate Secure Password & Invite via Email</option>
-                      <option value="preset">Preset to 'Password@123' (Demo Mode)</option>
+                      <option value="auto">Generate Secure Cryptographic Temporary Password</option>
                     </select>
                   </div>
                 </div>

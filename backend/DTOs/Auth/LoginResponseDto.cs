@@ -8,4 +8,5 @@ public class LoginResponseDto
     public bool RequiresTwoFactor { get; set; }
     public string? TempToken { get; set; }
     public bool MustEnrollTwoFactor { get; set; }
+    public bool MustChangePassword { get; set; }
 }

@@ -248,8 +248,11 @@ public class PlatformUsersController : ControllerBase
         if (role == null)
             return BadRequest(ApiResponse<PlatformUserDto>.FailureResult("Role 'company_admin' is not configured in database."));
 
-        var password = string.IsNullOrWhiteSpace(req.Password) ? "Password@123" : req.Password;
-        var passwordHash = BCrypt.Net.BCrypt.HashPassword(password);
+        var isGeneratedTemp = string.IsNullOrWhiteSpace(req.Password);
+        var tempPassword = isGeneratedTemp
+            ? backend.Helpers.PasswordHasher.GenerateTemporaryPassword()
+            : req.Password!.Trim();
+        var passwordHash = backend.Helpers.PasswordHasher.HashPassword(tempPassword);
 
         var newUser = new User
         {
@@ -260,6 +263,7 @@ public class PlatformUsersController : ControllerBase
             RoleId = role.Id,
             CompanyId = companyId,
             Status = Enum.TryParse<UserStatus>(req.Status, true, out var st) ? st : UserStatus.Active,
+            MustChangePassword = true,
             CreatedAt = DateTime.UtcNow
         };
 
@@ -310,6 +314,8 @@ public class PlatformUsersController : ControllerBase
             Avatar = newUser.AvatarUrl,
             EmployeeCode = req.EmployeeCode,
             Designation = req.Designation ?? newUser.Role?.Name ?? "Company Administrator",
+            MustChangePassword = newUser.MustChangePassword,
+            TemporaryPassword = tempPassword,
             CreatedAt = newUser.CreatedAt.ToString("o")
         };
 
@@ -398,7 +404,8 @@ public class PlatformUsersController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(req.Password))
         {
-            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password);
+            user.PasswordHash = backend.Helpers.PasswordHasher.HashPassword(req.Password.Trim());
+            user.MustChangePassword = false;
         }
 
         user.UpdatedAt = DateTime.UtcNow;
@@ -499,9 +506,10 @@ public class PlatformUsersController : ControllerBase
             return NotFound(ApiResponse<object>.FailureResult($"User with ID {id} not found."));
 
         var tempPassword = !string.IsNullOrWhiteSpace(req?.NewPassword)
-            ? req.NewPassword
-            : $"Nexus#{new Random().Next(1000, 9999)}!";
-        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(tempPassword);
+            ? req.NewPassword.Trim()
+            : backend.Helpers.PasswordHasher.GenerateTemporaryPassword();
+        user.PasswordHash = backend.Helpers.PasswordHasher.HashPassword(tempPassword);
+        user.MustChangePassword = true;
         user.UpdatedAt = DateTime.UtcNow;
 
         // Invalidate active sessions for this user

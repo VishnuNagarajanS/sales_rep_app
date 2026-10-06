@@ -250,7 +250,7 @@ export const PlatformSecurityPage: React.FC = () => {
             disabled={isRefreshing || isLoading}
             onClick={() => loadData(true)}
           >
-            <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} /> {isRefreshing ? 'Refreshing...' : 'Refresh'}
+            <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
           </button>
         </div>
       </div>

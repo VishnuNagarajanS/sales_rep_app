@@ -642,8 +642,8 @@ export class SuperAdminService {
     return paged.items;
   }
 
-  async createUserApi(userData: Partial<User>, initialPassword?: string): Promise<User> {
-    const res = await apiClient.post<ApiResponse<User>>('/super-admin/users', {
+  async createUserApi(userData: Partial<User>, initialPassword?: string): Promise<User & { temporaryPassword?: string }> {
+    const res = await apiClient.post<ApiResponse<User & { temporaryPassword?: string }>>('/super-admin/users', {
       name: userData.name,
       email: userData.email,
       phone: userData.phone,
@@ -1677,24 +1677,40 @@ export class SuperAdminService {
       const res = await apiClient.get<any>('/audit-logs', params);
       const rawList = res?.data?.items || res?.items || res?.data || (Array.isArray(res) ? res : []);
       if (Array.isArray(rawList)) {
-        const mapped: AuditLog[] = rawList.map((l: any) => ({
-          id: String(l.id),
-          timestamp: l.createdAt || l.timestamp || new Date().toISOString(),
-          actorName: l.actorName || l.userName || 'System User',
-          actorEmail: l.actorEmail || l.userEmail || '',
-          action: l.action || 'PLATFORM_OPERATION',
-          entityType: l.entityType || 'Platform',
-          entityId: String(l.entityId || ''),
-          companyId: l.companyId ? String(l.companyId) : undefined,
-          companyName: l.companyName || (l.companyId ? `Company #${l.companyId}` : 'PLATFORM CONSOLE'),
-          details: l.details || '',
-          ipAddress: l.ipAddress || '127.0.0.1',
-          userAgent: l.userAgent || 'Nexus Platform Console',
-          module: l.module || 'Platform',
-          status: (l.status as any) || 'success',
-          beforeValue: l.beforeValue ? (typeof l.beforeValue === 'string' ? JSON.parse(l.beforeValue) : l.beforeValue) : undefined,
-          afterValue: l.afterValue ? (typeof l.afterValue === 'string' ? JSON.parse(l.afterValue) : l.afterValue) : undefined,
-        }));
+        const mapped: AuditLog[] = rawList.map((l: any) => {
+          let actorName = (l.actorName || l.userName || '').trim();
+          let actorEmail = (l.actorEmail || l.userEmail || '').trim();
+
+          // If actorName is in the format "IRM (ID: 5)" or contains "(ID: ...)", clean it up
+          if (actorName.includes('(ID:')) {
+            actorName = actorEmail ? actorEmail.split('@')[0] : 'System User';
+          } else if (actorName.includes('@') && !actorEmail) {
+            actorEmail = actorName;
+          }
+
+          if (!actorName && actorEmail) {
+            actorName = actorEmail.split('@')[0];
+          }
+
+          return {
+            id: String(l.id),
+            timestamp: l.createdAt || l.timestamp || new Date().toISOString(),
+            actorName: actorName || 'System User',
+            actorEmail: actorEmail,
+            action: l.action || 'PLATFORM_OPERATION',
+            entityType: l.entityType || 'Platform',
+            entityId: String(l.entityId || ''),
+            companyId: l.companyId ? String(l.companyId) : undefined,
+            companyName: l.companyName || (l.companyId ? `Company #${l.companyId}` : 'PLATFORM CONSOLE'),
+            details: l.details || '',
+            ipAddress: l.ipAddress || '127.0.0.1',
+            userAgent: l.userAgent || 'Nexus Platform Console',
+            module: l.module || 'Platform',
+            status: (l.status as any) || 'success',
+            beforeValue: l.beforeValue ? (typeof l.beforeValue === 'string' ? JSON.parse(l.beforeValue) : l.beforeValue) : undefined,
+            afterValue: l.afterValue ? (typeof l.afterValue === 'string' ? JSON.parse(l.afterValue) : l.afterValue) : undefined,
+          };
+        });
 
         localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(mapped));
         return mapped;

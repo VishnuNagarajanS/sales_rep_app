@@ -26,6 +26,9 @@ public class User
     /// <summary>Indicates root platform accounts that cannot be deleted or suspended.</summary>
     public bool IsProtected { get; set; } = false;
 
+    /// <summary>Whether user is required to change their temporary password upon first login.</summary>
+    public bool MustChangePassword { get; set; } = false;
+
     /// <summary>Whether two-factor authentication (TOTP) is enforced for this user.</summary>
     public bool IsTwoFactorEnabled { get; set; } = false;
 

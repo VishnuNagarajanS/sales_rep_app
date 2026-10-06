@@ -160,7 +160,7 @@ export const PlatformUsersPage: React.FC = () => {
 
     setIsSubmitting(true);
     try {
-      await superAdminService.createUserApi({
+      const createdUser = await superAdminService.createUserApi({
         name: newName.trim(),
         email: newEmail.trim(),
         phone: newPhone.trim(),
@@ -176,6 +176,14 @@ export const PlatformUsersPage: React.FC = () => {
       setNewName('');
       setNewEmail('');
       setNewEmployeeCode('');
+
+      if (createdUser && createdUser.temporaryPassword) {
+        setResettingUser(createdUser);
+        setGeneratedTempPassword(createdUser.temporaryPassword);
+        setHasCopiedPassword(false);
+        setIsResetModalOpen(true);
+      }
+
       showFeedback(`Company Admin account "${newName.trim()}" provisioned successfully in database.`);
       await loadData();
     } catch (err: any) {
@@ -266,7 +274,7 @@ export const PlatformUsersPage: React.FC = () => {
             bc.postMessage({ type: 'ACCOUNT_SUSPENDED', ...suspensionEvent });
             bc.close();
           }
-        } catch {}
+        } catch { }
       }
       showFeedback(`User status for ${u.name} set to ${nextStatus}.`);
       await applyFilters();
@@ -369,7 +377,7 @@ export const PlatformUsersPage: React.FC = () => {
             disabled={isLoading}
             title="Reload users directly from development database"
           >
-            <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} /> Refresh Directory
+            <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
           </button>
           <button
             className="btn btn-primary btn-sm btn-provision-user"

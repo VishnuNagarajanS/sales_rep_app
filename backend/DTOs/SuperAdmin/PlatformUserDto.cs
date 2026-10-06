@@ -53,6 +53,8 @@ public class PlatformUserDto
     public string? Avatar { get; set; }
     public string? EmployeeCode { get; set; }
     public string? Designation { get; set; }
+    public bool MustChangePassword { get; set; }
+    public string? TemporaryPassword { get; set; }
     public string CreatedAt { get; set; } = string.Empty;
     public string? UpdatedAt { get; set; }
 }

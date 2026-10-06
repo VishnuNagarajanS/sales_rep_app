@@ -422,7 +422,7 @@ export const PlatformSystemPage: React.FC = () => {
             onClick={() => loadData(true)}
             title="Fetch latest metrics and telemetry directly from server"
           >
-            <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} /> {isRefreshing ? 'Refreshing...' : 'Refresh'}
+            <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
           </button>
 
           <button

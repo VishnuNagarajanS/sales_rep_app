@@ -44,6 +44,9 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.IsProtected)
             .HasDefaultValue(false);
 
+        builder.Property(u => u.MustChangePassword)
+            .HasDefaultValue(false);
+
         builder.Property(u => u.IsTwoFactorEnabled)
             .HasDefaultValue(false);
 

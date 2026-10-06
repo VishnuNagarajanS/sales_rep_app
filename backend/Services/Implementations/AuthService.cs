@@ -140,7 +140,8 @@ public class AuthService : IAuthService
             Token = token,
             User = MapToUserDto(user),
             Tenant = user.Company != null ? MapToTenantDto(user.Company) : null,
-            MustEnrollTwoFactor = user.RoleId == 1 && !user.IsTwoFactorEnabled
+            MustEnrollTwoFactor = user.RoleId == 1 && !user.IsTwoFactorEnabled,
+            MustChangePassword = user.MustChangePassword
         };
 
         _logger.LogInformation("Successful login for user: {Email}", user.Email);
@@ -281,6 +282,7 @@ public class AuthService : IAuthService
             return ApiResponse<object>.FailureResult("Current password is incorrect.");
 
         user.PasswordHash = PasswordHasher.HashPassword(request.NewPassword);
+        user.MustChangePassword = false;
         user.UpdatedAt = DateTime.UtcNow;
 
         // Invalidate all active sessions for this user
@@ -422,6 +424,7 @@ public class AuthService : IAuthService
         }
 
         user.PasswordHash = PasswordHasher.HashPassword(request.NewPassword);
+        user.MustChangePassword = false;
         user.UpdatedAt = DateTime.UtcNow;
         reset.UsedAt = DateTime.UtcNow;
 
@@ -502,7 +505,8 @@ public class AuthService : IAuthService
             CompanyName = user.Company?.Name,
             Status = user.Status.ToString(),
             LastLogin = "Just now",
-            Avatar = user.AvatarUrl
+            Avatar = user.AvatarUrl,
+            MustChangePassword = user.MustChangePassword
         };
     }
 

@@ -292,12 +292,15 @@ public class IrmKycController : ControllerBase
         }
 
         // Set VerifiedBy & VerifiedAt from authenticated user
+        var currentDbUser = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
         var actorEmail = User.FindFirst(ClaimTypes.Email)?.Value
             ?? User.FindFirst("email")?.Value
+            ?? currentDbUser?.Email
             ?? "irm@ghl.com";
         var actorName = User.FindFirst(ClaimTypes.Name)?.Value
             ?? User.FindFirst("name")?.Value
-            ?? "IRM Officer";
+            ?? currentDbUser?.Name
+            ?? actorEmail;
 
         var oldStatus = kyc.Status.ToString();
 
@@ -429,8 +432,15 @@ public class IrmKycController : ControllerBase
             return BadRequest(ApiResponse<bool>.ErrorResponse("Reason is required when marking bank as wrong."));
 
         // Persist as JSON blob — does NOT change KycStatus
+        var currentDbUser = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
         var actorEmail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
-            ?? User.FindFirst("email")?.Value ?? "irm@ghl.com";
+            ?? User.FindFirst("email")?.Value 
+            ?? currentDbUser?.Email 
+            ?? "irm@ghl.com";
+        var actorName = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+            ?? User.FindFirst("name")?.Value
+            ?? currentDbUser?.Name
+            ?? actorEmail;
 
         kyc.SectionVerificationsJson = System.Text.Json.JsonSerializer.Serialize(new
         {
@@ -446,7 +456,7 @@ public class IrmKycController : ControllerBase
             CompanyId  = companyId,
             Timestamp  = DateTime.UtcNow,
             ActorEmail = actorEmail,
-            ActorName  = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "IRM Officer",
+            ActorName  = actorName,
             Action     = "UPDATE",
             EntityType = "InvestorKyc",
             EntityId   = kyc.Id.ToString(),

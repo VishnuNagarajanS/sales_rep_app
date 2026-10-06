@@ -208,7 +208,6 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
             <span className="platform-pill-badge">
               <span className="live-pulse-dot" /> {isLoading ? 'SYNCING LIVE TELEMETRY...' : 'PLATFORM OPERATOR CONSOLE'}
             </span>
-            <span className="platform-version-tag">NexusSales Cloud v2.4</span>
           </div>
           <h1 className="platform-main-title">Global Fleet Telemetry & Management</h1>
           <p className="platform-main-subtitle">
@@ -570,41 +569,6 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
                   </div>
                 ))
               )}
-            </div>
-          </div>
-
-          {/* Quick System Tools Card */}
-          <div className="card platform-quick-tools-card">
-            <h4 className="quick-tools-title">Platform Operator Utilities</h4>
-            <div className="quick-tools-grid">
-              <button
-                className="quick-tool-btn"
-                onClick={() => onNavigate('admin-roles')}
-              >
-                <Shield size={16} color="#c084fc" />
-                <span>RBAC Matrix</span>
-              </button>
-              <button
-                className="quick-tool-btn"
-                onClick={() => onNavigate('admin-features')}
-              >
-                <Sparkles size={16} color="#38bdf8" />
-                <span>Tier Packages</span>
-              </button>
-              <button
-                className="quick-tool-btn"
-                onClick={() => onNavigate('admin-call-config')}
-              >
-                <Radio size={16} color="#34d399" />
-                <span>DID Allocation</span>
-              </button>
-              <button
-                className="quick-tool-btn"
-                onClick={() => onNavigate('admin-system')}
-              >
-                <Server size={16} color="#fbbf24" />
-                <span>Maintenance & Config</span>
-              </button>
             </div>
           </div>
         </div>
