@@ -60,6 +60,9 @@ public class ApplicationDbContext : DbContext
     public DbSet<IrmCoverageAssignment> IrmCoverageAssignments => Set<IrmCoverageAssignment>();
     public DbSet<WorkHandover> WorkHandovers => Set<WorkHandover>();
     public DbSet<WorkHandoverItem> WorkHandoverItems => Set<WorkHandoverItem>();
+    public DbSet<LeaveRequest> LeaveRequests => Set<LeaveRequest>();
+    public DbSet<LeavePolicy> LeavePolicies => Set<LeavePolicy>();
+    public DbSet<LeaveRequestEvent> LeaveRequestEvents => Set<LeaveRequestEvent>();
 
     public override int SaveChanges()
     {
@@ -151,6 +154,45 @@ public class ApplicationDbContext : DbContext
         {
             b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
             b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<WorkHandover>(b =>
+        {
+            b.HasOne(x => x.LeaveRequest)
+             .WithMany()
+             .HasForeignKey(x => x.LeaveRequestId)
+             .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<LeaveRequest>(b =>
+        {
+            b.HasOne(x => x.WorkHandover)
+             .WithMany()
+             .HasForeignKey(x => x.WorkHandoverId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            b.HasOne(x => x.DecidedBy)
+             .WithMany()
+             .HasForeignKey(x => x.DecidedById)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            b.HasOne(x => x.CancelledBy)
+             .WithMany()
+             .HasForeignKey(x => x.CancelledById)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            b.HasMany(x => x.Events)
+             .WithOne(e => e.LeaveRequest)
+             .HasForeignKey(e => e.LeaveRequestId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<LeaveRequestEvent>(b =>
+        {
+            b.HasOne(e => e.Actor)
+             .WithMany()
+             .HasForeignKey(e => e.ActorId)
+             .OnDelete(DeleteBehavior.Restrict);
         });
 
         // Seed initial roles, tenants, and demo users

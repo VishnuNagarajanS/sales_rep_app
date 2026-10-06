@@ -40,6 +40,12 @@ public class WorkHandover
     public string? ReturnSummaryJson { get; set; }
 
     /// <summary>
+    /// Optional link to LeaveRequest if started via Arrange Handover shortcut.
+    /// </summary>
+    public int? LeaveRequestId { get; set; }
+    public LeaveRequest? LeaveRequest { get; set; }
+
+    /// <summary>
     /// Set by HandoverDueDateCheckerService when a one-time overdue notification is sent to admins.
     /// Prevents repeat notifications.
     /// </summary>

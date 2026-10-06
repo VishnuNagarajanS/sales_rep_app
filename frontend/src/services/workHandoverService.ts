@@ -40,6 +40,7 @@ export interface HandoverItemDto {
   origin: string; // 'included_at_start' | 'created_during_coverage'
   returnedAt?: string | null;
   returnOutcome?: string | null; // 'returned' | 'skipped_reassigned' | null
+  status?: string;
   createdAt: string;
 }
 
@@ -75,6 +76,7 @@ export interface WorkHandoverDto {
   endedByName?: string | null;
   progress?: WorkHandoverProgressDto | null;
   totalItemsCount: number;
+  returnSummaryJson?: string | null;
   activeItemsCount: number;
   items: HandoverItemDto[];
 }
@@ -85,11 +87,23 @@ export interface MyWorkHandoverStatusDto {
   recentlyEnded?: WorkHandoverDto | null;
 }
 
+export interface CoverSuggestionDto {
+  userId: number;
+  name: string;
+  roleCode: string;
+  openItemCount: number;
+  currentlyCovering: boolean;
+  recommended: boolean;
+  disabled: boolean;
+  disabledReason?: string | null;
+}
+
 export interface StartHandoverRequest {
   fromUserId: number;
   toUserId: number;
   reason: string;
   plannedEndAt?: string | null;
+  leaveRequestId?: number | null;
 }
 
 export interface ReturnItemsRequest {
@@ -103,6 +117,14 @@ export const workHandoverService = {
     return res.data || [];
   },
 
+  async getCoverSuggestions(fromUserId: number, from?: string, to?: string): Promise<CoverSuggestionDto[]> {
+    const params: Record<string, any> = { fromUserId };
+    if (from) params.from = from;
+    if (to) params.to = to;
+    const res = await apiClient.get<ApiResponse<CoverSuggestionDto[]>>('/ghl/handover/cover-suggestions', params);
+    return res.data || [];
+  },
+
   async getPreview(fromUserId: number, toUserId: number): Promise<HandoverPreviewCounts> {
     // Backend endpoint is POST preview with body { fromUserId, toUserId }
     const res = await apiClient.post<ApiResponse<HandoverPreviewCounts>>('/ghl/handover/preview', { fromUserId, toUserId });
@@ -110,7 +132,7 @@ export const workHandoverService = {
   },
 
   async startHandover(data: StartHandoverRequest): Promise<WorkHandoverDto> {
-    // Backend expects { fromUserId, toUserId, reason, plannedEndAt? }
+    // Backend expects { fromUserId, toUserId, reason, plannedEndAt?, leaveRequestId? }
     const res = await apiClient.post<ApiResponse<WorkHandoverDto>>('/ghl/handover/start', data);
     return res.data;
   },
@@ -143,6 +165,6 @@ export const workHandoverService = {
 
   async getMyStatus(): Promise<MyWorkHandoverStatusDto> {
     const res = await apiClient.get<ApiResponse<MyWorkHandoverStatusDto>>('/workhandover/my-status');
-    return res.data;
+    return res.data ?? { activeCoverage: null, activeCovering: null, recentlyEnded: null };
   },
 };

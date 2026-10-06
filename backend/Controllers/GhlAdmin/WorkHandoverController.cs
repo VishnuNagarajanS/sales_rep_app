@@ -39,6 +39,27 @@ public class WorkHandoverController : ControllerBase
         }
     }
 
+    [HttpGet("cover-suggestions")]
+    public async Task<IActionResult> GetCoverSuggestions(
+        [FromQuery] int fromUserId,
+        [FromQuery] DateOnly? from,
+        [FromQuery] DateOnly? to,
+        CancellationToken ct)
+    {
+        var companyId = _currentUser.CompanyId ?? 1;
+        if (companyId <= 0) return Unauthorized();
+
+        try
+        {
+            var suggestions = await _handoverService.GetCoverSuggestionsAsync(companyId, fromUserId, from, to, ct);
+            return Ok(ApiResponse<List<backend.DTOs.Admin.CoverSuggestionDto>>.SuccessResponse(suggestions));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(ApiResponse<List<backend.DTOs.Admin.CoverSuggestionDto>>.ErrorResponse(ex.Message));
+        }
+    }
+
     [HttpPost("preview")]
     public async Task<IActionResult> GetPreview([FromBody] StartWorkHandoverRequestDto request, CancellationToken ct)
     {

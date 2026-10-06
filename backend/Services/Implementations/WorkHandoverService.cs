@@ -418,6 +418,28 @@ public class WorkHandoverService : IWorkHandoverService
             CreatedAt = DateTime.UtcNow
         });
 
+        // Optional LeaveRequest link (Spec §4.3)
+        if (request.LeaveRequestId.HasValue)
+        {
+            var lr = await _db.LeaveRequests.FirstOrDefaultAsync(l => l.Id == request.LeaveRequestId.Value && l.CompanyId == companyId, ct);
+            if (lr != null && lr.UserId == fromUser.Id)
+            {
+                handover.LeaveRequestId = lr.Id;
+                lr.HandoverDecision = "arranged";
+                lr.WorkHandoverId = handover.Id;
+                lr.UpdatedAt = DateTime.UtcNow;
+
+                _db.LeaveRequestEvents.Add(new LeaveRequestEvent
+                {
+                    LeaveRequestId = lr.Id,
+                    Action = "handover_linked",
+                    ActorId = actorId,
+                    Note = $"Work handover #{handover.Id} arranged with covering user {toUser.Name}.",
+                    At = DateTime.UtcNow
+                });
+            }
+        }
+
         await _db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
 
@@ -1175,5 +1197,91 @@ public class WorkHandoverService : IWorkHandoverService
             ActiveItemsCount = h.Items.Count(x => x.ReturnedAt == null),
             Items = itemDtos
         };
+    }
+
+    public async Task<List<backend.DTOs.Admin.CoverSuggestionDto>> GetCoverSuggestionsAsync(int companyId, int fromUserId, DateOnly? from, DateOnly? to, CancellationToken ct = default)
+    {
+        var fromUser = await _db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == fromUserId && u.CompanyId == companyId, ct);
+        if (fromUser == null || fromUser.Role == null) return new List<backend.DTOs.Admin.CoverSuggestionDto>();
+
+        var roleCode = fromUser.Role.Code;
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var fromDate = from ?? today;
+        var toDate = to ?? today;
+
+        var candidates = await _db.Users
+            .Include(u => u.Role)
+            .Where(u => u.CompanyId == companyId && u.Role != null && u.Role.Code == roleCode && u.Id != fromUserId && u.Status == backend.Models.Enums.UserStatus.Active)
+            .ToListAsync(ct);
+
+        var activeHandovers = await _db.WorkHandovers
+            .Where(wh => wh.CompanyId == companyId && wh.Status == "active")
+            .ToListAsync(ct);
+
+        var approvedLeaves = await _db.LeaveRequests
+            .Where(lr => lr.CompanyId == companyId && lr.Status == "Approved" && lr.StartDate <= toDate && fromDate <= lr.EndDate)
+            .ToListAsync(ct);
+
+        var suggestions = new List<backend.DTOs.Admin.CoverSuggestionDto>();
+
+        foreach (var c in candidates)
+        {
+            var isCovered = activeHandovers.Any(wh => wh.OriginalUserId == c.Id);
+            var onLeave = approvedLeaves.Any(lr => lr.UserId == c.Id);
+            var isCovering = activeHandovers.Any(wh => wh.CoveringUserId == c.Id);
+
+            bool disabled = isCovered || onLeave;
+            string? disabledReason = null;
+            if (isCovered) disabledReason = "Currently covered by another handover";
+            else if (onLeave)
+            {
+                var leave = approvedLeaves.First(lr => lr.UserId == c.Id);
+                disabledReason = $"On approved leave ({leave.StartDate:d MMM} - {leave.EndDate:d MMM})";
+            }
+
+            int openItems = 0;
+            if (roleCode == "sales_executive")
+            {
+                var openLeads = await _db.Leads.CountAsync(l => l.CompanyId == companyId && l.AssignedAgentId == c.Id && l.Status != "Converted" && l.Status != "Not Interested" && l.Status != "Junk", ct);
+                var pendingFollowups = await _db.Followups.CountAsync(f => f.CompanyId == companyId && f.AssignedAgentId == c.Id && f.Status == FollowupStatus.Pending, ct);
+                var openDeals = await _db.GhlDeals.CountAsync(d => d.CompanyId == companyId && d.AssignedAgentId == c.Id && d.Stage != "won" && d.Stage != "lost" && d.Stage != "converted", ct);
+                openItems = openLeads + pendingFollowups + openDeals;
+            }
+            else if (roleCode == "irm")
+            {
+                var openInvestors = await _db.Investors.CountAsync(i => i.CompanyId == companyId && i.AssignedIrmId == c.Id, ct);
+                var openKycs = await _db.InvestorKycs.CountAsync(k => k.CompanyId == companyId && k.IrmId == c.Id && k.Status != KycStatus.Approved && k.Status != KycStatus.Rejected, ct);
+                var openConsultations = await _db.Consultations.CountAsync(con => con.CompanyId == companyId && con.ConsultantId == c.Id && con.Status == ConsultationStatus.Scheduled, ct);
+                var openCards = await _db.IrmPipelineCards.CountAsync(card => card.CompanyId == companyId && card.AssignedIrmId == c.Id, ct);
+                openItems = openInvestors + openKycs + openConsultations + openCards;
+            }
+
+            suggestions.Add(new backend.DTOs.Admin.CoverSuggestionDto
+            {
+                UserId = c.Id,
+                Name = c.Name,
+                Email = c.Email,
+                RoleCode = roleCode,
+                OpenItemCount = openItems,
+                CurrentlyCovering = isCovering,
+                Disabled = disabled,
+                DisabledReason = disabledReason,
+                IsRecommended = false
+            });
+        }
+
+        // Sort by eligible first (not disabled), then by openItemCount ascending
+        var sorted = suggestions
+            .OrderBy(s => s.Disabled ? 1 : 0)
+            .ThenBy(s => s.OpenItemCount)
+            .ToList();
+
+        var firstEligible = sorted.FirstOrDefault(s => !s.Disabled);
+        if (firstEligible != null)
+        {
+            firstEligible.IsRecommended = true;
+        }
+
+        return sorted;
     }
 }

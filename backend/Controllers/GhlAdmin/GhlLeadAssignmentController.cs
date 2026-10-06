@@ -41,13 +41,95 @@ public class GhlLeadAssignmentController : ControllerBase
     public async Task<IActionResult> GetAgents(CancellationToken ct)
     {
         var companyId = GetCompanyId();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var activeHandovers = await _context.WorkHandovers
+            .Include(wh => wh.CoveringUser)
+            .Where(wh => wh.CompanyId == companyId && wh.Status == "active")
+            .ToListAsync(ct);
+
+        var approvedLeaves = await _context.LeaveRequests
+            .Where(lr => lr.CompanyId == companyId && lr.Status == "Approved" && lr.StartDate <= today && today <= lr.EndDate)
+            .ToListAsync(ct);
+
         var agents = await _context.Users
             .Include(u => u.Role)
             .Where(u => u.CompanyId == companyId && u.Role!.Code == "sales_executive" && u.Status == backend.Models.Enums.UserStatus.Active)
-            .Select(u => new { id = u.Id, name = u.Name, email = u.Email })
+            .OrderBy(u => u.Name)
             .ToListAsync(ct);
+
+        var result = agents.Select(u =>
+        {
+            var handover = activeHandovers.FirstOrDefault(wh => wh.OriginalUserId == u.Id);
+            var leave = approvedLeaves.FirstOrDefault(lr => lr.UserId == u.Id);
+            var onLeave = leave != null;
+            var isCovered = handover != null;
+            var coveredBy = handover?.CoveringUser?.Name;
+            var disabled = onLeave || isCovered;
+            string? disabledReason = null;
+            if (onLeave) disabledReason = $"On leave until {leave!.EndDate:d MMM}";
+            else if (isCovered) disabledReason = $"Work covered by {coveredBy}";
+
+            return new
+            {
+                id = u.Id,
+                name = u.Name,
+                email = u.Email,
+                onLeave,
+                leaveUntil = leave?.EndDate,
+                isCovered,
+                coveredBy,
+                disabled,
+                disabledReason
+            };
+        }).ToList();
         
-        return Ok(new { success = true, data = agents });
+        return Ok(new { success = true, data = result });
+    }
+
+    [HttpGet("workforce/availability")]
+    public async Task<IActionResult> GetWorkforceAvailability([FromQuery] DateOnly? date, CancellationToken ct)
+    {
+        var companyId = GetCompanyId();
+        var targetDate = date ?? DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var activeHandovers = await _context.WorkHandovers
+            .Include(wh => wh.CoveringUser)
+            .Where(wh => wh.CompanyId == companyId && wh.Status == "active")
+            .ToListAsync(ct);
+
+        var approvedLeaves = await _context.LeaveRequests
+            .Where(lr => lr.CompanyId == companyId && lr.Status == "Approved" && lr.StartDate <= targetDate && targetDate <= lr.EndDate)
+            .ToListAsync(ct);
+
+        var users = await _context.Users
+            .Include(u => u.Role)
+            .Where(u => u.CompanyId == companyId &&
+                        u.Role != null &&
+                        (u.Role.Code == "sales_executive" || u.Role.Code == "irm") &&
+                        u.Status == backend.Models.Enums.UserStatus.Active)
+            .OrderBy(u => u.Name)
+            .ToListAsync(ct);
+
+        var list = users.Select(u =>
+        {
+            var handover = activeHandovers.FirstOrDefault(wh => wh.OriginalUserId == u.Id);
+            var leave = approvedLeaves.FirstOrDefault(lr => lr.UserId == u.Id);
+
+            return new backend.DTOs.Admin.WorkforceAvailabilityDto
+            {
+                UserId = u.Id,
+                Name = u.Name,
+                RoleCode = u.Role!.Code,
+                OnLeave = leave != null,
+                LeaveUntil = leave?.EndDate,
+                LeaveRequestId = leave?.Id,
+                IsCovered = handover != null,
+                CoveredBy = handover?.CoveringUser?.Name
+            };
+        }).ToList();
+
+        return Ok(new { success = true, data = list });
     }
 
     public class AssignLeadDto
@@ -78,16 +160,29 @@ public class GhlLeadAssignmentController : ControllerBase
     {
         var companyId = GetCompanyId();
         var callerId = GetCurrentUserId();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var usersCovered = await _context.WorkHandovers
+            .Where(wh => wh.CompanyId == companyId && wh.Status == "active")
+            .Select(wh => wh.OriginalUserId)
+            .ToListAsync(ct);
+
+        var usersOnLeave = await _context.LeaveRequests
+            .Where(lr => lr.CompanyId == companyId && lr.Status == "Approved" && lr.StartDate <= today && today <= lr.EndDate)
+            .Select(lr => lr.UserId)
+            .ToListAsync(ct);
+
+        var unavailableUsers = usersCovered.Concat(usersOnLeave).Distinct().ToList();
 
         var agents = await _context.Users
             .Include(u => u.Role)
-            .Where(u => u.CompanyId == companyId && u.Role!.Code == "sales_executive" && u.Status == backend.Models.Enums.UserStatus.Active)
+            .Where(u => u.CompanyId == companyId && u.Role!.Code == "sales_executive" && u.Status == backend.Models.Enums.UserStatus.Active && !unavailableUsers.Contains(u.Id))
             .OrderBy(u => u.Id)
             .Select(u => u.Id)
             .ToListAsync(ct);
 
         if (!agents.Any())
-            return BadRequest(new { success = false, message = "No active sales agents found." });
+            return BadRequest(new { success = false, message = "No active, available sales agents found (all may be on leave or covered)." });
 
         List<int> targetLeadIds;
         if (dto.LeadIds != null && dto.LeadIds.Any())
@@ -181,6 +276,25 @@ public class GhlLeadAssignmentController : ControllerBase
         if (agent == null)
             return BadRequest(new { success = false, message = "Invalid agent." });
 
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var isCovered = await _context.WorkHandovers
+            .Include(wh => wh.CoveringUser)
+            .FirstOrDefaultAsync(wh => wh.CompanyId == companyId && wh.Status == "active" && wh.OriginalUserId == agentId, ct);
+
+        var leave = await _context.LeaveRequests
+            .FirstOrDefaultAsync(lr => lr.CompanyId == companyId && lr.UserId == agentId && lr.Status == "Approved" && lr.StartDate <= today && today <= lr.EndDate, ct);
+
+        if (leave != null)
+        {
+            return BadRequest(new { success = false, message = $"Agent {agent.Name} is on approved leave until {leave.EndDate:d MMM}. Cannot assign new leads." });
+        }
+
+        if (isCovered != null)
+        {
+            return BadRequest(new { success = false, message = $"Agent {agent.Name}'s work is currently covered by {isCovered.CoveringUser?.Name ?? "another agent"}. Cannot assign new leads." });
+        }
+
         if (leadIds == null || !leadIds.Any())
             return Ok(new { success = true, data = new { assigned = 0, skipped = new List<object>() } });
 
@@ -252,5 +366,47 @@ public class GhlLeadAssignmentController : ControllerBase
         }
 
         return Ok(new { success = true, data = new { assigned = assignedCount, skipped } });
+    }
+
+    [HttpGet("archived-leads")]
+    public async Task<IActionResult> GetArchivedLeads([FromQuery] int? agentId, [FromQuery] string? startDate, [FromQuery] string? endDate, CancellationToken ct = default)
+    {
+        var companyId = GetCompanyId();
+        var query = _context.Leads
+            .Include(l => l.AssignedAgent)
+            .Where(l => l.CompanyId == companyId && (l.Status == "Junk" || l.Status == "Not Interested"));
+
+        if (agentId.HasValue && agentId.Value > 0)
+        {
+            query = query.Where(l => l.AssignedAgentId == agentId.Value);
+        }
+
+        if (DateTime.TryParse(startDate, out var start))
+        {
+            query = query.Where(l => l.UpdatedAt >= start.ToUniversalTime());
+        }
+        
+        if (DateTime.TryParse(endDate, out var end))
+        {
+            query = query.Where(l => l.UpdatedAt <= end.ToUniversalTime());
+        }
+
+        var leads = await query.OrderByDescending(l => l.UpdatedAt).ToListAsync(ct);
+
+        var result = leads.Select(l => new
+        {
+            id = l.Id,
+            name = l.Name,
+            phone = l.Phone,
+            email = l.Email,
+            status = l.Status,
+            source = l.Source,
+            assignedAgentId = l.AssignedAgentId,
+            assignedAgentName = l.AssignedAgent?.Name,
+            updatedAt = l.UpdatedAt,
+            notes = l.Notes
+        });
+
+        return Ok(new { success = true, data = result });
     }
 }

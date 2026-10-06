@@ -42,6 +42,7 @@ public class StartWorkHandoverRequestDto
     public int ToUserId { get; set; }
     public string Reason { get; set; } = string.Empty;
     public DateTime? PlannedEndAt { get; set; }
+    public int? LeaveRequestId { get; set; }
 }
 
 public class ReturnSelectedItemsRequestDto

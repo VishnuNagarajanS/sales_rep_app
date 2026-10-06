@@ -13,6 +13,7 @@ export interface AssignableAgent {
   id: string;
   name: string;
   dbId?: number;
+  roleCode?: string;
 }
 
 export interface AgentDirectory {
@@ -34,9 +35,10 @@ export async function loadAgentDirectory(companyId?: string, currentUserId?: str
       const res = await apiClient.get<any>('/ghl/agents');
       if (res.success && res.data) {
         const agents: AssignableAgent[] = res.data.map((u: any) => ({
-          id: String(u.id),
+          id: String(u.userId || u.id),
           name: u.name,
-          dbId: Number(u.id)
+          dbId: Number(u.userId || u.id),
+          roleCode: u.roleCode
         }));
         return { agents, adminIds, fromApi: true };
       }

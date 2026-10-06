@@ -24,7 +24,25 @@ public class AdminUserService : IAdminUserService
         var users = await _context.Users
             .Include(u => u.Role)
             .Where(u => u.CompanyId == companyId)
-            .Select(u => new AdminUserDto
+            .ToListAsync(cancellationToken);
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var activeHandovers = await _context.WorkHandovers
+            .Include(wh => wh.CoveringUser)
+            .Where(wh => wh.CompanyId == companyId && wh.Status == "active")
+            .ToListAsync(cancellationToken);
+
+        var approvedLeaves = await _context.LeaveRequests
+            .Where(lr => lr.CompanyId == companyId && lr.Status == "Approved" && lr.StartDate <= today && today <= lr.EndDate)
+            .ToListAsync(cancellationToken);
+
+        var dtos = users.Select(u =>
+        {
+            var handover = activeHandovers.FirstOrDefault(wh => wh.OriginalUserId == u.Id);
+            var leave = approvedLeaves.FirstOrDefault(lr => lr.UserId == u.Id);
+
+            return new AdminUserDto
             {
                 Id = u.Id,
                 Name = u.Name,
@@ -36,11 +54,15 @@ public class AdminUserService : IAdminUserService
                 Status = u.Status,
                 LastLoginAt = u.LastLoginAt,
                 AvatarUrl = u.AvatarUrl,
-                CreatedAt = u.CreatedAt
-            })
-            .ToListAsync(cancellationToken);
+                CreatedAt = u.CreatedAt,
+                IsCovered = handover != null,
+                CoveredBy = handover?.CoveringUser?.Name,
+                OnLeave = leave != null,
+                LeaveUntil = leave?.EndDate
+            };
+        }).ToList();
 
-        return ApiResponse<List<AdminUserDto>>.SuccessResult(users);
+        return ApiResponse<List<AdminUserDto>>.SuccessResult(dtos);
     }
 
     public async Task<ApiResponse<AdminUserDto>> GetUserByIdAsync(int companyId, int userId, CancellationToken cancellationToken = default)
@@ -60,7 +82,8 @@ public class AdminUserService : IAdminUserService
                 Status = u.Status,
                 LastLoginAt = u.LastLoginAt,
                 AvatarUrl = u.AvatarUrl,
-                CreatedAt = u.CreatedAt
+                CreatedAt = u.CreatedAt,
+                IsCovered = _context.WorkHandovers.Any(wh => wh.OriginalUserId == u.Id && wh.Status == "active")
             })
             .FirstOrDefaultAsync(cancellationToken);
 

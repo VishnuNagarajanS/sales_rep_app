@@ -24,24 +24,62 @@ import {
   HandoverCandidateUser,
   HandoverPreviewCounts,
   WorkHandoverDto,
-  HandoverItemDto
+  HandoverItemDto,
+  CoverSuggestionDto
 } from '../../services/workHandoverService';
 import './WorkHandoverPage.css';
 
-export const WorkHandoverPage: React.FC = () => {
-  const [selectedRole, setSelectedRole] = useState<'sales_executive' | 'irm'>('sales_executive');
+export interface WorkHandoverPageProps {
+  initialParams?: {
+    fromUserId?: number;
+    plannedEndAt?: string;
+    reason?: string;
+    leaveRequestId?: number;
+    fromUserName?: string;
+    leaveDates?: string;
+    roleCode?: string;
+  };
+  onNavigate?: (route: string) => void;
+}
+
+export const WorkHandoverPage: React.FC<WorkHandoverPageProps> = ({ initialParams, onNavigate }) => {
+  const [selectedRole, setSelectedRole] = useState<'sales_executive' | 'irm'>(() => {
+    if (initialParams?.roleCode === 'irm') return 'irm';
+    return 'sales_executive';
+  });
   const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
+
+  // Leave prefill & banner info
+  const [leaveBannerInfo, setLeaveBannerInfo] = useState<{ name: string; dates: string } | null>(() => {
+    if (initialParams?.leaveRequestId && initialParams?.fromUserName) {
+      return {
+        name: initialParams.fromUserName,
+        dates: initialParams.leaveDates || ''
+      };
+    }
+    return null;
+  });
+  const [leaveRequestId, setLeaveRequestId] = useState<number | null>(() => initialParams?.leaveRequestId || null);
 
   // Candidate users
   const [candidates, setCandidates] = useState<HandoverCandidateUser[]>([]);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
 
   // Form inputs
-  const [sourceUserId, setSourceUserId] = useState<number | ''>('');
-  const [coveringUserId, setCoveringUserId] = useState<number | ''>('');
-  const [plannedEndAt, setPlannedEndAt] = useState('');
-  const [notes, setNotes] = useState('');
+  const [sourceUserId, setSourceUserId] = useState<number | ''>(() => initialParams?.fromUserId || '');
+  const [coveringUserId, setCoveringUserId] = useState<number | ''>(''); // Always empty by default
+  const [plannedEndAt, setPlannedEndAt] = useState<string>(() => {
+    if (initialParams?.plannedEndAt) {
+      return initialParams.plannedEndAt.split('T')[0];
+    }
+    return '';
+  });
+  const [notes, setNotes] = useState<string>(() => initialParams?.reason || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Cover suggestions
+  const [coverSuggestions, setCoverSuggestions] = useState<CoverSuggestionDto[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
 
   // Live preview counts
   const [preview, setPreview] = useState<HandoverPreviewCounts | null>(null);
@@ -101,14 +139,68 @@ export const WorkHandoverPage: React.FC = () => {
     }
   }, []);
 
-  // On role change or initial mount
+  // When initialParams changes (e.g. from Arrange Handover shortcut)
   useEffect(() => {
+    if (initialParams?.fromUserId) {
+      if (initialParams.roleCode) {
+        setSelectedRole(initialParams.roleCode === 'irm' ? 'irm' : 'sales_executive');
+      }
+      setSourceUserId(initialParams.fromUserId);
+      if (initialParams.plannedEndAt) {
+        setPlannedEndAt(initialParams.plannedEndAt.split('T')[0]);
+      }
+      if (initialParams.reason) {
+        setNotes(initialParams.reason);
+      }
+      if (initialParams.leaveRequestId) {
+        setLeaveRequestId(initialParams.leaveRequestId);
+        setLeaveBannerInfo({
+          name: initialParams.fromUserName || 'Team Member',
+          dates: initialParams.leaveDates || ''
+        });
+      }
+      setCoveringUserId(''); // Covering user ALWAYS stays empty by default
+    }
+  }, [initialParams]);
+
+  // On role change or initial mount
+  const isFirstMount = React.useRef(true);
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      loadCandidates(selectedRole);
+      loadHandovers(selectedRole);
+      return;
+    }
     setSourceUserId('');
     setCoveringUserId('');
     setPreview(null);
+    setCoverSuggestions([]);
     loadCandidates(selectedRole);
     loadHandovers(selectedRole);
   }, [selectedRole, loadCandidates, loadHandovers]);
+
+  // Load cover suggestions when source user changes
+  useEffect(() => {
+    if (!sourceUserId) {
+      setCoverSuggestions([]);
+      return;
+    }
+    let isMounted = true;
+    const fetchSuggestions = async () => {
+      try {
+        setLoadingSuggestions(true);
+        const data = await workHandoverService.getCoverSuggestions(Number(sourceUserId));
+        if (isMounted) setCoverSuggestions(data);
+      } catch (err) {
+        console.error('Failed to load cover suggestions:', err);
+      } finally {
+        if (isMounted) setLoadingSuggestions(false);
+      }
+    };
+    fetchSuggestions();
+    return () => { isMounted = false; };
+  }, [sourceUserId]);
 
   // Load preview when source user changes
   useEffect(() => {
@@ -154,6 +246,7 @@ export const WorkHandoverPage: React.FC = () => {
         toUserId: Number(coveringUserId),
         reason: notes.trim() || `Work handover — ${selectedRole === 'irm' ? 'IRM' : 'Sales Executive'} leave coverage`,
         plannedEndAt: plannedEndAt ? new Date(plannedEndAt).toISOString() : undefined,
+        leaveRequestId: leaveRequestId || undefined,
       });
 
       showFeedback('success', 'Work handover started successfully.');
@@ -161,7 +254,10 @@ export const WorkHandoverPage: React.FC = () => {
       setCoveringUserId('');
       setPlannedEndAt('');
       setNotes('');
+      setLeaveRequestId(null);
+      setLeaveBannerInfo(null);
       setPreview(null);
+      setCoverSuggestions([]);
       await loadCandidates(selectedRole);
       await loadHandovers(selectedRole);
     } catch (err: any) {
@@ -260,6 +356,25 @@ export const WorkHandoverPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Leave Arrangement Banner */}
+      {leaveBannerInfo && (
+        <div className="handover-leave-banner">
+          <div className="handover-leave-banner-content">
+            <Info size={18} color="#818cf8" />
+            <span>
+              Arranging handover for <strong>{leaveBannerInfo.name}</strong>'s leave ({leaveBannerInfo.dates})
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs"
+            onClick={() => setLeaveBannerInfo(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Feedback Toast */}
       {feedbackMsg && (
         <div
@@ -355,7 +470,7 @@ export const WorkHandoverPage: React.FC = () => {
               </div>
               <button
                 type="button"
-                className="btn-secondary"
+                className="btn btn-secondary"
                 style={{ padding: '6px 12px', fontSize: 12 }}
                 onClick={() => {
                   loadCandidates(selectedRole);
@@ -402,16 +517,42 @@ export const WorkHandoverPage: React.FC = () => {
                     value={coveringUserId}
                     onChange={e => setCoveringUserId(e.target.value ? Number(e.target.value) : '')}
                     required
-                    disabled={!sourceUserId}
+                    disabled={!sourceUserId || loadingSuggestions}
                   >
                     <option value="">-- Select Covering Peer --</option>
-                    {eligibleCoveringUsers.map(u => (
-                      <option key={u.userId} value={u.userId}>
-                        {u.name} ({u.email})
-                      </option>
-                    ))}
+                    {coverSuggestions.length > 0 ? (
+                      coverSuggestions.map(s => {
+                        let extra = '';
+                        if (s.recommended) extra += ' — (Recommended)';
+                        if (s.currentlyCovering) extra += ' — (Currently covering)';
+                        if (s.disabled && s.disabledReason) extra += ` — [${s.disabledReason}]`;
+                        return (
+                          <option key={s.userId} value={s.userId} disabled={s.disabled}>
+                            {s.name} ({s.openItemCount} open items){extra}
+                          </option>
+                        );
+                      })
+                    ) : (
+                      eligibleCoveringUsers.map(u => (
+                        <option key={u.userId} value={u.userId}>
+                          {u.name} ({u.email})
+                        </option>
+                      ))
+                    )}
                   </select>
-                  {sourceUserId && eligibleCoveringUsers.length === 0 && (
+                  {loadingSuggestions && (
+                    <span style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <RefreshCw size={11} className="spin" />
+                      Loading cover suggestions...
+                    </span>
+                  )}
+                  {!loadingSuggestions && sourceUserId && coverSuggestions.length > 0 && coverSuggestions.every(s => s.disabled) && (
+                    <span style={{ fontSize: 11, color: '#f59e0b', marginTop: 4 }}>
+                      <ShieldAlert size={12} style={{ display: 'inline', marginRight: 4 }} />
+                      No eligible covering peers available (all are on leave or covered).
+                    </span>
+                  )}
+                  {!loadingSuggestions && sourceUserId && coverSuggestions.length === 0 && eligibleCoveringUsers.length === 0 && (
                     <span style={{ fontSize: 11, color: '#f59e0b', marginTop: 4 }}>
                       <ShieldAlert size={12} style={{ display: 'inline', marginRight: 4 }} />
                       No eligible covering peers available (all are active in existing handovers).
@@ -513,7 +654,7 @@ export const WorkHandoverPage: React.FC = () => {
               <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end' }}>
                 <button
                   type="submit"
-                  className="btn-primary"
+                  className="btn btn-primary"
                   disabled={!sourceUserId || !coveringUserId || isSubmitting}
                 >
                   <ArrowRight size={16} />
@@ -606,7 +747,7 @@ export const WorkHandoverPage: React.FC = () => {
                         <div style={{ display: 'flex', gap: 8 }}>
                           <button
                             type="button"
-                            className="btn-secondary"
+                            className="btn btn-secondary"
                             style={{ padding: '6px 12px', fontSize: 12 }}
                             onClick={() => {
                               setReturnItemsModalHandover(h);
@@ -617,7 +758,7 @@ export const WorkHandoverPage: React.FC = () => {
                           </button>
                           <button
                             type="button"
-                            className="btn-danger"
+                            className="btn btn-danger"
                             style={{ padding: '6px 12px', fontSize: 12 }}
                             onClick={() => {
                               setEndModalHandover(h);
@@ -706,7 +847,7 @@ export const WorkHandoverPage: React.FC = () => {
                           {returnSummary ? (
                             <button
                               type="button"
-                              className="btn-secondary"
+                              className="btn btn-secondary"
                               style={{ padding: '4px 10px', fontSize: 11 }}
                               onClick={() => toggleHistoryExpanded(h.id)}
                             >
@@ -774,7 +915,7 @@ export const WorkHandoverPage: React.FC = () => {
               </div>
               <button
                 type="button"
-                className="btn-secondary"
+                className="btn btn-secondary"
                 style={{ border: 'none', padding: 4 }}
                 onClick={() => setEndModalHandover(null)}
               >
@@ -815,7 +956,7 @@ export const WorkHandoverPage: React.FC = () => {
             <div className="handover-modal-footer">
               <button
                 type="button"
-                className="btn-secondary"
+                className="btn btn-secondary"
                 onClick={() => setEndModalHandover(null)}
                 disabled={endingHandover}
               >
@@ -823,7 +964,7 @@ export const WorkHandoverPage: React.FC = () => {
               </button>
               <button
                 type="button"
-                className="btn-danger"
+                className="btn btn-danger"
                 onClick={handleEndHandover}
                 disabled={endingHandover}
               >
@@ -845,7 +986,7 @@ export const WorkHandoverPage: React.FC = () => {
               </div>
               <button
                 type="button"
-                className="btn-secondary"
+                className="btn btn-secondary"
                 style={{ border: 'none', padding: 4 }}
                 onClick={() => setReturnItemsModalHandover(null)}
               >
@@ -918,7 +1059,7 @@ export const WorkHandoverPage: React.FC = () => {
             <div className="handover-modal-footer">
               <button
                 type="button"
-                className="btn-secondary"
+                className="btn btn-secondary"
                 onClick={() => setReturnItemsModalHandover(null)}
                 disabled={returningItems}
               >
@@ -926,7 +1067,7 @@ export const WorkHandoverPage: React.FC = () => {
               </button>
               <button
                 type="button"
-                className="btn-primary"
+                className="btn btn-primary"
                 onClick={handleReturnSelectedItems}
                 disabled={selectedItemIds.length === 0 || returningItems}
               >

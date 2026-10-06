@@ -29,6 +29,8 @@ export const routeToPath = (route: string, isSuperAdmin: boolean): string => {
         return '/dashboard';
       case 'company-users':
         return '/users';
+      case 'leave-requests':
+        return '/leave-requests';
       case 'work-handover':
         return '/handover';
       case 'company-settings':
@@ -71,6 +73,8 @@ export const pathToRoute = (pathname: string, isSuperAdmin: boolean): string => 
     switch (cleanPath) {
       case '/users':
         return 'company-users';
+      case '/leave-requests':
+        return 'leave-requests';
       case '/handover':
       case '/work-handover':
         return 'work-handover';
@@ -127,10 +131,12 @@ import { ConsultationsPage } from './pages/Consultations/ConsultationsPage';
 import { OpportunitiesPage } from './pages/InvestmentOpportunities/OpportunitiesPage';
 import { AssignedLeadsPage } from './pages/AssignedLeads/AssignedLeadsPage';
 import { PendingLeadsPage } from './pages/PendingLeads/PendingLeadsPage';
+import { ArchivedLeadsPage } from './pages/ArchivedLeads/ArchivedLeadsPage';
 import { KYCPage } from './pages/KYC/KYCPage';
 
 // Company Admin
 import { CompanyUsersPage } from './pages/Company/CompanyUsersPage';
+import { LeaveRequestsPage } from './pages/Company/LeaveRequestsPage';
 import { WorkHandoverPage } from './pages/Company/WorkHandoverPage';
 import { CompanySettingsPage } from './pages/Company/CompanySettingsPage';
 import { CompanyAuditPage } from './pages/Company/CompanyAuditPage';
@@ -630,6 +636,14 @@ export const App: React.FC = () => {
             <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
           )}
         </ProtectedRoute>
+      ) : currentRoute === 'archived-leads' ? (
+        <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
+          {isGhlAdmin ? (
+            <ArchivedLeadsPage />
+          ) : (
+            <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+          )}
+        </ProtectedRoute>
       ) : currentRoute === 'customers' ? (
         <ProtectedRoute permission={PERMISSIONS.CUSTOMERS_VIEW}>
           <CustomersPage />
@@ -716,9 +730,11 @@ export const App: React.FC = () => {
         <ProtectedRoute permission={PERMISSIONS.USERS_VIEW}>
           <CompanyUsersPage />
         </ProtectedRoute>
+      ) : currentRoute === 'leave-requests' ? (
+        <LeaveRequestsPage onNavigate={navigate} />
       ) : currentRoute === 'work-handover' ? (
         <ProtectedRoute permission={PERMISSIONS.USERS_VIEW}>
-          <WorkHandoverPage />
+          <WorkHandoverPage initialParams={navExtraState} onNavigate={navigate} />
         </ProtectedRoute>
       ) : currentRoute === 'company-settings' ? (
         <ProtectedRoute permission={PERMISSIONS.SETTINGS_VIEW}>

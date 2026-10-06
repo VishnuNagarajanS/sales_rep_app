@@ -103,6 +103,7 @@ export interface User {
   emailSent?: boolean;
   emailError?: string;
   temporaryPassword?: string;
+  isCovered?: boolean;
 }
 
 export interface Lead {
@@ -441,6 +442,7 @@ export interface InvestmentOpportunity {
   targetAmount: number;
   committedAmount: number;
   assignedAgentName: string;
+  assignedAgentId?: string | number;
   expectedCloseDate: string;
   notes: string;
   handoverId?: number;

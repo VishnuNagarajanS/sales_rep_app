@@ -22,6 +22,7 @@ interface AdminUserDto {
   emailSent?: boolean;
   emailError?: string;
   temporaryPassword?: string;
+  isCovered?: boolean;
 }
 
 const mapDtoToUser = (dto: AdminUserDto): User => {
@@ -67,6 +68,7 @@ const mapDtoToUser = (dto: AdminUserDto): User => {
     emailSent: dto.emailSent,
     emailError: dto.emailError,
     temporaryPassword: dto.temporaryPassword,
+    isCovered: dto.isCovered,
   };
 };
 

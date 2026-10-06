@@ -41,6 +41,7 @@ export const SalesLayout: React.FC<SalesLayoutProps> = ({
     const checkHandovers = async () => {
       try {
         const status = await workHandoverService.getMyStatus();
+        if (!status || !isMounted) return;
         if (isMounted) {
           setCoveredHandover(status.activeCoverage || null);
           setCoveringHandover(status.activeCovering || null);

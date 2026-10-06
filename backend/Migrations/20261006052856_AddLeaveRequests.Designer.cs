@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using backend.Data;
@@ -12,9 +13,11 @@ using backend.Data;
 namespace backend.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261006052856_AddLeaveRequests")]
+    partial class AddLeaveRequests
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1918,38 +1921,6 @@ namespace backend.Migrations
                     b.ToTable("lead_assignment_history", (string)null);
                 });
 
-            modelBuilder.Entity("backend.Models.Entities.LeavePolicy", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<decimal>("AnnualQuotaDays")
-                        .HasColumnType("decimal(4,1)");
-
-                    b.Property<int>("CompanyId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("LeaveType")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CompanyId");
-
-                    b.ToTable("LeavePolicies");
-                });
-
             modelBuilder.Entity("backend.Models.Entities.LeaveRequest", b =>
                 {
                     b.Property<int>("Id")
@@ -1961,62 +1932,22 @@ namespace backend.Migrations
                     b.Property<int?>("ApprovedById")
                         .HasColumnType("integer");
 
-                    b.Property<DateTime?>("CancelledAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int?>("CancelledById")
-                        .HasColumnType("integer");
-
                     b.Property<int>("CompanyId")
                         .HasColumnType("integer");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<decimal>("Days")
-                        .HasColumnType("decimal(4,1)");
-
-                    b.Property<int?>("DecidedById")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("DecisionAt")
+                    b.Property<DateTime>("EndDate")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("DecisionNote")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<DateOnly>("EndDate")
-                        .HasColumnType("date");
-
-                    b.Property<string>("HalfDaySession")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<string>("HandoverDecision")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
-
-                    b.Property<string>("HandoverDecisionNote")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<bool>("IsHalfDay")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("LeaveType")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
 
                     b.Property<string>("Reason")
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
-                    b.Property<DateOnly>("StartDate")
-                        .HasColumnType("date");
+                    b.Property<DateTime>("StartDate")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -2036,52 +1967,13 @@ namespace backend.Migrations
 
                     b.HasIndex("ApprovedById");
 
-                    b.HasIndex("CancelledById");
-
                     b.HasIndex("CompanyId");
-
-                    b.HasIndex("DecidedById");
 
                     b.HasIndex("UserId");
 
                     b.HasIndex("WorkHandoverId");
 
                     b.ToTable("LeaveRequests");
-                });
-
-            modelBuilder.Entity("backend.Models.Entities.LeaveRequestEvent", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Action")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<int>("ActorId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("At")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("LeaveRequestId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Note")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ActorId");
-
-                    b.HasIndex("LeaveRequestId");
-
-                    b.ToTable("LeaveRequestEvents");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.Notification", b =>
@@ -2910,9 +2802,6 @@ namespace backend.Migrations
                     b.Property<int?>("EndedById")
                         .HasColumnType("integer");
 
-                    b.Property<int?>("LeaveRequestId")
-                        .HasColumnType("integer");
-
                     b.Property<int>("OriginalUserId")
                         .HasColumnType("integer");
 
@@ -2955,8 +2844,6 @@ namespace backend.Migrations
                     b.HasIndex("CoveringUserId");
 
                     b.HasIndex("EndedById");
-
-                    b.HasIndex("LeaveRequestId");
 
                     b.HasIndex("OriginalUserId");
 
@@ -3576,38 +3463,17 @@ namespace backend.Migrations
                     b.Navigation("ToAgent");
                 });
 
-            modelBuilder.Entity("backend.Models.Entities.LeavePolicy", b =>
-                {
-                    b.HasOne("backend.Models.Entities.Tenant", "Company")
-                        .WithMany()
-                        .HasForeignKey("CompanyId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Company");
-                });
-
             modelBuilder.Entity("backend.Models.Entities.LeaveRequest", b =>
                 {
                     b.HasOne("backend.Models.Entities.User", "ApprovedBy")
                         .WithMany()
                         .HasForeignKey("ApprovedById");
 
-                    b.HasOne("backend.Models.Entities.User", "CancelledBy")
-                        .WithMany()
-                        .HasForeignKey("CancelledById")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.HasOne("backend.Models.Entities.Tenant", "Company")
                         .WithMany()
                         .HasForeignKey("CompanyId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.User", "DecidedBy")
-                        .WithMany()
-                        .HasForeignKey("DecidedById")
-                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("backend.Models.Entities.User", "User")
                         .WithMany()
@@ -3617,39 +3483,15 @@ namespace backend.Migrations
 
                     b.HasOne("backend.Models.Entities.WorkHandover", "WorkHandover")
                         .WithMany()
-                        .HasForeignKey("WorkHandoverId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .HasForeignKey("WorkHandoverId");
 
                     b.Navigation("ApprovedBy");
 
-                    b.Navigation("CancelledBy");
-
                     b.Navigation("Company");
-
-                    b.Navigation("DecidedBy");
 
                     b.Navigation("User");
 
                     b.Navigation("WorkHandover");
-                });
-
-            modelBuilder.Entity("backend.Models.Entities.LeaveRequestEvent", b =>
-                {
-                    b.HasOne("backend.Models.Entities.User", "Actor")
-                        .WithMany()
-                        .HasForeignKey("ActorId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.LeaveRequest", "LeaveRequest")
-                        .WithMany("Events")
-                        .HasForeignKey("LeaveRequestId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Actor");
-
-                    b.Navigation("LeaveRequest");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.OpportunityPitch", b =>
@@ -3726,11 +3568,6 @@ namespace backend.Migrations
                         .HasForeignKey("EndedById")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("backend.Models.Entities.LeaveRequest", "LeaveRequest")
-                        .WithMany()
-                        .HasForeignKey("LeaveRequestId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.HasOne("backend.Models.Entities.User", "OriginalUser")
                         .WithMany()
                         .HasForeignKey("OriginalUserId")
@@ -3748,8 +3585,6 @@ namespace backend.Migrations
                     b.Navigation("CoveringUser");
 
                     b.Navigation("EndedBy");
-
-                    b.Navigation("LeaveRequest");
 
                     b.Navigation("OriginalUser");
 
@@ -3781,11 +3616,6 @@ namespace backend.Migrations
                     b.Navigation("Followups");
 
                     b.Navigation("KycRecords");
-                });
-
-            modelBuilder.Entity("backend.Models.Entities.LeaveRequest", b =>
-                {
-                    b.Navigation("Events");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.Role", b =>

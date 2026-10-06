@@ -15,6 +15,7 @@ import { AgentAvailabilityToggle } from '../calling/CallCenterComponents';
 import { PersonaSwitcher } from './PersonaSwitcher';
 import { storageService } from '../../services/storageService';
 import { FEATURES } from '../../constants/features';
+import { ExportReportModal } from '../modals/ExportReportModal';
 import './TopBar.css';
 
 
@@ -26,6 +27,8 @@ interface TopBarProps {
 export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate }) => {
   const { user, tenant, isSuperAdmin, logout, enabledFeatures } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
   const roleCode = user?.role?.code;
   const isGhlAdmin =
@@ -116,7 +119,36 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
+  const handleExport = async (moduleName: string) => {
+    setIsExportModalOpen(false);
+    try {
+      const token = sessionStorage.getItem('nexus_auth_token') || localStorage.getItem('nexus_auth_token') || '';
+      const url = `/api/Reports/export${moduleName === 'All' ? '' : '?module=' + moduleName}`;
+      const res = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Failed to export: ${res.status} - ${errorText}`);
+      }
+      
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = moduleName === 'All' ? 'Complete_Report.xlsx' : `${moduleName}_Report.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Failed to export report.");
+    }
+  };
+
   return (
+    <>
     <header className="topbar-header">
       {/* Hidden SVG Gradient definition for Red Gradient icon stroke */}
       <svg width="0" height="0" className="topbar-svg-def">
@@ -259,9 +291,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
         {isGhlAdmin && (
           <button
             className="btn btn-secondary btn-sm"
-            onClick={() => {
-              alert("Downloading comprehensive report for all users...");
-            }}
+            onClick={() => setIsExportModalOpen(true)}
             title="Export Report"
             style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
           >
@@ -508,5 +538,12 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
         </div>
       </div>
     </header>
+    {isExportModalOpen && (
+      <ExportReportModal 
+        onClose={() => setIsExportModalOpen(false)} 
+        onExport={handleExport} 
+      />
+    )}
+    </>
   );
 };

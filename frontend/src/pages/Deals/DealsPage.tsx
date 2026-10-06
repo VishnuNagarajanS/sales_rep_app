@@ -16,7 +16,6 @@ interface DealsPageProps {
 export const DealsPage: React.FC<DealsPageProps> = ({ onNavigate }) => {
   const { tenant, user } = useAuth();
   const [deals, setDeals] = useState<Deal[]>([]);
-  const [stageFilter, setStageFilter] = useState('All');
   const [agentFilter, setAgentFilter] = useState('All');
 
   // Role-based scoping: Sales Executives see only their own deals.
@@ -58,7 +57,6 @@ export const DealsPage: React.FC<DealsPageProps> = ({ onNavigate }) => {
       : PIPELINE_STAGES.default;
 
   const filteredDeals = scopedDeals.filter(d => {
-    if (stageFilter !== 'All' && d.stage !== stageFilter) return false;
     if (agentFilter !== 'All' && d.assignedAgentName !== agentFilter) return false;
     return true;
   });
@@ -148,13 +146,6 @@ export const DealsPage: React.FC<DealsPageProps> = ({ onNavigate }) => {
         filtersNode={
           <FilterBar
             filters={[
-              {
-                key: 'stage',
-                label: 'Stage',
-                value: stageFilter,
-                onChange: setStageFilter,
-                options: stages.map(s => ({ value: s.id, label: s.name })),
-              },
               ...(!isExec ? [{
                 key: 'agent',
                 label: 'Agent',
@@ -164,7 +155,6 @@ export const DealsPage: React.FC<DealsPageProps> = ({ onNavigate }) => {
               }] : []),
             ]}
             onClearAll={() => {
-              setStageFilter('All');
               setAgentFilter('All');
             }}
           />

@@ -1015,7 +1015,7 @@ class StorageService {
     }
     const users = this.getUsers(companyId);
     const agents = users
-      .filter(u => u.role?.code === 'sales_executive' || u.role?.name?.toLowerCase().includes('sales'))
+      .filter(u => !u.isCovered && (u.role?.code === 'sales_executive' || u.role?.name?.toLowerCase().includes('sales')))
       .map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role?.name || 'Sales Executive' }));
     if (agents.length > 0) return agents;
     return [
@@ -1029,7 +1029,7 @@ class StorageService {
     }
     const users = this.getUsers(companyId);
     const irms = users
-      .filter(u => u.role?.code === 'irm' || u.role?.name?.toLowerCase().includes('irm') || u.role?.name?.toLowerCase().includes('investor'))
+      .filter(u => !u.isCovered && (u.role?.code === 'irm' || u.role?.name?.toLowerCase().includes('irm') || u.role?.name?.toLowerCase().includes('investor')))
       .map(u => ({
         id: u.id,
         name: u.name,

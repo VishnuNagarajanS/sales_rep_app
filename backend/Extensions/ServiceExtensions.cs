@@ -58,6 +58,7 @@ public static class ServiceExtensions
         services.AddScoped<IJwtService, JwtService>();
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUserService, CurrentUserService>();
+        services.AddScoped<IReportService, ReportService>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IAdminUserService, AdminUserService>();
         services.AddScoped<ILeadService, LeadService>();
@@ -75,9 +76,11 @@ public static class ServiceExtensions
         services.AddScoped<IKycService, KycService>();
         services.AddScoped<IOpportunityService, OpportunityService>();
         services.AddScoped<IWorkHandoverService, WorkHandoverService>();
+        services.AddScoped<ILeaveRequestService, LeaveRequestService>();
 
         // Background job: notify admins when a handover's PlannedEndAt has passed (never auto-reverts)
         services.AddHostedService<backend.Services.BackgroundJobs.HandoverDueDateCheckerService>();
+        services.AddHostedService<backend.Services.BackgroundJobs.LeaveReminderBackgroundService>();
 
         services.AddDev1Services();
 

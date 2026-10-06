@@ -16,4 +16,5 @@ public interface IWorkHandoverService
     Task<WorkHandover?> GetActiveHandoverForCoveringUserAsync(int companyId, int coveringUserId, CancellationToken ct = default);
     Task<WorkHandover?> GetActiveHandoverForCoveredUserAsync(int companyId, int coveredUserId, CancellationToken ct = default);
     Task<MyWorkHandoverStatusDto> GetMyStatusAsync(int companyId, int userId, CancellationToken ct = default);
+    Task<List<backend.DTOs.Admin.CoverSuggestionDto>> GetCoverSuggestionsAsync(int companyId, int fromUserId, DateOnly? from, DateOnly? to, CancellationToken ct = default);
 }
