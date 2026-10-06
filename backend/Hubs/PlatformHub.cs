@@ -12,6 +12,10 @@ public interface IPlatformHubClient
     Task TenantActivated(int tenantId);
     Task MaintenanceModeToggled(bool enabled, string message);
     Task AnnouncementBroadcast(object announcement);
+    Task AnnouncementCreated(object payload);
+    Task AnnouncementActivated(object payload);
+    Task AnnouncementDeactivated(object payload);
+    Task AnnouncementDeleted(object payload);
     Task SessionRevoked(string tokenId, int userId);
     Task SecurityAlert(string title, string severity, string message);
     Task PlatformDataUpdated(string entityType, string action);
@@ -55,6 +59,14 @@ public class PlatformHub : Hub<IPlatformHubClient>
         if (!string.IsNullOrEmpty(companyIdStr))
         {
             await Groups.AddToGroupAsync(Context.ConnectionId, $"tenant_{companyIdStr}");
+            if (role == "company_admin")
+            {
+                await Groups.AddToGroupAsync(Context.ConnectionId, $"tenant_{companyIdStr}_admins");
+            }
+            else if (role == "sales_executive" || role == "irm" || role == "sales_manager")
+            {
+                await Groups.AddToGroupAsync(Context.ConnectionId, $"tenant_{companyIdStr}_reps");
+            }
         }
 
         _logger.LogInformation("SignalR Client connected: {ConnectionId}, User: {UserId}, Role: {Role}, Tenant: {TenantId}",

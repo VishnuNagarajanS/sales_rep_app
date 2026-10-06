@@ -64,9 +64,35 @@ public class PlatformSystemController : ControllerBase
             .AsNoTracking()
             .Where(a => a.IsActive && (!a.ExpiresAt.HasValue || a.ExpiresAt.Value > now));
 
+        int? effectiveTenantId = null;
         if (!string.IsNullOrWhiteSpace(tenantId) && int.TryParse(tenantId, out var tid))
         {
-            query = query.Where(a => !a.TargetTenantId.HasValue || a.TargetTenantId.Value == tid);
+            effectiveTenantId = tid;
+        }
+        else if (_currentUser.IsAuthenticated && _currentUser.CompanyId.HasValue && _currentUser.Role != "super_admin")
+        {
+            effectiveTenantId = _currentUser.CompanyId.Value;
+        }
+
+        if (effectiveTenantId.HasValue)
+        {
+            query = query.Where(a => !a.TargetTenantId.HasValue || a.TargetTenantId.Value == effectiveTenantId.Value);
+        }
+
+        string? effectiveRole = !string.IsNullOrWhiteSpace(role)
+            ? role.ToLowerInvariant()
+            : (_currentUser.IsAuthenticated ? _currentUser.Role?.ToLowerInvariant() : null);
+
+        if (!string.IsNullOrEmpty(effectiveRole) && effectiveRole != "super_admin")
+        {
+            if (effectiveRole == "company_admin")
+            {
+                query = query.Where(a => a.TargetAudience == "all" || a.TargetAudience == "tenant_admins");
+            }
+            else
+            {
+                query = query.Where(a => a.TargetAudience == "all" || a.TargetAudience == "sales_reps");
+            }
         }
 
         var announcements = await query
@@ -115,6 +141,18 @@ public class PlatformSystemController : ControllerBase
         if (!string.IsNullOrWhiteSpace(req.TargetTenantId) && int.TryParse(req.TargetTenantId, out var tid))
             targetTenantId = tid;
 
+        if (req.IsActive && !targetTenantId.HasValue)
+        {
+            var alreadyActive = await _context.BroadcastAnnouncements
+                .AnyAsync(a => a.IsActive && !a.TargetTenantId.HasValue, ct);
+
+            if (alreadyActive)
+            {
+                return BadRequest(ApiResponse<AnnouncementResponseDto>.FailureResult(
+                    "Another global broadcast is already active. Deactivate the current broadcast before activating this one."));
+            }
+        }
+
         var ann = new BroadcastAnnouncement
         {
             Title = req.Title.Trim(),
@@ -143,13 +181,17 @@ public class PlatformSystemController : ControllerBase
             Timestamp = DateTime.UtcNow
         });
 
-        await _context.SaveChangesAsync(ct);
-
         try
         {
-            await _hubContext.Clients.All.AnnouncementBroadcast(MapToAnnouncementDto(ann));
+            await _context.SaveChangesAsync(ct);
         }
-        catch { }
+        catch (DbUpdateException)
+        {
+            return BadRequest(ApiResponse<AnnouncementResponseDto>.FailureResult(
+                "Another global broadcast is already active. Deactivate the current broadcast before activating this one."));
+        }
+
+        await PublishAnnouncementEventAsync(ann.IsActive ? "created" : "deactivated", ann);
 
         return CreatedAtAction(nameof(GetAnnouncementById), new { id = ann.Id }, ApiResponse<AnnouncementResponseDto>.SuccessResult(MapToAnnouncementDto(ann), "Announcement published."));
     }
@@ -165,6 +207,27 @@ public class PlatformSystemController : ControllerBase
         if (ann == null)
             return NotFound(ApiResponse<AnnouncementResponseDto>.FailureResult("Announcement not found."));
 
+        int? newTargetTenantId = ann.TargetTenantId;
+        if (req.TargetTenantId != null)
+        {
+            if (int.TryParse(req.TargetTenantId, out var tid))
+                newTargetTenantId = tid;
+            else
+                newTargetTenantId = null;
+        }
+
+        if (req.IsActive && !newTargetTenantId.HasValue)
+        {
+            var alreadyActive = await _context.BroadcastAnnouncements
+                .AnyAsync(a => a.Id != id && a.IsActive && !a.TargetTenantId.HasValue, ct);
+
+            if (alreadyActive)
+            {
+                return BadRequest(ApiResponse<AnnouncementResponseDto>.FailureResult(
+                    "Another global broadcast is already active. Deactivate the current broadcast before activating this one."));
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(req.Title))
             ann.Title = req.Title.Trim();
 
@@ -177,14 +240,7 @@ public class PlatformSystemController : ControllerBase
         if (!string.IsNullOrWhiteSpace(req.TargetAudience))
             ann.TargetAudience = req.TargetAudience;
 
-        if (req.TargetTenantId != null)
-        {
-            if (int.TryParse(req.TargetTenantId, out var tid))
-                ann.TargetTenantId = tid;
-            else
-                ann.TargetTenantId = null;
-        }
-
+        ann.TargetTenantId = newTargetTenantId;
         ann.ExpiresAt = req.ExpiresAt;
         ann.IsActive = req.IsActive;
         ann.UpdatedAt = DateTime.UtcNow;
@@ -202,13 +258,17 @@ public class PlatformSystemController : ControllerBase
             Timestamp = DateTime.UtcNow
         });
 
-        await _context.SaveChangesAsync(ct);
-
         try
         {
-            await _hubContext.Clients.All.AnnouncementBroadcast(MapToAnnouncementDto(ann));
+            await _context.SaveChangesAsync(ct);
         }
-        catch { }
+        catch (DbUpdateException)
+        {
+            return BadRequest(ApiResponse<AnnouncementResponseDto>.FailureResult(
+                "Another global broadcast is already active. Deactivate the current broadcast before activating this one."));
+        }
+
+        await PublishAnnouncementEventAsync(ann.IsActive ? "activated" : "deactivated", ann);
 
         return Ok(ApiResponse<AnnouncementResponseDto>.SuccessResult(MapToAnnouncementDto(ann), "Announcement updated."));
     }
@@ -223,6 +283,18 @@ public class PlatformSystemController : ControllerBase
         var ann = await _context.BroadcastAnnouncements.FirstOrDefaultAsync(a => a.Id == id, ct);
         if (ann == null)
             return NotFound(ApiResponse<AnnouncementResponseDto>.FailureResult("Announcement not found."));
+
+        if (req.IsActive && !ann.TargetTenantId.HasValue)
+        {
+            var alreadyActive = await _context.BroadcastAnnouncements
+                .AnyAsync(a => a.Id != id && a.IsActive && !a.TargetTenantId.HasValue, ct);
+
+            if (alreadyActive)
+            {
+                return BadRequest(ApiResponse<AnnouncementResponseDto>.FailureResult(
+                    "Another global broadcast is already active. Deactivate the current broadcast before activating this one."));
+            }
+        }
 
         ann.IsActive = req.IsActive;
         ann.UpdatedAt = DateTime.UtcNow;
@@ -240,13 +312,17 @@ public class PlatformSystemController : ControllerBase
             Timestamp = DateTime.UtcNow
         });
 
-        await _context.SaveChangesAsync(ct);
-
         try
         {
-            await _hubContext.Clients.All.AnnouncementBroadcast(MapToAnnouncementDto(ann));
+            await _context.SaveChangesAsync(ct);
         }
-        catch { }
+        catch (DbUpdateException)
+        {
+            return BadRequest(ApiResponse<AnnouncementResponseDto>.FailureResult(
+                "Another global broadcast is already active. Deactivate the current broadcast before activating this one."));
+        }
+
+        await PublishAnnouncementEventAsync(req.IsActive ? "activated" : "deactivated", ann);
 
         return Ok(ApiResponse<AnnouncementResponseDto>.SuccessResult(MapToAnnouncementDto(ann), "Status updated."));
     }
@@ -276,7 +352,133 @@ public class PlatformSystemController : ControllerBase
         });
 
         await _context.SaveChangesAsync(ct);
+
+        ann.IsActive = false;
+        await PublishAnnouncementEventAsync("deleted", ann);
+
         return Ok(ApiResponse<bool>.SuccessResult(true, "Announcement deleted."));
+    }
+
+    private async Task PublishAnnouncementEventAsync(string action, BroadcastAnnouncement ann)
+    {
+        try
+        {
+            var dto = MapToAnnouncementDto(ann);
+            var payload = new
+            {
+                announcementId = ann.Id.ToString(),
+                action = action,
+                announcement = dto
+            };
+
+            var targetGroups = new List<string> { "super_admin" };
+            var audience = (ann.TargetAudience ?? "all").ToLowerInvariant();
+
+            if (ann.TargetTenantId.HasValue)
+            {
+                int tid = ann.TargetTenantId.Value;
+                if (audience == "tenant_admins")
+                {
+                    targetGroups.Add($"tenant_{tid}_admins");
+                }
+                else if (audience == "sales_reps")
+                {
+                    targetGroups.Add($"tenant_{tid}_reps");
+                }
+                else
+                {
+                    targetGroups.Add($"tenant_{tid}");
+                }
+
+                var targetClient = _hubContext.Clients.Groups(targetGroups);
+                switch (action)
+                {
+                    case "created":
+                        await targetClient.AnnouncementCreated(payload);
+                        break;
+                    case "activated":
+                        await targetClient.AnnouncementActivated(payload);
+                        break;
+                    case "deactivated":
+                        await targetClient.AnnouncementDeactivated(payload);
+                        break;
+                    case "deleted":
+                        await targetClient.AnnouncementDeleted(payload);
+                        break;
+                }
+                await targetClient.AnnouncementBroadcast(dto);
+            }
+            else
+            {
+                if (audience == "tenant_admins")
+                {
+                    targetGroups.Add("role_company_admin");
+                    var targetClient = _hubContext.Clients.Groups(targetGroups);
+                    switch (action)
+                    {
+                        case "created":
+                            await targetClient.AnnouncementCreated(payload);
+                            break;
+                        case "activated":
+                            await targetClient.AnnouncementActivated(payload);
+                            break;
+                        case "deactivated":
+                            await targetClient.AnnouncementDeactivated(payload);
+                            break;
+                        case "deleted":
+                            await targetClient.AnnouncementDeleted(payload);
+                            break;
+                    }
+                    await targetClient.AnnouncementBroadcast(dto);
+                }
+                else if (audience == "sales_reps")
+                {
+                    targetGroups.Add("role_sales_executive");
+                    targetGroups.Add("role_irm");
+                    targetGroups.Add("role_sales_manager");
+                    var targetClient = _hubContext.Clients.Groups(targetGroups);
+                    switch (action)
+                    {
+                        case "created":
+                            await targetClient.AnnouncementCreated(payload);
+                            break;
+                        case "activated":
+                            await targetClient.AnnouncementActivated(payload);
+                            break;
+                        case "deactivated":
+                            await targetClient.AnnouncementDeactivated(payload);
+                            break;
+                        case "deleted":
+                            await targetClient.AnnouncementDeleted(payload);
+                            break;
+                    }
+                    await targetClient.AnnouncementBroadcast(dto);
+                }
+                else
+                {
+                    switch (action)
+                    {
+                        case "created":
+                            await _hubContext.Clients.All.AnnouncementCreated(payload);
+                            break;
+                        case "activated":
+                            await _hubContext.Clients.All.AnnouncementActivated(payload);
+                            break;
+                        case "deactivated":
+                            await _hubContext.Clients.All.AnnouncementDeactivated(payload);
+                            break;
+                        case "deleted":
+                            await _hubContext.Clients.All.AnnouncementDeleted(payload);
+                            break;
+                    }
+                    await _hubContext.Clients.All.AnnouncementBroadcast(dto);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to broadcast real-time announcement event {Action} for announcement {AnnouncementId}", action, ann.Id);
+        }
     }
 
     // ── PLATFORM MAINTENANCE MODE ─────────────────────────────────────────────

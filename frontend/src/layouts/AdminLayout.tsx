@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Sidebar } from '../components/layout/Sidebar';
 import { TopBar } from '../components/layout/TopBar';
 import { superAdminService } from '../services/superAdminService';
+import { signalRService } from '../services/signalRService';
 import { BroadcastAnnouncement, SystemDiagnostics } from '../types';
 import { NetworkStatusBanner } from '../components/common/NetworkStatusBanner';
 import './AdminLayout.css';
@@ -46,8 +47,70 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
 
   useEffect(() => {
     loadBannerData();
+
+    const handleAnnouncementChange = (data: any) => {
+      const action = data?.action || (data?.isActive === false ? 'deactivated' : 'activated');
+      const ann: BroadcastAnnouncement | undefined = data?.announcement || (data?.title ? data : undefined);
+      const annId = String(data?.announcementId || ann?.id || '');
+
+      if (!annId && !ann) return;
+
+      if (action === 'deleted') {
+        setAnnouncements(prev => prev.filter(a => String(a.id) !== annId));
+        return;
+      }
+
+      if (action === 'deactivated') {
+        setAnnouncements(prev => prev.map(a => String(a.id) === annId ? { ...a, isActive: false } : a));
+        return;
+      }
+
+      if (action === 'activated' || action === 'created') {
+        if (!ann) {
+          loadBannerData();
+          return;
+        }
+        setAnnouncements(prev => {
+          const idx = prev.findIndex(a => String(a.id) === String(ann.id));
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = ann;
+            return next;
+          }
+          return [ann, ...prev];
+        });
+      }
+    };
+
+    const unsubCreated = signalRService.on('AnnouncementCreated', handleAnnouncementChange);
+    const unsubActivated = signalRService.on('AnnouncementActivated', handleAnnouncementChange);
+    const unsubDeactivated = signalRService.on('AnnouncementDeactivated', handleAnnouncementChange);
+    const unsubDeleted = signalRService.on('AnnouncementDeleted', handleAnnouncementChange);
+    const unsubBroadcast = signalRService.on('AnnouncementBroadcast', (ann: any) => {
+      handleAnnouncementChange({
+        announcementId: ann?.id,
+        action: ann?.isActive ? 'activated' : 'deactivated',
+        announcement: ann,
+      });
+    });
+
+    const unsubReconnected = signalRService.on('reconnected', () => {
+      loadBannerData();
+    });
+
     window.addEventListener('nexus_admin_updated', loadBannerData);
-    return () => window.removeEventListener('nexus_admin_updated', loadBannerData);
+    window.addEventListener('nexus_signalr_reconnected', loadBannerData);
+
+    return () => {
+      unsubCreated();
+      unsubActivated();
+      unsubDeactivated();
+      unsubDeleted();
+      unsubBroadcast();
+      unsubReconnected();
+      window.removeEventListener('nexus_admin_updated', loadBannerData);
+      window.removeEventListener('nexus_signalr_reconnected', loadBannerData);
+    };
   }, []);
 
   const activeAnnouncement = announcements.find(a => a.isActive);

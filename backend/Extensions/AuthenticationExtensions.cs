@@ -57,7 +57,9 @@ public static class AuthenticationExtensions
                     {
                         var dbContext = context.HttpContext.RequestServices.GetRequiredService<backend.Data.ApplicationDbContext>();
                         var user = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(
-                            dbContext.Users.AsNoTracking(),
+                            dbContext.Users.AsNoTracking()
+                                .Include(u => u.Role)
+                                .Include(u => u.Company),
                             u => u.Id == userId);
 
                         if (user == null || user.Status != backend.Models.Enums.UserStatus.Active)
@@ -70,10 +72,7 @@ public static class AuthenticationExtensions
                         var roleCode = context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value?.ToLowerInvariant();
                         if (user.CompanyId.HasValue && roleCode != "super_admin")
                         {
-                            var tenant = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(
-                                dbContext.Tenants.AsNoTracking(),
-                                t => t.Id == user.CompanyId.Value);
-
+                            var tenant = user.Company;
                             if (tenant == null || !tenant.IsActive || tenant.Status == "Suspended")
                             {
                                 context.Fail("Your organization account has been suspended or is inactive.");
@@ -81,13 +80,14 @@ public static class AuthenticationExtensions
                             }
                         }
 
-                        // Enforce Session Revocation: Check if this specific JWT Jti token was revoked
+                        // Enforce Session Revocation: Check if this specific JWT Jti token was revoked (lean projection)
                         var jti = context.Principal?.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Jti)?.Value;
                         if (!string.IsNullOrEmpty(jti))
                         {
                             var session = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(
-                                dbContext.UserSessions.AsNoTracking(),
-                                s => s.TokenId == jti);
+                                dbContext.UserSessions.AsNoTracking()
+                                    .Where(s => s.TokenId == jti)
+                                    .Select(s => new { s.IsActive, s.RevokedAt }));
 
                             if (session != null && (!session.IsActive || session.RevokedAt.HasValue))
                             {
@@ -95,6 +95,14 @@ public static class AuthenticationExtensions
                                 return;
                             }
                         }
+
+                        // Zero out sensitive credentials before caching in request scope
+                        user.PasswordHash = string.Empty;
+                        user.TwoFactorSecret = null;
+                        user.TwoFactorRecoveryCodesJson = null;
+
+                        // Store verified user for downstream reuse within this single HTTP request
+                        context.HttpContext.Items["ValidatedCurrentUser"] = user;
                     }
                 }
             };

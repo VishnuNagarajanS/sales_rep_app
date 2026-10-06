@@ -63,5 +63,8 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .WithMany(t => t.Users)
             .HasForeignKey(u => u.CompanyId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasIndex(u => u.CompanyId);
+        builder.HasIndex(u => u.RoleId);
     }
 }

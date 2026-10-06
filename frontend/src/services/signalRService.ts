@@ -103,12 +103,58 @@ class SignalRService {
         );
       });
 
+      this.connection.on('AnnouncementCreated', (data: any) => {
+        this.emit('AnnouncementCreated', data);
+        window.dispatchEvent(
+          new CustomEvent('nexus_announcement_created', { detail: data })
+        );
+      });
+
+      this.connection.on('AnnouncementActivated', (data: any) => {
+        this.emit('AnnouncementActivated', data);
+        window.dispatchEvent(
+          new CustomEvent('nexus_announcement_activated', { detail: data })
+        );
+      });
+
+      this.connection.on('AnnouncementDeactivated', (data: any) => {
+        this.emit('AnnouncementDeactivated', data);
+        window.dispatchEvent(
+          new CustomEvent('nexus_announcement_deactivated', { detail: data })
+        );
+      });
+
+      this.connection.on('AnnouncementDeleted', (data: any) => {
+        this.emit('AnnouncementDeleted', data);
+        window.dispatchEvent(
+          new CustomEvent('nexus_announcement_deleted', { detail: data })
+        );
+      });
+
       this.connection.on('SessionRevoked', (tokenId: string, userId: number) => {
         this.emit('SessionRevoked', { tokenId, userId });
       });
 
       this.connection.on('PlatformDataUpdated', (entityType: string, action: string) => {
         this.emit('PlatformDataUpdated', { entityType, action });
+      });
+
+      this.connection.onreconnecting((error) => {
+        console.warn('SignalR reconnecting...', error);
+        this.emit('reconnecting', error);
+      });
+
+      this.connection.onreconnected((connectionId) => {
+        console.info('SignalR reconnected:', connectionId);
+        this.emit('reconnected', connectionId);
+        window.dispatchEvent(
+          new CustomEvent('nexus_signalr_reconnected', { detail: { connectionId } })
+        );
+      });
+
+      this.connection.onclose((error) => {
+        console.warn('SignalR connection closed:', error);
+        this.emit('close', error);
       });
 
       await this.connection.start();

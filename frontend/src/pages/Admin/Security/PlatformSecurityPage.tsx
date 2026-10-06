@@ -281,7 +281,7 @@ export const PlatformSecurityPage: React.FC = () => {
           <div style={{ fontSize: '12px', color: '#94a3b8' }}>Real-time verified via JWT session ledger</div>
         </div>
 
-        <div className="security-card">
+        {/* <div className="security-card">
           <div className="security-card-header">
             <span className="diag-label">Super Admin MFA Status</span>
             <ShieldCheck size={18} style={{ color: mfaStatus?.isTwoFactorEnabled ? '#10b981' : '#f59e0b' }} />
@@ -294,7 +294,7 @@ export const PlatformSecurityPage: React.FC = () => {
               ? `${mfaStatus.remainingRecoveryCodes} recovery codes remaining`
               : 'TOTP enrollment recommended'}
           </div>
-        </div>
+        </div> */}
 
         <div className="security-card">
           <div className="security-card-header">

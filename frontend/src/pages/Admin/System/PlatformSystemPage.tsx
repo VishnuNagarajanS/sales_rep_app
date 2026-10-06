@@ -32,6 +32,7 @@ import {
   GlobalConfig,
 } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
+import { signalRService } from '../../../services/signalRService';
 import { useUnsavedChanges } from '../../../context/NavigationGuardContext';
 import { Modal } from '../../../components/common/Modal';
 import './PlatformSystemPage.css';
@@ -45,6 +46,10 @@ export const PlatformSystemPage: React.FC = () => {
   const [globalConfig, setGlobalConfig] = useState<GlobalConfig | null>(null);
   const [configForm, setConfigForm] = useState<Partial<GlobalConfig>>({});
   const [announcements, setAnnouncements] = useState<BroadcastAnnouncement[]>([]);
+  const activeGlobalAnnouncement = announcements.find(
+    a => a.isActive && (!a.targetTenantId || a.targetTenantId === 'all')
+  );
+  const hasActiveGlobal = !!activeGlobalAnnouncement;
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [maintenance, setMaintenance] = useState<{ enabled: boolean; message: string; bypassSecret: string }>({
     enabled: false,
@@ -137,8 +142,75 @@ export const PlatformSystemPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    window.addEventListener('nexus_admin_updated', () => loadData(false));
-    return () => window.removeEventListener('nexus_admin_updated', () => loadData(false));
+
+    const handleUpdate = () => loadData(false);
+    window.addEventListener('nexus_admin_updated', handleUpdate);
+    window.addEventListener('nexus_signalr_reconnected', handleUpdate);
+
+    const handleAnnouncementEvent = (data: any) => {
+      const action = data?.action || (data?.isActive === false ? 'deactivated' : 'activated');
+      const ann: BroadcastAnnouncement | undefined = data?.announcement || (data?.title ? data : undefined);
+      const annId = String(data?.announcementId || ann?.id || '');
+
+      if (!annId && !ann) return;
+
+      if (action === 'deleted') {
+        setAnnouncements(prev => prev.filter(a => String(a.id) !== annId));
+        return;
+      }
+
+      if (action === 'activated' || action === 'deactivated') {
+        const isActive = action === 'activated';
+        setAnnouncements(prev => {
+          const idx = prev.findIndex(a => String(a.id) === annId);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = { ...next[idx], ...(ann || {}), isActive };
+            return next;
+          }
+          if (ann) {
+            return [ann, ...prev];
+          }
+          return prev;
+        });
+        return;
+      }
+
+      if (action === 'created') {
+        if (ann) {
+          setAnnouncements(prev => {
+            if (prev.some(a => String(a.id) === String(ann.id))) {
+              return prev;
+            }
+            return [ann, ...prev];
+          });
+        } else {
+          loadData(false);
+        }
+      }
+    };
+
+    const unsubCreated = signalRService.on('AnnouncementCreated', handleAnnouncementEvent);
+    const unsubActivated = signalRService.on('AnnouncementActivated', handleAnnouncementEvent);
+    const unsubDeactivated = signalRService.on('AnnouncementDeactivated', handleAnnouncementEvent);
+    const unsubDeleted = signalRService.on('AnnouncementDeleted', handleAnnouncementEvent);
+    const unsubBroadcast = signalRService.on('AnnouncementBroadcast', (ann: any) => {
+      handleAnnouncementEvent({
+        announcementId: ann?.id,
+        action: ann?.isActive ? 'activated' : 'deactivated',
+        announcement: ann,
+      });
+    });
+
+    return () => {
+      unsubCreated();
+      unsubActivated();
+      unsubDeactivated();
+      unsubDeleted();
+      unsubBroadcast();
+      window.removeEventListener('nexus_admin_updated', handleUpdate);
+      window.removeEventListener('nexus_signalr_reconnected', handleUpdate);
+    };
   }, []);
 
   const handleProbeHealth = async () => {
@@ -196,6 +268,9 @@ export const PlatformSystemPage: React.FC = () => {
     if (!annTitle.trim() || !annMessage.trim() || isCreatingAnn) return;
     setIsCreatingAnn(true);
 
+    const isGlobal = !annTenantId || annTenantId === 'all';
+    const willBeActive = isGlobal ? !hasActiveGlobal : true;
+
     try {
       const created = await superAdminService.createAnnouncementApi({
         title: annTitle.trim(),
@@ -203,15 +278,26 @@ export const PlatformSystemPage: React.FC = () => {
         priority: annPriority,
         targetAudience: annAudience,
         targetTenantId: annTenantId === 'all' ? undefined : annTenantId,
+        isActive: willBeActive,
       });
 
       setAnnouncements(prev => [created, ...prev]);
       setIsAnnModalOpen(false);
       setAnnTitle('');
       setAnnMessage('');
-      showSuccess('Broadcast announcement published.');
+      if (willBeActive) {
+        showSuccess('Broadcast announcement published and active.');
+      } else {
+        showSuccess('Broadcast announcement published as inactive (another broadcast is currently active).');
+      }
     } catch (err: any) {
       alert(err.message || 'Failed to publish announcement');
+      try {
+        const fresh = await superAdminService.fetchAnnouncementsFromApi();
+        setAnnouncements(fresh || []);
+      } catch {
+        // ignore secondary error
+      }
     } finally {
       setIsCreatingAnn(false);
     }
@@ -219,13 +305,30 @@ export const PlatformSystemPage: React.FC = () => {
 
   const handleToggleAnnouncement = async (id: string, current: boolean) => {
     if (isActionInProgress) return;
+
+    const targetAnn = announcements.find(a => String(a.id) === String(id));
+    const isGlobal = !targetAnn?.targetTenantId || targetAnn?.targetTenantId === 'all';
+
+    // Client-side guard: Only one global broadcast can be active at any given time
+    if (!current && isGlobal && hasActiveGlobal && String(activeGlobalAnnouncement?.id) !== String(id)) {
+      alert("Another broadcast is currently active. Deactivate it before activating this broadcast.");
+      return;
+    }
+
     setIsActionInProgress(true);
     try {
       await superAdminService.toggleAnnouncementApi(id, !current);
-      setAnnouncements(prev => prev.map(a => (a.id === id ? { ...a, isActive: !current } : a)));
+      setAnnouncements(prev => prev.map(a => (String(a.id) === String(id) ? { ...a, isActive: !current } : a)));
       showSuccess(`Broadcast banner ${!current ? 'ACTIVATED' : 'DEACTIVATED'}.`);
     } catch (err: any) {
       alert(err.message || 'Failed to toggle announcement');
+      // If rejection occurred due to stale UI, immediately re-sync table from backend
+      try {
+        const fresh = await superAdminService.fetchAnnouncementsFromApi();
+        setAnnouncements(fresh || []);
+      } catch {
+        // ignore secondary error
+      }
     } finally {
       setIsActionInProgress(false);
     }
@@ -560,8 +663,8 @@ export const PlatformSystemPage: React.FC = () => {
                       {backupStatus?.lastBackupAt
                         ? `${new Date(backupStatus.lastBackupAt).toLocaleDateString()} (${backupStatus.backupSize})`
                         : diagnostics.lastBackupAt
-                        ? new Date(diagnostics.lastBackupAt).toLocaleDateString()
-                        : 'Active Automated Snapshots'}
+                          ? new Date(diagnostics.lastBackupAt).toLocaleDateString()
+                          : 'Active Automated Snapshots'}
                     </span>
                     <span className="telemetry-item-sub">
                       Status: {backupStatus?.status || 'Active'} • Retention: {backupStatus?.retentionDays || 30} days ({backupStatus?.tablesArchivedCount || 16} tables)
@@ -929,6 +1032,25 @@ export const PlatformSystemPage: React.FC = () => {
                   </button>
                 </div>
 
+                <div className={`single-active-broadcast-status ${hasActiveGlobal ? 'has-active' : 'idle'}`}>
+                  {hasActiveGlobal ? (
+                    <>
+                      <div className="status-live-dot" />
+                      <span>
+                        <strong>Currently Active Global Broadcast:</strong> &ldquo;{activeGlobalAnnouncement?.title}&rdquo;.
+                        Only 1 global broadcast can be active at a time. Other global broadcasts are locked until this broadcast is deactivated.
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="status-idle-icon">⚡</span>
+                      <span>
+                        <strong>Global Broadcast Channel Idle:</strong> No global broadcast is currently active. Any announcement can be activated.
+                      </span>
+                    </>
+                  )}
+                </div>
+
                 <div className="table-responsive">
                   <table className="announcements-table">
                     <thead>
@@ -980,15 +1102,38 @@ export const PlatformSystemPage: React.FC = () => {
                             </td>
 
                             <td>
-                              <label className="switch-control">
-                                <input
-                                  type="checkbox"
-                                  checked={ann.isActive}
-                                  disabled={isActionInProgress}
-                                  onChange={() => handleToggleAnnouncement(ann.id, ann.isActive)}
-                                />
-                                <span className="switch-slider round" />
-                              </label>
+                              {(() => {
+                                const isGlobal = !ann.targetTenantId || ann.targetTenantId === 'all';
+                                const isLocked = !ann.isActive && isGlobal && hasActiveGlobal;
+                                const tooltipText = isLocked
+                                  ? "Another broadcast is currently active. Deactivate it before activating this broadcast."
+                                  : ann.isActive
+                                    ? "Click to deactivate this broadcast"
+                                    : "Click to activate this broadcast";
+
+                                return (
+                                  <div className="ann-switch-cell" title={tooltipText}>
+                                    <label
+                                      className={`switch-control ${isLocked ? 'switch-disabled' : ''}`}
+                                      title={tooltipText}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={ann.isActive}
+                                        disabled={isActionInProgress || isLocked}
+                                        onChange={() => handleToggleAnnouncement(ann.id, ann.isActive)}
+                                        aria-label={tooltipText}
+                                      />
+                                      <span className={`switch-slider round ${isLocked ? 'locked' : ''}`} />
+                                    </label>
+                                    {isLocked && (
+                                      <span className="switch-locked-tag" title={tooltipText}>
+                                        <Lock size={10} />
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </td>
 
                             <td style={{ textAlign: 'right' }}>
@@ -1073,6 +1218,16 @@ export const PlatformSystemPage: React.FC = () => {
                 </select>
               </div>
             </div>
+
+            {hasActiveGlobal && (!annTenantId || annTenantId === 'all') && (
+              <div className="ann-modal-lock-warning">
+                <AlertTriangle size={14} />
+                <span>
+                  <strong>Notice:</strong> &ldquo;{activeGlobalAnnouncement?.title}&rdquo; is currently active.
+                  This broadcast will be created as <strong>inactive</strong>. Deactivate the current broadcast before activating this one.
+                </span>
+              </div>
+            )}
 
             <div className="modal-actions-footer">
               <button className="btn btn-ghost" disabled={isCreatingAnn} onClick={() => setIsAnnModalOpen(false)}>

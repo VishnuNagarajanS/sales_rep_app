@@ -414,7 +414,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               new Set([...(userData.role.permissions || []), ...(SYSTEM_ROLES[userData.role.code].permissions || [])])
             );
           }
-          setUser(userData);
+          const prev = userRef.current;
+          const changed =
+            !prev ||
+            prev.id !== userData.id ||
+            prev.status !== userData.status ||
+            prev.name !== userData.name ||
+            prev.email !== userData.email ||
+            prev.role?.code !== userData.role?.code ||
+            prev.companyId !== userData.companyId;
+
+          if (changed) {
+            setUser(userData);
+          }
         }
 
         if (userData?.role?.code === 'super_admin') {
@@ -429,7 +441,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setTenant(null);
           }
         } else if (tenantData) {
-          setTenant(tenantData);
+          setTenant((prevTenant) => {
+            if (
+              !prevTenant ||
+              prevTenant.id !== tenantData.id ||
+              prevTenant.status !== tenantData.status ||
+              prevTenant.name !== tenantData.name
+            ) {
+              return tenantData;
+            }
+            return prevTenant;
+          });
         }
       }
     } catch {
@@ -530,12 +552,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       revalidateSession();
     }
 
-    // Active session status heartbeat (checks backend every 2s while user is logged in)
+    // Background session watchdog heartbeat (SignalR provides instant real-time suspension/revocation push)
     const intervalId = setInterval(() => {
       if (userRef.current && !isMockMode()) {
         revalidateSession();
       }
-    }, 2000);
+    }, 60000);
 
     return () => {
       clearInterval(intervalId);

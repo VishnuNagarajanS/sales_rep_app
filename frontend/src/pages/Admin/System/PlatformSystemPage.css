@@ -351,6 +351,147 @@
   gap: 14px;
 }
 
+/* Single Active Global Broadcast Status Bar */
+.single-active-broadcast-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 12px;
+  line-height: 1.4;
+  transition: all 0.2s ease;
+}
+
+.single-active-broadcast-status.has-active {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #a7f3d0;
+}
+
+.single-active-broadcast-status.idle {
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(51, 65, 85, 0.5);
+  color: #94a3b8;
+}
+
+.status-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.8);
+  flex-shrink: 0;
+  animation: pulse 2s infinite;
+}
+
+.status-idle-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+/* Switch control styling */
+.switch-control {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  vertical-align: middle;
+}
+
+.switch-control input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #334155;
+  transition: 0.3s;
+}
+
+.switch-slider:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.3s;
+}
+
+.switch-control input:checked + .switch-slider {
+  background-color: #10b981;
+}
+
+.switch-control input:checked + .switch-slider:before {
+  transform: translateX(16px);
+}
+
+.switch-slider.round {
+  border-radius: 20px;
+}
+
+.switch-slider.round:before {
+  border-radius: 50%;
+}
+
+.switch-control.switch-disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.switch-control.switch-disabled .switch-slider {
+  cursor: not-allowed;
+  background-color: #1e293b;
+}
+
+.ann-switch-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.switch-locked-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.03em;
+  user-select: none;
+}
+
+.ann-row.active-broadcast-row {
+  background: rgba(16, 185, 129, 0.04);
+}
+
+.ann-modal-lock-warning {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 /* ==========================================================================
    Tab Navigation & System Extension Styles
    ========================================================================== */

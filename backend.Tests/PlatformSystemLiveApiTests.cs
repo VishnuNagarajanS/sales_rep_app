@@ -76,12 +76,14 @@ public class PlatformSystemLiveApiTests
         var smtpOptionsMock = new Mock<IOptionsMonitor<SmtpSettings>>();
         smtpOptionsMock.Setup(o => o.CurrentValue).Returns(smtpSettings);
 
+        var hubMock = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<backend.Hubs.PlatformHub, backend.Hubs.IPlatformHubClient>>();
         var controller = new PlatformSystemController(
             db,
             currentUserMock.Object,
             config,
             smtpOptionsMock.Object,
-            NullLogger<PlatformSystemController>.Instance);
+            NullLogger<PlatformSystemController>.Instance,
+            hubMock.Object);
 
         var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
@@ -190,5 +192,74 @@ public class PlatformSystemLiveApiTests
         var backupSetting = await db.PlatformSettings.FirstOrDefaultAsync(s => s.Key == "last_platform_backup_at");
         Assert.NotNull(backupSetting);
         Assert.False(string.IsNullOrWhiteSpace(backupSetting.Value));
+    }
+
+    [Fact]
+    public async Task BroadcastAnnouncement_ActivateWhenAnotherGlobalActive_RejectsWith400()
+    {
+        var (controller, db) = CreateController();
+
+        // 1. Create first announcement as active
+        var create1 = await controller.CreateAnnouncement(new CreateAnnouncementRequestDto
+        {
+            Title = "First Broadcast",
+            Message = "System notice 1",
+            Priority = "info",
+            TargetAudience = "all",
+            IsActive = true
+        });
+        var ok1 = Assert.IsType<CreatedAtActionResult>(create1.Result);
+        var res1 = Assert.IsType<ApiResponse<AnnouncementResponseDto>>(ok1.Value);
+        Assert.True(res1.Success);
+        Assert.True(res1.Data!.IsActive);
+
+        // 2. Attempt to create second global announcement as active -> MUST reject with 400
+        var create2 = await controller.CreateAnnouncement(new CreateAnnouncementRequestDto
+        {
+            Title = "Second Broadcast",
+            Message = "System notice 2",
+            Priority = "warning",
+            TargetAudience = "all",
+            IsActive = true
+        });
+        var badReq2 = Assert.IsType<BadRequestObjectResult>(create2.Result);
+        var err2 = Assert.IsType<ApiResponse<AnnouncementResponseDto>>(badReq2.Value);
+        Assert.False(err2.Success);
+        Assert.Equal("Another global broadcast is already active. Deactivate the current broadcast before activating this one.", err2.Message);
+
+        // 3. Creating second announcement as INACTIVE -> MUST succeed
+        var create2Inactive = await controller.CreateAnnouncement(new CreateAnnouncementRequestDto
+        {
+            Title = "Second Broadcast Inactive",
+            Message = "System notice 2 inactive",
+            Priority = "warning",
+            TargetAudience = "all",
+            IsActive = false
+        });
+        var ok2Inactive = Assert.IsType<CreatedAtActionResult>(create2Inactive.Result);
+        var res2Inactive = Assert.IsType<ApiResponse<AnnouncementResponseDto>>(ok2Inactive.Value);
+        Assert.True(res2Inactive.Success);
+        Assert.False(res2Inactive.Data!.IsActive);
+        int secondId = int.Parse(res2Inactive.Data.Id);
+
+        // 4. Attempt to toggle second announcement to ACTIVE -> MUST reject with 400
+        var toggleAttempt = await controller.ToggleAnnouncementStatus(secondId, new AnnouncementStatusUpdateDto { IsActive = true });
+        var badToggle = Assert.IsType<BadRequestObjectResult>(toggleAttempt.Result);
+        var errToggle = Assert.IsType<ApiResponse<AnnouncementResponseDto>>(badToggle.Value);
+        Assert.False(errToggle.Success);
+        Assert.Equal("Another global broadcast is already active. Deactivate the current broadcast before activating this one.", errToggle.Message);
+
+        // 5. Deactivate first broadcast -> MUST succeed
+        int firstId = int.Parse(res1.Data.Id);
+        var deact1 = await controller.ToggleAnnouncementStatus(firstId, new AnnouncementStatusUpdateDto { IsActive = false });
+        var okDeact = Assert.IsType<OkObjectResult>(deact1.Result);
+        Assert.True(Assert.IsType<ApiResponse<AnnouncementResponseDto>>(okDeact.Value).Success);
+
+        // 6. Now toggle second announcement to ACTIVE -> MUST succeed!
+        var toggleSuccess = await controller.ToggleAnnouncementStatus(secondId, new AnnouncementStatusUpdateDto { IsActive = true });
+        var okToggle = Assert.IsType<OkObjectResult>(toggleSuccess.Result);
+        var resToggle = Assert.IsType<ApiResponse<AnnouncementResponseDto>>(okToggle.Value);
+        Assert.True(resToggle.Success);
+        Assert.True(resToggle.Data!.IsActive);
     }
 }

@@ -1889,9 +1889,13 @@ export class SuperAdminService {
     throw new Error(res?.message || 'Failed to fetch announcements from backend');
   }
 
-  async fetchActiveAnnouncementsFromApi(): Promise<BroadcastAnnouncement[]> {
+  async fetchActiveAnnouncementsFromApi(tenantId?: string | number, role?: string): Promise<BroadcastAnnouncement[]> {
     try {
-      const res = await apiClient.get<ApiResponse<BroadcastAnnouncement[]>>('/announcements/active');
+      const params = new URLSearchParams();
+      if (tenantId) params.append('tenantId', String(tenantId));
+      if (role) params.append('role', role);
+      const query = params.toString() ? `?${params.toString()}` : '';
+      const res = await apiClient.get<ApiResponse<BroadcastAnnouncement[]>>(`/announcements/active${query}`);
       if (res && res.data) {
         return res.data;
       }
@@ -1918,6 +1922,7 @@ export class SuperAdminService {
       targetAudience: ann.targetAudience || 'all',
       targetTenantId: ann.targetTenantId,
       expiresAt: ann.expiresAt,
+      isActive: ann.isActive !== undefined ? ann.isActive : true,
     };
 
     const res = await apiClient.post<ApiResponse<BroadcastAnnouncement>>('/super-admin/system/announcements', payload);
@@ -2227,3 +2232,41 @@ export class SuperAdminService {
 }
 
 export const superAdminService = new SuperAdminService();
+
+export function isAnnouncementEligibleForUser(
+  ann: BroadcastAnnouncement,
+  userRoleCode?: string,
+  userCompanyId?: string | number
+): boolean {
+  if (!ann) return false;
+  const role = (userRoleCode || '').toLowerCase();
+  if (role === 'super_admin') return true;
+
+  // Tenant check
+  if (
+    ann.targetTenantId !== undefined &&
+    ann.targetTenantId !== null &&
+    String(ann.targetTenantId).trim() !== '' &&
+    String(ann.targetTenantId).toLowerCase() !== 'all'
+  ) {
+    const annTenant = String(ann.targetTenantId);
+    const userTenant = userCompanyId !== undefined && userCompanyId !== null ? String(userCompanyId) : '';
+    if (annTenant !== userTenant) {
+      return false;
+    }
+  }
+
+  // Audience check
+  const audience = (ann.targetAudience || 'all').toLowerCase();
+  if (audience === 'all') return true;
+
+  if (audience === 'tenant_admins') {
+    return role === 'company_admin' || role === 'super_admin';
+  }
+
+  if (audience === 'sales_reps') {
+    return role === 'sales_executive' || role === 'irm' || role === 'sales_manager' || role === 'super_admin';
+  }
+
+  return true;
+}
