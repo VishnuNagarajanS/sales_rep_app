@@ -1,5 +1,4 @@
-import { apiClient } from './apiClient';
-import { ApiResponse } from '../types';
+import { apiClient, ApiResponse } from './apiClient';
 import { storageService } from './storageService';
 
 export interface AiChatRequest {
@@ -34,6 +33,6 @@ export const aiAssistantService = {
         request.clientContext = `Call Preferences: Auto-Busy is ${parsed.autoBusyEnabled ? 'Enabled' : 'Disabled'}. Sound is ${parsed.soundEnabled ? 'Enabled' : 'Disabled'}. Desktop Notifications: ${parsed.desktopNotifEnabled ? 'Enabled' : 'Disabled'}. Default Followup Time: ${parsed.defaultFollowupTime}.`;
     } catch(e) {}
     
-    return apiClient.post<AiChatResponse>('/ai/chat', request);
+    return apiClient.post<ApiResponse<AiChatResponse>>('/ai/chat', request);
   }
 };
