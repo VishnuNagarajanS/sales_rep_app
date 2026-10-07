@@ -30,16 +30,22 @@ class ApiClient {
     };
   }
 
+  private static isLoggingOut = false;
+
   private async handleResponse<T>(res: Response): Promise<T> {
     if (res.status === 401) {
       const err = await res.json().catch(() => ({ message: 'Invalid credentials.' }));
       if (!res.url.includes('/auth/login')) {
-        sessionStorage.removeItem('nexus_auth_token');
-        sessionStorage.removeItem('nexus_current_user');
-        localStorage.removeItem('nexus_auth_token');
-        localStorage.removeItem('nexus_current_user');
-        window.dispatchEvent(new Event('nexus_auth_unauthorized'));
-        throw new Error('Session expired. Please sign in again.');
+        if (!ApiClient.isLoggingOut) {
+          ApiClient.isLoggingOut = true;
+          sessionStorage.removeItem('nexus_auth_token');
+          sessionStorage.removeItem('nexus_current_user');
+          localStorage.removeItem('nexus_auth_token');
+          localStorage.removeItem('nexus_current_user');
+          window.dispatchEvent(new Event('nexus_auth_unauthorized'));
+        }
+        // Return a never-resolving promise so the component doesn't catch an error, re-render, and retry in a loop
+        return new Promise<any>(() => {}); 
       }
       throw new Error(err.message || 'Invalid email or password.');
     }

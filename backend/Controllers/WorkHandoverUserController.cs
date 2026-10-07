@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace backend.Controllers;
 
 [ApiController]
-[Route("api/v1/workhandover/my-status")]
+[Route("api/workhandover/my-status")]
 [Authorize]
 public class WorkHandoverUserController : ControllerBase
 {
