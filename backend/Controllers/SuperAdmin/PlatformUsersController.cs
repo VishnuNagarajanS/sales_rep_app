@@ -576,10 +576,22 @@ public class PlatformUsersController : ControllerBase
         var previousMonthLeads = await _context.Leads.CountAsync(l => l.CreatedAt >= prevMonthStart && l.CreatedAt < currentMonthStart, ct);
 
         var totalCustomers = await _context.Customers.CountAsync(ct);
-        var ghlDealSum = await _context.GhlDeals.SumAsync(d => d.Value, ct);
-        var irmDealSum = await _context.IrmPipelineCards
-            .Where(c => c.Value.HasValue)
-            .SumAsync(c => c.Value!.Value, ct);
+        decimal ghlDealSum = 0m;
+        try
+        {
+            ghlDealSum = await _context.GhlDeals.SumAsync(d => (decimal?)d.Value, ct) ?? 0m;
+        }
+        catch { }
+
+        decimal irmDealSum = 0m;
+        try
+        {
+            irmDealSum = await _context.IrmPipelineCards
+                .Where(c => c.Value.HasValue)
+                .SumAsync(c => c.Value, ct) ?? 0m;
+        }
+        catch { }
+
         var totalPipelineValue = (long)Math.Round(ghlDealSum + irmDealSum);
 
         // Real system health score from persistent uptime telemetry

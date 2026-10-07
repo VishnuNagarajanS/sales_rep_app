@@ -45,7 +45,15 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
     setIsLoading(true);
     setLoadError(null);
     try {
-      const [allTenants, allUsers, liveLogs, liveDiag, liveMetrics, liveCarrier, liveDids] = await Promise.all([
+      const [
+        tenantsRes,
+        usersRes,
+        logsRes,
+        diagRes,
+        metricsRes,
+        carrierRes,
+        didsRes,
+      ] = await Promise.allSettled([
         superAdminService.fetchTenantsFromApi(),
         superAdminService.fetchUsersFromApi(),
         superAdminService.fetchAuditLogsFromApi(),
@@ -54,14 +62,20 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
         superAdminService.fetchCarrierSettingsFromApi(),
         superAdminService.fetchDidMappingsFromApi(),
       ]);
-      setTenants(allTenants);
-      setUsers(allUsers);
-      setAuditLogs(liveLogs);
-      setDiagnostics(liveDiag);
-      setCarrierSettings(liveCarrier);
-      setDids(liveDids);
-      if (liveMetrics) {
-        setMetrics(liveMetrics);
+
+      if (tenantsRes.status === 'fulfilled') setTenants(tenantsRes.value);
+      if (usersRes.status === 'fulfilled') setUsers(usersRes.value);
+      if (logsRes.status === 'fulfilled') setAuditLogs(logsRes.value);
+      if (diagRes.status === 'fulfilled') setDiagnostics(diagRes.value);
+      if (carrierRes.status === 'fulfilled') setCarrierSettings(carrierRes.value);
+      if (didsRes.status === 'fulfilled') setDids(didsRes.value);
+      if (metricsRes.status === 'fulfilled' && metricsRes.value) {
+        setMetrics(metricsRes.value);
+      }
+
+      if (tenantsRes.status === 'rejected' && usersRes.status === 'rejected') {
+        const err: any = (tenantsRes as PromiseRejectedResult).reason;
+        setLoadError(err?.message || 'Unable to connect to platform API server.');
       }
     } catch (err: any) {
       console.error('Failed to load platform dashboard data:', err);

@@ -2064,13 +2064,18 @@ export class SuperAdminService {
   // ── PLATFORM TELEMETRY METRICS ────────────────────────────────────────────
 
   async fetchPlatformMetricsFromApi(): Promise<PlatformMetrics> {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const res = await apiClient.get<ApiResponse<PlatformMetrics>>('/super-admin/metrics', { timeZone: tz });
-    if (res && res.data) {
-      localStorage.setItem(STORAGE_KEYS.METRICS, JSON.stringify(res.data));
-      return res.data;
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const res = await apiClient.get<ApiResponse<PlatformMetrics>>('/super-admin/metrics', { timeZone: tz });
+      if (res && res.data) {
+        localStorage.setItem(STORAGE_KEYS.METRICS, JSON.stringify(res.data));
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Unable to fetch live platform metrics, returning cached data:', err);
+      return this.getPlatformMetrics();
     }
-    throw new Error(res?.message || 'Failed to fetch platform metrics from backend');
+    return this.getPlatformMetrics();
   }
 
   async fetchCallsTodayMetricsFromApi(): Promise<{ callsToday: number; callsConnected: number } | null> {
