@@ -94,7 +94,8 @@ export function DataTable<T>({
     if (!btn) return;
     const rect = btn.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
-    if (spaceBelow < 200) {
+    const spaceAbove = rect.top;
+    if (spaceBelow < 200 || spaceAbove >= 140) {
       // Flip above the button
       setMenuPos({ bottom: window.innerHeight - rect.top + 4, right: window.innerWidth - rect.right });
     } else {
@@ -525,7 +526,12 @@ export function DataTable<T>({
               zIndex: 9999,
               minWidth: 168,
               padding: '6px',
-              boxShadow: 'var(--shadow-lg)',
+              backgroundColor: '#ffffff',
+              color: '#0f172a',
+              border: '1px solid #e2e8f0',
+              borderRadius: 8,
+              boxShadow: '0 10px 24px rgba(15, 23, 42, 0.14)',
+              overflow: 'hidden',
             }}
           >
             {(() => {
@@ -541,6 +547,10 @@ export function DataTable<T>({
                       width: '100%',
                       justifyContent: 'flex-start',
                       color: action.danger ? 'var(--danger)' : 'var(--text-primary)',
+                      minHeight: 34,
+                      padding: '8px 10px',
+                      borderRadius: 6,
+                      gap: 8,
                     }}
                     onClick={() => {
                       setActiveMenuKey(null);

@@ -31,7 +31,7 @@ public class JaminProjectConfiguration : IEntityTypeConfiguration<JaminProject>
             .HasMaxLength(100);
 
         builder.Property(p => p.ImageUrl)
-            .HasMaxLength(500);
+            .HasColumnType("text");
 
         builder.Property(p => p.CreatedAt)
             .HasDefaultValueSql("NOW()");

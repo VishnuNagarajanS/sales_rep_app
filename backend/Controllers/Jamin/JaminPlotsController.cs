@@ -82,6 +82,16 @@ public class JaminPlotsController : JaminTenantControllerBase
             return BadRequest(ApiResponse<JaminPlotResponseDto>.FailureResult("Plot number, area, or price is invalid."));
         if (dto.Status != null && dto.Status is not ("Available" or "Hold" or "Booked" or "Registered" or "Sold"))
             return BadRequest(ApiResponse<JaminPlotResponseDto>.FailureResult("Invalid plot status."));
+        if (dto.Status is "Hold" or "Booked" or "Registered" or "Sold")
+            return BadRequest(ApiResponse<JaminPlotResponseDto>.FailureResult("Use the hold or booking workflow to change this plot status."));
+        if (dto.Status == "Available" && !string.Equals(plot.Status, "Available", StringComparison.OrdinalIgnoreCase))
+        {
+            var hasActiveBooking = await _db.JaminBookings.AnyAsync(b => b.PlotId == id && b.CompanyId == plot.CompanyId && b.Status != "Cancelled", ct);
+            if (hasActiveBooking)
+                return Conflict(ApiResponse<JaminPlotResponseDto>.FailureResult("This plot has an active booking and cannot be made available. Cancel the booking first."));
+            if (plot.Status is "Registered" or "Sold")
+                return Conflict(ApiResponse<JaminPlotResponseDto>.FailureResult("A registered or sold plot cannot be made available again."));
+        }
         if (dto.PlotNumber != null) plot.PlotNumber = dto.PlotNumber.Trim();
         if (dto.Dimensions != null) plot.Dimensions = dto.Dimensions.Trim();
         if (dto.AreaSqFt.HasValue) plot.AreaSqFt = dto.AreaSqFt.Value;
@@ -90,17 +100,14 @@ public class JaminPlotsController : JaminTenantControllerBase
         if (dto.Notes != null) plot.Notes = dto.Notes.Trim();
         if (dto.Status != null && dto.Status != plot.Status)
         {
-            var wasCountedBooked = IsBooked(plot.Status);
-            var becomesCountedBooked = IsBooked(dto.Status);
-            var project = await _db.JaminProjects.FirstOrDefaultAsync(p => p.Id == plot.ProjectId && p.CompanyId == plot.CompanyId, ct);
-            if (project != null && wasCountedBooked != becomesCountedBooked)
-            {
-                project.BookedPlots = Math.Max(0, project.BookedPlots + (becomesCountedBooked ? 1 : -1));
-                project.AvailablePlots = Math.Max(0, project.AvailablePlots + (becomesCountedBooked ? -1 : 1));
-                project.UpdatedAt = DateTime.UtcNow;
-            }
             plot.Status = dto.Status;
+            var project = await _db.JaminProjects.FirstOrDefaultAsync(p => p.Id == plot.ProjectId && p.CompanyId == plot.CompanyId, ct);
+            if (project != null) await RecalculateInventoryAsync(project, ct);
         }
+        if (dto.HeldByCustomerId.HasValue) plot.HeldByCustomerId = dto.HeldByCustomerId;
+        if (dto.HeldByCustomerName != null) plot.HeldByCustomerName = dto.HeldByCustomerName.Trim();
+        if (dto.HeldByCustomerPhone != null) plot.HeldByCustomerPhone = dto.HeldByCustomerPhone.Trim();
+        if (dto.HoldByAgent != null) plot.HoldByAgent = dto.HoldByAgent.Trim();
         plot.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
         return Ok(ApiResponse<JaminPlotResponseDto>.SuccessResult(ToDto(plot), "Plot updated."));
@@ -115,11 +122,13 @@ public class JaminPlotsController : JaminTenantControllerBase
         if (plot == null) return NotFound(ApiResponse<JaminPlotResponseDto>.FailureResult("Plot not found."));
         if (plot.Status == "Hold" && plot.HoldExpiresAt <= DateTime.UtcNow)
         {
-            plot.Status = "Available"; plot.HeldByCustomerName = null; plot.HeldByCustomerPhone = null; plot.HoldExpiresAt = null;
+            plot.Status = "Available"; plot.HeldByCustomerId = null; plot.HeldByCustomerName = null; plot.HeldByCustomerPhone = null; plot.HoldByAgent = null; plot.HoldExpiresAt = null;
         }
         if (plot.Status != "Available") return Conflict(ApiResponse<JaminPlotResponseDto>.FailureResult("Only available plots can be placed on hold."));
-        plot.Status = "Hold"; plot.HeldByCustomerName = dto.CustomerName.Trim(); plot.HeldByCustomerPhone = dto.CustomerPhone.Trim();
-        plot.HoldExpiresAt = DateTime.UtcNow.AddDays(dto.HoldDays); plot.Notes = dto.Notes?.Trim(); plot.UpdatedAt = DateTime.UtcNow;
+        plot.Status = "Hold"; plot.HeldByCustomerId = dto.HeldByCustomerId; plot.HeldByCustomerName = dto.CustomerName.Trim(); plot.HeldByCustomerPhone = dto.CustomerPhone.Trim(); plot.HoldByAgent = dto.HoldByAgent?.Trim();
+        plot.HoldExpiresAt = DateTime.UtcNow.AddDays(dto.HoldDays); plot.UpdatedAt = DateTime.UtcNow;
+        var holdProject = await _db.JaminProjects.FirstOrDefaultAsync(p => p.Id == plot.ProjectId && p.CompanyId == plot.CompanyId, ct);
+        if (holdProject != null) await RecalculateInventoryAsync(holdProject, ct);
         await _db.SaveChangesAsync(ct);
         return Ok(ApiResponse<JaminPlotResponseDto>.SuccessResult(ToDto(plot), "Plot placed on hold."));
     }
@@ -130,7 +139,9 @@ public class JaminPlotsController : JaminTenantControllerBase
         var plot = await _db.JaminPlots.FirstOrDefaultAsync(p => p.Id == id && p.CompanyId == JaminCompanyId, ct);
         if (plot == null) return NotFound(ApiResponse<JaminPlotResponseDto>.FailureResult("Plot not found."));
         if (plot.Status != "Hold") return Conflict(ApiResponse<JaminPlotResponseDto>.FailureResult("Plot is not on hold."));
-        plot.Status = "Available"; plot.HeldByCustomerName = null; plot.HeldByCustomerPhone = null; plot.HoldExpiresAt = null;
+        plot.Status = "Available"; plot.HeldByCustomerId = null; plot.HeldByCustomerName = null; plot.HeldByCustomerPhone = null; plot.HoldByAgent = null; plot.HoldExpiresAt = null;
+        var releaseProject = await _db.JaminProjects.FirstOrDefaultAsync(p => p.Id == plot.ProjectId && p.CompanyId == plot.CompanyId, ct);
+        if (releaseProject != null) await RecalculateInventoryAsync(releaseProject, ct);
         plot.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
         return Ok(ApiResponse<JaminPlotResponseDto>.SuccessResult(ToDto(plot), "Plot hold released."));
@@ -153,14 +164,7 @@ public class JaminPlotsController : JaminTenantControllerBase
         if (project != null)
         {
             project.TotalPlots = Math.Max(0, project.TotalPlots - 1);
-            if (plot.Status == "Available")
-            {
-                project.AvailablePlots = Math.Max(0, project.AvailablePlots - 1);
-            }
-            else if (IsBooked(plot.Status))
-            {
-                project.BookedPlots = Math.Max(0, project.BookedPlots - 1);
-            }
+            if (project != null) await RecalculateInventoryAsync(project, ct, plot.Id);
             project.UpdatedAt = DateTime.UtcNow;
         }
 
@@ -173,10 +177,18 @@ public class JaminPlotsController : JaminTenantControllerBase
     {
         Id = p.Id, CompanyId = p.CompanyId, ProjectId = p.ProjectId, PlotNumber = p.PlotNumber,
         Dimensions = p.Dimensions, AreaSqFt = p.AreaSqFt, Facing = p.Facing, Status = p.Status,
-        Price = p.Price, HeldByCustomerName = p.HeldByCustomerName, HeldByCustomerPhone = p.HeldByCustomerPhone,
+        Price = p.Price, PricePerSqft = p.PricePerSqft, HeldByCustomerId = p.HeldByCustomerId, HeldByCustomerName = p.HeldByCustomerName, HeldByCustomerPhone = p.HeldByCustomerPhone, HoldByAgent = p.HoldByAgent,
         HoldExpiresAt = p.HoldExpiresAt, Notes = p.Notes, CreatedAt = p.CreatedAt, UpdatedAt = p.UpdatedAt
     };
 
     private static bool IsBooked(string status) => status is "Booked" or "Registered" or "Sold";
+
+    private async Task RecalculateInventoryAsync(JaminProject project, CancellationToken ct, int? excludedPlotId = null)
+    {
+        var plots = await _db.JaminPlots.Where(p => p.ProjectId == project.Id && p.CompanyId == project.CompanyId && (!excludedPlotId.HasValue || p.Id != excludedPlotId.Value)).ToListAsync(ct);
+        project.BookedPlots = plots.Count(p => IsBooked(p.Status));
+        project.AvailablePlots = plots.Count(p => p.Status == "Available");
+        project.UpdatedAt = DateTime.UtcNow;
+    }
 }
 

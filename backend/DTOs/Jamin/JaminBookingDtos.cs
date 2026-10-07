@@ -51,6 +51,8 @@ public class UpdateJaminBookingStatusDto
 {
     /// <summary>Token Paid | Agreement Signed | Registration Completed | Cancelled.</summary>
     public string Status { get; set; } = string.Empty;
+    public decimal? TokenAmountPaid { get; set; }
+    public string? PaymentMode { get; set; }
     public string? PaymentTerms { get; set; }
     public string? Notes { get; set; }
 }

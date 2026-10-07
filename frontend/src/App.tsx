@@ -429,7 +429,7 @@ export const App: React.FC = () => {
         <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
       ) : currentRoute === 'leads' ? (
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
-          <LeadsPage />
+          <LeadsPage onNavigate={navigate} />
         </ProtectedRoute>
       ) : currentRoute === 'assigned-leads' ? (
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>

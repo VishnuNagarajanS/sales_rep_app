@@ -147,7 +147,9 @@ using (var scope = app.Services.CreateScope())
                 @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""PreferredVisitDate"" VARCHAR(100);",
                 @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""PreferredTimeSlot"" VARCHAR(100);",
                 @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""AnythingWeShouldKnow"" VARCHAR(2000);",
-                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""WhatAreYouLookingFor"" VARCHAR(2000);"
+                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""WhatAreYouLookingFor"" VARCHAR(2000);",
+                // Allow storing full Base64 image data for project master layout blueprints
+                @"ALTER TABLE IF EXISTS jamin_projects ALTER COLUMN ""ImageUrl"" TYPE TEXT;"
             };
 
             foreach (var q in alterQueries)

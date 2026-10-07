@@ -41,9 +41,24 @@ const CAPACITY_OPTIONS = [
   'Not sure yet — help me decide'
 ];
 
-export const LeadsPage: React.FC = () => {
+interface LeadsPageProps {
+  onNavigate?: (route: string) => void;
+}
+
+export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
+
+  const handleNavigate = (route: string) => {
+    if (onNavigate) {
+      onNavigate(route);
+    } else {
+      sessionStorage.setItem('nexus_current_route', route);
+      const targetUrl = route === 'dashboard' ? '/' : `/${route}`;
+      window.history.pushState({ route }, '', targetUrl);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }
+  };
 
   const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2' || !tenant;
   const isJaminUser = isJamin;
@@ -66,6 +81,7 @@ export const LeadsPage: React.FC = () => {
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isConvertModalOpen, setIsConvertModalOpen] = useState(false);
+  const [drawerActiveTab, setDrawerActiveTab] = useState<'contact' | 'followups' | 'site_visits' | 'calls' | 'activity'>('contact');
 
   // CSV Import State
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -88,6 +104,8 @@ export const LeadsPage: React.FC = () => {
   const [jaminAgents, setJaminAgents] = useState<Array<{ id: string; name: string; email: string }>>([]);
   const [apiAgents, setApiAgents] = useState<Array<{ id: string; name: string; email: string }>>([]);
   const [jaminApiProjects, setJaminApiProjects] = useState<Array<{ id: string; name: string }>>([]);
+  const [apiSiteVisits, setApiSiteVisits] = useState<SiteVisit[]>([]);
+  const [apiFollowups, setApiFollowups] = useState<Followup[]>([]);
 
   const agentOptions = useMemo(() => {
     const list = isJamin ? jaminAgents : apiAgents;
@@ -230,6 +248,25 @@ export const LeadsPage: React.FC = () => {
           })));
         }
       }).catch(err => console.warn('Failed to load Jamin projects:', err));
+
+      const fetchJaminActivities = () => {
+        jaminApiService.getSiteVisits(true).then(visits => {
+          if (visits && visits.length > 0) {
+            setApiSiteVisits(visits);
+          }
+        }).catch(err => console.warn('Failed to load Jamin site visits in Leads:', err));
+
+        jaminApiService.getFollowups(true).then(fws => {
+          if (fws && fws.length > 0) {
+            setApiFollowups(fws);
+          }
+        }).catch(err => console.warn('Failed to load Jamin followups in Leads:', err));
+      };
+      fetchJaminActivities();
+      window.addEventListener('nexus_storage_updated', fetchJaminActivities);
+      return () => {
+        window.removeEventListener('nexus_storage_updated', fetchJaminActivities);
+      };
     } else {
       adminUserService.getUsers(tenant?.id || '1').then(users => {
         if (users && users.length > 0) {
@@ -320,12 +357,16 @@ export const LeadsPage: React.FC = () => {
     try {
       if (isJamin) {
         const liveLeads = await jaminApiService.getLeads(true);
-        if (liveLeads && liveLeads.length > 0) {
-          updated = liveLeads;
-        }
+        const convertedLeads = await jaminApiService.getLeads(true, undefined, 'Converted');
+        const localLeads = storageService.getLeads(tenant?.id) || [];
+        const leadMap = new Map<string, Lead>();
+        localLeads.forEach(l => leadMap.set(l.id, l));
+        (liveLeads || []).forEach(l => leadMap.set(l.id, l));
+        (convertedLeads || []).forEach(l => leadMap.set(l.id, l));
+        updated = Array.from(leadMap.values());
       } else {
         const res = await apiClient.get<any>(`/leads?tenantId=${effectiveCompanyId}`);
-        if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+        if (res && res.success && Array.isArray(res.data)) {
           updated = res.data.map((l: any) => ({
             id: String(l.id),
             companyId: tenant?.id || 't-ghl-01',
@@ -353,6 +394,26 @@ export const LeadsPage: React.FC = () => {
               investorType: l.investorType || '',
             }
           }));
+
+          const convertedRes = await apiClient.get<any>(`/leads?tenantId=${effectiveCompanyId}&status=Converted`);
+          if (convertedRes?.success && Array.isArray(convertedRes.data)) {
+            updated = [...updated, ...convertedRes.data.map((l: any) => ({
+              id: String(l.id),
+              companyId: tenant?.id || 't-ghl-01',
+              name: l.name,
+              phone: l.phone,
+              email: l.email || '',
+              location: l.location || '',
+              source: l.source || 'Website Inbound',
+              status: 'Converted' as const,
+              priority: l.priority || 'Medium',
+              assignedAgentId: l.assignedAgentId ? String(l.assignedAgentId) : '',
+              assignedAgentName: l.assignedAgentName || l.assignedAgent?.name || 'Unassigned',
+              notes: l.notes || '',
+              createdAt: l.createdAt ? new Date(l.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+              customFields: l.customFields || {},
+            }))];
+          }
         }
       }
     } catch (err) {
@@ -793,26 +854,65 @@ export const LeadsPage: React.FC = () => {
 
   const leadSiteVisits = useMemo(() => {
     if (!selectedLead) return [];
-    const visits = storageService.getSiteVisits(tenant?.id) || [];
+    const localVisits = storageService.getSiteVisits() || [];
+    const visitMap = new Map<string, SiteVisit>();
+    localVisits.forEach(v => visitMap.set(String(v.id), v));
+    apiSiteVisits.forEach(v => visitMap.set(String(v.id), v));
+    const allVisits = Array.from(visitMap.values());
+
     const cleanPhone = (selectedLead.phone || '').replace(/\D/g, '').slice(-10);
-    return visits.filter(
-      v =>
-        v.customerId === selectedLead.id ||
-        v.leadId === selectedLead.id ||
-        (cleanPhone && (v.customerPhone || '').replace(/\D/g, '').slice(-10) === cleanPhone)
-    );
-  }, [selectedLead, tenant?.id, isDetailDrawerOpen]);
+    const targetLeadId = String(selectedLead.id || '').replace('db-', '').replace('lead-', '').trim();
+    const targetName = (selectedLead.name || '').trim().toLowerCase();
+
+    return allVisits.filter(v => {
+      // 1. Phone match
+      const vPhone = (v.customerPhone || '').replace(/\D/g, '').slice(-10);
+      if (cleanPhone && vPhone && cleanPhone === vPhone) return true;
+
+      // 2. Direct ID match
+      if (v.customerId === selectedLead.id || v.leadId === selectedLead.id) return true;
+
+      // 3. Normalized ID match
+      const vLeadId = v.leadId ? String(v.leadId).replace('db-', '').replace('lead-', '').trim() : '';
+      const vCustId = v.customerId ? String(v.customerId).replace('db-', '').replace('lead-', '').trim() : '';
+      if (targetLeadId && (vLeadId === targetLeadId || vCustId === targetLeadId)) return true;
+
+      // 4. Name match
+      const vName = (v.customerName || '').trim().toLowerCase();
+      if (targetName && vName && targetName === vName) return true;
+
+      return false;
+    });
+  }, [selectedLead, apiSiteVisits, isDetailDrawerOpen]);
 
   const leadFollowups = useMemo(() => {
     if (!selectedLead) return [];
-    const all = storageService.getFollowups(tenant?.id) || [];
+    const local = storageService.getFollowups(tenant?.id) || [];
+    const followupMap = new Map<string, Followup>();
+    local.forEach(f => followupMap.set(String(f.id), f));
+    apiFollowups.forEach(f => followupMap.set(String(f.id), f));
+    const all = Array.from(followupMap.values());
+
     const cleanPhone = (selectedLead.phone || '').replace(/\D/g, '').slice(-10);
-    return all.filter(
-      f =>
-        f.contactId === selectedLead.id ||
-        (cleanPhone && (f.contactPhone || '').replace(/\D/g, '').slice(-10) === cleanPhone)
-    );
-  }, [selectedLead, tenant?.id, isDetailDrawerOpen]);
+    const targetLeadId = String(selectedLead.id || '').replace('db-', '').replace('lead-', '').trim();
+    const targetName = (selectedLead.name || '').trim().toLowerCase();
+
+    return all.filter(f => {
+      // 1. Direct ID match
+      if (f.contactId === selectedLead.id) return true;
+      // 2. Normalized ID match
+      const fContactId = f.contactId ? String(f.contactId).replace('db-', '').replace('lead-', '').trim() : '';
+      if (targetLeadId && fContactId === targetLeadId) return true;
+      // 3. Phone match
+      const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+      if (cleanPhone && fPhone && cleanPhone === fPhone) return true;
+      // 4. Name match
+      const fName = (f.contactName || '').trim().toLowerCase();
+      if (targetName && fName && targetName === fName) return true;
+
+      return false;
+    });
+  }, [selectedLead, tenant?.id, apiFollowups, isDetailDrawerOpen]);
 
   const leadConsultations = useMemo(() => {
     if (!selectedLead) return [];
@@ -916,6 +1016,8 @@ export const LeadsPage: React.FC = () => {
       }
     })();
 
+    const trimmedNotes = leadVisitNotes.trim();
+
     const newVisit: SiteVisit = {
       id: `sv-${Date.now()}`,
       companyId: tenant?.id || 't-jamin-02',
@@ -931,10 +1033,34 @@ export const LeadsPage: React.FC = () => {
       assignedAgentId: hostAg?.id || selectedLead.assignedAgentId || user?.id || '1',
       assignedAgentName: hostAg?.name || leadVisitHostAgent || user?.name || 'Agent',
       status: 'Scheduled',
-      outcomeNotes: leadVisitNotes,
+      outcomeNotes: trimmedNotes,
+      visitorNote: trimmedNotes,
     };
 
     storageService.saveSiteVisit(newVisit);
+
+    if (isJamin) {
+      jaminApiService.createSiteVisit({
+        companyId: tenant?.id || 't-jamin-02',
+        customerId: selectedLead.id,
+        customerName: selectedLead.name,
+        customerPhone: selectedLead.phone,
+        contactType: 'lead',
+        leadId: selectedLead.id,
+        projectName: leadVisitProject,
+        plotNumber: leadVisitPlot,
+        scheduledAt: dateFormatted,
+        assignedAgentId: hostAg?.id ? Number(hostAg.id) : undefined,
+        assignedAgentName: hostAg?.name || leadVisitHostAgent || user?.name || 'Agent',
+        status: 'Scheduled',
+        outcomeNotes: trimmedNotes,
+        visitorNote: trimmedNotes,
+      }).then(created => {
+        if (created) {
+          setApiSiteVisits(prev => [created, ...prev.filter(v => v.id !== created.id)]);
+        }
+      }).catch(err => console.warn('API site visit save skipped:', err));
+    }
 
     storageService.addAuditLog({
       id: `aud-${Date.now()}`,
@@ -949,6 +1075,7 @@ export const LeadsPage: React.FC = () => {
       details: `Scheduled site visit for LEAD: ${selectedLead.name} at ${leadVisitProject} (${leadVisitPlot}).`,
     });
 
+    window.dispatchEvent(new Event('nexus_storage_updated'));
     setIsLeadSiteVisitModalOpen(false);
     showToast(`✓ Site visit scheduled for ${selectedLead.name}!`);
   };
@@ -1273,39 +1400,36 @@ export const LeadsPage: React.FC = () => {
   const handleConfirmConvert = async () => {
     if (!selectedLead || !tenant) return;
 
-    // 1. Create / Update Customer in Customer 360
-    const newCustomer: Customer = {
-      id: `cust-${Date.now()}`,
-      companyId: tenant.id,
-      name: selectedLead.name,
-      phone: selectedLead.phone,
-      email: selectedLead.email || '',
-      status: 'Active',
-      assignedAgentId: selectedLead.assignedAgentId,
-      assignedAgentName: selectedLead.assignedAgentName,
-      location: selectedLead.location || '',
-      lastContacted: 'Today',
-      openDealsCount: 0,
-      totalValue: 0,
-      createdAt: new Date().toISOString().split('T')[0],
-      notes: `Converted from lead prospect. Original notes: ${selectedLead.notes || 'None'}`,
-      customFields: selectedLead.customFields,
-    };
-    storageService.saveCustomer(newCustomer);
+    const cleanId = String(selectedLead.id).replace('db-', '').replace('lead-', '').trim();
+    const conversionResult = !isNaN(Number(cleanId))
+      ? await jaminApiService.convertLead(cleanId, undefined, undefined, selectedLead.notes)
+      : { success: true, customerId: undefined };
 
-    // 2. Mark Lead as Converted locally
+    if (!conversionResult.success) {
+      showToast('Unable to convert this lead. No records were changed.');
+      return;
+    }
+
     const updatedLead: Lead = { ...selectedLead, status: 'Converted' };
     storageService.saveLead(updatedLead);
-    setLeads(prev => prev.map(l => l.id === selectedLead.id ? updatedLead : l));
-
-    // 3. Sync with Backend API
-    try {
-      const cleanId = String(selectedLead.id).replace('db-', '').replace('lead-', '').trim();
-      if (!isNaN(Number(cleanId))) {
-        await jaminApiService.convertLead(cleanId, undefined, undefined, selectedLead.notes);
-      }
-    } catch (err) {
-      console.warn('Backend convert sync notice:', err);
+    if (!conversionResult.customerId) {
+      storageService.saveCustomer({
+        id: `cust-${Date.now()}`,
+        companyId: tenant.id,
+        name: selectedLead.name,
+        phone: selectedLead.phone,
+        email: selectedLead.email || '',
+        status: 'Active',
+        assignedAgentId: selectedLead.assignedAgentId,
+        assignedAgentName: selectedLead.assignedAgentName,
+        location: selectedLead.location || '',
+        lastContacted: new Date().toISOString(),
+        openDealsCount: 0,
+        totalValue: 0,
+        createdAt: new Date().toISOString(),
+        notes: selectedLead.notes || '',
+        customFields: selectedLead.customFields,
+      });
     }
 
     showToast(`✓ Lead "${selectedLead.name}" converted to Customer successfully.`);
@@ -1618,6 +1742,7 @@ export const LeadsPage: React.FC = () => {
       icon: <ExternalLink size={14} className="leads-action-icon" />,
       onClick: l => {
         setSelectedLead(l);
+        setDrawerActiveTab('contact');
         setIsDetailDrawerOpen(true);
       },
     },
@@ -1673,6 +1798,7 @@ export const LeadsPage: React.FC = () => {
         rowActions={rowActions}
         onRowClick={l => {
           setSelectedLead(l);
+          setDrawerActiveTab('contact');
           setIsDetailDrawerOpen(true);
         }}
         searchPlaceholder="Search leads by name, phone, or location..."
@@ -1907,6 +2033,350 @@ export const LeadsPage: React.FC = () => {
             selectedLead.notes ||
             null;
 
+          // ══════════════════════════════════════════════════════════════════
+          //  JAMIN ONLY: Tabbed 360 Layout
+          // ══════════════════════════════════════════════════════════════════
+          if (isJamin) {
+            const jaminTabs = [
+              { id: 'contact' as const, label: 'Contact' },
+              { id: 'followups' as const, label: `Follow-ups (${leadFollowups.length})` },
+              { id: 'site_visits' as const, label: `Site Visits (${leadSiteVisits.length})` },
+              { id: 'calls' as const, label: 'Calls' },
+              { id: 'activity' as const, label: 'Activity' },
+            ];
+
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', margin: '-20px' }}>
+                {/* ── Lead banner: Assigned agent + convert button ── */}
+                <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border-base)', background: 'var(--bg-surface)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 700, letterSpacing: '0.06em' }}>Assigned Sales Executive</div>
+                    <div style={{ fontSize: '14px', fontWeight: 700, marginTop: 2, color: (!selectedLead.assignedAgentName || selectedLead.assignedAgentName === 'Unassigned' || selectedLead.assignedAgentName === 'Agent') ? 'var(--text-secondary)' : 'var(--text-primary)' }}>
+                      {(!selectedLead.assignedAgentName || selectedLead.assignedAgentName === 'Unassigned' || selectedLead.assignedAgentName === 'Agent') ? 'Not Assigned' : selectedLead.assignedAgentName}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <StatusChip status={selectedLead.status} size="sm" />
+                    {selectedLead.status !== 'Converted' && selectedLead.assignedAgentName && selectedLead.assignedAgentName !== 'Unassigned' && selectedLead.assignedAgentName !== 'Agent' && (
+                      <button type="button" onClick={() => handleStartConvert(selectedLead)} style={{ fontSize: '11px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: 4, backgroundColor: '#10b981', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer' }}>
+                        <Sparkles size={12} /> Convert
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* ── Tab bar ── */}
+                <div className="ld360-tab-bar">
+                  {jaminTabs.map(tab => (
+                    <button
+                      key={tab.id}
+                      className={`ld360-tab-btn${drawerActiveTab === tab.id ? ' is-active' : ''}`}
+                      onClick={() => setDrawerActiveTab(tab.id)}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* ── Tab content ── */}
+                <div className="ld360-tab-content">
+
+                  {/* CONTACT TAB */}
+                  {drawerActiveTab === 'contact' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      {/* Contact & Profile */}
+                      <div className="card lead-detail-card">
+                        <h4 className="lead-detail-title">Contact &amp; Profile</h4>
+                        <div className="lead-detail-grid">
+                          <div><span className="lead-detail-label">Full Name:</span><div className="lead-detail-value" style={{ fontWeight: 700 }}>{selectedLead.name}</div></div>
+                          <div><span className="lead-detail-label">Phone Number:</span><div className="lead-detail-value" style={{ fontWeight: 700, color: 'var(--primary-600)' }}>{selectedLead.phone}</div></div>
+                          <div><span className="lead-detail-label">Email:</span><div className="lead-detail-value">{selectedLead.email || '—'}</div></div>
+                          <div><span className="lead-detail-label">Location / City:</span><div className="lead-detail-value">{selectedLead.location || '—'}</div></div>
+                          <div><span className="lead-detail-label">Lead Source:</span><div className="lead-detail-value">{selectedLead.source || '—'}</div></div>
+                          <div><span className="lead-detail-label">Intake Date:</span><div className="lead-detail-value">{selectedLead.createdAt ? new Date(selectedLead.createdAt).toLocaleDateString() : '—'}</div></div>
+                          <div><span className="lead-detail-label">Priority:</span><div style={{ marginTop: 4 }}><StatusChip status={selectedLead.priority} size="sm" /></div></div>
+                        </div>
+                      </div>
+                      {/* Requirements */}
+                      <div className="card lead-detail-card">
+                        <h4 className="lead-detail-title">Requirements &amp; Preferences</h4>
+                        <div className="lead-detail-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+                          <div>
+                            <span className="lead-detail-label">Target Project:</span>
+                            <div className="lead-detail-value" style={{ fontWeight: 700, color: 'var(--primary-600)' }}>
+                              {selectedLead.targetDevelopment || selectedLead.customFields?.targetDevelopment || selectedLead.customFields?.project || '—'}
+                            </div>
+                          </div>
+                          <div>
+                            <span className="lead-detail-label">Budget Range:</span>
+                            <div className="lead-detail-value" style={{ fontWeight: 700, color: '#059669' }}>
+                              {selectedLead.customFields?.budgetRange || selectedLead.customFields?.budget || (selectedLead as any).budgetRange || selectedLead.budgetRange || '—'}
+                            </div>
+                          </div>
+                          <div>
+                            <span className="lead-detail-label">Ready to Register:</span>
+                            <div className="lead-detail-value">{selectedLead.customFields?.readyToRegister || (selectedLead as any).readyToRegister || '—'}</div>
+                          </div>
+                        </div>
+                        {userMessage && (
+                          <div style={{ marginTop: 14 }}>
+                            <div style={{ fontSize: '11px', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 6 }}>Message from Lead</div>
+                            <div className="lead-user-message-box"><div className="lead-user-message-text">{userMessage}</div></div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* FOLLOW-UPS TAB */}
+                  {drawerActiveTab === 'followups' && (
+                    <div className="card lead-detail-card">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                        <h4 className="lead-detail-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Calendar size={15} color="var(--primary-600)" /> Follow-ups ({leadFollowups.length})
+                        </h4>
+                        <button type="button" className="btn btn-sm btn-secondary" onClick={() => handleOpenJaminSchedule(selectedLead)} style={{ fontSize: '11px', padding: '3px 10px', fontWeight: 600, color: 'var(--primary-600)', borderColor: 'var(--primary-200, #fca5a5)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <Calendar size={12} /> {selectedLead.nextFollowupDate ? 'Reschedule' : '+ Schedule'}
+                        </button>
+                      </div>
+                      {selectedLead.nextFollowupDate && (
+                        <div style={{ padding: '10px 14px', borderRadius: 8, backgroundColor: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)', marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                          <div>
+                            <div style={{ fontSize: '11px', textTransform: 'uppercase', fontWeight: 700, color: '#dc2626' }}>Next Action</div>
+                            <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', marginTop: 2 }}>
+                              {selectedLead.nextFollowupType && <span style={{ marginRight: 6 }}>{selectedLead.nextFollowupType === 'call' ? '📞' : selectedLead.nextFollowupType === 'whatsapp' ? '💬' : '🤝'} •</span>}
+                              {selectedLead.nextFollowupDate}
+                            </div>
+                          </div>
+                          <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: 12, backgroundColor: '#fee2e2', color: '#991b1b', fontWeight: 700 }}>Action Due</span>
+                        </div>
+                      )}
+                      {leadFollowups.length === 0 && !selectedLead.nextFollowupDate ? (
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '20px', textAlign: 'center', backgroundColor: 'var(--bg-surface)', borderRadius: 8, border: '1px dashed var(--border-base)' }}>
+                          No follow-ups scheduled yet. Click "+ Schedule" to set a task.
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {leadFollowups.map(f => (
+                            <div
+                              key={f.id}
+                              onClick={() => {
+                                sessionStorage.setItem('target_followup_id', f.id);
+                                sessionStorage.setItem('target_followup_contact', selectedLead.name);
+                                setIsDetailDrawerOpen(false);
+                                handleNavigate('followups');
+                              }}
+                              className="ld360-clickable-card"
+                              title="Click to view and manage in Follow-ups"
+                              style={{
+                                padding: '12px 14px',
+                                borderRadius: 8,
+                                background: 'var(--bg-card-subtle, #f9fafb)',
+                                border: '1px solid var(--border-base)',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                gap: 10,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontWeight: 600, fontSize: '12px', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                  <span>{f.followupType === 'whatsapp' ? '💬 WhatsApp' : f.followupType === 'meeting' ? '🤝 Meeting' : '📞 Phone Call'}</span>
+                                  <span style={{ color: 'var(--text-muted)' }}>•</span>
+                                  <span>{f.scheduledAt || `${f.scheduledDate || ''} ${f.scheduledTime || ''}`}</span>
+                                </div>
+                                {f.notes && <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: 3 }}>{f.notes}</div>}
+                                {f.assignedAgentName && <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: 2 }}>Agent: <strong>{f.assignedAgentName}</strong></div>}
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                                <StatusChip status={f.status} size="sm" />
+                                <span style={{ fontSize: '11px', color: 'var(--primary-600)', display: 'inline-flex', alignItems: 'center', gap: 2, fontWeight: 600, marginTop: 4 }}>
+                                  Open <ExternalLink size={10} />
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* SITE VISITS TAB */}
+                  {drawerActiveTab === 'site_visits' && (
+                    <div className="card lead-detail-card">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                        <h4 className="lead-detail-title" style={{ margin: 0 }}>Site Visits ({leadSiteVisits.length})</h4>
+                        <button type="button" className="btn btn-sm btn-secondary" onClick={() => handleOpenLeadSiteVisitModal(selectedLead)} style={{ fontSize: '11px', padding: '3px 9px', color: '#dc2626', borderColor: '#fca5a5' }}>
+                          + Book Site Visit
+                        </button>
+                      </div>
+                      {leadSiteVisits.length === 0 ? (
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '20px', textAlign: 'center', backgroundColor: 'var(--bg-surface)', borderRadius: 8, border: '1px dashed var(--border-base)' }}>
+                          No site visits booked yet. Click "+ Book Site Visit" to schedule one.
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {leadSiteVisits.map(sv => (
+                            <div
+                              key={sv.id}
+                              onClick={() => {
+                                sessionStorage.setItem('target_site_visit_id', sv.id);
+                                sessionStorage.setItem('target_site_visit_lead', selectedLead.name);
+                                setIsDetailDrawerOpen(false);
+                                handleNavigate('site-visits');
+                              }}
+                              className="ld360-clickable-card"
+                              title="Click to view and manage in Site Visits"
+                              style={{
+                                padding: '12px 14px',
+                                borderRadius: 8,
+                                background: 'var(--bg-card-subtle, #f9fafb)',
+                                border: '1px solid var(--border-base)',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                    <span style={{ fontWeight: 700, fontSize: '13px', color: 'var(--text-primary)' }}>
+                                      {sv.projectName || 'Jamin Development'}
+                                    </span>
+                                    <span style={{ color: '#dc2626', fontWeight: 600, fontSize: '12px' }}>
+                                      — {sv.plotNumber || 'Layout Tour'}
+                                    </span>
+                                  </div>
+                                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: 4 }}>
+                                    📅 <strong>{sv.scheduledAt}</strong>
+                                  </div>
+                                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: 2 }}>
+                                    🧑‍💼 Host: <strong>{sv.assignedAgentName || 'Unassigned'}</strong>
+                                  </div>
+                                  {(sv.outcomeNotes || sv.visitorNote) && (
+                                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: 6, padding: '6px 10px', background: 'var(--bg-surface)', borderRadius: 6, fontStyle: 'italic', borderLeft: '3px solid #dc2626' }}>
+                                      "{sv.outcomeNotes || sv.visitorNote}"
+                                    </div>
+                                  )}
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+                                  <StatusChip status={sv.status} size="sm" />
+                                  <span style={{ fontSize: '11px', color: '#dc2626', display: 'inline-flex', alignItems: 'center', gap: 3, fontWeight: 600, marginTop: 4 }}>
+                                    Open Visit <ExternalLink size={11} />
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* CALLS TAB */}
+                  {drawerActiveTab === 'calls' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      <LeadDetailDrawerContent
+                        contactName={selectedLead.name}
+                        contactPhone={selectedLead.phone}
+                        contactId={selectedLead.id}
+                        contactType="lead"
+                        tenantId={tenant?.id}
+                        tenantName={tenant?.name}
+                        onCall={() => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id)}
+                        sectionsOnly={['callRecordings']}
+                      />
+                      <div style={{ textAlign: 'right', marginTop: 4 }}>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-secondary"
+                          style={{ fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                          onClick={() => {
+                            setIsDetailDrawerOpen(false);
+                            handleNavigate('call-history');
+                          }}
+                        >
+                          <Phone size={12} /> Open Call History <ExternalLink size={11} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ACTIVITY TAB */}
+                  {drawerActiveTab === 'activity' && (() => {
+                    const allLogs = storageService.getAuditLogs(tenant?.id) || [];
+                    const targetLeadId = selectedLead.id;
+                    const phoneDigits = (selectedLead.phone || '').replace(/\D/g, '').slice(-10);
+                    const targetName = (selectedLead.name || '').toLowerCase();
+                    const leadLogs = allLogs.filter(l => {
+                      if (targetLeadId && (l.entityId === targetLeadId || l.entityId === String(targetLeadId))) return true;
+                      if (l.details && phoneDigits && l.details.includes(phoneDigits)) return true;
+                      if (l.details && targetName && l.details.toLowerCase().includes(targetName)) return true;
+                      return false;
+                    });
+                    return (
+                      <div className="card lead-detail-card">
+                        <h4 className="lead-detail-title" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <History size={16} color="var(--primary-600)" /> Activity &amp; Audit Timeline ({leadLogs.length})
+                        </h4>
+                        {leadLogs.length === 0 ? (
+                          <div style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '20px', backgroundColor: 'var(--bg-surface)', borderRadius: 8, textAlign: 'center', border: '1px dashed var(--border-base)' }}>
+                            No audit activities recorded for this lead yet.
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', position: 'relative', paddingLeft: 16, borderLeft: '2px solid var(--border-base)', gap: 12, marginLeft: 6 }}>
+                            {leadLogs.map((log, idx) => {
+                              let formattedTime = log.timestamp || '';
+                              if (formattedTime) {
+                                const d = new Date(formattedTime);
+                                if (!isNaN(d.getTime())) formattedTime = d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
+                              }
+                              return (
+                                <div key={log.id || idx} style={{ position: 'relative', backgroundColor: 'var(--bg-surface, #ffffff)', border: '1px solid var(--border-base)', borderRadius: 6, padding: '8px 12px' }}>
+                                  <div style={{ position: 'absolute', left: -22, top: 12, width: 10, height: 10, borderRadius: '50%', backgroundColor: log.action.includes('DELETE') ? '#ef4444' : log.action.includes('CREATE') ? '#10b981' : 'var(--primary-600)', border: '2px solid #ffffff', boxShadow: '0 0 0 1px var(--border-base)' }} />
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                      <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 4, backgroundColor: log.action.includes('DELETE') ? '#fee2e2' : log.action.includes('CREATE') ? '#dcfce7' : '#e0e7ff', color: log.action.includes('DELETE') ? '#b91c1c' : log.action.includes('CREATE') ? '#15803d' : '#4338ca', textTransform: 'uppercase' }}>
+                                        {log.action.replace(/_/g, ' ')}
+                                      </span>
+                                      <span style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                                        <UserIcon size={10} /> <strong>{log.actorName || log.actorEmail || 'System'}</strong>
+                                      </span>
+                                    </div>
+                                    <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>{formattedTime}</span>
+                                  </div>
+                                  {log.details && <div style={{ fontSize: 12, color: 'var(--text-primary)', marginTop: 4, lineHeight: 1.35 }}>{log.details}</div>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {leadLogs.length > 0 && (
+                          <div style={{ textAlign: 'right', marginTop: 12 }}>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-secondary"
+                              style={{ fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                              onClick={() => {
+                                setIsDetailDrawerOpen(false);
+                                handleNavigate(isAdmin ? 'admin-audit' : 'company-audit');
+                              }}
+                            >
+                              <History size={12} /> Open Audit Logs <ExternalLink size={11} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                </div>
+              </div>
+            );
+          }
+          // ══════════════════════════════════════════════════════════════════
+          //  END JAMIN TABBED LAYOUT — non-Jamin continues below
+          // ══════════════════════════════════════════════════════════════════
+
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {/* ── 1. Quick Info Banner (Assigned Agent & Quick Actions) ── */}
@@ -1916,9 +2386,11 @@ export const LeadsPage: React.FC = () => {
                   <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 700 }}>
                     Assigned Sales Executive
                   </div>
-                  <div className="lead-assigned-note" style={{ margin: 0, marginTop: 2, fontSize: '14px', fontWeight: 700,
+                  <div className="lead-assigned-note" style={{
+                    margin: 0, marginTop: 2, fontSize: '14px', fontWeight: 700,
                     color: (!selectedLead.assignedAgentName || selectedLead.assignedAgentName === 'Unassigned' || selectedLead.assignedAgentName === 'Agent')
-                      ? 'var(--text-secondary)' : 'var(--text-primary)' }}>
+                      ? 'var(--text-secondary)' : 'var(--text-primary)'
+                  }}>
                     {(!selectedLead.assignedAgentName || selectedLead.assignedAgentName === 'Unassigned' || selectedLead.assignedAgentName === 'Agent')
                       ? 'Not Assigned'
                       : selectedLead.assignedAgentName}
@@ -1931,28 +2403,28 @@ export const LeadsPage: React.FC = () => {
                     selectedLead.assignedAgentName &&
                     selectedLead.assignedAgentName !== 'Unassigned' &&
                     selectedLead.assignedAgentName !== 'Agent' && (
-                    <button
-                      type="button"
-                      className="btn btn-sm"
-                      onClick={() => handleStartConvert(selectedLead)}
-                      style={{
-                        fontSize: '11px',
-                        padding: '4px 10px',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        backgroundColor: '#10b981',
-                        color: '#ffffff',
-                        border: 'none',
-                        borderRadius: 6,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                      }}
-                      title="Convert this lead into an active Customer record"
-                    >
-                      <Sparkles size={12} /> Convert to Customer
-                    </button>
-                  )}
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => handleStartConvert(selectedLead)}
+                        style={{
+                          fontSize: '11px',
+                          padding: '4px 10px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          backgroundColor: '#10b981',
+                          color: '#ffffff',
+                          border: 'none',
+                          borderRadius: 6,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                        }}
+                        title="Convert this lead into an active Customer record"
+                      >
+                        <Sparkles size={12} /> Convert to Customer
+                      </button>
+                    )}
                 </div>
               </div>
 
@@ -2346,9 +2818,9 @@ export const LeadsPage: React.FC = () => {
                             <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: 2 }}>
                               Slot: <strong>{sv.scheduledAt}</strong> • Host: {sv.assignedAgentName}
                             </div>
-                            {sv.outcomeNotes && (
+                            {(sv.outcomeNotes || sv.visitorNote) && (
                               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: 3, fontStyle: 'italic' }}>
-                                "{sv.outcomeNotes}"
+                                "{sv.outcomeNotes || sv.visitorNote}"
                               </div>
                             )}
                           </div>
@@ -3225,36 +3697,9 @@ export const LeadsPage: React.FC = () => {
             )}
           </div>
 
-          {/* Quick Presets */}
-          <div>
-            <label className="form-label" style={{ marginBottom: 6 }}>Quick Date Presets</label>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setQuickDatePreset(1)}
-                style={{ fontSize: '12px', padding: '4px 10px' }}
-              >
-                Tomorrow
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setQuickDatePreset(2)}
-                style={{ fontSize: '12px', padding: '4px 10px' }}
-              >
-                In 2 Days
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setQuickDatePreset(7)}
-                style={{ fontSize: '12px', padding: '4px 10px' }}
-              >
-                In 1 Week
-              </button>
-            </div>
-          </div>
+
+
+
 
           {/* Date & Time Grid */}
           <div className="lead-form-grid-2">
@@ -3470,13 +3915,13 @@ export const LeadsPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Logistics / Pickup Notes</label>
+              <label className="form-label">Visit Notes / Requirements</label>
               <textarea
                 className="form-textarea"
                 rows={2}
                 value={leadVisitNotes}
                 onChange={e => setLeadVisitNotes(e.target.value)}
-                placeholder="e.g. Metro pickup required, visiting with family..."
+                placeholder="e.g. Metro pickup required, visiting with family, visit reason..."
               />
             </div>
 

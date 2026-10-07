@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Calendar, Plus, CheckCircle2, Phone, RefreshCw, User, Building2, Lock } from 'lucide-react';
+import { Calendar, Plus, CheckCircle2, Phone, RefreshCw, User, Building2, Lock, Edit } from 'lucide-react';
 import { SiteVisit, Lead, Customer } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
@@ -10,6 +10,7 @@ import { jaminApiService } from '../../services/jaminApiService';
 import { storageService } from '../../services/storageService';
 import { getCustomers } from '../../services/ghlApiService';
 import './SiteVisitsPage.css';
+
 const TIME_SLOTS = [
   'Morning · 9–11 am',
   'Midday · 11 am–1 pm',
@@ -18,7 +19,7 @@ const TIME_SLOTS = [
 ];
 
 export const SiteVisitsPage: React.FC = () => {
-  const { user } = useAuth();
+  const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
 
   const [siteVisits, setSiteVisits] = useState<SiteVisit[]>([]);
@@ -31,6 +32,20 @@ export const SiteVisitsPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+
+  // Unified Manage Site Visit modal state (Status change, Reschedule, Complete, Cancel)
+  const [isManageModalOpen, setIsManageModalOpen] = useState(false);
+  const [managingVisit, setManagingVisit] = useState<SiteVisit | null>(null);
+  const [manageStatus, setManageStatus] = useState<string>('');
+  const [manageVisitDate, setManageVisitDate] = useState('');
+  const [manageVisitTimeSlot, setManageVisitTimeSlot] = useState(TIME_SLOTS[0]);
+  const [manageProjectId, setManageProjectId] = useState<string>('');
+  const [managePlotId, setManagePlotId] = useState<string>('');
+  const [manageFilteredPlots, setManageFilteredPlots] = useState<any[]>([]);
+  const [manageHostAgentId, setManageHostAgentId] = useState<number>(0);
+  const [manageHostAgentName, setManageHostAgentName] = useState('');
+  const [manageNote, setManageNote] = useState('');
+  const [isSubmittingManage, setIsSubmittingManage] = useState(false);
 
   // Form state
   const [visitorType, setVisitorType] = useState<'lead' | 'customer' | 'new'>('lead');
@@ -245,27 +260,12 @@ export const SiteVisitsPage: React.FC = () => {
       };
 
       const created = await jaminApiService.scheduleSiteVisit(payload);
+      if (!created) {
+        throw new Error('The site visit could not be saved. Please try again.');
+      }
 
       // Save locally to storageService to ensure immediate linkage
-      const newVisit: SiteVisit = created || {
-        id: `sv-${Date.now()}`,
-        companyId: tenantId,
-        leadId: cleanLeadId,
-        customerId: cleanCustomerId || cleanLeadId || '',
-        contactType,
-        customerName: customerName.trim(),
-        customerPhone: customerPhone.trim(),
-        projectId: selectedProjectId,
-        projectName: project?.name ?? '',
-        plotId: selectedPlotId,
-        plotNumber: plot?.plotNumber ?? 'General Project Tour',
-        scheduledAt: dateFormatted,
-        assignedAgentId: String(hostAgentId),
-        assignedAgentName: hostAgentName,
-        status: 'Scheduled',
-        visitorNote: notes.trim() || undefined,
-      };
-      storageService.saveSiteVisit(newVisit);
+      storageService.saveSiteVisit(created);
 
       // If linked to a lead, log in lead timeline/notes
       if (cleanLeadId) {
@@ -297,14 +297,200 @@ export const SiteVisitsPage: React.FC = () => {
     }
   };
 
-  // ── Row actions ────────────────────────────────────────────────────────────
-  const handleConfirmVisit = async (sv: SiteVisit) => {
-    await jaminApiService.confirmSiteVisit(sv.id);
-    await loadAll();
+  // ── Unified Manage Site Visit Handlers ─────────────────────────────────────
+  const handleOpenManageModal = (sv: SiteVisit) => {
+    setManagingVisit(sv);
+
+    let parsedDate = '';
+    let parsedSlot = TIME_SLOTS[0];
+
+    if (sv.scheduledAt) {
+      const parts = sv.scheduledAt.split(/[·•]/).map(s => s.trim());
+      if (parts[0] && /^\d{4}-\d{2}-\d{2}$/.test(parts[0])) {
+        parsedDate = parts[0];
+      } else if (parts[0]) {
+        const d = new Date(parts[0]);
+        if (!isNaN(d.getTime())) {
+          parsedDate = d.toISOString().split('T')[0];
+        }
+      }
+
+      const rest = parts.slice(1).join(' ');
+      const matched = TIME_SLOTS.find(slot =>
+        rest.toLowerCase().includes(slot.toLowerCase().split(/[·•]/)[0].trim().toLowerCase())
+      );
+      if (matched) {
+        parsedSlot = matched;
+      }
+    }
+
+    if (!parsedDate) {
+      parsedDate = new Date().toISOString().split('T')[0];
+    }
+
+    setManageVisitDate(parsedDate);
+    setManageVisitTimeSlot(parsedSlot);
+
+    const projId = sv.projectId
+      ? String(sv.projectId)
+      : (projects.find(p => p.name === sv.projectName)?.id
+        ? String(projects.find(p => p.name === sv.projectName).id)
+        : '');
+    setManageProjectId(projId);
+
+    if (projId) {
+      const matchedPlots = plots.filter(p => String(p.projectId) === String(projId));
+      setManageFilteredPlots(matchedPlots);
+      const plt = matchedPlots.find(
+        p => String(p.id) === String(sv.plotId) || p.plotNumber === sv.plotNumber
+      );
+      setManagePlotId(plt ? String(plt.id) : '');
+    } else {
+      setManageFilteredPlots([]);
+      setManagePlotId('');
+    }
+
+    const agId =
+      Number(sv.assignedAgentId) ||
+      (agents.find(a => a.name === sv.assignedAgentName)?.id ?? 0);
+    setManageHostAgentId(agId);
+    setManageHostAgentName(sv.assignedAgentName || '');
+
+    // Default status: nothing selected initially, forcing user to choose
+    setManageStatus('');
+
+    setManageNote(sv.outcomeNotes || sv.visitorNote || '');
+    setIsManageModalOpen(true);
   };
 
-  const handleMarkComplete = async (sv: SiteVisit) => {
-    await jaminApiService.completeSiteVisit(sv.id, 'Site visit completed.');
+  // Auto-open target site visit if redirected from Leads 360 drawer
+  useEffect(() => {
+    const targetId = sessionStorage.getItem('target_site_visit_id');
+    if (targetId && siteVisits.length > 0) {
+      sessionStorage.removeItem('target_site_visit_id');
+      sessionStorage.removeItem('target_site_visit_lead');
+      const found = siteVisits.find(v => v.id === targetId || String(v.id) === String(targetId));
+      if (found) {
+        handleOpenManageModal(found);
+      }
+    }
+  }, [siteVisits]);
+
+  const handleManageProjectChange = (projId: string) => {
+    setManageProjectId(projId);
+    setManagePlotId('');
+    if (!projId) {
+      setManageFilteredPlots([]);
+      return;
+    }
+    const matching = plots.filter(p => String(p.projectId) === String(projId));
+    setManageFilteredPlots(matching);
+  };
+
+  const handleSaveManageVisit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!managingVisit || !manageStatus) return;
+    setIsSubmittingManage(true);
+
+    try {
+      const trimmedNote = manageNote.trim();
+      const isRescheduled = manageStatus === 'Rescheduled';
+
+      let formattedSlot = managingVisit.scheduledAt;
+      if (isRescheduled) {
+        try {
+          const [y, m, d] = manageVisitDate.split('-');
+          const dateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+          formattedSlot = `${dateObj.toLocaleDateString('en-US', {
+            weekday: 'short',
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+          })} • ${manageVisitTimeSlot}`;
+        } catch {
+          formattedSlot = `${manageVisitDate} • ${manageVisitTimeSlot}`;
+        }
+      }
+
+      const project = projects.find(p => String(p.id) === String(manageProjectId));
+      const plot = manageFilteredPlots.find(p => String(p.id) === String(managePlotId));
+
+      const payload: any = {
+        status: manageStatus,
+        visitorNote: trimmedNote,
+        outcomeNotes: trimmedNote,
+      };
+
+      if (isRescheduled) {
+        payload.scheduledAt = formattedSlot;
+        if (manageProjectId) payload.projectId = Number(manageProjectId);
+        if (project?.name) payload.projectName = project.name;
+        if (managePlotId) payload.plotId = Number(managePlotId);
+        if (plot?.plotNumber) payload.plotNumber = plot.plotNumber;
+        if (manageHostAgentId) payload.assignedAgentId = manageHostAgentId;
+        if (manageHostAgentName) payload.assignedAgentName = manageHostAgentName;
+      }
+
+      const updated = await jaminApiService.updateSiteVisit(managingVisit.id, payload);
+      if (!updated) {
+        throw new Error('The site visit could not be updated. Please try again.');
+      }
+
+      const updatedVisit: SiteVisit = {
+        ...managingVisit,
+        status: manageStatus as any,
+        scheduledAt: formattedSlot,
+        projectId: isRescheduled ? (manageProjectId || managingVisit.projectId) : managingVisit.projectId,
+        projectName: isRescheduled ? (project?.name || managingVisit.projectName) : managingVisit.projectName,
+        plotId: isRescheduled ? (managePlotId || managingVisit.plotId) : managingVisit.plotId,
+        plotNumber: isRescheduled ? (plot?.plotNumber || (managePlotId ? '' : managingVisit.plotNumber)) : managingVisit.plotNumber,
+        assignedAgentId: isRescheduled ? String(manageHostAgentId || managingVisit.assignedAgentId) : managingVisit.assignedAgentId,
+        assignedAgentName: isRescheduled ? (manageHostAgentName || managingVisit.assignedAgentName) : managingVisit.assignedAgentName,
+        visitorNote: trimmedNote,
+        outcomeNotes: trimmedNote,
+      };
+      storageService.saveSiteVisit(updatedVisit);
+
+      // If linked to a lead, log in lead timeline/notes
+      if (managingVisit.leadId) {
+        const matchingLead = leads.find(l => l.id === managingVisit.leadId);
+        if (matchingLead) {
+          const timestamp = new Date().toLocaleDateString();
+          storageService.saveLead({
+            ...matchingLead,
+            notes: `${matchingLead.notes ? matchingLead.notes + '\n\n' : ''}[${timestamp}] Site Visit Status: ${manageStatus}${isRescheduled ? ` (New slot: ${formattedSlot})` : ''} — ${trimmedNote || 'Updated'}`,
+          });
+        }
+      }
+
+      storageService.addAuditLog({
+        id: `aud-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        actorName: user?.name || 'Agent',
+        actorEmail: user?.email || 'agent@jaminbazaar.com',
+        action: isRescheduled ? 'SITE_VISIT_RESCHEDULED' : `SITE_VISIT_${manageStatus.toUpperCase()}`,
+        entityType: 'SiteVisit',
+        entityId: String(managingVisit.id),
+        companyId: tenant?.id,
+        companyName: tenant?.name,
+        details: isRescheduled
+          ? `Rescheduled visit for ${managingVisit.customerName} to ${formattedSlot}. Note: ${trimmedNote}`
+          : `Updated visit status to ${manageStatus} for ${managingVisit.customerName}. Note: ${trimmedNote}`,
+      });
+
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+      setIsManageModalOpen(false);
+      await loadAll();
+    } catch (err) {
+      console.error('Failed to update visit:', err);
+      alert('Failed to update visit. Please try again.');
+    } finally {
+      setIsSubmittingManage(false);
+    }
+  };
+
+  const handleConfirmVisit = async (sv: SiteVisit) => {
+    await jaminApiService.confirmSiteVisit(sv.id);
     await loadAll();
   };
 
@@ -315,10 +501,7 @@ export const SiteVisitsPage: React.FC = () => {
       header: 'Scheduled Slot',
       sortable: true,
       render: sv => (
-        <div>
-          <div className="sitevisit-slot-title">{sv.scheduledAt}</div>
-          <div className="sitevisit-slot-id">ID #{sv.id}</div>
-        </div>
+        <div className="sitevisit-slot-title">{sv.scheduledAt}</div>
       ),
     },
     {
@@ -371,9 +554,24 @@ export const SiteVisitsPage: React.FC = () => {
     },
     {
       key: 'status',
-      header: 'Visit Status',
+      header: 'Visit Status & Notes',
       sortable: true,
-      render: sv => <StatusChip status={sv.status} size="sm" />,
+      render: sv => {
+        const note = sv.outcomeNotes || sv.visitorNote || '';
+        return (
+          <div className="sitevisit-status-cell">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <StatusChip status={sv.status} size="sm" />
+            </div>
+
+            {note ? (
+              <div className="sitevisit-note-text" title={note}>
+                "{note}"
+              </div>
+            ) : null}
+          </div>
+        );
+      },
     },
   ];
 
@@ -385,15 +583,14 @@ export const SiteVisitsPage: React.FC = () => {
     },
     {
       label: 'Confirm Visit',
-      icon: <CheckCircle2 size={14} color="#d97706" style={{ marginRight: 6 }} />,
+      icon: <CheckCircle2 size={14} color="#059669" style={{ marginRight: 6 }} />,
       hidden: sv => sv.status !== 'Pending' && sv.status !== 'Requested',
       onClick: sv => handleConfirmVisit(sv),
     },
     {
-      label: 'Mark Completed',
-      icon: <CheckCircle2 size={14} color="#2563eb" style={{ marginRight: 6 }} />,
-      hidden: sv => sv.status === 'Completed',
-      onClick: sv => handleMarkComplete(sv),
+      label: 'Update Status / Reschedule',
+      icon: <Edit size={14} color="#4f46e5" style={{ marginRight: 6 }} />,
+      onClick: sv => handleOpenManageModal(sv),
     },
   ];
 
@@ -654,13 +851,13 @@ export const SiteVisitsPage: React.FC = () => {
 
           {/* Notes */}
           <div className="form-group">
-            <label className="form-label">Logistics / Pickup Notes</label>
+            <label className="form-label">Visit Notes / Requirements</label>
             <textarea
               className="form-textarea"
               rows={2}
               value={notes}
               onChange={e => setNotes(e.target.value)}
-              placeholder="e.g. Needs cab pickup from metro station, visiting with spouse..."
+              placeholder="e.g. Needs cab pickup from metro station, visiting with spouse, interested in corner plot..."
             />
           </div>
 
@@ -675,6 +872,295 @@ export const SiteVisitsPage: React.FC = () => {
             </button>
             <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
               {isSubmitting ? 'Scheduling...' : 'Confirm Schedule'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ── Unified Manage Site Visit Modal ──────────────────────────────── */}
+      <Modal
+        isOpen={isManageModalOpen && !!managingVisit}
+        onClose={() => setIsManageModalOpen(false)}
+        title={
+          manageStatus === 'Rescheduled'
+            ? `Reschedule Site Visit: ${managingVisit?.customerName || ''}`
+            : manageStatus === 'Completed'
+              ? `Complete Site Visit: ${managingVisit?.customerName || ''}`
+              : manageStatus === 'Cancelled'
+                ? `Cancel Site Visit: ${managingVisit?.customerName || ''}`
+                : `Update Visit: ${managingVisit?.customerName || ''}`
+        }
+        subtitle="Update walkthrough status, reschedule timing, or log outcome & reason"
+        size="md"
+      >
+        <form onSubmit={handleSaveManageVisit} className="sitevisit-form">
+          {/* Visit Summary Card */}
+          <div className="sitevisit-summary-card">
+            <div className="sitevisit-summary-row">
+              <span className="sitevisit-summary-label">Client:</span>
+              <span className="sitevisit-summary-val">
+                {managingVisit?.customerName} ({managingVisit?.customerPhone})
+              </span>
+            </div>
+            <div className="sitevisit-summary-row">
+              <span className="sitevisit-summary-label">Project / Plot:</span>
+              <span className="sitevisit-summary-val">
+                {managingVisit?.projectName || 'Project Tour'} {managingVisit?.plotNumber ? `· Plot ${managingVisit.plotNumber}` : ''}
+              </span>
+            </div>
+            <div className="sitevisit-summary-row">
+              <span className="sitevisit-summary-label">Current Slot:</span>
+              <span className="sitevisit-summary-val" style={{ color: '#2563eb', fontWeight: 700 }}>
+                {managingVisit?.scheduledAt}
+              </span>
+            </div>
+            <div className="sitevisit-summary-row">
+              <span className="sitevisit-summary-label">Current Status:</span>
+              <span className="sitevisit-summary-val">
+                <StatusChip status={managingVisit?.status || 'Scheduled'} size="sm" />
+              </span>
+            </div>
+          </div>
+
+          {/* 1. FIRST: Status Dropdown (NO "Scheduled" option!) */}
+          <div className="form-group">
+            <label className="form-label" style={{ fontWeight: 700, fontSize: '13px' }}>
+              Select New Visit Status *
+            </label>
+            <select
+              className="form-select"
+              required
+              value={manageStatus}
+              onChange={e => setManageStatus(e.target.value)}
+              style={{ fontWeight: 600, fontSize: '13px', borderColor: 'var(--primary-500)' }}
+            >
+              <option value="">-- Select Status to Proceed --</option>
+              <option value="Rescheduled">Rescheduled</option>
+              <option value="Completed">Completed</option>
+              <option value="Cancelled">Cancelled</option>
+            </select>
+          </div>
+
+          {!manageStatus && (
+            <div
+              style={{
+                padding: '16px 20px',
+                backgroundColor: 'var(--bg-surface-hover, #f8fafc)',
+                borderRadius: '8px',
+                border: '1px dashed var(--border-base, #cbd5e1)',
+                textAlign: 'center',
+                color: 'var(--text-secondary, #64748b)',
+                fontSize: '13px',
+                margin: '10px 0',
+              }}
+            >
+              Please select a status above to proceed.
+            </div>
+          )}
+
+          {/* 2. DYNAMIC FORM SECTIONS BASED ON STATUS */}
+
+          {/* ── CASE A: RESCHEDULED ── */}
+          {manageStatus === 'Rescheduled' && (
+            <>
+              <div className="sitevisit-manage-banner rescheduled">
+                <span>📅 <strong>Rescheduling Visit:</strong> Choose the new inspection date, time slot, and escort agent below.</span>
+              </div>
+
+              {/* Date & Time Slot Grid */}
+              <div className="sitevisit-form-grid-2">
+                <div className="form-group">
+                  <label className="form-label">New Visit Date *</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    required
+                    min={new Date().toISOString().split('T')[0]}
+                    value={manageVisitDate}
+                    onChange={e => setManageVisitDate(e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">New Time Slot *</label>
+                  <select
+                    className="form-select"
+                    required
+                    value={manageVisitTimeSlot}
+                    onChange={e => setManageVisitTimeSlot(e.target.value)}
+                  >
+                    {TIME_SLOTS.map(slot => (
+                      <option key={slot} value={slot}>{slot}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Project & Plot Selection Grid */}
+              <div className="sitevisit-form-grid-2">
+                <div className="form-group">
+                  <label className="form-label">Development Project</label>
+                  <select
+                    className="form-select"
+                    value={manageProjectId}
+                    onChange={e => handleManageProjectChange(e.target.value)}
+                  >
+                    <option value="">-- Keep Existing Project --</option>
+                    {projects.map(p => (
+                      <option key={p.id} value={String(p.id)}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Target Plot (Optional)</label>
+                  <select
+                    className="form-select"
+                    value={managePlotId}
+                    onChange={e => setManagePlotId(e.target.value)}
+                    disabled={!manageProjectId || manageFilteredPlots.length === 0}
+                  >
+                    <option value="">-- General Project Tour --</option>
+                    {manageFilteredPlots.map(pl => (
+                      <option key={pl.id} value={String(pl.id)}>
+                        {pl.plotNumber} {pl.status ? `(${pl.status})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Host Agent */}
+              <div className="form-group">
+                <label className="form-label">Host Escort Agent</label>
+                <select
+                  className="form-select"
+                  value={manageHostAgentId}
+                  onChange={e => {
+                    const id = Number(e.target.value);
+                    setManageHostAgentId(id);
+                    const ag = agents.find(a => a.id === id);
+                    setManageHostAgentName(ag?.name || '');
+                  }}
+                >
+                  <option value="0">-- select agent --</option>
+                  {agents.map(ag => (
+                    <option key={ag.id} value={ag.id}>
+                      {ag.name} ({ag.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Unified Reschedule Reason & Notes */}
+              <div className="form-group">
+                <label className="form-label">
+                  Reason for Rescheduling / Visit Notes *
+                </label>
+                <textarea
+                  className="form-textarea"
+                  rows={3}
+                  required
+                  value={manageNote}
+                  onChange={e => setManageNote(e.target.value)}
+                  placeholder="Why is this visit being rescheduled? (e.g. Client requested next Saturday 11 AM due to office work, out of station...)"
+                />
+              </div>
+            </>
+          )}
+
+          {/* ── CASE B: COMPLETED ── */}
+          {manageStatus === 'Completed' && (
+            <>
+              <div className="sitevisit-manage-banner completed">
+                <span>✓ <strong>Mark as Completed:</strong> Record the client's inspection feedback and discussion outcome.</span>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">
+                  Client Feedback & Visit Outcome *
+                </label>
+                <textarea
+                  className="form-textarea"
+                  rows={4}
+                  required
+                  value={manageNote}
+                  onChange={e => setManageNote(e.target.value)}
+                  placeholder="What did the client say? Which plot did they prefer? Are they ready for token booking or follow-up needed?"
+                />
+              </div>
+            </>
+          )}
+
+          {/* ── CASE C: CANCELLED ── */}
+          {manageStatus === 'Cancelled' && (
+            <>
+              <div className="sitevisit-manage-banner cancelled">
+                <span>✕ <strong>Cancel Site Visit:</strong> Please provide the reason for cancellation for records and tracking.</span>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">
+                  Reason for Cancellation *
+                </label>
+                <textarea
+                  className="form-textarea"
+                  rows={4}
+                  required
+                  value={manageNote}
+                  onChange={e => setManageNote(e.target.value)}
+                  placeholder="Why was this visit cancelled? (e.g. Client postponed indefinitely, client did not turn up, budget constraints, not interested...)"
+                />
+              </div>
+            </>
+          )}
+
+          {/* Modal Actions */}
+          <div className="sitevisit-form-actions">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setIsManageModalOpen(false)}
+              disabled={isSubmittingManage}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={isSubmittingManage || !manageStatus}
+              style={{
+                backgroundColor:
+                  manageStatus === 'Completed'
+                    ? '#059669'
+                    : manageStatus === 'Cancelled'
+                      ? '#dc2626'
+                      : manageStatus === 'Rescheduled'
+                        ? '#4f46e5'
+                        : 'var(--primary-600, #4f46e5)',
+                borderColor:
+                  manageStatus === 'Completed'
+                    ? '#059669'
+                    : manageStatus === 'Cancelled'
+                      ? '#dc2626'
+                      : manageStatus === 'Rescheduled'
+                        ? '#4f46e5'
+                        : 'var(--primary-600, #4f46e5)',
+                color: '#ffffff',
+                fontWeight: 600,
+                opacity: !manageStatus ? 0.6 : 1,
+                cursor: !manageStatus ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {isSubmittingManage
+                ? 'Saving...'
+                : manageStatus === 'Rescheduled'
+                  ? 'Confirm Reschedule & Update Slot'
+                  : manageStatus === 'Completed'
+                    ? 'Save & Mark Completed'
+                    : manageStatus === 'Cancelled'
+                      ? 'Confirm Cancellation'
+                      : 'Select Status to Save'}
             </button>
           </div>
         </form>

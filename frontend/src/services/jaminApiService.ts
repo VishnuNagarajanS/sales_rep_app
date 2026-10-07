@@ -62,6 +62,7 @@ export interface UpdateJaminLeadPayload {
 
 export interface ScheduleFollowupPayload {
   contactId: string;
+  contactType?: 'lead' | 'customer' | string;
   contactName: string;
   contactPhone?: string;
   scheduledAt: string;
@@ -349,6 +350,29 @@ export const jaminApiService = {
     }
   },
 
+  async updateSiteVisit(id: string | number, data: any): Promise<boolean> {
+    try {
+      const res = await apiClient.put<any>(`/jamin/site-visits/${id}`, data);
+      return res && res.success;
+    } catch (err) {
+      console.error(`Failed to update site visit #${id}`, err);
+      return false;
+    }
+  },
+
+  async cancelSiteVisit(id: string | number, reason?: string): Promise<boolean> {
+    try {
+      const res = await apiClient.put<any>(`/jamin/site-visits/${id}`, {
+        status: 'Cancelled',
+        outcomeNotes: reason || 'Cancelled by user',
+      });
+      return res && res.success;
+    } catch (err) {
+      console.error(`Failed to cancel site visit #${id}`, err);
+      return false;
+    }
+  },
+
   // ── 3. FOLLOW-UPS ──────────────────────────────────────────────────────────
   async getFollowups(isAdmin: boolean = false, agentId?: number, status?: string): Promise<Followup[]> {
     try {
@@ -386,7 +410,7 @@ export const jaminApiService = {
     try {
       const res = await apiClient.post<any>('/sales-executive/followups', {
         contactId: payload.contactId,
-        contactType: 'lead',
+        contactType: payload.contactType || 'lead',
         contactName: payload.contactName,
         contactPhone: payload.contactPhone,
         scheduledAt: payload.scheduledAt,
@@ -401,7 +425,7 @@ export const jaminApiService = {
           contactId: payload.contactId,
           contactName: payload.contactName,
           contactPhone: payload.contactPhone || '',
-          contactType: 'lead',
+          contactType: payload.contactType || 'lead',
           scheduledAt: payload.scheduledAt,
           priority: payload.priority || 'Medium',
           status: 'Pending',
@@ -489,13 +513,13 @@ export const jaminApiService = {
     }
   },
 
-  async deleteProject(id: number | string): Promise<boolean> {
+  async deleteProject(id: number | string): Promise<{ success: boolean; message?: string }> {
     try {
       const res = await apiClient.delete<any>(`/jamin/projects/${id}`);
-      return res && res.success;
+      return { success: Boolean(res?.success), message: res?.message };
     } catch (err) {
       console.error(`Failed to delete project #${id}`, err);
-      return false;
+      return { success: false, message: err instanceof Error ? err.message : 'Project deletion failed.' };
     }
   },
 
@@ -638,9 +662,9 @@ export const jaminApiService = {
     }
   },
 
-  async updateBookingStatus(id: number | string, status: string, notes?: string): Promise<boolean> {
+  async updateBookingStatus(id: number | string, status: string, notes?: string, details?: { tokenAmountPaid?: number; paymentMode?: string; paymentTerms?: string }): Promise<boolean> {
     try {
-      const res = await apiClient.put<any>(`/jamin/bookings/${id}/status`, { status, notes });
+      const res = await apiClient.put<any>(`/jamin/bookings/${id}/status`, { status, notes, ...details });
       return res && res.success;
     } catch (err) {
       console.error(`Failed to update booking #${id} status`, err);

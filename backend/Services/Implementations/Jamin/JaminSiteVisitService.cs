@@ -11,6 +11,7 @@ public class JaminSiteVisitService : IJaminSiteVisitService
 {
     private readonly ApplicationDbContext _context;
     private const int JaminTenantId = 2;
+    private static readonly string[] SiteVisitStatuses = { "Requested", "Pending", "Scheduled", "Completed", "Rescheduled", "Cancelled", "No-show" };
 
     public JaminSiteVisitService(ApplicationDbContext context)
     {
@@ -46,6 +47,22 @@ public class JaminSiteVisitService : IJaminSiteVisitService
 
     public async Task<ApiResponse<JaminSiteVisitDto>> ScheduleSiteVisitAsync(ScheduleSiteVisitRequestDto dto, CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(dto.CustomerName) || string.IsNullOrWhiteSpace(dto.CustomerPhone))
+            return ApiResponse<JaminSiteVisitDto>.FailureResult("Visitor name and phone are required.");
+        if (dto.LeadId.HasValue && dto.CustomerId.HasValue)
+            return ApiResponse<JaminSiteVisitDto>.FailureResult("A site visit can be linked to a lead or a customer, not both.");
+
+        if (dto.LeadId.HasValue)
+        {
+            var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == dto.LeadId.Value && l.CompanyId == JaminTenantId && l.Status != "Converted", ct);
+            if (lead == null) return ApiResponse<JaminSiteVisitDto>.FailureResult("Active Jamin lead not found.");
+        }
+        if (dto.CustomerId.HasValue)
+        {
+            var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == dto.CustomerId.Value && c.CompanyId == JaminTenantId, ct);
+            if (customer == null) return ApiResponse<JaminSiteVisitDto>.FailureResult("Jamin customer not found.");
+        }
+
         int? resolvedProjectId = dto.ProjectId;
         int? resolvedPlotId = dto.PlotId;
         string projectName = dto.ProjectName;
@@ -59,9 +76,15 @@ public class JaminSiteVisitService : IJaminSiteVisitService
                 .FirstOrDefaultAsync(p => p.Id == resolvedPlotId && p.CompanyId == JaminTenantId, ct);
             if (plot != null)
             {
+                if (resolvedProjectId.HasValue && resolvedProjectId.Value != plot.ProjectId)
+                    return ApiResponse<JaminSiteVisitDto>.FailureResult("Selected plot does not belong to the selected project.");
                 resolvedProjectId ??= plot.ProjectId;
                 projectName = plot.Project?.Name ?? projectName;
                 plotNumber = plot.PlotNumber;
+            }
+            else
+            {
+                return ApiResponse<JaminSiteVisitDto>.FailureResult("Selected plot not found in Jamin inventory.");
             }
         }
         // If only ProjectId is provided, resolve ProjectName
@@ -73,7 +96,14 @@ public class JaminSiteVisitService : IJaminSiteVisitService
             {
                 projectName = project.Name;
             }
+            else
+            {
+                return ApiResponse<JaminSiteVisitDto>.FailureResult("Selected project not found in Jamin.");
+            }
         }
+
+        if (resolvedProjectId.HasValue && !await _context.JaminProjects.AnyAsync(p => p.Id == resolvedProjectId.Value && p.CompanyId == JaminTenantId, ct))
+            return ApiResponse<JaminSiteVisitDto>.FailureResult("Selected project not found in Jamin.");
 
         var siteVisit = new SiteVisit
         {
@@ -109,6 +139,10 @@ public class JaminSiteVisitService : IJaminSiteVisitService
         {
             return ApiResponse<JaminSiteVisitDto>.FailureResult("Site visit not found.");
         }
+        if (visit.Status is "Completed" or "Cancelled" or "No-show")
+        {
+            return ApiResponse<JaminSiteVisitDto>.FailureResult("Completed, cancelled, or no-show visits cannot be confirmed.");
+        }
 
         visit.Status = "Scheduled";
         visit.UpdatedAt = DateTime.UtcNow;
@@ -124,8 +158,17 @@ public class JaminSiteVisitService : IJaminSiteVisitService
         {
             return ApiResponse<JaminSiteVisitDto>.FailureResult("Site visit not found.");
         }
+        if (visit.Status is "Completed" or "Cancelled" or "No-show")
+        {
+            return ApiResponse<JaminSiteVisitDto>.FailureResult("This site visit is already closed.");
+        }
+        var outcomeStatus = string.IsNullOrWhiteSpace(dto.Status) ? "Completed" : dto.Status.Trim();
+        if (outcomeStatus is not ("Completed" or "No-show"))
+        {
+            return ApiResponse<JaminSiteVisitDto>.FailureResult("A completed visit must be marked Completed or No-show.");
+        }
 
-        visit.Status = dto.Status ?? "Completed";
+        visit.Status = outcomeStatus;
         if (!string.IsNullOrEmpty(dto.OutcomeNotes))
         {
             visit.OutcomeNotes = dto.OutcomeNotes;
@@ -134,6 +177,47 @@ public class JaminSiteVisitService : IJaminSiteVisitService
         await _context.SaveChangesAsync(ct);
 
         return ApiResponse<JaminSiteVisitDto>.SuccessResult(MapToDto(visit), "Site visit marked as completed.");
+    }
+
+    public async Task<ApiResponse<JaminSiteVisitDto>> UpdateSiteVisitAsync(int id, UpdateSiteVisitDto dto, CancellationToken ct = default)
+    {
+        var visit = await _context.SiteVisits.FirstOrDefaultAsync(s => s.Id == id && s.TenantId == JaminTenantId, ct);
+        if (visit == null)
+        {
+            return ApiResponse<JaminSiteVisitDto>.FailureResult("Site visit not found.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.Status))
+        {
+            var requestedStatus = dto.Status.Trim();
+            if (!SiteVisitStatuses.Contains(requestedStatus, StringComparer.OrdinalIgnoreCase))
+            {
+                return ApiResponse<JaminSiteVisitDto>.FailureResult("Invalid site visit status.");
+            }
+            if (visit.Status is "Completed" or "No-show")
+            {
+                return ApiResponse<JaminSiteVisitDto>.FailureResult("Completed or no-show visits cannot be changed.");
+            }
+            if (visit.Status == "Cancelled" && !string.Equals(requestedStatus, "Cancelled", StringComparison.OrdinalIgnoreCase))
+            {
+                return ApiResponse<JaminSiteVisitDto>.FailureResult("Cancelled visits cannot be reopened.");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.ScheduledAt)) visit.ScheduledAt = dto.ScheduledAt.Trim();
+        if (dto.ProjectId.HasValue) visit.ProjectId = dto.ProjectId;
+        if (dto.PlotId.HasValue) visit.PlotId = dto.PlotId;
+        if (!string.IsNullOrWhiteSpace(dto.ProjectName)) visit.ProjectName = dto.ProjectName.Trim();
+        if (dto.PlotNumber != null) visit.PlotNumber = dto.PlotNumber.Trim();
+        if (dto.AssignedAgentId.HasValue) visit.AssignedAgentId = dto.AssignedAgentId;
+        if (!string.IsNullOrWhiteSpace(dto.AssignedAgentName)) visit.AssignedAgentName = dto.AssignedAgentName.Trim();
+        if (!string.IsNullOrWhiteSpace(dto.Status)) visit.Status = SiteVisitStatuses.First(s => string.Equals(s, dto.Status.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (dto.VisitorNote != null) visit.VisitorNote = dto.VisitorNote.Trim();
+        if (dto.OutcomeNotes != null) visit.OutcomeNotes = dto.OutcomeNotes.Trim();
+        visit.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(ct);
+        return ApiResponse<JaminSiteVisitDto>.SuccessResult(MapToDto(visit), "Site visit updated successfully.");
     }
 
     public async Task<ApiResponse<List<JaminSiteVisitDto>>> GetLeadSiteVisitsAsync(int leadId, CancellationToken ct = default)

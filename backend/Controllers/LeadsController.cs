@@ -18,13 +18,27 @@ public class LeadsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetLeads([FromQuery] int? tenantId, CancellationToken ct)
+    public async Task<IActionResult> GetLeads([FromQuery] int? tenantId, [FromQuery] string? status, CancellationToken ct)
     {
-        var query = _db.Leads.AsNoTracking().Include(l => l.AssignedAgent).Include(l => l.SiteVisits).AsQueryable();
+        var query = _db.Leads.AsNoTracking().Include(l => l.AssignedAgent).AsQueryable();
 
         if (tenantId.HasValue)
         {
             query = query.Where(l => l.CompanyId == tenantId.Value);
+        }
+
+        // Converted contacts are Customers, NEVER active Leads!
+        if (string.Equals(status, "Converted", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(l => l.Status == "Converted");
+        }
+        else if (!string.Equals(status, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(l => l.Status != "Converted");
+            if (!string.IsNullOrWhiteSpace(status))
+            {
+                query = query.Where(l => l.Status == status);
+            }
         }
 
         var leads = await query.OrderByDescending(l => l.CreatedAt).ToListAsync(ct);
@@ -191,6 +205,7 @@ public class LeadsController : ControllerBase
         if (lead == null)
             return NotFound(ApiResponse<object>.FailureResult("Lead not found"));
 
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
         var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Phone == lead.Phone && c.CompanyId == lead.CompanyId, ct);
         if (customer == null)
         {
@@ -214,6 +229,11 @@ public class LeadsController : ControllerBase
         }
         else
         {
+            if (string.IsNullOrWhiteSpace(customer.Name)) customer.Name = lead.Name;
+            if (string.IsNullOrWhiteSpace(customer.Email)) customer.Email = lead.Email ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(customer.Location)) customer.Location = lead.Location ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(customer.Notes)) customer.Notes = dto?.Notes ?? lead.Notes ?? string.Empty;
+            if (customer.AssignedAgentId == null) customer.AssignedAgentId = lead.AssignedAgentId;
             customer.LastContactedAt = DateTime.UtcNow;
             if (dto?.DealValue.HasValue == true)
             {
@@ -224,6 +244,7 @@ public class LeadsController : ControllerBase
         lead.Status = "Converted";
         lead.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
 
         return Ok(ApiResponse<object>.SuccessResult(new
         {

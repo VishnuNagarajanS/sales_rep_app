@@ -45,3 +45,18 @@ public class UpdateSiteVisitOutcomeDto
     public string? Status { get; set; } = "Completed";
     public string? OutcomeNotes { get; set; }
 }
+
+public class UpdateSiteVisitDto
+{
+    public int? ProjectId { get; set; }
+    public int? PlotId { get; set; }
+    public string? ProjectName { get; set; }
+    public string? PlotNumber { get; set; }
+    public string? ScheduledAt { get; set; }
+    public int? AssignedAgentId { get; set; }
+    public string? AssignedAgentName { get; set; }
+    public string? Status { get; set; }
+    public string? VisitorNote { get; set; }
+    public string? OutcomeNotes { get; set; }
+}
+

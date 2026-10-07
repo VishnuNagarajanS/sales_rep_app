@@ -14,11 +14,13 @@ import {
   Lock,
   Sparkles,
   Calendar,
+  Pencil,
 } from 'lucide-react';
 import { Customer, CallRecord, Followup, Deal, Lead, IrmProfile, SiteVisit, CustomFieldDefinition } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
+import { apiClient } from '../../services/apiClient';
 import {
   getCustomers,
   saveCustomer as apiSaveCustomer,
@@ -73,14 +75,15 @@ export const CustomersPage: React.FC = () => {
   const isSalesExecutive = isExec || user?.role?.name === 'Sales Executive';
   const canAssignToIRM = Boolean(isGhlTenant && isSalesExecutive);
 
-  const scopedCustomers = isExec
+  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2' || user?.companySlug === 'jamin';
+
+  const scopedCustomers = (isExec && !isJamin)
     ? customers.filter(c =>
       (c.assignedAgentId && (String(c.assignedAgentId) === String(user?.id) || c.assignedAgentId === user?.id)) ||
       (c.assignedAgentName && user?.name && c.assignedAgentName.toLowerCase() === user.name.toLowerCase()) ||
       !c.assignedAgentId
     )
     : customers;
-  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2' || user?.companySlug === 'jamin';
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'calls' | 'followups' | 'timeline' | 'documents' | 'site_visits'>('overview');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -118,6 +121,80 @@ export const CustomersPage: React.FC = () => {
   const [newCustomFields, setNewCustomFields] = useState<Record<string, any>>({});
   const [addErrors, setAddErrors] = useState<{ name?: string; phone?: string }>({});
 
+  // Edit Customer modal state
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editLocation, setEditLocation] = useState('');
+  const [editStatus, setEditStatus] = useState<'Active' | 'VIP' | 'Inactive'>('Active');
+  const [editAgentName, setEditAgentName] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [editTotalValue, setEditTotalValue] = useState<number | string>('');
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+
+  const handleOpenEditModal = (c: Customer) => {
+    setEditName(c.name || '');
+    setEditPhone(c.phone || '');
+    setEditEmail(c.email || '');
+    setEditLocation(c.location || '');
+    setEditStatus(c.status || 'Active');
+    setEditAgentName(c.assignedAgentName || '');
+    setEditNotes(c.notes || '');
+    setEditTotalValue(c.totalValue || '');
+    setIsEditModalOpen(true);
+  };
+
+  const handleSaveEditCustomer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCustomer) return;
+    if (!editName.trim() || !editPhone.trim()) {
+      alert('Name and Phone are required.');
+      return;
+    }
+    setIsSubmittingEdit(true);
+    try {
+      const updated: Customer = {
+        ...selectedCustomer,
+        name: editName.trim(),
+        phone: editPhone.trim(),
+        email: editEmail.trim(),
+        location: editLocation.trim(),
+        status: editStatus,
+        assignedAgentName: editAgentName.trim() || selectedCustomer.assignedAgentName,
+        notes: editNotes.trim(),
+        totalValue: editTotalValue ? Number(editTotalValue) : selectedCustomer.totalValue,
+      };
+
+      // 1. Immediately update UI state
+      setSelectedCustomer(updated);
+      setCustomers(prev => prev.map(c => c.id === updated.id ? updated : c));
+
+      // 2. Persist in storageService
+      storageService.saveCustomer(updated);
+
+      // 3. Persist in backend DB API
+      const numId = parseInt(String(updated.id).replace(/\D/g, ''), 10);
+      if (numId) {
+        await apiClient.put(`/leads/${numId}`, {
+          name: updated.name,
+          phone: updated.phone,
+          email: updated.email,
+          location: updated.location,
+          notes: updated.notes,
+          status: 'Converted',
+        }).catch(() => {});
+        await apiSaveCustomer(updated).catch(() => {});
+      }
+
+      setIsEditModalOpen(false);
+      showToast(`✓ Customer ${updated.name} updated successfully!`);
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+    } finally {
+      setIsSubmittingEdit(false);
+    }
+  };
+
   const [calls, setCalls] = useState<CallRecord[]>([]);
   const [followups, setFollowups] = useState<Followup[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
@@ -125,7 +202,34 @@ export const CustomersPage: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [custs, cCalls, cFollowups, cDeals, cLeads] = await Promise.all([
+      const tenantNum = (tenant?.id === '2' || tenant?.id === 't-jamin-02' || tenant?.slug === 'jamin') ? '2' : '1';
+
+      // 1. Fetch real converted leads directly from DB API
+      let convertedCusts: Customer[] = [];
+      try {
+        const res = await apiClient.get<any>(`/leads?tenantId=${tenantNum}&status=Converted`);
+        if (res && res.success && Array.isArray(res.data)) {
+          convertedCusts = res.data.map((l: any) => ({
+            id: String(l.id),
+            name: l.name,
+            phone: l.phone,
+            email: l.email || '',
+            location: l.location || '',
+            source: l.source || 'Converted Lead',
+            status: 'Active',
+            companyId: tenant?.id || (tenantNum === '2' ? 't-jamin-02' : 't-ghl-01'),
+            assignedAgentId: l.assignedAgentId ? String(l.assignedAgentId) : undefined,
+            assignedAgentName: l.assignedAgentName || l.assignedAgent?.name || 'Unassigned',
+            notes: l.notes || '',
+            createdAt: l.createdAt || new Date().toISOString(),
+          }));
+        }
+      } catch (e) {
+        console.warn('Failed to load converted DB leads in CustomersPage:', e);
+      }
+
+      // 2. Fetch customers directly from customers API and other entities
+      const [apiCusts, cCalls, cFollowups, cDeals, cLeads] = await Promise.all([
         getCustomers(tenant?.id).catch(() => []),
         getCalls(tenant?.id).catch(() => []),
         getFollowups(tenant?.id).catch(() => []),
@@ -133,17 +237,16 @@ export const CustomersPage: React.FC = () => {
         getLeads(tenant?.id).catch(() => []),
       ]);
 
-      const localCusts = tenant?.id ? storageService.getCustomers(tenant.id) : [];
+      // 3. Fallback to local storage if API returned nothing
+      const localCusts = storageService.getCustomers(tenant?.id) || [];
+
+      // 4. Combine and strictly deduplicate by 10-digit phone number
       const combinedCustsMap = new Map<string, Customer>();
-      localCusts.forEach(c => {
-        const phoneKey = (c.phone || '').replace(/\D/g, '').slice(-10);
-        if (phoneKey) combinedCustsMap.set(phoneKey, c);
-        else combinedCustsMap.set(String(c.id), c);
-      });
-      (custs || []).forEach(c => {
-        const phoneKey = (c.phone || '').replace(/\D/g, '').slice(-10);
-        if (phoneKey) combinedCustsMap.set(phoneKey, { ...(combinedCustsMap.get(phoneKey) || {}), ...c });
-        else combinedCustsMap.set(String(c.id), c);
+      [...convertedCusts, ...(apiCusts || []), ...localCusts].forEach(c => {
+        const phoneKey = (c.phone || '').replace(/\D/g, '').slice(-10) || String(c.id);
+        if (phoneKey && !combinedCustsMap.has(phoneKey)) {
+          combinedCustsMap.set(phoneKey, c);
+        }
       });
       const allCusts = Array.from(combinedCustsMap.values());
 
@@ -153,15 +256,15 @@ export const CustomersPage: React.FC = () => {
       setDeals(cDeals);
       setLeads(cLeads);
 
-      const firstVisible = isExec
+      const firstVisible = (isExec && !isJamin)
         ? allCusts.filter(c =>
           (c.assignedAgentId && (String(c.assignedAgentId) === String(user?.id) || c.assignedAgentId === user?.id)) ||
           (c.assignedAgentName && user?.name && c.assignedAgentName.toLowerCase() === user.name.toLowerCase()) ||
           !c.assignedAgentId
         )[0]
         : allCusts[0];
-      if (firstVisible && !selectedCustomer) {
-        setSelectedCustomer(firstVisible);
+      if (firstVisible) {
+        setSelectedCustomer(prev => (prev && allCusts.some(c => c.id === prev.id)) ? prev : firstVisible);
       }
     } catch (err) {
       console.error('Failed to load customers page data', err);
@@ -482,16 +585,39 @@ export const CustomersPage: React.FC = () => {
     d => selectedCustomer && (d.customerId === selectedCustomer.id || d.customerName === selectedCustomer.name)
   );
 
+  const [apiSiteVisits, setApiSiteVisits] = useState<SiteVisit[]>([]);
+
   const customerSiteVisits = useMemo(() => {
     if (!selectedCustomer || !isJamin) return [];
-    const visits = storageService.getSiteVisits(tenant?.id);
+    const localVisits = storageService.getSiteVisits() || [];
+    const visitMap = new Map<string, SiteVisit>();
+    localVisits.forEach(v => visitMap.set(String(v.id), v));
+    apiSiteVisits.forEach(v => visitMap.set(String(v.id), v));
+    const allVisits = Array.from(visitMap.values());
+
     const cleanPhone = (selectedCustomer.phone || '').replace(/\D/g, '').slice(-10);
-    return visits.filter(
-      v =>
-        v.customerId === selectedCustomer.id ||
-        (cleanPhone && (v.customerPhone || '').replace(/\D/g, '').slice(-10) === cleanPhone)
-    );
-  }, [selectedCustomer, isJamin, tenant?.id]);
+    const targetCustId = String(selectedCustomer.id || '').replace('db-', '').replace('cust-', '').trim();
+    const targetName = (selectedCustomer.name || '').trim().toLowerCase();
+
+    return allVisits.filter(v => {
+      // 1. Phone match
+      const vPhone = (v.customerPhone || '').replace(/\D/g, '').slice(-10);
+      if (cleanPhone && vPhone && cleanPhone === vPhone) return true;
+
+      // 2. Direct ID match
+      if (v.customerId === selectedCustomer.id || (v as any).leadId === selectedCustomer.id) return true;
+
+      // 3. Normalized ID match
+      const vCustId = v.customerId ? String(v.customerId).replace('db-', '').replace('cust-', '').trim() : '';
+      if (targetCustId && vCustId === targetCustId) return true;
+
+      // 4. Name match
+      const vName = (v.customerName || '').trim().toLowerCase();
+      if (targetName && vName && targetName === vName) return true;
+
+      return false;
+    });
+  }, [selectedCustomer, isJamin, apiSiteVisits]);
 
   // Jamin Bazaar: Site Visit scheduling state
   const [isSiteVisitModalOpen, setIsSiteVisitModalOpen] = useState(false);
@@ -516,6 +642,19 @@ export const CustomersPage: React.FC = () => {
           setJaminAgents(data.map(a => ({ id: String(a.id), name: a.name, email: a.email })));
         }
       });
+
+      const fetchSiteVisits = () => {
+        jaminApiService.getSiteVisits(true).then(visits => {
+          if (visits && visits.length > 0) {
+            setApiSiteVisits(visits);
+          }
+        }).catch(err => console.warn('Failed to load Jamin site visits in Customers:', err));
+      };
+      fetchSiteVisits();
+      window.addEventListener('nexus_storage_updated', fetchSiteVisits);
+      return () => {
+        window.removeEventListener('nexus_storage_updated', fetchSiteVisits);
+      };
     }
   }, [isJamin]);
 
@@ -545,6 +684,8 @@ export const CustomersPage: React.FC = () => {
       }
     })();
 
+    const trimmedNotes = svNotes.trim();
+
     const newVisit: SiteVisit = {
       id: `sv-${Date.now()}`,
       companyId: tenant?.id || 't-jamin-02',
@@ -559,10 +700,33 @@ export const CustomersPage: React.FC = () => {
       assignedAgentId: hostAg?.id || user?.id || '1',
       assignedAgentName: hostAg?.name || svHostAgent || user?.name || 'Agent',
       status: 'Scheduled',
-      outcomeNotes: svNotes,
+      outcomeNotes: trimmedNotes,
+      visitorNote: trimmedNotes,
     };
 
     storageService.saveSiteVisit(newVisit);
+
+    if (isJamin) {
+      jaminApiService.createSiteVisit({
+        companyId: tenant?.id || 't-jamin-02',
+        customerId: selectedCustomer.id,
+        customerName: selectedCustomer.name,
+        customerPhone: selectedCustomer.phone,
+        contactType: 'customer',
+        projectName: svProject,
+        plotNumber: svPlot,
+        scheduledAt: dateFormatted,
+        assignedAgentId: hostAg?.id ? Number(hostAg.id) : undefined,
+        assignedAgentName: hostAg?.name || svHostAgent || user?.name || 'Agent',
+        status: 'Scheduled',
+        outcomeNotes: trimmedNotes,
+        visitorNote: trimmedNotes,
+      }).then(created => {
+        if (created) {
+          setApiSiteVisits(prev => [created, ...prev.filter(v => v.id !== created.id)]);
+        }
+      }).catch(err => console.warn('API customer site visit save skipped:', err));
+    }
 
     storageService.addAuditLog({
       id: `aud-${Date.now()}`,
@@ -955,6 +1119,13 @@ export const CustomersPage: React.FC = () => {
               {/* Quick Actions */}
               <div className="customer-cockpit-actions" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <button
+                  className="btn btn-secondary"
+                  onClick={() => handleOpenEditModal(selectedCustomer)}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px' }}
+                >
+                  <Pencil size={14} /> Edit Details
+                </button>
+                <button
                   className="btn btn-primary customer-call-btn"
                   onClick={() => initiateCall(selectedCustomer.name, selectedCustomer.phone, 'customer', selectedCustomer.id)}
                 >
@@ -1278,9 +1449,9 @@ export const CustomersPage: React.FC = () => {
                             <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
                               Slot: <strong>{sv.scheduledAt}</strong> • Host: {sv.assignedAgentName}
                             </div>
-                            {sv.outcomeNotes && (
+                            {(sv.outcomeNotes || sv.visitorNote) && (
                               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, fontStyle: 'italic' }}>
-                                "{sv.outcomeNotes}"
+                                "{sv.outcomeNotes || sv.visitorNote}"
                               </div>
                             )}
                           </div>
@@ -1730,13 +1901,13 @@ export const CustomersPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Logistics / Pickup Notes</label>
+              <label className="form-label">Visit Notes / Requirements</label>
               <textarea
                 className="form-textarea"
                 rows={2}
                 value={svNotes}
                 onChange={e => setSvNotes(e.target.value)}
-                placeholder="e.g. Needs cab pickup from metro station, visiting with family..."
+                placeholder="e.g. Needs cab pickup from metro station, visiting with family, visit reason..."
               />
             </div>
 
@@ -1762,6 +1933,123 @@ export const CustomersPage: React.FC = () => {
                 }}
               >
                 <Calendar size={14} /> Confirm Schedule
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* Edit Customer Modal */}
+      {isEditModalOpen && (
+        <Modal
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          title="Edit Customer Profile"
+        >
+          <form onSubmit={handleSaveEditCustomer} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="form-group">
+                <label className="form-label">Customer Name *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  required
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Phone Number *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  required
+                  value={editPhone}
+                  onChange={e => setEditPhone(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="form-group">
+                <label className="form-label">Email Address</label>
+                <input
+                  type="email"
+                  className="form-input"
+                  value={editEmail}
+                  onChange={e => setEditEmail(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Location / City</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={editLocation}
+                  onChange={e => setEditLocation(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="form-group">
+                <label className="form-label">Account Status</label>
+                <select
+                  className="form-input"
+                  value={editStatus}
+                  onChange={e => setEditStatus(e.target.value as any)}
+                >
+                  <option value="Active">Active</option>
+                  <option value="VIP">VIP</option>
+                  <option value="Inactive">Inactive</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Assigned Executive</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={editAgentName}
+                  onChange={e => setEditAgentName(e.target.value)}
+                  placeholder="e.g. Sales Agent"
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Customer Notes / Overview</label>
+              <textarea
+                className="form-textarea"
+                rows={3}
+                value={editNotes}
+                onChange={e => setEditNotes(e.target.value)}
+                placeholder="Important client history, preferences, or negotiation notes..."
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setIsEditModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={isSubmittingEdit}
+                style={{
+                  background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                  borderColor: '#059669',
+                  color: '#ffffff',
+                  fontWeight: 600,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <CheckCircle size={15} /> {isSubmittingEdit ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
           </form>

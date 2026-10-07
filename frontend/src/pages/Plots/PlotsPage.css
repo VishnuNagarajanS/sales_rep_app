@@ -187,3 +187,36 @@
   color: #b45309;
   margin-bottom: 4px;
 }
+
+.hold-source-tabs {
+  display: flex;
+  background: var(--bg-hover, rgba(0, 0, 0, 0.05));
+  border-radius: var(--radius-md, 8px);
+  padding: 4px;
+  gap: 4px;
+}
+
+.hold-source-tab {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.hold-source-tab:hover {
+  color: var(--text-primary);
+}
+
+.hold-source-tab.active {
+  background: var(--bg-surface, #ffffff);
+  color: var(--primary, #2563eb);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+

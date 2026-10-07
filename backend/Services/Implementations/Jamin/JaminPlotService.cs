@@ -74,7 +74,7 @@ public class JaminPlotService : IJaminPlotService
             Status = "Available",
             Price = dto.Price,
             PricePerSqft = pricePerSqft,
-            Notes = dto.Notes?.Trim(),
+            Notes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim(),
             CreatedAt = DateTime.UtcNow
         };
 
@@ -109,7 +109,7 @@ public class JaminPlotService : IJaminPlotService
         if (dto.HeldByCustomerName != null) plot.HeldByCustomerName = dto.HeldByCustomerName.Trim();
         if (dto.HeldByCustomerPhone != null) plot.HeldByCustomerPhone = dto.HeldByCustomerPhone.Trim();
         if (dto.HoldByAgent != null) plot.HoldByAgent = dto.HoldByAgent.Trim();
-        if (dto.Notes != null) plot.Notes = dto.Notes.Trim();
+        if (dto.Notes != null) plot.Notes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim();
 
         plot.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync(ct);
@@ -149,7 +149,6 @@ public class JaminPlotService : IJaminPlotService
         plot.HeldByCustomerPhone = dto.CustomerPhone.Trim();
         plot.HoldByAgent = dto.HoldByAgent?.Trim();
         plot.HoldExpiresAt = DateTime.UtcNow.AddDays(dto.HoldDays > 0 ? dto.HoldDays : 7);
-        if (!string.IsNullOrEmpty(dto.Notes)) plot.Notes = dto.Notes.Trim();
         plot.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(ct);

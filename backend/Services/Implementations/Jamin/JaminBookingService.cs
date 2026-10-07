@@ -82,42 +82,50 @@ public class JaminBookingService : IJaminBookingService
             }
         }
 
-        // Resolve Customer ID if not explicitly passed
-        int? customerId = dto.CustomerId;
-        if (!customerId.HasValue && !string.IsNullOrEmpty(dto.CustomerPhone))
-        {
-            var matchedCustomer = await _context.Customers
-                .FirstOrDefaultAsync(c => c.Phone == dto.CustomerPhone.Trim() && c.CompanyId == JaminTenantId, ct);
-            if (matchedCustomer != null)
-            {
-                customerId = matchedCustomer.Id;
-            }
-        }
-
         // Resolve Lead ID if passed or matched
         int? leadId = dto.LeadId;
-        if (!leadId.HasValue && !string.IsNullOrEmpty(dto.CustomerPhone))
+        Lead? matchedLead = null;
+        if (leadId.HasValue && leadId.Value > 0)
         {
-            var matchedLead = await _context.Leads
+            matchedLead = await _context.Leads
+                .FirstOrDefaultAsync(l => l.Id == leadId.Value && l.CompanyId == JaminTenantId, ct);
+        }
+        if (matchedLead == null && !string.IsNullOrEmpty(dto.CustomerPhone))
+        {
+            matchedLead = await _context.Leads
                 .FirstOrDefaultAsync(l => l.Phone == dto.CustomerPhone.Trim() && l.CompanyId == JaminTenantId, ct);
-            if (matchedLead != null)
-            {
-                leadId = matchedLead.Id;
-            }
+            if (matchedLead != null) leadId = matchedLead.Id;
         }
 
-        // If Customer does not exist yet, automatically create one upon booking!
-        if (!customerId.HasValue)
+        // Resolve Customer ID if not explicitly passed
+        int? customerId = dto.CustomerId;
+        Customer? matchedCustomer = null;
+        if (customerId.HasValue && customerId.Value > 0)
+        {
+            matchedCustomer = await _context.Customers
+                .FirstOrDefaultAsync(c => c.Id == customerId.Value && c.CompanyId == JaminTenantId, ct);
+        }
+        if (matchedCustomer == null && !string.IsNullOrEmpty(dto.CustomerPhone))
+        {
+            matchedCustomer = await _context.Customers
+                .FirstOrDefaultAsync(c => c.Phone == dto.CustomerPhone.Trim() && c.CompanyId == JaminTenantId, ct);
+            if (matchedCustomer != null) customerId = matchedCustomer.Id;
+        }
+
+        // Automatically create or update buyer as an Active Customer in the CRM
+        if (matchedCustomer == null)
         {
             var newCustomer = new Customer
             {
                 CompanyId = JaminTenantId,
-                AssignedAgentId = dto.AssignedAgentId,
+                AssignedAgentId = dto.AssignedAgentId ?? matchedLead?.AssignedAgentId,
                 Name = dto.CustomerName.Trim(),
                 Phone = dto.CustomerPhone.Trim(),
+                Email = matchedLead?.Email ?? string.Empty,
+                Location = matchedLead?.Location ?? string.Empty,
                 Status = "Active",
                 TotalValue = dto.TotalPlotPrice,
-                Notes = $"Created upon booking Plot {plotNumber} in {projectName}. {dto.Notes}".Trim(),
+                Notes = $"Confirmed via booking for Plot {plotNumber} in {projectName}. {dto.Notes}".Trim(),
                 LastContactedAt = DateTime.UtcNow,
                 CreatedAt = DateTime.UtcNow
             };
@@ -125,16 +133,20 @@ public class JaminBookingService : IJaminBookingService
             await _context.SaveChangesAsync(ct);
             customerId = newCustomer.Id;
         }
+        else
+        {
+            matchedCustomer.TotalValue += dto.TotalPlotPrice;
+            matchedCustomer.Status = "Active";
+            if (string.IsNullOrWhiteSpace(matchedCustomer.Name)) matchedCustomer.Name = dto.CustomerName.Trim();
+            matchedCustomer.UpdatedAt = DateTime.UtcNow;
+            customerId = matchedCustomer.Id;
+        }
 
         // Mark the linked Lead as Converted in DB
-        if (leadId.HasValue)
+        if (matchedLead != null)
         {
-            var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == leadId.Value && l.CompanyId == JaminTenantId, ct);
-            if (lead != null)
-            {
-                lead.Status = "Converted";
-                lead.UpdatedAt = DateTime.UtcNow;
-            }
+            matchedLead.Status = "Converted";
+            matchedLead.UpdatedAt = DateTime.UtcNow;
         }
 
         // Resolve Agent name
@@ -158,7 +170,7 @@ public class JaminBookingService : IJaminBookingService
             PlotNumber = plotNumber,
             TotalPlotPrice = dto.TotalPlotPrice,
             TokenAmountPaid = dto.TokenAmountPaid,
-            PaymentMode = dto.PaymentMode?.Trim() ?? "Bank Transfer / NEFT",
+            PaymentMode = !string.IsNullOrWhiteSpace(dto.PaymentMode) ? dto.PaymentMode.Trim() : string.Empty,
             PaymentTerms = dto.PaymentTerms?.Trim(),
             Status = "Token Paid",
             BookingDate = DateTime.UtcNow,

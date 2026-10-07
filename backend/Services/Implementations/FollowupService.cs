@@ -135,8 +135,11 @@ public class FollowupService : IFollowupService
 
     public async Task<ApiResponse<FollowupResponseDto>> CreateFollowupAsync(CreateFollowupDto dto, CancellationToken ct = default)
     {
-        var agentId = _currentUser.UserId ?? 1;
+        var agentId = dto.AssignedAgentId ?? _currentUser.UserId ?? 1;
         var companyId = _currentUser.CompanyId ?? 1;
+        var assignedAgent = await _context.Users.FirstOrDefaultAsync(u => u.Id == agentId && u.CompanyId == companyId, ct);
+        if (assignedAgent == null)
+            return ApiResponse<FollowupResponseDto>.FailureResult("Assigned agent was not found in this company.");
 
         var followup = new Followup
         {

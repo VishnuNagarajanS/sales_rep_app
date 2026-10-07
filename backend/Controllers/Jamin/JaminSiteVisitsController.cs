@@ -82,6 +82,22 @@ public class JaminSiteVisitsController : JaminTenantControllerBase
     }
 
     /// <summary>
+    /// Updates an existing site visit (timings, plot, host agent, status, notes).
+    /// </summary>
+    [HttpPut("{id:int}")]
+    [Authorize]
+    public async Task<IActionResult> UpdateSiteVisit(int id, [FromBody] UpdateSiteVisitDto dto, CancellationToken ct)
+    {
+        var result = await _siteVisitService.UpdateSiteVisitAsync(id, dto, ct);
+        if (!result.Success)
+        {
+            return NotFound(result);
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Deletes or cancels a site visit.
     /// </summary>
     [HttpDelete("{id:int}")]

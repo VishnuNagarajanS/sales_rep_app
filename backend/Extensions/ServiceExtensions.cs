@@ -28,7 +28,7 @@ public static class ServiceExtensions
             var user = Environment.GetEnvironmentVariable("DB_USER") ?? "neondb_owner";
             var pass = Environment.GetEnvironmentVariable("DB_PASSWORD") ?? "";
             var ssl = Environment.GetEnvironmentVariable("DB_SSL_MODE") ?? "Require";
-            connectionString = $"Host={dbHost};Port={port};Database={db};Username={user};Password={pass};SSL Mode={ssl};Trust Server Certificate=true;Channel Binding=require";
+            connectionString = $"Host={dbHost};Port={port};Database={db};Username={user};Password={pass};SSL Mode={ssl};Trust Server Certificate=true;Keepalive=30;Timeout=30;Command Timeout=60;Pooling=true";
         }
 
         if (string.IsNullOrWhiteSpace(connectionString))

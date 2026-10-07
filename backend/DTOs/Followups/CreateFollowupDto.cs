@@ -7,6 +7,7 @@ public class CreateFollowupDto
     public string ContactName { get; set; } = string.Empty;
     public string ContactPhone { get; set; } = string.Empty;
     public DateTime ScheduledAt { get; set; }
+    public int? AssignedAgentId { get; set; }
     public string Priority { get; set; } = "Medium"; // Low, Medium, High, Urgent
     public string Notes { get; set; } = string.Empty;
 }

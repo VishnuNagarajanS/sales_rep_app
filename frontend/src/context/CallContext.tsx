@@ -581,7 +581,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Converted: ${notes}`;
           }
           storageService.saveLead(matchedLead);
-          setLeads(prev => prev.map(l => l.id === matchedLead!.id ? { ...matchedLead!, status: 'Converted' } : l));
+          setLeads(prev => prev.filter(l => l.id !== matchedLead!.id));
 
           // 3. Call backend convert API to create backend Customer and set Lead.Status = 'Converted'
           const cleanId = String(matchedLead.id).replace('db-', '').replace('lead-', '').replace('l-', '').trim();

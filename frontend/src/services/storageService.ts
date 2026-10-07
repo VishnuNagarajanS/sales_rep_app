@@ -36,15 +36,13 @@ export type PopupPosition = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-
 class StorageService {
   constructor() {
     this.runLeadsDedupMigration();
+    this.cleanupDuplicateCustomers();
   }
 
   private runLeadsDedupMigration(): void {
     try {
       if (typeof window === 'undefined' || !window.localStorage) return;
-      const MIGRATION_KEY = 'nexus_leads_deduped_v1';
-      if (localStorage.getItem(MIGRATION_KEY)) return;
       this._dedupeLeadsInternal();
-      localStorage.setItem(MIGRATION_KEY, 'true');
     } catch (e) {
       console.error('Error in runLeadsDedupMigration:', e);
     }
@@ -54,16 +52,41 @@ class StorageService {
     try {
       const leads = this.get<Lead[]>('leads', []);
       if (!leads || leads.length === 0) return;
+      
+      // Auto-migrate any Converted contacts from leads to customers
+      const activeLeads: Lead[] = [];
+      leads.forEach(l => {
+        if (l.status === 'Converted') {
+          this.saveCustomer({
+            id: `cust-${l.id ? l.id.replace(/\D/g, '') : Date.now()}`,
+            companyId: l.companyId || 't-jamin-02',
+            name: l.name,
+            phone: l.phone,
+            email: l.email || '',
+            location: l.location || '',
+            source: l.source || 'Converted Lead',
+            status: 'Active',
+            assignedAgentId: l.assignedAgentId,
+            assignedAgentName: l.assignedAgentName,
+            notes: l.notes,
+            createdAt: l.createdAt || new Date().toISOString().split('T')[0],
+          });
+        } else {
+          activeLeads.push(l);
+        }
+      });
+
       const seen = new Set<string>();
-      const unique = leads.filter(l => {
-        const key = `${l.companyId}_${(l.phone || '').replace(/\D/g, '').slice(-10) || l.id}`;
+      const unique = activeLeads.filter(l => {
+        const phoneKey = (l.phone || '').replace(/\D/g, '').slice(-10);
+        const key = phoneKey || l.id;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
       });
       this.set('leads', unique);
     } catch (e) {
-      console.error('Error in cleanupDuplicateLeads:', e);
+      console.error('Error in _dedupeLeadsInternal:', e);
     }
   }
 
@@ -124,19 +147,68 @@ class StorageService {
   }
 
   // Leads (Defaults to empty [] - real-time data only)
-  getLeads(companyId?: string): Lead[] {
-    let leads = this.get<Lead[]>('leads', []);
-    if (leads.length === 0) {
-      leads = this.get<Lead[]>('nexus_leads', []);
+  getLeads(companyId?: string, includeConverted: boolean = false): Lead[] {
+    let rawLeads = this.get<Lead[]>('leads', []);
+    if (rawLeads.length === 0) {
+      rawLeads = this.get<Lead[]>('nexus_leads', []);
     }
-    if (!companyId) return leads;
-    return leads.filter(l => {
-      if (!l.companyId) return true;
+
+    // Filter by converted status and tenant
+    const filtered = rawLeads.filter(l => {
+      // Converted records are CUSTOMERS, NEVER active leads!
+      if (!includeConverted && l.status === 'Converted') return false;
+      if (!companyId) return true;
       if (l.companyId === companyId) return true;
       if ((companyId === 't-ghl-01' || companyId === '1') && (l.companyId === 't-ghl-01' || l.companyId === '1')) return true;
       if ((companyId === 't-jamin-02' || companyId === '2') && (l.companyId === 't-jamin-02' || l.companyId === '2')) return true;
       return false;
     });
+
+    // Deduplicate by 10-digit phone number or unique ID
+    const seen = new Set<string>();
+    const deduplicated: Lead[] = [];
+    for (const l of filtered) {
+      const phoneDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+      const key = phoneDigits || l.id;
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduplicated.push(l);
+      }
+    }
+    return deduplicated;
+  }
+
+  setLeads(leads: Lead[], companyId?: string): void {
+    // Only store active, non-converted leads
+    const incomingActive = leads.filter(l => l.status !== 'Converted');
+    const existingActive = this.get<Lead[]>('leads', []).filter(l => l.status !== 'Converted');
+
+    const otherCompany = companyId
+      ? existingActive.filter(l => {
+          if (companyId === '2' || companyId === 't-jamin-02') {
+            return l.companyId !== '2' && l.companyId !== 't-jamin-02';
+          }
+          if (companyId === '1' || companyId === 't-ghl-01') {
+            return l.companyId !== '1' && l.companyId !== 't-ghl-01';
+          }
+          return l.companyId !== companyId;
+        })
+      : [];
+
+    // Deduplicate incoming and existing
+    const leadMap = new Map<string, Lead>();
+    incomingActive.forEach(l => {
+      const key = (l.phone || '').replace(/\D/g, '').slice(-10) || l.id;
+      leadMap.set(key, l);
+    });
+    existingActive.forEach(l => {
+      const key = (l.phone || '').replace(/\D/g, '').slice(-10) || l.id;
+      if (!leadMap.has(key)) {
+        leadMap.set(key, l);
+      }
+    });
+
+    this.set('leads', [...otherCompany, ...Array.from(leadMap.values())]);
   }
 
   findLeadByPhone(phone: string, companyId?: string): Lead | undefined {
@@ -151,10 +223,30 @@ class StorageService {
   }
 
   saveLead(lead: Lead): void {
-    const leads = this.getLeads();
-    const index = leads.findIndex(l => l.id === lead.id);
+    // If a lead status is Converted, purge from active leads list (history kept in DB)
+    if (lead.status === 'Converted') {
+      const currentLeads = this.get<Lead[]>('leads', []);
+      const digits = (lead.phone || '').replace(/\D/g, '').slice(-10);
+      const remainingLeads = currentLeads.filter(l => {
+        if (l.id === lead.id) return false;
+        const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+        if (digits && lDigits && digits === lDigits) return false;
+        return true;
+      });
+      this.set('leads', remainingLeads);
+      return;
+    }
+
+    const leads = this.get<Lead[]>('leads', []);
+    const digits = (lead.phone || '').replace(/\D/g, '').slice(-10);
+    const index = leads.findIndex(l => {
+      if (l.id === lead.id) return true;
+      const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+      return Boolean(digits && lDigits && digits === lDigits);
+    });
+
     if (index >= 0) {
-      leads[index] = lead;
+      leads[index] = { ...leads[index], ...lead };
     } else {
       leads.unshift(lead);
     }
@@ -248,19 +340,76 @@ class StorageService {
 
   // Customers (Defaults to empty [] - real-time data only)
   getCustomers(companyId?: string): Customer[] {
-    const customers = this.get<Customer[]>('customers', []);
-    return companyId ? customers.filter(c => c.companyId === companyId) : customers;
+    const raw = this.get<Customer[]>('customers', []);
+
+    // Deduplicate by 10-digit phone number or unique ID
+    const seen = new Set<string>();
+    const deduplicated: Customer[] = [];
+    for (const c of raw) {
+      const phoneDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
+      const key = phoneDigits || c.id || (c.name ? c.name.trim().toLowerCase() : '');
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        deduplicated.push(c);
+      }
+    }
+
+    if (!companyId) return deduplicated;
+    return deduplicated.filter(c => {
+      if (c.companyId === companyId) return true;
+      if ((companyId === 't-ghl-01' || companyId === '1') && (c.companyId === 't-ghl-01' || c.companyId === '1')) return true;
+      if ((companyId === 't-jamin-02' || companyId === '2') && (c.companyId === 't-jamin-02' || c.companyId === '2')) return true;
+      return false;
+    });
   }
 
   saveCustomer(customer: Customer): void {
-    const customers = this.getCustomers();
-    const index = customers.findIndex(c => c.id === customer.id);
+    const customers = this.get<Customer[]>('customers', []);
+    const digits = (customer.phone || '').replace(/\D/g, '').slice(-10);
+    const index = customers.findIndex(c => {
+      if (customer.id && c.id === customer.id) return true;
+      const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
+      if (digits && cDigits && digits === cDigits) return true;
+      if (customer.name && c.name && customer.name.trim().toLowerCase() === c.name.trim().toLowerCase()) return true;
+      return false;
+    });
+
     if (index >= 0) {
-      customers[index] = customer;
+      customers[index] = { ...customers[index], ...customer };
     } else {
       customers.unshift(customer);
     }
     this.set('customers', customers);
+  }
+
+  cleanupDuplicateCustomers(): { removedCount: number } {
+    try {
+      const allCustomers = this.get<Customer[]>('customers', []) || [];
+      if (!allCustomers.length) return { removedCount: 0 };
+
+      const seen = new Set<string>();
+      const deduplicated: Customer[] = [];
+      let removedCount = 0;
+
+      for (const c of allCustomers) {
+        const phoneDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
+        const key = phoneDigits || c.id || (c.name ? c.name.trim().toLowerCase() : '');
+        if (key && seen.has(key)) {
+          removedCount++;
+        } else {
+          if (key) seen.add(key);
+          deduplicated.push(c);
+        }
+      }
+
+      if (removedCount > 0) {
+        this.set('customers', deduplicated);
+      }
+      return { removedCount };
+    } catch (e) {
+      console.error('Error in cleanupDuplicateCustomers:', e);
+      return { removedCount: 0 };
+    }
   }
 
   // Deals (Defaults to empty [] - real-time data only)

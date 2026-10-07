@@ -75,16 +75,39 @@ public class JaminProjectsController : JaminTenantControllerBase
         if (dto.ImageUrl != null) project.ImageUrl = dto.ImageUrl.Trim();
         if (dto.TotalPlots.HasValue)
         {
-            var actualPlots = await _db.JaminPlots.CountAsync(p => p.ProjectId == id && p.CompanyId == project.CompanyId, ct);
-            if (dto.TotalPlots.Value < actualPlots)
-                return BadRequest(ApiResponse<JaminProjectResponseDto>.FailureResult("Total plots cannot be less than the number of plots already created."));
+            var actualPlotsCount = await _db.JaminPlots.CountAsync(p => p.ProjectId == id && p.CompanyId == project.CompanyId, ct);
+            if (dto.TotalPlots.Value < actualPlotsCount)
+                return BadRequest(ApiResponse<JaminProjectResponseDto>.FailureResult($"Total plots cannot be less than the {actualPlotsCount} plots already created."));
             project.TotalPlots = dto.TotalPlots.Value;
         }
-        if (dto.AvailablePlots.HasValue) project.AvailablePlots = dto.AvailablePlots.Value;
-        if (dto.BookedPlots.HasValue) project.BookedPlots = dto.BookedPlots.Value;
-        if (project.AvailablePlots < 0 || project.BookedPlots < 0 ||
-            project.AvailablePlots + project.BookedPlots > project.TotalPlots)
-            return BadRequest(ApiResponse<JaminProjectResponseDto>.FailureResult("Project plot counts are invalid."));
+
+        // Dynamically recalculate plots if actual individual plots exist in DB
+        var existingPlots = await _db.JaminPlots.Where(p => p.ProjectId == id && p.CompanyId == project.CompanyId).ToListAsync(ct);
+        if (existingPlots.Count > 0)
+        {
+            project.BookedPlots = existingPlots.Count(p => p.Status == "Booked" || p.Status == "Registered" || p.Status == "Sold");
+            project.AvailablePlots = Math.Max(0, project.TotalPlots - project.BookedPlots);
+        }
+        else
+        {
+            if (dto.BookedPlots.HasValue) project.BookedPlots = dto.BookedPlots.Value;
+            if (dto.AvailablePlots.HasValue)
+            {
+                project.AvailablePlots = dto.AvailablePlots.Value;
+            }
+            else
+            {
+                project.AvailablePlots = Math.Max(0, project.TotalPlots - project.BookedPlots);
+            }
+        }
+
+        if (project.AvailablePlots < 0) project.AvailablePlots = 0;
+        if (project.BookedPlots < 0) project.BookedPlots = 0;
+        if (project.AvailablePlots + project.BookedPlots > project.TotalPlots)
+        {
+            project.AvailablePlots = Math.Max(0, project.TotalPlots - project.BookedPlots);
+        }
+
         project.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
         var result = await ProjectQuery(project.CompanyId).FirstAsync(p => p.Id == id, ct);

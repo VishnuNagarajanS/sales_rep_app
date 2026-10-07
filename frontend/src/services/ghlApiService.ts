@@ -76,10 +76,22 @@ interface ApiResponse<T> {
 
 /** Fetch all pages and return flat array (backend defaults to pageSize=100). */
 async function fetchAll<T>(path: string, params: Record<string, string> = {}): Promise<T[]> {
-  const qs = new URLSearchParams({ pageSize: '200', ...params }).toString();
-  const res: ApiResponse<PagedResult<T>> = await apiClient.get(`${path}?${qs}`);
-  if (!res.success || !res.data) return [];
-  return res.data.items;
+  const pageSize = 200;
+  const items: T[] = [];
+  let page = 1;
+  let totalCount = 0;
+
+  do {
+    const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize), ...params }).toString();
+    const res: ApiResponse<PagedResult<T>> = await apiClient.get(`${path}?${qs}`);
+    if (!res.success || !res.data) return items;
+    if (res.data.items.length === 0) break;
+    items.push(...res.data.items);
+    totalCount = res.data.totalCount;
+    page += 1;
+  } while (items.length < totalCount);
+
+  return items;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

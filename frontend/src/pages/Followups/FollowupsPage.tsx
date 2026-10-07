@@ -11,6 +11,7 @@ import {
   CheckCircle,
   Pencil,
   RotateCcw,
+  Plus,
 } from 'lucide-react';
 import { Followup, CallRecord, Deal, Lead, Customer } from '../../types';
 import { storageService } from '../../services/storageService';
@@ -22,11 +23,13 @@ import {
   completeFollowup as apiCompleteFollowup,
   getCalls,
   getLeads,
+  getCustomers,
   saveDeal as apiSaveDeal,
   saveLead as apiSaveLead,
   isTenantMatch,
 } from '../../services/ghlApiService';
 import { jaminApiService } from '../../services/jaminApiService';
+import { apiClient } from '../../services/apiClient';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { Drawer } from '../../components/common/Drawer';
@@ -56,22 +59,174 @@ export const FollowupsPage: React.FC = () => {
   const [completeItem, setCompleteItem] = useState<Followup | null>(null);
   const [completionNotes, setCompletionNotes] = useState('');
 
+  const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
+
+  // Schedule New Follow-up state
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [createContactType, setCreateContactType] = useState<'lead' | 'customer' | 'new'>('lead');
+  const [createSelectedLeadId, setCreateSelectedLeadId] = useState('');
+  const [createSelectedCustomerId, setCreateSelectedCustomerId] = useState('');
+  const [createContactName, setCreateContactName] = useState('');
+  const [createContactPhone, setCreateContactPhone] = useState('+91 ');
+  const [createDate, setCreateDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split('T')[0];
+  });
+  const [createTime, setCreateTime] = useState('11:00 AM');
+  const [createType, setCreateType] = useState<'call' | 'whatsapp' | 'meeting'>('call');
+  const [createPriority, setCreatePriority] = useState<'Low' | 'Medium' | 'High'>('Medium');
+  const [createAgentId, setCreateAgentId] = useState('');
+  const [createNotes, setCreateNotes] = useState('');
+  const [isSubmittingCreate, setIsSubmittingCreate] = useState(false);
+
+  const handleOpenCreateModal = () => {
+    setCreateContactType('lead');
+    const firstLead = allLeads[0];
+    setCreateSelectedLeadId(firstLead?.id || '');
+    setCreateSelectedCustomerId('');
+    if (firstLead) {
+      setCreateContactName(firstLead.name);
+      setCreateContactPhone(firstLead.phone);
+    } else {
+      setCreateContactName('');
+      setCreateContactPhone('+91 ');
+    }
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    setCreateDate(d.toISOString().split('T')[0]);
+    setCreateTime('11:00 AM');
+    setCreateType('call');
+    setCreatePriority('Medium');
+    setCreateAgentId(user?.id ? String(user.id) : (assignableAgents[0]?.id || ''));
+    setCreateNotes('');
+    setIsCreateModalOpen(true);
+  };
+
+  const handleContactTypeChange = (type: 'lead' | 'customer' | 'new') => {
+    setCreateContactType(type);
+    if (type === 'lead') {
+      const first = allLeads[0];
+      setCreateSelectedLeadId(first?.id || '');
+      setCreateContactName(first?.name || '');
+      setCreateContactPhone(first?.phone || '+91 ');
+    } else if (type === 'customer') {
+      const first = allCustomers[0];
+      setCreateSelectedCustomerId(first?.id || '');
+      setCreateContactName(first?.name || '');
+      setCreateContactPhone(first?.phone || '+91 ');
+    } else {
+      setCreateSelectedLeadId('');
+      setCreateSelectedCustomerId('');
+      setCreateContactName('');
+      setCreateContactPhone('+91 ');
+    }
+  };
+
+  const handleLeadSelect = (leadId: string) => {
+    setCreateSelectedLeadId(leadId);
+    const found = allLeads.find(l => l.id === leadId);
+    if (found) {
+      setCreateContactName(found.name);
+      setCreateContactPhone(found.phone);
+    }
+  };
+
+  const handleCustomerSelect = (custId: string) => {
+    setCreateSelectedCustomerId(custId);
+    const found = allCustomers.find(c => c.id === custId);
+    if (found) {
+      setCreateContactName(found.name);
+      setCreateContactPhone(found.phone);
+    }
+  };
+
+  const handleSaveCreateFollowup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!createContactName.trim() || !createContactPhone.trim()) {
+      alert('Please provide contact name and phone number.');
+      return;
+    }
+    setIsSubmittingCreate(true);
+    try {
+      const formattedDateString = `${createDate} • ${createTime}`;
+      const agentObj = assignableAgents.find(a => String(a.id) === String(createAgentId));
+      const agentName = agentObj?.name || user?.name || 'Agent';
+      const cleanContactId = createContactType === 'lead' ? createSelectedLeadId : (createContactType === 'customer' ? createSelectedCustomerId : `contact-${Date.now()}`);
+
+      const newFollowup: Followup = {
+        id: `fu-${Date.now()}`,
+        companyId: tenant?.id || 't-jamin-02',
+        contactId: cleanContactId || `lead-${Date.now()}`,
+        contactName: createContactName.trim(),
+        contactPhone: createContactPhone.trim(),
+        contactType: createContactType === 'customer' ? 'customer' : 'lead',
+        scheduledDate: createDate,
+        scheduledTime: createTime,
+        scheduledAt: formattedDateString,
+        priority: createPriority,
+        status: 'Pending',
+        followupType: createType,
+        assignedAgentId: createAgentId || (user?.id ? String(user.id) : '1'),
+        assignedAgentName: agentName,
+        assignedRole: user?.role?.code === 'irm' ? 'irm' : 'sales_executive',
+        notes: createNotes.trim(),
+      };
+
+      if (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2') {
+        const created = await jaminApiService.scheduleFollowup({
+          contactId: cleanContactId || '1',
+          contactType: newFollowup.contactType,
+          contactName: createContactName.trim(),
+          contactPhone: createContactPhone.trim(),
+          scheduledAt: `${createDate} ${createTime}`,
+          priority: createPriority,
+          notes: createNotes.trim(),
+          assignedAgentId: createAgentId || String(user?.id || '1'),
+        });
+        if (!created) {
+          throw new Error('The follow-up could not be saved. Please try again.');
+        }
+        storageService.saveFollowup({ ...newFollowup, id: created.id });
+      } else {
+        await apiSaveFollowup(tenant?.id, newFollowup).catch(() => { });
+        storageService.saveFollowup(newFollowup);
+      }
+
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+      setIsCreateModalOpen(false);
+      showToast(`✓ Follow-up scheduled with ${createContactName}!`);
+      await loadData();
+    } finally {
+      setIsSubmittingCreate(false);
+    }
+  };
+
   useEffect(() => {
-    if (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02') {
+    const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2';
+    if (isJamin) {
       jaminApiService.getAgents().then(data => {
         if (data && data.length > 0) {
           setAssignableAgents(data.map(a => ({ id: String(a.id), name: a.name, email: a.email })));
+        } else if (user) {
+          setAssignableAgents([{ id: String(user.id), name: user.name, email: user.email }]);
         }
-      }).catch(() => {});
+      }).catch(() => {
+        if (user) setAssignableAgents([{ id: String(user.id), name: user.name, email: user.email }]);
+      });
     } else {
       adminUserService.getUsers(tenant?.id || '1').then(users => {
         if (users && users.length > 0) {
           const salesUsers = users.filter(u => u.role?.code === 'sales_executive' || u.role?.code === 'sales_manager' || u.role?.code === 'irm');
           setAssignableAgents((salesUsers.length > 0 ? salesUsers : users).map(u => ({ id: String(u.id), name: u.name, email: u.email })));
+        } else if (user) {
+          setAssignableAgents([{ id: String(user.id), name: user.name, email: user.email }]);
         }
-      }).catch(() => {});
+      }).catch(() => {
+        if (user) setAssignableAgents([{ id: String(user.id), name: user.name, email: user.email }]);
+      });
     }
-  }, [tenant?.slug, tenant?.id]);
+  }, [tenant?.slug, tenant?.id, user]);
 
   const assignableAgentOptions = assignableAgents;
 
@@ -85,6 +240,19 @@ export const FollowupsPage: React.FC = () => {
     setRescheduleAgentId(f.assignedAgentId || user?.id || '');
     setRescheduleNotes(f.notes || '');
   };
+
+  // Auto-open target follow-up if redirected from Leads 360 drawer
+  useEffect(() => {
+    const targetId = sessionStorage.getItem('target_followup_id');
+    if (targetId && followups.length > 0) {
+      sessionStorage.removeItem('target_followup_id');
+      sessionStorage.removeItem('target_followup_contact');
+      const found = followups.find(f => f.id === targetId || String(f.id) === String(targetId));
+      if (found) {
+        handleOpenRescheduleModal(found);
+      }
+    }
+  }, [followups]);
 
   const setQuickDatePreset = (daysAhead: number) => {
     const d = new Date();
@@ -172,14 +340,83 @@ export const FollowupsPage: React.FC = () => {
 
       const finalFollowups = Array.from(combinedMap.values());
 
-      const [calls, leads] = await Promise.all([
-        getCalls(tenant?.id).catch(() => storageService.getCalls(tenant?.id)),
-        getLeads(tenant?.id).catch(() => storageService.getLeads(tenant?.id)),
-      ]);
+      const calls = await getCalls(tenant?.id).catch(() => storageService.getCalls(tenant?.id));
+
+      const tenantNum = (tenant?.id === '2' || tenant?.id === 't-jamin-02' || tenant?.slug === 'jamin') ? '2' : '1';
+
+      // Load the same normalized contacts used by the Leads and Customers pages.
+      let directLeads: Lead[] = [];
+      try {
+        directLeads = await getLeads(tenant?.id);
+      } catch (err) {
+        console.warn('Failed to load leads from API:', err);
+      }
+      if (directLeads.length === 0) {
+        directLeads = storageService.getLeads(tenant?.id, false) || [];
+      }
+
+      // Deduplicate leads by 10-digit phone
+      const leadsMap = new Map<string, Lead>();
+      directLeads.forEach(l => {
+        const phone = (l.phone || '').replace(/\D/g, '').slice(-10) || l.id;
+        if (phone && !leadsMap.has(phone)) {
+          leadsMap.set(phone, l);
+        }
+      });
+      const finalLeads = Array.from(leadsMap.values());
+
+      // Include converted leads because they are customer records in the CRM.
+      let directCustomers: Customer[] = [];
+      try {
+        directCustomers = await getCustomers(tenant?.id);
+      } catch (err) {
+        console.warn('Failed to load customers from DB API:', err);
+      }
+
+      try {
+        const convertedResponse = await apiClient.get<any>(`/leads?tenantId=${tenantNum}&status=Converted`);
+        if (convertedResponse?.success && Array.isArray(convertedResponse.data)) {
+          const convertedCustomers: Customer[] = convertedResponse.data.map((lead: any) => ({
+            id: String(lead.id),
+            companyId: String(lead.companyId ?? tenant?.id ?? tenantNum),
+            name: lead.name ?? '',
+            phone: lead.phone ?? '',
+            email: lead.email ?? '',
+            status: 'Active',
+            assignedAgentId: lead.assignedAgentId ? String(lead.assignedAgentId) : '',
+            assignedAgentName: lead.assignedAgentName ?? lead.assignedAgent?.name ?? 'Unassigned',
+            location: lead.location ?? '',
+            lastContacted: lead.lastContactedAt ?? '',
+            openDealsCount: 0,
+            totalValue: 0,
+            createdAt: lead.createdAt ?? new Date().toISOString(),
+            notes: lead.notes ?? '',
+            customFields: lead.customFields ?? {},
+          }));
+          directCustomers = [...directCustomers, ...convertedCustomers];
+        }
+      } catch (err) {
+        console.warn('Failed to load converted leads as customers:', err);
+      }
+
+      if (directCustomers.length === 0) {
+        directCustomers = storageService.getCustomers(tenant?.id) || [];
+      }
+
+      // Deduplicate customers by 10-digit phone
+      const custMap = new Map<string, Customer>();
+      directCustomers.forEach(c => {
+        const phone = (c.phone || '').replace(/\D/g, '').slice(-10) || c.id;
+        if (phone && !custMap.has(phone)) {
+          custMap.set(phone, c);
+        }
+      });
+      const finalCustomers = Array.from(custMap.values());
 
       setFollowups(finalFollowups.length > 0 ? finalFollowups : localFollowups);
       setCallsList(calls || []);
-      setAllLeads(leads || []);
+      setAllLeads(finalLeads);
+      setAllCustomers(finalCustomers);
     } catch (err) {
       console.error('Failed to load followups data', err);
       setFollowups(storageService.getFollowups(tenant?.id) || []);
@@ -946,7 +1183,7 @@ export const FollowupsPage: React.FC = () => {
   return (
     <div className="followups-page-container">
       {/* Header */}
-      <div className="page-header">
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 className="page-title">
             <CalendarCheck size={24} color="var(--primary-600)" /> Follow-ups & Reminders
@@ -955,6 +1192,13 @@ export const FollowupsPage: React.FC = () => {
             Keep commitments, maintain pipeline velocity, and log outcomes seamlessly.
           </p>
         </div>
+        <button
+          className="btn btn-primary"
+          onClick={handleOpenCreateModal}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+        >
+          <Plus size={16} /> Schedule Follow-up
+        </button>
       </div>
 
       {/* ── Admin Global Filter Bar ─────────────────────────────────────────── */}
@@ -1084,21 +1328,19 @@ export const FollowupsPage: React.FC = () => {
         ].map(tab => (
           <button
             key={tab.id}
-            className={`btn btn-sm ${
-              activeTab === tab.id
-                ? tab.danger
-                  ? 'btn-danger followups-tab-danger-active'
-                  : tab.success
+            className={`btn btn-sm ${activeTab === tab.id
+              ? tab.danger
+                ? 'btn-danger followups-tab-danger-active'
+                : tab.success
                   ? 'btn-success followups-tab-success-active'
                   : 'btn-primary'
-                : 'btn-secondary'
-            } ${
-              tab.danger && activeTab !== tab.id
+              : 'btn-secondary'
+              } ${tab.danger && activeTab !== tab.id
                 ? 'followups-tab-danger-inactive'
                 : tab.success && activeTab !== tab.id
-                ? 'followups-tab-success-inactive'
-                : ''
-            }`}
+                  ? 'followups-tab-success-inactive'
+                  : ''
+              }`}
             onClick={() => setActiveTab(tab.id as any)}
           >
             {tab.danger && (
@@ -1294,36 +1536,9 @@ export const FollowupsPage: React.FC = () => {
         subtitle={`Select date, time & channel for ${rescheduleItem?.contactPhone || ''}`}
       >
         <form onSubmit={handleSaveReschedule} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Quick Presets */}
-          <div>
-            <label className="form-label" style={{ marginBottom: 6 }}>Quick Date Presets</label>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setQuickDatePreset(1)}
-                style={{ fontSize: '12px', padding: '4px 10px' }}
-              >
-                Tomorrow
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setQuickDatePreset(2)}
-                style={{ fontSize: '12px', padding: '4px 10px' }}
-              >
-                In 2 Days
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setQuickDatePreset(7)}
-                style={{ fontSize: '12px', padding: '4px 10px' }}
-              >
-                In 1 Week
-              </button>
-            </div>
-          </div>
+
+
+
 
           {/* Date & Time Grid */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -1431,6 +1646,234 @@ export const FollowupsPage: React.FC = () => {
               }}
             >
               <Calendar size={14} /> Confirm Reschedule
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ── Schedule New Follow-up Modal ── */}
+      <Modal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        title="Schedule Prospective Follow-up"
+        subtitle="Set task date, time, channel & assigned executive"
+      >
+        <form onSubmit={handleSaveCreateFollowup} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Contact Source Type Toggle */}
+          <div className="form-group">
+            <label className="form-label" style={{ fontWeight: 600, marginBottom: 8, display: 'block' }}>Contact Source</label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              {[
+                { key: 'lead' as const, label: 'Lead' },
+                { key: 'customer' as const, label: 'Customer' },
+                { key: 'new' as const, label: 'New Contact' },
+              ].map(opt => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => handleContactTypeChange(opt.key)}
+                  style={{
+                    padding: '8px 10px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    borderRadius: 6,
+                    border: '1px solid',
+                    borderColor: createContactType === opt.key ? 'var(--primary-600)' : 'var(--border-base)',
+                    backgroundColor: createContactType === opt.key ? 'var(--primary-50, rgba(239, 68, 68, 0.08))' : 'var(--bg-surface)',
+                    color: createContactType === opt.key ? 'var(--primary-600)' : 'var(--text-secondary)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Contact Picker based on type */}
+          {createContactType === 'lead' && (
+            <div className="form-group">
+              <label className="form-label">Select Lead *</label>
+              <select
+                className="form-input"
+                required
+                value={createSelectedLeadId}
+                onChange={e => handleLeadSelect(e.target.value)}
+              >
+                <option value="">-- Choose a lead --</option>
+                {allLeads.map(l => (
+                  <option key={l.id} value={l.id}>
+                    {l.name} ({l.phone})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {createContactType === 'customer' && (
+            <div className="form-group">
+              <label className="form-label">Select Customer *</label>
+              <select
+                className="form-input"
+                required
+                value={createSelectedCustomerId}
+                onChange={e => handleCustomerSelect(e.target.value)}
+              >
+                <option value="">-- Choose a customer --</option>
+                {allCustomers.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.phone})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Name & Phone */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="form-group">
+              <label className="form-label">Contact Name *</label>
+              <input
+                type="text"
+                className="form-input"
+                required
+                placeholder="Full name"
+                value={createContactName}
+                onChange={e => setCreateContactName(e.target.value)}
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Phone Number *</label>
+              <input
+                type="text"
+                className="form-input"
+                required
+                placeholder="+91 "
+                value={createContactPhone}
+                onChange={e => setCreateContactPhone(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Date & Time Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="form-group">
+              <label className="form-label">Follow-up Date *</label>
+              <input
+                type="date"
+                className="form-input"
+                required
+                value={createDate}
+                min={new Date().toISOString().split('T')[0]}
+                onChange={e => setCreateDate(e.target.value)}
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Follow-up Time</label>
+              <input
+                type="time"
+                className="form-input"
+                value={createTime}
+                onChange={e => setCreateTime(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Follow-up Channel */}
+          <div className="form-group">
+            <label className="form-label">Channel</label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              {[
+                { type: 'call' as const, label: '📞 Phone Call' },
+                { type: 'whatsapp' as const, label: '💬 WhatsApp' },
+                { type: 'meeting' as const, label: '🤝 Meeting' },
+              ].map(opt => (
+                <button
+                  key={opt.type}
+                  type="button"
+                  onClick={() => setCreateType(opt.type)}
+                  style={{
+                    padding: '8px 10px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    borderRadius: 6,
+                    border: '1px solid',
+                    borderColor: createType === opt.type ? 'var(--primary-600)' : 'var(--border-base)',
+                    backgroundColor: createType === opt.type ? 'var(--primary-50, rgba(239, 68, 68, 0.08))' : 'var(--bg-surface)',
+                    color: createType === opt.type ? 'var(--primary-600)' : 'var(--text-secondary)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Priority & Assigned Agent */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="form-group">
+              <label className="form-label">Priority</label>
+              <select
+                className="form-input"
+                value={createPriority}
+                onChange={e => setCreatePriority(e.target.value as any)}
+              >
+                <option value="High">🔴 High Priority</option>
+                <option value="Medium">🟡 Medium</option>
+                <option value="Low">🟢 Low</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Assigned Executive</label>
+              <select
+                className="form-input"
+                value={createAgentId}
+                onChange={e => setCreateAgentId(e.target.value)}
+              >
+                {assignableAgents.map(a => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Notes / Agenda */}
+          <div className="form-group">
+            <label className="form-label">Notes / Agenda</label>
+            <textarea
+              className="form-textarea"
+              rows={3}
+              placeholder="Discussion points, follow-up purpose, or key requests..."
+              value={createNotes}
+              onChange={e => setCreateNotes(e.target.value)}
+            />
+          </div>
+
+          {/* Form Actions */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setIsCreateModalOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={isSubmittingCreate}
+              style={{
+                background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                borderColor: '#dc2626',
+                color: '#ffffff',
+                fontWeight: 600,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              <Calendar size={14} /> {isSubmittingCreate ? 'Scheduling...' : 'Schedule Follow-up'}
             </button>
           </div>
         </form>

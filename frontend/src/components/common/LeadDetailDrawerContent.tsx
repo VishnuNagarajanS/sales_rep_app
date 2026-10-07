@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { CallDisposition, Consultation, SiteVisit } from '../../types';
 import { storageService } from '../../services/storageService';
+import { jaminApiService } from '../../services/jaminApiService';
 import { useAuth } from '../../context/AuthContext';
 import { StatusChip } from './StatusChip';
 
@@ -74,9 +75,20 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   const [isSiteVisitsOpen, setIsSiteVisitsOpen] = useState(true);
   const [isActivityOpen, setIsActivityOpen] = useState(true);
   const [, setSiteVisitsVersion] = useState(0);
+  const [apiSiteVisits, setApiSiteVisits] = useState<SiteVisit[]>([]);
 
   useEffect(() => {
     setCallTab('agent');
+  }, [contactPhone, contactId]);
+
+  useEffect(() => {
+    let isMounted = true;
+    jaminApiService.getSiteVisits(true).then(visits => {
+      if (isMounted && visits && visits.length > 0) {
+        setApiSiteVisits(visits);
+      }
+    }).catch(() => {});
+    return () => { isMounted = false; };
   }, [contactPhone, contactId]);
 
   // ── Lead record lookup ───────────────────────────────────────────────────────
@@ -107,14 +119,32 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
 
   // ── Site Visits lookup (Jamin Bazaar) ──────────────────────────────────────
   const leadSiteVisits = (() => {
-    if (!selectedLead && !contactPhone) return [];
-    const allVisits = storageService.getSiteVisits(tenantId) || [];
+    if (!selectedLead && !contactPhone && !contactName) return [];
+    const localVisits = storageService.getSiteVisits() || [];
+    const visitMap = new Map<string, SiteVisit>();
+    localVisits.forEach(v => visitMap.set(String(v.id), v));
+    apiSiteVisits.forEach(v => visitMap.set(String(v.id), v));
+    const allVisits = Array.from(visitMap.values());
+
     const phoneDigits = (selectedLead?.phone || contactPhone || '').replace(/\D/g, '').slice(-10);
+    const targetLeadId = String(selectedLead?.id || contactId || '').replace('db-', '').replace('lead-', '').trim();
+    const targetName = (selectedLead?.name || contactName || '').trim().toLowerCase();
+
     return allVisits.filter(v => {
-      if (selectedLead && v.leadId && (v.leadId === selectedLead.id || v.leadId === contactId)) return true;
-      if (selectedLead && v.customerId && (v.customerId === selectedLead.id || v.customerId === contactId)) return true;
+      // 1. Phone match
       const vPhone = (v.customerPhone || '').replace(/\D/g, '').slice(-10);
-      return Boolean(phoneDigits && vPhone && phoneDigits === vPhone);
+      if (phoneDigits && vPhone && phoneDigits === vPhone) return true;
+
+      // 2. ID match
+      const vLeadId = v.leadId ? String(v.leadId).replace('db-', '').replace('lead-', '').trim() : '';
+      const vCustId = v.customerId ? String(v.customerId).replace('db-', '').replace('lead-', '').trim() : '';
+      if (targetLeadId && (vLeadId === targetLeadId || vCustId === targetLeadId || String(v.leadId) === String(selectedLead?.id))) return true;
+
+      // 3. Name match
+      const vName = (v.customerName || '').trim().toLowerCase();
+      if (targetName && vName && targetName === vName) return true;
+
+      return false;
     });
   })();
 
@@ -839,6 +869,11 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                   <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8 }}>
                     Host Agent: <strong>{sv.assignedAgentName || 'Agent'}</strong>
                   </div>
+                  {(sv.outcomeNotes || sv.visitorNote) && (
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, fontStyle: 'italic' }}>
+                      "{sv.outcomeNotes || sv.visitorNote}"
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

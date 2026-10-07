@@ -249,6 +249,7 @@ public class LeadService : ILeadService
         if (lead == null)
             return ApiResponse<object>.FailureResult("Lead not found or access denied.");
 
+        await using var transaction = await _context.Database.BeginTransactionAsync(ct);
         var agentId = lead.AssignedAgentId;
         var companyId = lead.CompanyId;
 
@@ -277,6 +278,11 @@ public class LeadService : ILeadService
         }
         else
         {
+            if (string.IsNullOrWhiteSpace(customer.Name)) customer.Name = lead.Name;
+            if (string.IsNullOrWhiteSpace(customer.Email)) customer.Email = lead.Email;
+            if (string.IsNullOrWhiteSpace(customer.Location)) customer.Location = lead.Location;
+            if (string.IsNullOrWhiteSpace(customer.Notes)) customer.Notes = dto.Notes ?? lead.Notes;
+            if (customer.AssignedAgentId == null) customer.AssignedAgentId = lead.AssignedAgentId;
             customer.LastContactedAt = DateTime.UtcNow;
             if (dto.DealValue.HasValue)
             {
@@ -288,6 +294,7 @@ public class LeadService : ILeadService
         lead.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
 
         return ApiResponse<object>.SuccessResult(new
         {
