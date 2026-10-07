@@ -18,32 +18,23 @@
   color-scheme: dark;
 }
 
-/* Background Layer with Subtle 6px Blur */
+/* Background Layer Covering Full Viewport (Fixed) */
 .auth-bg-layer {
   position: fixed;
-  top: -20px;
-  left: -20px;
-  right: -20px;
-  bottom: -20px;
-  background-image: url('/auth-bg.jpg');
+  inset: 0;
+  background-image: url('../assets/images/login-bg.jpg');
   background-size: cover;
-  background-position: center center;
+  background-position: center;
   background-repeat: no-repeat;
-  filter: blur(1px);
-  transform: scale(1.04);
-  /* Prevents blur halo along viewport edges */
   z-index: 0;
   pointer-events: none;
-  will-change: transform;
 }
 
-/* Subtle Dark/Blue Transparent Overlay for Premium Depth & High Contrast */
+/* Subtle Dark Overlay Behind Form for Readability */
 .auth-bg-overlay {
   position: fixed;
   inset: 0;
-  background: radial-gradient(circle at 50% 45%,
-      rgba(15, 23, 42, 0.42) 0%,
-      rgba(10, 18, 36, 0.68) 100%);
+  background: rgba(0, 0, 0, 0.3);
   z-index: 1;
   pointer-events: none;
 }
@@ -66,7 +57,7 @@
   max-width: 480px;
   padding: 38px 34px;
   background: rgba(255, 255, 255, 0.10) !important;
-  backdrop-filter: blur(3px);
+  backdrop-filter: blur(5px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.22) !important;
   border-radius: 24px;
@@ -99,6 +90,45 @@
 .auth-header {
   text-align: center;
   margin-bottom: 26px;
+}
+
+/* Application Logo Container - Transparent 3D Metallic Emblem */
+.auth-logo-container {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 18px;
+  padding: 0;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.auth-logo-container:hover {
+  transform: translateY(-3px) scale(1.04);
+}
+
+.auth-app-logo {
+  height: 62px;
+  width: auto;
+  max-width: 220px;
+  object-fit: contain;
+  display: block;
+  /* 3D metallic ambient depth & specular glow over dark glass */
+  filter:
+    drop-shadow(0 8px 16px rgba(0, 0, 0, 0.55))
+    drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4))
+    drop-shadow(0 0 20px rgba(59, 130, 246, 0.22));
+  transition: filter 0.3s ease;
+}
+
+.auth-logo-container:hover .auth-app-logo {
+  filter:
+    drop-shadow(0 12px 22px rgba(0, 0, 0, 0.65))
+    drop-shadow(0 3px 6px rgba(0, 0, 0, 0.5))
+    drop-shadow(0 0 28px rgba(239, 68, 68, 0.35))
+    drop-shadow(0 0 28px rgba(59, 130, 246, 0.35));
 }
 
 /* Red Lightning Logo Badge */
@@ -311,89 +341,134 @@
 
 /* Maintain Liquid Glass aesthetics for browser autofill & saved credentials (WebKit / Chrome / Edge / Safari) */
 .auth-input-field:-webkit-autofill,
+.form-input.auth-input-field:-webkit-autofill {
+  -webkit-text-fill-color: #ffffff !important;
+  color: #ffffff !important;
+  caret-color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.20) !important;
+  border-radius: 12px !important;
+  /* Prevent browser from painting the default opaque white/yellow/dark autofill background */
+  transition: background-color 600000s 0s, color 600000s 0s !important;
+  -webkit-box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.2),
+    inset 0 0 10px rgba(255, 255, 255, 0.02) !important;
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.2),
+    inset 0 0 10px rgba(255, 255, 255, 0.02) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+}
+
 .auth-input-field:-webkit-autofill:hover,
-.auth-input-field:-webkit-autofill:active {
+.form-input.auth-input-field:-webkit-autofill:hover {
   -webkit-text-fill-color: #ffffff !important;
   color: #ffffff !important;
   caret-color: #ffffff !important;
-  border: 1px solid rgba(255, 255, 255, 0.20) !important;
-  border-radius: 12px !important;
-  /* Prevent browser from painting the default opaque white/yellow autofill background */
-  transition: background-color 50000s ease-in-out 0s, color 50000s ease-in-out 0s;
-  /* Mask browser autofill with liquid-glass tinted inset box-shadow */
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(255, 255, 255, 0.30) !important;
+  transition: background-color 600000s 0s, color 600000s 0s !important;
   -webkit-box-shadow:
-    0 0 0 1000px rgba(36, 52, 75, 0.78) inset,
     inset 0 1px 2px rgba(0, 0, 0, 0.2),
     inset 0 0 10px rgba(255, 255, 255, 0.02) !important;
   box-shadow:
-    0 0 0 1000px rgba(36, 52, 75, 0.78) inset,
     inset 0 1px 2px rgba(0, 0, 0, 0.2),
     inset 0 0 10px rgba(255, 255, 255, 0.02) !important;
-  backdrop-filter: blur(8px) !important;
-  -webkit-backdrop-filter: blur(8px) !important;
 }
 
-.auth-input-field:-webkit-autofill:focus {
+.auth-input-field:-webkit-autofill:focus,
+.auth-input-field:-webkit-autofill:active,
+.form-input.auth-input-field:-webkit-autofill:focus,
+.form-input.auth-input-field:-webkit-autofill:active {
   -webkit-text-fill-color: #ffffff !important;
   color: #ffffff !important;
   caret-color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.14) !important;
   border-color: rgba(239, 68, 68, 0.75) !important;
   border-radius: 12px !important;
+  transition: background-color 600000s 0s, color 600000s 0s !important;
   -webkit-box-shadow:
-    0 0 0 1000px rgba(36, 52, 75, 0.78) inset,
     0 0 0 3px rgba(239, 68, 68, 0.25),
     0 0 16px rgba(239, 68, 68, 0.2),
     inset 0 1px 2px rgba(0, 0, 0, 0.2) !important;
   box-shadow:
-    0 0 0 1000px rgba(36, 52, 75, 0.78) inset,
     0 0 0 3px rgba(239, 68, 68, 0.25),
     0 0 16px rgba(239, 68, 68, 0.2),
     inset 0 1px 2px rgba(0, 0, 0, 0.2) !important;
   outline: none !important;
-  transition: background-color 50000s ease-in-out 0s, color 50000s ease-in-out 0s;
 }
 
-/* Standard :autofill */
+/* Standard :autofill selector (Firefox / Modern Standards) */
 .auth-input-field:autofill,
-.auth-input-field:autofill:hover,
-.auth-input-field:autofill:active {
+.form-input.auth-input-field:autofill {
   -webkit-text-fill-color: #ffffff !important;
   color: #ffffff !important;
   caret-color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.08) !important;
   border: 1px solid rgba(255, 255, 255, 0.20) !important;
   border-radius: 12px !important;
+  transition: background-color 600000s 0s, color 600000s 0s !important;
   box-shadow:
-    0 0 0 1000px rgba(36, 52, 75, 0.78) inset,
     inset 0 1px 2px rgba(0, 0, 0, 0.2),
     inset 0 0 10px rgba(255, 255, 255, 0.02) !important;
   backdrop-filter: blur(8px) !important;
   -webkit-backdrop-filter: blur(8px) !important;
-  transition: background-color 50000s ease-in-out 0s, color 50000s ease-in-out 0s;
 }
 
-.auth-input-field:autofill:focus {
+.auth-input-field:autofill:hover,
+.form-input.auth-input-field:autofill:hover {
   -webkit-text-fill-color: #ffffff !important;
   color: #ffffff !important;
   caret-color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(255, 255, 255, 0.30) !important;
+  transition: background-color 600000s 0s, color 600000s 0s !important;
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.2),
+    inset 0 0 10px rgba(255, 255, 255, 0.02) !important;
+}
+
+.auth-input-field:autofill:focus,
+.auth-input-field:autofill:active,
+.form-input.auth-input-field:autofill:focus,
+.form-input.auth-input-field:autofill:active {
+  -webkit-text-fill-color: #ffffff !important;
+  color: #ffffff !important;
+  caret-color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.14) !important;
   border-color: rgba(239, 68, 68, 0.75) !important;
   border-radius: 12px !important;
+  transition: background-color 600000s 0s, color 600000s 0s !important;
   box-shadow:
-    0 0 0 1000px rgba(36, 52, 75, 0.78) inset,
     0 0 0 3px rgba(239, 68, 68, 0.25),
     0 0 16px rgba(239, 68, 68, 0.2),
     inset 0 1px 2px rgba(0, 0, 0, 0.2) !important;
   outline: none !important;
-  transition: background-color 50000s ease-in-out 0s, color 50000s ease-in-out 0s;
 }
 
 /* Firefox :-moz-autofill */
 .auth-input-field:-moz-autofill,
-.auth-input-field:-moz-autofill:hover,
-.auth-input-field:-moz-autofill:focus {
-  background: rgba(36, 52, 75, 0.78) !important;
+.form-input.auth-input-field:-moz-autofill {
+  background-color: rgba(255, 255, 255, 0.08) !important;
   color: #ffffff !important;
-  border-color: rgba(255, 255, 255, 0.20) !important;
-  box-shadow: 0 0 0 1000px rgba(36, 52, 75, 0.78) inset !important;
+  border: 1px solid rgba(255, 255, 255, 0.20) !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2), inset 0 0 10px rgba(255, 255, 255, 0.02) !important;
+}
+
+.auth-input-field:-moz-autofill:hover,
+.form-input.auth-input-field:-moz-autofill:hover {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(255, 255, 255, 0.30) !important;
+}
+
+.auth-input-field:-moz-autofill:focus,
+.form-input.auth-input-field:-moz-autofill:focus {
+  background-color: rgba(255, 255, 255, 0.14) !important;
+  border-color: rgba(239, 68, 68, 0.75) !important;
+  box-shadow:
+    0 0 0 3px rgba(239, 68, 68, 0.25),
+    0 0 16px rgba(239, 68, 68, 0.2),
+    inset 0 1px 2px rgba(0, 0, 0, 0.2) !important;
 }
 
 .auth-input-wrapper:focus-within .auth-input-icon {

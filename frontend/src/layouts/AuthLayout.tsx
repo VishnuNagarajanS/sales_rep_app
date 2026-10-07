@@ -1,17 +1,23 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { ArrowRight, ArrowLeft, Lock, Mail, AlertCircle, CheckCircle2, KeyRound } from 'lucide-react';
+import { ArrowRight, ArrowLeft, Lock, Mail, AlertCircle, CheckCircle2, KeyRound, ShieldCheck, Key } from 'lucide-react';
 import { authService } from '../services/authService';
 import './AuthLayout.css';
 
 export const AuthLayout: React.FC = () => {
-  const { login, loginError } = useAuth();
+  const { login, loginError, mfaChallenge, verifyMfaCode, verifyMfaRecovery, cancelMfa } = useAuth();
   const [view, setView] = useState<'login' | 'forgot'>('login');
 
   // Login Form State
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  // MFA Verification Form State
+  const [mfaCode, setMfaCode] = useState('');
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [isRecoveryMode, setIsRecoveryMode] = useState(false);
+  const [isMfaSubmitting, setIsMfaSubmitting] = useState(false);
 
   // Forgot Password Form State
   const [forgotEmail, setForgotEmail] = useState('');
@@ -24,6 +30,24 @@ export const AuthLayout: React.FC = () => {
     setIsLoading(true);
     await login(email, password);
     setIsLoading(false);
+  };
+
+  const handleMfaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsMfaSubmitting(true);
+    if (isRecoveryMode) {
+      await verifyMfaRecovery(recoveryCode.trim());
+    } else {
+      await verifyMfaCode(mfaCode.trim());
+    }
+    setIsMfaSubmitting(false);
+  };
+
+  const handleCancelMfa = () => {
+    cancelMfa();
+    setMfaCode('');
+    setRecoveryCode('');
+    setIsRecoveryMode(false);
   };
 
   const handleForgotSubmit = async (e: React.FormEvent) => {
@@ -60,14 +84,143 @@ export const AuthLayout: React.FC = () => {
 
   return (
     <div className="auth-page-container">
-      {/* Background with subtle 6px blur and dark/blue transparent overlay */}
+      {/* Fixed background image */}
       <div className="auth-bg-layer" />
+      {/* Subtle dark overlay for contrast */}
       <div className="auth-bg-overlay" />
 
       {/* Centered Liquid Glass Card */}
       <div className="auth-card-container">
         <div className="card animate-slide-down auth-card">
-          {view === 'forgot' ? (
+          {mfaChallenge ? (
+            <>
+              {/* MFA Verification Screen */}
+              <div className="auth-header">
+                <div
+                  className="auth-logo-badge"
+                  style={{
+                    background: isRecoveryMode
+                      ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+                      : 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                  }}
+                >
+                  {isRecoveryMode ? <Key size={26} color="#ffffff" /> : <ShieldCheck size={26} color="#ffffff" />}
+                </div>
+                <h2 className="auth-title">
+                  {isRecoveryMode ? 'Emergency Recovery Code' : 'Two-Factor Authentication'}
+                </h2>
+                <p className="auth-subtitle">
+                  {isRecoveryMode
+                    ? 'Enter one of your 8 single-use emergency backup recovery codes.'
+                    : `Enter the 6-digit verification code from your authenticator app for ${mfaChallenge.email}.`}
+                </p>
+              </div>
+
+              <form onSubmit={handleMfaSubmit} className="auth-form">
+                {!isRecoveryMode ? (
+                  <div className="form-group">
+                    <label htmlFor="mfa-login-code" className="form-label auth-form-label">
+                      6-Digit Authenticator Code
+                    </label>
+                    <div className="auth-input-wrapper">
+                      <KeyRound size={15} className="auth-input-icon" />
+                      <input
+                        id="mfa-login-code"
+                        name="code"
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        maxLength={6}
+                        autoComplete="one-time-code"
+                        className="form-input auth-input-field"
+                        placeholder="123456"
+                        value={mfaCode}
+                        onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, ''))}
+                        required
+                        autoFocus
+                        style={{
+                          letterSpacing: '0.25em',
+                          fontFamily: 'monospace',
+                          fontSize: '18px',
+                          textAlign: 'center',
+                          fontWeight: 700,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="form-group">
+                    <label htmlFor="mfa-recovery-code" className="form-label auth-form-label">
+                      Backup Recovery Code
+                    </label>
+                    <div className="auth-input-wrapper">
+                      <Key size={15} className="auth-input-icon" />
+                      <input
+                        id="mfa-recovery-code"
+                        name="recoveryCode"
+                        type="text"
+                        autoComplete="off"
+                        className="form-input auth-input-field"
+                        placeholder="XXXX-XXXX"
+                        value={recoveryCode}
+                        onChange={(e) => setRecoveryCode(e.target.value.toUpperCase())}
+                        required
+                        autoFocus
+                        style={{
+                          letterSpacing: '0.15em',
+                          fontFamily: 'monospace',
+                          fontSize: '16px',
+                          textAlign: 'center',
+                          fontWeight: 700,
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {loginError && (
+                  <div className="auth-error-alert">
+                    <AlertCircle size={16} />
+                    <span>{loginError}</span>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  className="btn btn-primary auth-submit-btn"
+                  disabled={isMfaSubmitting || (!isRecoveryMode ? mfaCode.length < 6 : !recoveryCode.trim())}
+                >
+                  {isMfaSubmitting ? 'Verifying Code...' : 'Verify and Sign In'} <ArrowRight size={16} />
+                </button>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary auth-preset-btn"
+                    style={{ justifyContent: 'center', textAlign: 'center', width: '100%', fontSize: 13 }}
+                    onClick={() => {
+                      setIsRecoveryMode(!isRecoveryMode);
+                      setMfaCode('');
+                      setRecoveryCode('');
+                    }}
+                    disabled={isMfaSubmitting}
+                  >
+                    {isRecoveryMode ? 'Use Authenticator Code instead' : 'Use a backup recovery code instead'}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-secondary auth-preset-btn"
+                    style={{ justifyContent: 'center', textAlign: 'center', width: '100%', fontSize: 13, borderColor: 'transparent' }}
+                    onClick={handleCancelMfa}
+                    disabled={isMfaSubmitting}
+                  >
+                    <ArrowLeft size={14} /> Back to Sign In
+                  </button>
+                </div>
+              </form>
+            </>
+          ) : view === 'forgot' ? (
             <>
               {/* Forgot Password Header */}
               <div className="auth-header">
@@ -155,8 +308,8 @@ export const AuthLayout: React.FC = () => {
             <>
               {/* Header */}
               <div className="auth-header">
-                <div className="auth-logo-badge">
-                  ⚡
+                <div className="auth-logo-container">
+                  <img src="/gml-metallic-logo.png" alt="GML Logo" className="auth-app-logo" />
                 </div>
                 <h2 className="auth-title">NexusSales Platform</h2>
                 <p className="auth-subtitle">
@@ -240,4 +393,3 @@ export const AuthLayout: React.FC = () => {
     </div>
   );
 };
-

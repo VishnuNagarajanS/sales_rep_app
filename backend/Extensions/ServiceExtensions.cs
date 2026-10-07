@@ -62,6 +62,8 @@ public static class ServiceExtensions
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUserService, CurrentUserService>();
         services.AddScoped<ITotpService, TotpService>();
+        services.AddSingleton<IMfaEncryptionService, MfaEncryptionService>();
+        services.AddScoped<IMfaService, MfaService>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IAdminUserService, AdminUserService>();
         services.AddScoped<ILeadService, LeadService>();

@@ -393,41 +393,6 @@ export const PlatformAuditPage: React.FC = () => {
                 <span className="meta-val">{inspectedLog.details}</span>
               </div>
             </div>
-
-            {/* Visual JSON Before / After Diff */}
-            {/* <div className="diff-section">
-              <h4 className="diff-heading">Payload State Diff (Before vs After)</h4>
-              <div className="diff-grid">
-                <div className="diff-pane before-pane">
-                  <div className="pane-header">STATE BEFORE ACTION</div>
-                  <pre className="pane-body font-mono">
-                    {inspectedLog.beforeValue
-                      ? JSON.stringify(inspectedLog.beforeValue, null, 2)
-                      : '// No preceding state recorded (initial creation or read event)'}
-                  </pre>
-                </div>
-
-                <div className="diff-pane after-pane">
-                  <div className="pane-header">STATE AFTER ACTION (COMMITTED)</div>
-                  <pre className="pane-body font-mono">
-                    {inspectedLog.afterValue
-                      ? JSON.stringify(inspectedLog.afterValue, null, 2)
-                      : JSON.stringify(
-                          {
-                            action: inspectedLog.action,
-                            entity: inspectedLog.entityType,
-                            entityId: inspectedLog.entityId,
-                            status: inspectedLog.status || 'success',
-                            details: inspectedLog.details,
-                          },
-                          null,
-                          2
-                        )}
-                  </pre>
-                </div>
-              </div>
-            </div> */}
-
             <div className="drawer-footer-actions">
               <button className="btn btn-primary" onClick={() => setIsInspectDrawerOpen(false)}>
                 Close Inspector

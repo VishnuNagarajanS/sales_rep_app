@@ -507,7 +507,7 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
 
                         <td className="platform-matrix-td-action">
                           <div className="action-button-group">
-                            <button
+                            {/* <button
                               className="btn btn-secondary btn-xs action-btn-support"
                               title="Drill in to inspect tenant CRM in read-only support mode"
                               onClick={() => {
@@ -517,7 +517,7 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
                               }}
                             >
                               <ExternalLink size={12} /> View as Company
-                            </button>
+                            </button> */}
                             <button
                               className="btn btn-ghost btn-xs action-btn-manage"
                               onClick={() => onNavigate('admin-companies', { selectedTenantId: t.id })}

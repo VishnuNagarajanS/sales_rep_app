@@ -47,6 +47,9 @@ public class ApplicationDbContext : DbContext
     public DbSet<PlatformSetting> PlatformSettings => Set<PlatformSetting>();
     public DbSet<UserSession> UserSessions => Set<UserSession>();
     public DbSet<SecurityEvent> SecurityEvents => Set<SecurityEvent>();
+    public DbSet<UserMfaSetting> UserMfaSettings => Set<UserMfaSetting>();
+    public DbSet<MfaRecoveryCode> MfaRecoveryCodes => Set<MfaRecoveryCode>();
+    public DbSet<MfaChallenge> MfaChallenges => Set<MfaChallenge>();
 
     // IRM Entities
     public DbSet<Investor> Investors => Set<Investor>();

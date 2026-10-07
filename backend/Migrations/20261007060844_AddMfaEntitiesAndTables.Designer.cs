@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using backend.Data;
@@ -12,9 +13,11 @@ using backend.Data;
 namespace backend.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261007060844_AddMfaEntitiesAndTables")]
+    partial class AddMfaEntitiesAndTables
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -78,7 +81,7 @@ namespace backend.Migrations
 
                     b.HasIndex("CompanyId");
 
-                    b.ToTable("AuditLogs", (string)null);
+                    b.ToTable("AuditLogs");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.BroadcastAnnouncement", b =>
@@ -553,7 +556,7 @@ namespace backend.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Documents", (string)null);
+                    b.ToTable("Documents");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.ExecutiveProfile", b =>
@@ -605,7 +608,7 @@ namespace backend.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ExecutiveProfiles", (string)null);
+                    b.ToTable("ExecutiveProfiles");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.Followup", b =>
@@ -805,7 +808,7 @@ namespace backend.Migrations
 
                     b.HasIndex("CustomerId");
 
-                    b.ToTable("GhlDeals", (string)null);
+                    b.ToTable("GhlDeals");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.GhlDealActivity", b =>
@@ -856,7 +859,7 @@ namespace backend.Migrations
 
                     b.HasIndex("DealId");
 
-                    b.ToTable("GhlDealActivities", (string)null);
+                    b.ToTable("GhlDealActivities");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.GhlInvestmentOpportunity", b =>
@@ -912,7 +915,7 @@ namespace backend.Migrations
 
                     b.HasIndex("InvestorId");
 
-                    b.ToTable("GhlInvestmentOpportunities", (string)null);
+                    b.ToTable("GhlInvestmentOpportunities");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.InvestmentOpportunity", b =>
@@ -985,7 +988,7 @@ namespace backend.Migrations
 
                     b.HasIndex("CreatedByIrmId");
 
-                    b.ToTable("InvestmentOpportunities", (string)null);
+                    b.ToTable("InvestmentOpportunities");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.Investor", b =>
@@ -1057,7 +1060,7 @@ namespace backend.Migrations
 
                     b.HasIndex("CompanyId");
 
-                    b.ToTable("Investors", (string)null);
+                    b.ToTable("Investors");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.InvestorKyc", b =>
@@ -1256,7 +1259,7 @@ namespace backend.Migrations
 
                     b.HasIndex("IrmId");
 
-                    b.ToTable("InvestorKycs", (string)null);
+                    b.ToTable("InvestorKycs");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.IrmCoverageAssignment", b =>
@@ -1312,7 +1315,7 @@ namespace backend.Migrations
 
                     b.HasIndex("OriginalIrmId");
 
-                    b.ToTable("IrmCoverageAssignments", (string)null);
+                    b.ToTable("IrmCoverageAssignments");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.KycOtpVerification", b =>
@@ -1374,7 +1377,7 @@ namespace backend.Migrations
 
                     b.HasIndex("InvestorKycId");
 
-                    b.ToTable("KycOtpVerifications", (string)null);
+                    b.ToTable("KycOtpVerifications");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.Lead", b =>
@@ -1652,7 +1655,7 @@ namespace backend.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Notifications", (string)null);
+                    b.ToTable("Notifications");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.PasswordResetToken", b =>
@@ -1681,7 +1684,7 @@ namespace backend.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("PasswordResetTokens", (string)null);
+                    b.ToTable("PasswordResetTokens");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.PlatformSetting", b =>

@@ -663,13 +663,13 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                 </div>
 
                 <div className="tenant-card-footer">
-                  <button
+                  {/* <button
                     className="btn btn-secondary btn-sm btn-support-mode"
                     title="Inspect tenant CRM in safe read-only mode"
                     onClick={() => handleViewAsCompany(t)}
                   >
                     <ExternalLink size={13} /> View as Company
-                  </button>
+                  </button> */}
 
                   <button
                     className="btn btn-primary btn-sm btn-manage-drawer"

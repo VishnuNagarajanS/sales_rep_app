@@ -584,16 +584,6 @@ public class PlatformUsersController : ControllerBase
         catch { }
 
         decimal irmDealSum = 0m;
-        try
-        {
-            irmDealSum = await _context.IrmPipelineCards
-                .Where(c => c.Value.HasValue)
-                .SumAsync(c => c.Value, ct) ?? 0m;
-        }
-        catch { }
-
-        var ghlDealSum = await _context.GhlDeals.SumAsync(d => d.Value, ct);
-        var irmDealSum = 0m;
         var totalPipelineValue = (long)Math.Round(ghlDealSum + irmDealSum);
 
         // Real system health score from persistent uptime telemetry

@@ -4,6 +4,7 @@ import { DEFAULT_TENANTS } from '../constants/defaultTenants';
 import { SYSTEM_ROLES } from '../constants/roles';
 import { FEATURES } from '../constants/features';
 import { apiClient } from '../services/apiClient';
+import { authService } from '../services/authService';
 import { isMockMode } from '../config/environment';
 
 const getStoredTenants = (): Tenant[] => {
@@ -72,7 +73,11 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isSuperAdmin: boolean;
   loginError: string | null;
+  mfaChallenge: { challengeToken: string; email: string } | null;
   login: (email: string, password?: string, roleCode?: RoleCode, tenantSlug?: TenantSlug) => Promise<boolean>;
+  verifyMfaCode: (code: string) => Promise<boolean>;
+  verifyMfaRecovery: (recoveryCode: string) => Promise<boolean>;
+  cancelMfa: () => void;
   logout: (reason?: string) => void;
   switchPersona: (roleCode: RoleCode, tenantSlug?: TenantSlug) => void;
   setUser: (user: User | null) => void;
@@ -84,6 +89,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [mfaChallenge, setMfaChallenge] = useState<{ challengeToken: string; email: string } | null>(null);
 
   // User session state
   const [user, setUser] = useState<User | null>(() => {
@@ -206,6 +212,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const response: any = await apiClient.post('/auth/login', { email, password });
 
       if (response && response.success && response.data) {
+        if (response.data.requiresMfa || response.data.requiresTwoFactor) {
+          const chalToken = response.data.challengeToken || response.data.tempToken;
+          setMfaChallenge({ challengeToken: chalToken, email });
+          return false;
+        }
+
         const { token, user: userData, tenant: tenantData } = response.data;
 
         if (token) {
@@ -221,6 +233,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setTenant(tenantData);
         }
 
+        setMfaChallenge(null);
         return true;
       } else {
         setLoginError(response?.message || 'Login failed. Please check credentials.');
@@ -232,6 +245,67 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const verifyMfaCode = async (code: string): Promise<boolean> => {
+    if (!mfaChallenge?.challengeToken) {
+      setLoginError('No active MFA challenge session found.');
+      return false;
+    }
+    setLoginError(null);
+    try {
+      const response: any = await authService.verifyMfa(mfaChallenge.challengeToken, code);
+      if (response && response.success && response.data) {
+        const { token, user: userData, tenant: tenantData } = response.data;
+        if (token) {
+          sessionStorage.setItem('nexus_auth_token', token);
+          localStorage.setItem('nexus_auth_token', token);
+        }
+        if (userData) setUser(userData);
+        if (tenantData) setTenant(tenantData);
+        setMfaChallenge(null);
+        return true;
+      } else {
+        setLoginError(response?.message || 'Invalid verification code. Please check your authenticator app.');
+        return false;
+      }
+    } catch (err: any) {
+      setLoginError(err.message || 'MFA verification failed. Please try again.');
+      return false;
+    }
+  };
+
+  const verifyMfaRecovery = async (recoveryCode: string): Promise<boolean> => {
+    if (!mfaChallenge?.challengeToken) {
+      setLoginError('No active MFA challenge session found.');
+      return false;
+    }
+    setLoginError(null);
+    try {
+      const response: any = await authService.verifyRecovery(mfaChallenge.challengeToken, recoveryCode);
+      if (response && response.success && response.data) {
+        const { token, user: userData, tenant: tenantData } = response.data;
+        if (token) {
+          sessionStorage.setItem('nexus_auth_token', token);
+          localStorage.setItem('nexus_auth_token', token);
+        }
+        if (userData) setUser(userData);
+        if (tenantData) setTenant(tenantData);
+        setMfaChallenge(null);
+        return true;
+      } else {
+        setLoginError(response?.message || 'Invalid or already-used recovery code.');
+        return false;
+      }
+    } catch (err: any) {
+      setLoginError(err.message || 'Recovery verification failed.');
+      return false;
+    }
+  };
+
+  const cancelMfa = () => {
+    setMfaChallenge(null);
+    setLoginError(null);
+  };
+
   const logout = (reason?: string) => {
     sessionStorage.removeItem('nexus_auth_token');
     sessionStorage.removeItem('nexus_current_user');
@@ -241,6 +315,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem('nexus_auth_token');
     localStorage.removeItem('nexus_current_user');
     localStorage.removeItem('nexus_current_tenant');
+    setMfaChallenge(null);
     setLoginError(reason || null);
     setUser(null);
     setTenant(null);
@@ -449,7 +524,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAuthenticated: !!user,
         isSuperAdmin,
         loginError,
+        mfaChallenge,
         login,
+        verifyMfaCode,
+        verifyMfaRecovery,
+        cancelMfa,
         logout,
         switchPersona,
         setUser,

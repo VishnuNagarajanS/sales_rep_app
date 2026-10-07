@@ -2180,7 +2180,9 @@ export class SuperAdminService {
   }
 
   async getMfaStatus(): Promise<MfaStatusDto> {
-    const res = await apiClient.get<ApiResponse<any>>('/super-admin/security/mfa/status');
+    const res = await apiClient.get<ApiResponse<any>>('/auth/mfa/status').catch(() =>
+      apiClient.get<ApiResponse<any>>('/super-admin/security/mfa/status')
+    );
     if (!res || !res.data) throw new Error(res?.message || 'Failed to load MFA status.');
     return {
       isTwoFactorEnabled: Boolean(res.data.isEnabled ?? res.data.isTwoFactorEnabled),
@@ -2190,21 +2192,36 @@ export class SuperAdminService {
   }
 
   async setupMfa(): Promise<MfaSetupResponseDto> {
-    const res = await apiClient.post<ApiResponse<MfaSetupResponseDto>>('/super-admin/security/mfa/setup');
+    const res = await apiClient.post<ApiResponse<MfaSetupResponseDto>>('/auth/mfa/setup').catch(() =>
+      apiClient.post<ApiResponse<MfaSetupResponseDto>>('/super-admin/security/mfa/setup')
+    );
     if (!res || !res.data) throw new Error(res?.message || 'Failed to initiate MFA setup.');
     return res.data;
   }
 
-  async verifyAndEnableMfa(code: string): Promise<boolean> {
-    const res = await apiClient.post<ApiResponse<boolean>>('/super-admin/security/mfa/verify-and-enable', { code });
+  async verifyAndEnableMfa(code: string): Promise<{ success: boolean; recoveryCodes: string[] }> {
+    const res = await apiClient.post<ApiResponse<any>>('/auth/mfa/verify-setup', { code }).catch(() =>
+      apiClient.post<ApiResponse<any>>('/super-admin/security/mfa/verify-and-enable', { code })
+    );
     if (!res || !res.data) throw new Error(res?.message || 'Failed to verify MFA code.');
+    const recoveryCodes: string[] = res.data.recoveryCodes || [];
+    return { success: true, recoveryCodes };
+  }
+
+  async disableMfa(password: string, code?: string): Promise<boolean> {
+    const res = await apiClient.post<ApiResponse<boolean>>('/auth/mfa/disable', { password, code }).catch(() =>
+      apiClient.post<ApiResponse<boolean>>('/super-admin/security/mfa/disable', { password, code })
+    );
+    if (!res || !res.data) throw new Error(res?.message || 'Failed to disable MFA.');
     return true;
   }
 
-  async disableMfa(password: string): Promise<boolean> {
-    const res = await apiClient.post<ApiResponse<boolean>>('/super-admin/security/mfa/disable', { password });
-    if (!res || !res.data) throw new Error(res?.message || 'Failed to disable MFA.');
-    return true;
+  async regenerateRecoveryCodes(password: string, code?: string): Promise<string[]> {
+    const res = await apiClient.post<ApiResponse<string[]>>('/auth/mfa/recovery-codes/regenerate', { password, code }).catch(() =>
+      apiClient.post<ApiResponse<string[]>>('/super-admin/security/mfa/regenerate-recovery-codes', { password, code })
+    );
+    if (!res || !res.data) throw new Error(res?.message || 'Failed to regenerate recovery codes.');
+    return res.data;
   }
 
   async getBackupStatus(): Promise<any> {
