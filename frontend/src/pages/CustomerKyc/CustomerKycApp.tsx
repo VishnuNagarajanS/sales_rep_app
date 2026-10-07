@@ -35,6 +35,7 @@ import {
   NOMINEE_RELATIONSHIP_OPTIONS,
 } from '../../utils/kycValidators';
 import { isMockMode } from '../../config/environment';
+import { apiUrl } from '../../utils/apiUrl';
 
 type ScreenId =
   | 'loading'
@@ -232,7 +233,7 @@ export const CustomerKycApp: React.FC = () => {
     }
 
     try {
-      const res = await fetch('/api/irm/kyc/otp/send', {
+      const res = await fetch(apiUrl('/irm/kyc/otp/send'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -241,7 +242,12 @@ export const CustomerKycApp: React.FC = () => {
         }),
       });
 
-      const json = await res.json();
+      if (res.status === 429) {
+        setOtpSuccess(null);
+        setOtpError('Too many attempts. Please wait a minute and try again.');
+        return;
+      }
+      const json = await res.json().catch(() => ({} as any));
       if (res.ok && json.success && json.data?.success) {
         setMaskedEmail(json.data.maskedEmail || 'your email');
         setOtpSuccess(json.data.message || 'Verification code sent to your email!');
@@ -283,7 +289,7 @@ export const CustomerKycApp: React.FC = () => {
     }
 
     try {
-      const res = await fetch('/api/irm/kyc/otp/verify', {
+      const res = await fetch(apiUrl('/irm/kyc/otp/verify'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -293,7 +299,11 @@ export const CustomerKycApp: React.FC = () => {
         }),
       });
 
-      const json = await res.json();
+      if (res.status === 429) {
+        setOtpError('Too many attempts. Please wait a minute and try again.');
+        return;
+      }
+      const json = await res.json().catch(() => ({} as any));
       if (res.ok && json.success && json.data?.verified) {
         setOtpSuccess('Identity verified successfully! Unlocking KYC Form...');
         setTimeout(() => {
@@ -567,7 +577,7 @@ export const CustomerKycApp: React.FC = () => {
         isFinalSubmit: false,
       };
 
-      const res = await fetch('/api/irm/kyc/submit', {
+      const res = await fetch(apiUrl('/irm/kyc/submit'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -632,7 +642,7 @@ export const CustomerKycApp: React.FC = () => {
         isFinalSubmit: true,
       };
 
-      const res = await fetch('/api/irm/kyc/submit', {
+      const res = await fetch(apiUrl('/irm/kyc/submit'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -670,7 +680,7 @@ export const CustomerKycApp: React.FC = () => {
 
       setCurrentScreen('loading');
       try {
-        const res = await fetch(`/api/irm/kyc/public/${encodeURIComponent(activeToken)}`);
+        const res = await fetch(apiUrl(`/irm/kyc/public/${encodeURIComponent(activeToken)}`));
         if (!res.ok) {
           setCurrentScreen('invalid');
           return;

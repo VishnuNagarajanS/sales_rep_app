@@ -5,6 +5,7 @@ import { SYSTEM_ROLES } from '../constants/roles';
 import { FEATURES } from '../constants/features';
 import { apiClient } from '../services/apiClient';
 import { isMockMode } from '../config/environment';
+import { clearKycLocalData } from '../utils/kycStorage';
 
 const getStoredTenants = (): Tenant[] => {
   try {
@@ -241,6 +242,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem('nexus_auth_token');
     localStorage.removeItem('nexus_current_user');
     localStorage.removeItem('nexus_current_tenant');
+    clearKycLocalData();
     setLoginError(reason || null);
     setUser(null);
     setTenant(null);

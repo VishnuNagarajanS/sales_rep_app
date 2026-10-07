@@ -545,50 +545,23 @@ export const OpportunitiesPage: React.FC = () => {
     showToast(`✓ Investment amount ₹${numericAmount.toLocaleString('en-IN')} confirmed for "${detailDeal.customerName}"`);
   };
 
-  const getDealKycStatus = (deal: Deal): 'Pending' | 'Partially Completed' | 'Completed' => {
+  const getDealKycStatus = (deal: Deal): 'Pending' | 'Partially Completed' | 'Submitted' | 'Verified' | 'Wrong' => {
     // 1. Prefer DB-sourced status (persists across refresh)
-    if (deal.kycStatus === 'Completed') return 'Completed';
-    if (deal.kycStatus === 'Partially Completed') return 'Partially Completed';
-    if (deal.kycStatus === 'Pending') return 'Pending';
+    const dbStatus = (deal.kycStatus || '').toLowerCase();
+    if (dbStatus === 'verified' || dbStatus === 'completed' || dbStatus === 'approved') return 'Verified';
+    if (dbStatus === 'wrong' || dbStatus === 'rejected') return 'Wrong';
+    if (dbStatus === 'submitted' || dbStatus === 'pending_review' || dbStatus === 'under_review') return 'Submitted';
+    if (dbStatus === 'partially completed' || dbStatus === 'in_progress') return 'Partially Completed';
 
     // 2. Fallback: check localStorage (set when customer submits KYC form)
     const rawStatus = localStorage.getItem(`nexus_kyc_status_${deal.id}`);
-    if (rawStatus === 'Completed' || rawStatus === 'Submitted for Review' || rawStatus === 'SEBI KYC Validated') {
-      return 'Completed';
-    }
+    if (rawStatus === 'Verified' || rawStatus === 'Completed' || rawStatus === 'SEBI KYC Validated') return 'Verified';
+    if (rawStatus === 'Wrong' || rawStatus === 'Rejected') return 'Wrong';
+    if (rawStatus === 'Submitted' || rawStatus === 'Submitted for Review') return 'Submitted';
     if (rawStatus === 'Partially Completed') return 'Partially Completed';
-    if (rawStatus === 'Pending') return 'Pending';
 
-    // 3. Fallback: check localStorage KYC form data completeness
-    const savedDataStr = localStorage.getItem(`nexus_kyc_data_${deal.id}`);
-    if (savedDataStr) {
-      try {
-        const data = JSON.parse(savedDataStr);
-        if (data && typeof data === 'object') {
-          const isAllFilled =
-            Boolean(data.investorName?.trim()) &&
-            Boolean(data.panNumber?.trim()) &&
-            Boolean(data.bankAccountNumber?.trim() || data.accountNumber?.trim()) &&
-            Boolean(data.bankIfsc?.trim() || data.ifscCode?.trim()) &&
-            (Boolean(data.dematDoc) || data.hasNoDemat) &&
-            Boolean(data.nominees && data.nominees.length > 0 && data.nominees[0]?.name?.trim());
-
-          if (isAllFilled) return 'Completed';
-
-          const isPartiallyFilled =
-            Boolean(data.panNumber?.trim()) ||
-            Boolean(data.aadhaarNumber?.trim()) ||
-            Boolean(data.bankAccountNumber?.trim() || data.accountNumber?.trim()) ||
-            Boolean(data.aadhaarDoc) ||
-            Boolean(data.panDoc);
-
-          if (isPartiallyFilled) return 'Partially Completed';
-        }
-      } catch { }
-    }
-
-    // 4. Fallback: kycValidated flag on deal object
-    if ((deal as any).kycValidated === true) return 'Completed';
+    // 3. Fallback: kycValidated flag on the deal object
+    if ((deal as any).kycValidated === true) return 'Verified';
 
     return 'Pending';
   };
@@ -1151,8 +1124,10 @@ export const OpportunitiesPage: React.FC = () => {
           {(() => {
             const kycStatus = getDealKycStatus(detailDeal);
             const kycBadgeStyles = {
-              Completed: { bg: '#ecfdf5', color: '#059669', border: '#a7f3d0' },
+              Verified: { bg: '#ecfdf5', color: '#059669', border: '#a7f3d0' },
+              Submitted: { bg: '#eff6ff', color: '#2563eb', border: '#bfdbfe' },
               'Partially Completed': { bg: '#fffbeb', color: '#d97706', border: '#fde68a' },
+              Wrong: { bg: '#fef2f2', color: '#dc2626', border: '#fecaca' },
               Pending: { bg: '#f8fafc', color: '#64748b', border: '#cbd5e1' },
             }[kycStatus];
             const kycData = getKycFormData(detailDeal.id);

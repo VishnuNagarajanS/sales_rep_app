@@ -87,3 +87,7 @@ backend/uploads/*
 !backend/uploads/.gitkeep
 backend/wwwroot/uploads/*
 !backend/wwwroot/uploads/.gitkeep
+
+# Archives
+*.zip
+

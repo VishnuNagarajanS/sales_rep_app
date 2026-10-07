@@ -463,7 +463,20 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors("DefaultCorsPolicy");
 
-app.UseStaticFiles(); // Added to serve uploaded documents
+// Serve uploaded documents, but never let the browser render them inline as HTML/scripts.
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        var path = ctx.Context.Request.Path.Value ?? string.Empty;
+        if (path.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            ctx.Context.Response.Headers["Content-Security-Policy"] = "default-src 'none'; sandbox";
+            ctx.Context.Response.Headers["Content-Disposition"] = "attachment";
+        }
+    }
+});
 
 app.UseAuthentication();
 app.UseAuthorization();

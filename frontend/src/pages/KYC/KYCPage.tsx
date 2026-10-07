@@ -54,6 +54,8 @@ import { DataTable, Column, RowAction } from '../../components/common/DataTable'
 import { FilterBar } from '../../components/common/FilterBar';
 import { Modal } from '../../components/common/Modal';
 import { getAuthHeaders } from '../../utils/authHeaders';
+import { apiUrl } from '../../utils/apiUrl';
+import { saveKycLocal } from '../../utils/kycStorage';
 import {
   SharedKycFormData,
   NomineeItem,
@@ -68,11 +70,23 @@ import './KYCPage.css';
 // ── Types for GHL IRM 5-Step Flow ──────────────────────────────────────────────
 export type { NomineeItem };
 
+/** A KYC document. `url` is set once the file is stored on the server. */
+export interface KycDoc {
+  name: string;
+  size: string;
+  type: string;
+  url?: string;
+}
+
+// File objects can't be serialised; keep them here (keyed by the doc object) until they are uploaded.
+const pendingDocFiles = new WeakMap<object, File>();
+const MAX_KYC_UPLOAD_BYTES = 10 * 1024 * 1024; // matches the server limit (10 MB)
+
 export interface KYCFormData extends SharedKycFormData {
-  aadhaarDoc: { name: string; size: string; type: string } | null;
-  panDoc: { name: string; size: string; type: string } | null;
-  bankProofDoc: { name: string; size: string; type: string } | null;
-  dematDoc: { name: string; size: string; type: string } | null;
+  aadhaarDoc: KycDoc | null;
+  panDoc: KycDoc | null;
+  bankProofDoc: KycDoc | null;
+  dematDoc: KycDoc | null;
 }
 
 const BLANK_KYC_FORM: KYCFormData = {
@@ -129,9 +143,9 @@ function formatBytes(bytes: number): string {
 interface KYCUploadProps {
   label: string;
   required?: boolean;
-  doc: { name: string; size: string; type: string } | null;
+  doc: KycDoc | null;
   error?: string;
-  onUpload: (doc: { name: string; size: string; type: string }) => void;
+  onUpload: (doc: KycDoc) => void;
   onRemove: () => void;
 }
 
@@ -146,11 +160,17 @@ const KYCUploadCard: React.FC<KYCUploadProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = (file: File) => {
-    onUpload({
+    if (file.size > MAX_KYC_UPLOAD_BYTES) {
+      window.alert('File is too large. Maximum allowed size is 10 MB.');
+      return;
+    }
+    const doc: KycDoc = {
       name: file.name,
       size: formatBytes(file.size),
       type: file.type || 'application/pdf',
-    });
+    };
+    pendingDocFiles.set(doc, file);
+    onUpload(doc);
   };
 
   return (
@@ -195,7 +215,7 @@ const KYCUploadCard: React.FC<KYCUploadProps> = ({
               Click to upload or drag & drop
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-              PDF, JPG, PNG up to 15 MB
+              PDF, JPG, PNG up to 10 MB
             </div>
           </div>
           <input
@@ -401,7 +421,7 @@ const GhlIrmKycView: React.FC = () => {
 
   const refreshDbKycs = async () => {
     try {
-      const res = await fetch('/api/irm/kyc/all', {
+      const res = await fetch(apiUrl('/irm/kyc/all'), {
         headers: getAuthHeaders(),
       });
       if (!res.ok) return;
@@ -548,7 +568,7 @@ const GhlIrmKycView: React.FC = () => {
       setIsLoading(false);
     }
 
-    fetch('/api/irm/kyc/all', {
+    fetch(apiUrl('/irm/kyc/all'), {
       headers: getAuthHeaders(),
     })
       .then(res => (res.ok ? res.json() : null))
@@ -786,7 +806,7 @@ const GhlIrmKycView: React.FC = () => {
     }
 
     const docFrom = (url?: string | null, label = 'Uploaded document') =>
-      url && String(url).trim() ? { name: label, size: '', type: '' } : null;
+      url && String(url).trim() ? { name: label, size: '', type: '', url: String(url) } : null;
 
     const savedNonEmpty: Record<string, any> = {};
     if (saved && typeof saved === 'object') {
@@ -869,12 +889,14 @@ const GhlIrmKycView: React.FC = () => {
     let isCancelled = false;
     const fetchLiveKycForProfile = async () => {
       try {
+        // Only a real KYC record id may be used here. customerId / deal.id are different id spaces and
+        // would load (and show) some other investor's KYC. Without a KYC id we look up by email instead.
         const targetId = (selectedCustomerDeal as any).kycId ||
                          (selectedCustomerDeal as any).kycRecordId ||
-                         (selectedCustomerDeal.customerId ? Number(selectedCustomerDeal.customerId) : 0);
+                         0;
         let liveRecord: any = null;
         if (targetId) {
-          const res = await fetch(`/api/irm/kyc/${targetId}`, { headers: getAuthHeaders() });
+          const res = await fetch(apiUrl(`/irm/kyc/${targetId}`), { headers: getAuthHeaders() });
           if (res.ok) {
             const json = await res.json();
             if (json.success && json.data) {
@@ -883,7 +905,7 @@ const GhlIrmKycView: React.FC = () => {
           }
         }
         if (!liveRecord && selectedCustomerDeal.email) {
-          const res = await fetch(`/api/irm/kyc/by-email?email=${encodeURIComponent(selectedCustomerDeal.email)}`, { headers: getAuthHeaders() });
+          const res = await fetch(apiUrl(`/irm/kyc/by-email?email=${encodeURIComponent(selectedCustomerDeal.email)}`), { headers: getAuthHeaders() });
           if (res.ok) {
             const json = await res.json();
             if (json.success && json.data) {
@@ -1000,7 +1022,7 @@ const GhlIrmKycView: React.FC = () => {
         }
 
         const docFrom = (url?: string | null, label = 'Uploaded document') =>
-          url && String(url).trim() ? { name: label, size: 'Saved', type: 'application/pdf' } : null;
+          url && String(url).trim() ? { name: label, size: 'Saved', type: 'application/pdf', url: String(url) } : null;
 
         initialForm = {
           ...initialForm,
@@ -1070,8 +1092,63 @@ const GhlIrmKycView: React.FC = () => {
     startKycFlow(deal, targetStep, true);
   };
 
+  /** Uploads a KYC document file to the server (once) and returns its stored URL. */
+  const uploadKycDoc = async (
+    doc: KycDoc | null,
+    category: string,
+    deal: Deal
+  ): Promise<string | null> => {
+    if (!doc) return null;
+    if (doc.url) return doc.url;
+
+    const file = pendingDocFiles.get(doc);
+    if (!file) {
+      throw new Error(`Please re-attach the ${category} document and try again.`);
+    }
+    const investorId = Number(deal.customerId);
+    if (!Number.isFinite(investorId) || investorId <= 0) {
+      throw new Error('Cannot upload documents: this deal is not linked to an investor record yet.');
+    }
+
+    const fd = new FormData();
+    fd.append('Name', file.name);
+    fd.append('Size', doc.size);
+    fd.append('Type', doc.type);
+    fd.append('Category', category);
+    fd.append('EntityType', 'investor');
+    fd.append('EntityId', String(investorId));
+    fd.append('File', file);
+
+    const res = await fetch(apiUrl('/documents'), {
+      method: 'POST',
+      headers: getAuthHeaders(), // no Content-Type: the browser sets the multipart boundary
+      body: fd,
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.success || !json?.data?.fileUrl) {
+      throw new Error(json?.message || `Failed to upload ${category} document.`);
+    }
+    doc.url = String(json.data.fileUrl); // cache so retries don't upload again
+    return doc.url;
+  };
+
   const saveBackendDraft = async (deal: Deal, data: KYCFormData, step: number) => {
     try {
+      // Best-effort document upload for drafts: a failed upload must not block saving the text fields.
+      const tryUpload = async (doc: KycDoc | null, category: string) => {
+        try {
+          return await uploadKycDoc(doc, category, deal);
+        } catch (e) {
+          console.warn('[KYC draft] document not uploaded:', e);
+          return doc?.url || null;
+        }
+      };
+      const docUrls = {
+        pan: await tryUpload(data.panDoc, 'KYC - PAN'),
+        aadhaar: await tryUpload(data.aadhaarDoc, 'KYC - Aadhaar'),
+        bank: await tryUpload(data.bankProofDoc, 'KYC - Bank Proof'),
+        demat: data.hasNoDemat ? null : await tryUpload(data.dematDoc, 'KYC - Demat Statement'),
+      };
       const payload = {
         investorId: deal.customerId ? Number(deal.customerId) || 0 : 0,
         kycId: deal.kycId || (deal as any).kycRecordId || undefined,
@@ -1100,27 +1177,38 @@ const GhlIrmKycView: React.FC = () => {
         accountType: data.accountType,
         dematAccountNumber: data.hasNoDemat ? null : data.dematAccountNumber,
         nomineesJson: data.hasNominee && data.nominees && data.nominees.length > 0 ? JSON.stringify(data.nominees) : '[]',
-        panDocumentUrl: data.panDoc?.name || null,
-        aadhaarDocumentUrl: data.aadhaarDoc?.name || null,
-        bankChequeUrl: data.bankProofDoc?.name || null,
-        dematDocumentUrl: data.hasNoDemat ? null : (data.dematDoc?.name || null),
-        customerConsentObtained: true,
-        customerConsentTimestamp: new Date().toISOString(),
-        customerConsentDetails: "Customer verbal and electronic consent obtained during assisted KYC session.",
+        panDocumentUrl: docUrls.pan,
+        aadhaarDocumentUrl: docUrls.aadhaar,
+        bankChequeUrl: docUrls.bank,
+        dematDocumentUrl: docUrls.demat,
+        // Consent is only captured on final submit; a draft must never claim it was obtained.
+        customerConsentObtained: false,
+        customerConsentTimestamp: null,
+        customerConsentDetails: null,
         isFinalSubmit: false,
       };
-      await fetch('/api/irm/kyc/assisted-draft', {
+      const res = await fetch(apiUrl('/irm/kyc/assisted-draft'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(payload),
       });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.message || `Draft was not saved on the server (${res.status}).`);
+      }
     } catch (err) {
       console.warn('Draft save error:', err);
+      throw err;
     }
   };
 
   const submitBackendAssistedKyc = async (deal: Deal, data: KYCFormData) => {
     try {
+      // Upload the actual files first; submission fails (and nothing is reported as saved) if an upload fails.
+      const panUrl = await uploadKycDoc(data.panDoc, 'KYC - PAN', deal);
+      const aadhaarUrl = await uploadKycDoc(data.aadhaarDoc, 'KYC - Aadhaar', deal);
+      const bankUrl = await uploadKycDoc(data.bankProofDoc, 'KYC - Bank Proof', deal);
+      const dematUrl = data.hasNoDemat ? null : await uploadKycDoc(data.dematDoc, 'KYC - Demat Statement', deal);
       const payload = {
         investorId: deal.customerId ? Number(deal.customerId) || 0 : 0,
         kycId: deal.kycId || (deal as any).kycRecordId || undefined,
@@ -1149,16 +1237,16 @@ const GhlIrmKycView: React.FC = () => {
         accountType: data.accountType,
         dematAccountNumber: data.hasNoDemat ? null : data.dematAccountNumber,
         nomineesJson: data.hasNominee && data.nominees && data.nominees.length > 0 ? JSON.stringify(data.nominees) : '[]',
-        panDocumentUrl: data.panDoc?.name || null,
-        aadhaarDocumentUrl: data.aadhaarDoc?.name || null,
-        bankChequeUrl: data.bankProofDoc?.name || null,
-        dematDocumentUrl: data.hasNoDemat ? null : (data.dematDoc?.name || null),
+        panDocumentUrl: panUrl,
+        aadhaarDocumentUrl: aadhaarUrl,
+        bankChequeUrl: bankUrl,
+        dematDocumentUrl: dematUrl,
         customerConsentObtained: Boolean(customerConsentChecked),
         customerConsentTimestamp: new Date().toISOString(),
         customerConsentDetails: "Customer verbal and electronic consent obtained during assisted KYC session.",
         isFinalSubmit: true,
       };
-      const res = await fetch('/api/irm/kyc/assisted-submit', {
+      const res = await fetch(apiUrl('/irm/kyc/assisted-submit'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(payload),
@@ -1187,7 +1275,7 @@ const GhlIrmKycView: React.FC = () => {
       currentResolved === 'Assisted KYC – Submitted for Verification';
 
     // 1. Save all form field values
-    localStorage.setItem(`nexus_kyc_data_${dealId}`, JSON.stringify(formData));
+    saveKycLocal(dealId, formData);
 
     // 2. Save draft metadata
     const nowIso = new Date().toISOString();
@@ -1214,7 +1302,9 @@ const GhlIrmKycView: React.FC = () => {
 
     // 4. Save to backend if authenticated
     if (user) {
-      saveBackendDraft(selectedDeal, formData, currentStep).catch(() => {});
+      saveBackendDraft(selectedDeal, formData, currentStep).catch(err => {
+        showToast(`⚠️ Draft is only saved on this device: ${err?.message || 'server error'}`);
+      });
     }
 
     window.dispatchEvent(new Event('nexus_storage_updated'));
@@ -1276,7 +1366,7 @@ const GhlIrmKycView: React.FC = () => {
       ...sectionFormData,
     };
 
-    localStorage.setItem(savedKey, JSON.stringify(updatedData));
+    saveKycLocal(dealId, updatedData);
     setProfileKycData(updatedData);
 
     // Update Deal in storageService if primary contact fields changed
@@ -1339,23 +1429,23 @@ const GhlIrmKycView: React.FC = () => {
   ) => {
     const newCustStatus =
       newStatus === 'Verified' ? 'Verified' : newStatus === 'Wrong' ? 'Needs Correction' : 'Submitted';
-    const verifiedBy = newStatus === 'Verified' ? (user?.email || 'irm@ghl.com') : undefined;
+    const verifiedBy = newStatus === 'Verified' ? (user?.email || user?.name || 'IRM User') : undefined;
     const verifiedAt = newStatus === 'Verified' ? new Date().toISOString() : undefined;
 
     // Resolve KYC record ID from the deal's own kycId / kycRecordId or matching dbKycs
     const emailKey = (deal.email || '').toLowerCase().trim();
     const phoneDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
     const dbItem = dbKycs[emailKey] || (phoneDigits ? Object.values(dbKycs).find((k: any) => (k.phone || '').replace(/\D/g, '').slice(-10) === phoneDigits) : null);
+    // Never fall back to deal.customerId / deal.id: those are different id spaces and would update
+    // (or verify) an unrelated investor's KYC record.
     const resolvedKycId =
       (deal as any).kycId ||
       (deal as any).kycRecordId ||
-      dbItem?.id ||
-      deal.customerId ||
-      deal.id;
+      dbItem?.id;
 
     if (typeof resolvedKycId === 'number' || /^\d+$/.test(String(resolvedKycId))) {
       try {
-        const res = await fetch(`/api/irm/kyc/${resolvedKycId}/status`, {
+        const res = await fetch(apiUrl(`/irm/kyc/${resolvedKycId}/status`), {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
@@ -1380,8 +1470,8 @@ const GhlIrmKycView: React.FC = () => {
         showToast(err?.message || 'Error updating KYC status in backend.');
         throw err;
       }
-    } else if (newStatus === 'Verified') {
-      const errMsg = 'Cannot verify KYC: No valid backend KYC submission found for this customer.';
+    } else {
+      const errMsg = 'Cannot update KYC status: no matching backend KYC submission found for this customer.';
       showToast(errMsg);
       throw new Error(errMsg);
     }
@@ -1538,7 +1628,7 @@ const GhlIrmKycView: React.FC = () => {
       setFormErrors({});
       setValidationErrorSummary(null);
       if (selectedDeal) {
-        localStorage.setItem(`nexus_kyc_data_${selectedDeal.id}`, JSON.stringify(formData));
+        saveKycLocal(selectedDeal.id, formData);
         if (isAssistedFlow) {
           const nextStep = Math.min(5, currentStep + 1);
           localStorage.setItem(`nexus_kyc_draft_${selectedDeal.id}`, JSON.stringify({
@@ -1593,19 +1683,23 @@ const GhlIrmKycView: React.FC = () => {
     }
     if (!selectedDeal) return;
 
+    if (!user) {
+      showToast('Your session has expired. Please sign in again before submitting KYC.');
+      return;
+    }
+
     let savedKycDto: any = null;
     // Await server submission first; never report success if backend save fails
-    if (user) {
-      try {
-        savedKycDto = await submitBackendAssistedKyc(selectedDeal, formData);
-        if (savedKycDto?.id) {
-          selectedDeal.kycId = savedKycDto.id;
-          (selectedDeal as any).kycRecordId = savedKycDto.id;
-        }
-      } catch (err: any) {
-        showToast(`⚠️ Failed to submit assisted KYC: ${err.message || 'Server error'}`);
-        return;
+    try {
+      savedKycDto = await submitBackendAssistedKyc(selectedDeal, formData);
+      if (savedKycDto?.id) {
+        setSelectedDeal((prev: Deal | null) =>
+          prev ? ({ ...prev, kycId: savedKycDto.id, kycRecordId: savedKycDto.id } as Deal) : prev
+        );
       }
+    } catch (err: any) {
+      showToast(`⚠️ Failed to submit assisted KYC: ${err.message || 'Server error'}`);
+      return;
     }
 
     const investorName = formData.investorName.trim();
@@ -1623,10 +1717,10 @@ const GhlIrmKycView: React.FC = () => {
     };
 
     // 1. Persist full KYC form data in localStorage
-    localStorage.setItem(`nexus_kyc_data_${dealId}`, JSON.stringify({
+    saveKycLocal(dealId, {
       ...formData,
       assistedMetadata,
-    }));
+    });
     localStorage.setItem(`nexus_kyc_status_${dealId}`, 'Submitted for Review');
     localStorage.setItem(`nexus_kyc_assisted_${dealId}`, JSON.stringify(assistedMetadata));
 

@@ -93,7 +93,8 @@ export const InvestorsPage: React.FC = () => {
   const loadData = async () => {
     try {
       setLoadError(null);
-      const [apiInvestors, apiDeals, apiCalls, apiConsultations, apiOpportunities, apiFollowups] = await Promise.all([
+      // allSettled: if a secondary list (e.g. calls) fails, the investors themselves must still load.
+      const [resInv, resDeals, resCalls, resConsultations, resOpps, resFollowups] = await Promise.allSettled([
         getInvestors(tenant?.id),
         getDeals(tenant?.id),
         getCalls(tenant?.id),
@@ -101,12 +102,16 @@ export const InvestorsPage: React.FC = () => {
         getOpportunities(tenant?.id),
         getFollowups(tenant?.id),
       ]);
-      setInvestors(apiInvestors || []);
-      setDeals(apiDeals || []);
-      setAllCalls(apiCalls || []);
-      setAllConsultations(apiConsultations || []);
-      setAllOpportunities(apiOpportunities || []);
-      setAllFollowups(apiFollowups || []);
+      const val = <T,>(r: PromiseSettledResult<T>, fb: T): T => (r.status === 'fulfilled' ? r.value : fb);
+      if (resInv.status === 'rejected') {
+        throw (resInv as PromiseRejectedResult).reason;
+      }
+      setInvestors(val(resInv, []));
+      setDeals(val(resDeals, []));
+      setAllCalls(val(resCalls, []));
+      setAllConsultations(val(resConsultations, []));
+      setAllOpportunities(val(resOpps, []));
+      setAllFollowups(val(resFollowups, []));
     } catch (err: any) {
       console.error('Failed to load investor data:', err);
       if (storageService.isMockMode()) {

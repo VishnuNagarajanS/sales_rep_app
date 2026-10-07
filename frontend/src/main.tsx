@@ -9,6 +9,10 @@ import { ThemeProvider } from './context/ThemeContext';
 import { CustomerKycApp } from './pages/CustomerKyc/CustomerKycApp';
 import { ResetPasswordPage } from './pages/Auth/ResetPasswordPage';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { sanitizeStoredKycData } from './utils/kycStorage';
+
+// Remove PAN/Aadhaar/bank numbers that older versions cached in localStorage.
+sanitizeStoredKycData();
 
 const isCustomerKycRoute = /^\/kyc\/[^/]+/i.test(window.location.pathname);
 const isResetPasswordRoute = /^\/reset-password/i.test(window.location.pathname);

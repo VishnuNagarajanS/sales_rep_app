@@ -12,6 +12,7 @@ import {
   User,
   MapPin,
   TrendingUp,
+  Plus,
 } from 'lucide-react';
 import { Deal, DealActivity, Lead, Followup, Investor, InvestmentOpportunity, Consultation } from '../../types';
 import { storageService } from '../../services/storageService';
@@ -288,6 +289,14 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     if (currentIndex === -1) return;
 
     const newIndex = direction === 'forward' ? currentIndex + 1 : currentIndex - 1;
+
+    // Moving into the final (won) stage must run the same conversion logic as "Mark Won"
+    // (investor record creation / linking), otherwise the deal ends up Won with no investor.
+    if (direction === 'forward' && newIndex === stages.length - 1 && stages[newIndex].id === wonStageId) {
+      void handleMarkWon(deal);
+      return;
+    }
+
     if (newIndex >= 0 && newIndex < stages.length) {
       const updatedDeal: Deal = {
         ...deal,
@@ -340,7 +349,10 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
           updated.customerId = String(existingInv.id);
         }
       } catch (err) {
+        // Do not mark the deal Won when the investor record could not be created/linked.
         console.warn('[PipelinePage] Error syncing investor on mark won:', err);
+        showToast('Could not create the investor record, so the deal was not marked as won. Please try again.');
+        return;
       }
     }
     try {
@@ -422,6 +434,12 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
               onClearAll={() => setAgentFilter('All')}
             />
           )}
+          <button
+            className="btn btn-primary pipeline-new-deal-btn"
+            onClick={() => onOpenQuickCreate('deal')}
+          >
+            <Plus size={15} /> New Deal
+          </button>
         </div>
       </div>
 

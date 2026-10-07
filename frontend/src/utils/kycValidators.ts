@@ -1,3 +1,20 @@
+/** Parses a YYYY-MM-DD (or ISO) date as a LOCAL calendar date, avoiding the UTC off-by-one of new Date('YYYY-MM-DD'). */
+function parseLocalDate(value: string): Date | null {
+  if (!value) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
+  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(value);
+  if (isNaN(d.getTime())) return null;
+  if (m && (d.getMonth() !== Number(m[2]) - 1 || d.getDate() !== Number(m[3]))) return null; // e.g. 2020-02-31
+  return d;
+}
+
+function ageOn(d: Date, now: Date = new Date()): number {
+  return (
+    now.getFullYear() - d.getFullYear() -
+    (now.getMonth() < d.getMonth() || (now.getMonth() === d.getMonth() && now.getDate() < d.getDate()) ? 1 : 0)
+  );
+}
+
 export const kycValidators = {
   pan: (value: string) => {
     const val = value.toUpperCase();
@@ -22,42 +39,44 @@ export const kycValidators = {
       if (!n.allocationPercentage || n.allocationPercentage <= 0) return false;
       sum += n.allocationPercentage;
     }
-    return sum === 100;
+    return Math.abs(sum - 100) < 0.01; // tolerate floating point (e.g. 33.3 + 33.3 + 33.4)
   },
   requiredText: (value: string, minLen = 2) => {
     return typeof value === 'string' && value.trim().length >= minLen;
   },
   phone: (value: string) => {
-    const stripped = value.replace(/[\s\-().+]/g, '');
-    const normalized = stripped.replace(/^(91|0)/, '');
-    return /^[6-9][0-9]{9}$/.test(normalized);
+    // Only strip a country/trunk prefix when the length shows it IS a prefix. Blindly stripping a leading
+    // "91" rejected genuine mobile numbers such as 9123456789.
+    let digits = value.replace(/\D/g, '');
+    if (digits.length === 12 && digits.startsWith('91')) digits = digits.slice(2);
+    else if (digits.length === 11 && digits.startsWith('0')) digits = digits.slice(1);
+    return /^[6-9][0-9]{9}$/.test(digits);
   },
   email: (value: string) => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
   },
   dob: (value: string) => {
-    if (!value) return false;
-    const d = new Date(value);
-    if (isNaN(d.getTime())) return false;
-    const now = new Date();
-    const age =
-      now.getFullYear() - d.getFullYear() -
-      (now.getMonth() < d.getMonth() ||
-      (now.getMonth() === d.getMonth() && now.getDate() < d.getDate())
-        ? 1
-        : 0);
-    return age >= 18;
+    const d = parseLocalDate(value);
+    if (!d) return false;
+    const age = ageOn(d);
+    return age >= 18 && age <= 120;
   },
   bankAccount: (value: string) => {
     return /^[0-9]{9,18}$/.test(value.trim());
   },
   dematBoid: (value: string) => {
-    return /^[0-9]{16}$/.test(value.trim());
+    // CDSL: 16 digits. NSDL: "IN" + 6 alphanumeric DP ID + 8 digit client ID.
+    const v = value.replace(/[\s-]/g, '').toUpperCase();
+    return /^[0-9]{16}$/.test(v) || /^IN[0-9A-Z]{6}[0-9]{8}$/.test(v);
   },
   nomineeDob: (value: string) => {
-    if (!value) return false;
-    const d = new Date(value);
-    return !isNaN(d.getTime());
+    const d = parseLocalDate(value);
+    if (!d) return false;
+    return d.getTime() <= Date.now() && ageOn(d) <= 120; // not in the future
+  },
+  isMinorDob: (value: string) => {
+    const d = parseLocalDate(value);
+    return d ? ageOn(d) < 18 : false;
   },
 };
 
@@ -239,9 +258,10 @@ export function validateKycStep(
 
   if (step === 4) {
     if (!data.hasNoDemat) {
-      const dematClean = (data.dematAccountNumber || '').replace(/\D/g, '');
+      const dematClean = (data.dematAccountNumber || '').replace(/[\s-]/g, '');
       if (!kycValidators.dematBoid(dematClean)) {
-        errs.dematAccountNumber = 'Demat account number must be exactly 16 digits (BO ID).';
+        errs.dematAccountNumber =
+          'Enter a valid Demat ID: 16 digits (CDSL) or IN + 6 characters + 8 digits (NSDL).';
       }
     }
   }
@@ -263,7 +283,7 @@ export function validateKycStep(
           errs[`nominee_${idx}_relationship`] = 'Relationship is required.';
         }
         if (!kycValidators.nomineeDob(nom.dob || '')) {
-          errs[`nominee_${idx}_dob`] = 'Nominee date of birth is required.';
+          errs[`nominee_${idx}_dob`] = 'Enter a valid nominee date of birth (cannot be in the future).';
         }
         const pct = Number(nom.allocationPercentage);
         if (isNaN(pct) || pct <= 0) {
@@ -273,8 +293,8 @@ export function validateKycStep(
         }
       });
 
-      if (totalPct !== 100) {
-        errs.nominees = `Total allocation across all nominees must equal exactly 100% (currently ${totalPct}%).`;
+      if (Math.abs(totalPct - 100) >= 0.01) {
+        errs.nominees = `Total allocation across all nominees must equal exactly 100% (currently ${Math.round(totalPct * 100) / 100}%).`;
       }
     }
   }
