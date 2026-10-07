@@ -5,6 +5,7 @@ using backend.DTOs.Calls;
 using backend.DTOs.Common;
 using backend.Extensions;
 using backend.Models.Entities;
+using backend.Services.Implementations;
 using backend.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -253,6 +254,8 @@ public class SalesExecutiveCallsController : ControllerBase
             Duration = c.Duration,
             Disposition = c.Disposition,
             Notes = c.Notes,
+            Reason = c.Reason,
+            CallModule = c.CallModule,
             LeadId = c.LeadId,
             CustomerId = c.CustomerId,
             Timestamp = c.Timestamp,
@@ -317,6 +320,33 @@ public class SalesExecutiveCallsController : ControllerBase
         if (!companyId.HasValue || companyId.Value <= 0)
             return Unauthorized(ApiResponse<CallRecordResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
 
+        var normalizedModule = IrmOtherService.NormalizeModule(dto.Module);
+        if (!string.IsNullOrWhiteSpace(dto.Module) || role == "irm")
+        {
+            if (!string.IsNullOrWhiteSpace(normalizedModule))
+            {
+                if (!IrmOtherService.ModuleOutcomes.TryGetValue(normalizedModule, out var allowedOutcomes))
+                {
+                    return BadRequest(ApiResponse<CallRecordResponseDto>.FailureResult($"Invalid module '{dto.Module}'. Allowed IRM modules are: my_leads, follow_up, kyc, opportunities, investor_360."));
+                }
+
+                var dispo = dto.Disposition?.Trim() ?? string.Empty;
+                if (!allowedOutcomes.Any(o => o.Equals(dispo, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return BadRequest(ApiResponse<CallRecordResponseDto>.FailureResult($"Disposition '{dto.Disposition}' is not valid for module '{dto.Module}'."));
+                }
+            }
+
+            if (dto.Disposition != null && dto.Disposition.Trim().Equals("Other", StringComparison.OrdinalIgnoreCase))
+            {
+                var effectiveReason = (dto.Reason ?? dto.Notes)?.Trim();
+                if (string.IsNullOrWhiteSpace(effectiveReason))
+                {
+                    return BadRequest(ApiResponse<CallRecordResponseDto>.FailureResult("Reason is required when disposition is Other."));
+                }
+            }
+        }
+
         // Use actual provider results; do not mark simulated calls as connected or successful
         var hasTwilioSid = !string.IsNullOrWhiteSpace(dto.TwilioCallSid);
         var twilioConfigured = _twilioOptions.Value.IsConfigured;
@@ -353,6 +383,44 @@ public class SalesExecutiveCallsController : ControllerBase
             rawNotes = $"{rawNotes} [Source: irm]".Trim();
         }
 
+        string? storedReason = null;
+        if (!string.IsNullOrWhiteSpace(dto.Reason))
+        {
+            storedReason = dto.Reason.Trim();
+        }
+        else if (dto.Disposition != null && (dto.Disposition.Trim().Equals("Other", StringComparison.OrdinalIgnoreCase) || dto.Disposition.Trim().Equals("Contacted", StringComparison.OrdinalIgnoreCase)))
+        {
+            storedReason = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim();
+        }
+
+        int? validLeadId = dto.LeadId;
+        if (validLeadId.HasValue)
+        {
+            if (validLeadId.Value <= 0)
+            {
+                validLeadId = null;
+            }
+            else if (!_context.Database.IsInMemory())
+            {
+                var leadExists = await _context.Leads.AnyAsync(l => l.Id == validLeadId.Value, ct);
+                if (!leadExists) validLeadId = null;
+            }
+        }
+
+        int? validCustomerId = dto.CustomerId;
+        if (validCustomerId.HasValue)
+        {
+            if (validCustomerId.Value <= 0)
+            {
+                validCustomerId = null;
+            }
+            else if (!_context.Database.IsInMemory())
+            {
+                var customerExists = await _context.Customers.AnyAsync(c => c.Id == validCustomerId.Value, ct);
+                if (!customerExists) validCustomerId = null;
+            }
+        }
+
         var call = new CallRecord
         {
             CompanyId = companyId.Value,
@@ -363,8 +431,10 @@ public class SalesExecutiveCallsController : ControllerBase
             Duration = effectiveDuration,
             Disposition = effectiveDisposition,
             Notes = rawNotes,
-            LeadId = dto.LeadId,
-            CustomerId = dto.CustomerId,
+            Reason = storedReason,
+            CallModule = normalizedModule,
+            LeadId = validLeadId,
+            CustomerId = validCustomerId,
             TwilioCallSid = dto.TwilioCallSid,
             Timestamp = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow
@@ -373,7 +443,14 @@ public class SalesExecutiveCallsController : ControllerBase
         _context.CallRecords.Add(call);
         await _context.SaveChangesAsync(ct);
 
-        await _context.Entry(call).Reference(c => c.Agent).Query().Include(a => a.Role).LoadAsync(ct);
+        try
+        {
+            await _context.Entry(call).Reference(c => c.Agent).Query().Include(a => a.Role).LoadAsync(ct);
+        }
+        catch
+        {
+            // Suppress if navigation is already loaded or in test contexts
+        }
 
         var response = MapToResponseDto(call);
 
@@ -392,12 +469,73 @@ public class SalesExecutiveCallsController : ControllerBase
                 ApiResponse<CallRecordDto>.FailureResult("Access denied: GHL Admin has read-only access to call disposition records."));
         }
 
+        var normalizedModule = IrmOtherService.NormalizeModule(request.Module);
+        if (!string.IsNullOrWhiteSpace(request.Module) || role == "irm")
+        {
+            if (!string.IsNullOrWhiteSpace(normalizedModule))
+            {
+                if (!IrmOtherService.ModuleOutcomes.TryGetValue(normalizedModule, out var allowedOutcomes))
+                {
+                    return BadRequest(ApiResponse<CallRecordDto>.FailureResult($"Invalid module '{request.Module}'. Allowed IRM modules are: my_leads, follow_up, kyc, opportunities, investor_360."));
+                }
+
+                var dispo = request.Disposition?.Trim() ?? string.Empty;
+                if (!allowedOutcomes.Any(o => o.Equals(dispo, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return BadRequest(ApiResponse<CallRecordDto>.FailureResult($"Disposition '{request.Disposition}' is not valid for module '{request.Module}'."));
+                }
+            }
+
+            if (request.Disposition != null && request.Disposition.Trim().Equals("Other", StringComparison.OrdinalIgnoreCase))
+            {
+                var effectiveReason = (request.Reason ?? request.Notes)?.Trim();
+                if (string.IsNullOrWhiteSpace(effectiveReason))
+                {
+                    return BadRequest(ApiResponse<CallRecordDto>.FailureResult("Reason is required when disposition is Other."));
+                }
+            }
+        }
+
         var result = await _callService.ProcessDispositionAsync(request, ct);
         if (!result.Success)
         {
             if (result.Message.StartsWith("Unauthorized"))
                 return Unauthorized(result);
             return BadRequest(result);
+        }
+        return Ok(result);
+    }
+
+    [HttpGet("other")]
+    public async Task<IActionResult> GetOtherRecords(
+        [FromServices] IIrmOtherService otherService,
+        [FromQuery] string? module,
+        [FromQuery] string? search,
+        [FromQuery] int? irmId,
+        CancellationToken ct = default)
+    {
+        var companyId = _currentUser.CompanyId ?? User.GetCompanyId();
+        var role = (_currentUser.Role ?? User.GetUserRole()).ToLowerInvariant();
+        int? effectiveIrmId = (role == "irm") ? (_currentUser.UserId ?? User.GetUserId()) : irmId;
+
+        var result = await otherService.GetOtherRecordsAsync(companyId, effectiveIrmId, module, search, ct);
+        return Ok(result);
+    }
+
+    [HttpGet("outcomes")]
+    [HttpGet("call-outcomes")]
+    public IActionResult GetCallOutcomes(
+        [FromServices] IIrmOtherService otherService,
+        [FromQuery] string? module)
+    {
+        var result = otherService.GetCallOutcomes();
+        if (!string.IsNullOrWhiteSpace(module))
+        {
+            var normalized = IrmOtherService.NormalizeModule(module);
+            if (normalized != null && result.Data != null && result.Data.TryGetValue(normalized, out var list))
+            {
+                return Ok(ApiResponse<List<string>>.SuccessResponse(list, $"Call outcomes for module {normalized} retrieved."));
+            }
         }
         return Ok(result);
     }

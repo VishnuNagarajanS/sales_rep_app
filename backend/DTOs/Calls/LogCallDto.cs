@@ -8,6 +8,8 @@ public class LogCallDto
     public int Duration { get; set; }
     public string Disposition { get; set; } = string.Empty;
     public string? Notes { get; set; }
+    public string? Reason { get; set; }
+    public string? Module { get; set; }
     public int? LeadId { get; set; }
     public int? CustomerId { get; set; }
     /// <summary>Twilio Call SID (CAxxxx) to correlate with Twilio's records.</summary>

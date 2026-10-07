@@ -26,6 +26,7 @@ import {
   saveLead as apiSaveLead,
   saveCustomer as apiSaveCustomer,
   isTenantMatch,
+  transitionFollowupToKyc,
 } from '../../services/ghlApiService';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
@@ -508,110 +509,35 @@ export const FollowupsPage: React.FC = () => {
       (drawerFollowup as any)?.investmentCapacity ||
       '';   // No hardcoded default — only use what the contact actually provided
 
-    // 1. Create or update deal in stage 'qualified_investor' — fetch from API first, fallback to localStorage
-    let allDeals: Deal[] = [];
     try {
-      allDeals = await getDeals(tenant?.id);
-    } catch {
-      allDeals = storageService.getDeals(tenant?.id) || [];
-    }
-    const existingDeal = allDeals.find(d =>
-      (d.customerId && d.customerId === resolvedContactId) ||
-      (d.phone && fDigits && (d.phone || '').replace(/\D/g, '').slice(-10) === fDigits)
-    );
-
-    const kycDeal: Deal = {
-      id: existingDeal?.id || `deal-kyc-${Date.now()}`,
-      companyId: tenant?.id || 't-ghl-01',
-      title: `${drawerFollowup.contactName} - KYC Verification`,
-      customerId: resolvedContactId,
-      customerName: drawerFollowup.contactName,
-      phone: drawerFollowup.contactPhone,
-      email: contactEmail && contactEmail !== '—' ? contactEmail : undefined,
-      location: contactLocation && contactLocation !== '—' ? contactLocation : undefined,
-      stage: 'qualified_investor',
-      stageEnteredAt: new Date().toISOString(),
-      value: (investmentAmountValue && parseFloat(investmentAmountValue.replace(/,/g, '')) > 0)
-        ? parseFloat(investmentAmountValue.replace(/,/g, ''))
-        : (existingDeal?.value ?? 0),
-      expectedCloseDate: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
-      assignedAgentId: user?.id || drawerFollowup.assignedAgentId || '',
-      assignedAgentName: user?.name || drawerFollowup.assignedAgentName || '',
-      notes: `Ready for KYC. Moved from Follow-ups by IRM (${user?.name || ''}).`,
-      createdAt: existingDeal?.createdAt || new Date().toISOString().slice(0, 10),
-      priority: drawerFollowup.priority || 'High',
-      // Only set preferredAssetClass if IRM has confirmed it; do not default to 'CO-AIF'
-      ...(prefAssetClass && isPrefConfirmed ? { preferredAssetClass: prefAssetClass } : {}),
-      // Only set investmentRange if actually provided; do not default
-      ...(investmentCapacity ? { investmentRange: investmentCapacity } : {}),
-    };
-
-    // Save deal to DB (API) — this persists stage='qualified_investor' in Neon
-    try {
-      await apiSaveDeal(kycDeal);
-    } catch (err: any) {
-      console.error('[FollowupsPage] API saveDeal failed:', err);
-      showToast(`Failed to move to KYC: ${err?.message || 'Error updating deal status'}`);
-      return;
-    }
-
-    // 2. Mark the follow-up task as completed in DB so it does not show in the followup page
-    try {
-      await apiSaveFollowup({
-        ...drawerFollowup,
-        status: 'Completed',
-        notes: `${drawerFollowup.notes ? drawerFollowup.notes + ' | ' : ''}Ready for KYC: Moved to KYC Module by IRM`,
+      await transitionFollowupToKyc({
+        contactName: drawerFollowup.contactName,
+        contactPhone: drawerFollowup.contactPhone,
+        contactEmail: contactEmail && contactEmail !== '—' ? contactEmail : undefined,
+        contactLocation: contactLocation && contactLocation !== '—' ? contactLocation : undefined,
+        contactId: resolvedContactId,
+        followupId: drawerFollowup.id,
+        followupNotes: drawerFollowup.notes,
+        followupPriority: drawerFollowup.priority || 'High',
+        investmentAmount: investmentAmountValue,
+        preferredAssetClass: prefAssetClass,
+        investmentHorizon: prefHorizon,
+        isPrefConfirmed: Boolean(isPrefConfirmed),
+        assignedAgentId: user?.id || drawerFollowup.assignedAgentId || '',
+        assignedAgentName: user?.name || drawerFollowup.assignedAgentName || '',
+        tenantId: tenant?.id || 't-ghl-01',
+        tenantName: tenant?.name || 'GHL India Ventures',
+        actorName: user?.name || 'IRM',
+        actorEmail: user?.email || 'irm@ghl.com',
       });
+
+      setDrawerFollowup(null);
+      loadData();
+      showToast(`✓ ${drawerFollowup.contactName} moved to KYC module!`);
     } catch (err: any) {
-      console.error('[FollowupsPage] API saveFollowup (complete) failed:', err);
-      showToast(`Failed to complete follow-up task: ${err?.message || 'Error updating follow-up status'}`);
-      return;
+      console.error('[FollowupsPage] transitionFollowupToKyc failed:', err);
+      showToast(`Failed to move to KYC: ${err?.message || 'Error updating deal status'}`);
     }
-
-    // 3. If matching lead exists, update lead status to 'Ready for KYC' in DB
-    if (matchingLead) {
-      const updatedLead = {
-        ...matchingLead,
-        status: 'Qualified' as Lead['status'],
-        customFields: {
-          ...(matchingLead.customFields || {}),
-          ...(prefAssetClass && isPrefConfirmed ? { preferredAssetClass: prefAssetClass } : {}),
-          ...(prefHorizon && isPrefConfirmed ? { horizon: prefHorizon, investmentHorizon: prefHorizon } : {}),
-          investmentAmount: (investmentAmountValue && parseFloat(investmentAmountValue.replace(/,/g, '')) > 0)
-            ? investmentAmountValue.replace(/,/g, '').trim()
-            : undefined,
-          irmPreferencesConfirmed: Boolean(isPrefConfirmed),
-          movedToKycAt: new Date().toISOString(),
-        },
-      };
-      try {
-        await apiSaveLead(updatedLead);
-      } catch (err: any) {
-        console.error('[FollowupsPage] API saveLead (qualified) failed:', err);
-        showToast(`Failed to update lead status: ${err?.message || 'Error updating lead'}`);
-        return;
-      }
-    }
-
-    // 4. Audit Log
-    storageService.addAuditLog({
-      id: `aud-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      actorName: user?.name || 'IRM',
-      actorEmail: user?.email || 'irm@ghl.com',
-      action: 'DEAL_CREATED_KYC',
-      entityType: 'Deal',
-      entityId: kycDeal.id,
-      companyId: tenant?.id || 't-ghl-01',
-      companyName: tenant?.name || 'GHL India Ventures',
-      details: `Moved ${drawerFollowup.contactName} to KYC verification module`,
-    });
-
-    // 5. Update local state & close drawer
-    setDrawerFollowup(null);
-    loadData();
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-    showToast(`✓ ${drawerFollowup.contactName} moved to KYC module!`);
   };
 
   const handleSaveReschedule = async () => {
@@ -1182,7 +1108,8 @@ export const FollowupsPage: React.FC = () => {
                         f.contactPhone,
                         f.contactType as any,
                         f.contactId,
-                        f.id
+                        f.id,
+                        'follow_up'
                       );
                     }}
                   >
@@ -1288,7 +1215,8 @@ export const FollowupsPage: React.FC = () => {
                         drawerFollowup.contactPhone,
                         (drawerFollowup.contactType as any) || 'lead',
                         drawerFollowup.contactId,
-                        drawerFollowup.id
+                        drawerFollowup.id,
+                        'follow_up'
                       );
                     }}
                   >
@@ -1801,7 +1729,8 @@ export const FollowupsPage: React.FC = () => {
                       drawerFollowup.contactPhone,
                       resolvedContactType as any,
                       resolvedContactId,
-                      drawerFollowup.id
+                      drawerFollowup.id,
+                      'follow_up'
                     )
                   }
                   sectionsOnly={['callRecordings']}

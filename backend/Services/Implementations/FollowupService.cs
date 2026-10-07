@@ -13,11 +13,13 @@ public class FollowupService : IFollowupService
 {
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
+    private readonly IIrmOtherService _otherService;
 
-    public FollowupService(ApplicationDbContext context, ICurrentUserService currentUser)
+    public FollowupService(ApplicationDbContext context, ICurrentUserService currentUser, IIrmOtherService? otherService = null)
     {
         _context = context;
         _currentUser = currentUser;
+        _otherService = otherService ?? new IrmOtherService(context);
     }
 
     private IQueryable<Followup> GetScopedFollowupsQuery()
@@ -131,19 +133,31 @@ public class FollowupService : IFollowupService
             }
         }
 
-        var totalCount = await query.CountAsync(ct);
-
-        var page = Math.Max(1, filter.Page);
-        var pageSize = Math.Clamp(filter.PageSize, 1, 100);
+        var companyId = _currentUser.CompanyId ?? 1;
+        var otherMatcher = await _otherService.GetOtherMatcherAsync(companyId, "follow_up", ct);
 
         var entities = await query
             .OrderBy(f => f.Status == FollowupStatus.Pending ? 0 : 1)
             .ThenBy(f => f.ScheduledAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
             .ToListAsync(ct);
 
-        var items = entities.Select(MapToDto).ToList();
+        if (otherMatcher.HasAnyOther)
+        {
+            entities = entities
+                .Where(f => !otherMatcher.IsInOther(f.ContactPhone, f.InvestorId, f.LeadId, f.ContactName))
+                .ToList();
+        }
+
+        var totalCount = entities.Count;
+        var page = Math.Max(1, filter.Page);
+        var pageSize = Math.Clamp(filter.PageSize, 1, 100);
+
+        var paged = entities
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        var items = paged.Select(MapToDto).ToList();
 
         return ApiResponse<PagedResult<FollowupResponseDto>>.SuccessResult(
             PagedResult<FollowupResponseDto>.Create(items, totalCount, page, pageSize),

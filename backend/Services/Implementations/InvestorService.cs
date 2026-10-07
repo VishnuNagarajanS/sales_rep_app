@@ -12,16 +12,26 @@ public class InvestorService : IInvestorService
 {
     private readonly IInvestorRepository _investorRepo;
     private readonly IUserRepository _userRepo;
+    private readonly IIrmOtherService? _otherService;
 
-    public InvestorService(IInvestorRepository investorRepo, IUserRepository userRepo)
+    public InvestorService(IInvestorRepository investorRepo, IUserRepository userRepo, IIrmOtherService? otherService = null)
     {
         _investorRepo = investorRepo;
         _userRepo = userRepo;
+        _otherService = otherService;
     }
 
     public async Task<ApiResponse<List<InvestorDto>>> GetAllAsync(int companyId, string? status, string? assetClass, int? irmId, CancellationToken ct = default)
     {
         var investors = await _investorRepo.GetAllAsync(companyId, status, assetClass, irmId, ct);
+        if (_otherService != null)
+        {
+            var matcher = await _otherService.GetOtherMatcherAsync(companyId, "investor_360", ct);
+            if (matcher.HasAnyOther)
+            {
+                investors = investors.Where(i => !matcher.IsInOther(i.Phone, i.Id, null, i.Name)).ToList();
+            }
+        }
         var dtos = investors.Select(MapToDto).ToList();
         return ApiResponse<List<InvestorDto>>.SuccessResponse(dtos);
     }

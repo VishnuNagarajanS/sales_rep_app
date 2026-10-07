@@ -1408,7 +1408,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
             aria-label={`Call ${l.name}`}
             onClick={e => {
               e.stopPropagation();
-              initiateCall(l.name, l.phone, 'lead', l.id);
+              initiateCall(l.name, l.phone, 'lead', l.id, undefined, 'my_leads');
             }}
           >
             <Phone size={12} color="#ffffff" />
@@ -1605,7 +1605,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
             <button
               className="btn btn-call"
               onClick={() => {
-                if (selectedLead) initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id);
+                if (selectedLead) initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, 'my_leads');
               }}
             >
               <Phone size={14} /> Call Lead
@@ -1781,7 +1781,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                   contactType="lead"
                   tenantId={tenant?.id}
                   tenantName={tenant?.name}
-                  onCall={() => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id)}
+                  onCall={() => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, 'my_leads')}
                   sectionsOnly={['callRecordings']}
                 />
               </>

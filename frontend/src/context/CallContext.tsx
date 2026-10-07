@@ -5,9 +5,11 @@ import {
   saveLead as apiSaveLead,
   saveCustomer as apiSaveCustomer,
   saveFollowup as apiSaveFollowup,
+  getFollowups as apiGetFollowups,
   saveDeal as apiSaveDeal,
   getLeads as apiGetLeads,
   getCustomers as apiGetCustomers,
+  transitionFollowupToKyc,
 } from '../services/ghlApiService';
 import { storageService } from '../services/storageService';
 import { useAuth } from './AuthContext';
@@ -43,6 +45,7 @@ interface ActiveCall {
   // Follow-up task linkage — set when the call is initiated from a scheduled follow-up task.
   // The disposition modal uses this to restrict available Call Outcome options.
   sourceFollowupId?: string;
+  callModule?: string;
   isSimulated?: boolean;
   providerStatus?: string;
   twilioCallSid?: string;
@@ -55,7 +58,14 @@ interface CallContextType {
   activeCall: ActiveCall | null;
   showDispositionModal: boolean;
   lastCallRecord: ActiveCall | null;
-  initiateCall: (name: string, phone: string, recordType?: 'lead' | 'customer', recordId?: string, sourceFollowupId?: string) => void;
+  initiateCall: (
+    name: string,
+    phone: string,
+    recordType?: 'lead' | 'customer',
+    recordId?: string,
+    sourceFollowupId?: string,
+    callModule?: string
+  ) => void;
   simulateIncomingCall: (name?: string, phone?: string) => void;
   acceptCall: () => void;
   rejectCall: () => void;
@@ -233,7 +243,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     phone: string,
     recordType: 'lead' | 'customer' = 'lead',
     recordId?: string,
-    sourceFollowupId?: string
+    sourceFollowupId?: string,
+    callModule?: string
   ) => {
     const callId = `call-${Date.now()}`;
     const newCall: ActiveCall = {
@@ -258,6 +269,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isVideoMode: false,
       meetingLink: null,
       sourceFollowupId,
+      callModule,
     };
     setActiveCall(newCall);
 
@@ -535,6 +547,10 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         transcription: undefined,
         notes: finalNotes || undefined,
         reason: reason || undefined,
+        callModule: lastCallRecord.callModule,
+        module: lastCallRecord.callModule,
+        leadId: lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : undefined,
+        customerId: lastCallRecord.matchedRecord?.type === 'customer' ? lastCallRecord.matchedRecord.id : undefined,
         twilioCallSid: lastCallRecord.twilioCallSid,
       };
 
@@ -869,72 +885,61 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           await apiSaveLead(matchedLead);
         }
       }
+
+      // 8. Ready for KYC -> Transition contact to KYC module and mark follow-up completed
+      else if (disposition === 'Ready for KYC') {
+        try {
+          await transitionFollowupToKyc({
+            contactName: lastCallRecord.contactName,
+            contactPhone: lastCallRecord.contactPhone,
+            contactId: lastCallRecord.matchedRecord?.id,
+            followupId: lastCallRecord.sourceFollowupId,
+            followupNotes: notes,
+            assignedAgentId: user.id,
+            assignedAgentName: user.name,
+            tenantId: tenant.id,
+            tenantName: tenant.name,
+            actorName: user.name,
+            actorEmail: user.email,
+          });
+        } catch (err) {
+          console.error('[CallContext] Failed to transition to KYC on disposition:', err);
+        }
+      }
+
+      // 9. Other -> If originated from a follow-up, mark the source follow-up as completed
+      else if (disposition === 'Other') {
+        if (lastCallRecord.sourceFollowupId) {
+          try {
+            const followups = await apiGetFollowups(tenant.id).catch(() => []);
+            const match = followups.find(f => f.id === lastCallRecord.sourceFollowupId);
+            if (match) {
+              await apiSaveFollowup({
+                ...match,
+                status: 'Completed',
+                notes: `${match.notes ? match.notes + ' | ' : ''}Reclassified to Other: ${reason || notes || ''}`,
+              });
+            }
+          } catch (err) {
+            console.error('[CallContext] Failed to mark source follow-up completed on Other:', err);
+          }
+        }
+      }
     }
+
+    try {
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+      window.dispatchEvent(new Event('nexus_call_logged'));
+    } catch {}
 
     setShowDispositionModal(false);
     setLastCallRecord(null);
     setAvailability(prev => prev === 'Busy' ? 'Available' : prev);
   };
 
-  const skipDispositionWithReason = async (reason: string, notes?: string) => {
-    if (lastCallRecord && tenant && user) {
-      const isSim = !!lastCallRecord.isSimulated || lastCallRecord.status !== 'connected';
-      const trimmedReason = reason.trim();
-      let combinedNotes = notes?.trim()
-        ? `${notes.trim()}\n[Skip Reason]: ${trimmedReason}`
-        : `[Skip Reason]: ${trimmedReason}`;
-      if (isSim && !combinedNotes.includes('Simulated')) {
-        combinedNotes = `[Provider Result: Simulated - Call Not Connected (0s)]\n${combinedNotes}`;
-      }
-
-      const callRecord: CallRecord = {
-        id: lastCallRecord.id,
-        companyId: tenant.id,
-        contactName: lastCallRecord.contactName,
-        contactPhone: lastCallRecord.contactPhone,
-        direction: lastCallRecord.direction,
-        duration: isSim ? 0 : lastCallRecord.duration,
-        agentId: user.id,
-        agentName: user.name,
-        disposition: 'Skipped',
-        timestamp: new Date().toISOString(),
-        recordingUrl: undefined,
-        transcription: undefined,
-        notes: combinedNotes,
-        reason: trimmedReason,
-        leadId: lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : undefined,
-        customerId: lastCallRecord.matchedRecord?.type === 'customer' ? lastCallRecord.matchedRecord.id : undefined,
-      };
-
-      await apiLogCall(callRecord);
-
-      // Record activity on matched lead
-      const leadId = lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : null;
-      const allLeads = leads.length > 0 ? leads : (tenant ? storageService.getLeads(tenant.id) : []);
-      const normalize = (p: string) => (p || '').replace(/\D/g, '').slice(-10);
-      const callPhoneDigits = normalize(lastCallRecord.contactPhone);
-      const matchedLead = leadId
-        ? allLeads.find((l: Lead) => l.id === leadId)
-        : allLeads.find((l: Lead) =>
-            (callPhoneDigits && normalize(l.phone) === callPhoneDigits) ||
-            (l.name && l.name.toLowerCase() === lastCallRecord.contactName.toLowerCase())
-          );
-
-      if (matchedLead) {
-        const durM = Math.floor(lastCallRecord.duration / 60);
-        const durS = lastCallRecord.duration % 60;
-        const entry = `[${new Date().toLocaleDateString()}] Call (${durM}m ${durS}s) - Wrap-up Skipped. Reason: ${trimmedReason}${notes?.trim() ? ` • Notes: ${notes.trim()}` : ''}`;
-        matchedLead.notes = matchedLead.notes ? `${matchedLead.notes}\n\n${entry}` : entry;
-        if (!matchedLead.customFields) matchedLead.customFields = {};
-        matchedLead.customFields.lastCallDisposition = 'Skipped';
-        matchedLead.customFields.lastCallSkipReason = trimmedReason;
-        await apiSaveLead(matchedLead);
-        storageService.saveLead(matchedLead);
-      }
-
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-    }
-
+  const skipDispositionWithReason = async (_reason: string, _notes?: string) => {
+    // "Skip for Now" has been completely removed from the disposition workflow.
+    console.warn('[CallContext] skipDispositionWithReason is deprecated and disabled.');
     setShowDispositionModal(false);
     setLastCallRecord(null);
     setAvailability(prev => prev === 'Busy' ? 'Available' : prev);

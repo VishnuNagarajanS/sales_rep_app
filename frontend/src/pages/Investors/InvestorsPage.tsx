@@ -402,7 +402,7 @@ export const InvestorsPage: React.FC = () => {
     {
       label: 'Call Customer',
       icon: <Phone size={14} color="#059669" style={{ marginRight: 6 }} />,
-      onClick: inv => initiateCall(inv.name, inv.phone, 'customer', inv.id),
+      onClick: inv => initiateCall(inv.name, inv.phone, 'customer', inv.id, undefined, 'investor_360'),
     },
     {
       label: 'View Investor 360',
@@ -555,7 +555,7 @@ export const InvestorsPage: React.FC = () => {
 
               <button
                 className="btn btn-primary btn-sm investor-call-btn-blue"
-                onClick={() => initiateCall(selectedInvestor.name, selectedInvestor.phone, 'customer', selectedInvestor.id)}
+                onClick={() => initiateCall(selectedInvestor.name, selectedInvestor.phone, 'customer', selectedInvestor.id, undefined, 'investor_360')}
               >
                 <Phone size={13} /> Call Customer
               </button>

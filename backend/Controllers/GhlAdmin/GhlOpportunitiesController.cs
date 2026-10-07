@@ -7,6 +7,8 @@ using backend.Models.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using backend.Services.Interfaces;
+using backend.Services.Implementations;
 
 namespace backend.Controllers.GhlAdmin;
 
@@ -22,11 +24,13 @@ public class GhlOpportunitiesController : ControllerBase
 {
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
+    private readonly IIrmOtherService _otherService;
 
-    public GhlOpportunitiesController(ApplicationDbContext db, ICurrentUserService currentUser)
+    public GhlOpportunitiesController(ApplicationDbContext db, ICurrentUserService currentUser, IIrmOtherService? otherService = null)
     {
         _db = db;
         _currentUser = currentUser;
+        _otherService = otherService ?? new IrmOtherService(db);
     }
 
     private IQueryable<GhlInvestmentOpportunity> ScopedQuery()
@@ -71,17 +75,30 @@ public class GhlOpportunitiesController : ControllerBase
                 (o.Investor != null && o.Investor.Name.ToLower().Contains(s)));
         }
 
-        var total = await query.CountAsync(ct);
-        page = Math.Max(1, page);
-        pageSize = Math.Clamp(pageSize, 1, 200);
+        var companyId = _currentUser.CompanyId ?? 1;
+        var otherMatcher = await _otherService.GetOtherMatcherAsync(companyId, "opportunities", ct);
 
         var entities = await query
             .OrderByDescending(o => o.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
             .ToListAsync(ct);
 
-        var items = entities.Select(MapToDto).ToList();
+        if (otherMatcher.HasAnyOther)
+        {
+            entities = entities
+                .Where(o => !otherMatcher.IsInOther(o.Investor?.Phone, o.InvestorId, null, o.Investor?.Name ?? o.Title))
+                .ToList();
+        }
+
+        var total = entities.Count;
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 200);
+
+        var paged = entities
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        var items = paged.Select(MapToDto).ToList();
 
         return Ok(ApiResponse<PagedResult<GhlOpportunityResponseDto>>.SuccessResult(
             PagedResult<GhlOpportunityResponseDto>.Create(items, total, page, pageSize),

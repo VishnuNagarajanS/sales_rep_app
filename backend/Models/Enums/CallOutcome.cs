@@ -8,5 +8,6 @@ public enum CallOutcome
     MandateDiscussed,
     NoAnswer,
     Voicemail,
-    WrongNumber
+    WrongNumber,
+    Other
 }

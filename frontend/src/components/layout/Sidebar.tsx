@@ -29,6 +29,7 @@ import {
   Clock,
   Server,
   KeyRound,
+  FolderArchive,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
@@ -279,6 +280,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
         { id: 'kyc', label: 'KYC', icon: <FileCheck size={18} />, feature: FEATURES.INVESTORS, permission: PERMISSIONS.INVESTORS_VIEW },
         { id: 'opportunities', label: 'Opportunities', icon: <Briefcase size={18} />, feature: FEATURES.INVESTMENT_OPPORTUNITIES, permission: PERMISSIONS.OPPORTUNITIES_VIEW },
         { id: 'investors', label: 'Investor 360', icon: <TrendingUp size={18} />, feature: FEATURES.INVESTORS, permission: PERMISSIONS.INVESTORS_VIEW },
+        { id: 'irm-other', label: 'Other', icon: <FolderArchive size={18} /> },
         ...(isGhlIrm ? [{ id: 'pipeline', label: 'Pipeline', icon: <Kanban size={18} />, feature: FEATURES.DEALS, permission: PERMISSIONS.DEALS_VIEW }] : []),
       ],
     },

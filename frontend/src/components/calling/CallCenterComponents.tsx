@@ -1084,7 +1084,7 @@ export const InCallBar: React.FC = () => {
 
 // --- Mandatory Post-Call Disposition Modal ---
 export const DispositionModal: React.FC = () => {
-  const { showDispositionModal, lastCallRecord, saveDisposition, skipDispositionWithReason } = useCall();
+  const { showDispositionModal, lastCallRecord, saveDisposition } = useCall();
   const { tenant, user } = useAuth();
 
   const [disposition, setDisposition] = useState<CallDisposition>('Interested');
@@ -1094,11 +1094,6 @@ export const DispositionModal: React.FC = () => {
   const [followupDate, setFollowupDate] = useState('');
   const [followupTime, setFollowupTime] = useState('');
   const [followupPriority, setFollowupPriority] = useState<'Low' | 'Medium' | 'High'>('High');
-
-  // Skip outcome workflow state
-  const [isSkipping, setIsSkipping] = useState(false);
-  const [skipReason, setSkipReason] = useState('');
-  const [skipError, setSkipError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -1114,32 +1109,53 @@ export const DispositionModal: React.FC = () => {
   ]);
   const [sendDeliveryNotice, setSendDeliveryNotice] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
-  const QUICK_SKIP_REASONS = [
-    'Customer disconnected abruptly',
-    'Customer requested callback later',
-    'Customer busy / in a meeting',
-    'Wrong contact / invalid number',
-    'Requires manager consultation',
-    'Handled via WhatsApp / offline',
-  ];
+  const normalizeModule = (m?: string) => {
+    if (!m) return undefined;
+    const clean = m.trim().toLowerCase().replace(/-/g, '_').replace(/ /g, '_');
+    if (clean === 'myleads' || clean === 'leads') return 'my_leads';
+    if (clean === 'followup' || clean === 'followups') return 'follow_up';
+    if (clean === 'investor360' || clean === 'investors' || clean === 'investor') return 'investor_360';
+    if (clean === 'opportunity' || clean === 'opps') return 'opportunities';
+    return clean;
+  };
 
-  // Reset all form state fresh for every new call — keyed on lastCallRecord.id so
-  // it fires once per finished call, before the modal renders to the agent.
-  // tomorrowDate and defaultFollowupTime are recomputed here (not at module scope)
-  // so midnight rollovers and mid-session Call Settings changes both take effect.
+  const IRM_MODULE_OUTCOMES: Record<string, CallDisposition[]> = {
+    my_leads: ['Follow-up Required', 'No Response', 'Call Back'],
+    follow_up: ['Follow-up Required', 'Other', 'No Response', 'Call Back', 'Ready for KYC'],
+    kyc: ['Contacted', 'Other', 'No Response', 'Call Back'],
+    opportunities: ['Contacted', 'Other', 'No Response', 'Call Back'],
+    investor_360: ['Contacted', 'Other', 'No Response', 'Call Back'],
+  };
+
+  // Reset all form state fresh for every new call
   useEffect(() => {
     if (!lastCallRecord) return;
     const d = new Date();
     d.setDate(d.getDate() + 1);
     const freshTomorrow = d.toISOString().slice(0, 10);
     const isFollowup = !!lastCallRecord.sourceFollowupId;
-    const isIrmLead = user?.role?.code === 'irm' && lastCallRecord.matchedRecord?.type === 'lead';
+    const isIrm = user?.role?.code === 'irm';
+    const isIrmLead = isIrm && lastCallRecord.matchedRecord?.type === 'lead';
     const isSimulated = !!lastCallRecord.isSimulated;
     const isNotConnected = !isSimulated && lastCallRecord.duration === 0;
-    // Use actual provider results; do not mark simulated calls as connected or successful
-    const defaultDispo: CallDisposition = (isSimulated || isNotConnected)
-      ? 'No Response'
-      : (isIrmLead && !isFollowup ? 'Follow-up Required' : 'Interested');
+
+    const currentModule = normalizeModule(lastCallRecord.callModule) ||
+      (lastCallRecord.sourceFollowupId ? 'follow_up' : (lastCallRecord.matchedRecord?.type === 'lead' ? 'my_leads' : 'investor_360'));
+
+    let defaultDispo: CallDisposition;
+    if (isIrm) {
+      const allowed = IRM_MODULE_OUTCOMES[currentModule] || ['Contacted', 'Other', 'No Response', 'Call Back'];
+      if (isSimulated || isNotConnected) {
+        defaultDispo = allowed.includes('No Response') ? 'No Response' : allowed[0];
+      } else {
+        defaultDispo = allowed.includes('Follow-up Required') ? 'Follow-up Required' : (allowed.includes('Contacted') ? 'Contacted' : allowed[0]);
+      }
+    } else {
+      defaultDispo = (isSimulated || isNotConnected)
+        ? 'No Response'
+        : (isIrmLead && !isFollowup ? 'Follow-up Required' : 'Interested');
+    }
+
     setDisposition(defaultDispo);
     setNotes(isSimulated ? '[Provider Result: Simulated - Call Not Connected (0s)]' : (isNotConnected ? '[Twilio Voice: Call Not Answered (0s)]' : ''));
     setReason('');
@@ -1147,9 +1163,6 @@ export const DispositionModal: React.FC = () => {
     setFollowupDate(freshTomorrow);
     setFollowupTime(getCallPreferences().defaultFollowupTime);
     setFollowupPriority('High');
-    setIsSkipping(false);
-    setSkipReason('');
-    setSkipError('');
     setFormError('');
     setIsSubmitting(false);
 
@@ -1175,17 +1188,19 @@ export const DispositionModal: React.FC = () => {
     getMessagingChannels().then(ch => {
       if (ch && ch.length) setChannelsStatus(ch);
     }).catch(console.error);
-  }, [lastCallRecord?.id, lastCallRecord?.matchedRecord?.type, lastCallRecord?.sourceFollowupId, user?.role?.code, tenant?.id]);
+  }, [lastCallRecord?.id, lastCallRecord?.matchedRecord?.type, lastCallRecord?.sourceFollowupId, lastCallRecord?.callModule, user?.role?.code, tenant?.id]);
 
   if (!showDispositionModal || !lastCallRecord) return null;
 
   const isGhlSalesExec = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') && user?.role?.code === 'sales_executive';
-  // This call was launched from the Follow-ups page (a previously scheduled follow-up task).
   const isFollowupCall = !!lastCallRecord.sourceFollowupId;
   const isIrm = user?.role?.code === 'irm';
   const isIrmLeadCall = isIrm && lastCallRecord.matchedRecord?.type === 'lead';
   const isSimulated = !!lastCallRecord.isSimulated;
   const isNotConnected = !isSimulated && lastCallRecord.duration === 0;
+
+  const currentModule = normalizeModule(lastCallRecord.callModule) ||
+    (lastCallRecord.sourceFollowupId ? 'follow_up' : (lastCallRecord.matchedRecord?.type === 'lead' ? 'my_leads' : 'investor_360'));
 
   const allDispositions: CallDisposition[] = [
     'Interested',
@@ -1205,37 +1220,37 @@ export const DispositionModal: React.FC = () => {
     'Wrong Number',
   ];
 
-  // For follow-up calls, "Call Back" and "Wrong Number" are not valid outcomes.
-  // IRM follow-up calls support Interested, Follow-up Required, and No Response.
   const FOLLOWUP_CALL_OUTCOMES: CallDisposition[] = ['Interested', 'Follow-up Required', 'Not Interested'];
-
-  // For IRM follow-up calls, outcomes include Interested, Follow-up Required, and No Response.
-  const IRM_FOLLOWUP_CALL_OUTCOMES: CallDisposition[] = ['Interested', 'Follow-up Required', 'No Response'];
-
-  // For IRM calls against Lead records, restrict to Follow-up Required, Converted, and No Response beside Converted
   const IRM_LEAD_OUTCOMES: CallDisposition[] = ['Follow-up Required', 'Converted', 'No Response'];
 
-  const dispositions: CallDisposition[] = isSimulated
-    ? (isFollowupCall
-        ? ['No Response', 'Follow-up Required', 'Not Interested']
-        : (isIrmLeadCall
-            ? ['No Response', 'Follow-up Required']
-            : SIMULATED_OUTCOMES))
-    : isNotConnected
-      ? ['No Response', 'Follow-up Required', 'Call Back', 'Not Interested', 'Wrong Number']
-      : (isFollowupCall
-          ? (isIrm ? IRM_FOLLOWUP_CALL_OUTCOMES : FOLLOWUP_CALL_OUTCOMES)
-          : isIrmLeadCall
-            ? IRM_LEAD_OUTCOMES
-            : isGhlSalesExec
-              ? allDispositions.filter(d => d !== 'Converted')
-              : allDispositions);
+  const dispositions: CallDisposition[] = isIrm
+    ? (IRM_MODULE_OUTCOMES[currentModule] || ['Contacted', 'Other', 'No Response', 'Call Back'])
+    : (isSimulated
+        ? (isFollowupCall
+            ? ['No Response', 'Follow-up Required', 'Not Interested']
+            : (isIrmLeadCall
+                ? ['No Response', 'Follow-up Required']
+                : SIMULATED_OUTCOMES))
+        : isNotConnected
+          ? ['No Response', 'Follow-up Required', 'Call Back', 'Not Interested', 'Wrong Number']
+          : (isFollowupCall
+              ? FOLLOWUP_CALL_OUTCOMES
+              : isIrmLeadCall
+                ? IRM_LEAD_OUTCOMES
+                : isGhlSalesExec
+                  ? allDispositions.filter(d => d !== 'Converted')
+                  : allDispositions));
 
   const handleSave = async () => {
     if (isSubmitting) return;
 
     if (isSimulated && (disposition === 'Interested' || disposition === 'Converted')) {
       alert('Simulated calls without an active carrier connection cannot be marked as connected or successful.');
+      return;
+    }
+
+    if (disposition === 'Other' && !reason.trim()) {
+      alert('Reason is required when disposition is Other.');
       return;
     }
 
@@ -1308,8 +1323,6 @@ export const DispositionModal: React.FC = () => {
         });
 
         if (!sendResult.delivered) {
-          // Delivery failed or unavailable!
-          // Do not show as sent; preserve state so IRM can retry or switch channel
           setSendDeliveryNotice({
             type: 'error',
             text: sendResult.deliveryResult || `Message delivery via ${selectedChannel.toUpperCase()} is unavailable or failed. State preserved for retry.`,
@@ -1318,7 +1331,6 @@ export const DispositionModal: React.FC = () => {
           return;
         }
 
-        // Delivery succeeded!
         const channelLabel = selectedChannel.toUpperCase();
         const contactTarget = selectedChannel === 'email' ? recipientEmail.trim() : effectivePhone;
         const logSnippet = `[No Response Follow-up Message Sent via ${channelLabel} to ${contactTarget}]: ${customerMessage.trim()}`;
@@ -1335,7 +1347,7 @@ export const DispositionModal: React.FC = () => {
             notes: finalNotes ? `Follow-up from call with ${lastCallRecord.contactName}: ${finalNotes}` : `Follow-up required from call with ${lastCallRecord.contactName}`,
           }
           : undefined,
-        (disposition === 'Not Interested' || disposition === 'Wrong Number') ? reason : undefined
+        reason.trim() ? reason.trim() : undefined
       );
     } catch (err: any) {
       if (disposition === 'No Response') {
@@ -1350,149 +1362,32 @@ export const DispositionModal: React.FC = () => {
     }
   };
 
-  const handleConfirmSkip = async () => {
-    if (isSubmitting) return;
-
-    if (!skipReason.trim()) {
-      setSkipError('Please provide a reason before skipping wrap-up.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      await skipDispositionWithReason(skipReason.trim(), notes.trim());
-    } catch (err: any) {
-      setSkipError(err.message || 'Failed to save skip reason. Please try again.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   return (
     <Modal
       isOpen={showDispositionModal}
       onClose={() => {
-        // Prevent accidental closing; modal must not disappear until saved or skipped with reason
+        // Modal must not close until disposition is saved
       }}
       closeOnBackdrop={false}
       closeOnEscape={false}
       hideCloseButton={true}
-      title={isSkipping ? "Skip Call Wrap-up" : "Call Wrap-up & Disposition"}
+      title="Call Wrap-up & Disposition"
       subtitle={`Call with ${lastCallRecord.contactName} (${lastCallRecord.contactPhone}) • Duration: ${isSimulated ? '0s (Not Connected)' : `${Math.floor(lastCallRecord.duration / 60)}m ${lastCallRecord.duration % 60}s`}`}
       maxWidth={580}
       footer={
-        isSkipping ? (
-          <>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => {
-                setIsSkipping(false);
-                setSkipError('');
-              }}
-              disabled={isSubmitting}
-            >
-              Back to Wrap-up
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={handleConfirmSkip}
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? 'Saving...' : 'Save Reason & Skip'}
-            </button>
-          </>
-        ) : (
-          <>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => {
-                setIsSkipping(true);
-                setSkipError('');
-              }}
-              disabled={isSubmitting}
-            >
-              Skip for Now
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={handleSave}
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? 'Saving...' : 'Save Disposition & Wrap Up'}
-            </button>
-          </>
-        )
+        <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%' }}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={handleSave}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? 'Saving...' : 'Save Disposition & Wrap Up'}
+          </button>
+        </div>
       }
     >
-      {isSkipping ? (
-        <div className="disposition-form-container">
-          <div className="disposition-skip-banner">
-            <AlertCircle size={18} className="disposition-skip-banner-icon" />
-            <div style={{ fontSize: 13, lineHeight: 1.5 }}>
-              <strong>Reason Required to Skip Wrap-up</strong>
-              <div style={{ color: 'var(--text-secondary)', marginTop: 2 }}>
-                Please specify why this call wrap-up is being skipped. The reason will be permanently recorded in Call Details.
-              </div>
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Select a Common Reason</label>
-            <div className="disposition-skip-chips">
-              {QUICK_SKIP_REASONS.map(r => (
-                <button
-                  key={r}
-                  type="button"
-                  className={`disposition-skip-chip ${skipReason === r ? 'disposition-skip-chip-active' : ''}`}
-                  onClick={() => {
-                    setSkipReason(r);
-                    setSkipError('');
-                  }}
-                >
-                  {skipReason === r && <CheckCircle2 size={12} style={{ marginRight: 4 }} />}
-                  {r}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">
-              Reason for Skipping <span style={{ color: '#ef4444' }}>*</span>
-            </label>
-            <textarea
-              className="form-textarea"
-              rows={3}
-              placeholder="Explain why wrap-up is skipped (e.g. customer dropped, will re-dial in 10 mins)..."
-              value={skipReason}
-              onChange={e => {
-                setSkipReason(e.target.value);
-                if (skipError) setSkipError('');
-              }}
-              autoFocus
-            />
-            {skipError && (
-              <p style={{ color: '#ef4444', fontSize: 12, marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                <AlertCircle size={13} /> {skipError}
-              </p>
-            )}
-          </div>
-
-          {notes && (
-            <div className="form-group" style={{ opacity: 0.85 }}>
-              <label className="form-label" style={{ fontSize: 12 }}>Notes from call</label>
-              <div style={{ fontSize: 12, padding: '8px 12px', background: 'var(--bg-surface-hover)', borderRadius: 'var(--radius-sm)', color: 'var(--text-secondary)' }}>
-                {notes}
-              </div>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="disposition-form-container">
+      <div className="disposition-form-container">
           {isSimulated && (
             <div
               style={{
@@ -1745,6 +1640,37 @@ export const DispositionModal: React.FC = () => {
             </div>
           )}
 
+          {/* Reason Box for Other */}
+          {disposition === 'Other' && (
+            <div className="form-group">
+              <label className="form-label">
+                Reason <span style={{ color: '#ef4444' }}>*</span>
+              </label>
+              <textarea
+                className="form-textarea"
+                rows={2}
+                placeholder="Reason is required when outcome is Other (e.g. exploring alternative products, pending family consultation)..."
+                value={reason}
+                onChange={e => setReason(e.target.value)}
+                required
+              />
+            </div>
+          )}
+
+          {/* Reason Box for Contacted */}
+          {disposition === 'Contacted' && (
+            <div className="form-group">
+              <label className="form-label">Reason / Feedback (Optional)</label>
+              <textarea
+                className="form-textarea"
+                rows={2}
+                placeholder="Optional details or key discussion summary..."
+                value={reason}
+                onChange={e => setReason(e.target.value)}
+              />
+            </div>
+          )}
+
           {/* Reason Box for Not Interested / Wrong Number */}
           {(disposition === 'Not Interested' || disposition === 'Wrong Number') && (
             <div className="form-group">
@@ -1834,7 +1760,6 @@ export const DispositionModal: React.FC = () => {
             </div>
           )}
         </div>
-      )}
     </Modal>
   );
 };

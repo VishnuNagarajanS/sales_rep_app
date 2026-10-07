@@ -12,17 +12,27 @@ public class IrmFollowupService : IIrmFollowupService
     private readonly IFollowupRepository _followupRepo;
     private readonly IInvestorRepository _investorRepo;
     private readonly IUserRepository _userRepo;
+    private readonly IIrmOtherService? _otherService;
 
-    public IrmFollowupService(IFollowupRepository followupRepo, IInvestorRepository investorRepo, IUserRepository userRepo)
+    public IrmFollowupService(IFollowupRepository followupRepo, IInvestorRepository investorRepo, IUserRepository userRepo, IIrmOtherService? otherService = null)
     {
         _followupRepo = followupRepo;
         _investorRepo = investorRepo;
         _userRepo = userRepo;
+        _otherService = otherService;
     }
 
     public async Task<ApiResponse<List<FollowupDto>>> GetAllAsync(int companyId, int? assignedToId, string? status, CancellationToken ct = default)
     {
         var list = await _followupRepo.GetAllAsync(companyId, assignedToId, "irm", status, ct);
+        if (_otherService != null)
+        {
+            var matcher = await _otherService.GetOtherMatcherAsync(companyId, "follow_up", ct);
+            if (matcher.HasAnyOther)
+            {
+                list = list.Where(f => !matcher.IsInOther(f.ContactPhone, f.InvestorId, null, f.ContactName)).ToList();
+            }
+        }
         return ApiResponse<List<FollowupDto>>.SuccessResponse(list.Select(MapToDto).ToList());
     }
 

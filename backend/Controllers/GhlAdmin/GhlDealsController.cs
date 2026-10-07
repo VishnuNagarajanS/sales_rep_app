@@ -8,6 +8,8 @@ using backend.Models.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using backend.Services.Interfaces;
+using backend.Services.Implementations;
 
 namespace backend.Controllers.GhlAdmin;
 
@@ -28,11 +30,13 @@ public class GhlDealsController : ControllerBase
 
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
+    private readonly IIrmOtherService _otherService;
 
-    public GhlDealsController(ApplicationDbContext db, ICurrentUserService currentUser)
+    public GhlDealsController(ApplicationDbContext db, ICurrentUserService currentUser, IIrmOtherService? otherService = null)
     {
         _db = db;
         _currentUser = currentUser;
+        _otherService = otherService ?? new IrmOtherService(db);
     }
 
     private static bool IsIrmDeal(GhlDeal deal)
@@ -94,18 +98,39 @@ public class GhlDealsController : ControllerBase
             query = query.Where(d => d.Title.ToLower().Contains(s) || d.CustomerName.ToLower().Contains(s));
         }
 
-        var total = await query.CountAsync(ct);
-        page = Math.Max(1, page);
-        pageSize = Math.Clamp(pageSize, 1, 200);
+        var companyId = _currentUser.CompanyId ?? 1;
+        string? moduleForStage = (stage?.Trim().ToLowerInvariant()) switch
+        {
+            "qualified_investor" => "kyc",
+            "investment_opportunity" => "opportunities",
+            "followup" => "follow_up",
+            "leads" => "my_leads",
+            _ => null
+        };
+        var otherMatcher = await _otherService.GetOtherMatcherAsync(companyId, moduleForStage, ct);
 
         var entities = await query
             .OrderByDescending(d => d.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
             .ToListAsync(ct);
 
-        var items = entities.Select(MapToDto).ToList();
-        await PopulateContactDetailsAsync(items, entities, ct);
+        if (otherMatcher.HasAnyOther)
+        {
+            entities = entities
+                .Where(d => !otherMatcher.IsInOther(d.Customer?.Phone, d.CustomerId, null, d.CustomerName))
+                .ToList();
+        }
+
+        var total = entities.Count;
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 200);
+
+        var paged = entities
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        var items = paged.Select(MapToDto).ToList();
+        await PopulateContactDetailsAsync(items, paged, ct);
 
         return Ok(ApiResponse<PagedResult<GhlDealResponseDto>>.SuccessResult(
             PagedResult<GhlDealResponseDto>.Create(items, total, page, pageSize),

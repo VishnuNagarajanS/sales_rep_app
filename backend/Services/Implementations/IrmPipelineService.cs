@@ -12,17 +12,27 @@ public class IrmPipelineService : IIrmPipelineService
     private readonly IIrmPipelineRepository _pipelineRepo;
     private readonly IInvestorRepository _investorRepo;
     private readonly IUserRepository _userRepo;
+    private readonly IIrmOtherService? _otherService;
 
-    public IrmPipelineService(IIrmPipelineRepository pipelineRepo, IInvestorRepository investorRepo, IUserRepository userRepo)
+    public IrmPipelineService(IIrmPipelineRepository pipelineRepo, IInvestorRepository investorRepo, IUserRepository userRepo, IIrmOtherService? otherService = null)
     {
         _pipelineRepo = pipelineRepo;
         _investorRepo = investorRepo;
         _userRepo = userRepo;
+        _otherService = otherService;
     }
 
     public async Task<ApiResponse<IrmPipelineBoardDto>> GetBoardAsync(int companyId, int? irmId, CancellationToken ct = default)
     {
         var cards = await _pipelineRepo.GetAllAsync(companyId, irmId, ct);
+        if (_otherService != null)
+        {
+            var matcher = await _otherService.GetOtherMatcherAsync(companyId, null, ct);
+            if (matcher.HasAnyOther)
+            {
+                cards = cards.Where(c => !matcher.IsInOther(c.InvestorPhone, c.InvestorId, null, c.InvestorName)).ToList();
+            }
+        }
         var cardDtos = cards.Select(MapToCardDto).ToList();
 
         var stages = new List<IrmPipelineStageDto>

@@ -19,6 +19,7 @@ public class KycService : IKycService
     private readonly IOtpService _otpService;
     private readonly ApplicationDbContext _db;
     private readonly ILogger<KycService> _logger;
+    private readonly IIrmOtherService _otherService;
 
     public KycService(
         IKycRepository kycRepo,
@@ -26,7 +27,8 @@ public class KycService : IKycService
         IEmailService emailService,
         IOtpService otpService,
         ApplicationDbContext db,
-        ILogger<KycService> logger)
+        ILogger<KycService> logger,
+        IIrmOtherService? otherService = null)
     {
         _kycRepo = kycRepo;
         _investorRepo = investorRepo;
@@ -34,6 +36,7 @@ public class KycService : IKycService
         _otpService = otpService;
         _db = db;
         _logger = logger;
+        _otherService = otherService ?? new IrmOtherService(db);
     }
 
     public async Task<ApiResponse<KycDto>> GetByInvestorIdAsync(int investorId, int companyId, CancellationToken ct = default)
@@ -527,6 +530,11 @@ public class KycService : IKycService
     public async Task<ApiResponse<List<KycListDto>>> GetAllAsync(int companyId, string? status, int? irmId, CancellationToken ct = default)
     {
         var list = await _kycRepo.GetAllAsync(companyId, status, irmId, ct);
+        var matcher = await _otherService.GetOtherMatcherAsync(companyId, "kyc", ct);
+        if (matcher.HasAnyOther)
+        {
+            list = list.Where(k => !matcher.IsInOther(k.Phone, k.InvestorId, null, k.InvestorName)).ToList();
+        }
         var dtos = list.Select(MapToListDto).ToList();
         return ApiResponse<List<KycListDto>>.SuccessResponse(dtos);
     }

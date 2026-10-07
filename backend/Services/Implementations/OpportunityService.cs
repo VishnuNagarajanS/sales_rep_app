@@ -11,17 +11,27 @@ public class OpportunityService : IOpportunityService
     private readonly IOpportunityRepository _oppRepo;
     private readonly IInvestorRepository _investorRepo;
     private readonly IUserRepository _userRepo;
+    private readonly IIrmOtherService? _otherService;
 
-    public OpportunityService(IOpportunityRepository oppRepo, IInvestorRepository investorRepo, IUserRepository userRepo)
+    public OpportunityService(IOpportunityRepository oppRepo, IInvestorRepository investorRepo, IUserRepository userRepo, IIrmOtherService? otherService = null)
     {
         _oppRepo = oppRepo;
         _investorRepo = investorRepo;
         _userRepo = userRepo;
+        _otherService = otherService;
     }
 
     public async Task<ApiResponse<List<OpportunityDto>>> GetAllAsync(int companyId, bool? isActive, CancellationToken ct = default)
     {
         var list = await _oppRepo.GetAllAsync(companyId, isActive, ct);
+        if (_otherService != null)
+        {
+            var matcher = await _otherService.GetOtherMatcherAsync(companyId, "opportunities", ct);
+            if (matcher.HasAnyOther)
+            {
+                list = list.Where(o => !matcher.IsInOther(null, null, null, o.Title)).ToList();
+            }
+        }
         return ApiResponse<List<OpportunityDto>>.SuccessResponse(list.Select(MapToDto).ToList());
     }
 

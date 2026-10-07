@@ -28,6 +28,11 @@ public class CallRecord
     public string Disposition { get; set; } = string.Empty;
     public string? Notes { get; set; } = string.Empty;
 
+    [MaxLength(50)]
+    public string? CallModule { get; set; }
+
+    public string? Reason { get; set; }
+
     /// <summary>
     /// Twilio Call SID (CAxxxx) assigned by Twilio when a real call is placed.
     /// Null for legacy records or calls that never connected to Twilio.

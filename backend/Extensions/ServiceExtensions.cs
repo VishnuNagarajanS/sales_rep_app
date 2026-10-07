@@ -78,6 +78,7 @@ public static class ServiceExtensions
         services.AddScoped<IIrmPipelineService, IrmPipelineService>();
         services.AddScoped<IKycService, KycService>();
         services.AddScoped<IOpportunityService, OpportunityService>();
+        services.AddScoped<IIrmOtherService, IrmOtherService>();
 
         services.AddDev1Services();
 

@@ -183,88 +183,90 @@ export function DataTable<T>({
       }}
     >
       {/* Top Bar: Search & Actions */}
-      <div
-        style={{
-          padding: '16px 20px',
-          borderBottom: '1px solid var(--border-base)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: 12,
-          background: 'var(--bg-surface)',
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 260 }}>
-          {!hideSearch && (
-            <div
-              style={{
-                position: 'relative',
-                width: '100%',
-                maxWidth: 360,
-                display: 'flex',
-                alignItems: 'center',
-              }}
-            >
-              <Search
-                size={16}
-                style={{ position: 'absolute', left: 12, color: 'var(--text-muted)' }}
-              />
-              <input
-                id="datatable-search-input"
-                name="search"
-                type="text"
-                className="form-input"
-                style={{ paddingLeft: 36, height: 38 }}
-                placeholder={searchPlaceholder}
-                aria-label={searchPlaceholder}
-                value={searchQuery}
-                onChange={e => {
-                  setSearchQuery(e.target.value);
-                  setCurrentPage(1);
-                }}
-              />
-            </div>
-          )}
-          {filtersNode && (
-            <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-              {filtersNode}
-            </span>
-          )}
-        </div>
-
-        {/* Bulk Action Bar */}
-        {selectedKeys.size > 0 && bulkActions && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              background: 'var(--primary-50)',
-              padding: '6px 12px',
-              borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--primary-100)',
-            }}
-          >
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--primary-700)' }}>
-              {selectedKeys.size} selected
-            </span>
-            {bulkActions.map((action, idx) => (
-              <button
-                key={idx}
-                className={`btn btn-sm ${action.danger ? 'btn-danger' : 'btn-secondary'}`}
-                onClick={() => {
-                  action.onClick(selectedItems);
-                  setSelectedKeys(new Set());
+      {(!hideSearch || Boolean(filtersNode) || Boolean(selectedKeys.size > 0 && bulkActions)) && (
+        <div
+          style={{
+            padding: '16px 20px',
+            borderBottom: '1px solid var(--border-base)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 12,
+            background: 'var(--bg-surface)',
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 260 }}>
+            {!hideSearch && (
+              <div
+                style={{
+                  position: 'relative',
+                  width: '100%',
+                  maxWidth: 360,
+                  display: 'flex',
+                  alignItems: 'center',
                 }}
               >
-                {action.label}
-              </button>
-            ))}
+                <Search
+                  size={16}
+                  style={{ position: 'absolute', left: 12, color: 'var(--text-muted)' }}
+                />
+                <input
+                  id="datatable-search-input"
+                  name="search"
+                  type="text"
+                  className="form-input"
+                  style={{ paddingLeft: 36, height: 38 }}
+                  placeholder={searchPlaceholder}
+                  aria-label={searchPlaceholder}
+                  value={searchQuery}
+                  onChange={e => {
+                    setSearchQuery(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                />
+              </div>
+            )}
+            {filtersNode && (
+              <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                {filtersNode}
+              </span>
+            )}
           </div>
-        )}
-      </div>
+
+          {/* Bulk Action Bar */}
+          {selectedKeys.size > 0 && bulkActions && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                background: 'var(--primary-50)',
+                padding: '6px 12px',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--primary-100)',
+              }}
+            >
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--primary-700)' }}>
+                {selectedKeys.size} selected
+              </span>
+              {bulkActions.map((action, idx) => (
+                <button
+                  key={idx}
+                  className={`btn btn-sm ${action.danger ? 'btn-danger' : 'btn-secondary'}`}
+                  onClick={() => {
+                    action.onClick(selectedItems);
+                    setSelectedKeys(new Set());
+                  }}
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Table Body */}
       {paginatedData.length === 0 ? (

@@ -31,12 +31,19 @@ import type {
   CallRecord,
   Consultation,
   AuditLog,
+  IrmOtherRecord,
 } from '../types';
 
 // ── ID type helpers ───────────────────────────────────────────────────────────
 // Backend uses int IDs; frontend types use string.
 const sid = (n: number | string | undefined | null): string => String(n ?? '');
-const nid = (s: string | undefined | null): number => parseInt(s ?? '0', 10) || 0;
+const nid = (s: string | number | undefined | null): number => {
+  if (s == null) return 0;
+  if (typeof s === 'number') return s;
+  const cleaned = s.replace(/^[a-zA-Z_-]+/, '');
+  const parsed = parseInt(cleaned, 10);
+  return isNaN(parsed) ? 0 : parsed;
+};
 
 // ── Tenant match helper ───────────────────────────────────────────────────────
 export function isTenantMatch(
@@ -713,7 +720,9 @@ function mapCallRecord(c: Record<string, any>): CallRecord {
     disposition: c.disposition ?? 'No Response',
     timestamp: c.timestamp ?? new Date().toISOString(),
     notes: notes,
-    reason: reason,
+    reason: c.reason || reason,
+    callModule: c.callModule || c.module || undefined,
+    module: c.callModule || c.module || undefined,
     recordingUrl: recordingUrl,
     transcription: transcription,
     twilioCallSid: c.twilioCallSid || undefined,
@@ -728,6 +737,8 @@ export async function getCalls(companyId?: string): Promise<CallRecord[]> {
 }
 
 export async function logCall(call: CallRecord): Promise<CallRecord> {
+  const parsedLeadId = call.leadId ? nid(call.leadId) : undefined;
+  const parsedCustomerId = call.customerId ? nid(call.customerId) : undefined;
   const payload = {
     contactName: call.contactName,
     contactPhone: call.contactPhone,
@@ -735,14 +746,172 @@ export async function logCall(call: CallRecord): Promise<CallRecord> {
     duration: call.duration,
     disposition: call.disposition,
     notes: call.notes,
-    leadId: call.leadId ? nid(call.leadId) : undefined,
-    customerId: call.customerId ? nid(call.customerId) : undefined,
+    leadId: parsedLeadId && parsedLeadId > 0 ? parsedLeadId : undefined,
+    customerId: parsedCustomerId && parsedCustomerId > 0 ? parsedCustomerId : undefined,
     twilioCallSid: call.twilioCallSid || undefined,
+    module: call.callModule || call.module || undefined,
+    reason: call.reason || undefined,
   };
   const res: ApiResponse<any> = await apiClient.post('/sales-executive/calls', payload);
   if (!res.success || !res.data) throw new Error(res.message);
   window.dispatchEvent(new Event('nexus_storage_updated'));
   return mapCallRecord(res.data);
+}
+
+export async function getIrmOtherRecords(params?: { module?: string; search?: string }): Promise<IrmOtherRecord[]> {
+  try {
+    const res: ApiResponse<IrmOtherRecord[]> = await apiClient.get('/irm/other', params);
+    if (res.success && res.data) return res.data;
+  } catch {
+    try {
+      const fallbackRes: ApiResponse<IrmOtherRecord[]> = await apiClient.get('/sales-executive/calls/other', params);
+      if (fallbackRes.success && fallbackRes.data) return fallbackRes.data;
+    } catch {}
+  }
+  return [];
+}
+
+export async function getIrmCallOutcomes(module?: string): Promise<Record<string, string[]>> {
+  try {
+    const res: ApiResponse<Record<string, string[]>> = await apiClient.get('/irm/call-outcomes', module ? { module } : undefined);
+    if (res.success && res.data) return res.data;
+  } catch {
+    try {
+      const fallbackRes: ApiResponse<Record<string, string[]>> = await apiClient.get('/sales-executive/calls/outcomes', module ? { module } : undefined);
+      if (fallbackRes.success && fallbackRes.data) return fallbackRes.data;
+    } catch {}
+  }
+  return {
+    my_leads: ['Follow-up Required', 'No Response', 'Call Back'],
+    follow_up: ['Follow-up Required', 'Other', 'No Response', 'Call Back', 'Ready for KYC'],
+    kyc: ['Contacted', 'Other', 'No Response', 'Call Back'],
+    opportunities: ['Contacted', 'Other', 'No Response', 'Call Back'],
+    investor_360: ['Contacted', 'Other', 'No Response', 'Call Back'],
+  };
+}
+
+export interface TransitionFollowupToKycOptions {
+  contactName: string;
+  contactPhone: string;
+  contactEmail?: string;
+  contactLocation?: string;
+  contactId?: string;
+  followupId?: string;
+  followupNotes?: string;
+  followupPriority?: 'Low' | 'Medium' | 'High';
+  investmentAmount?: number | string;
+  preferredAssetClass?: string;
+  investmentHorizon?: string;
+  isPrefConfirmed?: boolean;
+  assignedAgentId?: string;
+  assignedAgentName?: string;
+  tenantId?: string;
+  tenantName?: string;
+  actorName?: string;
+  actorEmail?: string;
+}
+
+export async function transitionFollowupToKyc(options: TransitionFollowupToKycOptions): Promise<void> {
+  const fDigits = (options.contactPhone || '').replace(/\D/g, '').slice(-10);
+  const resolvedContactId = options.contactId || (fDigits ? `contact-${fDigits}` : `contact-${Date.now()}`);
+
+  let allDeals: Deal[] = [];
+  try {
+    allDeals = await getDeals(options.tenantId);
+  } catch {
+    allDeals = storageService.getDeals(options.tenantId) || [];
+  }
+
+  const existingDeal = allDeals.find(d =>
+    (d.customerId && d.customerId === resolvedContactId) ||
+    (d.phone && fDigits && (d.phone || '').replace(/\D/g, '').slice(-10) === fDigits)
+  );
+
+  const numVal = options.investmentAmount
+    ? (typeof options.investmentAmount === 'number' ? options.investmentAmount : parseFloat(String(options.investmentAmount).replace(/,/g, '')) || 0)
+    : (existingDeal?.value ?? 0);
+
+  const kycDeal: Deal = {
+    id: existingDeal?.id || `deal-kyc-${Date.now()}`,
+    companyId: options.tenantId || 't-ghl-01',
+    title: `${options.contactName} - KYC Verification`,
+    customerId: resolvedContactId,
+    customerName: options.contactName,
+    phone: options.contactPhone,
+    email: options.contactEmail && options.contactEmail !== '—' ? options.contactEmail : undefined,
+    location: options.contactLocation && options.contactLocation !== '—' ? options.contactLocation : undefined,
+    stage: 'qualified_investor',
+    stageEnteredAt: new Date().toISOString(),
+    value: numVal,
+    expectedCloseDate: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+    assignedAgentId: options.assignedAgentId || '',
+    assignedAgentName: options.assignedAgentName || '',
+    notes: `Ready for KYC. Moved from Follow-ups by IRM (${options.actorName || ''}).`,
+    createdAt: existingDeal?.createdAt || new Date().toISOString().slice(0, 10),
+    priority: options.followupPriority || 'High',
+    ...(options.preferredAssetClass && options.isPrefConfirmed ? { preferredAssetClass: options.preferredAssetClass } : {}),
+    ...(options.investmentAmount ? { investmentRange: String(options.investmentAmount) } : {}),
+  };
+
+  await saveDeal(kycDeal);
+
+  if (options.followupId) {
+    try {
+      const followups = await getFollowups(options.tenantId);
+      const match = followups.find(f => f.id === options.followupId);
+      if (match) {
+        await saveFollowup({
+          ...match,
+          status: 'Completed',
+          notes: `${match.notes ? match.notes + ' | ' : ''}Ready for KYC: Moved to KYC Module by IRM`,
+        });
+      }
+    } catch (err) {
+      console.error('[transitionFollowupToKyc] Failed to mark follow-up completed:', err);
+    }
+  }
+
+  try {
+    const leads = await getLeads(options.tenantId);
+    const matchingLead = leads.find(l => {
+      if (l.id === options.contactId) return true;
+      const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+      return Boolean(lDigits && fDigits && lDigits === fDigits);
+    });
+
+    if (matchingLead) {
+      const updatedLead: Lead = {
+        ...matchingLead,
+        status: 'Qualified',
+        customFields: {
+          ...(matchingLead.customFields || {}),
+          ...(options.preferredAssetClass && options.isPrefConfirmed ? { preferredAssetClass: options.preferredAssetClass } : {}),
+          ...(options.investmentHorizon && options.isPrefConfirmed ? { horizon: options.investmentHorizon, investmentHorizon: options.investmentHorizon } : {}),
+          ...(numVal > 0 ? { investmentAmount: String(numVal) } : {}),
+          irmPreferencesConfirmed: Boolean(options.isPrefConfirmed),
+          movedToKycAt: new Date().toISOString(),
+        },
+      };
+      await saveLead(updatedLead);
+    }
+  } catch (err) {
+    console.error('[transitionFollowupToKyc] Failed to update lead:', err);
+  }
+
+  storageService.addAuditLog({
+    id: `aud-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    actorName: options.actorName || 'IRM',
+    actorEmail: options.actorEmail || 'irm@ghl.com',
+    action: 'DEAL_CREATED_KYC',
+    entityType: 'Deal',
+    entityId: kycDeal.id,
+    companyId: options.tenantId || 't-ghl-01',
+    companyName: options.tenantName || 'GHL India Ventures',
+    details: `Moved ${options.contactName} to KYC verification module`,
+  });
+
+  window.dispatchEvent(new Event('nexus_storage_updated'));
 }
 
 export interface SendCustomerMessagePayload {

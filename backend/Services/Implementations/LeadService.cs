@@ -16,12 +16,14 @@ public class LeadService : ILeadService
 {
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
+    private readonly IIrmOtherService _otherService;
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> _leadCreationLocks = new();
 
-    public LeadService(ApplicationDbContext context, ICurrentUserService currentUser)
+    public LeadService(ApplicationDbContext context, ICurrentUserService currentUser, IIrmOtherService? otherService = null)
     {
         _context = context;
         _currentUser = currentUser;
+        _otherService = otherService ?? new IrmOtherService(context);
     }
 
     private static readonly string[] ExcludedStatuses = { "Not Interested", "Junk", "Converted" };
@@ -149,7 +151,8 @@ public class LeadService : ILeadService
             query = query.Where(l => l.Priority == filter.Priority);
         }
 
-        var totalCount = await query.CountAsync(ct);
+        var companyId = _currentUser.CompanyId ?? 1;
+        var otherMatcher = await _otherService.GetOtherMatcherAsync(companyId, "my_leads", ct);
 
         // Sorting
         var isAsc = string.Equals(filter.SortOrder, "asc", StringComparison.OrdinalIgnoreCase);
@@ -161,15 +164,25 @@ public class LeadService : ILeadService
             _ => isAsc ? query.OrderBy(l => l.CreatedAt) : query.OrderByDescending(l => l.CreatedAt),
         };
 
+        var entities = await query.ToListAsync(ct);
+
+        if (otherMatcher.HasAnyOther)
+        {
+            entities = entities
+                .Where(l => !otherMatcher.IsInOther(l.Phone, null, l.Id, l.Name))
+                .ToList();
+        }
+
+        var totalCount = entities.Count;
         var page = Math.Max(1, filter.Page);
         var pageSize = Math.Clamp(filter.PageSize, 1, 100);
 
-        var entities = await query
+        var paged = entities
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .ToListAsync(ct);
+            .ToList();
 
-        var items = entities.Select(MapToDto).ToList();
+        var items = paged.Select(MapToDto).ToList();
 
         return ApiResponse<PagedResult<LeadResponseDto>>.SuccessResult(
             PagedResult<LeadResponseDto>.Create(items, totalCount, page, pageSize),

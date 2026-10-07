@@ -35,6 +35,9 @@ export const routeToPath = (route: string, isSuperAdmin: boolean): string => {
         return '/settings';
       case 'company-audit':
         return '/audit';
+      case 'irm-other':
+      case 'other':
+        return '/other';
       default:
         return `/${route}`;
     }
@@ -77,6 +80,8 @@ export const pathToRoute = (pathname: string, isSuperAdmin: boolean): string => 
         return 'company-settings';
       case '/audit':
         return 'company-audit';
+      case '/other':
+        return 'irm-other';
       default: {
         const seg = cleanPath.slice(1);
         return seg || 'dashboard';
@@ -126,6 +131,7 @@ import { OpportunitiesPage } from './pages/InvestmentOpportunities/Opportunities
 import { AssignedLeadsPage } from './pages/AssignedLeads/AssignedLeadsPage';
 import { PendingLeadsPage } from './pages/PendingLeads/PendingLeadsPage';
 import { KYCPage } from './pages/KYC/KYCPage';
+import { IrmOtherPage } from './pages/IrmOther/IrmOtherPage';
 
 // Company Admin
 import { CompanyUsersPage } from './pages/Company/CompanyUsersPage';
@@ -805,6 +811,8 @@ export const App: React.FC = () => {
         <ProtectedRoute permission={PERMISSIONS.AUDIT_VIEW}>
           <CompanyAuditPage />
         </ProtectedRoute>
+      ) : currentRoute === 'irm-other' || currentRoute === 'other' ? (
+        <IrmOtherPage />
       ) : (
         user?.role?.code === 'irm' ? (
           <InvestorsPage />

@@ -19,7 +19,7 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
         if (from.HasValue) query = query.Where(x => x.Timestamp >= from.Value.ToUniversalTime());
         if (to.HasValue) query = query.Where(x => x.Timestamp <= to.Value.ToUniversalTime());
         var total = await query.CountAsync(cancellationToken);
-        var items = await query.OrderByDescending(x => x.Timestamp).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new CallRecordDto { Id = x.Id, CompanyId = x.CompanyId, AgentId = x.AgentId, ContactName = x.ContactName, ContactPhone = x.ContactPhone, Direction = x.Direction, Duration = x.Duration, Disposition = x.Disposition, Notes = x.Notes, LeadId = x.LeadId, CustomerId = x.CustomerId, Timestamp = x.Timestamp, CreatedAt = x.CreatedAt }).ToListAsync(cancellationToken);
+        var items = await query.OrderByDescending(x => x.Timestamp).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new CallRecordDto { Id = x.Id, CompanyId = x.CompanyId, AgentId = x.AgentId, ContactName = x.ContactName, ContactPhone = x.ContactPhone, Direction = x.Direction, Duration = x.Duration, Disposition = x.Disposition, Notes = x.Notes, Reason = x.Reason, CallModule = x.CallModule, LeadId = x.LeadId, CustomerId = x.CustomerId, Timestamp = x.Timestamp, CreatedAt = x.CreatedAt }).ToListAsync(cancellationToken);
         return new PagedResult<CallRecordDto> { Items = items, Page = page, PageSize = pageSize, TotalCount = total };
     }
 
@@ -30,7 +30,35 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
         if (!currentUser.CompanyId.HasValue || currentUser.CompanyId.Value <= 0)
             return ApiResponse<CallRecordDto>.FailureResult("Unauthorized: Company ID is missing.");
 
-        var record = new CallRecord { CompanyId = currentUser.CompanyId.Value, AgentId = currentUser.UserId.Value, ContactName = request.ContactName, ContactPhone = request.ContactPhone, Direction = request.Direction.ToLowerInvariant(), Duration = request.Duration, Disposition = request.Disposition, Notes = request.Notes, LeadId = request.LeadId, CustomerId = request.CustomerId };
+        int? validLeadId = request.LeadId;
+        if (validLeadId.HasValue)
+        {
+            if (validLeadId.Value <= 0)
+            {
+                validLeadId = null;
+            }
+            else if (!context.Database.IsInMemory())
+            {
+                var leadExists = await context.Set<Lead>().AnyAsync(l => l.Id == validLeadId.Value, cancellationToken);
+                if (!leadExists) validLeadId = null;
+            }
+        }
+
+        int? validCustomerId = request.CustomerId;
+        if (validCustomerId.HasValue)
+        {
+            if (validCustomerId.Value <= 0)
+            {
+                validCustomerId = null;
+            }
+            else if (!context.Database.IsInMemory())
+            {
+                var customerExists = await context.Set<Customer>().AnyAsync(c => c.Id == validCustomerId.Value, cancellationToken);
+                if (!customerExists) validCustomerId = null;
+            }
+        }
+
+        var record = new CallRecord { CompanyId = currentUser.CompanyId.Value, AgentId = currentUser.UserId.Value, ContactName = request.ContactName, ContactPhone = request.ContactPhone, Direction = request.Direction.ToLowerInvariant(), Duration = request.Duration, Disposition = request.Disposition, Notes = request.Notes, Reason = request.Reason, CallModule = request.Module, LeadId = validLeadId, CustomerId = validCustomerId };
         context.Set<CallRecord>().Add(record); await context.SaveChangesAsync(cancellationToken);
         return ApiResponse<CallRecordDto>.SuccessResult(Map(record), "Call logged");
     }
@@ -42,13 +70,45 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
         if (!currentUser.CompanyId.HasValue || currentUser.CompanyId.Value <= 0)
             return ApiResponse<CallRecordDto>.FailureResult("Unauthorized: Company ID is missing.");
 
+        int? validLeadId = request.LeadId;
+        if (validLeadId.HasValue)
+        {
+            if (validLeadId.Value <= 0)
+            {
+                validLeadId = null;
+            }
+            else if (!context.Database.IsInMemory())
+            {
+                var leadExists = await context.Set<Lead>().AnyAsync(l => l.Id == validLeadId.Value, cancellationToken);
+                if (!leadExists) validLeadId = null;
+            }
+        }
+
+        int? validCustomerId = request.CustomerId;
+        if (validCustomerId.HasValue)
+        {
+            if (validCustomerId.Value <= 0)
+            {
+                validCustomerId = null;
+            }
+            else if (!context.Database.IsInMemory())
+            {
+                var customerExists = await context.Set<Customer>().AnyAsync(c => c.Id == validCustomerId.Value, cancellationToken);
+                if (!customerExists) validCustomerId = null;
+            }
+        }
+
         CallRecord? record = request.CallId.HasValue ? await context.Set<CallRecord>().FirstOrDefaultAsync(x => x.Id == request.CallId && x.CompanyId == currentUser.CompanyId.Value && x.AgentId == currentUser.UserId.Value, cancellationToken) : null;
         if (record == null)
         {
-            record = new CallRecord { CompanyId = currentUser.CompanyId.Value, AgentId = currentUser.UserId.Value, ContactName = request.ContactName, ContactPhone = request.ContactPhone, Direction = request.Direction.ToLowerInvariant(), Duration = request.Duration, LeadId = request.LeadId, CustomerId = request.CustomerId };
+            record = new CallRecord { CompanyId = currentUser.CompanyId.Value, AgentId = currentUser.UserId.Value, ContactName = request.ContactName, ContactPhone = request.ContactPhone, Direction = request.Direction.ToLowerInvariant(), Duration = request.Duration, LeadId = validLeadId, CustomerId = validCustomerId };
             context.Set<CallRecord>().Add(record);
         }
-        record.Disposition = request.Disposition; record.Notes = request.Notes;
+        record.Disposition = request.Disposition; 
+        record.Notes = request.Notes;
+        if (!string.IsNullOrWhiteSpace(request.Reason)) record.Reason = request.Reason;
+        if (!string.IsNullOrWhiteSpace(request.Module)) record.CallModule = request.Module;
+
         if (request.LeadId.HasValue)
         {
             var lead = await context.Set<Lead>().FirstOrDefaultAsync(x => x.Id == request.LeadId && x.CompanyId == currentUser.CompanyId.Value && x.AssignedAgentId == currentUser.UserId.Value, cancellationToken);
@@ -59,5 +119,5 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
         return ApiResponse<CallRecordDto>.SuccessResult(Map(record), "Disposition processed");
     }
 
-    private static CallRecordDto Map(CallRecord x) => new() { Id = x.Id, CompanyId = x.CompanyId, AgentId = x.AgentId, ContactName = x.ContactName, ContactPhone = x.ContactPhone, Direction = x.Direction, Duration = x.Duration, Disposition = x.Disposition, Notes = x.Notes, LeadId = x.LeadId, CustomerId = x.CustomerId, Timestamp = x.Timestamp, CreatedAt = x.CreatedAt };
+    private static CallRecordDto Map(CallRecord x) => new() { Id = x.Id, CompanyId = x.CompanyId, AgentId = x.AgentId, ContactName = x.ContactName, ContactPhone = x.ContactPhone, Direction = x.Direction, Duration = x.Duration, Disposition = x.Disposition, Notes = x.Notes, Reason = x.Reason, CallModule = x.CallModule, LeadId = x.LeadId, CustomerId = x.CustomerId, Timestamp = x.Timestamp, CreatedAt = x.CreatedAt };
 }

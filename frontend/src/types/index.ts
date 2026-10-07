@@ -239,7 +239,11 @@ export type CallDisposition =
   | 'Wrong Number'
   | 'Converted'
   | 'No Response'
-  | 'Skipped';
+  | 'Contacted'
+  | 'Other'
+  | 'Ready for KYC'
+  | 'Skipped'
+  | (string & {});
 
 export interface CallRecord {
   id: string;
@@ -259,6 +263,8 @@ export interface CallRecord {
   transcription?: string;
   notes?: string;
   reason?: string;
+  callModule?: string;
+  module?: string;
   providerCallId?: string;
   twilioCallSid?: string;
   contactId?: string;
@@ -280,6 +286,25 @@ export interface CallRecord {
   recordingStatus?: 'pending' | 'completed' | 'failed';
   callStatus?: 'completed' | 'missed' | 'abandoned' | 'transferred';
   source?: string;
+}
+
+export interface IrmOtherRecord {
+  callId: number;
+  customerId?: number;
+  leadId?: number;
+  contactName: string;
+  contactPhone: string;
+  contactEmail?: string;
+  callModule: string;
+  moduleDisplayName: string;
+  disposition: string;
+  reason: string;
+  agentId: number;
+  agentName: string;
+  companyId: number;
+  companyName: string;
+  lastCallAt: string;
+  duration: number;
 }
 
 export interface Followup {

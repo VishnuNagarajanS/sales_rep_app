@@ -2209,7 +2209,7 @@ const GhlIrmKycView: React.FC = () => {
             onViewProfile={d => handleOpenCustomerProfile(d)}
             onEditKyc={d => startKycFlow(d)}
             onAssistedKyc={d => startAssistedKycFlow(d)}
-            onCallInvestor={d => initiateCall(d.customerName, d.phone || '', 'customer', d.id)}
+            onCallInvestor={d => initiateCall(d.customerName, d.phone || '', 'customer', d.customerId || d.id, undefined, 'kyc')}
             // Only show "Advance to Opportunity" after KYC is fully completed
             onAdvanceStage={normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Verified' ? d => handleAdvanceStage(d) : undefined}
           />
@@ -4360,7 +4360,7 @@ const OriginalKYCView: React.FC = () => {
             type="button"
             className="btn btn-sm btn-ghost btn-icon"
             title={`Call ${deal.customerName}`}
-            onClick={() => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.id)}
+            onClick={() => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.customerId || deal.id, undefined, 'kyc')}
           >
             <Phone size={14} color="#059669" />
           </button>
@@ -4386,7 +4386,7 @@ const OriginalKYCView: React.FC = () => {
     {
       label: 'Call Investor',
       icon: <Phone size={14} color="#059669" style={{ marginRight: 6 }} />,
-      onClick: deal => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.id),
+      onClick: deal => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.customerId || deal.id, undefined, 'kyc'),
     },
     {
       label: 'Advance to Opportunity',

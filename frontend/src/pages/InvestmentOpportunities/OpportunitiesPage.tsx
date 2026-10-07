@@ -334,7 +334,7 @@ export const OpportunitiesPage: React.FC = () => {
       icon: <Phone size={14} color="#059669" style={{ marginRight: 6 }} />,
       onClick: o => {
         const inv = investors.find(i => i.id === o.investorId);
-        if (inv) initiateCall(inv.name, inv.phone, 'customer', inv.id);
+        if (inv) initiateCall(inv.name, inv.phone, 'customer', inv.id, undefined, 'opportunities');
       },
     },
     {
@@ -704,7 +704,7 @@ export const OpportunitiesPage: React.FC = () => {
                 type="button"
                 className="btn btn-sm btn-ghost btn-icon"
                 title={`Call ${deal.customerName}`}
-                onClick={() => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.id)}
+                onClick={() => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.customerId || deal.id, undefined, 'opportunities')}
               >
                 <Phone size={14} color="#059669" />
               </button>
