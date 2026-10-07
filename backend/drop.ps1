@@ -1,7 +1,8 @@
 
 $bin = 'C:\Users\ADMIN\Desktop\sales_rep_app\backend\bin\Debug\net8.0'
 [System.Reflection.Assembly]::LoadFrom("$bin\Npgsql.dll") | Out-Null
-$cs = 'Host=ep-sparkling-leaf-b3evey2y.c-4.ap-southeast-1.aws.neon.tech;Port=5432;Database=neondb;Username=neondb_owner;Password=npg_wIWrXLJV9fF3;SSL Mode=Require;Trust Server Certificate=true'
+$cs = $env:ConnectionStrings__DefaultConnection
+if (-not $cs) { throw "ConnectionStrings__DefaultConnection environment variable is missing" }
 $conn = [Npgsql.NpgsqlConnection]::new($cs)
 $conn.Open()
 $cmd = $conn.CreateCommand()
