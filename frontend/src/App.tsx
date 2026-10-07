@@ -814,11 +814,7 @@ export const App: React.FC = () => {
       ) : currentRoute === 'irm-other' || currentRoute === 'other' ? (
         <IrmOtherPage />
       ) : (
-        user?.role?.code === 'irm' ? (
-          <InvestorsPage />
-        ) : (
-          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
-        )
+        <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
       )}
 
       {/* Global Quick Action Modal */}

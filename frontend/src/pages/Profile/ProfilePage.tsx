@@ -43,6 +43,7 @@ import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawe
 import { StatusChip } from '../../components/common/StatusChip';
 import { CallRecord, Lead, Followup, Consultation } from '../../types';
 import { storageService } from '../../services/storageService';
+import { IrmProfileView } from './components/IrmProfileView';
 import './ProfilePage.css';
 
 // ── User persistence helper ──────────────────────────────────────────────────
@@ -158,6 +159,12 @@ type Tab = 'overview' | 'performance' | 'edit';
 // ── Main Component ────────────────────────────────────────────────────────────
 export const ProfilePage: React.FC = () => {
   const { user, tenant, setUser } = useAuth();
+  const isIrm = user?.role?.code === 'irm';
+
+  if (isIrm) {
+    return <IrmProfileView />;
+  }
+
   const { availability, initiateCall } = useCall();
 
   const [tab, setTab] = useState<Tab>('overview');

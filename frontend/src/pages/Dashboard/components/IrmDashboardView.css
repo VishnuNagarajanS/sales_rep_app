@@ -1,0 +1,615 @@
+/* ==========================================================================
+   IrmDashboardView — Investor Relationship Manager Dashboard Styles
+   ========================================================================== */
+
+.irm-dashboard-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ── Advisor Welcome Banner ──────────────────────────────────────────────── */
+.irm-dashboard-banner {
+  padding: 24px 28px;
+  background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 60%, #0f172a 100%);
+  border: 1px solid var(--border-base, #1e293b);
+  border-radius: var(--radius-xl);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px;
+  box-shadow: 0 15px 35px -10px rgba(0, 0, 0, 0.25);
+}
+
+.irm-banner-left {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 680px;
+}
+
+.irm-banner-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(37, 99, 235, 0.18);
+  color: #60a5fa;
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  width: fit-content;
+}
+
+.irm-banner-title {
+  font-size: 24px;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0;
+}
+
+.irm-banner-subtitle {
+  font-size: 13px;
+  color: #94a3b8;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.irm-banner-subtitle strong {
+  color: #e2e8f0;
+}
+
+.irm-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.irm-spin {
+  animation: irmDashSpin 1s linear infinite;
+}
+
+@keyframes irmDashSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ── Top 5 KPI Cards Grid ────────────────────────────────────────────────── */
+.irm-dashboard-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 14px;
+}
+
+@media (max-width: 1280px) {
+  .irm-dashboard-kpi-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .irm-dashboard-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.irm-kpi-card {
+  padding: 18px 20px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-base);
+}
+
+.irm-kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08);
+}
+
+.irm-kpi-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.irm-kpi-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.irm-kpi-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.irm-kpi-icon.aum { background: rgba(16, 185, 129, 0.12); color: #059669; }
+.irm-kpi-icon.kyc { background: rgba(139, 92, 246, 0.12); color: #7c3aed; }
+.irm-kpi-icon.deals { background: rgba(2, 132, 199, 0.12); color: #0284c7; }
+.irm-kpi-icon.followups { background: rgba(245, 158, 11, 0.12); color: #d97706; }
+.irm-kpi-icon.investors { background: rgba(37, 99, 235, 0.12); color: #2563eb; }
+
+.irm-kpi-val {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.irm-kpi-sub-num {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.irm-kpi-progress-track {
+  width: 100%;
+  height: 5px;
+  background: var(--bg-surface-hover);
+  border-radius: 3px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.irm-kpi-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.6s ease;
+}
+
+.irm-kpi-progress-fill.aum { background: #10b981; }
+.irm-kpi-progress-fill.kyc { background: #8b5cf6; }
+.irm-kpi-progress-fill.deals { background: #0284c7; }
+.irm-kpi-progress-fill.followups { background: #f59e0b; }
+.irm-kpi-progress-fill.investors { background: #3b82f6; }
+
+.irm-kpi-sub {
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.irm-kpi-sub.positive { color: #059669; }
+.irm-kpi-sub.overdue { color: #ef4444; font-weight: 700; }
+
+/* ── Split 2-Column Core View ────────────────────────────────────────────── */
+.irm-dashboard-split {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+@media (max-width: 1024px) {
+  .irm-dashboard-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.irm-split-col {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.irm-widget-card {
+  padding: 22px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-base);
+}
+
+.irm-widget-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  gap: 12px;
+}
+
+.irm-widget-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.irm-widget-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Opportunities List */
+.irm-opps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.irm-opp-card {
+  padding: 12px 14px;
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.irm-opp-card:hover {
+  border-color: var(--primary-600, #2563eb);
+  transform: translateX(2px);
+}
+
+.irm-opp-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.irm-opp-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.irm-opp-investor {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.irm-opp-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.irm-opp-badge.committed,
+.irm-opp-badge.closed-won {
+  background: rgba(16, 185, 129, 0.15);
+  color: #059669;
+}
+
+.irm-opp-badge.qualified,
+.irm-opp-badge.opportunity {
+  background: rgba(37, 99, 235, 0.15);
+  color: #2563eb;
+}
+
+.irm-opp-badge.enquiry,
+.irm-opp-badge.contacted,
+.irm-opp-badge.consultation {
+  background: rgba(245, 158, 11, 0.15);
+  color: #d97706;
+}
+
+.irm-opp-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-base);
+}
+
+.irm-opp-amt-label {
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+
+.irm-opp-date {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+/* Assigned Investors Table */
+.irm-table-wrap {
+  overflow-x: auto;
+}
+
+.irm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.irm-table th {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  font-weight: 700;
+  border-bottom: 1px solid var(--border-base);
+}
+
+.irm-table th.right,
+.irm-table td.right {
+  text-align: right;
+}
+
+.irm-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-base);
+}
+
+.irm-td-name {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.irm-td-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.irm-td-empty {
+  text-align: center;
+  padding: 24px 0;
+  color: var(--text-muted);
+}
+
+.irm-call-btn {
+  background: rgba(16, 185, 129, 0.15);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.irm-call-btn:hover {
+  background: #10b981;
+  color: #ffffff;
+}
+
+/* KYC Queue */
+.irm-kyc-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.irm-kyc-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.irm-kyc-item:hover {
+  border-color: #8b5cf6;
+}
+
+.irm-kyc-item-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.irm-kyc-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(139, 92, 246, 0.15);
+  color: #7c3aed;
+  font-size: 12px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.irm-kyc-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.irm-kyc-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.irm-kyc-item-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.irm-kyc-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 10px;
+}
+
+.irm-kyc-pill.review {
+  background: rgba(245, 158, 11, 0.15);
+  color: #d97706;
+}
+
+/* Follow-ups & Consultations */
+.irm-tab-toggle {
+  display: flex;
+  background: var(--bg-surface-hover);
+  padding: 3px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+  gap: 3px;
+}
+
+.irm-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.irm-toggle-btn.active {
+  background: var(--bg-surface);
+  color: var(--primary-600, #2563eb);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.irm-followups-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.irm-followup-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+}
+
+.irm-followup-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.irm-followup-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.irm-followup-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.irm-followup-notes {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.irm-followup-due {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.irm-action-call-btn {
+  margin-left: 12px;
+}
+
+.irm-empty-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+  gap: 8px;
+  text-align: center;
+}
+
+/* ── Quick IRM Workflow Navigation Bar ───────────────────────────────────── */
+.irm-workflow-nav-bar {
+  padding: 14px 20px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.irm-nav-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.irm-nav-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.irm-nav-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+  border-radius: 20px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.irm-nav-chip:hover {
+  background: var(--primary-600, #2563eb);
+  color: #ffffff;
+  border-color: var(--primary-600, #2563eb);
+}
+
+.irm-nav-chip strong {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.irm-nav-chip:hover strong {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}

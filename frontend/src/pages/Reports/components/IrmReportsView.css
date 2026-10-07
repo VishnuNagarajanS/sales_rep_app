@@ -1,0 +1,728 @@
+/* ==========================================================================
+   IrmReportsView — Investor Relationship Manager Analytics Styles
+   ========================================================================== */
+
+.irm-reports-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.irm-reports-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.irm-reports-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--primary-600, #2563eb);
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+
+.irm-reports-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.irm-reports-subtitle {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin-top: 4px;
+  max-width: 720px;
+}
+
+.irm-reports-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.irm-reports-period-toggle {
+  display: flex;
+  background-color: var(--bg-surface-hover);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  border: 1px solid var(--border-base);
+}
+
+.irm-spin {
+  animation: irmSpin 1s linear infinite;
+}
+
+@keyframes irmSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ── Top 4 KPI Grid ──────────────────────────────────────────────────────── */
+.irm-reports-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.irm-reports-kpi-card {
+  padding: 20px 22px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.irm-reports-kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08);
+}
+
+.irm-reports-kpi-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.irm-reports-kpi-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.irm-reports-kpi-icon-box {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.irm-reports-kpi-icon-box.aum {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+}
+
+.irm-reports-kpi-icon-box.kyc {
+  background: rgba(139, 92, 246, 0.12);
+  color: #7c3aed;
+}
+
+.irm-reports-kpi-icon-box.pipeline {
+  background: rgba(2, 132, 199, 0.12);
+  color: #0284c7;
+}
+
+.irm-reports-kpi-icon-box.connect {
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563eb;
+}
+
+.irm-reports-kpi-value {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.irm-reports-kpi-sub-count {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.irm-reports-progress-wrap {
+  width: 100%;
+  height: 6px;
+  background: var(--bg-surface-hover);
+  border-radius: 3px;
+  margin-top: 10px;
+  overflow: hidden;
+}
+
+.irm-reports-progress-bar {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.8s ease-in-out;
+}
+
+.irm-reports-kpi-subtext {
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.irm-reports-kpi-subtext.positive {
+  color: #059669;
+}
+
+/* ── Segmented Navigation Tabs ───────────────────────────────────────────── */
+.irm-reports-tabs-bar {
+  display: flex;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-lg);
+  padding: 4px;
+  gap: 4px;
+  overflow-x: auto;
+}
+
+.irm-reports-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.irm-reports-tab-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-surface-hover);
+}
+
+.irm-reports-tab-btn.active {
+  background: var(--primary-600, #2563eb);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+}
+
+.irm-reports-tab-counter {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.2);
+  color: inherit;
+}
+
+.irm-reports-tab-btn:not(.active) .irm-reports-tab-counter {
+  background: var(--bg-surface-hover);
+  color: var(--text-muted);
+}
+
+/* ── Tab Content Grids ───────────────────────────────────────────────────── */
+.irm-reports-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.irm-reports-grid-2col {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 20px;
+}
+
+.irm-reports-card {
+  padding: 24px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+}
+
+.irm-reports-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20px;
+  gap: 12px;
+}
+
+.irm-reports-card-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.irm-reports-card-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+.irm-reports-pill {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: var(--bg-surface-hover);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-base);
+  white-space: nowrap;
+}
+
+/* ── Funnel Styles ───────────────────────────────────────────────────────── */
+.irm-funnel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.irm-funnel-step {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.irm-funnel-step-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.irm-funnel-step-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.irm-funnel-step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.irm-funnel-step-stats {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.irm-funnel-step-count {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.irm-funnel-step-pct {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.irm-funnel-track {
+  width: 100%;
+  height: 9px;
+  background: var(--bg-surface-hover);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.irm-funnel-fill {
+  height: 100%;
+  border-radius: 5px;
+}
+
+.irm-funnel-step-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding-left: 16px;
+}
+
+/* ── Ticket Size Brackets ────────────────────────────────────────────────── */
+.irm-brackets-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.irm-bracket-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.irm-bracket-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.irm-bracket-track {
+  height: 8px;
+  background: var(--bg-surface-hover);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.irm-bracket-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.6s ease;
+}
+
+.irm-bracket-summary {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-base);
+  display: flex;
+  justify-content: space-between;
+}
+
+.irm-bracket-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.irm-bracket-stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.irm-bracket-stat-val {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* ── Asset Grid ──────────────────────────────────────────────────────────── */
+.irm-asset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+}
+
+.irm-asset-card {
+  padding: 16px;
+  background: var(--bg-surface-hover);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.irm-asset-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.irm-asset-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.irm-asset-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.irm-asset-val {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.irm-asset-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.irm-asset-track {
+  height: 5px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.irm-asset-fill {
+  height: 100%;
+  border-radius: 3px;
+}
+
+/* ── KYC Status Grid ─────────────────────────────────────────────────────── */
+.irm-kyc-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.irm-kyc-status-box {
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.irm-kyc-status-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.irm-kyc-status-num {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.irm-kyc-status-bar {
+  height: 5px;
+  background: var(--border-base);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+.irm-kyc-status-bar > div {
+  height: 100%;
+  border-radius: 3px;
+}
+
+/* ── Document Checklist Health ───────────────────────────────────────────── */
+.irm-doc-health-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.irm-doc-health-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.irm-doc-health-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--bg-surface-hover);
+  color: var(--primary-600, #2563eb);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.irm-doc-health-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.irm-doc-health-top {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.irm-doc-health-track {
+  height: 6px;
+  background: var(--bg-surface-hover);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.irm-doc-health-fill {
+  height: 100%;
+  background: var(--primary-600, #2563eb);
+  border-radius: 3px;
+}
+
+.irm-kyc-tat-box {
+  margin-top: 20px;
+  padding: 12px 16px;
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+/* ── Dispositions & Other Analytics ──────────────────────────────────────── */
+.irm-dispo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.irm-dispo-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.irm-dispo-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 140px;
+  flex-shrink: 0;
+}
+
+.irm-dispo-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.irm-dispo-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.irm-dispo-track-wrap {
+  flex: 1;
+  height: 7px;
+  background: var(--bg-surface-hover);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.irm-dispo-track-fill {
+  height: 100%;
+  border-radius: 4px;
+}
+
+.irm-dispo-right {
+  width: 70px;
+  text-align: right;
+  font-size: 12px;
+}
+
+.irm-dispo-pct {
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
+.irm-other-analytics-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.irm-other-reasons-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.irm-other-reason-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.irm-other-reason-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.irm-other-reason-track {
+  height: 7px;
+  background: var(--bg-surface-hover);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.irm-other-reason-fill {
+  height: 100%;
+  background: #f59e0b;
+  border-radius: 4px;
+}
+
+.irm-other-origins-box {
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: var(--bg-surface-hover);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.irm-other-origins-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.irm-other-origins-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.irm-other-origin-tag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 3px 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  border-radius: 12px;
+  color: var(--text-primary);
+}
+
+.irm-other-origin-tag strong {
+  color: var(--primary-600, #2563eb);
+}
+
+.irm-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  color: var(--text-muted);
+  font-size: 13px;
+  gap: 8px;
+  text-align: center;
+}

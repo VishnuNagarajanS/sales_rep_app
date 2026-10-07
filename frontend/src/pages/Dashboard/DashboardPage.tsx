@@ -36,6 +36,7 @@ import {
 } from '../../types';
 import { StatusChip } from '../../components/common/StatusChip';
 import { FEATURES } from '../../constants/features';
+import { IrmDashboardView } from './components/IrmDashboardView';
 import './DashboardPage.css';
 
 const getStoredPlots = (): Plot[] => {
@@ -101,6 +102,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
   const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
   const isIrm = roleCode === 'irm';
+
+  if (isIrm) {
+    return <IrmDashboardView onNavigate={onNavigate} onOpenQuickCreate={onOpenQuickCreate} />;
+  }
 
   const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk'];
 

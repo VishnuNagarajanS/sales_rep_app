@@ -97,6 +97,11 @@ export interface User {
   routingPriority?: number;
   availabilityStatus?: 'available' | 'busy' | 'offline' | 'break';
   workingHours?: { start: string; end: string; days: string[] };
+  targetAum?: number;
+  targetKyc?: number;
+  extension?: string;
+  certifications?: string[];
+  maxActiveInvestors?: number;
   joinedAt?: string;
   createdAt?: string;
   updatedAt?: string;

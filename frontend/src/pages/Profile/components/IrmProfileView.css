@@ -1,0 +1,777 @@
+/* ==========================================================================
+   IrmProfileView — Investor Relationship Manager Profile Styles
+   ========================================================================== */
+
+.irm-profile-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ── Hero Banner & Avatar ────────────────────────────────────────────────── */
+.irm-profile-hero {
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  position: relative;
+  background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+  border: 1px solid var(--border-base, #1e293b);
+  box-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.25);
+}
+
+.irm-hero-banner {
+  height: 130px;
+  position: relative;
+  cursor: pointer;
+  transition: filter 0.2s;
+}
+
+.irm-hero-banner:hover {
+  filter: brightness(0.92);
+}
+
+.irm-banner-hint {
+  position: absolute;
+  bottom: 10px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(0, 0, 0, 0.45);
+  padding: 4px 10px;
+  border-radius: 20px;
+  backdrop-filter: blur(4px);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.irm-hero-banner:hover .irm-banner-hint {
+  opacity: 1;
+}
+
+.irm-banner-picker {
+  position: absolute;
+  bottom: -8px;
+  right: 14px;
+  width: 300px;
+  background: var(--bg-card, #1e293b);
+  border: 1px solid var(--border-base, #334155);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  z-index: 50;
+}
+
+.irm-banner-picker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.irm-banner-picker-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.irm-banner-presets {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+
+.irm-banner-preset {
+  height: 36px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  transition: transform 0.15s ease;
+}
+
+.irm-banner-preset:hover {
+  transform: scale(1.08);
+}
+
+.irm-hero-body {
+  padding: 0 28px 24px;
+  display: flex;
+  align-items: flex-end;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.irm-avatar-wrap {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  position: relative;
+  margin-top: -48px;
+  cursor: pointer;
+  border: 4px solid var(--bg-card, #0f172a);
+  background: var(--bg-surface);
+  flex-shrink: 0;
+}
+
+.irm-avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.irm-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.irm-avatar-status {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--bg-card);
+}
+
+.irm-avatar-status.available { background: #10b981; }
+.irm-avatar-status.busy { background: #f59e0b; }
+.irm-avatar-status.offline { background: #64748b; }
+
+.irm-avatar-hint {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.irm-avatar-wrap:hover .irm-avatar-hint {
+  opacity: 1;
+}
+
+.irm-hero-info {
+  flex: 1;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.irm-role-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(37, 99, 235, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(37, 99, 235, 0.3);
+  padding: 2px 9px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  width: fit-content;
+}
+
+.irm-hero-name {
+  font-size: 24px;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0;
+}
+
+.irm-hero-designation {
+  font-size: 13px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.irm-hero-chips {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.irm-hero-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.irm-hero-chip.status {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 3px 10px;
+  border-radius: 14px;
+}
+
+.irm-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.irm-dot.available { background: #10b981; }
+.irm-dot.busy { background: #f59e0b; }
+.irm-dot.offline { background: #64748b; }
+
+.irm-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Tabs Bar ────────────────────────────────────────────────────────────── */
+.irm-profile-tabs-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-lg);
+  padding: 4px;
+}
+
+.irm-profile-tab-bar {
+  display: flex;
+  gap: 4px;
+}
+
+.irm-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.irm-tab-btn:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+}
+
+.irm-tab-btn.active {
+  background: var(--primary-600, #2563eb);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+}
+
+/* ── Overview 3-Column Layout ────────────────────────────────────────────── */
+.irm-3col-layout {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+@media (max-width: 1080px) {
+  .irm-3col-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.irm-col-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.irm-card {
+  padding: 22px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+}
+
+.irm-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Credentials */
+.irm-credentials-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.irm-cred-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-surface-hover);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+}
+
+.irm-cred-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--bg-surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.irm-cred-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.irm-cred-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Shift Info */
+.irm-shift-info {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.irm-shift-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border-base);
+}
+
+.irm-shift-label {
+  color: var(--text-secondary);
+}
+
+/* 2x2 Quick Metrics */
+.irm-metrics-2x2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.irm-metric-tile {
+  padding: 14px;
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.irm-metric-tile.clickable {
+  cursor: pointer;
+}
+
+.irm-metric-tile.clickable:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary-600, #2563eb);
+}
+
+.irm-metric-tile-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.irm-metric-tile-val {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.irm-metric-tile-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Tiers */
+.irm-tier-box {
+  padding: 12px;
+  background: var(--bg-surface-hover);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+}
+
+.irm-tier-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.irm-tier-pills {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.irm-tier-pill {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  padding: 5px 8px;
+  background: var(--bg-surface);
+  border-radius: 6px;
+}
+
+.irm-tier-pill strong {
+  color: var(--primary-600, #2563eb);
+}
+
+.irm-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.irm-pill-tag {
+  font-size: 11px;
+  padding: 4px 10px;
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+  border-radius: 12px;
+  color: var(--text-primary);
+}
+
+/* Activity Feed */
+.irm-activity-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.irm-activity-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.irm-activity-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.irm-activity-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.irm-activity-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.irm-telephony-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.irm-tele-stat {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border-base);
+}
+
+/* ── Performance Tab ─────────────────────────────────────────────────────── */
+.irm-performance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+@media (max-width: 900px) {
+  .irm-performance-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.irm-targets-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.irm-target-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.irm-target-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.irm-target-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.irm-target-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.irm-target-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.irm-target-pct {
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.irm-target-track {
+  height: 8px;
+  background: var(--bg-surface-hover);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.irm-target-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.6s ease;
+}
+
+/* Competency Gauges */
+.irm-gauges-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.irm-gauge-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.irm-gauge-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.irm-gauge-label {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.irm-gauge-pct {
+  font-weight: 700;
+}
+
+.irm-gauge-track {
+  height: 7px;
+  background: var(--bg-surface-hover);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.irm-gauge-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.6s ease;
+}
+
+/* Funnel Compact */
+.irm-funnel-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.irm-funnel-compact-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.irm-funnel-compact-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 130px;
+  font-weight: 600;
+}
+
+.irm-funnel-compact-track {
+  flex: 1;
+  height: 8px;
+  background: var(--bg-surface-hover);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.irm-funnel-compact-fill {
+  height: 100%;
+  border-radius: 4px;
+}
+
+.irm-funnel-compact-count {
+  width: 40px;
+  text-align: right;
+  font-weight: 700;
+}
+
+.irm-dispo-summary {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.irm-dispo-chip {
+  padding: 10px 14px;
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ── Edit 3-Column Layout ────────────────────────────────────────────────── */
+.irm-edit-3col {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+@media (max-width: 960px) {
+  .irm-edit-3col {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Drawer List ─────────────────────────────────────────────────────────── */
+.irm-drawer-search-wrap {
+  position: relative;
+  margin-bottom: 14px;
+}
+
+.irm-drawer-search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+}
+
+.irm-drawer-search-input {
+  width: 100%;
+  padding: 9px 12px 9px 36px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+  background: var(--bg-surface);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.irm-drawer-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.irm-drawer-contact-card {
+  padding: 12px 14px;
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.irm-drawer-contact-card:hover {
+  border-color: var(--primary-600, #2563eb);
+  transform: translateX(2px);
+}
+
+.irm-drawer-contact-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 3px;
+}
+
+.irm-drawer-contact-name {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.irm-drawer-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+}
+
+.irm-drawer-contact-phone {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.irm-drawer-contact-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
