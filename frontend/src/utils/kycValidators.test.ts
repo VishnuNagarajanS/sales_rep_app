@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { kycValidators, validateKycStep } from './kycValidators';
+import { kycValidators, validateKycStep, getDobValidationError } from './kycValidators';
 
 describe('kycValidators', () => {
   describe('pan', () => {
@@ -111,8 +111,20 @@ describe('kycValidators', () => {
       expect(kycValidators.dob('1800-01-01')).toBe(false); // implausible age
       expect(kycValidators.dob('2999-01-01')).toBe(false); // future
       expect(kycValidators.dob('not-a-date')).toBe(false);
+      expect(kycValidators.dob('30-02-1999')).toBe(false); // February 30 does not exist
+      expect(kycValidators.dob('1999-02-30')).toBe(false); // February 30 does not exist
+    });
+    it('accepts valid DD-MM-YYYY dates for >= 18', () => {
+      expect(kycValidators.dob('15-08-1995')).toBe(true);
+      expect(kycValidators.dob('28-02-1999')).toBe(true);
+    });
+    it('returns specific explanation for impossible dates like 30-02-1999', () => {
+      expect(getDobValidationError('30-02-1999')).toContain('February 1999 has only 28 days');
+      expect(getDobValidationError('')).toBe('Date of birth is required.');
     });
   });
+
+
 
   describe('bankAccount', () => {
     it('validates 9-18 digit account numbers', () => {

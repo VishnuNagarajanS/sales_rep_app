@@ -1,11 +1,87 @@
-/** Parses a YYYY-MM-DD (or ISO) date as a LOCAL calendar date, avoiding the UTC off-by-one of new Date('YYYY-MM-DD'). */
-function parseLocalDate(value: string): Date | null {
+/** Parses a YYYY-MM-DD, DD-MM-YYYY, DD/MM/YYYY, or ISO date as a LOCAL calendar date. */
+export function parseLocalDate(value: string): Date | null {
   if (!value) return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
-  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(value);
-  if (isNaN(d.getTime())) return null;
-  if (m && (d.getMonth() !== Number(m[2]) - 1 || d.getDate() !== Number(m[3]))) return null; // e.g. 2020-02-31
-  return d;
+  const trimmed = value.trim();
+
+  // 1. YYYY-MM-DD or YYYY/MM/DD
+  const ymd = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/.exec(trimmed);
+  if (ymd) {
+    const y = Number(ymd[1]), mo = Number(ymd[2]) - 1, day = Number(ymd[3]);
+    const d = new Date(y, mo, day);
+    if (d.getFullYear() === y && d.getMonth() === mo && d.getDate() === day) return d;
+    return null;
+  }
+
+  // 2. DD-MM-YYYY or DD/MM/YYYY
+  const dmy = /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/.exec(trimmed);
+  if (dmy) {
+    const day = Number(dmy[1]), mo = Number(dmy[2]) - 1, y = Number(dmy[3]);
+    const d = new Date(y, mo, day);
+    if (d.getFullYear() === y && d.getMonth() === mo && d.getDate() === day) return d;
+    return null;
+  }
+
+  const d = new Date(trimmed);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+export function getDobValidationError(value: string | undefined | null): string | null {
+  if (!value || !value.trim()) {
+    return 'Date of birth is required.';
+  }
+  const trimmed = value.trim();
+
+  // Check specific day-of-month calendar validity for YYYY-MM-DD and DD-MM-YYYY
+  let y: number | null = null;
+  let mo: number | null = null;
+  let day: number | null = null;
+
+  const ymd = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/.exec(trimmed);
+  const dmy = /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/.exec(trimmed);
+
+  if (ymd) {
+    y = Number(ymd[1]);
+    mo = Number(ymd[2]);
+    day = Number(ymd[3]);
+  } else if (dmy) {
+    day = Number(dmy[1]);
+    mo = Number(dmy[2]);
+    y = Number(dmy[3]);
+  }
+
+  if (y !== null && mo !== null && day !== null) {
+    if (mo < 1 || mo > 12) {
+      return 'Invalid month in date of birth.';
+    }
+    const daysInMonth = new Date(y, mo, 0).getDate();
+    if (day < 1 || day > daysInMonth) {
+      const monthNames = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+      ];
+      return `Invalid calendar date. ${monthNames[mo - 1]} ${y} has only ${daysInMonth} days.`;
+    }
+  }
+
+  const d = parseLocalDate(trimmed);
+  if (!d) {
+    return 'Please enter a valid date of birth (DD-MM-YYYY).';
+  }
+
+  const now = new Date();
+  if (d.getTime() > now.getTime()) {
+    return 'Date of birth cannot be in the future.';
+  }
+
+  const age = ageOn(d, now);
+  if (age < 18) {
+    return 'Investor must be at least 18 years old.';
+  }
+  if (age > 120) {
+    return 'Please enter a valid date of birth.';
+  }
+
+  return null;
 }
 
 function ageOn(d: Date, now: Date = new Date()): number {
@@ -56,11 +132,9 @@ export const kycValidators = {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
   },
   dob: (value: string) => {
-    const d = parseLocalDate(value);
-    if (!d) return false;
-    const age = ageOn(d);
-    return age >= 18 && age <= 120;
+    return getDobValidationError(value) === null;
   },
+
   bankAccount: (value: string) => {
     return /^[0-9]{9,18}$/.test(value.trim());
   },
@@ -219,9 +293,11 @@ export function validateKycStep(
     if (!kycValidators.aadhaar(aadhaarClean)) {
       errs.aadhaarNumber = 'Enter a valid 12-digit Aadhaar number (cannot start with 0 or 1).';
     }
-    if (!kycValidators.dob(data.dob || '')) {
-      errs.dob = 'Date of birth is required and the investor must be at least 18 years old.';
+    const dobErr = getDobValidationError(data.dob);
+    if (dobErr) {
+      errs.dob = dobErr;
     }
+
     if (!kycValidators.requiredText(data.address || '', 5)) {
       errs.address = 'Permanent address is required (at least 5 characters).';
     }
