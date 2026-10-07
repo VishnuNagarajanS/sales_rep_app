@@ -43,21 +43,4 @@ public class IrmPipelineController : ControllerBase
 
         return Ok(result);
     }
-
-    [HttpPost("{cardId:int}/activity")]
-    public async Task<IActionResult> LogActivity(int cardId, [FromBody] LogIrmActivityDto dto, CancellationToken ct)
-    {
-        if (User.IsGhlAdmin())
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<string>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM pipeline data."));
-        }
-
-        var companyId = User.GetCompanyId();
-        var irmId = User.GetUserId();
-        var result = await _pipelineService.LogActivityAsync(cardId, companyId, irmId, dto, ct);
-        if (!result.Success)
-            return BadRequest(result);
-
-        return Ok(result);
-    }
 }

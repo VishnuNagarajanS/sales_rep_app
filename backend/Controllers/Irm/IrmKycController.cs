@@ -193,14 +193,6 @@ public class IrmKycController : ControllerBase
         return Ok(result);
     }
 
-    [HttpPost("draft")]
-    [AllowAnonymous]
-    public async Task<IActionResult> SaveCustomerDraft([FromBody] SubmitKycDto dto, CancellationToken ct)
-    {
-        dto.IsFinalSubmit = false;
-        return await SubmitKyc(dto, ct);
-    }
-
     [HttpPost("assisted-draft")]
     [Authorize]
     public async Task<IActionResult> SaveAssistedDraft([FromBody] SubmitKycDto dto, CancellationToken ct)
