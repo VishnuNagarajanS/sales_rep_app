@@ -238,7 +238,8 @@ export type CallDisposition =
   | 'Call Back'
   | 'Wrong Number'
   | 'Converted'
-  | 'No Response';
+  | 'No Response'
+  | 'Skipped';
 
 export interface CallRecord {
   id: string;
@@ -249,6 +250,9 @@ export interface CallRecord {
   duration: number; // in seconds
   agentId: string;
   agentName: string;
+  agentRole?: string;
+  callerType?: 'Agent' | 'IRM';
+  connectVia?: 'Connect via Agent' | 'Connect via IRM';
   disposition: CallDisposition;
   timestamp: string;
   recordingUrl?: string;
@@ -256,6 +260,7 @@ export interface CallRecord {
   notes?: string;
   reason?: string;
   providerCallId?: string;
+  twilioCallSid?: string;
   contactId?: string;
   leadId?: string;
   customerId?: string;
@@ -283,6 +288,8 @@ export interface Followup {
   contactId: string;
   contactName: string;
   contactPhone: string;
+  contactEmail?: string;
+  email?: string;
   contactType: 'lead' | 'customer' | 'investor';
   scheduledAt: string;
   priority: 'Low' | 'Medium' | 'High';
@@ -461,6 +468,7 @@ export interface DocumentItem {
   category: string;
   entityType?: 'lead' | 'customer' | 'investor' | 'booking' | 'consultation' | 'company';
   entityId?: string;
+  fileUrl?: string;
 }
 
 export interface Department {

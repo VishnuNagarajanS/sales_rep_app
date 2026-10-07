@@ -88,7 +88,6 @@ import { useAuth } from './context/AuthContext';
 import { AuthLayout } from './layouts/AuthLayout';
 import { SalesLayout } from './layouts/SalesLayout';
 import { AdminLayout } from './layouts/AdminLayout';
-import { isMockMode } from './config/environment';
 
 // Sales Core Pages
 import { DashboardPage } from './pages/Dashboard/DashboardPage';
@@ -125,6 +124,7 @@ import { InvestorsPage } from './pages/Investors/InvestorsPage';
 import { ConsultationsPage } from './pages/Consultations/ConsultationsPage';
 import { OpportunitiesPage } from './pages/InvestmentOpportunities/OpportunitiesPage';
 import { AssignedLeadsPage } from './pages/AssignedLeads/AssignedLeadsPage';
+import { PendingLeadsPage } from './pages/PendingLeads/PendingLeadsPage';
 import { KYCPage } from './pages/KYC/KYCPage';
 
 // Company Admin
@@ -146,8 +146,8 @@ import { signalRService } from './services/signalRService';
 
 import { ProtectedRoute } from './components/common/Guards';
 import { Modal } from './components/common/Modal';
-import { Investor, Customer } from './types';
 import { storageService } from './services/storageService';
+import { Investor, Customer } from './types';
 import {
   saveLead as apiSaveLead,
   saveFollowup as apiSaveFollowup,
@@ -163,10 +163,8 @@ import './App.css';
 
 export const App: React.FC = () => {
   useEffect(() => {
-    if (!isMockMode()) {
-      localStorage.removeItem('nexus_dev_deals');
-      localStorage.removeItem('nexus_dev_leads');
-    }
+    localStorage.removeItem('nexus_dev_deals');
+    localStorage.removeItem('nexus_dev_leads');
   }, []);
 
   const { isAuthenticated, isSuperAdmin, tenant, user } = useAuth();
@@ -185,14 +183,6 @@ export const App: React.FC = () => {
   const isGhlAdmin =
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
-  // In mock mode only, run idempotent mock bootstrap if not yet initialized
-  useEffect(() => {
-    if (isMockMode()) {
-      import('./mock/runtime/mockBootstrap').then(({ runMockBootstrap }) => {
-        runMockBootstrap();
-      });
-    }
-  }, []);
 
   // Set default route for IRM user
   useEffect(() => {
@@ -255,16 +245,6 @@ export const App: React.FC = () => {
   const [quickCreateType, setQuickCreateType] = useState<
     'lead' | 'followup' | 'deal' | 'visit' | 'consultation' | null
   >(null);
-
-  const [investors, setInvestors] = useState<Investor[]>([]);
-  const [tenantCustomers, setTenantCustomers] = useState<Customer[]>([]);
-
-  useEffect(() => {
-    if (tenant?.id) {
-      apiGetInvestors(tenant.id).then(setInvestors).catch(() => {});
-      apiGetCustomers(tenant.id).then(setTenantCustomers).catch(() => {});
-    }
-  }, [tenant?.id, quickCreateType]);
 
   const [quickName, setQuickName] = useState('');
   const [quickPhone, setQuickPhone] = useState('+91 ');
@@ -485,6 +465,16 @@ export const App: React.FC = () => {
     });
   };
 
+  useEffect(() => {
+    const handleCustomNav = (e: any) => {
+      if (e.detail) {
+        navigate(e.detail);
+      }
+    };
+    window.addEventListener('nexus_navigate', handleCustomNav);
+    return () => window.removeEventListener('nexus_navigate', handleCustomNav);
+  }, []);
+
   const [isSavingQuickCreate, setIsSavingQuickCreate] = useState(false);
   const [quickCreateError, setQuickCreateError] = useState<string | null>(null);
 
@@ -516,11 +506,12 @@ export const App: React.FC = () => {
     setConsAgenda('Commercial REIT yield analysis & pass-through taxation discussion.');
     setConsOutcome('');
     setScheduledDate(new Date(Date.now() + 86400000).toISOString().split('T')[0]);
-    setScheduledTime('11:00');
+    setScheduledTime(storageService.getCallPreferences().defaultFollowupTime);
     // Reset deal-specific state; pre-select first available customer
     setDealCustomerMode('existing');
     setNewCustomerName('');
-    setSelectedCustomerId(tenantCustomers[0]?.id || '');
+    const existingCustomers = storageService.getCustomers(tenant?.id);
+    setSelectedCustomerId(existingCustomers[0]?.id || '');
   };
 
   const handleSaveQuickCreate = async (e: React.FormEvent) => {
@@ -600,7 +591,7 @@ export const App: React.FC = () => {
         let resolvedCustomerName: string;
 
         if (dealCustomerMode === 'existing' && selectedCustomerId) {
-          const existing = tenantCustomers.find(c => c.id === selectedCustomerId);
+          const existing = storageService.getCustomers(tenant?.id).find((c: any) => c.id === selectedCustomerId);
           resolvedCustomerId = existing?.id || selectedCustomerId;
           resolvedCustomerName = existing?.name || 'Customer';
         } else {
@@ -702,12 +693,20 @@ export const App: React.FC = () => {
         <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
       ) : currentRoute === 'leads' ? (
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
-          <LeadsPage />
+          <LeadsPage onNavigate={navigate} />
         </ProtectedRoute>
       ) : currentRoute === 'assigned-leads' ? (
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
           {isGhlAdmin ? (
             <AssignedLeadsPage />
+          ) : (
+            <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+          )}
+        </ProtectedRoute>
+      ) : currentRoute === 'pending-leads' ? (
+        <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
+          {isGhlAdmin ? (
+            <PendingLeadsPage />
           ) : (
             <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
           )}
@@ -967,6 +966,7 @@ export const App: React.FC = () => {
             <>
               {/* ── CONSULTATION: Full form matching Schedule Consultation ── */}
               {(() => {
+                const investors = storageService.getInvestors(tenant?.id);
                 return (
                   <>
                     <div className="form-group">

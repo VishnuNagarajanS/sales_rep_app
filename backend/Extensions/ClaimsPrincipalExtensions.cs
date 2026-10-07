@@ -22,4 +22,16 @@ public static class ClaimsPrincipalExtensions
     {
         return principal.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
     }
+
+    public static bool IsGhlAdmin(this ClaimsPrincipal principal)
+    {
+        var role = (principal.FindFirst(ClaimTypes.Role)?.Value
+                    ?? principal.FindFirst("role")?.Value
+                    ?? string.Empty).ToLowerInvariant();
+
+        var companyId = principal.GetCompanyId();
+
+        return (companyId == 1 || companyId == 0) &&
+               (role == "admin" || role == "ghl_admin" || role == "company_admin" || role == "super_admin");
+    }
 }

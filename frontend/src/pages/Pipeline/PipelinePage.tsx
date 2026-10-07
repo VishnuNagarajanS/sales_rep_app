@@ -7,14 +7,13 @@ import {
   Clock,
   ChevronRight,
   ChevronLeft,
-  Plus,
   Phone,
   Mail,
   User,
   MapPin,
   TrendingUp,
 } from 'lucide-react';
-import { Deal, Lead, Followup } from '../../types';
+import { Deal, DealActivity, Lead, Followup, Investor, InvestmentOpportunity, Consultation } from '../../types';
 import { storageService } from '../../services/storageService';
 import { useAuth } from '../../context/AuthContext';
 import { useCan } from '../../components/common/Guards';
@@ -22,13 +21,13 @@ import {
   getDeals,
   getLeads,
   getFollowups,
+  getInvestors,
+  getOpportunities,
+  getConsultations,
   isTenantMatch,
-  saveDeal as apiSaveDeal,
-  saveFollowup as apiSaveFollowup,
-  saveLead as apiSaveLead,
+  saveInvestor as apiSaveInvestor,
   persistDeal,
 } from '../../services/ghlApiService';
-import { isMockMode } from '../../config/environment';
 import { PIPELINE_STAGES } from '../../constants/pipelineStages';
 import { Modal } from '../../components/common/Modal';
 import { FilterBar } from '../../components/common/FilterBar';
@@ -73,46 +72,92 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   const [deals, setDeals] = useState<Deal[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [followups, setFollowups] = useState<Followup[]>([]);
+  const [investors, setInvestors] = useState<Investor[]>([]);
+  const [opportunities, setOpportunities] = useState<InvestmentOpportunity[]>([]);
+  const [consultations, setConsultations] = useState<Consultation[]>([]);
   const [selectedDealForLoss, setSelectedDealForLoss] = useState<Deal | null>(null);
   const [lossReason, setLossReason] = useState('Competitor Pricing');
   const [agentFilter, setAgentFilter] = useState('All');
 
   // IRM-specific state
-  const [cardIndex, setCardIndex] = useState<Record<string, number>>({});
   const [irmDetailDeal, setIrmDetailDeal] = useState<Deal | null>(null);
 
-  // Role-based scoping: Sales Executives see only their own deals.
+  // Role-based scoping: Sales Executives and IRMs see only their own deals.
   // Managers / Admins / Super Admins see every deal in the company (no filter).
   const isExec = roleCode === 'sales_executive';
-  const scopedDeals = isExec
+  const isScopedAgent = isExec || isGhlIrm || isIrm;
+  const scopedDeals = isScopedAgent
     ? deals.filter(d =>
-      (d.assignedAgentId && d.assignedAgentId === user?.id) ||
+      (d.assignedAgentId && String(d.assignedAgentId) === String(user?.id)) ||
       (d.assignedAgentName && d.assignedAgentName === user?.name)
     )
     : deals;
 
   const scopedLeads = isGhlIrm
-    ? leads
-        .filter(l => !l.companyId || isTenantMatch(l.companyId, tenant?.id))
-        // Same rule as IRM "My Leads": only 'Interested' leads assigned to THIS IRM
-        .filter(l => l.status === 'Interested')
-        .filter(l =>
-          l.assignedAgentId
-            ? String(l.assignedAgentId) === String(user?.id)
-            : !!l.assignedAgentName && l.assignedAgentName === user?.name
-        )
+    ? (() => {
+        // Build sets of contact IDs / phones that already have a real pending followup.
+        // A lead with an active followup belongs in the Follow-up column only.
+        const pendingFuContactIds = new Set<string>(
+          followups
+            .filter(f => f.status === 'Pending')
+            .map(f => String(f.contactId || ''))
+            .filter(Boolean)
+        );
+        const pendingFuPhones = new Set<string>(
+          followups
+            .filter(f => f.status === 'Pending')
+            .map(f => (f.contactPhone || '').replace(/\D/g, '').slice(-10))
+            .filter(Boolean)
+        );
+        const raw = leads
+          .filter(l => !l.companyId || isTenantMatch(l.companyId, tenant?.id))
+          // Same rule as IRM "My Leads": only 'Interested' leads assigned to THIS IRM
+          .filter(l => l.status === 'Interested')
+          .filter(l =>
+            l.assignedAgentId
+              ? String(l.assignedAgentId) === String(user?.id)
+              : !!l.assignedAgentName && l.assignedAgentName === user?.name
+          )
+          // Exclude leads that already have a real pending followup record
+          .filter(l => {
+            if (pendingFuContactIds.has(String(l.id))) return false;
+            const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+            if (lPhone && pendingFuPhones.has(lPhone)) return false;
+            return true;
+          });
+        // Deduplicate by phone to match LeadsPage
+        const seen = new Set<string>();
+        return raw.filter(l => {
+          const phone = (l.phone || '').replace(/\D/g, '').slice(-10);
+          if (phone) {
+            if (seen.has(phone)) return false;
+            seen.add(phone);
+          }
+          return true;
+        });
+      })()
     : [];
 
   const scopedFollowups = isGhlIrm
-    ? followups
-        .filter(f => !f.companyId || isTenantMatch(f.companyId, tenant?.id))
-        .filter(f => f.status === 'Pending')
-        .filter(
-          f =>
-            (f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
-            (f.assignedAgentName && f.assignedAgentName === user?.name) ||
-            !f.assignedAgentId
-        )
+    ? (() => {
+        const raw = followups
+          .filter(f => !f.companyId || isTenantMatch(f.companyId, tenant?.id))
+          .filter(f => f.status === 'Pending')
+          .filter(
+            f =>
+              (f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
+              (f.assignedAgentName && f.assignedAgentName === user?.name)
+          );
+        const seen = new Set<string>();
+        return raw.filter(f => {
+          const key = String(f.id);
+          if (!seen.has(key)) {
+            seen.add(key);
+            return true;
+          }
+          return false;
+        });
+      })()
     : [];
 
   const leadToPipelineCard = (lead: Lead): Deal => ({
@@ -140,6 +185,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       (lead as any).investmentRange ||
       undefined,
     investorType: lead.customFields?.investorType || undefined,
+    preferredAssetClass: lead.customFields?.preferredAssetClass || undefined,
   });
 
   const followupToPipelineCard = (followup: Followup): Deal => ({
@@ -163,6 +209,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       (followup as any).investmentCapacity ||
       (followup as any).investmentRange ||
       undefined,
+    preferredAssetClass: (followup as any).preferredAssetClass || (followup as any).customFields?.preferredAssetClass || undefined,
   });
 
   // Agent filter options — derived from the already-scoped pool so execs never see this.
@@ -178,45 +225,35 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
 
   const loadData = async () => {
     const my = ++reqId.current;
-    if (isMockMode()) {
-      setIsLoading(true);
-      const latestDeals = storageService.getDeals(tenant?.id) || [];
-      const localLeads = storageService.getLeads(tenant?.id) || [];
-      const localFollowups = storageService.getFollowups(tenant?.id) || [];
-      setDeals(latestDeals);
-      setLeads(localLeads);
-      setFollowups(localFollowups);
+    setIsLoading(true);
+    setLoadError(false);
+    try {
+      const [apiDeals, apiLeads, apiFollowups, apiInvs, apiOpps, apiCons] = await Promise.all([
+        getDeals(tenant?.id),
+        getLeads(tenant?.id),
+        getFollowups(tenant?.id),
+        getInvestors(tenant?.id),
+        getOpportunities(tenant?.id),
+        getConsultations(tenant?.id),
+      ]);
+      if (my !== reqId.current) return;
+      const dealsList = apiDeals || [];
+      setDeals(dealsList);
+      setLeads(apiLeads || []);
+      setFollowups(apiFollowups || []);
+      setInvestors(apiInvs || []);
+      setOpportunities(apiOpps || []);
+      setConsultations(apiCons || []);
       setIsLoading(false);
-      setLoadError(false);
       setIrmDetailDeal(prev => {
         if (!prev) return null;
-        return latestDeals.find(d => d.id === prev.id) || prev;
+        return dealsList.find(d => d.id === prev.id) || prev;
       });
-    } else {
-      setIsLoading(true);
-      setLoadError(false);
-      try {
-        const [apiDeals, apiLeads, apiFollowups] = await Promise.all([
-          getDeals(tenant?.id),
-          getLeads(tenant?.id),
-          getFollowups(tenant?.id),
-        ]);
-        if (my !== reqId.current) return;
-        const dealsList = apiDeals || [];
-        setDeals(dealsList);
-        setLeads(apiLeads || []);
-        setFollowups(apiFollowups || []);
-        setIsLoading(false);
-        setIrmDetailDeal(prev => {
-          if (!prev) return null;
-          return dealsList.find(d => d.id === prev.id) || prev;
-        });
-      } catch (err) {
-        if (my !== reqId.current) return;
-        console.error('[PipelinePage] Failed to load pipeline data:', err);
-        setLoadError(true);
-        setIsLoading(false);
-      }
+    } catch (err) {
+      if (my !== reqId.current) return;
+      console.error('[PipelinePage] Failed to load pipeline data:', err);
+      setLoadError(true);
+      setIsLoading(false);
     }
   };
 
@@ -265,7 +302,47 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   };
 
   const handleMarkWon = async (deal: Deal) => {
-    const updated = { ...deal, stage: wonStageId, stageEnteredAt: new Date().toISOString() };
+    let updated = { ...deal, stage: wonStageId, stageEnteredAt: new Date().toISOString() };
+    if (isGhlIrm || isIrm) {
+      try {
+        let linkedInvestorId = deal.customerId && !deal.customerId.startsWith('lead-') && !deal.customerId.startsWith('cust-') ? deal.customerId : '';
+        const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+        const existingInv = investors.find(inv => {
+          if (linkedInvestorId && String(inv.id) === String(linkedInvestorId)) return true;
+          const invDigits = (inv.phone || '').replace(/\D/g, '').slice(-10);
+          if (fDigits && invDigits && invDigits === fDigits) return true;
+          if (deal.email && inv.email && inv.email.toLowerCase() === deal.email.toLowerCase()) return true;
+          return false;
+        });
+
+        const invPayload: Investor = {
+          id: existingInv ? existingInv.id : linkedInvestorId,
+          companyId: tenant?.id || '',
+          name: deal.customerName,
+          phone: deal.phone || '',
+          email: deal.email || '',
+          status: 'Active Investor',
+          investmentCapacity: deal.investmentRange || '',
+          preferredAssetClass: deal.preferredAssetClass || '',
+          assignedAgentId: deal.assignedAgentId || user?.id || '',
+          assignedAgentName: deal.assignedAgentName || user?.name || '',
+          referralSource: 'IRM Pipeline',
+          notes: deal.notes || (deal.value ? `Converted from Pipeline. Investment Amount: ₹${(deal.value || 0).toLocaleString('en-IN')}` : ''),
+          committedAUM: deal.value ? String(deal.value) : (deal.investmentRange || ''),
+          investmentMandate: deal.investorType || '',
+          riskTolerance: undefined,
+          createdAt: existingInv?.createdAt || new Date().toISOString(),
+        };
+        const savedInv = await apiSaveInvestor(invPayload);
+        if (savedInv?.id) {
+          updated.customerId = String(savedInv.id);
+        } else if (existingInv?.id) {
+          updated.customerId = String(existingInv.id);
+        }
+      } catch (err) {
+        console.warn('[PipelinePage] Error syncing investor on mark won:', err);
+      }
+    }
     try {
       await persistDeal(updated);
     } catch (e) {
@@ -304,7 +381,18 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   };
 
   if (isGhlAdmin) {
-    return <AdminKanbanBoard onOpenQuickCreate={onOpenQuickCreate} />;
+    return (
+      <AdminKanbanBoard 
+        onOpenQuickCreate={onOpenQuickCreate} 
+        apiLeads={leads} 
+        apiFollowups={followups} 
+        apiDeals={deals}
+        apiInvestors={investors}
+        apiOpportunities={opportunities}
+        apiConsultations={consultations}
+        onDataChange={loadData}
+      />
+    );
   }
 
   return (
@@ -334,12 +422,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
               onClearAll={() => setAgentFilter('All')}
             />
           )}
-          <button
-            className="btn btn-primary pipeline-new-deal-btn"
-            onClick={() => onOpenQuickCreate('deal')}
-          >
-            <Plus size={15} /> New Deal
-          </button>
         </div>
       </div>
 
@@ -433,9 +515,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                       No deals in this stage
                     </div>
                   ) : (
-                    (() => {
-                      const currIdx = Math.min(cardIndex[stage.id] || 0, Math.max(0, stageDeals.length - 1));
-                      const deal = stageDeals[currIdx];
+                    stageDeals.map(deal => {
                       const daysInStage = getDaysInStage(deal);
 
                       return (
@@ -496,53 +576,15 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                             </span>
                           </div>
 
-                          {/* Footer: Investment range + pagination */}
+                          {/* Footer: Investment range */}
                           <div className="irm-card-footer">
                             <span className="irm-card-investment-range">
-                              {deal.investmentRange || formatCurrency(deal.value)}
+                              {deal.investmentRange || (deal.value > 0 ? formatCurrency(deal.value) : '—')}
                             </span>
-                            {stageDeals.length > 1 && (
-                              <div
-                                className="irm-card-pagination"
-                                onClick={e => e.stopPropagation()}
-                              >
-                                <span>{currIdx + 1}/{stageDeals.length}</span>
-                                <button
-                                  type="button"
-                                  className="irm-page-btn"
-                                  disabled={currIdx === 0}
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    setCardIndex(prev => ({
-                                      ...prev,
-                                      [stage.id]: Math.max(0, currIdx - 1),
-                                    }));
-                                  }}
-                                  title="Previous Deal"
-                                >
-                                  ‹
-                                </button>
-                                <button
-                                  type="button"
-                                  className="irm-page-btn"
-                                  disabled={currIdx >= stageDeals.length - 1}
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    setCardIndex(prev => ({
-                                      ...prev,
-                                      [stage.id]: Math.min(stageDeals.length - 1, currIdx + 1),
-                                    }));
-                                  }}
-                                  title="Next Deal"
-                                >
-                                  ›
-                                </button>
-                              </div>
-                            )}
                           </div>
                         </div>
                       );
-                    })()
+                    })
                   )
                 ) : (
                   stageDeals.length === 0 ? (
@@ -769,10 +811,35 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                     <TrendingUp size={12} /> Investment Capacity / Size
                   </span>
                   <span className="irm-detail-grid-value" style={{ color: '#10b981', fontWeight: 800 }}>
-                    {irmDetailDeal.investmentRange || formatCurrency(irmDetailDeal.value)}
+                    {irmDetailDeal.investmentRange || (irmDetailDeal.value > 0 ? formatCurrency(irmDetailDeal.value) : '—')}
                   </span>
                 </div>
-
+                <div className="irm-detail-grid-item">
+                  <span className="irm-detail-grid-label">
+                    Preferred Asset Class
+                  </span>
+                  <span className="irm-detail-grid-value">
+                    {irmDetailDeal.preferredAssetClass || '—'}
+                  </span>
+                </div>
+                <div className="irm-detail-grid-item">
+                  <span className="irm-detail-grid-label">
+                    Investor Structure / Mandate
+                  </span>
+                  <span className="irm-detail-grid-value">
+                    {irmDetailDeal.investorType || '—'}
+                  </span>
+                </div>
+                {irmDetailDeal.customerId && (
+                  <div className="irm-detail-grid-item">
+                    <span className="irm-detail-grid-label">
+                      Customer ID
+                    </span>
+                    <span className="irm-detail-grid-value" style={{ fontFamily: 'monospace' }}>
+                      #{irmDetailDeal.customerId}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 

@@ -718,3 +718,124 @@
   border-color: var(--primary-600, #2563eb);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
+
+/* ── Stage Action Standalone Icon Buttons ── */
+.kyc-stage-action-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  vertical-align: middle;
+}
+
+.kyc-stage-action-tooltip-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.kyc-stage-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0;
+  background: transparent;
+  box-sizing: border-box;
+}
+
+.kyc-stage-action-btn:focus-visible {
+  outline: 2px solid var(--primary-500, #3b82f6);
+  outline-offset: 1px;
+}
+
+/* Link (Send / Resend) button */
+.kyc-stage-action-btn--link {
+  background: rgba(37, 99, 235, 0.12);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #3b82f6;
+}
+
+.kyc-stage-action-btn--link:hover {
+  background: rgba(37, 99, 235, 0.22);
+  border-color: #3b82f6;
+  color: #60a5fa;
+  transform: translateY(-1px);
+}
+
+.kyc-stage-action-btn--link:active {
+  transform: translateY(0);
+  background: rgba(37, 99, 235, 0.28);
+}
+
+/* Assisted KYC button */
+.kyc-stage-action-btn--assisted {
+  background: rgba(124, 58, 237, 0.12);
+  border-color: rgba(139, 92, 246, 0.3);
+  color: #8b5cf6;
+}
+
+.kyc-stage-action-btn--assisted:hover {
+  background: rgba(124, 58, 237, 0.22);
+  border-color: #8b5cf6;
+  color: #a78bfa;
+  transform: translateY(-1px);
+}
+
+.kyc-stage-action-btn--assisted:active {
+  transform: translateY(0);
+  background: rgba(124, 58, 237, 0.28);
+}
+
+/* Draft (Resume Draft) button */
+.kyc-stage-action-btn--draft {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: #f59e0b;
+}
+
+.kyc-stage-action-btn--draft:hover {
+  background: rgba(245, 158, 11, 0.22);
+  border-color: #f59e0b;
+  color: #fbbf24;
+  transform: translateY(-1px);
+}
+
+.kyc-stage-action-btn--draft:active {
+  transform: translateY(0);
+  background: rgba(245, 158, 11, 0.28);
+}
+
+/* Tooltip */
+.kyc-stage-action-tooltip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  background-color: var(--bg-card, #1e293b);
+  color: var(--text-primary, #ffffff);
+  border: 1px solid var(--border-base, rgba(255, 255, 255, 0.12));
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+}
+
+.kyc-stage-action-tooltip-wrapper:hover .kyc-stage-action-tooltip,
+.kyc-stage-action-tooltip-wrapper:focus-within .kyc-stage-action-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}

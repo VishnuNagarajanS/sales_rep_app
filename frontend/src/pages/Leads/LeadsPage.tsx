@@ -9,20 +9,55 @@ import {
   Trash2,
   Edit,
   ExternalLink,
+  CalendarCheck,
+  AlertTriangle,
+  Clock,
+  ArrowRight,
+  UserCheck,
 } from 'lucide-react';
-import { Lead, Customer, Deal } from '../../types';
+import { Lead, Customer, Deal, Followup } from '../../types';
 import { useAuth } from '../../context/AuthContext';
-import { useUnsavedChanges } from '../../context/NavigationGuardContext';
 import { useCall } from '../../context/CallContext';
-import { getLeads, saveLead as apiSaveLead, saveCustomer as apiSaveCustomer, saveOpportunity as apiSaveOpportunity, getFollowups, isTenantMatch } from '../../services/ghlApiService';
+import { apiClient } from '../../services/apiClient';
+import { storageService } from '../../services/storageService';
+import {
+  AssignableAgent,
+  loadAgentDirectory,
+  isLeadAssigned,
+  persistLeadAssignment,
+} from '../../services/agentDirectory';
+import {
+  getLeads,
+  getDeals,
+  saveLead as apiSaveLead,
+  saveCustomer as apiSaveCustomer,
+  saveOpportunity as apiSaveOpportunity,
+  getFollowups,
+  getCustomers,
+  saveFollowup as apiSaveFollowup,
+  isTenantMatch,
+} from '../../services/ghlApiService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
-import { storageService } from '../../services/storageService';
 import './LeadsPage.css';
+
+export const normalizePhone = (phone?: string): string | null => {
+  if (!phone) return null;
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length >= 10) return digits.slice(-10);
+  if (digits.length >= 7) return digits;
+  return null;
+};
+
+export const normalizeEmail = (email?: string): string | null => {
+  if (!email) return null;
+  const clean = email.trim().toLowerCase();
+  return clean.length > 0 ? clean : null;
+};
 
 const CAPACITY_OPTIONS = [
   'Contact for Co-Invest Details',
@@ -31,22 +66,85 @@ const CAPACITY_OPTIONS = [
   '₹10 Cr – ₹25 Cr',
   '₹25 Cr+'
 ];
-import { MOCK_AGENTS } from '../../mock_data/mockData';
+
+const MOCK_AGENTS = storageService.getMockAgents();
 export { MOCK_AGENTS };
 
-export const LeadsPage: React.FC = () => {
+interface LeadsPageProps {
+  onNavigate?: (route: string) => void;
+}
+
+export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
+  const handleNavigate = (route: string) => {
+    if (onNavigate) {
+      onNavigate(route);
+    } else {
+      sessionStorage.setItem('nexus_current_route', route);
+      window.dispatchEvent(new CustomEvent('nexus_navigate', { detail: route }));
+    }
+  };
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
 
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [allFollowups, setAllFollowups] = useState<any[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Duplicate in Follow-up & Customer Resolution States
+  interface DuplicateFollowupModalData {
+    contactId: string;
+    contactType: 'lead' | 'customer';
+    contactName: string;
+    contactPhone: string;
+    contactEmail?: string;
+    assignedAgentName: string;
+    assignedAgentId?: string;
+    existingStatus?: string;
+  }
+  const [duplicateFollowupModal, setDuplicateFollowupModal] = useState<DuplicateFollowupModalData | null>(null);
+
+  interface DuplicateKycModalData {
+    contactId: string;
+    contactType: 'lead' | 'customer' | 'kyc';
+    contactName: string;
+    contactPhone: string;
+    contactEmail?: string;
+    assignedAgentName: string;
+    assignedAgentId?: string;
+    kycId?: string;
+    dealId?: string;
+  }
+  const [duplicateKycModal, setDuplicateKycModal] = useState<DuplicateKycModalData | null>(null);
+  const [deals, setDeals] = useState<Deal[]>([]);
+  const [isSchedulingActivity, setIsSchedulingActivity] = useState<boolean>(false);
+  const [followupDate, setFollowupDate] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    d.setHours(10, 0, 0, 0);
+    return d.toISOString().slice(0, 16);
+  });
+  const [followupPriority, setFollowupPriority] = useState<string>('Medium');
+  const [followupNotes, setFollowupNotes] = useState<string>('');
+  const [isSavingFollowupActivity, setIsSavingFollowupActivity] = useState<boolean>(false);
+
+  interface DuplicateCustomerModalData {
+    contactId: string;
+    contactName: string;
+    contactPhone: string;
+    contactEmail?: string;
+    assignedAgentName: string;
+  }
+  const [duplicateCustomerModal, setDuplicateCustomerModal] = useState<DuplicateCustomerModalData | null>(null);
+  const [formErrorMessage, setFormErrorMessage] = useState<string | null>(null);
+
   const agentsList = useMemo(() => storageService.getAgents(tenant?.id), [tenant?.id]);
 
   const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk'];
 
-  // Role-based scoping:
-  // - Sales Executives see only their own leads, excluding moved/converted leads.
-  // - IRM sees their directly assigned leads PLUS all qualified 'Interested' leads handed over by Sales Execs.
-  // - Managers / Admins / Super Admins see the full company lead list.
+  // Role-based scoping: Sales Executives and IRMs see only their own leads.
+  // Managers / Admins / Super Admins see the full company lead list (no filter).
+  // Inactive / moved leads (Interested, Follow-up Required, Not Interested, Junk, Converted) are excluded from active Leads.
   const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
   const isLeadScopedUser = roleCode === 'sales_executive' || roleCode === 'irm';
@@ -68,11 +166,34 @@ export const LeadsPage: React.FC = () => {
       // IRM My Leads: ONLY leads that are 'Interested' AND assigned to THIS IRM
       // (e.g. Sales Exec Naveen hands a lead to IRM Dhinakaran -> only Dhinakaran sees it).
       // Leads of other IRMs, or still owned by a Sales Executive, are never shown.
+      // Also exclude any lead that already has a real, persisted pending follow-up record —
+      // those contacts belong in the Follow-ups screen only, not here.
+      const pendingFollowupContactIds = new Set<string>(
+        (allFollowups || [])
+          .filter(f => f.status === 'Pending')
+          .map(f => String(f.contactId || ''))
+          .filter(Boolean)
+      );
+      const pendingFollowupPhones = new Set<string>(
+        (allFollowups || [])
+          .filter(f => f.status === 'Pending')
+          .map(f => (f.contactPhone || '').replace(/\D/g, '').slice(-10))
+          .filter(Boolean)
+      );
+
       const raw = tenantLeads.filter(l => {
         if (l.status !== 'Interested') return false;
-        if (l.assignedAgentId) return String(l.assignedAgentId) === String(user?.id);
-        // Legacy rows without an agent id: fall back to the exact name
-        return !!l.assignedAgentName && l.assignedAgentName === user?.name;
+        if (l.assignedAgentId) {
+          if (String(l.assignedAgentId) !== String(user?.id)) return false;
+        } else {
+          // Legacy rows without an agent id: fall back to the exact name
+          if (!l.assignedAgentName || l.assignedAgentName !== user?.name) return false;
+        }
+        // Exclude if a real pending followup already exists for this contact
+        if (pendingFollowupContactIds.has(String(l.id))) return false;
+        const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+        if (lPhone && pendingFollowupPhones.has(lPhone)) return false;
+        return true;
       });
       // Deduplicate by phone to prevent double-entries from different IDs
       const seen = new Set<string>();
@@ -85,9 +206,8 @@ export const LeadsPage: React.FC = () => {
       });
     }
 
-
     return tenantLeads.filter(l => !MOVED_LEAD_STATUSES.includes(l.status));
-  }, [tenantLeads, isExec, isIrm, user?.id, user?.name]);
+  }, [tenantLeads, isExec, isIrm, user?.id, user?.name, allFollowups]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
@@ -188,13 +308,13 @@ export const LeadsPage: React.FC = () => {
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [assignStep, setAssignStep] = useState<'pick-agent' | 'confirm'>('pick-agent');
-  const [assignSelectedAgent, setAssignSelectedAgent] = useState<{ id: number | string; name: string } | null>(null);
+  const [assignSelectedAgent, setAssignSelectedAgent] = useState<AssignableAgent | null>(null);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [aiDistribution, setAiDistribution] = useState<Record<string, Lead[]>>({});
   const [isAiEditMode, setIsAiEditMode] = useState(false);
   const [assignedLeadIds, setAssignedLeadIds] = useState<Set<string>>(new Set());
   const [agentAssignments, setAgentAssignments] = useState<
-    Array<{ leadId: string; leadName: string; agentId: number | string; agentName: string; assignedAt: string }>
+    Array<{ leadId: string; leadName: string; agentId: number; agentName: string; assignedAt: string }>
   >(() => {
     try {
       const saved = sessionStorage.getItem('ghl_mock_agent_assignments');
@@ -205,24 +325,29 @@ export const LeadsPage: React.FC = () => {
   });
   const [toast, setToast] = useState<string | null>(null);
 
+  // Real sales agents (from DB) + admin ids. A lead still owned by an admin = UNASSIGNED.
+  const [agents, setAgents] = useState<AssignableAgent[]>([]);
+  const [agentsFromApi, setAgentsFromApi] = useState(true);
+  const [adminIds, setAdminIds] = useState<Set<string>>(
+    new Set(user?.id ? [String(user.id)] : [])
+  );
+
+  useEffect(() => {
+    if (!isGhlAdmin) return;
+    let cancelled = false;
+    loadAgentDirectory(tenant?.id, user?.id).then(dir => {
+      if (cancelled) return;
+      setAgents(dir.agents);
+      setAdminIds(dir.adminIds);
+      setAgentsFromApi(dir.fromApi);
+    });
+    return () => { cancelled = true; };
+  }, [tenant?.id, user?.id, isGhlAdmin]);
+
   // Form state
   const [formData, setFormData] = useState<Partial<Lead>>({});
   const [convertDealTitle, setConvertDealTitle] = useState('');
   const [convertDealValue, setConvertDealValue] = useState<number>(5000000);
-  const [isSubmittingLead, setIsSubmittingLead] = useState(false);
-  const [isConvertingLead, setIsConvertingLead] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
-
-  // Unsaved changes check
-  const isEditDirty = isEditDrawerOpen && !!formData.name && formData.name.trim() !== '';
-  const isImportDirty = isImportModalOpen && !!importFile;
-  const isConvertDirty = isConvertModalOpen && !!convertDealTitle.trim();
-
-  useUnsavedChanges(
-    isEditDirty || isImportDirty || isConvertDirty,
-    'You have unsaved lead information or an in-progress workflow. Are you sure you want to leave?',
-    'leads-page'
-  );
 
   const currentAssetClass =
     formData.customFields?.assetClass ||
@@ -240,34 +365,102 @@ export const LeadsPage: React.FC = () => {
     }));
   };
 
-  const [ghlPendingFollowups, setGhlPendingFollowups] = useState<any[]>([]);
-
   const loadData = async () => {
-    const updated = await getLeads(tenant?.id);
-    setLeads(updated);
-    setSelectedLead(prev => {
-      if (!prev) return null;
-      const found = updated.find(l => l.id === prev.id);
-      if (!found || (isExec && MOVED_LEAD_STATUSES.includes(found.status)) || found.status === 'Junk') {
-        setIsDetailDrawerOpen(false);
-        setIsEditDrawerOpen(false);
-        return null;
+    if (apiClient.isMockMode()) {
+      const updated = storageService.getLeads(tenant?.id);
+      setLeads(updated);
+      const allFus = storageService.getFollowups ? storageService.getFollowups(tenant?.id) : [];
+      const pendingFus = (allFus || []).filter((f: any) => f.status === 'Pending');
+      setAllFollowups(pendingFus);
+      setCustomers(storageService.getCustomers ? storageService.getCustomers(tenant?.id) : []);
+      setSelectedLead(prev => {
+        if (!prev) return null;
+        const found = updated.find(l => l.id === prev.id);
+        if (!found || (isExec && MOVED_LEAD_STATUSES.includes(found.status)) || found.status === 'Junk') {
+          setIsDetailDrawerOpen(false);
+          setIsEditDrawerOpen(false);
+          return null;
+        }
+        return found;
+      });
+      return;
+    }
+
+    try {
+      setLoadError(null);
+      const [updatedFollowups, updatedCustomers, updatedDeals] = await Promise.all([
+        getFollowups(tenant?.id).catch(() => []),
+        getCustomers(tenant?.id).catch(() => []),
+        getDeals(tenant?.id).catch(() => []),
+      ]);
+      const pendingFus = (updatedFollowups || []).filter((f: any) => f.status === 'Pending');
+      setAllFollowups(pendingFus);
+      setCustomers(updatedCustomers || []);
+      setDeals(updatedDeals || []);
+
+      let loadedLeads: Lead[] = [];
+      if (isGhlAdmin) {
+        const res = await apiClient.get<any>('/sales-executive/leads?page=1&pageSize=200&assignment=unassigned');
+        if (res.success && res.data && res.data.items) {
+          loadedLeads = res.data.items.map((item: any) => ({
+            ...item,
+            id: String(item.id),
+            assignedAgentId: item.assignedAgentId ? String(item.assignedAgentId) : undefined,
+            customFields: item.customFields || {}
+          }));
+        } else {
+          throw new Error(res.message || 'Failed to load unassigned leads from server.');
+        }
+      } else {
+        loadedLeads = await getLeads(tenant?.id);
       }
-      return found;
-    });
+      setLeads(loadedLeads);
+      setSelectedLead(prev => {
+        if (!prev) return null;
+        const found = loadedLeads.find((l: any) => l.id === prev.id);
+        if (!found || (isExec && MOVED_LEAD_STATUSES.includes(found.status)) || found.status === 'Junk') {
+          setIsDetailDrawerOpen(false);
+          setIsEditDrawerOpen(false);
+          return null;
+        }
+        return found;
+      });
+    } catch (err: any) {
+      console.error('Failed to load leads from API', err);
+      setLeads([]);
+      setLoadError(err?.message || 'Failed to load leads from server.');
+    }
   };
 
-  const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
-
   useEffect(() => {
+    storageService.cleanupDuplicateLeads(tenant?.id);
     loadData();
-    if (isGhlSalesExec) {
-      getFollowups(tenant?.id).then(fus => setGhlPendingFollowups(fus.filter(f => f.status === 'Pending')));
-    }
     const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
-  }, [tenant?.id]);
+    
+    // Polling every 15 seconds while visible
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible' && !apiClient.isMockMode()) {
+        loadData();
+      }
+    }, 15000);
+    
+    const handleFocus = () => {
+      if (!apiClient.isMockMode()) loadData();
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
+      window.removeEventListener('focus', handleFocus);
+      clearInterval(interval);
+    };
+  }, [tenant?.id, isGhlAdmin]);
+
+  const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
+  const ghlPendingFollowups = isGhlSalesExec
+    ? (storageService.getFollowups(tenant?.id) || []).filter(f => f.status === 'Pending')
+    : [];
 
   const matchCapacity = (lead: Lead, filterRange: string): boolean => {
     if (!filterRange || filterRange === 'All') return true;
@@ -368,111 +561,124 @@ export const LeadsPage: React.FC = () => {
     setTimeout(() => setToast(null), 3500);
   };
 
-  const handleManualAssignConfirm = () => {
+  // Saves assignments to the backend (real agents) and mirrors them locally.
+  const assignLeads = async (pairs: Array<{ lead: Lead; agent: AssignableAgent }>): Promise<number> => {
+    const results = await Promise.allSettled(pairs.map(p => persistLeadAssignment(p.lead, p.agent)));
+    const failed = results.filter(r => r.status === 'rejected') as PromiseRejectedResult[];
+    if (failed.length > 0) {
+      console.error('[Lead assignment] failed', failed.map(f => f.reason));
+      alert(`${failed.length} lead(s) could not be assigned: ${failed[0].reason?.message || 'Unknown error'}`);
+    }
+    return results.length - failed.length;
+  };
+
+  const handleManualAssignConfirm = async () => {
     if (!assignSelectedAgent) return;
-    const newAssigned = new Set(assignedLeadIds);
-    const newRecords: Array<{ leadId: string; leadName: string; agentId: number | string; agentName: string; assignedAt: string }> = [];
-    selectedLeadIds.forEach(id => {
-      newAssigned.add(id);
-      const lead = leads.find(l => l.id === id);
-      if (lead) {
-        const updatedLead: Lead = {
-          ...lead,
-          assignedAgentId: String(assignSelectedAgent.id),
-          assignedAgentName: assignSelectedAgent.name,
-        };
-        apiSaveLead(updatedLead).catch(console.error);
-        storageService.saveLead(updatedLead);
+    const agent = assignSelectedAgent;
+    const leadIds = Array.from(selectedLeadIds).map(id => id.replace('db-', ''));
+    let realAssigned = 0;
+
+    if (apiClient.isMockMode()) {
+      const pairs = leadIds.map(id => leads.find(l => l.id === id)).filter((l): l is Lead => !!l).map(lead => ({ lead, agent }));
+      await assignLeads(pairs);
+    } else {
+      try {
+        const res = await apiClient.post<any>('/ghl/leads/assign', {
+          leadIds: leadIds.map(id => parseInt(id, 10)),
+          agentId: agent.dbId
+        });
+        realAssigned = res?.data?.assigned ?? 0;
+        const skipped = res?.data?.skipped || [];
+        if (skipped.length > 0) alert(`${skipped.length} lead(s) skipped: ${skipped[0].reason}`);
+      } catch (err: any) {
+        console.error('Manual assign failed', err);
+        alert(`Manual assign failed: ${err.message || 'Unknown error'}`);
+        return;
       }
-      newRecords.push({
-        leadId: id,
-        leadName: lead?.name || 'Unknown Lead',
-        agentId: assignSelectedAgent.id,
-        agentName: assignSelectedAgent.name,
-        assignedAt: new Date().toISOString(),
-      });
-    });
-    setAssignedLeadIds(newAssigned);
-    setAgentAssignments(prev => {
-      const updated = [...prev, ...newRecords];
-      try { sessionStorage.setItem('ghl_mock_agent_assignments', JSON.stringify(updated)); } catch { }
-      (window as any).__ghlAssignments = updated;
-      return updated;
-    });
-    console.log('[GHL Admin Leads Assignment - Manual]', newRecords);
-    const count = selectedLeadIds.size;
+    }
+
+    const okCount = apiClient.isMockMode() ? leadIds.length : realAssigned;
     setSelectedLeadIds(new Set());
     setIsAssignModalOpen(false);
     setAssignStep('pick-agent');
     setAssignSelectedAgent(null);
-    showToast(`✓ ${count} lead${count !== 1 ? 's' : ''} assigned to ${assignSelectedAgent.name}`);
+    loadData();
+    if (okCount > 0) {
+      showToast(`✓ ${okCount} lead${okCount !== 1 ? 's' : ''} assigned to ${agent.name}${agentsFromApi ? '' : ' (local only – no real agents found)'}`);
+    }
   };
 
   const handleOpenAiSuggestion = () => {
+    if (agents.length === 0) {
+      showToast('No sales agents available to assign to.');
+      return;
+    }
     const pool = filteredLeads;
     const dist: Record<string, Lead[]> = {};
-    agentsList.forEach((a: any) => { dist[String(a.id)] = []; });
-    if (agentsList.length > 0) {
-      pool.forEach((lead, i) => {
-        const agent = agentsList[i % agentsList.length];
-        dist[String(agent.id)].push(lead);
-      });
-    }
+    agents.forEach(a => { dist[a.id] = []; });
+    pool.forEach((lead, i) => {
+      const agent = agents[i % agents.length];
+      dist[agent.id].push(lead);
+    });
     setAiDistribution(dist);
     setIsAiEditMode(false);
     setIsAiModalOpen(true);
   };
 
-  const handleAiMoveLead = (leadId: string, fromAgentId: number | string, direction: 'left' | 'right') => {
-    const agentIds = agentsList.map((a: any) => String(a.id));
-    const fromIdx = agentIds.indexOf(String(fromAgentId));
+  const handleAiMoveLead = (leadId: string, fromAgentId: string, direction: 'left' | 'right') => {
+    const agentIds = agents.map(a => a.id);
+    const fromIdx = agentIds.indexOf(fromAgentId);
     const toIdx = direction === 'left' ? fromIdx - 1 : fromIdx + 1;
     if (toIdx < 0 || toIdx >= agentIds.length) return;
     const toAgentId = agentIds[toIdx];
     setAiDistribution(prev => {
-      const fromLeads = [...(prev[String(fromAgentId)] || [])].filter(l => l.id !== leadId);
-      const movedLead = (prev[String(fromAgentId)] || []).find(l => l.id === leadId);
+      const fromLeads = [...(prev[fromAgentId] || [])].filter(l => l.id !== leadId);
+      const movedLead = (prev[fromAgentId] || []).find(l => l.id === leadId);
       if (!movedLead) return prev;
       const toLeads = [...(prev[toAgentId] || []), movedLead];
-      return { ...prev, [String(fromAgentId)]: fromLeads, [toAgentId]: toLeads };
+      return { ...prev, [fromAgentId]: fromLeads, [toAgentId]: toLeads };
     });
   };
 
-  const handleAiConfirm = () => {
-    const newAssigned = new Set(assignedLeadIds);
-    const newRecords: Array<{ leadId: string; leadName: string; agentId: number | string; agentName: string; assignedAt: string }> = [];
-    let count = 0;
-    Object.entries(aiDistribution).forEach(([agentIdStr, agentLeads]) => {
-      const agent = agentsList.find((a: any) => String(a.id) === agentIdStr);
-      agentLeads.forEach(l => {
-        newAssigned.add(l.id);
-        count++;
-        const updatedLead: Lead = {
-          ...l,
-          assignedAgentId: agent ? String(agent.id) : agentIdStr,
-          assignedAgentName: agent?.name || 'Agent',
-        };
-        apiSaveLead(updatedLead).catch(console.error);
-        storageService.saveLead(updatedLead);
-        newRecords.push({
-          leadId: l.id,
-          leadName: l.name,
-          agentId: agent ? agent.id : agentIdStr,
-          agentName: agent?.name || 'Agent',
-          assignedAt: new Date().toISOString(),
-        });
+  const handleAiConfirm = async () => {
+    let okCount = 0;
+    
+    if (apiClient.isMockMode()) {
+      const pairs: Array<{ lead: Lead; agent: AssignableAgent }> = [];
+      Object.entries(aiDistribution).forEach(([agentId, agentLeads]) => {
+        const agent = agents.find(a => a.id === agentId);
+        if (!agent) return;
+        agentLeads.forEach(lead => pairs.push({ lead, agent }));
       });
-    });
-    setAssignedLeadIds(newAssigned);
-    setAgentAssignments(prev => {
-      const updated = [...prev, ...newRecords];
-      try { sessionStorage.setItem('ghl_mock_agent_assignments', JSON.stringify(updated)); } catch { }
-      (window as any).__ghlAssignments = updated;
-      return updated;
-    });
-    console.log('[GHL Admin Leads Assignment - AI Round Robin]', newRecords);
+      okCount = await assignLeads(pairs);
+    } else {
+      // Send exactly the distribution the admin previewed/edited: one assign call per agent.
+      try {
+        let skippedCount = 0;
+        for (const [agentId, agentLeads] of Object.entries(aiDistribution)) {
+          const agent = agents.find(a => a.id === agentId);
+          if (!agent?.dbId || agentLeads.length === 0) continue;
+          const res = await apiClient.post<any>('/ghl/leads/assign', {
+            leadIds: agentLeads.map(l => parseInt(l.id.replace('db-', ''), 10)),
+            agentId: agent.dbId
+          });
+          okCount += res?.data?.assigned ?? 0;
+          skippedCount += (res?.data?.skipped || []).length;
+        }
+        if (skippedCount > 0) alert(`${skippedCount} lead(s) were skipped (already assigned).`);
+      } catch (err: any) {
+        console.error('Auto assign failed', err);
+        alert(`Auto assign failed: ${err.message || 'Unknown error'}`);
+        loadData();
+        return;
+      }
+    }
+
     setIsAiModalOpen(false);
-    showToast(`✓ ${count} lead${count !== 1 ? 's' : ''} assigned via AI Suggestion`);
+    loadData();
+    if (okCount > 0) {
+      showToast(`✓ ${okCount} lead${okCount !== 1 ? 's' : ''} assigned via AI Suggestion`);
+    }
   };
 
   const handleOpenCreate = () => {
@@ -481,20 +687,17 @@ export const LeadsPage: React.FC = () => {
       return;
     }
     const defaultAgentId = user.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec');
-    const defaultAgentName = user.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Naveen');
-
-    const targetCompany = tenant?.id || (tenant?.slug === 'jamin' ? 't-jamin-02' : 't-ghl-01');
+    const defaultAgentName = user.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer');
 
     setFormData({
       id: `lead-${Date.now()}`,
-      companyId: targetCompany,
+      companyId: tenant?.id || 't-ghl-01',
       name: '',
       phone: '+91 ',
       email: '',
       location: '',
       source: 'Website Inbound',
-      // IRM directly-added leads start as 'Interested' so they appear in IRM My Leads
-      status: isIrm ? 'Interested' : 'New',
+      status: 'New',
       priority: 'Medium',
       assignedAgentId: defaultAgentId,
       assignedAgentName: defaultAgentName,
@@ -504,56 +707,219 @@ export const LeadsPage: React.FC = () => {
         ? { budgetRange: '₹45L - ₹65L', preferredLocation: 'Devanahalli North', readyToRegister: 'Immediate' }
         : { investmentCapacity: '', assetClass: '', preferredAssetClass: '', horizon: '3-5 Years' },
     });
+    setFormErrorMessage(null);
     setIsEditDrawerOpen(true);
   };
 
   const handleOpenEdit = (lead: Lead) => {
     setFormData({ ...lead });
+    setFormErrorMessage(null);
     setIsEditDrawerOpen(true);
+  };
+
+  const handleScheduleActivityForExisting = async (
+    contactId: string,
+    contactType: 'lead' | 'customer',
+    contactName: string,
+    contactPhone: string
+  ) => {
+    setIsSavingFollowupActivity(true);
+    try {
+      await apiSaveFollowup({
+        id: `fu-${Date.now()}`,
+        companyId: tenant?.id || 't-ghl-01',
+        contactId: contactId || 'contact-new',
+        contactType,
+        contactName,
+        contactPhone,
+        scheduledAt: followupDate ? new Date(followupDate).toISOString() : new Date(Date.now() + 86400000).toISOString(),
+        priority: followupPriority as any,
+        notes: followupNotes || `Follow-up activity created for existing ${contactType}.`,
+        status: 'Pending',
+        assignedAgentId: String(user?.id || 'usr-exec'),
+        assignedAgentName: user?.name || 'Agent',
+      });
+      showToast(`Follow-up activity successfully scheduled for "${contactName}".`);
+      setDuplicateKycModal(null);
+      setDuplicateFollowupModal(null);
+      setDuplicateCustomerModal(null);
+      setIsEditDrawerOpen(false);
+      await loadData();
+    } catch (err: any) {
+      console.error('Failed to schedule follow-up activity:', err);
+      showToast(`⚠️ Failed to schedule follow-up activity: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsSavingFollowupActivity(false);
+    }
   };
 
   const handleSaveLead = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSubmittingLead) return;
+    setFormErrorMessage(null);
     if (!formData.name || !formData.phone) {
-      showToast('Please provide both contact name and phone number.');
+      const msg = 'Please provide both contact name and phone number.';
+      setFormErrorMessage(msg);
+      showToast(msg);
       return;
     }
 
     const cleanPhone = (formData.phone || '').replace(/\D/g, '');
     if (cleanPhone.length < 10) {
-      showToast('Please enter a valid phone number with at least 10 digits.');
+      const msg = 'Please enter a valid phone number with at least 10 digits.';
+      setFormErrorMessage(msg);
+      showToast(msg);
       return;
     }
 
     // Pull real agent ID and name at save-time to prevent stale/fallback placeholder IDs from leaking
     const resolvedAgentId = (isLeadScopedUser && user?.id)
-      ? String(user.id)
-      : (formData.assignedAgentId && formData.assignedAgentId !== 'usr-exec' ? String(formData.assignedAgentId) : String(user?.id || 'usr-exec'));
+      ? user.id
+      : (formData.assignedAgentId && formData.assignedAgentId !== 'usr-exec' ? formData.assignedAgentId : (user?.id || 'usr-exec'));
     const resolvedAgentName = (isLeadScopedUser && user?.name)
       ? user.name
       : (formData.assignedAgentName && formData.assignedAgentName !== 'Agent' ? formData.assignedAgentName : (user?.name || 'Agent'));
 
     const isExistingById = leads.some(l => l.id === formData.id);
-    const targetCompanyId = formData.companyId || tenant?.id || (tenant?.slug === 'jamin' ? 't-jamin-02' : 't-ghl-01');
+    const targetCompanyId = formData.companyId || tenant?.id || 't-ghl-01';
 
     let leadToSave: Lead;
     let isUpdated = isExistingById;
 
     if (!isExistingById) {
-      const normNewPhone = cleanPhone.slice(-10);
-      const normNewEmail = (formData.email || '').trim().toLowerCase();
+      const normNewPhone = normalizePhone(formData.phone);
+      const normNewEmail = normalizeEmail(formData.email);
 
-      const existingMatch = leads.find(l => {
-        if (!targetCompanyId || isTenantMatch(l.companyId, targetCompanyId)) {
-          const normLPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
-          const normLEmail = (l.email || '').trim().toLowerCase();
-          const phoneMatch = normNewPhone && normLPhone && normNewPhone === normLPhone;
-          const emailMatch = normNewEmail && normLEmail && normNewEmail === normLEmail;
-          return phoneMatch || emailMatch;
-        }
-        return false;
-      });
+      let matchingPendingFollowup: any = null;
+      let existingMatch: Lead | undefined;
+      let existingCustomer: Customer | undefined;
+      let matchingKycDeal: Deal | undefined;
+
+      if (normNewPhone || normNewEmail) {
+        // 1. Search pending follow-ups
+        matchingPendingFollowup = (allFollowups || []).find((f: any) => {
+          if (normNewPhone) {
+            const fDigits = normalizePhone(f.contactPhone);
+            if (fDigits && fDigits === normNewPhone) return true;
+          }
+          return false;
+        });
+
+        // 2. Search existing leads
+        existingMatch = leads.find(l => {
+          if (!targetCompanyId || isTenantMatch(l.companyId, targetCompanyId)) {
+            const normLPhone = normalizePhone(l.phone);
+            const normLEmail = normalizeEmail(l.email);
+            const phoneMatch = normNewPhone && normLPhone && normNewPhone === normLPhone;
+            const emailMatch = normNewEmail && normLEmail && normNewEmail === normLEmail;
+            return phoneMatch || emailMatch;
+          }
+          return false;
+        });
+
+        // 3. Search existing customers
+        existingCustomer = (customers || []).find(c => {
+          if (!targetCompanyId || isTenantMatch(c.companyId, targetCompanyId)) {
+            const normCPhone = normalizePhone(c.phone);
+            const normCEmail = normalizeEmail(c.email);
+            const phoneMatch = normNewPhone && normCPhone && normNewPhone === normCPhone;
+            const emailMatch = normNewEmail && normCEmail && normNewEmail === normCEmail;
+            return phoneMatch || emailMatch;
+          }
+          return false;
+        });
+
+        // 4. Search existing KYC deals
+        matchingKycDeal = (deals || []).find(d => {
+          if (!targetCompanyId || isTenantMatch(d.companyId, targetCompanyId)) {
+            const isKyc = d.stage === 'qualified_investor' || !!d.kycStatus || !!(d as any).kycId;
+            if (!isKyc) return false;
+            if (existingCustomer && d.customerId && String(d.customerId) === String(existingCustomer.id)) return true;
+            if (existingMatch && d.customerId && String(d.customerId) === String(existingMatch.id)) return true;
+            const dPhone = normalizePhone(d.phone);
+            if (normNewPhone && dPhone && dPhone === normNewPhone) return true;
+            const dEmail = normalizeEmail(d.email);
+            if (normNewEmail && dEmail && dEmail === normNewEmail) return true;
+          }
+          return false;
+        });
+      }
+
+      // 1. Authoritative Stage Detection: Check if contact already exists in KYC
+      const isLeadInKyc = existingMatch && (
+        existingMatch.status === 'Qualified' ||
+        !!(existingMatch.customFields as any)?.movedToKycAt
+      );
+
+      const isContactInKyc = !!matchingKycDeal || isLeadInKyc;
+
+      if (isContactInKyc) {
+        const cName = matchingKycDeal?.customerName || existingCustomer?.name || existingMatch?.name || formData.name;
+        const cAgent = matchingKycDeal?.assignedAgentName || existingCustomer?.assignedAgentName || existingMatch?.assignedAgentName || 'an assigned agent';
+        const cType: 'lead' | 'customer' = existingCustomer ? 'customer' : 'lead';
+        const cId = existingCustomer?.id || existingMatch?.id || matchingKycDeal?.customerId || '';
+        const cPhone = existingCustomer?.phone || existingMatch?.phone || matchingKycDeal?.phone || formData.phone;
+
+        setDuplicateKycModal({
+          contactId: String(cId),
+          contactType: cType,
+          contactName: cName,
+          contactPhone: cPhone,
+          contactEmail: existingCustomer?.email || existingMatch?.email || matchingKycDeal?.email || formData.email,
+          assignedAgentName: cAgent,
+          dealId: matchingKycDeal?.id ? String(matchingKycDeal.id) : undefined,
+          kycId: (matchingKycDeal as any)?.kycId ? String((matchingKycDeal as any).kycId) : undefined,
+        });
+        setFollowupNotes(formData.notes ? `Follow-up from lead intake: ${formData.notes}` : `Follow-up with ${cName}`);
+        setIsSchedulingActivity(false);
+        return; // Prevent creating duplicate lead
+      }
+
+      // 2. Authoritative Stage Detection: Check if contact genuinely exists in Follow-up
+      const isLeadInFollowup = existingMatch && (
+        existingMatch.status === 'Follow-up Required' ||
+        (matchingPendingFollowup && (matchingPendingFollowup.contactType === 'lead' || !matchingPendingFollowup.contactType) && matchingPendingFollowup.contactId === existingMatch.id)
+      );
+      const isCustomerInFollowup = existingCustomer && (
+        (matchingPendingFollowup && matchingPendingFollowup.contactType === 'customer' && matchingPendingFollowup.contactId === existingCustomer.id) ||
+        (allFollowups || []).some(f => f.contactId === existingCustomer.id && f.status === 'Pending')
+      );
+      const existsInFollowup = isLeadInFollowup || isCustomerInFollowup || !!matchingPendingFollowup;
+
+      if (existsInFollowup) {
+        const cName = existingCustomer?.name || existingMatch?.name || matchingPendingFollowup?.contactName || formData.name;
+        const cAgent = existingCustomer?.assignedAgentName || existingMatch?.assignedAgentName || matchingPendingFollowup?.assignedAgentName || 'an assigned agent';
+        const cType: 'lead' | 'customer' = existingCustomer ? 'customer' : 'lead';
+        const cId = existingCustomer?.id || existingMatch?.id || matchingPendingFollowup?.contactId || '';
+        const cPhone = existingCustomer?.phone || existingMatch?.phone || matchingPendingFollowup?.contactPhone || formData.phone;
+
+        setDuplicateFollowupModal({
+          contactId: cId,
+          contactType: cType,
+          contactName: cName,
+          contactPhone: cPhone,
+          contactEmail: existingCustomer?.email || existingMatch?.email || formData.email,
+          assignedAgentName: cAgent,
+          existingStatus: existingMatch?.status || (existingCustomer ? 'Active Customer' : 'Follow-up Required'),
+        });
+        setFollowupNotes(formData.notes ? `Follow-up from lead intake: ${formData.notes}` : `Follow-up with ${cName}`);
+        setIsSchedulingActivity(false);
+        return; // Prevent creating duplicate lead
+      }
+
+      // Check if contact already exists as Customer (not in follow-up)
+      if (existingCustomer) {
+        setDuplicateCustomerModal({
+          contactId: existingCustomer.id,
+          contactName: existingCustomer.name,
+          contactPhone: existingCustomer.phone,
+          contactEmail: existingCustomer.email,
+          assignedAgentName: existingCustomer.assignedAgentName || 'Agent',
+        });
+        setFollowupNotes(formData.notes ? `Follow-up from lead intake: ${formData.notes}` : `Follow-up with ${existingCustomer.name}`);
+        return; // Prevent creating duplicate lead for existing customer
+      }
+
+      // Check if contact already exists as Lead (not in follow-up)
       if (existingMatch) {
         if (existingMatch.assignedAgentId && String(existingMatch.assignedAgentId) !== String(resolvedAgentId)) {
           showToast(`⚠️ Lead already exists for "${existingMatch.name}" and is currently assigned to ${existingMatch.assignedAgentName || 'another agent'}.`);
@@ -566,7 +932,10 @@ export const LeadsPage: React.FC = () => {
           ...formData,
           id: existingMatch.id, // Preserve existing ID
           companyId: existingMatch.companyId || targetCompanyId,
-          status: isIrm ? 'Interested' : (formData.status || existingMatch.status || 'New'),
+          // Preserve existing status if already in an active workflow
+          status: (existingMatch.status && existingMatch.status !== 'New')
+            ? existingMatch.status
+            : (isIrm ? 'Interested' : (formData.status || 'New')),
           assignedAgentId: resolvedAgentId || existingMatch.assignedAgentId,
           assignedAgentName: resolvedAgentName || existingMatch.assignedAgentName,
           customFields: {
@@ -577,7 +946,6 @@ export const LeadsPage: React.FC = () => {
       } else {
         leadToSave = {
           ...formData,
-          // IRM-created leads are always 'Interested' so they show in IRM My Leads
           status: isIrm ? 'Interested' : (formData.status || 'New'),
           assignedAgentId: resolvedAgentId,
           assignedAgentName: resolvedAgentName,
@@ -595,31 +963,113 @@ export const LeadsPage: React.FC = () => {
       } as Lead;
     }
 
-    setIsSubmittingLead(true);
     try {
       await apiSaveLead(leadToSave);
+
+      storageService.addAuditLog({
+        id: `aud-${Date.now()}`,
+        timestamp: 'Just now',
+        actorName: user?.name || resolvedAgentName,
+        actorEmail: user?.email || 'agent@nexus.io',
+        action: isUpdated ? 'LEAD_UPDATED' : 'LEAD_CREATED',
+        entityType: 'Lead',
+        entityId: leadToSave.id,
+        companyId: tenant?.id,
+        companyName: tenant?.name,
+        details: `Lead record ${leadToSave.name} (${leadToSave.phone}) saved.`,
+      });
+
       await loadData();
       showToast(isUpdated ? 'Lead updated successfully.' : 'New lead created successfully.');
+      setFormErrorMessage(null);
       setIsEditDrawerOpen(false);
     } catch (err: any) {
       console.error('[LeadsPage] Failed to save lead:', err);
-      showToast(`⚠️ ${err.message || 'Failed to save lead record.'}`);
-    } finally {
-      setIsSubmittingLead(false);
+      const errMsg = err.message || '';
+      const errList: string[] = err.errors || [];
+
+      const isDupKyc =
+        errList.includes('DUPLICATE_IN_KYC') ||
+        errMsg.includes('already exists in KYC');
+
+      const isDupFollowup =
+        !isDupKyc && (
+          errList.includes('DUPLICATE_IN_FOLLOWUP') ||
+          errMsg.includes('already exists in Follow-up')
+        );
+
+      if (isDupKyc) {
+        const cId = errList.find(e => e.startsWith('CONTACT_ID:'))?.split(':')[1] || '';
+        const cType = (errList.find(e => e.startsWith('CONTACT_TYPE:'))?.split(':')[1] as any) || 'lead';
+        const cName = errList.find(e => e.startsWith('CONTACT_NAME:'))?.split(':')[1] || formData.name;
+        const cAgent = errList.find(e => e.startsWith('ASSIGNED_AGENT:'))?.split(':')[1] || 'Agent';
+        const kId = errList.find(e => e.startsWith('KYC_ID:'))?.split(':')[1] || '';
+        const dId = errList.find(e => e.startsWith('DEAL_ID:'))?.split(':')[1] || '';
+
+        setDuplicateKycModal({
+          contactId: cId,
+          contactType: cType,
+          contactName: cName,
+          contactPhone: formData.phone,
+          contactEmail: formData.email,
+          assignedAgentName: cAgent,
+          kycId: kId,
+          dealId: dId,
+        });
+        setFollowupNotes(formData.notes ? `Follow-up from lead intake: ${formData.notes}` : `Follow-up with ${cName}`);
+        setIsSchedulingActivity(false);
+      } else if (isDupFollowup) {
+        const cId = errList.find(e => e.startsWith('CONTACT_ID:'))?.split(':')[1] || '';
+        const cType = (errList.find(e => e.startsWith('CONTACT_TYPE:'))?.split(':')[1] as any) || 'lead';
+        const cName = errList.find(e => e.startsWith('CONTACT_NAME:'))?.split(':')[1] || formData.name;
+        const cAgent = errList.find(e => e.startsWith('ASSIGNED_AGENT:'))?.split(':')[1] || 'Agent';
+
+        setDuplicateFollowupModal({
+          contactId: cId,
+          contactType: cType,
+          contactName: cName,
+          contactPhone: formData.phone,
+          contactEmail: formData.email,
+          assignedAgentName: cAgent,
+        });
+        setFollowupNotes(formData.notes ? `Follow-up from lead intake: ${formData.notes}` : `Follow-up with ${cName}`);
+        setIsSchedulingActivity(false);
+      } else if (errList.includes('DUPLICATE_CUSTOMER') || errMsg.includes('customer already exists')) {
+        const cId = errList.find(e => e.startsWith('CONTACT_ID:'))?.split(':')[1] || '';
+        const cName = errList.find(e => e.startsWith('CONTACT_NAME:'))?.split(':')[1] || formData.name;
+        const cAgent = errList.find(e => e.startsWith('ASSIGNED_AGENT:'))?.split(':')[1] || 'Agent';
+        setDuplicateCustomerModal({
+          contactId: cId,
+          contactName: cName,
+          contactPhone: formData.phone,
+          contactEmail: formData.email,
+          assignedAgentName: cAgent,
+        });
+      } else {
+        const displayErr = errMsg || 'Failed to save lead record. Please check the entered values and try again.';
+        setFormErrorMessage(displayErr);
+        showToast(`⚠️ ${displayErr}`);
+      }
     }
   };
 
   const handleDeleteLead = async (lead: Lead) => {
     if (confirm(`Delete lead ${lead.name}?`)) {
       try {
-        await apiSaveLead({ ...lead, status: 'Junk' });
-      } catch (err) {
-        console.error('Failed to update lead status:', err);
+        if (lead.id.toString().startsWith('db-')) {
+          const dbId = lead.id.toString().replace('db-', '');
+          await apiClient.delete(`/sales-executive/leads/${dbId}`);
+        } else {
+          await apiSaveLead({ ...lead, status: 'Junk' }).catch(() => {});
+        }
+      } catch (err: any) {
+        console.error('Failed to delete lead from DB', err);
       }
       storageService.deleteLead(lead.id);
       setLeads(prev => prev.filter(l => l.id !== lead.id));
       window.dispatchEvent(new CustomEvent('nexus_storage_updated'));
       showToast(`Lead ${lead.name} deleted`);
+      loadData();
     }
   };
 
@@ -633,74 +1083,51 @@ export const LeadsPage: React.FC = () => {
     setIsConvertModalOpen(true);
   };
 
-  const handleConfirmConvert = async () => {
-    if (!selectedLead || !tenant || isConvertingLead) return;
-    setIsConvertingLead(true);
+  const handleConfirmConvert = () => {
+    if (!selectedLead || !tenant) return;
 
-    try {
-      // 1. Create Customer
-      const newCustomer: Customer = {
-        id: `cust-${Date.now()}`,
-        companyId: tenant.id,
-        name: selectedLead.name,
-        phone: selectedLead.phone,
-        email: selectedLead.email,
-        status: 'Active',
-        assignedAgentId: selectedLead.assignedAgentId,
-        assignedAgentName: selectedLead.assignedAgentName,
-        location: selectedLead.location,
-        lastContacted: 'Today',
-        openDealsCount: 1,
-        totalValue: convertDealValue,
-        createdAt: new Date().toISOString().split('T')[0],
-        notes: `Converted from lead. Original notes: ${selectedLead.notes || ''}`,
-        customFields: selectedLead.customFields,
-      };
-      const savedCustomer = await apiSaveCustomer(newCustomer);
+    // 1. Create Customer
+    const newCustomer: Customer = {
+      id: `cust-${Date.now()}`,
+      companyId: tenant.id,
+      name: selectedLead.name,
+      phone: selectedLead.phone,
+      email: selectedLead.email,
+      status: 'Active',
+      assignedAgentId: selectedLead.assignedAgentId,
+      assignedAgentName: selectedLead.assignedAgentName,
+      location: selectedLead.location,
+      lastContacted: 'Today',
+      openDealsCount: 1,
+      totalValue: convertDealValue,
+      createdAt: new Date().toISOString().split('T')[0],
+      notes: `Converted from lead. Original notes: ${selectedLead.notes}`,
+      customFields: selectedLead.customFields,
+    };
+    storageService.saveCustomer(newCustomer);
 
-      // 2. Create Opportunity (maps to Deal/Investment Opportunity in GHL)
-      const newDeal: Deal = {
-        id: `deal-${Date.now()}`,
-        companyId: tenant.id,
-        title: convertDealTitle,
-        customerId: savedCustomer.id,
-        customerName: savedCustomer.name,
-        stage: tenant.slug === 'jamin' ? 'site_visit' : 'consultation',
-        value: convertDealValue,
-        expectedCloseDate: 'Within 30 Days',
-        assignedAgentId: selectedLead.assignedAgentId,
-        assignedAgentName: selectedLead.assignedAgentName,
-        notes: `Deal initiated upon converting lead ${selectedLead.name}.`,
-        createdAt: new Date().toISOString().split('T')[0],
-      };
-      await apiSaveOpportunity({
-        id: newDeal.id,
-        companyId: newDeal.companyId,
-        investorId: savedCustomer.id,
-        investorName: savedCustomer.name,
-        title: newDeal.title,
-        stage: 'Enquiry',
-        targetAmount: convertDealValue,
-        committedAmount: 0,
-        assignedAgentId: selectedLead.assignedAgentId || '',
-        assignedAgentName: selectedLead.assignedAgentName || '',
-        expectedCloseDate: 'Within 30 Days',
-        notes: newDeal.notes || ''
-      });
+    // 2. Create Deal
+    const newDeal: Deal = {
+      id: `deal-${Date.now()}`,
+      companyId: tenant.id,
+      title: convertDealTitle,
+      customerId: newCustomer.id,
+      customerName: newCustomer.name,
+      stage: tenant.slug === 'jamin' ? 'site_visit' : 'consultation',
+      value: convertDealValue,
+      expectedCloseDate: 'Within 30 Days',
+      assignedAgentId: selectedLead.assignedAgentId,
+      assignedAgentName: selectedLead.assignedAgentName,
+      notes: `Deal initiated upon converting lead ${selectedLead.name}.`,
+      createdAt: new Date().toISOString().split('T')[0],
+    };
+    storageService.saveDeal(newDeal);
 
-      // 3. Mark Lead as Converted
-      await apiSaveLead({ ...selectedLead, status: 'Converted' });
+    // 3. Mark Lead as Converted
+    storageService.saveLead({ ...selectedLead, status: 'Converted' });
 
-      showToast(`✓ ${selectedLead.name} successfully converted to customer and deal created.`);
-      setIsConvertModalOpen(false);
-      setIsDetailDrawerOpen(false);
-      await loadData();
-    } catch (err: any) {
-      console.error('[LeadsPage] Failed to convert lead:', err);
-      alert(err?.message || 'Failed to convert lead to customer and deal.');
-    } finally {
-      setIsConvertingLead(false);
-    }
+    setIsConvertModalOpen(false);
+    setIsDetailDrawerOpen(false);
   };
 
   const handleFileSelect = (file: File) => {
@@ -736,77 +1163,111 @@ export const LeadsPage: React.FC = () => {
     if (file) handleFileSelect(file);
   };
 
-  const handleImportLeads = async () => {
-    if (isImporting) return;
-    setIsImporting(true);
-
+  const handleImportLeads = () => {
     let successCount = 0;
     let skipCount = 0;
+    let updatedCount = 0;
     const companyId = tenant?.id || 't-ghl-01';
-    const promises: Promise<any>[] = [];
 
-    // Build a dedup set from the current leads so we can detect duplicates quickly
+    // Build a dedup set from current leads AND customers so we detect duplicates across both
     const normalizePhone = (ph: string) => (ph || '').replace(/\D/g, '').slice(-10);
     const normalizeEmail = (em: string) => (em || '').trim().toLowerCase();
 
     const existingPhones = new Set(leads.map(l => normalizePhone(l.phone)).filter(Boolean));
     const existingEmails = new Set(leads.map(l => normalizeEmail(l.email)).filter(Boolean));
 
-    try {
-      parsedRows.forEach((row, index) => {
-        const nameVal = row[columnMap['name']];
-        const phoneVal = row[columnMap['phone']];
+    const existingCompanyCustomers = storageService.getCustomers(tenant?.id) || [];
+    existingCompanyCustomers.forEach((c: any) => {
+      const cPh = normalizePhone(c.phone);
+      if (cPh) existingPhones.add(cPh);
+      const cEm = normalizeEmail(c.email);
+      if (cEm) existingEmails.add(cEm);
+    });
 
-        if (!nameVal || !phoneVal) { skipCount++; return; }
+    parsedRows.forEach((row, index) => {
+      const nameVal = row[columnMap['name']];
+      const phoneVal = row[columnMap['phone']];
 
-        const emailVal = row[columnMap['email']] || '';
-        const locationVal = row[columnMap['location']] || '';
-        const sourceVal = row[columnMap['source']] || 'CSV Import';
-        const rawPriority = row[columnMap['priority']];
-        let priorityVal = 'Medium';
-        if (['Low', 'Medium', 'High', 'Urgent'].includes(String(rawPriority))) priorityVal = rawPriority;
+      if (!nameVal || !phoneVal) {
+        skipCount++;
+        return;
+      }
 
-        // ── Duplicate check ──────────────────────────────────────────────────────
-        const normPhone = normalizePhone(phoneVal);
-        const normEmail = normalizeEmail(emailVal);
-        if ((normPhone && existingPhones.has(normPhone)) || (normEmail && existingEmails.has(normEmail))) {
-          console.info(`[CSV Import] Skipping duplicate: ${nameVal} — phone ${phoneVal} or email ${emailVal} already exists`);
-          skipCount++;
-          return;
-        }
-        // Register the new values so later rows in the same batch don't duplicate each other
-        if (normPhone) existingPhones.add(normPhone);
-        if (normEmail) existingEmails.add(normEmail);
-        // ─────────────────────────────────────────────────────────────────────────
+      const emailVal = row[columnMap['email']] || '';
+      const locationVal = row[columnMap['location']] || '';
+      const sourceVal = row[columnMap['source']] || 'CSV Import';
+      const rawPriority = row[columnMap['priority']];
+      let priorityVal = 'Medium';
+      if (['Low', 'Medium', 'High', 'Urgent'].includes(String(rawPriority))) {
+        priorityVal = rawPriority;
+      }
 
-        const newLead: Lead = {
-          id: `lead-${Date.now()}-${index}`,
-          companyId,
-          name: nameVal,
-          phone: phoneVal,
-          email: emailVal,
-          location: locationVal,
-          source: sourceVal,
-          priority: priorityVal as any,
-          status: isIrm ? 'Interested' : 'New',
-          assignedAgentId: user?.id || 'usr-exec',
-          assignedAgentName: user?.name || 'Agent',
-          createdAt: new Date().toISOString().split('T')[0],
-          notes: '',
-          customFields: {}
+      // Check for existing lead by phone in this company
+      const existingMatch = storageService.findLeadByPhone(phoneVal, companyId);
+      if (existingMatch) {
+        const updatedLead: Lead = {
+          ...existingMatch,
+          name: nameVal || existingMatch.name,
+          email: emailVal || existingMatch.email,
+          location: locationVal || existingMatch.location,
+          source: sourceVal || existingMatch.source,
+          priority: (priorityVal as any) || existingMatch.priority,
         };
-        promises.push(apiSaveLead(newLead).then(() => { successCount++; }).catch(() => { skipCount++; }));
-      });
+        storageService.saveLead(updatedLead);
+        updatedCount++;
+        successCount++;
+        return;
+      }
 
-      await Promise.all(promises);
-      setImportResults({ success: successCount, skipped: skipCount });
-      await loadData();
-    } catch (err: any) {
-      console.error('[LeadsPage] CSV import failed:', err);
-      showToast(`⚠️ Import encountered an error: ${err.message || 'Partial import completed.'}`);
-    } finally {
-      setIsImporting(false);
-    }
+      // ── Duplicate check ──────────────────────────────────────────────────────
+      const normPhone = normalizePhone(phoneVal);
+      const normEmail = normalizeEmail(emailVal);
+      if ((normPhone && existingPhones.has(normPhone)) || (normEmail && existingEmails.has(normEmail))) {
+        console.info(`[CSV Import] Skipping duplicate: ${nameVal} — phone ${phoneVal} or email ${emailVal} already exists`);
+        skipCount++;
+        return;
+      }
+      // Register the new values so later rows in the same batch don't duplicate each other
+      if (normPhone) existingPhones.add(normPhone);
+      if (normEmail) existingEmails.add(normEmail);
+      // ─────────────────────────────────────────────────────────────────────────
+
+      const newLead: Lead = {
+        id: `lead-${Date.now()}-${index}`,
+        companyId,
+        name: nameVal,
+        phone: phoneVal,
+        email: emailVal,
+        location: locationVal,
+        source: sourceVal,
+        priority: priorityVal as any,
+        status: isIrm ? 'Interested' : 'New',
+        assignedAgentId: user?.id || 'usr-exec',
+        assignedAgentName: user?.name || 'Agent',
+        createdAt: new Date().toISOString().split('T')[0],
+        notes: '',
+        customFields: {}
+      };
+
+      storageService.saveLead(newLead);
+      successCount++;
+    });
+
+    storageService.addAuditLog({
+      id: `aud-${Date.now()}`,
+      timestamp: 'Just now',
+      actorName: user?.name || 'Agent',
+      actorEmail: user?.email || 'agent@nexus.io',
+      action: 'LEADS_BULK_IMPORTED',
+      entityType: 'Lead',
+      entityId: `batch-${Date.now()}`,
+      companyId: tenant?.id,
+      companyName: tenant?.name,
+      details: `Bulk imported ${successCount} leads (${updatedCount} updated, ${successCount - updatedCount} created), skipped ${skipCount}.`,
+    });
+
+    setImportResults({ success: successCount, skipped: skipCount });
+    loadData();
   };
 
 
@@ -871,10 +1332,7 @@ export const LeadsPage: React.FC = () => {
       key: 'select',
       header: (
         <input
-          id="leads-select-all"
-          name="selectAllLeads"
           type="checkbox"
-          aria-label="Select all leads"
           className="assign-checkbox"
           checked={filteredLeads.length > 0 && filteredLeads.every(l => selectedLeadIds.has(l.id))}
           onChange={e => {
@@ -886,10 +1344,7 @@ export const LeadsPage: React.FC = () => {
       align: 'center' as const,
       render: (l: Lead) => (
         <input
-          id={`leads-select-row-${l.id}`}
-          name={`selectLead_${l.id}`}
           type="checkbox"
-          aria-label={`Select lead ${l.name || l.id}`}
           className="assign-checkbox"
           checked={selectedLeadIds.has(l.id)}
           onChange={e => {
@@ -977,13 +1432,12 @@ export const LeadsPage: React.FC = () => {
       icon: <Edit size={14} className="leads-action-icon" />,
       onClick: l => handleOpenEdit(l),
     },
-    // IRM role cannot delete leads — leads are DB-driven and deleted from admin
-    ...(!isIrm ? [{
+    {
       label: 'Delete Lead',
       icon: <Trash2 size={14} color="#ef4444" className="leads-action-icon" />,
       danger: true,
-      onClick: (l: Lead) => handleDeleteLead(l),
-    }] : []),
+      onClick: l => handleDeleteLead(l),
+    },
   ];
 
   return (
@@ -1011,6 +1465,25 @@ export const LeadsPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {loadError && (
+        <div
+          className="alert-banner error"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px 16px',
+            marginBottom: '16px',
+            borderRadius: '8px',
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            color: '#ef4444',
+          }}
+        >
+          <span>{loadError}</span>
+        </div>
+      )}
 
       {/* Leads Table */}
       <DataTable
@@ -1168,7 +1641,7 @@ export const LeadsPage: React.FC = () => {
                 {/* ── Quick Info Banner (Assigned Agent) ── */}
                 <div className="lead-quick-banner">
                   <div className="lead-assigned-note">
-                    Assigned to <strong>{selectedLead.assignedAgentName}</strong>
+                    Assigned : <strong>{selectedLead.assignedAgentName}</strong>
                   </div>
                 </div>
 
@@ -1261,11 +1734,11 @@ export const LeadsPage: React.FC = () => {
                   (() => {
                     const activeDefs = storageService
                       .getCustomFieldDefinitions(tenant?.id)
-                      .filter((d: any) => d.active !== false && (d.module === 'leads' || !d.module))
-                      .filter((d: any) => !(isExec && (d.fieldKey === 'assetClass' || d.fieldKey === 'preferredAssetClass')))
-                      .sort((a: any, b: any) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+                      .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
+                      .filter(d => !(isExec && (d.fieldKey === 'assetClass' || d.fieldKey === 'preferredAssetClass')))
+                      .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
                     const rows = activeDefs
-                      .map((def: any) => {
+                      .map(def => {
                         const key = def.fieldKey || def.id;
                         const val = selectedLead.customFields?.[key];
                         if (val === undefined || val === null || val === '') return null;
@@ -1277,7 +1750,7 @@ export const LeadsPage: React.FC = () => {
                       <div className="card lead-custom-card">
                         <h4 className="lead-custom-title">{tenant?.name} Custom Attributes</h4>
                         <div className="lead-detail-grid">
-                          {rows.map((item: any) => (
+                          {rows.map(item => (
                             <div key={item!.id}>
                               <span className="lead-custom-label">{item!.label}:</span>
                               <div className="lead-custom-value">{item!.value}</div>
@@ -1326,14 +1799,13 @@ export const LeadsPage: React.FC = () => {
       >
         <form onSubmit={handleSaveLead} className="lead-edit-form">
           <div className="form-group">
-            <label htmlFor="lead-form-name" className="form-label">Full Name *</label>
+            <label className="form-label">Full Name *</label>
             <input
-              id="lead-form-name"
               type="text"
               className="form-input"
               required
-              autoComplete="name"
-              name="name"
+              autoComplete="off"
+              name="fld-fullname-nexus"
               value={formData.name || ''}
               onChange={e => setFormData({ ...formData, name: e.target.value })}
               placeholder="e.g. Ramesh Chandra"
@@ -1342,27 +1814,25 @@ export const LeadsPage: React.FC = () => {
 
           <div className="lead-form-grid-2">
             <div className="form-group">
-              <label htmlFor="lead-form-phone" className="form-label">Phone Number *</label>
+              <label className="form-label">Phone Number *</label>
               <input
-                id="lead-form-phone"
                 type="text"
                 className="form-input"
                 required
-                autoComplete="tel"
-                name="phone"
+                autoComplete="off"
+                name="fld-phone-nexus"
                 value={formData.phone || ''}
                 onChange={e => setFormData({ ...formData, phone: e.target.value })}
                 placeholder="+91 98800 00000"
               />
             </div>
             <div className="form-group">
-              <label htmlFor="lead-form-email" className="form-label">Email Address</label>
+              <label className="form-label">Email Address</label>
               <input
-                id="lead-form-email"
                 type="email"
                 className="form-input"
-                autoComplete="email"
-                name="email"
+                autoComplete="off"
+                name="fld-email-nexus"
                 value={formData.email || ''}
                 onChange={e => setFormData({ ...formData, email: e.target.value })}
                 placeholder="ramesh@example.com"
@@ -1372,23 +1842,20 @@ export const LeadsPage: React.FC = () => {
 
           <div className="lead-form-grid-2">
             <div className="form-group">
-              <label htmlFor="lead-form-location" className="form-label">Location / City</label>
+              <label className="form-label">Location / City</label>
               <input
-                id="lead-form-location"
                 type="text"
                 className="form-input"
-                autoComplete="address-level2"
-                name="location"
+                autoComplete="off"
+                name="fld-location-nexus"
                 value={formData.location || ''}
                 onChange={e => setFormData({ ...formData, location: e.target.value })}
                 placeholder="e.g. Bengaluru, Indiranagar"
               />
             </div>
             <div className="form-group">
-              <label htmlFor="lead-form-source" className="form-label">Source</label>
+              <label className="form-label">Source</label>
               <select
-                id="lead-form-source"
-                name="source"
                 className="form-select"
                 value={formData.source || 'Website Inbound'}
                 onChange={e => setFormData({ ...formData, source: e.target.value })}
@@ -1411,10 +1878,8 @@ export const LeadsPage: React.FC = () => {
             {tenant?.slug === 'jamin' ? (
               <div className="lead-form-grid-2">
                 <div className="form-group">
-                  <label htmlFor="lead-form-budget-range" className="form-label">Plot Budget Range</label>
+                  <label className="form-label">Plot Budget Range</label>
                   <select
-                    id="lead-form-budget-range"
-                    name="budgetRange"
                     className="form-select"
                     value={formData.customFields?.budgetRange || '₹45L - ₹65L'}
                     onChange={e =>
@@ -1431,10 +1896,8 @@ export const LeadsPage: React.FC = () => {
                   </select>
                 </div>
                 <div className="form-group">
-                  <label htmlFor="lead-form-micro-market" className="form-label">Preferred Micro-Market</label>
+                  <label className="form-label">Preferred Micro-Market</label>
                   <select
-                    id="lead-form-micro-market"
-                    name="preferredLocation"
                     className="form-select"
                     value={formData.customFields?.preferredLocation || 'Devanahalli North'}
                     onChange={e =>
@@ -1454,10 +1917,8 @@ export const LeadsPage: React.FC = () => {
               <div className="lead-form-grid-2">
                 {!isExec && (
                   <div className="form-group">
-                    <label htmlFor="lead-form-asset-class" className="form-label">Asset Class</label>
+                    <label className="form-label">Asset Class</label>
                     <select
-                      id="lead-form-asset-class"
-                      name="assetClass"
                       className="form-select"
                       value={currentAssetClass}
                       onChange={e => handleAssetClassChange(e.target.value)}
@@ -1469,10 +1930,8 @@ export const LeadsPage: React.FC = () => {
                   </div>
                 )}
                 <div className="form-group">
-                  <label htmlFor="lead-form-capacity" className="form-label">Investment Capacity</label>
+                  <label className="form-label">Investment Capacity</label>
                   <select
-                    id="lead-form-capacity"
-                    name="investmentCapacity"
                     className="form-select"
                     value={formData.customFields?.investmentCapacity || ''}
                     onChange={e =>
@@ -1495,10 +1954,8 @@ export const LeadsPage: React.FC = () => {
           </div>
 
           <div className="form-group">
-            <label htmlFor="lead-form-notes" className="form-label">Notes & Requirements</label>
+            <label className="form-label">Notes & Requirements</label>
             <textarea
-              id="lead-form-notes"
-              name="notes"
               className="form-textarea"
               rows={3}
               value={formData.notes || ''}
@@ -1507,17 +1964,32 @@ export const LeadsPage: React.FC = () => {
             />
           </div>
 
+          {formErrorMessage && (
+            <div style={{
+              margin: '14px 0',
+              padding: '10px 14px',
+              borderRadius: 6,
+              backgroundColor: 'rgba(239,68,68,0.08)',
+              border: '1px solid rgba(239,68,68,0.25)',
+              color: '#dc2626',
+              fontSize: 13,
+              lineHeight: 1.5,
+              fontWeight: 500
+            }}>
+              ⚠️ {formErrorMessage}
+            </div>
+          )}
+
           <div className="lead-form-footer-actions">
             <button
               type="button"
               className="btn btn-secondary"
-              disabled={isSubmittingLead}
               onClick={() => setIsEditDrawerOpen(false)}
             >
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary" disabled={isSubmittingLead}>
-              {isSubmittingLead ? 'Saving Lead...' : 'Save Lead Record'}
+            <button type="submit" className="btn btn-primary">
+              Save Lead Record
             </button>
           </div>
         </form>
@@ -1531,11 +2003,11 @@ export const LeadsPage: React.FC = () => {
         subtitle={`Moving ${selectedLead?.name} into your active Customer 360 database`}
         footer={
           <>
-            <button className="btn btn-secondary" disabled={isConvertingLead} onClick={() => setIsConvertModalOpen(false)}>
+            <button className="btn btn-secondary" onClick={() => setIsConvertModalOpen(false)}>
               Cancel
             </button>
-            <button className="btn btn-primary" disabled={isConvertingLead || !convertDealTitle.trim()} onClick={handleConfirmConvert}>
-              {isConvertingLead ? 'Converting Lead...' : 'Confirm Conversion & Create Deal'}
+            <button className="btn btn-primary" onClick={handleConfirmConvert}>
+              Confirm Conversion & Create Deal
             </button>
           </>
         }
@@ -1547,26 +2019,24 @@ export const LeadsPage: React.FC = () => {
           </p>
 
           <div className="form-group">
-            <label htmlFor="lead-convert-deal-title" className="form-label">Initial Deal Title *</label>
+            <label className="form-label">Initial Deal Title *</label>
             <input
-              id="lead-convert-deal-title"
               type="text"
               className="form-input"
               autoComplete="off"
-              name="dealTitle"
+              name="fld-deal-title-nexus"
               value={convertDealTitle}
               onChange={e => setConvertDealTitle(e.target.value)}
             />
           </div>
 
           <div className="form-group">
-            <label htmlFor="lead-convert-deal-value" className="form-label">Estimated Deal Value (₹)</label>
+            <label className="form-label">Estimated Deal Value (₹)</label>
             <input
-              id="lead-convert-deal-value"
               type="number"
               className="form-input"
               autoComplete="off"
-              name="dealValue"
+              name="fld-deal-value-nexus"
               value={convertDealValue}
               onChange={e => setConvertDealValue(Number(e.target.value))}
             />
@@ -1604,9 +2074,9 @@ export const LeadsPage: React.FC = () => {
               <button
                 className="btn btn-primary"
                 onClick={handleImportLeads}
-                disabled={!columnMap['name'] || !columnMap['phone'] || isImporting}
+                disabled={!columnMap['name'] || !columnMap['phone']}
               >
-                {isImporting ? 'Importing Prospects...' : 'Import Leads'}
+                Import Leads
               </button>
             </div>
           ) : (
@@ -1638,13 +2108,10 @@ export const LeadsPage: React.FC = () => {
                 <div className="lead-form-grid-2">
                   {['name', 'phone', 'email', 'location', 'source', 'priority'].map(tf => (
                     <div key={tf} className="lead-mapping-row">
-                      <label htmlFor={`lead-csv-map-${tf}`} className="lead-mapping-label">
+                      <span className="lead-mapping-label">
                         {tf}{['name', 'phone'].includes(tf) ? ' *' : ''}
-                      </label>
+                      </span>
                       <select
-                        id={`lead-csv-map-${tf}`}
-                        name={`map_${tf}`}
-                        aria-label={`Map column for ${tf}`}
                         className="form-select lead-mapping-select"
                         value={columnMap[tf] || ''}
                         onChange={e => setColumnMap(prev => ({ ...prev, [tf]: e.target.value }))}
@@ -1689,9 +2156,6 @@ export const LeadsPage: React.FC = () => {
           ) : (
             <>
               <input
-                id="lead-csv-file-input"
-                name="csvFile"
-                aria-label="Upload CSV file"
                 type="file"
                 accept=".csv"
                 style={{ display: 'none' }}
@@ -1776,10 +2240,9 @@ export const LeadsPage: React.FC = () => {
               <>
                 <p className="assign-modal-sub">Select an agent to assign the {selectedLeadIds.size} selected lead{selectedLeadIds.size !== 1 ? 's' : ''} to:</p>
                 <div className="assign-agent-list">
-                  {agentsList.map((agent: any) => (
-                    <label htmlFor={`assign-agent-${agent.id}`} key={agent.id} className={`assign-agent-row${assignSelectedAgent?.id === agent.id ? ' selected' : ''}`}>
+                  {agents.map(agent => (
+                    <label key={agent.id} className={`assign-agent-row${assignSelectedAgent?.id === agent.id ? ' selected' : ''}`}>
                       <input
-                        id={`assign-agent-${agent.id}`}
                         type="radio"
                         name="assignAgent"
                         value={agent.id}
@@ -1830,7 +2293,7 @@ export const LeadsPage: React.FC = () => {
               <div>
                 <h3 className="assign-modal-title">✦ AI Suggestion — Round Robin</h3>
                 <p className="assign-modal-sub" style={{ margin: '2px 0 0' }}>
-                  {Object.values(aiDistribution).flat().length} leads distributed across {agentsList.length} agents
+                  {Object.values(aiDistribution).flat().length} leads distributed across {agents.length} agents
                 </p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1845,8 +2308,8 @@ export const LeadsPage: React.FC = () => {
             </div>
 
             <div className="ai-dist-grid">
-              {agentsList.map((agent: any, agentIdx: number) => {
-                const agentLeads = aiDistribution[String(agent.id)] || [];
+              {agents.map((agent, agentIdx) => {
+                const agentLeads = aiDistribution[agent.id] || [];
                 return (
                   <div key={agent.id} className="ai-dist-col">
                     <div className="ai-dist-col-header">
@@ -1872,7 +2335,7 @@ export const LeadsPage: React.FC = () => {
                                 >◀</button>
                                 <button
                                   className="ai-move-btn"
-                                  disabled={agentIdx === agentsList.length - 1}
+                                  disabled={agentIdx === agents.length - 1}
                                   onClick={() => handleAiMoveLead(lead.id, agent.id, 'right')}
                                   title="Move right"
                                 >▶</button>
@@ -1897,6 +2360,383 @@ export const LeadsPage: React.FC = () => {
         </div>
       )}
 
+      {/* ── Duplicate in KYC Resolution Modal ────────────────────────────── */}
+      {duplicateKycModal && (
+        <Modal
+          isOpen={!!duplicateKycModal}
+          onClose={() => {
+            setDuplicateKycModal(null);
+            setIsSchedulingActivity(false);
+          }}
+          title="Contact Already in KYC"
+          subtitle="Duplicate Contact Prevention"
+          maxWidth={540}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{
+              display: 'flex',
+              gap: 12,
+              alignItems: 'flex-start',
+              padding: 14,
+              borderRadius: 'var(--radius-md)',
+              background: 'rgba(16, 185, 129, 0.08)',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+              color: 'var(--text-primary)',
+            }}>
+              <CheckCircle2 size={24} style={{ color: '#10b981', flexShrink: 0, marginTop: 2 }} />
+              <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+                <strong>Customer "{duplicateKycModal.contactName}"</strong> already exists in KYC Onboarding (assigned to <strong>{duplicateKycModal.assignedAgentName}</strong>).
+                <div style={{ marginTop: 4, color: 'var(--text-secondary)' }}>
+                  A record matching phone <code>{duplicateKycModal.contactPhone}</code> is currently active in the KYC verification pipeline. To prevent duplicate investor profiles, this record was not overwritten.
+                </div>
+              </div>
+            </div>
+
+            {!isSchedulingActivity ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 4 }}>
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>
+                  What would you like to do with this contact?
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ justifyContent: 'flex-start', padding: '12px 16px' }}
+                    onClick={() => {
+                      setDuplicateKycModal(null);
+                      setIsEditDrawerOpen(false);
+                      handleNavigate('kyc');
+                    }}
+                  >
+                    <ArrowRight size={16} />
+                    <span>Open Contact in KYC</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ justifyContent: 'flex-start', padding: '12px 16px' }}
+                    onClick={() => setIsSchedulingActivity(true)}
+                  >
+                    <CalendarCheck size={16} style={{ color: 'var(--primary-color)' }} />
+                    <span>Schedule Additional Follow-up Task for This Contact</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ justifyContent: 'center' }}
+                    onClick={() => {
+                      setDuplicateKycModal(null);
+                      setIsSchedulingActivity(false);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 4 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                  Schedule Follow-up Activity for "{duplicateKycModal.contactName}"
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Follow-up Date & Time *</label>
+                  <input
+                    type="datetime-local"
+                    className="form-input"
+                    value={followupDate}
+                    onChange={e => setFollowupDate(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Priority</label>
+                  <select
+                    className="form-select"
+                    value={followupPriority}
+                    onChange={e => setFollowupPriority(e.target.value)}
+                  >
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                    <option value="Urgent">Urgent</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Task Notes / Agenda</label>
+                  <textarea
+                    className="form-textarea"
+                    rows={3}
+                    value={followupNotes}
+                    onChange={e => setFollowupNotes(e.target.value)}
+                    placeholder="Enter details for this follow-up activity..."
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 8 }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setIsSchedulingActivity(false)}
+                    disabled={isSavingFollowupActivity}
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={isSavingFollowupActivity}
+                    onClick={() =>
+                      handleScheduleActivityForExisting(
+                        duplicateKycModal.contactId,
+                        duplicateKycModal.contactType === 'customer' ? 'customer' : 'lead',
+                        duplicateKycModal.contactName,
+                        duplicateKycModal.contactPhone
+                      )
+                    }
+                  >
+                    {isSavingFollowupActivity ? 'Scheduling...' : 'Save Follow-up Activity'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {/* ── Duplicate in Follow-up Resolution Modal ──────────────────────── */}
+      {duplicateFollowupModal && (
+        <Modal
+          isOpen={!!duplicateFollowupModal}
+          onClose={() => {
+            setDuplicateFollowupModal(null);
+            setIsSchedulingActivity(false);
+          }}
+          title="Contact Already in Follow-up"
+          subtitle="Duplicate Lead Prevention"
+          maxWidth={540}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{
+              display: 'flex',
+              gap: 12,
+              alignItems: 'flex-start',
+              padding: 14,
+              borderRadius: 'var(--radius-md)',
+              background: 'rgba(245, 158, 11, 0.08)',
+              border: '1px solid rgba(245, 158, 11, 0.25)',
+              color: 'var(--text-primary)',
+            }}>
+              <AlertTriangle size={24} style={{ color: '#d97706', flexShrink: 0, marginTop: 2 }} />
+              <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+                <strong>Customer "{duplicateFollowupModal.contactName}"</strong> already exists in Follow-up (assigned to <strong>{duplicateFollowupModal.assignedAgentName}</strong>).
+                <div style={{ marginTop: 4, color: 'var(--text-secondary)' }}>
+                  A record matching phone <code>{duplicateFollowupModal.contactPhone}</code> is currently in the active follow-up pipeline. To prevent duplicates, this record was not overwritten.
+                </div>
+              </div>
+            </div>
+
+            {!isSchedulingActivity ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 4 }}>
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>
+                  What would you like to do with this contact?
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ justifyContent: 'flex-start', padding: '12px 16px' }}
+                    onClick={() => {
+                      setDuplicateFollowupModal(null);
+                      setIsEditDrawerOpen(false);
+                      handleNavigate('followups');
+                    }}
+                  >
+                    <ArrowRight size={16} />
+                    <span>Open Contact in Follow-ups</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ justifyContent: 'flex-start', padding: '12px 16px' }}
+                    onClick={() => setIsSchedulingActivity(true)}
+                  >
+                    <CalendarCheck size={16} style={{ color: 'var(--primary-color)' }} />
+                    <span>Schedule Additional Follow-up Task for This Contact</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ justifyContent: 'center' }}
+                    onClick={() => {
+                      setDuplicateFollowupModal(null);
+                      setIsSchedulingActivity(false);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 4 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                  Schedule Follow-up Activity for "{duplicateFollowupModal.contactName}"
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Follow-up Date & Time *</label>
+                  <input
+                    type="datetime-local"
+                    className="form-input"
+                    value={followupDate}
+                    onChange={e => setFollowupDate(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Priority</label>
+                  <select
+                    className="form-select"
+                    value={followupPriority}
+                    onChange={e => setFollowupPriority(e.target.value)}
+                  >
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                    <option value="Urgent">Urgent</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Task Notes / Agenda</label>
+                  <textarea
+                    className="form-textarea"
+                    rows={3}
+                    value={followupNotes}
+                    onChange={e => setFollowupNotes(e.target.value)}
+                    placeholder="Enter details for this follow-up activity..."
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 8 }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setIsSchedulingActivity(false)}
+                    disabled={isSavingFollowupActivity}
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={isSavingFollowupActivity}
+                    onClick={() =>
+                      handleScheduleActivityForExisting(
+                        duplicateFollowupModal.contactId,
+                        duplicateFollowupModal.contactType,
+                        duplicateFollowupModal.contactName,
+                        duplicateFollowupModal.contactPhone
+                      )
+                    }
+                  >
+                    {isSavingFollowupActivity ? 'Scheduling...' : 'Save Follow-up Activity'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {/* ── Duplicate Customer Resolution Modal ─────────────────────────── */}
+      {duplicateCustomerModal && (
+        <Modal
+          isOpen={!!duplicateCustomerModal}
+          onClose={() => setDuplicateCustomerModal(null)}
+          title="Customer Already Exists"
+          subtitle="Duplicate Customer Prevention"
+          maxWidth={500}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{
+              display: 'flex',
+              gap: 12,
+              alignItems: 'flex-start',
+              padding: 14,
+              borderRadius: 'var(--radius-md)',
+              background: 'rgba(59, 130, 246, 0.08)',
+              border: '1px solid rgba(59, 130, 246, 0.25)',
+              color: 'var(--text-primary)',
+            }}>
+              <UserCheck size={24} style={{ color: '#2563eb', flexShrink: 0, marginTop: 2 }} />
+              <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+                <strong>Customer "{duplicateCustomerModal.contactName}"</strong> already exists in the system (assigned to <strong>{duplicateCustomerModal.assignedAgentName}</strong>).
+                <div style={{ marginTop: 4, color: 'var(--text-secondary)' }}>
+                  A customer profile already exists for this phone/email. Instead of creating a duplicate lead, you can open their existing profile or schedule a follow-up activity.
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ justifyContent: 'flex-start', padding: '12px 16px' }}
+                onClick={() => {
+                  setDuplicateCustomerModal(null);
+                  setIsEditDrawerOpen(false);
+                  handleNavigate('customers');
+                }}
+              >
+                <ArrowRight size={16} />
+                <span>Open in Customer 360</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ justifyContent: 'flex-start', padding: '12px 16px' }}
+                onClick={() => {
+                  const cust = duplicateCustomerModal;
+                  setDuplicateCustomerModal(null);
+                  setDuplicateFollowupModal({
+                    contactId: cust.contactId,
+                    contactType: 'customer',
+                    contactName: cust.contactName,
+                    contactPhone: cust.contactPhone,
+                    contactEmail: cust.contactEmail,
+                    assignedAgentName: cust.assignedAgentName,
+                  });
+                  setIsSchedulingActivity(true);
+                }}
+              >
+                <CalendarCheck size={16} style={{ color: 'var(--primary-color)' }} />
+                <span>Schedule Follow-up Activity for This Customer</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ justifyContent: 'center' }}
+                onClick={() => setDuplicateCustomerModal(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {/* ── Toast notification ───────────────────────────────────────────── */}
       {toast && (
         <div className="assign-toast">
@@ -1906,3 +2746,4 @@ export const LeadsPage: React.FC = () => {
     </div>
   );
 };
+

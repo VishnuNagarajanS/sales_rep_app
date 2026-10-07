@@ -233,6 +233,7 @@ using (var scope = app.Services.CreateScope())
                     END IF;
 
                     ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ContactType"" character varying(50) NOT NULL DEFAULT 'lead';
+                    ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ContactEmail"" character varying(255) NULL;
                     ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Priority"" character varying(50) NOT NULL DEFAULT 'Medium';
                     ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
                     ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Agenda"" text NULL;
@@ -255,6 +256,23 @@ using (var scope = app.Services.CreateScope())
                     ALTER TABLE followups ALTER COLUMN ""Status"" SET DEFAULT 'Pending';
                     ALTER TABLE followups ALTER COLUMN ""Priority"" DROP NOT NULL;
                     ALTER TABLE followups ALTER COLUMN ""Priority"" SET DEFAULT 'Medium';
+
+                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Leads' AND column_name = 'AssignedAgentId') THEN
+                        ALTER TABLE ""Leads"" ALTER COLUMN ""AssignedAgentId"" DROP NOT NULL;
+                    ELSIF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'leads' AND column_name = 'AssignedAgentId') THEN
+                        ALTER TABLE leads ALTER COLUMN ""AssignedAgentId"" DROP NOT NULL;
+                    END IF;
+
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'call_records') THEN
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""TwilioCallSid"" character varying(64) NULL;
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""RecordingUrl"" character varying(256) NULL;
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""Transcript"" text NULL;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'CallRecords') THEN
+                        ALTER TABLE ""CallRecords"" ADD COLUMN IF NOT EXISTS ""TwilioCallSid"" character varying(64) NULL;
+                        ALTER TABLE ""CallRecords"" ADD COLUMN IF NOT EXISTS ""RecordingUrl"" character varying(256) NULL;
+                        ALTER TABLE ""CallRecords"" ADD COLUMN IF NOT EXISTS ""Transcript"" text NULL;
+                    END IF;
                 END $$;
             ";
             db.Database.ExecuteSqlRaw(sql);
@@ -262,6 +280,98 @@ using (var scope = app.Services.CreateScope())
         catch (Exception ex)
         {
             Console.WriteLine($"[Database Init Warning] {ex.Message}");
+        }
+
+        // Patch: ensure tenants have EnabledFeatures populated
+        try
+        {
+            var tenants = db.Tenants.ToList();
+            bool patched = false;
+            foreach (var t in tenants)
+            {
+                if (t.EnabledFeatures == null || t.EnabledFeatures.Count == 0)
+                {
+                    if (t.Slug == "ghl")
+                    {
+                        t.EnabledFeatures = new List<string>
+                        {
+                            "leads", "customers", "deals", "followups", "calls", "call-recording",
+                            "call-transcription", "investors", "consultations", "investment-opportunities",
+                            "reports", "users", "roles", "company-settings", "audit-logs"
+                        };
+                        patched = true;
+                    }
+                    else if (t.Slug == "jamin")
+                    {
+                        t.EnabledFeatures = new List<string>
+                        {
+                            "leads", "customers", "deals", "followups", "calls", "call-recording",
+                            "call-transcription", "properties", "site-visits", "bookings",
+                            "reports", "users", "roles", "company-settings", "audit-logs"
+                        };
+                        patched = true;
+                    }
+                }
+            }
+            if (patched) db.SaveChanges();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Tenant Feature Patch Warning] {ex.Message}");
+        }
+
+        // Patch: ensure roles have Permissions populated
+        try
+        {
+            var allRoles = db.Roles.ToList();
+            bool rolePatched = false;
+            var allPerms = new[] {
+                "leads.view","leads.create","leads.update","leads.delete","leads.assign","leads.export","leads.import","leads.convert",
+                "customers.view","customers.create","customers.update","customers.delete",
+                "deals.view","deals.create","deals.update","deals.delete",
+                "calls.make","calls.receive","calls.view","calls.recordings.play",
+                "followups.view","followups.create","followups.update",
+                "properties.view","properties.update","site-visits.view","site-visits.create","bookings.view","bookings.create",
+                "investors.view","investors.create","investors.update",
+                "consultations.view","consultations.create","consultations.update",
+                "opportunities.view","opportunities.create","opportunities.update",
+                "reports.view","reports.export",
+                "users.view","users.manage","roles.view","settings.view","settings.update","audit.view",
+                "chat.view","chat.send","kyc.view","kyc.approve"
+            };
+            foreach (var role in allRoles)
+            {
+                if (role.Permissions == null || role.Permissions.Count == 0)
+                {
+                    if (role.Code == "super_admin" || role.Code == "company_admin")
+                        role.Permissions = allPerms.ToList();
+                    else if (role.Code == "irm")
+                        role.Permissions = new List<string> {
+                            "leads.view","leads.create","leads.update",
+                            "followups.view","followups.create","followups.update",
+                            "investors.view","investors.create","investors.update",
+                            "consultations.view","consultations.create","consultations.update",
+                            "opportunities.view","opportunities.create","opportunities.update",
+                            "deals.view","deals.create","deals.update",
+                            "kyc.view","kyc.approve",
+                            "calls.make","calls.receive","calls.view","reports.view","chat.view","chat.send"
+                        };
+                    else // sales_executive
+                        role.Permissions = new List<string> {
+                            "leads.view","leads.create","leads.update","leads.convert",
+                            "customers.view","customers.create","customers.update",
+                            "deals.view","deals.create","deals.update",
+                            "calls.make","calls.receive","calls.view",
+                            "followups.view","followups.create","followups.update","chat.view","chat.send"
+                        };
+                    rolePatched = true;
+                }
+            }
+            if (rolePatched) db.SaveChanges();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Role Permissions Patch Warning] {ex.Message}");
         }
 
         try
@@ -383,6 +493,7 @@ using (var scope = app.Services.CreateScope())
         catch (Exception ex)
         {
             Console.WriteLine($"[Database Migration Check Warning] {ex.Message}");
+
         }
 
         try
@@ -407,6 +518,13 @@ using (var scope = app.Services.CreateScope())
     Console.WriteLine($"[DIAGNOSTIC] Count with help me decide: {helpMeDecide}");
     Console.WriteLine($"[DIAGNOSTIC] Count with asset class but not confirmed: {notConfirmed}");
 }
+
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor 
+                     | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto 
+                     | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost
+});
 
 // Global Exception Handling Middleware
 app.UseMiddleware<ExceptionHandlingMiddleware>();
@@ -439,6 +557,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors("DefaultCorsPolicy");
+
+app.UseStaticFiles(); // Added to serve uploaded documents
 
 app.UseAuthentication();
 app.UseAuthorization();

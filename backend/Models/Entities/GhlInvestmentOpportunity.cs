@@ -12,9 +12,9 @@ public class GhlInvestmentOpportunity
     public int CompanyId { get; set; }
     public Tenant? Company { get; set; }
 
-    /// <summary>FK to GhlInvestors table – the investor this opportunity belongs to.</summary>
+    /// <summary>FK to Investors table – the investor this opportunity belongs to.</summary>
     public int InvestorId { get; set; }
-    public GhlInvestor? Investor { get; set; }
+    public Investor? Investor { get; set; }
 
     public int AssignedAgentId { get; set; }
     public User? AssignedAgent { get; set; }

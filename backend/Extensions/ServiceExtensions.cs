@@ -16,7 +16,13 @@ public static class ServiceExtensions
 {
     public static IServiceCollection AddApplicationServices(this IServiceCollection services, IConfiguration configuration)
     {
+        services.Configure<SmtpSettings>(configuration.GetSection(SmtpSettings.SectionName));
+        services.Configure<TwilioSettings>(configuration.GetSection(TwilioSettings.SectionName));
+
         // 1. Database Context
+        services.AddMemoryCache();
+        services.AddHttpClient("TwilioRecordings");
+
         var connectionString = configuration.GetConnectionString("DefaultConnection");
         if (string.IsNullOrWhiteSpace(connectionString))
         {
@@ -40,43 +46,43 @@ public static class ServiceExtensions
 
         // 2. Options pattern
         services.Configure<JwtSettings>(configuration.GetSection(JwtSettings.SectionName));
-        services.Configure<SmtpSettings>(configuration.GetSection(SmtpSettings.SectionName));
 
         // 3. Repositories
         services.AddScoped<IUserRepository, UserRepository>();
-        services.AddScoped<IInvestorRepository, InvestorRepository>();
-        services.AddScoped<IKycRepository, KycRepository>();
         services.AddScoped<IConsultationRepository, ConsultationRepository>();
-        services.AddScoped<IOpportunityRepository, OpportunityRepository>();
-        services.AddScoped<IIrmPipelineRepository, IrmPipelineRepository>();
         services.AddScoped<IFollowupRepository, FollowupRepository>();
         services.AddScoped<IInvestorCallRepository, InvestorCallRepository>();
-
-        // Memory Cache for real-time OTP and session states
-        services.AddMemoryCache();
+        services.AddScoped<IInvestorRepository, InvestorRepository>();
+        services.AddScoped<IIrmPipelineRepository, IrmPipelineRepository>();
+        services.AddScoped<IKycRepository, KycRepository>();
+        services.AddScoped<IOpportunityRepository, OpportunityRepository>();
 
         // 4. Services
         services.AddScoped<IJwtService, JwtService>();
+        services.AddHttpContextAccessor();
+        services.AddScoped<ICurrentUserService, CurrentUserService>();
         services.AddScoped<ITotpService, TotpService>();
         services.AddScoped<IAuthService, AuthService>();
-        services.AddScoped<IEmailService, EmailService>();
+        services.AddScoped<IAdminUserService, AdminUserService>();
+        services.AddScoped<ILeadService, LeadService>();
+        services.AddScoped<backend.Services.Email.IEmailService, backend.Services.Email.SmtpEmailService>();
+        services.AddScoped<backend.Services.Interfaces.IEmailService, backend.Services.Implementations.EmailService>();
         services.AddScoped<IOtpService, OtpService>();
         services.AddScoped<IInvestorService, InvestorService>();
-        services.AddScoped<IKycService, KycService>();
-        services.AddScoped<IConsultationService, ConsultationService>();
-        services.AddScoped<IOpportunityService, OpportunityService>();
-        services.AddScoped<IIrmPipelineService, IrmPipelineService>();
-        services.AddScoped<IIrmFollowupService, IrmFollowupService>();
-        services.AddScoped<IInvestorCallService, InvestorCallService>();
         services.AddScoped<IIrmDashboardService, IrmDashboardService>();
+        services.AddScoped<IConsultationService, ConsultationService>();
+        services.AddScoped<ICustomerService, CustomerService>();
+        services.AddScoped<IFollowupService, FollowupService>();
+        services.AddScoped<IInvestorCallService, InvestorCallService>();
+        services.AddScoped<IIrmFollowupService, IrmFollowupService>();
+        services.AddScoped<IIrmPipelineService, IrmPipelineService>();
+        services.AddScoped<IKycService, KycService>();
+        services.AddScoped<IOpportunityService, OpportunityService>();
 
         services.AddDev1Services();
 
         // 5. Validators
         services.AddValidatorsFromAssemblyContaining<LoginRequestValidator>();
-
-        // 6. Developer 2 CRM Sales Pipeline Services
-        services.AddDev2Services();
 
         return services;
     }

@@ -9,21 +9,10 @@ import {
   Calendar,
   Clock,
 } from 'lucide-react';
-import { CallDisposition, Consultation, Lead, CallRecord, Followup, CustomFieldDefinition } from '../../types';
-import { getLeads, getCalls, getFollowups } from '../../services/ghlApiService';
+import { CallDisposition, Consultation } from '../../types';
 import { storageService } from '../../services/storageService';
 import { useAuth } from '../../context/AuthContext';
 import { StatusChip } from './StatusChip';
-
-const getStoredCustomFieldDefinitions = (tenantId?: string): CustomFieldDefinition[] => {
-  try {
-    const raw = localStorage.getItem('nexus_custom_fields');
-    const all = raw ? JSON.parse(raw) : [];
-    return tenantId ? all.filter((d: any) => !d.tenantId || d.tenantId === tenantId) : all;
-  } catch {
-    return [];
-  }
-};
 
 interface LeadDetailDrawerContentProps {
   /** The contact's display name */
@@ -80,28 +69,9 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
     setCallTab('agent');
   }, [contactPhone, contactId]);
 
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [allCalls, setAllCalls] = useState<CallRecord[]>([]);
-  const [followups, setFollowups] = useState<Followup[]>([]);
-
-  useEffect(() => {
-    let mounted = true;
-    Promise.all([
-      getLeads(tenantId),
-      getCalls(tenantId),
-      getFollowups(tenantId),
-    ]).then(([l, c, f]) => {
-      if (mounted) {
-        if (l.length) setLeads(l);
-        if (c.length) setAllCalls(c);
-        if (f.length) setFollowups(f);
-      }
-    }).catch(console.error);
-    return () => { mounted = false; };
-  }, [tenantId, contactPhone, contactId]);
-
   // ── Lead record lookup ───────────────────────────────────────────────────────
   const selectedLead = (() => {
+    const leads = storageService.getLeads(tenantId) || [];
     return leads.find(l => {
       if (contactId && contactId !== 'contact-new' && l.id === contactId) return true;
       const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
@@ -111,6 +81,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   })();
 
   // ── Call history lookup ──────────────────────────────────────────────────────
+  const allCalls = storageService.getCalls(tenantId) || [];
   const fPhoneDigits = (contactPhone || '').replace(/\D/g, '').slice(-10);
 
   const selectedCalls = allCalls.filter(c => {
@@ -130,18 +101,20 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   });
 
   const isIrmCall = (c: any) =>
-    (c.notes || '').startsWith('Connected to IRM:') ||
-    (c.agentId || '').toLowerCase().includes('irm') ||
-    (c.agentName || '').toLowerCase().includes('irm') ||
-    ['Rohan Varma', 'Arun Kumar', 'Ananya Mehta', 'Rohan Mehta', 'Priya Nair', 'Karthik Sundaram'].some(n =>
-      (c.agentName || '').toLowerCase().includes(n.toLowerCase())
-    );
+    c.callerType === 'IRM' ||
+    c.connectVia === 'Connect via IRM' ||
+    c.source === 'irm' ||
+    (c.agentRole || '').toLowerCase() === 'irm' ||
+    (c.notes || '').includes('Connect via IRM') ||
+    (c.notes || '').includes('Connected to IRM') ||
+    (c.agentId || '').toString().toLowerCase().includes('irm');
 
   const agentCalls = selectedCalls.filter(c => !isIrmCall(c));
   const irmCalls = selectedCalls.filter(c => isIrmCall(c));
   const tabCalls = callTab === 'agent' ? agentCalls : irmCalls;
 
   // ── Active follow-up count ───────────────────────────────────────────────────
+  const followups = storageService.getFollowups(tenantId) || [];
   const activeFollowupCount = followups.filter(f => {
     if (f.status !== 'Pending') return false;
     if (contactId && contactId !== 'contact-new' && f.contactId === contactId) return true;
@@ -230,188 +203,189 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
       {/* ── Lead / Investor Details ──────────────────────────────────────────── */}
       {(!sectionsOnly || sectionsOnly.includes('details')) && (
         <div className="card">
-          <h4 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Building2 size={16} color="var(--primary-600)" /> Lead / Investor Details
-          </h4>
+        <h4 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Building2 size={16} color="var(--primary-600)" /> Lead / Investor Details
+        </h4>
 
-          {selectedLead ? (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: 13 }}>
-              {selectedLead.name && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>FULL NAME</span>
-                  <div style={{ fontWeight: 600 }}>{selectedLead.name}</div>
-                </div>
-              )}
-              {selectedLead.phone && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>PHONE NUMBER</span>
-                  <div style={{ fontWeight: 600 }}>{selectedLead.phone}</div>
-                </div>
-              )}
-              {selectedLead.email && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>EMAIL</span>
-                  <div style={{ fontWeight: 600 }}>{selectedLead.email}</div>
-                </div>
-              )}
-              {selectedLead.location && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>LOCATION</span>
-                  <div style={{ fontWeight: 600 }}>{selectedLead.location}</div>
-                </div>
-              )}
-              {selectedLead.source && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>SOURCE</span>
-                  <div style={{ fontWeight: 600 }}>{selectedLead.source}</div>
-                </div>
-              )}
-              {selectedLead.status && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>STATUS</span>
-                  <div><StatusChip status={selectedLead.status} size="sm" /></div>
-                </div>
-              )}
-              {selectedLead.priority && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>PRIORITY</span>
-                  <div><StatusChip status={selectedLead.priority} size="sm" /></div>
-                </div>
-              )}
-              {selectedLead.createdAt && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>INTAKE DATE</span>
-                  <div style={{ fontWeight: 600 }}>{selectedLead.createdAt}</div>
-                </div>
-              )}
-              {(selectedLead as any).preferredLanguage && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>PREFERRED LANGUAGE</span>
-                  <div style={{ fontWeight: 600 }}>{(selectedLead as any).preferredLanguage}</div>
-                </div>
-              )}
-              {(selectedLead as any).preferredContactTime && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>PREFERRED CONTACT TIME</span>
-                  <div style={{ fontWeight: 600 }}>{(selectedLead as any).preferredContactTime}</div>
-                </div>
-              )}
-              {(() => {
-                // Strip legacy "[date] ... Reason: ..." lines that were previously
-                // appended to notes before reason was stored separately.
-                const reasonLinePattern = /^\[[\d/]+\]\s.*(Reason|Wrong Number|Not Interested).*/i;
+        {selectedLead ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: 13 }}>
+            {selectedLead.name && (
+              <div>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>FULL NAME</span>
+                <div style={{ fontWeight: 600 }}>{selectedLead.name}</div>
+              </div>
+            )}
+            {selectedLead.phone && (
+              <div>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>PHONE NUMBER</span>
+                <div style={{ fontWeight: 600 }}>{selectedLead.phone}</div>
+              </div>
+            )}
+            {selectedLead.email && (
+              <div>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>EMAIL</span>
+                <div style={{ fontWeight: 600 }}>{selectedLead.email}</div>
+              </div>
+            )}
+            {selectedLead.location && (
+              <div>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>LOCATION</span>
+                <div style={{ fontWeight: 600 }}>{selectedLead.location}</div>
+              </div>
+            )}
+            {selectedLead.source && (
+              <div>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>SOURCE</span>
+                <div style={{ fontWeight: 600 }}>{selectedLead.source}</div>
+              </div>
+            )}
+            {selectedLead.status && (
+              <div>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>STATUS</span>
+                <div><StatusChip status={selectedLead.status} size="sm" /></div>
+              </div>
+            )}
+            {selectedLead.priority && (
+              <div>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>PRIORITY</span>
+                <div><StatusChip status={selectedLead.priority} size="sm" /></div>
+              </div>
+            )}
+            {selectedLead.createdAt && (
+              <div>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>INTAKE DATE</span>
+                <div style={{ fontWeight: 600 }}>{selectedLead.createdAt}</div>
+              </div>
+            )}
+            {(selectedLead as any).preferredLanguage && (
+              <div>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>PREFERRED LANGUAGE</span>
+                <div style={{ fontWeight: 600 }}>{(selectedLead as any).preferredLanguage}</div>
+              </div>
+            )}
+            {(selectedLead as any).preferredContactTime && (
+              <div>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>PREFERRED CONTACT TIME</span>
+                <div style={{ fontWeight: 600 }}>{(selectedLead as any).preferredContactTime}</div>
+              </div>
+            )}
+            {(() => {
+              // Strip legacy "[date] ... Reason: ..." lines that were previously
+              // appended to notes before reason was stored separately.
+              const reasonLinePattern = /^\[[\d/]+\]\s.*(Reason|Wrong Number|Not Interested).*/i;
 
-                let notesContent = '';
-                if (hideAutoNotes) {
-                  if (
-                    selectedLead.customFields?.customerNotes &&
-                    typeof selectedLead.customFields.customerNotes === 'string' &&
-                    selectedLead.customFields.customerNotes.trim()
-                  ) {
-                    notesContent = selectedLead.customFields.customerNotes.trim();
-                  } else {
-                    const autoNotePattern1 =
-                      /^\[\d{1,2}\/\d{1,2}\/\d{4}\]\s*(Interested|Follow-up Required|Call Back|No Response|Converted|Not Interested|Wrong Number)/i;
-                    const autoNotePattern2 = /^\[Call Disposition\s*-.*?\]:/i;
-
-                    notesContent = (selectedLead.notes || '')
-                      .split('\n')
-                      .filter(line => {
-                        const trimmed = line.trim();
-                        if (reasonLinePattern.test(trimmed)) return false;
-                        if (autoNotePattern1.test(trimmed)) return false;
-                        if (autoNotePattern2.test(trimmed)) return false;
-                        return true;
-                      })
-                      .join('\n')
-                      .trim();
-                  }
+              let notesContent = '';
+              if (hideAutoNotes) {
+                if (
+                  selectedLead.customFields?.customerNotes &&
+                  typeof selectedLead.customFields.customerNotes === 'string' &&
+                  selectedLead.customFields.customerNotes.trim()
+                ) {
+                  notesContent = selectedLead.customFields.customerNotes.trim();
                 } else {
+                  const autoNotePattern1 =
+                    /^\[\d{1,2}\/\d{1,2}\/\d{4}\]\s*(Interested|Follow-up Required|Call Back|No Response|Converted|Not Interested|Wrong Number)/i;
+                  const autoNotePattern2 = /^\[Call Disposition\s*-.*?\]:/i;
+
                   notesContent = (selectedLead.notes || '')
                     .split('\n')
-                    .filter(line => !reasonLinePattern.test(line.trim()))
+                    .filter(line => {
+                      const trimmed = line.trim();
+                      if (reasonLinePattern.test(trimmed)) return false;
+                      if (autoNotePattern1.test(trimmed)) return false;
+                      if (autoNotePattern2.test(trimmed)) return false;
+                      return true;
+                    })
                     .join('\n')
                     .trim();
                 }
+              } else {
+                notesContent = (selectedLead.notes || '')
+                  .split('\n')
+                  .filter(line => !reasonLinePattern.test(line.trim()))
+                  .join('\n')
+                  .trim();
+              }
 
-                if (!notesContent) return null;
-                return (
-                  <div style={{ gridColumn: 'span 2' }}>
-                    <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>NOTES & REQUIREMENTS</span>
-                    <div style={{ backgroundColor: 'var(--bg-surface-hover)', padding: '8px 12px', borderRadius: 6, marginTop: 4, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-                      {notesContent}
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {selectedLead.customFields?.dispositionReason && (
+              if (!notesContent) return null;
+              return (
                 <div style={{ gridColumn: 'span 2' }}>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>REASON</span>
-                  <div style={{ backgroundColor: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)', padding: '8px 12px', borderRadius: 6, marginTop: 4, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-                    {selectedLead.customFields.dispositionReason as string}
+                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>NOTES & REQUIREMENTS</span>
+                  <div style={{ backgroundColor: 'var(--bg-surface-hover)', padding: '8px 12px', borderRadius: 6, marginTop: 4, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                    {notesContent}
                   </div>
                 </div>
-              )}
-              {consultationReason && (
-                <div style={{ gridColumn: 'span 2' }}>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>REASON FOR CONSULTATION</span>
-                  <div style={{ backgroundColor: 'var(--bg-surface-hover)', padding: '8px 12px', borderRadius: 6, marginTop: 4 }}>
-                    {consultationReason}
-                  </div>
+              );
+            })()}
+
+            {selectedLead.customFields?.dispositionReason && (
+              <div style={{ gridColumn: 'span 2' }}>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>REASON</span>
+                <div style={{ backgroundColor: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)', padding: '8px 12px', borderRadius: 6, marginTop: 4, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                  {selectedLead.customFields.dispositionReason as string}
                 </div>
-              )}
-
-              {/* Custom Fields */}
-              {(() => {
-                const activeDefs = (storageService?.getCustomFieldDefinitions ? storageService.getCustomFieldDefinitions(tenantId) : getStoredCustomFieldDefinitions(tenantId))
-                  .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
-                  .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
-
-                const rows = activeDefs
-                  .map(def => {
-                    const key = def.fieldKey || def.id;
-                    if (key === 'dispositionReason' || key === 'customerNotes') return null;
-                    if (isSalesExecutive && key === 'preferredAssetClass') return null;
-                    const val = selectedLead.customFields?.[key];
-                    if (val === undefined || val === null || val === '') return null;
-                    return { id: def.id, label: def.label || key.replace(/([A-Z])/g, ' $1'), value: String(val) };
-                  })
-                  .filter(Boolean);
-
-                if (rows.length === 0) return null;
-
-                return (
-                  <div style={{ gridColumn: 'span 2', marginTop: 8 }}>
-                    <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>CUSTOM ATTRIBUTES</span>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
-                      {rows.map(item => (
-                        <div key={item!.id} style={{ backgroundColor: 'var(--bg-surface-hover)', padding: '6px 10px', borderRadius: 6 }}>
-                          <span style={{ fontSize: 10, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{item!.label}</span>
-                          <div style={{ fontWeight: 600 }}>{item!.value}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-          ) : (
-            <div>
-              <div style={{ padding: '16px', backgroundColor: 'var(--bg-surface-hover)', borderRadius: 8, color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>
-                Lead details unavailable
               </div>
-              {consultationReason && (
-                <div style={{ marginTop: 12 }}>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>REASON FOR CONSULTATION</span>
-                  <div style={{ backgroundColor: 'var(--bg-surface-hover)', padding: '8px 12px', borderRadius: 6, marginTop: 4 }}>
-                    {consultationReason}
+            )}
+            {consultationReason && (
+              <div style={{ gridColumn: 'span 2' }}>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>REASON FOR CONSULTATION</span>
+                <div style={{ backgroundColor: 'var(--bg-surface-hover)', padding: '8px 12px', borderRadius: 6, marginTop: 4 }}>
+                  {consultationReason}
+                </div>
+              </div>
+            )}
+
+            {/* Custom Fields */}
+            {(() => {
+              const activeDefs = storageService
+                .getCustomFieldDefinitions(tenantId)
+                .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
+                .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+
+              const rows = activeDefs
+                .map(def => {
+                  const key = def.fieldKey || def.id;
+                  if (key === 'dispositionReason' || key === 'customerNotes') return null;
+                  if (isSalesExecutive && key === 'preferredAssetClass') return null;
+                  const val = selectedLead.customFields?.[key];
+                  if (val === undefined || val === null || val === '') return null;
+                  return { id: def.id, label: def.label || key.replace(/([A-Z])/g, ' $1'), value: String(val) };
+                })
+                .filter(Boolean);
+
+              if (rows.length === 0) return null;
+
+              return (
+                <div style={{ gridColumn: 'span 2', marginTop: 8 }}>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>CUSTOM ATTRIBUTES</span>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
+                    {rows.map(item => (
+                      <div key={item!.id} style={{ backgroundColor: 'var(--bg-surface-hover)', padding: '6px 10px', borderRadius: 6 }}>
+                        <span style={{ fontSize: 10, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{item!.label}</span>
+                        <div style={{ fontWeight: 600 }}>{item!.value}</div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              )}
+              );
+            })()}
+          </div>
+        ) : (
+          <div>
+            <div style={{ padding: '16px', backgroundColor: 'var(--bg-surface-hover)', borderRadius: 8, color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>
+              Lead details unavailable
             </div>
-          )}
-        </div>
+            {consultationReason && (
+              <div style={{ marginTop: 12 }}>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>REASON FOR CONSULTATION</span>
+                <div style={{ backgroundColor: 'var(--bg-surface-hover)', padding: '8px 12px', borderRadius: 6, marginTop: 4 }}>
+                  {consultationReason}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
       )}
 
       {/* ── Previous Consultations ─────────────────────────────────────── */}
@@ -518,130 +492,149 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
       {/* ── Call Recordings ────────────────────────────────────────────── */}
       {(!sectionsOnly || sectionsOnly.includes('callRecordings')) && (
         <div className="card">
-          <h4 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Phone size={16} color="var(--primary-600)" /> Call Recordings
-          </h4>
+        <h4 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Phone size={16} color="var(--primary-600)" /> Call Recordings
+        </h4>
 
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-            <button
-              type="button"
-              className={`btn btn-sm ${callTab === 'agent' ? 'btn-primary' : 'btn-ghost'}`}
-              onClick={() => setCallTab('agent')}
-            >
-              Connect via Agent ({agentCalls.length})
-            </button>
-            <button
-              type="button"
-              className={`btn btn-sm ${callTab === 'irm' ? 'btn-primary' : 'btn-ghost'}`}
-              onClick={() => setCallTab('irm')}
-            >
-              Connect via IRM ({irmCalls.length})
-            </button>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <button
+            type="button"
+            className={`btn btn-sm ${callTab === 'agent' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setCallTab('agent')}
+          >
+            Connect via Agent ({agentCalls.length})
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${callTab === 'irm' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setCallTab('irm')}
+          >
+            Connect via IRM ({irmCalls.length})
+          </button>
+        </div>
+
+        {tabCalls.length === 0 ? (
+          <div style={{ padding: '16px', backgroundColor: 'var(--bg-surface-hover)', borderRadius: 8, color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>
+            No calls in this category yet.
           </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {tabCalls.map(c => {
+              const isExpanded = !!expandedTranscripts[c.id];
+              return (
+                <div
+                  key={c.id}
+                  style={{
+                    border: '1px solid var(--border-base)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '12px 14px',
+                    backgroundColor: 'var(--bg-surface)',
+                  }}
+                >
+                  {/* Call header row */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: 10,
+                          backgroundColor: c.direction === 'inbound' ? '#dcfce7' : '#e0f2fe',
+                          color: c.direction === 'inbound' ? '#15803d' : '#0369a1',
+                        }}
+                      >
+                        {c.direction === 'inbound' ? '↙ Inbound' : '↗ Outbound'}
+                      </span>
+                      <span style={{ fontSize: 12, fontWeight: 600 }}>{c.timestamp}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>• {formatDuration(c.duration)}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>• Agent: <strong>{c.agentName || 'Unknown'}</strong></span>
+                    </div>
+                    <StatusChip status={c.disposition} size="sm" />
+                  </div>
 
-          {tabCalls.length === 0 ? (
-            <div style={{ padding: '16px', backgroundColor: 'var(--bg-surface-hover)', borderRadius: 8, color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>
-              No calls in this category yet.
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {tabCalls.map(c => {
-                const isExpanded = !!expandedTranscripts[c.id];
-                return (
-                  <div
-                    key={c.id}
-                    style={{
-                      border: '1px solid var(--border-base)',
-                      borderRadius: 'var(--radius-md)',
-                      padding: '12px 14px',
-                      backgroundColor: 'var(--bg-surface)',
-                    }}
-                  >
-                    {/* Call header row */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span
+                  {/* Notes */}
+                  {c.notes && (
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 6 }}>
+                      <strong>Notes:</strong> {c.notes}
+                    </div>
+                  )}
+
+                  {/* Reason (from Call Wrap-up & Disposition or Skip) */}
+                  {(c.reason || (c as any).reason) && (
+                    <div
+                      style={{
+                        fontSize: 12,
+                        marginTop: 6,
+                        backgroundColor: c.disposition === 'Skipped' ? 'rgba(245,158,11,0.08)' : 'rgba(239,68,68,0.06)',
+                        border: `1px solid ${c.disposition === 'Skipped' ? 'rgba(245,158,11,0.25)' : 'rgba(239,68,68,0.15)'}`,
+                        padding: '6px 10px',
+                        borderRadius: 6,
+                      }}
+                    >
+                      <strong style={{ color: c.disposition === 'Skipped' ? '#d97706' : 'var(--text-secondary)' }}>
+                        {c.disposition === 'Skipped' ? 'Skip Reason:' : 'Reason:'}
+                      </strong>{' '}
+                      <span style={{ color: 'var(--text-primary)' }}>{c.reason || (c as any).reason}</span>
+                    </div>
+                  )}
+
+                  {/* Audio Player / Honest Recording State */}
+                  {c.recordingUrl ? (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+                        <Volume2 size={12} /> Call Recording Audio
+                      </div>
+                      <audio controls src={c.recordingUrl} style={{ width: '100%', height: 36 }} />
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <Volume2 size={12} /> Recording: <span>Unavailable (carrier trunk offline)</span>
+                    </div>
+                  )}
+
+                  {/* Collapsible Transcription / Honest Transcript State */}
+                  {c.transcription ? (
+                    <div style={{ marginTop: 8 }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        style={{ padding: '2px 6px', fontSize: 11, gap: 4, color: 'var(--primary-600)' }}
+                        onClick={() => toggleTranscript(c.id)}
+                      >
+                        <FileText size={12} />
+                        {isExpanded ? 'Hide Transcription' : 'View Automated Transcription'}
+                        {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                      </button>
+
+                      {isExpanded && (
+                        <div
                           style={{
-                            fontSize: 11,
-                            fontWeight: 700,
-                            padding: '2px 8px',
-                            borderRadius: 10,
-                            backgroundColor: c.direction === 'inbound' ? '#dcfce7' : '#e0f2fe',
-                            color: c.direction === 'inbound' ? '#15803d' : '#0369a1',
+                            marginTop: 6,
+                            padding: '10px 12px',
+                            backgroundColor: 'var(--bg-surface-hover)',
+                            borderRadius: 6,
+                            fontSize: 12,
+                            lineHeight: 1.5,
+                            color: 'var(--text-primary)',
+                            borderLeft: '3px solid var(--primary-600)',
                           }}
                         >
-                          {c.direction === 'inbound' ? '↙ Inbound' : '↗ Outbound'}
-                        </span>
-                        <span style={{ fontSize: 12, fontWeight: 600 }}>{c.timestamp}</span>
-                        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>• {formatDuration(c.duration)}</span>
-                        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>• Agent: <strong>{c.agentName || 'Unknown'}</strong></span>
-                      </div>
-                      <StatusChip status={c.disposition} size="sm" />
-                    </div>
-
-                    {/* Notes */}
-                    {c.notes && (
-                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 6 }}>
-                        <strong>Notes:</strong> {c.notes}
-                      </div>
-                    )}
-
-                    {/* Reason (from Call Wrap-up & Disposition) */}
-                    {(c as any).reason && (
-                      <div style={{ fontSize: 12, marginTop: 6, backgroundColor: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)', padding: '5px 10px', borderRadius: 5 }}>
-                        <strong style={{ color: 'var(--text-secondary)' }}>Reason:</strong>{' '}
-                        <span style={{ color: 'var(--text-primary)' }}>{(c as any).reason}</span>
-                      </div>
-                    )}
-
-                    {/* Audio Player */}
-                    {c.recordingUrl && (
-                      <div style={{ marginTop: 10 }}>
-                        <div style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
-                          <Volume2 size={12} /> Call Recording Audio
+                          {c.transcription}
                         </div>
-                        <audio controls src={c.recordingUrl} style={{ width: '100%', height: 36 }} />
-                      </div>
-                    )}
-
-                    {/* Collapsible Transcription */}
-                    {c.transcription && (
-                      <div style={{ marginTop: 8 }}>
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          style={{ padding: '2px 6px', fontSize: 11, gap: 4, color: 'var(--primary-600)' }}
-                          onClick={() => toggleTranscript(c.id)}
-                        >
-                          <FileText size={12} />
-                          {isExpanded ? 'Hide Transcription' : 'View Automated Transcription'}
-                          {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                        </button>
-
-                        {isExpanded && (
-                          <div
-                            style={{
-                              marginTop: 6,
-                              padding: '10px 12px',
-                              backgroundColor: 'var(--bg-surface-hover)',
-                              borderRadius: 6,
-                              fontSize: 12,
-                              lineHeight: 1.5,
-                              color: 'var(--text-primary)',
-                              borderLeft: '3px solid var(--primary-600)',
-                            }}
-                          >
-                            {c.transcription}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <FileText size={12} /> Transcript: <span>Unavailable (speech-to-text offline)</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
       )}
     </div>
   );

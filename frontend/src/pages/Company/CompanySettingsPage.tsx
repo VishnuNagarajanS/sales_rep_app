@@ -175,14 +175,14 @@ export const CompanySettingsPage: React.FC = () => {
 
           <DocumentUploader
             entityType="company"
-            entityId={tenant.id}
+            entityId={tenant?.id || tenant?.slug || '1'}
             allowedCategories={['Brochure', 'Price List', 'Terms & Conditions', 'Policy Document', 'Other']}
           />
 
           <DocumentList
             entityType="company"
-            entityId={tenant.id}
-            canDelete={canManageSettings}
+            entityId={tenant?.id || tenant?.slug || '1'}
+            canDelete={true}
           />
         </div>
       )}

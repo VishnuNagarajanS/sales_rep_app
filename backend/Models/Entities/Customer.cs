@@ -13,6 +13,10 @@ public class Customer
     public string Name { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
+    public string? NormalizedPhone { get; set; }
+    public string? NormalizedEmail { get; set; }
+    public bool IsDuplicate { get; set; } = false;
+
     public string Location { get; set; } = string.Empty;
     public string Status { get; set; } = "Active"; // Active, VIP, Inactive
     public decimal TotalValue { get; set; } = 0;

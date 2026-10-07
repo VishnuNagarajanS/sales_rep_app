@@ -14,7 +14,9 @@ public class ApplicationDbContext : DbContext
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<Document> Documents => Set<Document>();
     public DbSet<Lead> Leads => Set<Lead>();
+    public DbSet<LeadAssignmentHistory> LeadAssignmentHistories => Set<LeadAssignmentHistory>();
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<Followup> Followups => Set<Followup>();
     public DbSet<Consultation> Consultations => Set<Consultation>();
@@ -29,9 +31,6 @@ public class ApplicationDbContext : DbContext
 
     /// <summary>Activity log entries for each GHL deal (notes, calls, stage changes).</summary>
     public DbSet<GhlDealActivity> GhlDealActivities => Set<GhlDealActivity>();
-
-    /// <summary>HNW investor profiles managed by GHL India Ventures.</summary>
-    public DbSet<GhlInvestor> GhlInvestors => Set<GhlInvestor>();
 
     /// <summary>Investment opportunity pipeline linked to GHL investors.</summary>
     public DbSet<GhlInvestmentOpportunity> GhlInvestmentOpportunities => Set<GhlInvestmentOpportunity>();
@@ -53,9 +52,41 @@ public class ApplicationDbContext : DbContext
     public DbSet<Investor> Investors => Set<Investor>();
     public DbSet<InvestorKyc> InvestorKycs => Set<InvestorKyc>();
     public DbSet<InvestmentOpportunity> InvestmentOpportunities => Set<InvestmentOpportunity>();
-    public DbSet<OpportunityPitch> OpportunityPitches => Set<OpportunityPitch>();
-    public DbSet<InvestorCall> InvestorCalls => Set<InvestorCall>();
-    public DbSet<IrmPipelineCard> IrmPipelineCards => Set<IrmPipelineCard>();
+    public DbSet<KycOtpVerification> KycOtpVerifications => Set<KycOtpVerification>();
+    public DbSet<IrmCoverageAssignment> IrmCoverageAssignments => Set<IrmCoverageAssignment>();
+
+    public override int SaveChanges()
+    {
+        NormalizeContacts();
+        return base.SaveChanges();
+    }
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        NormalizeContacts();
+        return base.SaveChangesAsync(cancellationToken);
+    }
+
+    private void NormalizeContacts()
+    {
+        foreach (var entry in ChangeTracker.Entries<Lead>())
+        {
+            if (entry.State == EntityState.Added || entry.State == EntityState.Modified)
+            {
+                entry.Entity.NormalizedPhone = ContactNormalizer.NormalizePhone(entry.Entity.Phone);
+                entry.Entity.NormalizedEmail = ContactNormalizer.NormalizeEmail(entry.Entity.Email);
+            }
+        }
+
+        foreach (var entry in ChangeTracker.Entries<Customer>())
+        {
+            if (entry.State == EntityState.Added || entry.State == EntityState.Modified)
+            {
+                entry.Entity.NormalizedPhone = ContactNormalizer.NormalizePhone(entry.Entity.Phone);
+                entry.Entity.NormalizedEmail = ContactNormalizer.NormalizeEmail(entry.Entity.Email);
+            }
+        }
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -66,6 +97,12 @@ public class ApplicationDbContext : DbContext
 
         // Seed initial roles, tenants, and demo users
         SeedData(modelBuilder);
+
+        // Ignore dropped legacy tables so EF Core never queries or maps them
+        modelBuilder.Ignore<GhlInvestor>();
+        modelBuilder.Ignore<InvestorCall>();
+        modelBuilder.Ignore<OpportunityPitch>();
+        modelBuilder.Ignore<IrmPipelineCard>();
     }
 
     private static void SeedData(ModelBuilder modelBuilder)
@@ -296,107 +333,6 @@ public class ApplicationDbContext : DbContext
                 CompanyId = 2,
                 Status = UserStatus.Active,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-            }
-        );
-
-        // 4. Sample Investors (GHL Company 1)
-        modelBuilder.Entity<Investor>().HasData(
-            new Investor
-            {
-                Id = 1,
-                CompanyId = 1,
-                Name = "Rajesh Singhania",
-                Phone = "+91 98200 44556",
-                Email = "rajesh.singhania@apexcapital.in",
-                Status = InvestorStatus.ActiveInvestor,
-                InvestmentCapacity = "₹5 Cr – ₹10 Cr",
-                PreferredAssetClass = "AIF",
-                RiskTolerance = "Moderate",
-                InvestmentMandate = "Growth focused Category II AIF with commercial allocation",
-                CommittedAum = "₹5.0 Cr",
-                ReferralSource = "Wealth Partner Direct",
-                AssignedIrmId = 5,
-                AssignedIrmName = "Dhinakaran",
-                Notes = "Senior HNI investor with portfolio in Bangalore",
-                CreatedAt = new DateTime(2026, 1, 15, 0, 0, 0, DateTimeKind.Utc)
-            },
-            new Investor
-            {
-                Id = 2,
-                CompanyId = 1,
-                Name = "Meera Nambiar",
-                Phone = "+91 98450 99881",
-                Email = "meera.nambiar@nambiarholdings.com",
-                Status = InvestorStatus.Lead,
-                InvestmentCapacity = "₹10 Cr – ₹25 Cr",
-                PreferredAssetClass = "Commercial AIF",
-                RiskTolerance = "Aggressive",
-                InvestmentMandate = "High-yield commercial development tranches",
-                AssignedIrmId = 5,
-                AssignedIrmName = "Dhinakaran",
-                Notes = "Family office lead referred via CFO network",
-                CreatedAt = new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc)
-            }
-        );
-
-        // 5. Sample Investment Opportunity
-        modelBuilder.Entity<InvestmentOpportunity>().HasData(
-            new InvestmentOpportunity
-            {
-                Id = 1,
-                CompanyId = 1,
-                CreatedByIrmId = 5,
-                Title = "Prime Bengaluru Commercial Yield Fund II",
-                AssetClass = "Commercial AIF",
-                Description = "Grade-A office park pre-leased to Fortune 500 GCCs with 8.5% entry cap rate",
-                TargetIrr = 16.5m,
-                MinTicketSize = 10000000m,
-                Tenure = "5 Years",
-                RiskLevel = "Moderate",
-                TotalTargetCorpus = 1000000000m,
-                CommittedAmount = 50000000m,
-                IsActive = true,
-                CreatedAt = new DateTime(2026, 1, 10, 0, 0, 0, DateTimeKind.Utc)
-            }
-        );
-
-        // 6. Sample IRM Pipeline Cards
-        modelBuilder.Entity<IrmPipelineCard>().HasData(
-            new IrmPipelineCard
-            {
-                Id = 1,
-                CompanyId = 1,
-                InvestorId = 1,
-                AssignedIrmId = 5,
-                AssignedIrmName = "Dhinakaran",
-                InvestorName = "Rajesh Singhania",
-                InvestorPhone = "+91 98200 44556",
-                InvestorEmail = "rajesh.singhania@apexcapital.in",
-                StageId = "qualified_investor",
-                StageEnteredAt = new DateTime(2026, 2, 10, 0, 0, 0, DateTimeKind.Utc),
-                Priority = "High",
-                Value = 50000000m,
-                InvestmentAmount = "₹5 Cr",
-                PreferredAssetClass = "AIF",
-                CreatedAt = new DateTime(2026, 1, 15, 0, 0, 0, DateTimeKind.Utc)
-            },
-            new IrmPipelineCard
-            {
-                Id = 2,
-                CompanyId = 1,
-                InvestorId = 2,
-                AssignedIrmId = 5,
-                AssignedIrmName = "Dhinakaran",
-                InvestorName = "Meera Nambiar",
-                InvestorPhone = "+91 98450 99881",
-                InvestorEmail = "meera.nambiar@nambiarholdings.com",
-                StageId = "leads",
-                StageEnteredAt = new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc),
-                Priority = "High",
-                Value = 100000000m,
-                InvestmentAmount = "₹10 Cr",
-                PreferredAssetClass = "Commercial AIF",
-                CreatedAt = new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc)
             }
         );
 

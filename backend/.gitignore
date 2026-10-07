@@ -28,3 +28,5 @@ appsettings.Local.json
 # macOS / Windows metadata
 .DS_Store
 Thumbs.db
+
+backend.Tests/

@@ -4,29 +4,29 @@ import {
   Phone,
   Edit,
   ExternalLink,
+  Users,
+  RotateCcw,
+  CheckCircle2,
+  AlertCircle,
 } from 'lucide-react';
-import { Lead, CustomFieldDefinition } from '../../types';
+import { Lead } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
-import { getLeads, saveLead as apiSaveLead } from '../../services/ghlApiService';
-import { isMockMode } from '../../config/environment';
+import { apiClient } from '../../services/apiClient';
+import {
+  AssignableAgent,
+  loadAgentDirectory,
+  isLeadAssigned,
+  persistLeadAssignment,
+} from '../../services/agentDirectory';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
-import { MOCK_AGENTS } from '../../mock_data/mockData';
+import { getAuthHeaders } from '../../utils/authHeaders';
 import './AssignedLeadsPage.css';
 
-const getCustomFieldDefinitions = (tenantId?: string): CustomFieldDefinition[] => {
-  try {
-    const raw = localStorage.getItem('nexus_custom_fields');
-    const all: CustomFieldDefinition[] = raw ? JSON.parse(raw) : [];
-    return tenantId ? all.filter(d => !d.companyId || d.companyId === tenantId) : all;
-  } catch {
-    return [];
-  }
-};
 export const AssignedLeadsPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
@@ -40,15 +40,114 @@ export const AssignedLeadsPage: React.FC = () => {
   const [datePreset, setDatePreset] = useState<string>('all');
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Agent reassignment confirmation state for Edit panel
-  const [pendingAgent, setPendingAgent] = useState<{ id: string | number; name: string } | null>(null);
+  const [pendingAgent, setPendingAgent] = useState<AssignableAgent | null>(null);
+  const [agents, setAgents] = useState<AssignableAgent[]>([]);
+  const [adminIds, setAdminIds] = useState<Set<string>>(
+    new Set(user?.id ? [String(user.id)] : [])
+  );
   const [isReassignConfirmOpen, setIsReassignConfirmOpen] = useState(false);
 
   const roleCode = user?.role?.code;
   const isGhlAdmin =
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
+
+  const isAdmin =
+    isGhlAdmin ||
+    roleCode === 'company_admin' ||
+    (roleCode as string) === 'admin' ||
+    roleCode === 'super_admin' ||
+    (roleCode as string) === 'sales_manager';
+
+  // IRM Coverage & Reassignment states
+  const [activeCoverages, setActiveCoverages] = useState<any[]>([]);
+  const [isCoverageModalOpen, setIsCoverageModalOpen] = useState(false);
+  const [coverageTab, setCoverageTab] = useState<'assign' | 'active'>('assign');
+  const [fromIrmId, setFromIrmId] = useState('');
+  const [toIrmId, setToIrmId] = useState('');
+  const [coverageReason, setCoverageReason] = useState('');
+  const [isSubmittingCoverage, setIsSubmittingCoverage] = useState(false);
+  const [coverageMessage, setCoverageMessage] = useState<string | null>(null);
+  const [coverageError, setCoverageError] = useState<string | null>(null);
+
+  const loadActiveCoverages = async () => {
+    try {
+      const res = await fetch('/api/irm/admin/coverage/active', {
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.data) {
+          setActiveCoverages(json.data);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load active coverages', e);
+    }
+  };
+
+  const handleReassignWork = async () => {
+    setCoverageError(null);
+    setCoverageMessage(null);
+    if (!fromIrmId || !toIrmId) {
+      setCoverageError('Please select both the absent IRM and covering IRM.');
+      return;
+    }
+    if (fromIrmId === toIrmId) {
+      setCoverageError('Source IRM and Covering IRM cannot be the same person.');
+      return;
+    }
+
+    setIsSubmittingCoverage(true);
+    try {
+      const res = await fetch('/api/irm/admin/reassign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({
+          fromIrmId: Number(fromIrmId),
+          toIrmId: Number(toIrmId),
+          reason: coverageReason.trim() || 'Temporary coverage assignment',
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        setCoverageError(json?.message || 'Failed to reassign work.');
+      } else {
+        setCoverageMessage(
+          `Reassigned ${json.data.reassignedLeadsCount} leads, ${json.data.reassignedFollowupsCount} follow-ups, ${json.data.reassignedKycsCount} KYCs, ${json.data.reassignedDealsCount} deals to ${json.data.toIrmName}.`
+        );
+        setFromIrmId('');
+        setToIrmId('');
+        setCoverageReason('');
+        await loadActiveCoverages();
+        await loadData();
+      }
+    } catch (e: any) {
+      setCoverageError(e.message || 'An error occurred during reassignment.');
+    } finally {
+      setIsSubmittingCoverage(false);
+    }
+  };
+
+  const handleEndCoverage = async (coverageId: number) => {
+    try {
+      const res = await fetch('/api/irm/admin/coverage/end', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ coverageId }),
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        await loadActiveCoverages();
+        await loadData();
+      }
+    } catch (e) {
+      console.error('Failed to end coverage', e);
+    }
+  };
 
   // Date range helpers
   const formatDateYMD = (d: Date): string => {
@@ -126,48 +225,51 @@ export const AssignedLeadsPage: React.FC = () => {
   };
 
   const loadData = async () => {
-    try {
-      let allLeads: Lead[] = [];
-      if (isMockMode()) {
-        allLeads = storageService.getLeads(tenant?.id);
-      } else {
-        try {
-          allLeads = await getLeads(tenant?.id);
-        } catch {
-          allLeads = [];
-        }
-      }
-
-      // Merge any mock assignments from session storage if present
-      let sessionAssignments: Array<{ leadId: string; agentId: number | string; agentName: string }> = [];
-      try {
-        const raw = sessionStorage.getItem('ghl_mock_agent_assignments');
-        if (raw) sessionAssignments = JSON.parse(raw);
-      } catch { }
-
-      const assigned = allLeads
-        .map(lead => {
-          const sessionAssigned = sessionAssignments.find(a => a.leadId === lead.id);
-          if (sessionAssigned) {
-            return {
-              ...lead,
-              assignedAgentId: String(sessionAssigned.agentId),
-              assignedAgentName: sessionAssigned.agentName,
-            };
-          }
-          return lead;
-        })
-        .filter(lead => (lead as any).assignmentStatus === 'assigned' || Boolean(lead.assignedAgentId));
-
+    if (apiClient.isMockMode()) {
+      setLoadError(null);
+      const allLeads = storageService.getLeads(tenant?.id);
+      const assigned = allLeads.filter(lead => isLeadAssigned(lead, adminIds));
       setLeads(assigned);
       setSelectedLead(prev => {
         if (!prev) return null;
         return assigned.find(l => l.id === prev.id) || null;
       });
-    } catch (err) {
-      console.error('Failed to load assigned leads', err);
+      return;
+    }
+
+    try {
+      setLoadError(null);
+      const res = await apiClient.get<any>('/sales-executive/leads?page=1&pageSize=200&assignment=assigned');
+      if (res.success && res.data && res.data.items) {
+        const apiLeads = res.data.items.map((item: any) => ({
+          ...item,
+          id: String(item.id),
+          assignedAgentId: item.assignedAgentId ? String(item.assignedAgentId) : undefined,
+          customFields: item.customFields || {}
+        }));
+        setLeads(apiLeads);
+        setSelectedLead(prev => {
+          if (!prev) return null;
+          return apiLeads.find((l: any) => l.id === prev.id) || null;
+        });
+      } else {
+        setLoadError(res.message || 'Failed to load assigned leads from server.');
+      }
+    } catch (err: any) {
+      console.error('Failed to load leads from API', err);
+      setLoadError(err?.message || 'Failed to connect to server. Please try again.');
     }
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    loadAgentDirectory(tenant?.id, user?.id).then(dir => {
+      if (cancelled) return;
+      setAgents(dir.agents);
+      setAdminIds(dir.adminIds);
+    });
+    return () => { cancelled = true; };
+  }, [tenant?.id, user?.id]);
 
   useEffect(() => {
     loadData();
@@ -179,11 +281,25 @@ export const AssignedLeadsPage: React.FC = () => {
       }, 300);
     };
     window.addEventListener('nexus_storage_updated', handleUpdate);
+    // Polling every 15 seconds while visible
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible' && !apiClient.isMockMode()) {
+        loadData();
+      }
+    }, 15000);
+    
+    const handleFocus = () => {
+      if (!apiClient.isMockMode()) loadData();
+    };
+    window.addEventListener('focus', handleFocus);
+
     return () => {
       clearTimeout(timeoutId);
       window.removeEventListener('nexus_storage_updated', handleUpdate);
+      window.removeEventListener('focus', handleFocus);
+      clearInterval(interval);
     };
-  }, [tenant?.id]);
+  }, [tenant?.id, adminIds]);
 
   const handleOpenEdit = (lead: Lead) => {
     setFormData({ ...lead });
@@ -192,14 +308,14 @@ export const AssignedLeadsPage: React.FC = () => {
     setIsEditDrawerOpen(true);
   };
 
-  // Populate agent options from storageService or MOCK_AGENTS, ensuring the current assigned agent is included
-  const agentOptions = useMemo<Array<{ id: string | number; name: string }>>(() => {
-    const list: Array<{ id: string | number; name: string }> = storageService.getAgents ? [...storageService.getAgents(tenant?.id)] : [...MOCK_AGENTS];
+  // Populate agent options from agents (with storageService fallback), ensuring the current assigned agent is included
+  const agentOptions = useMemo<AssignableAgent[]>(() => {
+    const list: AssignableAgent[] = agents.length > 0 ? [...agents] : (storageService.getAgents(tenant?.id) as any[] || []);
     if (formData.assignedAgentName && !list.some(a => a.name.toLowerCase() === formData.assignedAgentName?.toLowerCase())) {
-      list.unshift({ id: 'current', name: formData.assignedAgentName });
+      list.unshift({ id: 'current', name: formData.assignedAgentName } as any);
     }
     return list;
-  }, [formData.assignedAgentName]);
+  }, [formData.assignedAgentName, agents, tenant?.id]);
 
   const handleAgentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newName = e.target.value;
@@ -233,7 +349,7 @@ export const AssignedLeadsPage: React.FC = () => {
     setPendingAgent(null);
   };
 
-  const handleSaveLead = (e: React.FormEvent) => {
+  const handleSaveLead = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.phone) return;
 
@@ -245,39 +361,58 @@ export const AssignedLeadsPage: React.FC = () => {
       companyId: formData.companyId || tenant?.id || 't-ghl-01',
     };
 
-    if (isMockMode()) {
+    if (apiClient.isMockMode()) {
       storageService.saveLead(leadToSave);
-      loadData();
     } else {
-      apiSaveLead(leadToSave)
-        .then(() => {
-          storageService.saveLead(leadToSave);
-          loadData();
-        })
-        .catch(() => {
-          storageService.saveLead(leadToSave);
-          loadData();
+      try {
+        const leadId = parseInt(leadToSave.id, 10);
+        await apiClient.put(`/sales-executive/leads/${leadId}`, {
+          name: leadToSave.name,
+          phone: leadToSave.phone,
+          companyId: parseInt(String(leadToSave.companyId), 10) || 1,
+          email: leadToSave.email,
+          location: leadToSave.location,
+          source: leadToSave.source,
+          priority: leadToSave.priority,
+          notes: leadToSave.notes,
+          investmentCapacity: leadToSave.customFields?.investmentCapacity || ''
         });
+      } catch (err) {
+        console.error('Failed to update lead', err);
+      }
     }
 
-    // Keep session mock assignments in sync if tracked
-    try {
-      const raw = sessionStorage.getItem('ghl_mock_agent_assignments');
-      if (raw) {
-        const assignments: Array<{ leadId: string; agentId: number | string; agentName: string }> = JSON.parse(raw);
-        const idx = assignments.findIndex(a => a.leadId === leadToSave.id);
-        if (idx >= 0) {
-          assignments[idx] = {
-            ...assignments[idx],
-            agentId: leadToSave.assignedAgentId || '',
-            agentName: leadToSave.assignedAgentName || '',
-          };
-          sessionStorage.setItem('ghl_mock_agent_assignments', JSON.stringify(assignments));
+    // If the agent was changed in the edit panel, persist the reassignment
+    const agentChanged =
+      existingLead && String(existingLead.assignedAgentId || '') !== String(leadToSave.assignedAgentId || '');
+    if (agentChanged) {
+      const newAgent = agentOptions.find(a => a.id === String(leadToSave.assignedAgentId));
+      if (newAgent) {
+        if (apiClient.isMockMode()) {
+          try {
+            await persistLeadAssignment(leadToSave, newAgent);
+          } catch (err: any) {
+            console.error('Reassign failed', err);
+            alert(`Failed to reassign lead: ${err.message || 'Unknown error'}`);
+          }
+        } else {
+          try {
+            const res = await apiClient.post<any>('/ghl/leads/reassign', {
+              leadIds: [parseInt(leadToSave.id, 10)],
+              agentId: newAgent.dbId
+            });
+            const skipped = res?.data?.skipped || [];
+            if (skipped.length > 0) alert(`Reassign skipped: ${skipped[0].reason}`);
+          } catch (err: any) {
+            console.error('Reassign failed', err);
+            alert(`Reassign failed: ${err.message || 'Unknown error'}`);
+          }
         }
       }
-    } catch {}
+    }
 
     setIsEditDrawerOpen(false);
+    loadData();
   };
 
   // Table columns exactly matching the requested specification
@@ -434,7 +569,7 @@ export const AssignedLeadsPage: React.FC = () => {
   return (
     <div className="leads-page assigned-leads-page">
       {/* Header */}
-      <div className="page-header">
+      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <h1 className="page-title">
             <UserCheck size={24} color="var(--primary-600)" /> Assigned Leads
@@ -443,9 +578,51 @@ export const AssignedLeadsPage: React.FC = () => {
             View all inbound prospects that have been assigned to sales agents for {tenant?.name}.
           </p>
         </div>
+        {isAdmin && (
+          <div>
+            <button
+              className="btn btn-secondary"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+              onClick={() => {
+                setIsCoverageModalOpen(true);
+                loadActiveCoverages();
+              }}
+            >
+              <Users size={15} /> IRM Coverage &amp; Reassignment
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Assigned Leads Table */}
+      {loadError && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '12px 16px',
+          marginBottom: 16,
+          borderRadius: 8,
+          backgroundColor: 'rgba(239, 68, 68, 0.1)',
+          border: '1px solid rgba(239, 68, 68, 0.25)',
+          color: '#ef4444',
+          fontSize: 13,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <AlertCircle size={16} />
+            <span>{loadError}</span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => loadData()}
+            style={{ borderColor: '#ef4444', color: '#ef4444' }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       <DataTable
         columns={columns}
         data={filteredLeads}
@@ -527,7 +704,7 @@ export const AssignedLeadsPage: React.FC = () => {
             {/* Quick Info Banner */}
             <div className="lead-quick-banner">
               <div className="lead-assigned-note">
-                Assigned to <strong>{selectedLead.assignedAgentName || 'Unassigned'}</strong>
+                Assigned : <strong>{selectedLead.assignedAgentName || 'Unassigned'}</strong>
               </div>
             </div>
 
@@ -560,10 +737,8 @@ export const AssignedLeadsPage: React.FC = () => {
 
             {/* Tenant-Specific Dynamic Custom Fields */}
             {(() => {
-              const activeDefs = (storageService.getCustomFieldDefinitions
-                ? storageService.getCustomFieldDefinitions(tenant?.id)
-                : getCustomFieldDefinitions(tenant?.id)
-              )
+              const activeDefs = storageService
+                .getCustomFieldDefinitions(tenant?.id)
                 .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
                 .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
 
@@ -777,6 +952,151 @@ export const AssignedLeadsPage: React.FC = () => {
           <strong>{formData.assignedAgentName || 'Unassigned'}</strong> to{' '}
           <strong>{pendingAgent?.name}</strong>.
         </p>
+      </Modal>
+
+      {/* Admin IRM Coverage & Reassignment Modal */}
+      <Modal
+        isOpen={isCoverageModalOpen}
+        onClose={() => setIsCoverageModalOpen(false)}
+        title="Admin IRM Coverage & Work Reassignment"
+        subtitle="Temporarily assign an absent IRM's open records to a covering IRM with reversible audit trail."
+        maxWidth={700}
+      >
+        <div style={{ padding: '4px 0' }}>
+          {/* Tabs */}
+          <div style={{ display: 'flex', gap: 8, borderBottom: '1px solid var(--border-color)', marginBottom: 16 }}>
+            <button
+              className={`btn btn-sm ${coverageTab === 'assign' ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => setCoverageTab('assign')}
+            >
+              Assign Coverage
+            </button>
+            <button
+              className={`btn btn-sm ${coverageTab === 'active' ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => {
+                setCoverageTab('active');
+                loadActiveCoverages();
+              }}
+            >
+              Active Coverages ({activeCoverages.length})
+            </button>
+          </div>
+
+          {coverageError && (
+            <div style={{ padding: '8px 12px', borderRadius: 6, backgroundColor: 'rgba(239,68,68,0.1)', color: '#dc2626', fontSize: 13, marginBottom: 14 }}>
+              ⚠️ {coverageError}
+            </div>
+          )}
+
+          {coverageMessage && (
+            <div style={{ padding: '8px 12px', borderRadius: 6, backgroundColor: 'rgba(16,185,129,0.1)', color: '#059669', fontSize: 13, marginBottom: 14 }}>
+              ✓ {coverageMessage}
+            </div>
+          )}
+
+          {coverageTab === 'assign' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Absent IRM (Source) *</label>
+                  <select
+                    className="form-select"
+                    value={fromIrmId}
+                    onChange={e => setFromIrmId(e.target.value)}
+                  >
+                    <option value="">— Select Absent IRM —</option>
+                    {agentOptions.filter(a => a.id !== 'current').map(a => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Covering IRM (Destination) *</label>
+                  <select
+                    className="form-select"
+                    value={toIrmId}
+                    onChange={e => setToIrmId(e.target.value)}
+                  >
+                    <option value="">— Select Covering IRM —</option>
+                    {agentOptions.filter(a => a.id !== 'current' && String(a.id) !== fromIrmId).map(a => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Reason for Coverage</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Annual leave coverage until Monday"
+                  value={coverageReason}
+                  onChange={e => setCoverageReason(e.target.value)}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setIsCoverageModalOpen(false)}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={isSubmittingCoverage || !fromIrmId || !toIrmId}
+                  onClick={handleReassignWork}
+                >
+                  {isSubmittingCoverage ? 'Reassigning...' : 'Assign Coverage'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              {activeCoverages.length === 0 ? (
+                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+                  No active coverage assignments for this organization.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {activeCoverages.map((c: any) => (
+                    <div
+                      key={c.id}
+                      style={{
+                        padding: '12px 14px',
+                        borderRadius: 8,
+                        border: '1px solid var(--border-color)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        backgroundColor: 'var(--bg-card)'
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>
+                          {c.originalIrmName} ➔ Covering: {c.coveringIrmName}
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
+                          Reason: {c.reason || 'None specified'} • Started: {new Date(c.startedAt).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                        onClick={() => handleEndCoverage(c.id)}
+                      >
+                        <RotateCcw size={13} /> End &amp; Revert
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </Modal>
     </div>
   );

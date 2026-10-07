@@ -10,4 +10,6 @@ public class LogCallDto
     public string? Notes { get; set; }
     public int? LeadId { get; set; }
     public int? CustomerId { get; set; }
+    /// <summary>Twilio Call SID (CAxxxx) to correlate with Twilio's records.</summary>
+    public string? TwilioCallSid { get; set; }
 }

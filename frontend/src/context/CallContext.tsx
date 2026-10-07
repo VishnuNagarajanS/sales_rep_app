@@ -11,9 +11,11 @@ import {
 } from '../services/ghlApiService';
 import { storageService } from '../services/storageService';
 import { useAuth } from './AuthContext';
+import { twilioVoiceService } from '../services/twilioVoiceService';
+import { Call } from '@twilio/voice-sdk';
 
 export type AgentAvailability = 'Available' | 'Busy' | 'Offline';
-export type CallStatus = 'idle' | 'ringing' | 'connected' | 'ended';
+export type CallStatus = 'idle' | 'ringing' | 'connected' | 'ended' | 'simulated' | 'error' | 'unavailable';
 
 interface MatchedRecord {
   type: 'lead' | 'customer' | 'unknown';
@@ -41,6 +43,10 @@ interface ActiveCall {
   // Follow-up task linkage — set when the call is initiated from a scheduled follow-up task.
   // The disposition modal uses this to restrict available Call Outcome options.
   sourceFollowupId?: string;
+  isSimulated?: boolean;
+  providerStatus?: string;
+  twilioCallSid?: string;
+  errorMessage?: string;
 }
 
 interface CallContextType {
@@ -66,6 +72,7 @@ interface CallContextType {
     scheduleFollowup?: { scheduledAt: string; priority: 'Low' | 'Medium' | 'High'; notes: string },
     reason?: string
   ) => void;
+  skipDispositionWithReason: (reason: string, notes?: string) => Promise<void>;
   closeDispositionModal: () => void;
 }
 
@@ -91,6 +98,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [leads, setLeads] = useState<Lead[]>([]);
 
   const timerRef = useRef<any>(null);
+  const twilioCallRef = useRef<Call | null>(null);
 
   // Sync leads for incoming call lookup
   useEffect(() => {
@@ -99,9 +107,116 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [tenant?.id]);
 
-  // Timer for connected calls
+  // Register Twilio Voice device and incoming call listener
   useEffect(() => {
-    if (activeCall?.status === 'connected') {
+    if (user?.id) {
+      twilioVoiceService.initializeDevice().catch(err => {
+        console.warn('[CallContext] Twilio Voice initialization notice:', err?.message || err);
+      });
+
+      const unsubIncoming = twilioVoiceService.onIncomingCall((incomingCall: Call) => {
+        if (availability === 'Offline' || availability === 'Busy') {
+          try { incomingCall.reject(); } catch {}
+          return;
+        }
+
+        twilioCallRef.current = incomingCall;
+        const phone = incomingCall.parameters.From || 'Unknown';
+        const sid = incomingCall.parameters.CallSid;
+
+        const matchedLead = leads.find(l => l.phone.includes(phone.slice(-5)) || l.name.toLowerCase().includes(phone.toLowerCase()));
+
+        const newCall: ActiveCall = {
+          id: `call-${Date.now()}`,
+          contactName: matchedLead ? matchedLead.name : (incomingCall.parameters.From || 'Incoming Caller'),
+          contactPhone: phone,
+          direction: 'inbound',
+          status: 'ringing',
+          isSimulated: false,
+          twilioCallSid: sid,
+          providerStatus: 'Incoming Twilio Voice Call',
+          duration: 0,
+          isMuted: false,
+          isOnHold: false,
+          quickNotes: '',
+          matchedRecord: matchedLead
+            ? { type: 'lead', id: matchedLead.id, name: matchedLead.name, meta: `Lead • Priority: ${matchedLead.priority}` }
+            : { type: 'unknown', name: 'Unknown Caller', meta: 'Unregistered Number' },
+          isExpanded: true,
+          isVideoMode: false,
+          meetingLink: null,
+        };
+        setActiveCall(newCall);
+
+        incomingCall.on('accept', () => {
+          setActiveCall(prev => (prev ? {
+            ...prev,
+            status: 'connected',
+            isSimulated: false,
+            twilioCallSid: incomingCall.parameters.CallSid || prev.twilioCallSid,
+            providerStatus: 'Twilio Call Connected',
+          } : null));
+        });
+
+        const handleEnded = () => {
+          setActiveCall(prev => {
+            if (prev) {
+              const finished: ActiveCall = {
+                ...prev,
+                status: 'ended',
+                twilioCallSid: incomingCall.parameters.CallSid || prev.twilioCallSid,
+                duration: prev.status === 'connected' ? prev.duration : 0,
+              };
+              setLastCallRecord(finished);
+              setShowDispositionModal(true);
+            }
+            return null;
+          });
+          twilioCallRef.current = null;
+        };
+
+        incomingCall.on('disconnect', handleEnded);
+        incomingCall.on('cancel', handleEnded);
+        incomingCall.on('reject', handleEnded);
+        incomingCall.on('error', (twErr: any) => {
+          console.error('[Twilio] Incoming call error:', twErr);
+          handleEnded();
+        });
+
+        const prefs = getCallPreferences();
+        if (prefs.soundEnabled) {
+          try {
+            const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+            if (AudioCtx) {
+              const ctx = new AudioCtx();
+              const osc = ctx.createOscillator();
+              osc.frequency.value = 880;
+              osc.type = 'sine';
+              osc.connect(ctx.destination);
+              osc.start();
+              osc.stop(ctx.currentTime + 0.3);
+            }
+          } catch {}
+        }
+        if (prefs.desktopNotifEnabled && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          try {
+            new Notification('Incoming Twilio Call', { body: `${newCall.contactName} — ${newCall.contactPhone}` });
+          } catch {}
+        }
+        if (prefs.autoBusyEnabled) {
+          setAvailability('Busy');
+        }
+      });
+
+      return () => {
+        unsubIncoming();
+      };
+    }
+  }, [user?.id, availability, leads]);
+
+  // Timer for connected calls only (never increments for simulated/unconnected calls)
+  useEffect(() => {
+    if (activeCall?.status === 'connected' && !activeCall.isSimulated) {
       timerRef.current = setInterval(() => {
         setActiveCall(prev => (prev ? { ...prev, duration: prev.duration + 1 } : null));
       }, 1000);
@@ -111,15 +226,24 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [activeCall?.status]);
+  }, [activeCall?.status, activeCall?.isSimulated]);
 
-  const initiateCall = (name: string, phone: string, recordType: 'lead' | 'customer' = 'lead', recordId?: string, sourceFollowupId?: string) => {
+  const initiateCall = async (
+    name: string,
+    phone: string,
+    recordType: 'lead' | 'customer' = 'lead',
+    recordId?: string,
+    sourceFollowupId?: string
+  ) => {
+    const callId = `call-${Date.now()}`;
     const newCall: ActiveCall = {
-      id: `call-${Date.now()}`,
+      id: callId,
       contactName: name,
       contactPhone: phone,
       direction: 'outbound',
-      status: 'connected', // instantly connected for dialer simulation
+      status: 'ringing',
+      isSimulated: false,
+      providerStatus: 'Connecting to Twilio Voice...',
       duration: 0,
       isMuted: false,
       isOnHold: false,
@@ -136,9 +260,80 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sourceFollowupId,
     };
     setActiveCall(newCall);
+
     const prefs = getCallPreferences();
     if (prefs.autoBusyEnabled && availability === 'Available') {
       setAvailability('Busy');
+    }
+
+    try {
+      const call = await twilioVoiceService.makeCall(phone);
+      twilioCallRef.current = call;
+
+      const sid = call.parameters.CallSid;
+      if (sid) {
+        setActiveCall(prev => (prev ? { ...prev, twilioCallSid: sid } : null));
+      }
+
+      call.on('ringing', () => {
+        setActiveCall(prev => (prev ? { ...prev, status: 'ringing', providerStatus: 'Twilio: Ringing...' } : null));
+      });
+
+      call.on('accept', () => {
+        const confirmedSid = call.parameters.CallSid || sid;
+        setActiveCall(prev => (prev ? {
+          ...prev,
+          status: 'connected',
+          isSimulated: false,
+          twilioCallSid: confirmedSid,
+          providerStatus: 'Twilio: Call Connected',
+        } : null));
+      });
+
+      const handleCallEnded = () => {
+        setActiveCall(prev => {
+          if (prev) {
+            const finished: ActiveCall = {
+              ...prev,
+              status: 'ended',
+              twilioCallSid: call.parameters.CallSid || prev.twilioCallSid,
+              duration: prev.status === 'connected' ? prev.duration : 0,
+            };
+            setLastCallRecord(finished);
+            setShowDispositionModal(true);
+          }
+          return null;
+        });
+        twilioCallRef.current = null;
+      };
+
+      call.on('disconnect', handleCallEnded);
+      call.on('cancel', handleCallEnded);
+      call.on('reject', handleCallEnded);
+      call.on('error', (twErr: any) => {
+        console.error('[TwilioCall] Call error:', twErr);
+        const errMsg = twErr?.message || 'Call failed';
+        setActiveCall(prev => (prev ? {
+          ...prev,
+          status: 'error',
+          providerStatus: `Twilio Error: ${errMsg}`,
+          errorMessage: errMsg,
+        } : null));
+      });
+
+      call.on('mute', (isMuted: boolean) => {
+        setActiveCall(prev => (prev ? { ...prev, isMuted } : null));
+      });
+    } catch (err: any) {
+      console.error('[TwilioCall] Outbound call initialization error:', err);
+      const errMsg = err?.message || 'Twilio Voice unavailable';
+      setActiveCall(prev => (prev ? {
+        ...prev,
+        status: 'unavailable',
+        isSimulated: false,
+        providerStatus: `Telephony Gateway Unavailable: ${errMsg}`,
+        errorMessage: errMsg,
+      } : null));
     }
   };
 
@@ -156,6 +351,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       contactPhone: matchedLead ? matchedLead.phone : phone,
       direction: 'inbound',
       status: 'ringing',
+      isSimulated: true,
+      providerStatus: 'Simulated Incoming Call (Carrier Offline)',
       duration: 0,
       isMuted: false,
       isOnHold: false,
@@ -169,7 +366,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     setActiveCall(newCall);
     const prefs = getCallPreferences();
-    // Play ringtone via Web Audio API if sound is enabled
     if (prefs.soundEnabled) {
       try {
         const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -184,7 +380,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } catch { /* audio not available */ }
     }
-    // Desktop notification if enabled and permission granted
     if (prefs.desktopNotifEnabled && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       try {
         new Notification('Incoming Call', { body: `${newCall.contactName} — ${newCall.contactPhone}` });
@@ -196,24 +391,57 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const acceptCall = () => {
-    if (activeCall) {
-      setActiveCall({ ...activeCall, status: 'connected', duration: 0, isExpanded: true, isVideoMode: false, meetingLink: null });
+    if (twilioCallRef.current) {
+      try {
+        twilioCallRef.current.accept();
+      } catch (err) {
+        console.error('[TwilioCall] accept error:', err);
+      }
+    } else if (activeCall) {
+      const status: CallStatus = activeCall.isSimulated ? 'simulated' : 'connected';
+      setActiveCall({ 
+        ...activeCall, 
+        status, 
+        duration: 0, 
+        isExpanded: true, 
+        isVideoMode: false, 
+        meetingLink: null 
+      });
     }
   };
 
   const rejectCall = () => {
-    if (activeCall) {
-      setActiveCall(null);
-      setAvailability(prev => prev === 'Busy' ? 'Available' : prev);
+    if (twilioCallRef.current) {
+      try {
+        twilioCallRef.current.reject();
+      } catch (err) {
+        console.error('[TwilioCall] reject error:', err);
+      }
+      twilioCallRef.current = null;
     }
+    setActiveCall(null);
+    setAvailability(prev => prev === 'Busy' ? 'Available' : prev);
   };
 
   const endCall = (skipDisposition?: boolean | unknown) => {
+    if (twilioCallRef.current) {
+      try {
+        twilioCallRef.current.disconnect();
+      } catch (err) {
+        console.error('[TwilioCall] disconnect error:', err);
+      }
+      twilioCallRef.current = null;
+    }
     if (activeCall) {
-      const finishedCall = { ...activeCall, status: 'ended' as CallStatus };
+      const isConnectedReal = activeCall.status === 'connected' && !activeCall.isSimulated;
+      const finishedCall: ActiveCall = { 
+        ...activeCall, 
+        status: 'ended' as CallStatus,
+        duration: isConnectedReal ? activeCall.duration : 0
+      };
       setLastCallRecord(finishedCall);
       setActiveCall(null);
-      if (skipDisposition === true) {
+      if (skipDisposition === true || activeCall.status === 'error' || activeCall.status === 'unavailable') {
         setAvailability(prev => prev === 'Busy' ? 'Available' : prev);
       } else {
         setShowDispositionModal(true);
@@ -222,7 +450,17 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const toggleMute = () => {
-    if (activeCall) {
+    if (twilioCallRef.current) {
+      const nextMute = !activeCall?.isMuted;
+      try {
+        twilioCallRef.current.mute(nextMute);
+      } catch (err) {
+        console.error('[TwilioCall] mute error:', err);
+      }
+      if (activeCall) {
+        setActiveCall({ ...activeCall, isMuted: nextMute });
+      }
+    } else if (activeCall) {
       setActiveCall({ ...activeCall, isMuted: !activeCall.isMuted });
     }
   };
@@ -264,24 +502,43 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     reason?: string
   ) => {
     if (lastCallRecord && tenant && user) {
+      const isRealConnected = !lastCallRecord.isSimulated && lastCallRecord.status === 'connected';
+      const isSim = !isRealConnected;
+      let finalNotes = notes || lastCallRecord.quickNotes || '';
+      if (isSim && !finalNotes.includes('Simulated') && !finalNotes.includes('Not Connected')) {
+        finalNotes = finalNotes 
+          ? `[Provider Result: Call Not Connected (0s)]\n${finalNotes}` 
+          : '[Provider Result: Call Not Connected (0s)]';
+      }
+      if (reason?.trim()) {
+        finalNotes = finalNotes ? `${finalNotes}\n[Reason]: ${reason.trim()}` : `[Reason]: ${reason.trim()}`;
+      }
+
+      // Do not mark simulated or unconfirmed calls as connected or successful
+      let effectiveDispo = disposition;
+      if (isSim && (effectiveDispo === 'Interested' || effectiveDispo === 'Converted')) {
+        effectiveDispo = 'No Response';
+      }
+
       const callRecord: CallRecord = {
         id: lastCallRecord.id,
         companyId: tenant.id,
         contactName: lastCallRecord.contactName,
         contactPhone: lastCallRecord.contactPhone,
         direction: lastCallRecord.direction,
-        duration: lastCallRecord.duration,
+        duration: isSim ? 0 : lastCallRecord.duration,
         agentId: user.id,
         agentName: user.name,
-        disposition,
+        disposition: effectiveDispo,
         timestamp: new Date().toISOString(),
-        recordingUrl: 'https://cdn.nexusplatform.io/recordings/sample.mp3',
-        transcription: `Automated Call Transcript: Agent ${user.name} connected with ${lastCallRecord.contactName}. Call disposition marked as ${disposition}.`,
-        notes: notes || lastCallRecord.quickNotes || undefined,
+        recordingUrl: undefined,
+        transcription: undefined,
+        notes: finalNotes || undefined,
         reason: reason || undefined,
+        twilioCallSid: lastCallRecord.twilioCallSid,
       };
 
-      apiLogCall(callRecord).catch(console.error);
+      await apiLogCall(callRecord);
 
       // Locate matched lead if any
       const leadId = lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : null;
@@ -337,7 +594,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             cust.customFields = { ...cust.customFields, ...matchedLead.customFields };
           }
         }
-        apiSaveCustomer(cust).catch(console.error);
+        await apiSaveCustomer(cust);
 
         if (matchedLead) {
           matchedLead.status = 'Interested';
@@ -346,7 +603,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           matchedLead.customFields.qualifiedByAgentName = user.name;
           matchedLead.customFields.qualifiedAt = new Date().toISOString();
           matchedLead.customFields.transferredToIrm = 'true';
-          apiSaveLead(matchedLead).catch(console.error);
+          await apiSaveLead(matchedLead);
           storageService.saveLead(matchedLead);
         } else if (lastCallRecord.contactPhone || lastCallRecord.contactName) {
           const newInterestedLead: Lead = {
@@ -369,7 +626,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
               transferredToIrm: 'true',
             },
           };
-          apiSaveLead(newInterestedLead).catch(console.error);
+          await apiSaveLead(newInterestedLead);
           storageService.saveLead(newInterestedLead);
         }
       }
@@ -388,15 +645,17 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (notes) {
             matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Follow-up Required: ${notes}`;
           }
-          apiSaveLead(matchedLead).catch(console.error);
+          await apiSaveLead(matchedLead);
+          storageService.saveLead(matchedLead);
         }
 
-        apiSaveFollowup({
+        await apiSaveFollowup({
           id: `flw-${Date.now()}`,
           companyId: tenant.id,
           contactId: matchedLead?.id || lastCallRecord.matchedRecord?.id || `contact-${Date.now()}`,
           contactName: lastCallRecord.contactName,
           contactPhone: lastCallRecord.contactPhone,
+          contactEmail: (matchedLead as any)?.email || (lastCallRecord.matchedRecord as any)?.email || undefined,
           contactType: 'lead',
           scheduledAt: followupScheduledAt,
           priority: followupPriority,
@@ -404,7 +663,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           notes: followupNotes,
           assignedAgentId: matchedLead?.assignedAgentId || user.id,
           assignedAgentName: matchedLead?.assignedAgentName || user.name,
-        }).catch(console.error);
+        });
       }
 
       // 3. Call Back -> Keep in Leads section, update status to Callback
@@ -417,7 +676,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (notes) {
             matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Call Back: ${notes}`;
           }
-          apiSaveLead(matchedLead).catch(console.error);
+          await apiSaveLead(matchedLead);
         } else {
           const newLead: Lead = {
             id: `lead-${Date.now()}`,
@@ -435,11 +694,11 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: notes || '',
             customFields: {},
           };
-          apiSaveLead(newLead).catch(console.error);
+          await apiSaveLead(newLead);
         }
 
         if (scheduleFollowup) {
-          apiSaveFollowup({
+          await apiSaveFollowup({
             id: `flw-${Date.now()}`,
             companyId: tenant.id,
             contactId: matchedLead?.id || lastCallRecord.matchedRecord?.id || 'contact-new',
@@ -452,7 +711,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: scheduleFollowup.notes || (notes ? `Callback reminder: ${notes}` : `Callback reminder for ${lastCallRecord.contactName}`),
             assignedAgentId: user.id,
             assignedAgentName: user.name,
-          }).catch(console.error);
+          });
         }
       }
 
@@ -462,7 +721,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (matchedLead) {
           matchedLead.status = 'Not Interested';
           matchedLead.customFields = { ...matchedLead.customFields, dispositionReason: reasonText };
-          apiSaveLead(matchedLead).catch(console.error);
+          await apiSaveLead(matchedLead);
         } else {
           const newLead: Lead = {
             id: `lead-${Date.now()}`,
@@ -480,7 +739,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: '',
             customFields: { dispositionReason: reasonText },
           };
-          apiSaveLead(newLead).catch(console.error);
+          await apiSaveLead(newLead);
         }
       }
 
@@ -490,7 +749,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (matchedLead) {
           matchedLead.status = 'Junk';
           matchedLead.customFields = { ...matchedLead.customFields, dispositionReason: reasonText };
-          apiSaveLead(matchedLead).catch(console.error);
+          await apiSaveLead(matchedLead);
         } else {
           const newLead: Lead = {
             id: `lead-${Date.now()}`,
@@ -508,18 +767,21 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: '',
             customFields: { dispositionReason: reasonText },
           };
-          apiSaveLead(newLead).catch(console.error);
+          await apiSaveLead(newLead);
         }
       }
 
-      // 6. No Response -> Keep in Leads section, update status to No Response
+      // 6. No Response -> Keep in Leads section, update status to No Response, create scheduled follow-up
       else if (disposition === 'No Response') {
         if (matchedLead) {
           matchedLead.status = 'No Response';
+          if (scheduleFollowup?.scheduledAt) {
+            matchedLead.nextFollowupDate = scheduleFollowup.scheduledAt;
+          }
           if (notes) {
             matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] No Response: ${notes}`;
           }
-          apiSaveLead(matchedLead).catch(console.error);
+          await apiSaveLead(matchedLead);
         } else {
           const newLead: Lead = {
             id: `lead-${Date.now()}`,
@@ -537,7 +799,24 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: notes || '',
             customFields: {},
           };
-          apiSaveLead(newLead).catch(console.error);
+          await apiSaveLead(newLead);
+        }
+
+        if (scheduleFollowup) {
+          await apiSaveFollowup({
+            id: `flw-${Date.now()}`,
+            companyId: tenant.id,
+            contactId: matchedLead?.id || lastCallRecord.matchedRecord?.id || 'contact-new',
+            contactName: lastCallRecord.contactName,
+            contactPhone: lastCallRecord.contactPhone,
+            contactType: lastCallRecord.matchedRecord?.type === 'customer' ? 'customer' : 'lead',
+            scheduledAt: scheduleFollowup.scheduledAt,
+            priority: scheduleFollowup.priority,
+            status: 'Pending',
+            notes: scheduleFollowup.notes || (notes ? `Follow-up from No Response: ${notes}` : `Follow-up required for ${lastCallRecord.contactName}`),
+            assignedAgentId: user.id,
+            assignedAgentName: user.name,
+          });
         }
       }
 
@@ -564,7 +843,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
               notes: `Converted from lead. Original notes: ${matchedLead.notes || ''}`,
               customFields: matchedLead.customFields,
             };
-            apiSaveCustomer(cust).catch(console.error);
+            await apiSaveCustomer(cust);
           }
 
           const newDeal: Deal = {
@@ -581,15 +860,79 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: `Deal initiated upon converting lead ${matchedLead.name}. ${notes ? `Call notes: ${notes}` : ''}`,
             createdAt: new Date().toISOString().split('T')[0],
           };
-          apiSaveDeal(newDeal).catch(console.error);
+          await apiSaveDeal(newDeal);
 
           matchedLead.status = 'Converted';
           if (notes) {
             matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Converted: ${notes}`;
           }
-          apiSaveLead(matchedLead).catch(console.error);
+          await apiSaveLead(matchedLead);
         }
       }
+    }
+
+    setShowDispositionModal(false);
+    setLastCallRecord(null);
+    setAvailability(prev => prev === 'Busy' ? 'Available' : prev);
+  };
+
+  const skipDispositionWithReason = async (reason: string, notes?: string) => {
+    if (lastCallRecord && tenant && user) {
+      const isSim = !!lastCallRecord.isSimulated || lastCallRecord.status !== 'connected';
+      const trimmedReason = reason.trim();
+      let combinedNotes = notes?.trim()
+        ? `${notes.trim()}\n[Skip Reason]: ${trimmedReason}`
+        : `[Skip Reason]: ${trimmedReason}`;
+      if (isSim && !combinedNotes.includes('Simulated')) {
+        combinedNotes = `[Provider Result: Simulated - Call Not Connected (0s)]\n${combinedNotes}`;
+      }
+
+      const callRecord: CallRecord = {
+        id: lastCallRecord.id,
+        companyId: tenant.id,
+        contactName: lastCallRecord.contactName,
+        contactPhone: lastCallRecord.contactPhone,
+        direction: lastCallRecord.direction,
+        duration: isSim ? 0 : lastCallRecord.duration,
+        agentId: user.id,
+        agentName: user.name,
+        disposition: 'Skipped',
+        timestamp: new Date().toISOString(),
+        recordingUrl: undefined,
+        transcription: undefined,
+        notes: combinedNotes,
+        reason: trimmedReason,
+        leadId: lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : undefined,
+        customerId: lastCallRecord.matchedRecord?.type === 'customer' ? lastCallRecord.matchedRecord.id : undefined,
+      };
+
+      await apiLogCall(callRecord);
+
+      // Record activity on matched lead
+      const leadId = lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : null;
+      const allLeads = leads.length > 0 ? leads : (tenant ? storageService.getLeads(tenant.id) : []);
+      const normalize = (p: string) => (p || '').replace(/\D/g, '').slice(-10);
+      const callPhoneDigits = normalize(lastCallRecord.contactPhone);
+      const matchedLead = leadId
+        ? allLeads.find((l: Lead) => l.id === leadId)
+        : allLeads.find((l: Lead) =>
+            (callPhoneDigits && normalize(l.phone) === callPhoneDigits) ||
+            (l.name && l.name.toLowerCase() === lastCallRecord.contactName.toLowerCase())
+          );
+
+      if (matchedLead) {
+        const durM = Math.floor(lastCallRecord.duration / 60);
+        const durS = lastCallRecord.duration % 60;
+        const entry = `[${new Date().toLocaleDateString()}] Call (${durM}m ${durS}s) - Wrap-up Skipped. Reason: ${trimmedReason}${notes?.trim() ? ` • Notes: ${notes.trim()}` : ''}`;
+        matchedLead.notes = matchedLead.notes ? `${matchedLead.notes}\n\n${entry}` : entry;
+        if (!matchedLead.customFields) matchedLead.customFields = {};
+        matchedLead.customFields.lastCallDisposition = 'Skipped';
+        matchedLead.customFields.lastCallSkipReason = trimmedReason;
+        await apiSaveLead(matchedLead);
+        storageService.saveLead(matchedLead);
+      }
+
+      window.dispatchEvent(new Event('nexus_storage_updated'));
     }
 
     setShowDispositionModal(false);
@@ -623,6 +966,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setMeetingLink,
         setQuickNotes,
         saveDisposition,
+        skipDispositionWithReason,
         closeDispositionModal,
       }}
     >

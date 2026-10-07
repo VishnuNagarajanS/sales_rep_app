@@ -20,7 +20,6 @@
 
 import { apiClient } from './apiClient';
 import { storageService } from './storageService';
-import { isMockMode } from '../config/environment';
 import type {
   Deal,
   DealActivity,
@@ -75,12 +74,14 @@ interface ApiResponse<T> {
   errors?: string[];
 }
 
-/** Fetch all pages and return flat array (backend defaults to pageSize=100). */
+/** Fetch all pages and return flat array (backend defaults to pageSize=100). Throws on API error so callers show error state instead of empty array. */
 async function fetchAll<T>(path: string, params: Record<string, string> = {}): Promise<T[]> {
   const qs = new URLSearchParams({ pageSize: '200', ...params }).toString();
   const res: ApiResponse<PagedResult<T>> = await apiClient.get(`${path}?${qs}`);
-  if (!res.success || !res.data) return [];
-  const items = res.data.items;
+  if (!res.success || !res.data) {
+    throw new Error(res?.message || `Failed to fetch data from ${path}`);
+  }
+  const items = res.data.items || [];
   const seen = new Set();
   const deduped = items.filter((item: any) => {
     const id = item.id;
@@ -175,12 +176,7 @@ export async function saveDeal(deal: Deal): Promise<Deal> {
 }
 
 export async function persistDeal(deal: Deal): Promise<Deal> {
-  if (isMockMode()) {
-    storageService.saveDeal(deal);
-    return deal;
-  } else {
-    return await saveDeal(deal);
-  }
+  return await saveDeal(deal);
 }
 
 export async function deleteDeal(dealId: string): Promise<void> {
@@ -209,7 +205,7 @@ export async function getDealActivities(dealId: string): Promise<DealActivity[]>
   const res: ApiResponse<DealActivity[]> = await apiClient.get(
     `/ghl/deals/${nid(dealId)}/activities`
   );
-  if (!res.success || !res.data) return [];
+  if (!res.success || !res.data) throw new Error(res?.message || 'Failed to fetch deal activities');
   return res.data.map(mapActivity);
 }
 
@@ -430,9 +426,6 @@ function mapLead(l: Record<string, any>): Lead {
 }
 
 export async function getLeads(companyId?: string): Promise<Lead[]> {
-  if (isMockMode()) {
-    return storageService.getLeads(companyId);
-  }
   const raw = await fetchAll<any>('/sales-executive/leads');
   return raw.map(mapLead);
 }
@@ -455,9 +448,11 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         assignedAgentId: nid(lead.assignedAgentId) || undefined,
         companyId: nid(lead.companyId) || 1,
         investmentCapacity: customFields['Investment Capacity'] ?? customFields['investmentCapacity'],
+        investmentAmount: (lead as any).investmentAmount ?? customFields['Investment Amount'] ?? customFields['investmentAmount'],
         assetClass: customFields['Asset Class'] ?? customFields['assetClass'],
         preferredAssetClass: customFields['Preferred Asset Class'] ?? customFields['preferredAssetClass'],
         horizon: customFields['Horizon'] ?? customFields['horizon'],
+        additionalCustomFields: customFields,
       };
       const res: ApiResponse<any> = await apiClient.post('/sales-executive/leads', payload);
       if (res && res.success && res.data) {
@@ -478,11 +473,13 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         priority: lead.priority,
         notes: lead.notes,
         nextFollowupDate: lead.nextFollowupDate,
-        assignedAgentId: nid(lead.assignedAgentId) || undefined,
+        assignedAgentId: nid(lead.assignedAgentId?.toString()) || undefined,
         investmentCapacity: customFields['Investment Capacity'] ?? customFields['investmentCapacity'],
+        investmentAmount: (lead as any).investmentAmount ?? customFields['Investment Amount'] ?? customFields['investmentAmount'],
         assetClass: customFields['Asset Class'] ?? customFields['assetClass'],
         preferredAssetClass: customFields['Preferred Asset Class'] ?? customFields['preferredAssetClass'],
         horizon: customFields['Horizon'] ?? customFields['horizon'],
+        additionalCustomFields: customFields,
       };
       const res: ApiResponse<any> = await apiClient.put(
         `/sales-executive/leads/${nid(lead.id)}`,
@@ -519,8 +516,8 @@ function mapFollowup(f: Record<string, any>): Followup {
     status: f.status ?? 'Pending',
     notes: f.notes ?? '',
     assignedAgentId: sid(f.assignedAgentId),
-    assignedAgentName: f.assignedAgentName ?? '',
-    assignedRole: f.assignedRole ?? f.assignedToRole ?? f.assignedAgentRole ?? '',
+    assignedAgentName: f.assignedAgentName ?? f.assignedToName ?? '',
+    assignedRole: f.assignedRole ?? f.assignedToRole ?? f.assignedAgentRole ?? undefined,
     completedAt: f.completedAt,
   };
 }
@@ -541,6 +538,7 @@ export async function saveFollowup(followup: Followup): Promise<Followup> {
         contactType: followup.contactType || 'lead',
         contactName: followup.contactName,
         contactPhone: followup.contactPhone,
+        contactEmail: (followup as any).contactEmail || (followup as any).email || undefined,
         scheduledAt: followup.scheduledAt,
         priority: followup.priority,
         notes: followup.notes,
@@ -555,6 +553,7 @@ export async function saveFollowup(followup: Followup): Promise<Followup> {
         window.dispatchEvent(new Event('nexus_storage_updated'));
         return saved;
       }
+      throw new Error(res?.message || 'Failed to create follow-up on server');
     } else {
       const payload = {
         scheduledAt: followup.scheduledAt,
@@ -572,14 +571,12 @@ export async function saveFollowup(followup: Followup): Promise<Followup> {
         window.dispatchEvent(new Event('nexus_storage_updated'));
         return saved;
       }
+      throw new Error(res?.message || 'Failed to update follow-up on server');
     }
-  } catch (err) {
-    console.warn('[ghlApiService] API saveFollowup failed, saving locally:', err);
+  } catch (err: any) {
+    console.error('[ghlApiService] API saveFollowup failed:', err);
+    throw err;
   }
-
-  storageService.saveFollowup(followup);
-  window.dispatchEvent(new Event('nexus_storage_updated'));
-  return followup;
 }
 
 export async function completeFollowup(followupId: string): Promise<void> {
@@ -622,13 +619,15 @@ export async function saveCustomer(customer: Customer): Promise<Customer> {
     customer.id.startsWith('cust-') ||
     customer.id.startsWith('c-');
 
-  const payload = {
+  const payload: Record<string, any> = {
     name: customer.name,
     phone: customer.phone,
     email: customer.email,
     location: customer.location,
     status: customer.status,
     notes: customer.notes,
+    totalValue: customer.totalValue,
+    customFields: customer.customFields,
   };
 
   if (isNew) {
@@ -655,6 +654,49 @@ export async function saveCustomer(customer: Customer): Promise<Customer> {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function mapCallRecord(c: Record<string, any>): CallRecord {
+  const notes = c.notes;
+  let reason = c.reason;
+  if (!reason && notes) {
+    const match = notes.match(/(?:\[(?:Skip Reason|Reason)\]:\s*|(?:Skip Reason|Reason):\s*)([^\n]+)/i);
+    if (match) {
+      reason = match[1].trim();
+    }
+  }
+
+  // Determine categorization from backend attributes or stored source markers
+  const roleCode = (c.agentRole || c.callerType || '').toLowerCase();
+  const sourceCode = (c.source || '').toLowerCase();
+  const notesStr = notes || '';
+  const isIrm =
+    roleCode === 'irm' ||
+    sourceCode === 'irm' ||
+    c.connectVia === 'Connect via IRM' ||
+    notesStr.includes('Connect via IRM') ||
+    notesStr.includes('Connected to IRM') ||
+    notesStr.includes('[Source: irm]');
+
+  const callerType: 'Agent' | 'IRM' = isIrm ? 'IRM' : 'Agent';
+  const connectVia: 'Connect via Agent' | 'Connect via IRM' = isIrm ? 'Connect via IRM' : 'Connect via Agent';
+  const agentRole = isIrm ? 'IRM' : 'Agent';
+
+  // Only assign recordingUrl and transcription if genuine real provider data exists (no mock/sample/placeholder)
+  const isMockRecording = !c.recordingUrl ||
+    typeof c.recordingUrl !== 'string' ||
+    c.recordingUrl.includes('sample.mp3') ||
+    c.recordingUrl.includes('nexusplatform.io') ||
+    c.recordingUrl.includes('placeholder') ||
+    c.recordingUrl.includes('example.com');
+  const recordingUrl = !isMockRecording ? c.recordingUrl : undefined;
+
+  const rawTranscript = c.transcript || c.transcription;
+  const isMockTranscript = !rawTranscript ||
+    typeof rawTranscript !== 'string' ||
+    rawTranscript.startsWith('Automated Call Transcript: Agent') ||
+    rawTranscript.includes('Agent explained commercial cap rate') ||
+    rawTranscript.includes('Customer called inquiring about BDA') ||
+    rawTranscript.includes('AIF Category II structured debt product');
+  const transcription = !isMockTranscript ? rawTranscript : undefined;
+
   return {
     id: sid(c.id),
     companyId: sid(c.companyId),
@@ -664,9 +706,17 @@ function mapCallRecord(c: Record<string, any>): CallRecord {
     duration: c.duration ?? 0,
     agentId: sid(c.agentId),
     agentName: c.agentName ?? '',
+    agentRole: agentRole,
+    callerType: callerType,
+    connectVia: connectVia,
+    source: isIrm ? 'irm' : (c.source || 'agent'),
     disposition: c.disposition ?? 'No Response',
     timestamp: c.timestamp ?? new Date().toISOString(),
-    notes: c.notes,
+    notes: notes,
+    reason: reason,
+    recordingUrl: recordingUrl,
+    transcription: transcription,
+    twilioCallSid: c.twilioCallSid || undefined,
     leadId: c.leadId ? sid(c.leadId) : undefined,
     customerId: c.customerId ? sid(c.customerId) : undefined,
   };
@@ -687,10 +737,90 @@ export async function logCall(call: CallRecord): Promise<CallRecord> {
     notes: call.notes,
     leadId: call.leadId ? nid(call.leadId) : undefined,
     customerId: call.customerId ? nid(call.customerId) : undefined,
+    twilioCallSid: call.twilioCallSid || undefined,
   };
   const res: ApiResponse<any> = await apiClient.post('/sales-executive/calls', payload);
   if (!res.success || !res.data) throw new Error(res.message);
   window.dispatchEvent(new Event('nexus_storage_updated'));
+  return mapCallRecord(res.data);
+}
+
+export interface SendCustomerMessagePayload {
+  recipientEmail?: string;
+  recipientPhone?: string;
+  recipientName: string;
+  message: string;
+  channel?: string;
+  leadId?: number;
+  customerId?: number;
+  dealId?: number;
+}
+
+export interface SendCustomerMessageResult {
+  success: boolean;
+  delivered: boolean;
+  channel: string;
+  recipient?: string;
+  message: string;
+  deliveryResult: string;
+  sentAt: string;
+  sentByName: string;
+  sentByRole: string;
+}
+
+export async function sendCustomerMessage(
+  payload: SendCustomerMessagePayload
+): Promise<SendCustomerMessageResult> {
+  const res: ApiResponse<SendCustomerMessageResult> = await apiClient.post(
+    '/sales-executive/calls/send-customer-message',
+    payload
+  );
+  if (res && res.data) {
+    return res.data;
+  }
+  return {
+    success: false,
+    delivered: false,
+    channel: payload.channel || 'email',
+    recipient: payload.recipientEmail || payload.recipientPhone,
+    message: payload.message,
+    deliveryResult: res?.message || 'Failed to dispatch customer message',
+    sentAt: new Date().toISOString(),
+    sentByName: '',
+    sentByRole: '',
+  };
+}
+
+export interface MessagingChannelStatus {
+  channel: 'email' | 'sms' | 'whatsapp';
+  name: string;
+  configured: boolean;
+  provider: string;
+  statusMessage: string;
+}
+
+export async function getMessagingChannels(): Promise<MessagingChannelStatus[]> {
+  try {
+    const res: ApiResponse<MessagingChannelStatus[]> = await apiClient.get(
+      '/sales-executive/calls/messaging-channels'
+    );
+    if (res && res.data) {
+      return res.data;
+    }
+  } catch (err) {
+    console.error('Failed to fetch messaging channels from backend', err);
+  }
+  return [
+    { channel: 'email', name: 'Email', configured: true, provider: 'SMTP (smtp.gmail.com)', statusMessage: 'Active and configured via Gmail SMTP.' },
+    { channel: 'sms', name: 'SMS', configured: false, provider: 'None', statusMessage: 'No SMS gateway provider (e.g., Twilio / AWS SNS) is configured on the backend server.' },
+    { channel: 'whatsapp', name: 'WhatsApp', configured: false, provider: 'None', statusMessage: 'No WhatsApp Business API provider is configured on the backend server.' },
+  ];
+}
+
+export async function getCallById(id: string | number): Promise<CallRecord> {
+  const numericId = typeof id === 'string' ? parseInt(id.replace(/\D/g, ''), 10) : id;
+  const res: ApiResponse<any> = await apiClient.get(`/sales-executive/calls/${numericId || id}`);
+  if (!res.success || !res.data) throw new Error(res.message || 'Call record not found');
   return mapCallRecord(res.data);
 }
 
@@ -761,3 +891,58 @@ export async function saveConsultation(consultation: Consultation): Promise<Cons
   }
 }
 
+export interface IrmPipelineCardData {
+  id: number;
+  companyId: number;
+  investorId: number;
+  assignedIrmId: number;
+  assignedIrmName: string;
+  investorName: string;
+  investorPhone: string;
+  investorEmail: string;
+  stageId: string;
+  stageEnteredAt: string;
+  lastActionSnippet?: string;
+  lastActivityDate?: string;
+  priority: string;
+  value?: number;
+  investmentAmount?: string;
+  preferredAssetClass?: string;
+  activityLogsJson?: string;
+  createdAt: string;
+}
+
+export interface IrmPipelineBoardData {
+  stages: {
+    id: string;
+    name: string;
+    color: string;
+    cards: IrmPipelineCardData[];
+  }[];
+}
+
+export async function getIrmPipelineBoard(irmId?: number): Promise<IrmPipelineBoardData | null> {
+  try {
+    const res = await apiClient.get<ApiResponse<IrmPipelineBoardData>>(
+      `/irm/pipeline${irmId ? `?irmId=${irmId}` : ''}`
+    );
+    if (res.success && res.data) {
+      return res.data;
+    }
+  } catch (err) {
+    console.warn('[ghlApiService] getIrmPipelineBoard failed:', err);
+  }
+  return null;
+}
+
+export async function moveIrmPipelineCard(cardId: number, targetStageId: string): Promise<boolean> {
+  try {
+    const res = await apiClient.put<ApiResponse<any>>(`/irm/pipeline/${cardId}/move`, {
+      targetStageId,
+    });
+    return !!res.success;
+  } catch (err) {
+    console.warn('[ghlApiService] moveIrmPipelineCard failed:', err);
+    return false;
+  }
+}

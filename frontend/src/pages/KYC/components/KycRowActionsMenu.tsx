@@ -86,12 +86,14 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
 
   const handleReview = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setIsOpen(false);
     onOpenReview(deal);
   };
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setIsOpen(false);
     // TODO(logic): Generate real dynamic customer token
     const mockToken = `tok_${(deal.id || 'demo').replace(/[^a-zA-Z0-9]/g, '').slice(-8)}`;
@@ -102,6 +104,7 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
 
   const handleResend = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setIsOpen(false);
     // TODO(logic): Connect to IRM notification / SMS / WhatsApp dispatch
     onShowToast(`KYC Link resent to ${deal.customerName} (demo)`);
@@ -109,6 +112,7 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
 
   const handleRevoke = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setIsOpen(false);
     // TODO(logic): Invalidate link token in backend database
     onShowToast(`KYC Link revoked for ${deal.customerName} (demo)`);
@@ -116,24 +120,28 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
 
   const handleProfile = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setIsOpen(false);
     if (onViewProfile) onViewProfile(deal);
   };
 
   const handleEditKyc = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setIsOpen(false);
     if (onEditKyc) onEditKyc(deal);
   };
 
   const handleCall = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setIsOpen(false);
     if (onCallInvestor) onCallInvestor(deal);
   };
 
   const handleAdvance = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setIsOpen(false);
     if (onAdvanceStage) onAdvanceStage(deal);
   };
@@ -222,22 +230,37 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
             </button>
           )}
 
-          {onAssistedKyc && (
-            <button
-              type="button"
-              className="kyc-link-menu-item"
-              role="menuitem"
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsOpen(false);
-                onAssistedKyc(deal);
-              }}
-              style={{ color: '#7c3aed', fontWeight: 600 }}
-            >
-              <UserCheck size={14} color="#7c3aed" />
-              <span>Fill KYC on Behalf (Assisted)</span>
-            </button>
-          )}
+          {onAssistedKyc && (() => {
+            const draftRaw = localStorage.getItem(`nexus_kyc_draft_${deal.id}`);
+            let hasDraft = (deal as any).customerKycStatus === 'Assisted Draft';
+            let draftStep = 1;
+            if (draftRaw) {
+              try {
+                const parsed = JSON.parse(draftRaw);
+                if (parsed.isAssisted || parsed.step) {
+                  hasDraft = true;
+                  draftStep = parsed.step || 1;
+                }
+              } catch {}
+            }
+            return (
+              <button
+                type="button"
+                className="kyc-link-menu-item"
+                role="menuitem"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  setIsOpen(false);
+                  onAssistedKyc(deal);
+                }}
+                style={{ color: hasDraft ? '#d97706' : '#7c3aed', fontWeight: 600 }}
+              >
+                <UserCheck size={14} color={hasDraft ? '#d97706' : '#7c3aed'} />
+                <span>{hasDraft ? `Resume Assisted KYC (Draft Step ${draftStep})` : 'Fill KYC on Behalf (Assisted)'}</span>
+              </button>
+            );
+          })()}
 
           {onEditKyc && (
             <button

@@ -4,10 +4,24 @@ import ReactDOM from 'react-dom';
 export type PopupPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 
 const getPopupPosition = (): PopupPosition => {
-  const pos = (localStorage.getItem('nexus_popup_pos') || localStorage.getItem('nexus_popup_position')) as PopupPosition;
-  if (['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(pos)) {
-    return pos;
-  }
+  try {
+    const rawPos = localStorage.getItem('nexus_popup_pos');
+    if (rawPos && ['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(rawPos)) {
+      return rawPos as PopupPosition;
+    }
+    const rawData = localStorage.getItem('nexus_popup_position');
+    if (rawData) {
+      if (['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(rawData)) {
+        return rawData as PopupPosition;
+      }
+      try {
+        const parsed = JSON.parse(rawData);
+        if (['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(parsed)) {
+          return parsed as PopupPosition;
+        }
+      } catch {}
+    }
+  } catch {}
   return 'top-right';
 };
 
@@ -33,7 +47,7 @@ const getCallPreferences = (): CallPreferences => {
     return DEFAULT_CALL_PREFS;
   }
 };
-import { MOCK_AGENTS, MOCK_IRMS } from '../../mock_data/mockData';
+
 
 import {
   Phone,
@@ -50,12 +64,14 @@ import {
   CheckCircle2,
   Calendar,
   AlertCircle,
+  Mail,
   Volume2,
   Minimize2,
   Maximize2,
   Video,
   Headphones,
   MessageCircle,
+  MessageSquare,
   Inbox,
   ExternalLink,
   Library,
@@ -63,7 +79,7 @@ import {
 import { useCall, AgentAvailability } from '../../context/CallContext';
 import { useAuth } from '../../context/AuthContext';
 import { CallDisposition, Lead, Consultation, CallRecord } from '../../types';
-import { logCall, saveConsultation } from '../../services/ghlApiService';
+import { logCall, saveConsultation, sendCustomerMessage, getMessagingChannels, MessagingChannelStatus } from '../../services/ghlApiService';
 import { Modal } from '../common/Modal';
 import { Drawer } from '../common/Drawer';
 import { DocumentUploader } from '../common/DocumentUploader';
@@ -102,15 +118,6 @@ export const AgentAvailabilityToggle: React.FC = () => {
           }}
         />
         <span className="agent-availability-label">{availability}</span>
-      </button>
-
-      {/* Demo helper: button to simulate incoming call */}
-      <button
-        className="btn btn-ghost btn-sm agent-availability-simulate-btn"
-        title="Simulate Inbound Call for Testing"
-        onClick={() => simulateIncomingCall()}
-      >
-        <PhoneCall size={13} /> Simulate Ring
       </button>
 
       {isOpen && (
@@ -202,6 +209,11 @@ export const IncomingCallPopup: React.FC = () => {
             </div>
             <div className="incoming-call-caller-phone">
               {activeCall.contactPhone}
+              {activeCall.isSimulated && (
+                <div style={{ fontSize: 11, color: '#f59e0b', fontWeight: 600, marginTop: 4 }}>
+                  Simulated Call Event (Carrier Trunk Offline)
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -521,13 +533,16 @@ export const InCallBar: React.FC = () => {
           onMouseDown={handleDragMouseDown}
         >
           {/* Pulse dot */}
-          <div className="incall-minimized-dot" />
+          <div
+            className="incall-minimized-dot"
+            style={activeCall.isSimulated ? { background: '#f59e0b', animation: 'none' } : undefined}
+          />
 
           {/* Name + timer */}
           <div className="incall-minimized-info">
             <div className="incall-minimized-name">{activeCall.contactName}</div>
-            <div className="incall-minimized-timer">
-              {formatDuration(activeCall.duration)}
+            <div className="incall-minimized-timer" style={activeCall.isSimulated ? { color: '#f59e0b', fontSize: 11 } : undefined}>
+              {activeCall.isSimulated ? 'Simulated (Not Connected)' : formatDuration(activeCall.duration)}
             </div>
           </div>
 
@@ -584,11 +599,21 @@ export const InCallBar: React.FC = () => {
               <div className="incall-caller-sub">
                 {activeCall.contactPhone}
                 <span>•</span>
-                {/* Pulse dot + live timer */}
-                <span className="incall-live-dot" />
-                <span className="incall-live-timer">
-                  {formatDuration(activeCall.duration)}
-                </span>
+                {activeCall.isSimulated ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#f59e0b', display: 'inline-block' }} />
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Simulated (Not Connected)
+                    </span>
+                  </span>
+                ) : (
+                  <>
+                    <span className="incall-live-dot" />
+                    <span className="incall-live-timer">
+                      {formatDuration(activeCall.duration)}
+                    </span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -621,8 +646,10 @@ export const InCallBar: React.FC = () => {
             </div>
 
             {/* Simulated-call disclaimer */}
-            <span className="incall-simulated-tag">
-              Simulated call — no live audio
+            <span className="incall-simulated-tag" style={activeCall.isSimulated ? { color: '#f59e0b', fontWeight: 600 } : undefined}>
+              {activeCall.isSimulated
+                ? 'Actual provider results: Carrier trunk offline • Call not connected'
+                : 'Live audio call in progress'}
             </span>
           </div>
 
@@ -663,9 +690,6 @@ export const InCallBar: React.FC = () => {
           {/* ── Quick notes ── */}
           <div className="incall-notes-container">
             <input
-              id="active-call-quick-note"
-              name="quickNote"
-              aria-label="Quick call note"
               type="text"
               className="form-input incall-notes-input"
               placeholder="Quick call note..."
@@ -738,9 +762,6 @@ export const InCallBar: React.FC = () => {
                 onClick={(e) => e.stopPropagation()}
               >
                 <input
-                  id="transfer-search-agent"
-                  name="searchAgent"
-                  aria-label={isIrm ? 'Search agent by name' : 'Search IRM by name'}
                   type="text"
                   autoFocus
                   placeholder={isIrm ? 'Search agent by name...' : 'Search IRM by name...'}
@@ -855,12 +876,10 @@ export const InCallBar: React.FC = () => {
                   <div style={{ fontSize: 15, fontWeight: 600, color: '#f8fafc', marginBottom: 12 }}>
                     Connect {pendingIrm.name} to this call
                   </div>
-                  <label htmlFor="transfer-reason" style={{ display: 'block', fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>
+                  <label style={{ display: 'block', fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>
                     {isIrm ? 'Reason for Connecting Agent *' : 'Reason for Consultation *'}
                   </label>
                   <textarea
-                    id="transfer-reason"
-                    name="transferReason"
                     autoFocus
                     rows={3}
                     placeholder={isIrm ? 'Enter reason for connecting agent...' : 'Enter reason for consultation...'}
@@ -957,9 +976,6 @@ export const InCallBar: React.FC = () => {
             <div className="incall-meet-link-box">
               <div className="incall-meet-link-input-row">
                 <input
-                  id="conference-meet-link"
-                  name="meetLink"
-                  aria-label="Google Meet link"
                   type="text"
                   className="form-input incall-meet-input"
                   placeholder="Paste the Meet link here to share it"
@@ -1047,16 +1063,16 @@ export const InCallBar: React.FC = () => {
         )}
 
         {/* Company Resources tab — always available regardless of matched record */}
-        {docsTab === 'company' && tenant && (
+        {docsTab === 'company' && (
           <>
             <DocumentUploader
               entityType="company"
-              entityId={tenant.id}
+              entityId={tenant?.id || tenant?.slug || '1'}
               allowedCategories={['Brochure', 'Price List', 'Terms & Conditions', 'Policy Document', 'Other']}
             />
             <DocumentList
               entityType="company"
-              entityId={tenant.id}
+              entityId={tenant?.id || tenant?.slug || '1'}
               canDelete={false}
             />
           </>
@@ -1068,7 +1084,7 @@ export const InCallBar: React.FC = () => {
 
 // --- Mandatory Post-Call Disposition Modal ---
 export const DispositionModal: React.FC = () => {
-  const { showDispositionModal, lastCallRecord, saveDisposition, closeDispositionModal } = useCall();
+  const { showDispositionModal, lastCallRecord, saveDisposition, skipDispositionWithReason } = useCall();
   const { tenant, user } = useAuth();
 
   const [disposition, setDisposition] = useState<CallDisposition>('Interested');
@@ -1078,7 +1094,34 @@ export const DispositionModal: React.FC = () => {
   const [followupDate, setFollowupDate] = useState('');
   const [followupTime, setFollowupTime] = useState('');
   const [followupPriority, setFollowupPriority] = useState<'Low' | 'Medium' | 'High'>('High');
-  const [isSavingDispo, setIsSavingDispo] = useState(false);
+
+  // Skip outcome workflow state
+  const [isSkipping, setIsSkipping] = useState(false);
+  const [skipReason, setSkipReason] = useState('');
+  const [skipError, setSkipError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState('');
+
+  // No Response customized customer message state
+  const [customerMessage, setCustomerMessage] = useState('');
+  const [recipientEmail, setRecipientEmail] = useState('');
+  const [recipientPhone, setRecipientPhone] = useState('');
+  const [selectedChannel, setSelectedChannel] = useState<'email' | 'sms' | 'whatsapp'>('email');
+  const [channelsStatus, setChannelsStatus] = useState<MessagingChannelStatus[]>([
+    { channel: 'email', name: 'Email', configured: true, provider: 'SMTP (smtp.gmail.com)', statusMessage: 'Active and configured via Gmail SMTP.' },
+    { channel: 'sms', name: 'SMS', configured: false, provider: 'None', statusMessage: 'No SMS gateway provider (e.g., Twilio / AWS SNS) is configured on the backend server.' },
+    { channel: 'whatsapp', name: 'WhatsApp', configured: false, provider: 'None', statusMessage: 'No WhatsApp Business API provider is configured on the backend server.' },
+  ]);
+  const [sendDeliveryNotice, setSendDeliveryNotice] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+
+  const QUICK_SKIP_REASONS = [
+    'Customer disconnected abruptly',
+    'Customer requested callback later',
+    'Customer busy / in a meeting',
+    'Wrong contact / invalid number',
+    'Requires manager consultation',
+    'Handled via WhatsApp / offline',
+  ];
 
   // Reset all form state fresh for every new call — keyed on lastCallRecord.id so
   // it fires once per finished call, before the modal renders to the agent.
@@ -1091,15 +1134,48 @@ export const DispositionModal: React.FC = () => {
     const freshTomorrow = d.toISOString().slice(0, 10);
     const isFollowup = !!lastCallRecord.sourceFollowupId;
     const isIrmLead = user?.role?.code === 'irm' && lastCallRecord.matchedRecord?.type === 'lead';
-    const defaultDispo: CallDisposition = isIrmLead && !isFollowup ? 'Follow-up Required' : 'Interested';
+    const isSimulated = !!lastCallRecord.isSimulated;
+    const isNotConnected = !isSimulated && lastCallRecord.duration === 0;
+    // Use actual provider results; do not mark simulated calls as connected or successful
+    const defaultDispo: CallDisposition = (isSimulated || isNotConnected)
+      ? 'No Response'
+      : (isIrmLead && !isFollowup ? 'Follow-up Required' : 'Interested');
     setDisposition(defaultDispo);
-    setNotes('');
+    setNotes(isSimulated ? '[Provider Result: Simulated - Call Not Connected (0s)]' : (isNotConnected ? '[Twilio Voice: Call Not Answered (0s)]' : ''));
     setReason('');
-    setScheduleFollowup(defaultDispo === 'Follow-up Required');
+    setScheduleFollowup(defaultDispo === 'Follow-up Required' || defaultDispo === 'No Response');
     setFollowupDate(freshTomorrow);
     setFollowupTime(getCallPreferences().defaultFollowupTime);
     setFollowupPriority('High');
-  }, [lastCallRecord?.id, lastCallRecord?.matchedRecord?.type, lastCallRecord?.sourceFollowupId, user?.role?.code]);
+    setIsSkipping(false);
+    setSkipReason('');
+    setSkipError('');
+    setFormError('');
+    setIsSubmitting(false);
+
+    // Look up email address from local store / matched record
+    let foundEmail = '';
+    if (tenant?.id) {
+      const localLeads = storageService.getLeads(tenant.id);
+      const l = localLeads.find(x => (lastCallRecord.matchedRecord?.id && x.id === lastCallRecord.matchedRecord.id) || (x.phone && x.phone.replace(/\D/g, '').slice(-10) === (lastCallRecord.contactPhone || '').replace(/\D/g, '').slice(-10)));
+      if (l?.email) foundEmail = l.email;
+      if (!foundEmail) {
+        const localCusts = storageService.getCustomers(tenant.id);
+        const c = localCusts.find(x => (lastCallRecord.matchedRecord?.id && x.id === lastCallRecord.matchedRecord.id) || (x.phone && x.phone.replace(/\D/g, '').slice(-10) === (lastCallRecord.contactPhone || '').replace(/\D/g, '').slice(-10)));
+        if (c?.email) foundEmail = c.email;
+      }
+    }
+    setRecipientEmail(foundEmail);
+    setRecipientPhone(lastCallRecord.contactPhone || '');
+    setSelectedChannel('email');
+    setCustomerMessage(`Hi ${lastCallRecord.contactName || 'there'}, I tried reaching you regarding your investment inquiry with GHL India Ventures, but couldn't connect. I have scheduled our next follow-up. Please feel free to reply or call back when convenient.`);
+    setSendDeliveryNotice(null);
+
+    // Fetch active backend messaging channel configurations
+    getMessagingChannels().then(ch => {
+      if (ch && ch.length) setChannelsStatus(ch);
+    }).catch(console.error);
+  }, [lastCallRecord?.id, lastCallRecord?.matchedRecord?.type, lastCallRecord?.sourceFollowupId, user?.role?.code, tenant?.id]);
 
   if (!showDispositionModal || !lastCallRecord) return null;
 
@@ -1108,6 +1184,8 @@ export const DispositionModal: React.FC = () => {
   const isFollowupCall = !!lastCallRecord.sourceFollowupId;
   const isIrm = user?.role?.code === 'irm';
   const isIrmLeadCall = isIrm && lastCallRecord.matchedRecord?.type === 'lead';
+  const isSimulated = !!lastCallRecord.isSimulated;
+  const isNotConnected = !isSimulated && lastCallRecord.duration === 0;
 
   const allDispositions: CallDisposition[] = [
     'Interested',
@@ -1119,205 +1197,644 @@ export const DispositionModal: React.FC = () => {
     'No Response',
   ];
 
-  // For follow-up calls, "Call Back", "Wrong Number", and "No Response" are not valid outcomes —
-  // this is already a scheduled callback, so another Call Back is redundant, and the agent
-  // is expected to have reached the contact.
+  const SIMULATED_OUTCOMES: CallDisposition[] = [
+    'No Response',
+    'Follow-up Required',
+    'Call Back',
+    'Not Interested',
+    'Wrong Number',
+  ];
+
+  // For follow-up calls, "Call Back" and "Wrong Number" are not valid outcomes.
+  // IRM follow-up calls support Interested, Follow-up Required, and No Response.
   const FOLLOWUP_CALL_OUTCOMES: CallDisposition[] = ['Interested', 'Follow-up Required', 'Not Interested'];
 
-  // For IRM follow-up calls, outcomes are restricted to Interested and Follow-up Required only.
-  const IRM_FOLLOWUP_CALL_OUTCOMES: CallDisposition[] = ['Interested', 'Follow-up Required'];
+  // For IRM follow-up calls, outcomes include Interested, Follow-up Required, and No Response.
+  const IRM_FOLLOWUP_CALL_OUTCOMES: CallDisposition[] = ['Interested', 'Follow-up Required', 'No Response'];
 
-  // For IRM calls against Lead records, restrict to Follow-up Required and Converted
-  const IRM_LEAD_OUTCOMES: CallDisposition[] = ['Follow-up Required', 'Converted'];
+  // For IRM calls against Lead records, restrict to Follow-up Required, Converted, and No Response beside Converted
+  const IRM_LEAD_OUTCOMES: CallDisposition[] = ['Follow-up Required', 'Converted', 'No Response'];
 
-  const dispositions: CallDisposition[] = isFollowupCall
-    ? (isIrm ? IRM_FOLLOWUP_CALL_OUTCOMES : FOLLOWUP_CALL_OUTCOMES)
-    : isIrmLeadCall
-      ? IRM_LEAD_OUTCOMES
-      : isGhlSalesExec
-        ? allDispositions.filter(d => d !== 'Converted')
-        : allDispositions;
+  const dispositions: CallDisposition[] = isSimulated
+    ? (isFollowupCall
+        ? ['No Response', 'Follow-up Required', 'Not Interested']
+        : (isIrmLeadCall
+            ? ['No Response', 'Follow-up Required']
+            : SIMULATED_OUTCOMES))
+    : isNotConnected
+      ? ['No Response', 'Follow-up Required', 'Call Back', 'Not Interested', 'Wrong Number']
+      : (isFollowupCall
+          ? (isIrm ? IRM_FOLLOWUP_CALL_OUTCOMES : FOLLOWUP_CALL_OUTCOMES)
+          : isIrmLeadCall
+            ? IRM_LEAD_OUTCOMES
+            : isGhlSalesExec
+              ? allDispositions.filter(d => d !== 'Converted')
+              : allDispositions);
 
   const handleSave = async () => {
-    if (isSavingDispo) return;
-    setIsSavingDispo(true);
+    if (isSubmitting) return;
+
+    if (isSimulated && (disposition === 'Interested' || disposition === 'Converted')) {
+      alert('Simulated calls without an active carrier connection cannot be marked as connected or successful.');
+      return;
+    }
+
+    if ((disposition === 'Not Interested' || disposition === 'Wrong Number') && !reason.trim()) {
+      alert(`Please provide a reason why this contact was marked as "${disposition}".`);
+      return;
+    }
+
+    if (disposition === 'No Response') {
+      if (!customerMessage.trim()) {
+        alert('Please provide a message for the customer before saving wrap-up.');
+        return;
+      }
+
+      // Validate contact for selected channel
+      if (selectedChannel === 'email') {
+        if (!recipientEmail.trim()) {
+          setSendDeliveryNotice({
+            type: 'error',
+            text: 'Message delivery unavailable: No email address on file. Please enter a valid recipient email address above.',
+          });
+          return;
+        }
+        if (!recipientEmail.includes('@') || !recipientEmail.includes('.')) {
+          setSendDeliveryNotice({
+            type: 'error',
+            text: `Message delivery failed: "${recipientEmail}" is not a valid email address.`,
+          });
+          return;
+        }
+      } else {
+        const phone = recipientPhone.trim() || (lastCallRecord.contactPhone || '').trim();
+        if (!phone) {
+          setSendDeliveryNotice({
+            type: 'error',
+            text: `Message delivery unavailable: No phone number provided for ${selectedChannel.toUpperCase()}.`,
+          });
+          return;
+        }
+      }
+    }
+
+    // Combine date + time into a proper ISO string so scheduledAt is parseable
+    const targetDate = followupDate || (() => {
+      const d = new Date();
+      d.setDate(d.getDate() + 1);
+      return d.toISOString().slice(0, 10);
+    })();
+    const combinedDateTime = (scheduleFollowup || disposition === 'Follow-up Required' || disposition === 'No Response')
+      ? new Date(`${targetDate}T${followupTime || '11:00'}:00`).toISOString()
+      : '';
+
+    setIsSubmitting(true);
     try {
-      // Combine date + time into a proper ISO string so scheduledAt is parseable
-      const targetDate = followupDate || (() => {
-        const d = new Date();
-        d.setDate(d.getDate() + 1);
-        return d.toISOString().slice(0, 10);
-      })();
-      const combinedDateTime = (scheduleFollowup || disposition === 'Follow-up Required')
-        ? new Date(`${targetDate}T${followupTime || '11:00'}:00`).toISOString()
-        : '';
+      let finalNotes = notes;
+
+      if (disposition === 'No Response') {
+        const leadIdNum = parseInt(String(lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : '').replace(/\D/g, ''), 10) || undefined;
+        const customerIdNum = parseInt(String(lastCallRecord.matchedRecord?.type === 'customer' ? lastCallRecord.matchedRecord.id : '').replace(/\D/g, ''), 10) || undefined;
+        const effectivePhone = recipientPhone.trim() || (lastCallRecord.contactPhone || '').trim();
+
+        const sendResult = await sendCustomerMessage({
+          recipientEmail: recipientEmail.trim(),
+          recipientPhone: effectivePhone,
+          recipientName: lastCallRecord.contactName,
+          message: customerMessage.trim(),
+          channel: selectedChannel,
+          leadId: leadIdNum,
+          customerId: customerIdNum,
+        });
+
+        if (!sendResult.delivered) {
+          // Delivery failed or unavailable!
+          // Do not show as sent; preserve state so IRM can retry or switch channel
+          setSendDeliveryNotice({
+            type: 'error',
+            text: sendResult.deliveryResult || `Message delivery via ${selectedChannel.toUpperCase()} is unavailable or failed. State preserved for retry.`,
+          });
+          setIsSubmitting(false);
+          return;
+        }
+
+        // Delivery succeeded!
+        const channelLabel = selectedChannel.toUpperCase();
+        const contactTarget = selectedChannel === 'email' ? recipientEmail.trim() : effectivePhone;
+        const logSnippet = `[No Response Follow-up Message Sent via ${channelLabel} to ${contactTarget}]: ${customerMessage.trim()}`;
+        finalNotes = finalNotes ? `${finalNotes}\n\n${logSnippet}` : logSnippet;
+      }
 
       await saveDisposition(
         disposition,
-        notes,
+        finalNotes,
         combinedDateTime
           ? {
             scheduledAt: combinedDateTime,
             priority: followupPriority,
-            notes: notes ? `Follow-up required from call with ${lastCallRecord.contactName}: ${notes}` : `Follow-up required from call with ${lastCallRecord.contactName}`,
+            notes: finalNotes ? `Follow-up from call with ${lastCallRecord.contactName}: ${finalNotes}` : `Follow-up required from call with ${lastCallRecord.contactName}`,
           }
           : undefined,
         (disposition === 'Not Interested' || disposition === 'Wrong Number') ? reason : undefined
       );
+    } catch (err: any) {
+      if (disposition === 'No Response') {
+        setSendDeliveryNotice({
+          type: 'error',
+          text: `Message dispatch error: ${err.message || 'Unable to connect to server'}. State preserved for retry.`,
+        });
+      }
+      setFormError(err.message || 'Failed to save wrap-up. Please try again.');
     } finally {
-      setIsSavingDispo(false);
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleConfirmSkip = async () => {
+    if (isSubmitting) return;
+
+    if (!skipReason.trim()) {
+      setSkipError('Please provide a reason before skipping wrap-up.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await skipDispositionWithReason(skipReason.trim(), notes.trim());
+    } catch (err: any) {
+      setSkipError(err.message || 'Failed to save skip reason. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
     <Modal
       isOpen={showDispositionModal}
-      onClose={closeDispositionModal}
-      title="Call Wrap-up & Disposition"
-      subtitle={`Call with ${lastCallRecord.contactName} (${lastCallRecord.contactPhone}) • Duration: ${Math.floor(lastCallRecord.duration / 60)}m ${lastCallRecord.duration % 60}s`}
+      onClose={() => {
+        // Prevent accidental closing; modal must not disappear until saved or skipped with reason
+      }}
+      closeOnBackdrop={false}
+      closeOnEscape={false}
+      hideCloseButton={true}
+      title={isSkipping ? "Skip Call Wrap-up" : "Call Wrap-up & Disposition"}
+      subtitle={`Call with ${lastCallRecord.contactName} (${lastCallRecord.contactPhone}) • Duration: ${isSimulated ? '0s (Not Connected)' : `${Math.floor(lastCallRecord.duration / 60)}m ${lastCallRecord.duration % 60}s`}`}
       maxWidth={580}
       footer={
-        <>
-          <button className="btn btn-secondary" disabled={isSavingDispo} onClick={closeDispositionModal}>
-            Skip for Now
-          </button>
-          <button className="btn btn-primary" disabled={isSavingDispo} onClick={handleSave}>
-            {isSavingDispo ? 'Wrapping up...' : 'Save Disposition & Wrap Up'}
-          </button>
-        </>
+        isSkipping ? (
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setIsSkipping(false);
+                setSkipError('');
+              }}
+              disabled={isSubmitting}
+            >
+              Back to Wrap-up
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleConfirmSkip}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Saving...' : 'Save Reason & Skip'}
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setIsSkipping(true);
+                setSkipError('');
+              }}
+              disabled={isSubmitting}
+            >
+              Skip for Now
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleSave}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Saving...' : 'Save Disposition & Wrap Up'}
+            </button>
+          </>
+        )
       }
     >
-      <div className="disposition-form-container">
-        {/* Disposition Selector */}
-        <div className="form-group">
-          <div className="form-label">Call Outcome / Disposition *</div>
-          {isFollowupCall && (
-            <p className="disposition-followup-context-hint">
-              Follow-up call — outcomes restricted to relevant results.
-            </p>
-          )}
-          <div className="disposition-grid">
-            {dispositions.map(d => (
-              <button
-                key={d}
-                type="button"
-                className={`btn btn-sm disposition-choice-btn ${disposition === d ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => {
-                  setDisposition(d);
-                  if (d === 'Follow-up Required' || d === 'Call Back') {
-                    setScheduleFollowup(true);
-                  } else {
-                    setScheduleFollowup(false);
-                    setFollowupDate('');
-                    setFollowupTime('');
-                    setFollowupPriority('High');
-                  }
-                }}
-              >
-                {disposition === d && <CheckCircle2 size={13} style={{ marginRight: 4 }} />}
-                {d}
-              </button>
-            ))}
+      {isSkipping ? (
+        <div className="disposition-form-container">
+          <div className="disposition-skip-banner">
+            <AlertCircle size={18} className="disposition-skip-banner-icon" />
+            <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+              <strong>Reason Required to Skip Wrap-up</strong>
+              <div style={{ color: 'var(--text-secondary)', marginTop: 2 }}>
+                Please specify why this call wrap-up is being skipped. The reason will be permanently recorded in Call Details.
+              </div>
+            </div>
           </div>
-        </div>
 
-        {/* Call Notes */}
-        {!(disposition === 'Not Interested' || disposition === 'Wrong Number') && (
           <div className="form-group">
-            <label htmlFor="disposition-call-notes" className="form-label">Call Discussion Summary & Notes</label>
+            <label className="form-label">Select a Common Reason</label>
+            <div className="disposition-skip-chips">
+              {QUICK_SKIP_REASONS.map(r => (
+                <button
+                  key={r}
+                  type="button"
+                  className={`disposition-skip-chip ${skipReason === r ? 'disposition-skip-chip-active' : ''}`}
+                  onClick={() => {
+                    setSkipReason(r);
+                    setSkipError('');
+                  }}
+                >
+                  {skipReason === r && <CheckCircle2 size={12} style={{ marginRight: 4 }} />}
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">
+              Reason for Skipping <span style={{ color: '#ef4444' }}>*</span>
+            </label>
             <textarea
-              id="disposition-call-notes"
-              name="callNotes"
               className="form-textarea"
               rows={3}
-              placeholder="Key discussion points, customer objections, next steps..."
-              value={notes}
-              onChange={e => setNotes(e.target.value)}
+              placeholder="Explain why wrap-up is skipped (e.g. customer dropped, will re-dial in 10 mins)..."
+              value={skipReason}
+              onChange={e => {
+                setSkipReason(e.target.value);
+                if (skipError) setSkipError('');
+              }}
+              autoFocus
             />
-          </div>
-        )}
-
-        {/* Reason Box for Not Interested / Wrong Number */}
-        {(disposition === 'Not Interested' || disposition === 'Wrong Number') && (
-          <div className="form-group">
-            <label htmlFor="disposition-specific-reason" className="form-label">Reason *</label>
-            <textarea
-              id="disposition-specific-reason"
-              name="dispositionReason"
-              className="form-textarea"
-              rows={2}
-              placeholder={disposition === 'Not Interested' ? 'Why are they not interested?' : 'Details about the wrong number...'}
-              value={reason}
-              onChange={e => setReason(e.target.value)}
-              required
-            />
-          </div>
-        )}
-
-        {/* Conditional Follow-up Section */}
-        {!(disposition === 'Not Interested' || disposition === 'Wrong Number') && (
-          <div className="disposition-followup-box">
-            <div
-              className="disposition-followup-header"
-              style={{ marginBottom: scheduleFollowup ? 12 : 0 }}
-            >
-              <label htmlFor="disposition-schedule-followup" className="disposition-followup-label">
-                <input
-                  id="disposition-schedule-followup"
-                  name="scheduleFollowup"
-                  type="checkbox"
-                  checked={scheduleFollowup}
-                  onChange={e => setScheduleFollowup(e.target.checked)}
-                  style={{ width: 16, height: 16 }}
-                />
-                Schedule a Next Follow-up Task
-              </label>
-              <Calendar size={16} color="var(--primary-600)" />
-            </div>
-
-            {scheduleFollowup && (
-              <div className="disposition-followup-fields">
-                <div className="form-group">
-                  <label htmlFor="disposition-followup-date" className="form-label">Follow-up Date</label>
-                  <input
-                    id="disposition-followup-date"
-                    name="followupDate"
-                    type="date"
-                    className="form-input"
-                    value={followupDate}
-                    onChange={e => setFollowupDate(e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label htmlFor="disposition-followup-time" className="form-label">Follow-up Time</label>
-                  <input
-                    id="disposition-followup-time"
-                    name="followupTime"
-                    type="time"
-                    className="form-input"
-                    value={followupTime}
-                    onChange={e => setFollowupTime(e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label htmlFor="disposition-followup-priority" className="form-label">Priority</label>
-                  <select
-                    id="disposition-followup-priority"
-                    name="followupPriority"
-                    className="form-select"
-                    value={followupPriority}
-                    onChange={e => setFollowupPriority(e.target.value as any)}
-                  >
-                    <option value="Low">Low</option>
-                    <option value="Medium">Medium</option>
-                    <option value="High">High</option>
-                  </select>
-                </div>
-              </div>
+            {skipError && (
+              <p style={{ color: '#ef4444', fontSize: 12, marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <AlertCircle size={13} /> {skipError}
+              </p>
             )}
           </div>
-        )}
-      </div>
+
+          {notes && (
+            <div className="form-group" style={{ opacity: 0.85 }}>
+              <label className="form-label" style={{ fontSize: 12 }}>Notes from call</label>
+              <div style={{ fontSize: 12, padding: '8px 12px', background: 'var(--bg-surface-hover)', borderRadius: 'var(--radius-sm)', color: 'var(--text-secondary)' }}>
+                {notes}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="disposition-form-container">
+          {isSimulated && (
+            <div
+              style={{
+                padding: '10px 14px',
+                backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                border: '1px solid rgba(245, 158, 11, 0.3)',
+                borderRadius: 8,
+                fontSize: 12,
+                color: '#d97706',
+                marginBottom: 16,
+                lineHeight: 1.5,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <AlertCircle size={16} style={{ flexShrink: 0 }} />
+              <span>
+                <strong>Simulation Notice:</strong> This was a simulated call event and cannot be marked as connected or successful. Call duration is recorded as 0s.
+              </span>
+            </div>
+          )}
+          {isNotConnected && (
+            <div
+              style={{
+                padding: '10px 14px',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                border: '1px solid rgba(59, 130, 246, 0.3)',
+                borderRadius: 8,
+                fontSize: 12,
+                color: '#60a5fa',
+                marginBottom: 16,
+                lineHeight: 1.5,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <AlertCircle size={16} style={{ flexShrink: 0 }} />
+              <span>
+                <strong>Call Notice:</strong> The call was not answered or ended before connection. Call duration is recorded as 0s.
+              </span>
+            </div>
+          )}
+          {/* Disposition Selector */}
+          <div className="form-group">
+            <label className="form-label">Call Outcome / Disposition *</label>
+            {isFollowupCall && (
+              <p className="disposition-followup-context-hint">
+                Follow-up call — outcomes restricted to relevant results.
+              </p>
+            )}
+            <div className="disposition-grid">
+              {dispositions.map(d => (
+                <button
+                  key={d}
+                  type="button"
+                  className={`btn btn-sm disposition-choice-btn ${disposition === d ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => {
+                    setDisposition(d);
+                    if (d === 'Follow-up Required' || d === 'Call Back' || d === 'No Response') {
+                      setScheduleFollowup(true);
+                      if (!followupDate) {
+                        const dt = new Date();
+                        dt.setDate(dt.getDate() + 1);
+                        setFollowupDate(dt.toISOString().slice(0, 10));
+                      }
+                      if (!followupTime) {
+                        setFollowupTime(getCallPreferences().defaultFollowupTime);
+                      }
+                    } else {
+                      setScheduleFollowup(false);
+                      setFollowupDate('');
+                      setFollowupTime('');
+                      setFollowupPriority('High');
+                    }
+                  }}
+                >
+                  {disposition === d && <CheckCircle2 size={13} style={{ marginRight: 4 }} />}
+                  {d}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Call Notes */}
+          {!(disposition === 'Not Interested' || disposition === 'Wrong Number') && (
+            <div className="form-group">
+              <label className="form-label">Call Discussion Summary & Notes</label>
+              <textarea
+                className="form-textarea"
+                rows={3}
+                placeholder="Key discussion points, customer objections, next steps..."
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+              />
+            </div>
+          )}
+
+          {/* No Response: Customized Message to Customer */}
+          {disposition === 'No Response' && (
+            <div className="disposition-message-box">
+              <div className="disposition-message-header">
+                <div className="disposition-message-title">
+                  {selectedChannel === 'email' ? <Mail size={16} color="var(--primary-600)" /> : selectedChannel === 'sms' ? <MessageSquare size={16} color="var(--primary-600)" /> : <MessageCircle size={16} color="var(--primary-600)" />}
+                  <span>Customized Message to Customer</span>
+                </div>
+                <span className="disposition-channel-badge">
+                  {selectedChannel === 'email' ? 'Provider: Gmail SMTP (Active)' : `${selectedChannel.toUpperCase()} Gateway (Not Configured)`}
+                </span>
+              </div>
+
+              {/* Selectable Message Channels: Email, SMS, WhatsApp */}
+              <div className="form-group" style={{ marginBottom: 4 }}>
+                <label className="form-label" style={{ fontSize: 12, marginBottom: 6 }}>
+                  Select Message Channel *
+                </label>
+                <div className="disposition-channel-selector">
+                  {([
+                    { id: 'email' as const, label: 'Email', icon: <Mail size={14} /> },
+                    { id: 'sms' as const, label: 'SMS', icon: <MessageSquare size={14} /> },
+                    { id: 'whatsapp' as const, label: 'WhatsApp', icon: <MessageCircle size={14} /> },
+                  ]).map(ch => {
+                    const status = channelsStatus.find(s => s.channel === ch.id);
+                    const isConfigured = status ? status.configured : ch.id === 'email';
+                    return (
+                      <button
+                        key={ch.id}
+                        type="button"
+                        className={`disposition-channel-btn ${selectedChannel === ch.id ? 'active' : ''}`}
+                        onClick={() => {
+                          setSelectedChannel(ch.id);
+                          if (sendDeliveryNotice?.type === 'error') setSendDeliveryNotice(null);
+                        }}
+                      >
+                        <div className="disposition-channel-btn-top">
+                          {ch.icon}
+                          <span>{ch.label}</span>
+                        </div>
+                        <span className={`disposition-channel-tag ${isConfigured ? 'active' : 'unavailable'}`}>
+                          {isConfigured ? (
+                            <><CheckCircle2 size={10} /> Active</>
+                          ) : (
+                            <><AlertCircle size={10} /> Unavailable</>
+                          )}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Clear notice when selected channel is NOT configured */}
+              {selectedChannel !== 'email' && (
+                <div className="disposition-notice-alert error" style={{ margin: '4px 0 6px' }}>
+                  <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <div>
+                    <strong>{selectedChannel.toUpperCase()} Provider Unavailable</strong>
+                    <div style={{ fontSize: 11, marginTop: 2 }}>
+                      No {selectedChannel === 'sms' ? 'SMS gateway provider (e.g., Twilio or AWS SNS)' : 'WhatsApp Business API provider'} is configured on the backend server.
+                      Outbound messages cannot be dispatched via this channel. To deliver this follow-up, switch to <strong>Email (Gmail SMTP)</strong>.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {sendDeliveryNotice && (
+                <div className={`disposition-notice-alert ${sendDeliveryNotice.type}`}>
+                  {sendDeliveryNotice.type === 'error' ? (
+                    <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                  ) : (
+                    <CheckCircle2 size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                  )}
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600 }}>{sendDeliveryNotice.text}</div>
+                    {sendDeliveryNotice.type === 'error' && (
+                      <div style={{ fontSize: 11, marginTop: 4, opacity: 0.9 }}>
+                        Call disposition and follow-up date/time are preserved. You can edit the recipient contact or switch channels and click <strong>"Save Disposition &amp; Wrap Up"</strong> to retry.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Recipient Contact based on channel */}
+              {selectedChannel === 'email' ? (
+                <div className="form-group" style={{ marginBottom: 4 }}>
+                  <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>Recipient Email Address <span style={{ color: '#ef4444' }}>*</span></span>
+                    <span style={{ fontSize: 11, color: '#10b981' }}>● Gmail SMTP Active</span>
+                  </label>
+                  <input
+                    type="email"
+                    className={`form-input ${!recipientEmail.trim() && sendDeliveryNotice?.type === 'error' ? 'is-invalid' : ''}`}
+                    placeholder="Enter recipient email (e.g. client@example.com)"
+                    value={recipientEmail}
+                    onChange={e => {
+                      setRecipientEmail(e.target.value);
+                      if (sendDeliveryNotice?.type === 'error') setSendDeliveryNotice(null);
+                    }}
+                  />
+                  {!recipientEmail.trim() && (
+                    <span style={{ fontSize: 11, color: '#f59e0b', marginTop: 4, display: 'block' }}>
+                      ⚠️ No email address on file. Please enter a valid recipient email address above.
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="form-group" style={{ marginBottom: 4 }}>
+                  <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>Recipient Mobile Number ({selectedChannel.toUpperCase()}) <span style={{ color: '#ef4444' }}>*</span></span>
+                    <span style={{ fontSize: 11, color: '#ef4444' }}>● Gateway Not Configured</span>
+                  </label>
+                  <input
+                    type="text"
+                    className={`form-input ${!recipientPhone.trim() && sendDeliveryNotice?.type === 'error' ? 'is-invalid' : ''}`}
+                    placeholder="Enter phone number (e.g. +91 98765 43210)"
+                    value={recipientPhone}
+                    onChange={e => {
+                      setRecipientPhone(e.target.value);
+                      if (sendDeliveryNotice?.type === 'error') setSendDeliveryNotice(null);
+                    }}
+                  />
+                  {!recipientPhone.trim() && (
+                    <span style={{ fontSize: 11, color: '#ef4444', marginTop: 4, display: 'block' }}>
+                      ⚠️ No phone number provided for {selectedChannel.toUpperCase()}.
+                    </span>
+                  )}
+                </div>
+              )}
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">
+                  Message to Customer <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <textarea
+                  className="form-textarea"
+                  rows={4}
+                  placeholder="Write customized follow-up message to the customer..."
+                  value={customerMessage}
+                  onChange={e => {
+                    setCustomerMessage(e.target.value);
+                    if (sendDeliveryNotice?.type === 'error') setSendDeliveryNotice(null);
+                  }}
+                />
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+                  Message will be dispatched to the customer only when you click "Save Disposition &amp; Wrap Up".
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Reason Box for Not Interested / Wrong Number */}
+          {(disposition === 'Not Interested' || disposition === 'Wrong Number') && (
+            <div className="form-group">
+              <label className="form-label">Reason *</label>
+              <textarea
+                className="form-textarea"
+                rows={2}
+                placeholder={disposition === 'Not Interested' ? 'Why are they not interested?' : 'Details about the wrong number...'}
+                value={reason}
+                onChange={e => setReason(e.target.value)}
+                required
+              />
+            </div>
+          )}
+
+          {/* Conditional Follow-up Section */}
+          {!(disposition === 'Not Interested' || disposition === 'Wrong Number') && (
+            <div className="disposition-followup-box">
+              <div
+                className="disposition-followup-header"
+                style={{ marginBottom: scheduleFollowup ? 12 : 0 }}
+              >
+                <label className="disposition-followup-label">
+                  <input
+                    type="checkbox"
+                    checked={scheduleFollowup}
+                    onChange={e => setScheduleFollowup(e.target.checked)}
+                    style={{ width: 16, height: 16 }}
+                  />
+                  Schedule a Next Follow-up Task
+                </label>
+                <Calendar size={16} color="var(--primary-600)" />
+              </div>
+
+              {scheduleFollowup && (
+                <div className="disposition-followup-fields">
+                  <div className="form-group">
+                    <label className="form-label">Follow-up Date</label>
+                    <input
+                      type="date"
+                      className="form-input"
+                      value={followupDate}
+                      onChange={e => setFollowupDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Follow-up Time</label>
+                    <input
+                      type="time"
+                      className="form-input"
+                      value={followupTime}
+                      onChange={e => setFollowupTime(e.target.value)}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Priority</label>
+                    <select
+                      className="form-select"
+                      value={followupPriority}
+                      onChange={e => setFollowupPriority(e.target.value as any)}
+                    >
+                      <option value="Low">Low</option>
+                      <option value="Medium">Medium</option>
+                      <option value="High">High</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {formError && (
+            <div style={{
+              marginTop: 16,
+              padding: '10px 14px',
+              backgroundColor: '#fef2f2',
+              border: '1px solid #f87171',
+              borderRadius: 8,
+              color: '#b91c1c',
+              fontSize: 13,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}>
+              <AlertCircle size={16} />
+              <span>{formError}</span>
+            </div>
+          )}
+        </div>
+      )}
     </Modal>
   );
 };

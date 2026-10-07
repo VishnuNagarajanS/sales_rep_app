@@ -235,7 +235,7 @@ export const ProfilePage: React.FC = () => {
         storageService.cleanupDuplicateLeads(tenant?.id);
       } catch {}
 
-      if (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') {
+      if (!storageService.isMockMode()) {
         try {
           const [calls, leads, followups, consultations] = await Promise.all([
             apiGetCalls(tenant?.id),
@@ -249,8 +249,14 @@ export const ProfilePage: React.FC = () => {
             setAllFollowups(followups || []);
             setAllConsultations(consultations || []);
           }
-        } catch {
-          // Stop falling back to stale storageService in non-mock mode
+        } catch (err) {
+          console.error('[ProfilePage] Failed to fetch live data:', err);
+          if (isMounted) {
+            setAllCalls([]);
+            setAllLeads([]);
+            setAllFollowups([]);
+            setAllConsultations([]);
+          }
         }
       } else {
         if (isMounted) {

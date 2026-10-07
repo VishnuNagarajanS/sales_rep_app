@@ -71,8 +71,22 @@
 
 .document-item-delete-btn {
   flex-shrink: 0;
-  color: var(--danger);
-  width: 30px;
-  height: 30px;
+  color: #ef4444 !important;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: var(--radius-md);
+  border: 1px solid rgba(239, 68, 68, 0.25) !important;
+  background: rgba(239, 68, 68, 0.08) !important;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.document-item-delete-btn:hover {
+  background: rgba(239, 68, 68, 0.22) !important;
+  border-color: rgba(239, 68, 68, 0.5) !important;
+  color: #f87171 !important;
+  transform: scale(1.08);
 }

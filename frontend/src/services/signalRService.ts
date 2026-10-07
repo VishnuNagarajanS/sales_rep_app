@@ -139,12 +139,12 @@ class SignalRService {
         this.emit('PlatformDataUpdated', { entityType, action });
       });
 
-      this.connection.onreconnecting((error) => {
+      this.connection.onreconnecting((error?: Error) => {
         console.warn('SignalR reconnecting...', error);
         this.emit('reconnecting', error);
       });
 
-      this.connection.onreconnected((connectionId) => {
+      this.connection.onreconnected((connectionId?: string) => {
         console.info('SignalR reconnected:', connectionId);
         this.emit('reconnected', connectionId);
         window.dispatchEvent(
@@ -152,7 +152,7 @@ class SignalRService {
         );
       });
 
-      this.connection.onclose((error) => {
+      this.connection.onclose((error?: Error) => {
         console.warn('SignalR connection closed:', error);
         this.emit('close', error);
       });

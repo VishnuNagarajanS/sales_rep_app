@@ -77,65 +77,6 @@ public class InvestorService : IInvestorService
         return ApiResponse<InvestorActivityListDto>.SuccessResponse(result);
     }
 
-    public async Task<ApiResponse<InvestorDto>> CreateAsync(int companyId, int irmId, CreateInvestorDto dto, CancellationToken ct = default)
-    {
-        var irmUser = await _userRepo.GetByIdAsync(irmId, ct);
-
-        // ── Duplicate check: phone (last 10 digits, normalized) and email (case-insensitive, trimmed) ──
-        var normalizedPhone = NormalizePhone(dto.Phone);
-        var normalizedEmail = (dto.Email ?? string.Empty).Trim().ToLowerInvariant();
-
-        var allInvestors = await _investorRepo.GetAllAsync(companyId, null, null, null, ct);
-
-        foreach (var existing in allInvestors)
-        {
-            var existingPhone = NormalizePhone(existing.Phone);
-            var existingEmail = (existing.Email ?? string.Empty).Trim().ToLowerInvariant();
-
-            bool phoneMatch = !string.IsNullOrWhiteSpace(normalizedPhone) && normalizedPhone == existingPhone;
-            bool emailMatch = !string.IsNullOrWhiteSpace(normalizedEmail) && normalizedEmail == existingEmail;
-
-            if (phoneMatch || emailMatch)
-            {
-                var dupField = phoneMatch ? $"phone {existing.Phone}" : $"email {existing.Email}";
-                return ApiResponse<InvestorDto>.ErrorResponse(
-                    $"A record with this {dupField} already exists: \"{existing.Name}\" (ID: {existing.Id}). Please update the existing record instead of creating a duplicate.");
-            }
-        }
-
-        var investor = new Investor
-        {
-            CompanyId = companyId,
-            Name = dto.Name.Trim(),
-            Phone = dto.Phone?.Trim() ?? string.Empty,
-            Email = dto.Email?.Trim() ?? string.Empty,
-            Status = InvestorStatus.Lead,
-            InvestmentCapacity = dto.InvestmentCapacity,
-            PreferredAssetClass = dto.PreferredAssetClass,
-            RiskTolerance = dto.RiskTolerance,
-            InvestmentMandate = dto.InvestmentMandate,
-            ReferralSource = dto.ReferralSource,
-            AssignedIrmId = irmId,
-            AssignedIrmName = irmUser?.Name ?? string.Empty,
-            Notes = dto.Notes,
-            CreatedAt = DateTime.UtcNow
-        };
-
-        var created = await _investorRepo.CreateAsync(investor, ct);
-        return ApiResponse<InvestorDto>.SuccessResponse(MapToDto(created), "Investor created successfully");
-    }
-
-    /// <summary>
-    /// Normalizes a phone number to its last 10 digits for comparison.
-    /// Strips all non-digit characters and returns the trailing 10 digits.
-    /// </summary>
-    private static string NormalizePhone(string? phone)
-    {
-        if (string.IsNullOrWhiteSpace(phone)) return string.Empty;
-        var digits = new string(phone.Where(char.IsDigit).ToArray());
-        return digits.Length >= 10 ? digits[^10..] : digits;
-    }
-
     public async Task<ApiResponse<InvestorDto>> UpdateAsync(int id, int companyId, UpdateInvestorDto dto, CancellationToken ct = default)
     {
         var investor = await _investorRepo.GetByIdAsync(id, companyId, ct);

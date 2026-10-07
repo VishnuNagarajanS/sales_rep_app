@@ -13,51 +13,10 @@ import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { AgentAvailabilityToggle } from '../calling/CallCenterComponents';
 import { PersonaSwitcher } from './PersonaSwitcher';
-import { FEATURES } from '../../constants/features';
-import { getLeads, getCustomers, getDeals, getInvestors } from '../../services/ghlApiService';
-import { Lead, Customer, Deal, Investor, NotificationItem } from '../../types';
 import { storageService } from '../../services/storageService';
+import { FEATURES } from '../../constants/features';
 import './TopBar.css';
 
-const getStoredNotifications = (tenantId?: string, userId?: string, roleCode?: string): NotificationItem[] => {
-  try {
-    const raw = localStorage.getItem('nexus_notifications');
-    const all = raw ? JSON.parse(raw) : [];
-    return all.filter((n: any) => {
-      if (n.tenantId && tenantId && n.tenantId !== tenantId) return false;
-      if (n.recipientUserId && userId && n.recipientUserId !== userId) return false;
-      if (n.recipientRoleCode && roleCode && n.recipientRoleCode !== roleCode) return false;
-      return true;
-    });
-  } catch {
-    return [];
-  }
-};
-
-const markAllStoredNotificationsRead = (tenantId?: string, userId?: string) => {
-  try {
-    const raw = localStorage.getItem('nexus_notifications');
-    const all = raw ? JSON.parse(raw) : [];
-    all.forEach((n: any) => {
-      if ((!tenantId || n.tenantId === tenantId) && (!userId || n.recipientUserId === userId)) {
-        n.read = true;
-      }
-    });
-    localStorage.setItem('nexus_notifications', JSON.stringify(all));
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-  } catch { }
-};
-
-const markStoredNotificationRead = (id: string) => {
-  try {
-    const raw = localStorage.getItem('nexus_notifications');
-    const all = raw ? JSON.parse(raw) : [];
-    const item = all.find((n: any) => n.id === id);
-    if (item) item.read = true;
-    localStorage.setItem('nexus_notifications', JSON.stringify(all));
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-  } catch { }
-};
 
 interface TopBarProps {
   onNavigate: (route: string, extraState?: any) => void;
@@ -91,54 +50,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
   // User menu
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
-  // Search entities
-  const [searchLeads, setSearchLeads] = useState<Lead[]>([]);
-  const [searchCustomers, setSearchCustomers] = useState<Customer[]>([]);
-  const [searchDeals, setSearchDeals] = useState<Deal[]>([]);
-  const [searchInvestors, setSearchInvestors] = useState<Investor[]>([]);
 
-  useEffect(() => {
-    if (!tenant?.id) return;
-    let mounted = true;
-    const fetchSearchData = () => {
-      if (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') {
-        Promise.all([
-          getLeads(tenant.id).catch(() => []),
-          getCustomers(tenant.id).catch(() => []),
-          getDeals(tenant.id).catch(() => []),
-          getInvestors(tenant.id).catch(() => []),
-        ]).then(([l, c, d, i]) => {
-          if (mounted) {
-            setSearchLeads(l || []);
-            setSearchCustomers(c || []);
-            setSearchDeals(d || []);
-            setSearchInvestors(i || []);
-          }
-        });
-      } else {
-        try {
-          setSearchLeads(JSON.parse(localStorage.getItem('nexus_leads') || '[]'));
-          setSearchCustomers(JSON.parse(localStorage.getItem('nexus_customers') || '[]'));
-          setSearchDeals(JSON.parse(localStorage.getItem('nexus_deals') || '[]'));
-          setSearchInvestors(JSON.parse(localStorage.getItem('nexus_investors') || '[]'));
-        } catch { }
-      }
-    };
-    fetchSearchData();
-    let timeoutId: any;
-    const handleDebouncedUpdate = () => {
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
-        fetchSearchData();
-      }, 300);
-    };
-    window.addEventListener('nexus_storage_updated', handleDebouncedUpdate);
-    return () => {
-      mounted = false;
-      clearTimeout(timeoutId);
-      window.removeEventListener('nexus_storage_updated', handleDebouncedUpdate);
-    };
-  }, [tenant?.id, tenant?.slug]);
 
   // Sync notifications with tenant and user scoping
   useEffect(() => {
@@ -155,24 +67,24 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
     if (!searchQuery.trim()) return null;
     const q = searchQuery.toLowerCase();
 
-    const leads = searchLeads.filter(l =>
-      l.name.toLowerCase().includes(q) || l.phone.includes(q) || (l.email && l.email.toLowerCase().includes(q))
+    const leads = storageService.getLeads(tenant?.id).filter(l =>
+      l.name?.toLowerCase().includes(q) || l.phone?.includes(q) || l.email?.toLowerCase().includes(q)
     );
 
-    const customers = searchCustomers.filter(c =>
-      c.name.toLowerCase().includes(q) || c.phone.includes(q) || (c.email && c.email.toLowerCase().includes(q))
+    const customers = storageService.getCustomers(tenant?.id).filter(c =>
+      c.name?.toLowerCase().includes(q) || c.phone?.includes(q) || c.email?.toLowerCase().includes(q)
     );
 
-    const deals = searchDeals.filter(d =>
-      d.title.toLowerCase().includes(q) || (d.customerName && d.customerName.toLowerCase().includes(q))
+    const deals = storageService.getDeals(tenant?.id).filter(d =>
+      d.title?.toLowerCase().includes(q) || d.customerName?.toLowerCase().includes(q)
     );
 
     const plots = enabledFeatures.includes(FEATURES.PROPERTIES)
-      ? (JSON.parse(localStorage.getItem('nexus_plots') || '[]') as any[]).filter(p => p.plotNumber?.toLowerCase().includes(q))
+      ? storageService.getPlots().filter(p => p.plotNumber.toLowerCase().includes(q))
       : [];
 
     const investors = enabledFeatures.includes(FEATURES.INVESTORS)
-      ? searchInvestors.filter(i =>
+      ? storageService.getInvestors(tenant?.id).filter(i =>
         i.name.toLowerCase().includes(q) || i.phone.includes(q)
       )
       : [];

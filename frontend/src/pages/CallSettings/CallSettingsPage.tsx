@@ -44,48 +44,27 @@ const DEFAULT_ADMIN_SETTINGS: AdminCallSettings = {
 };
 
 const getPopupPosition = (): PopupPosition => {
-  return (localStorage.getItem('nexus_popup_pos') as PopupPosition) || 'top-right';
+  return storageService.getPopupPosition();
 };
 
 const setPopupPosition = (pos: PopupPosition) => {
-  localStorage.setItem('nexus_popup_pos', pos);
-  window.dispatchEvent(new Event('nexus_storage_updated'));
+  storageService.setPopupPosition(pos);
 };
 
 const getCallPreferences = (): CallPreferences => {
-  try {
-    const raw = localStorage.getItem('nexus_call_prefs');
-    return raw ? { ...DEFAULT_PREFS, ...JSON.parse(raw) } : DEFAULT_PREFS;
-  } catch {
-    return DEFAULT_PREFS;
-  }
+  return storageService.getCallPreferences();
 };
 
 const setCallPreferences = (patch: Partial<CallPreferences>) => {
-  try {
-    const current = getCallPreferences();
-    const updated = { ...current, ...patch };
-    localStorage.setItem('nexus_call_prefs', JSON.stringify(updated));
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-  } catch { }
+  storageService.setCallPreferences(patch);
 };
 
 const getAdminCallSettings = (): AdminCallSettings => {
-  try {
-    const raw = localStorage.getItem('nexus_admin_call_settings');
-    return raw ? { ...DEFAULT_ADMIN_SETTINGS, ...JSON.parse(raw) } : DEFAULT_ADMIN_SETTINGS;
-  } catch {
-    return DEFAULT_ADMIN_SETTINGS;
-  }
+  return storageService.getAdminCallSettings();
 };
 
 const setAdminCallSettings = (patch: Partial<AdminCallSettings>) => {
-  try {
-    const current = getAdminCallSettings();
-    const updated = { ...current, ...patch };
-    localStorage.setItem('nexus_admin_call_settings', JSON.stringify(updated));
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-  } catch { }
+  storageService.setAdminCallSettings(patch);
 };
 // ── Shared inline toggle component matching this file's visual language ──────
 const SettingToggle: React.FC<{
@@ -202,7 +181,6 @@ export const CallSettingsPage: React.FC = () => {
     const next = { ...adminSettings, [key]: value };
     setAdminSettings(next);
     setAdminCallSettings({ [key]: value });
-    storageService.setAdminCallSettings({ [key]: value });
   };
 
   const handleToggleDesktopNotif = async (enabled: boolean) => {
@@ -309,7 +287,15 @@ export const CallSettingsPage: React.FC = () => {
                 <label
                   htmlFor={`pos-${opt.value}`}
                   key={opt.value}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => handleSelectPosition(opt.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleSelectPosition(opt.value);
+                    }
+                  }}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -322,6 +308,7 @@ export const CallSettingsPage: React.FC = () => {
                     backgroundColor: isSelected ? 'var(--primary-50)' : 'var(--bg-card)',
                     cursor: 'pointer',
                     boxSizing: 'border-box',
+                    transition: 'all 0.15s ease-in-out',
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -333,6 +320,7 @@ export const CallSettingsPage: React.FC = () => {
                         value={opt.value}
                         checked={isSelected}
                         onChange={() => handleSelectPosition(opt.value)}
+                        onClick={e => e.stopPropagation()}
                         style={{
                           width: 18,
                           height: 18,

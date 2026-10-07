@@ -25,6 +25,14 @@ public class CallRecordConfiguration : IEntityTypeConfiguration<CallRecord>
         builder.Property(cr => cr.Disposition)
             .HasMaxLength(100);
 
+        builder.Property(cr => cr.TwilioCallSid)
+            .HasMaxLength(64);
+
+        builder.Property(cr => cr.RecordingUrl)
+            .HasMaxLength(256);
+
+        builder.Property(cr => cr.Transcript);
+
         builder.Property(cr => cr.CreatedAt)
             .HasDefaultValueSql("NOW()");
 

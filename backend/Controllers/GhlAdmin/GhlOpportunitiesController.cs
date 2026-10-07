@@ -2,6 +2,7 @@ using backend.Authentication.Interfaces;
 using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.GhlOpportunities;
+using backend.Extensions;
 using backend.Models.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -104,6 +105,12 @@ public class GhlOpportunitiesController : ControllerBase
     public async Task<ActionResult<ApiResponse<GhlOpportunityResponseDto>>> CreateOpportunity(
         [FromBody] CreateGhlOpportunityDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<GhlOpportunityResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM investment opportunity data."));
+        }
+
         var agentId = _currentUser.UserId;
         if (!agentId.HasValue || agentId.Value <= 0)
             return Unauthorized(ApiResponse<GhlOpportunityResponseDto>.FailureResult("Unauthorized: User ID is missing."));
@@ -113,7 +120,7 @@ public class GhlOpportunitiesController : ControllerBase
             return Unauthorized(ApiResponse<GhlOpportunityResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
 
         // Verify investor exists
-        var investorExists = await _db.GhlInvestors
+        var investorExists = await _db.Investors
             .AnyAsync(i => i.Id == dto.InvestorId && i.CompanyId == companyId.Value, ct);
 
         if (!investorExists)
@@ -148,6 +155,12 @@ public class GhlOpportunitiesController : ControllerBase
     public async Task<ActionResult<ApiResponse<GhlOpportunityResponseDto>>> UpdateOpportunity(
         int id, [FromBody] UpdateGhlOpportunityDto dto, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<GhlOpportunityResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM investment opportunity data."));
+        }
+
         var opp = await _db.GhlInvestmentOpportunities
             .Include(o => o.AssignedAgent)
             .Include(o => o.Investor)
@@ -174,6 +187,12 @@ public class GhlOpportunitiesController : ControllerBase
     [Authorize(Roles = "company_admin,super_admin,irm")]
     public async Task<ActionResult<ApiResponse<bool>>> DeleteOpportunity(int id, CancellationToken ct)
     {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<bool>.FailureResult("Access denied: GHL Admin has read-only access to IRM investment opportunity data."));
+        }
+
         var opp = await _db.GhlInvestmentOpportunities
             .FirstOrDefaultAsync(o => o.Id == id && o.CompanyId == _currentUser.CompanyId, ct);
 

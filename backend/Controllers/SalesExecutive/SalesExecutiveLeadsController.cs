@@ -66,6 +66,7 @@ public class SalesExecutiveLeadsController : ControllerBase
         [FromBody] CreateLeadDto dto,
         CancellationToken ct)
     {
+        Console.WriteLine("CREATE LEAD CALLED with Name: " + dto.Name);
         var validation = await _createValidator.ValidateAsync(dto, ct);
         if (!validation.IsValid)
         {
@@ -169,4 +170,14 @@ public class SalesExecutiveLeadsController : ControllerBase
 
         return Ok(result);
     }
+
+    [HttpDelete("{id:int}")]
+    public async Task<ActionResult<ApiResponse<object>>> DeleteLead([FromRoute] int id, CancellationToken ct)
+    {
+        var result = await _leadService.DeleteLeadAsync(id, ct);
+        if (!result.Success) return BadRequest(result);
+        return Ok(result);
+    }
 }
+
+

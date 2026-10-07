@@ -40,21 +40,16 @@ public class KycRepository : IKycRepository
     public async Task<InvestorKyc?> GetByTokenAsync(string token, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(token)) return null;
-        var direct = await _db.InvestorKycs.FirstOrDefaultAsync(k => k.KycLinkToken == token && k.KycLinkExpiresAt > DateTime.UtcNow, ct);
-        if (direct != null) return direct;
+        var cleanToken = token.Trim();
+        var subToken = cleanToken.StartsWith("tok_") ? cleanToken[4..] : cleanToken;
+        var tokenHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(cleanToken))).ToLowerInvariant();
+        var subTokenHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(subToken))).ToLowerInvariant();
 
-        var subToken = token.Replace("tok_", "").Trim();
-        var tokenPrefix = subToken.Contains('_') ? subToken.Split('_')[0] : subToken;
-        if (tokenPrefix.Length >= 8)
-        {
-            var match = await _db.InvestorKycs.FirstOrDefaultAsync(k => 
-                k.KycLinkToken != null && 
-                k.KycLinkExpiresAt > DateTime.UtcNow &&
-                k.KycLinkToken.StartsWith(tokenPrefix), ct);
-            if (match != null) return match;
-        }
-
-        return null;
+        return await _db.InvestorKycs.FirstOrDefaultAsync(k =>
+            !k.IsRevoked &&
+            (k.KycLinkToken == cleanToken || k.KycLinkToken == subToken || (k.KycLinkToken != null && ("tok_" + k.KycLinkToken) == cleanToken) ||
+             (k.KycTokenHash != null && (k.KycTokenHash == tokenHash || k.KycTokenHash == subTokenHash))) &&
+            (!k.KycLinkExpiresAt.HasValue || k.KycLinkExpiresAt.Value > DateTime.UtcNow), ct);
     }
 
     public async Task<InvestorKyc> CreateAsync(InvestorKyc kyc, CancellationToken ct = default)

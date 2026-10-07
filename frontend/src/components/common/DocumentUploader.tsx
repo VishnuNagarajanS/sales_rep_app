@@ -1,4 +1,6 @@
 import React, { useRef, useState } from 'react';
+import { apiClient } from '../../services/apiClient';
+import { isMockMode } from '../../config/environment';
 import { Upload, CheckCircle2, AlertCircle } from 'lucide-react';
 import { DocumentItem } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -59,29 +61,51 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({
     setTimeout(() => setToast(null), 3500);
   };
 
-  const handleFile = (file: File) => {
+  const handleFile = async (file: File) => {
     try {
-      const doc: DocumentItem = {
-        id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        name: file.name,
-        size: formatFileSize(file.size),
-        type: file.type || 'application/octet-stream',
-        uploadedBy: user?.name || 'Unknown User',
-        uploadedAt: new Date().toLocaleDateString('en-IN', {
-          day: '2-digit',
-          month: 'short',
-          year: 'numeric',
-        }),
-        category: selectedCategory,
-        entityType,
-        entityId,
-      };
+      if (isMockMode()) {
+        const doc: DocumentItem = {
+          id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          name: file.name,
+          size: formatFileSize(file.size),
+          type: file.type || 'application/octet-stream',
+          uploadedBy: user?.name || 'Unknown User',
+          uploadedAt: new Date().toLocaleDateString('en-IN', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+          }),
+          category: selectedCategory,
+          entityType,
+          entityId,
+        };
 
-      saveStoredDocument(doc);
-      onUploaded?.(doc);
-      showToast('success', `"${file.name}" logged successfully.`);
-    } catch {
-      showToast('error', 'Failed to log document. Please try again.');
+        saveStoredDocument(doc);
+        onUploaded?.(doc);
+        showToast('success', `"${file.name}" logged successfully.`);
+      } else {
+        const formData = new FormData();
+        formData.append('name', file.name);
+        formData.append('size', formatFileSize(file.size));
+        formData.append('type', file.type || 'application/octet-stream');
+        formData.append('category', selectedCategory);
+        formData.append('entityType', entityType || 'lead');
+        formData.append('entityId', entityId || '');
+        formData.append('file', file);
+        
+        const res = await apiClient.postFormData<any>('/documents', formData);
+        if (res.success && res.data) {
+          saveStoredDocument(res.data);
+          onUploaded?.(res.data);
+          window.dispatchEvent(new Event('nexus_storage_updated'));
+          showToast('success', `"${file.name}" logged successfully.`);
+        } else {
+          showToast('error', res.message || 'Failed to log document. Please try again.');
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to log document:', err);
+      showToast('error', err?.message || 'Failed to log document. Please try again.');
     }
 
     // Reset the file input so the same file can be re-selected

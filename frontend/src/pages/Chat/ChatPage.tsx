@@ -69,7 +69,6 @@ export const ChatPage: React.FC<{ onNavigate?: (route: string) => void }> = ({ o
 
   const loadData = useCallback(() => {
     if (!companyId) return;
-    cs.ensureDemoConversations(companyId, tenant?.slug);
     const convs = cs.getConversations(companyId);
     setConversations(convs);
 

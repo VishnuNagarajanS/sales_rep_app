@@ -11,4 +11,5 @@ public class LeadFilterDto
     public int PageSize { get; set; } = 10;
     public string? SortBy { get; set; } = "CreatedAt";
     public string? SortOrder { get; set; } = "desc";
+    public string? Assignment { get; set; } = "all"; // unassigned | assigned | all
 }

@@ -24,6 +24,7 @@ export type CustomerKycStatus =
   | 'Rejected'
   | 'Needs Correction'
   | 'Wrong'
+  | 'Assisted Draft'
   | 'Assisted KYC – Submitted for Verification';
 
 interface KycStatusBadgeProps {
@@ -32,6 +33,25 @@ interface KycStatusBadgeProps {
 
 export const KycStatusBadge: React.FC<KycStatusBadgeProps> = ({ status }) => {
   switch (status) {
+    case 'Assisted Draft':
+      return (
+        <span
+          className="kyc-link-badge"
+          style={{
+            background: 'rgba(245, 158, 11, 0.12)',
+            color: '#d97706',
+            borderColor: 'rgba(245, 158, 11, 0.35)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            fontWeight: 600,
+          }}
+          title="Assisted KYC draft is saved and incomplete — can be resumed at any time"
+        >
+          <Clock size={11} />
+          Assisted Draft
+        </span>
+      );
     case 'Assisted KYC – Submitted for Verification':
       return (
         <span
@@ -44,10 +64,12 @@ export const KycStatusBadge: React.FC<KycStatusBadgeProps> = ({ status }) => {
             alignItems: 'center',
             gap: 5,
             fontWeight: 600,
+            whiteSpace: 'nowrap',
           }}
+          title="Assisted KYC – Submitted for Verification"
         >
           <UserCheck size={11} />
-          Assisted KYC – Submitted for Verification
+          Under Verification
         </span>
       );
     case 'Pending':

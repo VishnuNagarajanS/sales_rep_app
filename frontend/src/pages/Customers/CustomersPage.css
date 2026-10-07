@@ -360,43 +360,308 @@
   color: var(--text-primary);
 }
 
-/* Calls Tab */
+/* Calls Tab & Call History Section */
 .customer-calls-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.customer-calls-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 4px;
+}
+
+.customer-calls-header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.customer-call-filter-pills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.customer-empty-text {
+  text-align: center;
+  padding: 36px 16px;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border: 1px dashed var(--border-base);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+
+.customer-call-card-item {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.customer-call-card-item:hover {
+  border-color: var(--border-strong);
+}
+
+.customer-call-compact-row {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  background: var(--bg-surface);
+}
+
+.customer-call-meta-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.customer-call-direction-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.customer-call-direction-badge.is-inbound {
+  background-color: #dcfce7;
+  color: #15803d;
+}
+
+.customer-call-direction-badge.is-outbound {
+  background-color: #e0f2fe;
+  color: #0369a1;
+}
+
+.customer-call-date {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.customer-call-sep {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.customer-call-duration {
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.customer-call-meta-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.customer-call-connect-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.customer-call-connect-badge.is-irm {
+  background-color: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.customer-call-connect-badge.is-agent {
+  background-color: #f5f3ff;
+  color: #6d28d9;
+  border: 1px solid #ddd6fe;
+}
+
+.customer-call-agent-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.customer-call-role-tag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.customer-call-role-tag.role-irm {
+  background-color: rgba(14, 165, 233, 0.12);
+  color: #0284c7;
+  border: 1px solid rgba(14, 165, 233, 0.25);
+}
+
+.customer-call-role-tag.role-agent {
+  background-color: rgba(100, 116, 139, 0.12);
+  color: #475569;
+  border: 1px solid rgba(100, 116, 139, 0.25);
+}
+
+.customer-call-expand-btn {
+  font-size: 12px;
+  font-weight: 600;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+}
+
+.customer-call-expanded-panel {
+  border-top: 1px solid var(--border-base);
+  background-color: var(--bg-surface-hover);
+  padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
 
-.customer-empty-text {
-  text-align: center;
-  padding: 32px 0;
-  color: var(--text-secondary);
+.customer-call-notes-section {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
 }
 
-.customer-call-card {
-  padding: 16px;
+.customer-call-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.customer-call-notes-content {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.customer-call-reason-section {
+  font-size: 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  color: var(--text-primary);
+}
+
+.customer-call-reason-label {
+  font-weight: 700;
+  color: #d97706;
+}
+
+.customer-call-media-card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+}
+
+.customer-call-media-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border: 1px solid var(--border-base);
+  margin-bottom: 8px;
 }
 
-.customer-call-meta {
+.customer-call-media-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.customer-call-duration {
+  gap: 6px;
   font-size: 12px;
-  color: var(--text-muted);
-}
-
-.customer-call-transcript {
-  font-size: 12px;
+  font-weight: 700;
   color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.customer-call-audio-wrap {
   margin-top: 6px;
-  font-style: italic;
+}
+
+.customer-call-audio-player {
+  width: 100%;
+  height: 38px;
+  border-radius: 6px;
+}
+
+.customer-call-transcript-wrap {
+  background-color: var(--bg-surface-hover);
+  border-left: 3px solid var(--primary-600);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+}
+
+.customer-call-transcript-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.customer-call-diagnostic-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-surface-hover);
+  border: 1px dashed var(--border-strong);
+}
+
+.customer-call-diag-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.customer-call-diag-body {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.customer-call-diag-body strong {
+  color: var(--text-secondary);
+  display: block;
+  margin-bottom: 3px;
+}
+
+.customer-call-diag-body p {
+  margin: 0;
+  color: var(--text-muted);
 }
 
 /* Followups Tab */

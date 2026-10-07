@@ -25,19 +25,6 @@ public class InvestorDto
     public DateTime? UpdatedAt { get; set; }
 }
 
-public class CreateInvestorDto
-{
-    public string Name { get; set; } = string.Empty;
-    public string Phone { get; set; } = string.Empty;
-    public string Email { get; set; } = string.Empty;
-    public string InvestmentCapacity { get; set; } = string.Empty;
-    public string PreferredAssetClass { get; set; } = string.Empty;
-    public string? RiskTolerance { get; set; }
-    public string? InvestmentMandate { get; set; }
-    public string? ReferralSource { get; set; }
-    public string Notes { get; set; } = string.Empty;
-}
-
 public class UpdateInvestorDto
 {
     public string? Name { get; set; }

@@ -23,6 +23,15 @@ public class LeadConfiguration : IEntityTypeConfiguration<Lead>
         builder.Property(l => l.Email)
             .HasMaxLength(255);
 
+        builder.Property(l => l.NormalizedPhone)
+            .HasMaxLength(20);
+
+        builder.Property(l => l.NormalizedEmail)
+            .HasMaxLength(255);
+
+        builder.Property(l => l.IsDuplicate)
+            .HasDefaultValue(false);
+
         builder.Property(l => l.Location)
             .HasMaxLength(255);
 
@@ -41,6 +50,15 @@ public class LeadConfiguration : IEntityTypeConfiguration<Lead>
         builder.Property(l => l.CreatedAt)
             .HasDefaultValueSql("NOW()");
 
+        // Tenant-scoped filtered unique indexes on normalized identifiers (safe when existing duplicates exist)
+        builder.HasIndex(l => new { l.CompanyId, l.NormalizedPhone })
+            .HasFilter("\"IsDuplicate\" = false AND \"NormalizedPhone\" IS NOT NULL AND \"NormalizedPhone\" <> ''")
+            .IsUnique();
+
+        builder.HasIndex(l => new { l.CompanyId, l.NormalizedEmail })
+            .HasFilter("\"IsDuplicate\" = false AND \"NormalizedEmail\" IS NOT NULL AND \"NormalizedEmail\" <> ''")
+            .IsUnique();
+
         // Relationships
         builder.HasOne(l => l.Company)
             .WithMany()
@@ -52,5 +70,14 @@ public class LeadConfiguration : IEntityTypeConfiguration<Lead>
             .HasForeignKey(l => l.AssignedAgentId)
             .IsRequired(false)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(l => l.AssignedBy)
+            .WithMany()
+            .HasForeignKey(l => l.AssignedById)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasIndex(l => new { l.CompanyId, l.AssignedAgentId });
+        
+        builder.UseXminAsConcurrencyToken();
     }
 }

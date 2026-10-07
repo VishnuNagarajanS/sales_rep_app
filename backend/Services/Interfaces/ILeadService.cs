@@ -13,4 +13,6 @@ public interface ILeadService
     Task<ApiResponse<PagedResult<LeadResponseDto>>> GetNotInterestedLeadsAsync(int page, int pageSize, CancellationToken ct = default);
     Task<ApiResponse<PagedResult<LeadResponseDto>>> GetJunkLeadsAsync(int page, int pageSize, CancellationToken ct = default);
     Task<ApiResponse<LeadResponseDto>> ReengageLeadAsync(int id, CancellationToken ct = default);
+    Task<ApiResponse<object>> DeleteLeadAsync(int id, CancellationToken ct = default);
 }
+

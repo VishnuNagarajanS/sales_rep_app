@@ -172,33 +172,68 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
           </div>
 
           {/* Quick Stage Switcher */}
-          <div className="activity-stage-switcher">
-            <span className="switcher-label">Move Stage:</span>
-            <div className="switcher-buttons">
-              {stages.map((stage) => {
-                const isActive = stage.id === card.stageId;
-                return (
-                  <button
-                    key={stage.id}
-                    type="button"
-                    className={`stage-pill-btn ${isActive ? 'active' : ''}`}
-                    style={{
-                      borderColor: isActive ? stage.color : undefined,
-                      backgroundColor: isActive ? `${stage.color}15` : undefined,
-                      color: isActive ? stage.color : undefined,
-                    }}
-                    onClick={() => handleStageChange(stage.id)}
-                  >
-                    <span
-                      className="stage-pill-dot"
-                      style={{ backgroundColor: stage.color }}
-                    />
-                    {stage.name}
-                  </button>
-                );
-              })}
+          {card.role !== 'irm' ? (
+            <div className="activity-stage-switcher">
+              <span className="switcher-label">Move Stage:</span>
+              <div className="switcher-buttons">
+                {stages.map((stage) => {
+                  const isActive = stage.id === card.stageId;
+                  return (
+                    <button
+                      key={stage.id}
+                      type="button"
+                      className={`stage-pill-btn ${isActive ? 'active' : ''}`}
+                      style={{
+                        borderColor: isActive ? stage.color : undefined,
+                        backgroundColor: isActive ? `${stage.color}15` : undefined,
+                        color: isActive ? stage.color : undefined,
+                      }}
+                      onClick={() => handleStageChange(stage.id)}
+                    >
+                      <span
+                        className="stage-pill-dot"
+                        style={{ backgroundColor: stage.color }}
+                      />
+                      {stage.name}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="activity-stage-switcher" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="switcher-label" style={{ margin: 0 }}>Stage:</span>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '4px 10px',
+                    borderRadius: 16,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    backgroundColor: `${currentStage?.color}15`,
+                    color: currentStage?.color,
+                    border: `1px solid ${currentStage?.color}40`,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      backgroundColor: currentStage?.color,
+                    }}
+                  />
+                  {currentStage?.name}
+                </span>
+              </div>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>
+                Read-only view (IRM managed)
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Add Note / Activity Form Removed */}

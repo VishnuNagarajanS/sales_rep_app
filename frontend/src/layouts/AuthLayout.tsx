@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Shield, Building2, UserCheck, ArrowRight, ArrowLeft, Lock, Mail, AlertCircle, TrendingUp, CheckCircle2, KeyRound } from 'lucide-react';
-import { isMockMode } from '../config/environment';
+import { ArrowRight, ArrowLeft, Lock, Mail, AlertCircle, CheckCircle2, KeyRound } from 'lucide-react';
 import { authService } from '../services/authService';
 import './AuthLayout.css';
 
 export const AuthLayout: React.FC = () => {
-  const { login, switchPersona, loginError } = useAuth();
+  const { login, loginError } = useAuth();
   const [view, setView] = useState<'login' | 'forgot'>('login');
 
   // Login Form State
@@ -164,84 +163,6 @@ export const AuthLayout: React.FC = () => {
                   Multi-Tenant Sales CRM & Real-Time Calling Engine
                 </p>
               </div>
-
-              {/* Demo Fast Login Presets (Mock Mode Only) */}
-              {isMockMode() && (
-                <>
-                  <div className="auth-presets-container">
-                    <div className="auth-presets-label">
-                      Quick One-Click Demo Sign-in
-                    </div>
-                    <div className="auth-presets-grid">
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm auth-preset-btn"
-                        onClick={() => switchPersona('company_admin', 'ghl')}
-                      >
-                        <Building2 size={14} color="#ef4444" />
-                        <div>
-                          <div className="auth-preset-title">GHL India Admin</div>
-                          <div className="auth-preset-subtitle">Wealth / Investors</div>
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm auth-preset-btn"
-                        onClick={() => switchPersona('company_admin', 'jamin')}
-                      >
-                        <Building2 size={14} color="#e10600" />
-                        <div>
-                          <div className="auth-preset-title">Jamin Bazaar Admin</div>
-                          <div className="auth-preset-subtitle">Mani</div>
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm auth-preset-btn"
-                        onClick={() => switchPersona('sales_executive', 'ghl')}
-                      >
-                        <UserCheck size={14} color="#ef4444" />
-                        <div>
-                          <div className="auth-preset-title">GHL Sales Agent</div>
-                          <div className="auth-preset-subtitle">Naveen</div>
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm auth-preset-btn"
-                        onClick={() => switchPersona('irm', 'ghl')}
-                      >
-                        <TrendingUp size={14} color="#ef4444" />
-                        <div>
-                          <div className="auth-preset-title">GHL IRM</div>
-                          <div className="auth-preset-subtitle">Dhinakaran</div>
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm auth-preset-btn"
-                        onClick={() => switchPersona('super_admin')}
-                      >
-                        <Shield size={14} color="#8b5cf6" />
-                        <div>
-                          <div className="auth-preset-title">Super Admin</div>
-                          <div className="auth-preset-subtitle">Yanosh</div>
-                        </div>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="auth-divider">
-                    <div className="auth-divider-line" />
-                    <span>or sign in with credentials</span>
-                    <div className="auth-divider-line" />
-                  </div>
-                </>
-              )}
 
               {/* Standard Form */}
               <form onSubmit={handleSubmit} className="auth-form">

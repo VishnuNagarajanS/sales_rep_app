@@ -30,7 +30,8 @@ public class IrmFollowupService : IIrmFollowupService
     {
         var user = await _userRepo.GetByIdAsync(assignedToId, ct);
 
-        // Deduplication & idempotency check
+        // Deduplication & idempotency check: only collapse repeated submissions
+        // Do NOT collapse legitimate separate tasks with different details or schedules
         var allCompanyFollowups = await _followupRepo.GetAllAsync(companyId, null, null, null, ct);
         var fDigits = (dto.ContactPhone ?? string.Empty).Replace(" ", "").Replace("-", "");
         if (fDigits.Length > 10) fDigits = fDigits[^10..];
@@ -38,12 +39,15 @@ public class IrmFollowupService : IIrmFollowupService
         var existingPending = allCompanyFollowups.FirstOrDefault(f =>
             f.Status == FollowupStatus.Pending &&
             ((!string.IsNullOrEmpty(dto.ContactId) && f.ContactId == dto.ContactId) ||
-             (!string.IsNullOrEmpty(fDigits) && f.ContactPhone != null && f.ContactPhone.Contains(fDigits))));
+             (!string.IsNullOrEmpty(fDigits) && f.ContactPhone != null && f.ContactPhone.Contains(fDigits))) &&
+            (Math.Abs((f.ScheduledAt - dto.ScheduledAt).TotalMinutes) <= 15 ||
+             (!string.IsNullOrEmpty(dto.Agenda) && f.Agenda == dto.Agenda.Trim() && (DateTime.UtcNow - f.CreatedAt).TotalMinutes <= 2)));
 
         if (existingPending != null)
         {
             existingPending.ScheduledAt = dto.ScheduledAt;
             existingPending.Agenda = dto.Agenda;
+            if (!string.IsNullOrWhiteSpace(dto.ContactEmail)) existingPending.ContactEmail = dto.ContactEmail.Trim();
             existingPending.AssignedToId = assignedToId;
             existingPending.AssignedToName = user?.Name ?? string.Empty;
             existingPending.AssignedToRole = assignedToRole;
@@ -52,10 +56,12 @@ public class IrmFollowupService : IIrmFollowupService
         }
 
         string? investorName = null;
+        string? email = dto.ContactEmail?.Trim();
         if (dto.InvestorId.HasValue)
         {
             var investor = await _investorRepo.GetByIdAsync(dto.InvestorId.Value, companyId, ct);
             investorName = investor?.Name;
+            if (string.IsNullOrEmpty(email)) email = investor?.Email;
         }
 
         var followup = new Followup
@@ -68,6 +74,7 @@ public class IrmFollowupService : IIrmFollowupService
             AssignedToRole = assignedToRole,
             ContactName = dto.ContactName ?? string.Empty,
             ContactPhone = dto.ContactPhone ?? string.Empty,
+            ContactEmail = email ?? string.Empty,
             ContactId = dto.ContactId ?? string.Empty,
             ScheduledAt = dto.ScheduledAt,
             Status = FollowupStatus.Pending,
@@ -122,6 +129,7 @@ public class IrmFollowupService : IIrmFollowupService
         AssignedToRole = f.AssignedToRole,
         ContactName = f.ContactName,
         ContactPhone = f.ContactPhone,
+        ContactEmail = f.ContactEmail,
         ContactId = f.ContactId,
         ScheduledAt = f.ScheduledAt,
         Status = f.Status.ToString(),

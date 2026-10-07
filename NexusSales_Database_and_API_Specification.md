@@ -429,18 +429,18 @@ Total REST endpoints: **92 APIs** across **15 Controller groups**.
 | Method | Endpoint | Description | Auth Roles |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/sales-executive/followups` | List pending, completed, or overdue follow-ups | All roles (scoped) |
-| `POST` | `/api/sales-executive/followups` | Schedule callback or meeting task | All roles |
+| `POST` | `/api/sales-executive/followups` | Schedule callback or meeting task (writes rejected for GHL Admin on IRM items) | All roles (IRM writes forbidden for GHL Admin) |
 | `GET` | `/api/sales-executive/followups/{id}` | View follow-up details | All roles (scoped) |
-| `PUT` | `/api/sales-executive/followups/{id}` | Reschedule or update follow-up notes | All roles (scoped) |
-| `PATCH` | `/api/sales-executive/followups/{id}/complete`| Mark follow-up as completed | All roles (scoped) |
-| `DELETE` | `/api/sales-executive/followups/{id}` | Cancel follow-up task | All roles (scoped) |
+| `PUT` | `/api/sales-executive/followups/{id}` | Reschedule or update follow-up notes (`403 Forbidden` for GHL Admin on IRM items) | All roles (IRM writes forbidden for GHL Admin) |
+| `PATCH` | `/api/sales-executive/followups/{id}/complete`| Mark follow-up as completed (`403 Forbidden` for GHL Admin on IRM items) | All roles (IRM writes forbidden for GHL Admin) |
+| `DELETE` | `/api/sales-executive/followups/{id}` | Cancel follow-up task (`403 Forbidden` for GHL Admin on IRM items) | All roles (IRM writes forbidden for GHL Admin) |
 
 ### Module 7: Telephony & Call Center (`/api/sales-executive/calls`)
 | Method | Endpoint | Description | Auth Roles |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/sales-executive/calls` | Call history log with duration and disposition | All roles (scoped) |
-| `POST` | `/api/sales-executive/calls` | Save call disposition, duration, notes | All roles |
-| `POST` | `/api/sales-executive/calls/initiate` | Trigger click-to-call / WebRTC session | All roles |
+| `POST` | `/api/sales-executive/calls` | Save call disposition, duration, notes (`403 Forbidden` for GHL Admin on IRM calls) | All roles (IRM writes forbidden for GHL Admin) |
+| `POST` | `/api/sales-executive/calls/initiate` | Trigger click-to-call / WebRTC session (`403 Forbidden` for GHL Admin on IRM calls) | All roles (IRM writes forbidden for GHL Admin) |
 | `GET` | `/api/sales-executive/calls/{id}/recording` | Stream call recording audio | Authenticated (permission) |
 | `GET` | `/api/sales-executive/calls/stats` | Today's talk-time, call counts, connected rate | All roles |
 
@@ -454,28 +454,32 @@ Total REST endpoints: **92 APIs** across **15 Controller groups**.
 | `DELETE` | `/api/sales-executive/consultations/{id}` | Cancel consultation | All roles (scoped) |
 
 ### Module 9: GHL Deals Pipeline (`/api/ghl/deals`)
+> **Note:** GHL Admin has read-only access to deals belonging to IRM stages (`leads`, `followup`, `qualified_investor`, `investment_opportunity`, `converted`) or assigned to IRM agents. Any write action (create, update, delete, log activity) on IRM deals by GHL Admin yields `403 Forbidden`.
+
 | Method | Endpoint | Description | Auth Roles |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/ghl/deals` | List deals grouped by Kanban stages | `ghl` tenant roles |
-| `POST` | `/api/ghl/deals` | Create investment pipeline deal | `ghl` tenant roles |
+| `POST` | `/api/ghl/deals` | Create investment pipeline deal (`403 Forbidden` for GHL Admin if IRM stage/agent) | `ghl` tenant roles |
 | `GET` | `/api/ghl/deals/{id}` | Deal details & financial values | `ghl` tenant roles |
-| `PUT` | `/api/ghl/deals/{id}` | Update deal stage, probability, close date | `ghl` tenant roles |
-| `DELETE` | `/api/ghl/deals/{id}` | Delete deal | `company_admin` |
+| `PUT` | `/api/ghl/deals/{id}` | Update deal stage, probability, close date (`403 Forbidden` for GHL Admin on IRM deals) | `ghl` tenant roles |
+| `DELETE` | `/api/ghl/deals/{id}` | Delete deal (`403 Forbidden` for GHL Admin on IRM deals) | `company_admin` |
 | `GET` | `/api/ghl/deals/{id}/activities` | Get deal chronological timeline | `ghl` tenant roles |
-| `POST` | `/api/ghl/deals/{id}/activities` | Log note, meeting, or stage change | `ghl` tenant roles |
+| `POST` | `/api/ghl/deals/{id}/activities` | Log note, meeting, or stage change (`403 Forbidden` for GHL Admin on IRM deals) | `ghl` tenant roles |
 
 ### Module 10: GHL Investors & Opportunities (`/api/ghl/*`)
+> **Note:** GHL Admin has read-only access to Investors and Opportunities. Create, update, and delete endpoints return `403 Forbidden` for GHL Admin.
+
 | Method | Endpoint | Description | Auth Roles |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/ghl/investors` | List HNW investor accounts | `ghl` tenant roles |
-| `POST` | `/api/ghl/investors` | Create investor profile & AUM mandate | `ghl` tenant roles |
+| `POST` | `/api/ghl/investors` | Create investor profile & AUM mandate (`403 Forbidden` for GHL Admin) | `irm`, `irm_admin` (GHL Admin Read-Only) |
 | `GET` | `/api/ghl/investors/{id}` | Investor portfolio details | `ghl` tenant roles |
-| `PUT` | `/api/ghl/investors/{id}` | Update ticket size & asset class preference | `ghl` tenant roles |
-| `DELETE` | `/api/ghl/investors/{id}` | Archive investor profile | `company_admin` |
+| `PUT` | `/api/ghl/investors/{id}` | Update ticket size & asset class preference (`403 Forbidden` for GHL Admin) | `irm`, `irm_admin` (GHL Admin Read-Only) |
+| `DELETE` | `/api/ghl/investors/{id}` | Archive investor profile (`403 Forbidden` for GHL Admin) | `irm_admin` (GHL Admin Read-Only) |
 | `GET` | `/api/ghl/investment-opportunities` | List active AIF funds and yield offerings | `ghl` tenant roles |
-| `POST` | `/api/ghl/investment-opportunities` | Create investment opportunity | `company_admin` |
-| `PUT` | `/api/ghl/investment-opportunities/{id}` | Update fund size, return, tenure | `company_admin` |
-| `DELETE` | `/api/ghl/investment-opportunities/{id}` | Archive opportunity | `company_admin` |
+| `POST` | `/api/ghl/investment-opportunities` | Create investment opportunity (`403 Forbidden` for GHL Admin) | `irm_admin`, `irm` (GHL Admin Read-Only) |
+| `PUT` | `/api/ghl/investment-opportunities/{id}` | Update fund size, return, tenure (`403 Forbidden` for GHL Admin) | `irm_admin`, `irm` (GHL Admin Read-Only) |
+| `DELETE` | `/api/ghl/investment-opportunities/{id}` | Archive opportunity (`403 Forbidden` for GHL Admin) | `irm_admin`, `irm` (GHL Admin Read-Only) |
 
 ### Module 11: Jamin Bazaar Real Estate Domain (`/api/properties`, etc.)
 | Method | Endpoint | Description | Auth Roles |
@@ -526,3 +530,33 @@ Total REST endpoints: **92 APIs** across **15 Controller groups**.
 | `POST` | `/api/documents/upload` | Multipart file upload (ID, Agreement, PAN) | Authenticated |
 | `GET` | `/api/documents/{id}/download` | Generate signed download URL | Authenticated (scoped) |
 | `DELETE` | `/api/documents/{id}` | Delete document | `company_admin` |
+
+### Module 16: IRM Operations & Governance (`/api/irm/*`)
+> **Access Policy:** GHL Admin users have strictly **Read-Only** access across all IRM domains (Pipeline, Deals, Follow-ups, Investors, Opportunities, Call History). GHL Admin can view, filter, search, and paginate all IRM data, but cannot invoke any write endpoints. Write requests from GHL Admin are rejected with `403 Forbidden` (`ApiResponse<T>.ErrorResponse`). IRM roles (`irm`, `irm_manager`, `irm_admin`) retain full read/write access.
+
+| Method | Endpoint | Description | Auth Roles |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/irm/pipeline` | List IRM pipeline stages, metrics, and cards | All authenticated (including GHL Admin) |
+| `PUT` | `/api/irm/pipeline/{cardId}/move` | Move IRM pipeline card between stages | `irm`, `irm_manager`, `irm_admin` (`403 Forbidden` for GHL Admin) |
+| `POST` | `/api/irm/pipeline/{cardId}/activity` | Log activity note on IRM pipeline card | `irm`, `irm_manager`, `irm_admin` (`403 Forbidden` for GHL Admin) |
+| `GET` | `/api/irm/followups` | List IRM follow-up tasks with status/priority filtering | All authenticated (including GHL Admin) |
+| `POST` | `/api/irm/followups` | Create new IRM follow-up | `irm`, `irm_manager`, `irm_admin` (`403 Forbidden` for GHL Admin) |
+| `PUT` | `/api/irm/followups/{id}/complete` | Mark IRM follow-up completed | `irm`, `irm_manager`, `irm_admin` (`403 Forbidden` for GHL Admin) |
+| `PUT` | `/api/irm/followups/{id}/reschedule` | Reschedule IRM follow-up | `irm`, `irm_manager`, `irm_admin` (`403 Forbidden` for GHL Admin) |
+| `GET` | `/api/irm/investors` | List IRM investors with search, filtering, and pagination | All authenticated (including GHL Admin) |
+| `GET` | `/api/irm/investors/{id}` | Get IRM investor details by ID | All authenticated (including GHL Admin) |
+| `POST` | `/api/irm/investors` | Create new IRM investor record | `irm`, `irm_manager`, `irm_admin` (`403 Forbidden` for GHL Admin) |
+| `PUT` | `/api/irm/investors/{id}` | Update existing IRM investor | `irm`, `irm_manager`, `irm_admin` (`403 Forbidden` for GHL Admin) |
+| `DELETE` | `/api/irm/investors/{id}` | Delete IRM investor record | `irm`, `irm_manager`, `irm_admin` (`403 Forbidden` for GHL Admin) |
+| `GET` | `/api/irm/opportunities` | List IRM investment opportunities | All authenticated (including GHL Admin) |
+| `GET` | `/api/irm/opportunities/{id}` | Get IRM opportunity details | All authenticated (including GHL Admin) |
+| `POST` | `/api/irm/opportunities` | Create new IRM opportunity | `irm`, `irm_manager`, `irm_admin` (`403 Forbidden` for GHL Admin) |
+| `POST` | `/api/irm/opportunities/{id}/pitch` | Pitch IRM opportunity to investor | `irm`, `irm_manager`, `irm_admin` (`403 Forbidden` for GHL Admin) |
+| `POST` | `/api/irm/opportunities/{id}/commit` | Record investment commitment on IRM opportunity | `irm`, `irm_manager`, `irm_admin` (`403 Forbidden` for GHL Admin) |
+| `GET` | `/api/irm/calls` | List IRM call logs and history | All authenticated (including GHL Admin) |
+| `POST` | `/api/irm/calls` | Log IRM call details and outcome | `irm`, `irm_manager`, `irm_admin` (`403 Forbidden` for GHL Admin) |
+| `GET` | `/api/irm/kyc` | List KYC records and verification statuses | All authenticated (including GHL Admin) |
+| `POST` | `/api/irm/kyc/link` | Generate and send KYC verification link | `irm`, `irm_manager`, `irm_admin` |
+| `POST` | `/api/irm/kyc/assisted` | Submit Assisted KYC form on behalf of investor | `irm`, `irm_manager`, `irm_admin` |
+| `POST` | `/api/irm/kyc/draft` | Save Assisted KYC draft | `irm`, `irm_manager`, `irm_admin` |
+

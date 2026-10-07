@@ -15,12 +15,6 @@
   flex-wrap: wrap;
 }
 
-.pipeline-new-deal-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
 .pipeline-board-container {
   display: flex;
   gap: 16px;

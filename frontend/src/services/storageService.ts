@@ -16,7 +16,6 @@ import {
   NotificationItem,
   User,
   Tenant,
-  Role,
   DocumentItem,
   Department,
   Team,
@@ -28,119 +27,21 @@ import {
   CustomFieldDefinition,
   ProductService,
   IrmProfile,
-  AdminKanbanCard,
 } from '../types';
+import { DEFAULT_TENANTS } from '../constants/defaultTenants';
 import { isMockMode } from '../config/environment';
-
-export interface MockStorageAdapter {
-  getTenants: () => Tenant[];
-  saveTenants: (tenants: Tenant[]) => void;
-  getRoles: () => Role[];
-  saveRoles: (roles: Role[]) => void;
-  getUsers: (tenantId?: string) => User[];
-  saveUsers: (users: User[]) => void;
-  getLeads: (companyId?: string) => Lead[];
-  saveLeads: (leads: Lead[]) => void;
-  getCustomers: (companyId?: string) => Customer[];
-  saveCustomers: (customers: Customer[]) => void;
-  getDeals: (companyId?: string) => Deal[];
-  saveDeals: (deals: Deal[]) => void;
-  getCalls: (companyId?: string) => CallRecord[];
-  saveCalls: (calls: CallRecord[]) => void;
-  getFollowups: (companyId?: string) => Followup[];
-  saveFollowups: (followups: Followup[]) => void;
-  getProjects: (companyId?: string) => PropertyProject[];
-  saveProjects: (projects: PropertyProject[]) => void;
-  getPlots: () => Plot[];
-  savePlots: (plots: Plot[]) => void;
-  getSiteVisits: (companyId?: string) => SiteVisit[];
-  saveSiteVisits: (visits: SiteVisit[]) => void;
-  getBookings: (companyId?: string) => Booking[];
-  saveBookings: (bookings: Booking[]) => void;
-  getInvestors: (companyId?: string) => Investor[];
-  saveInvestors: (investors: Investor[]) => void;
-  getConsultations: (companyId?: string) => Consultation[];
-  saveConsultations: (consultations: Consultation[]) => void;
-  getOpportunities: (companyId?: string) => InvestmentOpportunity[];
-  saveOpportunities: (opps: InvestmentOpportunity[]) => void;
-  getAuditLogs: (companyId?: string) => AuditLog[];
-  saveAuditLogs: (logs: AuditLog[]) => void;
-  getNotifications: (userId?: string) => NotificationItem[];
-  saveNotifications: (notifs: NotificationItem[]) => void;
-  getKanbanCards: () => AdminKanbanCard[];
-  saveKanbanCards: (cards: AdminKanbanCard[]) => void;
-  getAgents: () => Array<{ id: number | string; name: string }>;
-  getIrms: () => IrmProfile[];
-  getCustomFields: (companyId?: string) => CustomFieldDefinition[];
-  saveCustomFields: (definitions: CustomFieldDefinition[]) => void;
-}
-
-const defaultMockStorageAdapter: MockStorageAdapter = {
-  getTenants: (): Tenant[] => [],
-  saveTenants: () => {},
-  getRoles: (): Role[] => [],
-  saveRoles: () => {},
-  getUsers: (): User[] => [],
-  saveUsers: () => {},
-  getLeads: (): Lead[] => [],
-  saveLeads: () => {},
-  getCustomers: (): Customer[] => [],
-  saveCustomers: () => {},
-  getDeals: (): Deal[] => [],
-  saveDeals: () => {},
-  getCalls: (): CallRecord[] => [],
-  saveCalls: () => {},
-  getFollowups: (): Followup[] => [],
-  saveFollowups: () => {},
-  getProjects: (): PropertyProject[] => [],
-  saveProjects: () => {},
-  getPlots: (): Plot[] => [],
-  savePlots: () => {},
-  getSiteVisits: (): SiteVisit[] => [],
-  saveSiteVisits: () => {},
-  getBookings: (): Booking[] => [],
-  saveBookings: () => {},
-  getInvestors: (): Investor[] => [],
-  saveInvestors: () => {},
-  getConsultations: (): Consultation[] => [],
-  saveConsultations: () => {},
-  getOpportunities: (): InvestmentOpportunity[] => [],
-  saveOpportunities: () => {},
-  getAuditLogs: (): AuditLog[] => [],
-  saveAuditLogs: () => {},
-  getNotifications: (): NotificationItem[] => [],
-  saveNotifications: () => {},
-  getKanbanCards: (): AdminKanbanCard[] => [],
-  saveKanbanCards: () => {},
-  getAgents: (): Array<{ id: number | string; name: string }> => [],
-  getIrms: (): IrmProfile[] => [],
-  getCustomFields: (): CustomFieldDefinition[] => [],
-  saveCustomFields: () => {},
-};
-
-let mockStorageAdapter: MockStorageAdapter = defaultMockStorageAdapter;
-
-export function registerMockStorageAdapter(adapter: MockStorageAdapter): void {
-  if (adapter) {
-    mockStorageAdapter = adapter;
-  }
-}
-
-let mockBootstrapRunner: ((force?: boolean) => void) | null = null;
-
-export function registerMockBootstrapRunner(runner: (force?: boolean) => void): void {
-  mockBootstrapRunner = runner;
-}
+import { DEFAULT_CUSTOM_FIELD_DEFINITIONS } from '../constants/customFields';
 
 export type PopupPosition = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
 
 class StorageService {
-  private devPrefix = 'nexus_dev_';
-
   constructor() {
-    if (isMockMode()) {
-      this.runLeadsDedupMigration();
-    }
+    this.runLeadsDedupMigration();
+    this.cleanupFakeRuntimeData();
+  }
+
+  isMockMode(): boolean {
+    return isMockMode();
   }
 
   private runLeadsDedupMigration(): void {
@@ -155,110 +56,201 @@ class StorageService {
     }
   }
 
-  private getDev<T>(key: string, fallback: T): T {
+  private cleanupFakeRuntimeData(): void {
     try {
-      const data = localStorage.getItem(`${this.devPrefix}${key}`);
+      if (typeof window === 'undefined' || !window.localStorage) return;
+      if (isMockMode()) return;
+
+      // 1. Purge fake follow-ups (only confirmed exact fixture IDs)
+      const exactFakeFollowupIds = new Set([
+        'flw-se-ps-01', 'flw-se-ps-02', 'flw-se-ps-03',
+        'flw-se-rv-01', 'flw-se-rv-02', 'flw-se-rv-03',
+        'flw-irm-rv-01', 'flw-irm-rv-02', 'flw-irm-rv-03',
+        'flw-irm-mn-01', 'flw-irm-mn-02', 'flw-irm-mn-03',
+        'flw-irm-sj-01', 'flw-irm-sj-02', 'flw-irm-sj-03',
+      ]);
+      const rawFollowups = localStorage.getItem('nexus_followups');
+      if (rawFollowups) {
+        const parsed = JSON.parse(rawFollowups);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter((f: any) => !exactFakeFollowupIds.has(String(f.id || '')));
+          if (cleaned.length !== parsed.length) {
+            localStorage.setItem('nexus_followups', JSON.stringify(cleaned));
+          }
+        }
+      }
+
+      // 2. Purge fake investors (only confirmed exact fixture IDs)
+      const exactFakeInvestorIds = new Set(['inv-01', 'inv-02', 'inv-03', 'inv-04', 'inv-05']);
+      const rawInvestors = localStorage.getItem('nexus_investors');
+      if (rawInvestors) {
+        const parsed = JSON.parse(rawInvestors);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter((i: any) => !exactFakeInvestorIds.has(String(i.id || '')));
+          if (cleaned.length !== parsed.length) {
+            localStorage.setItem('nexus_investors', JSON.stringify(cleaned));
+          }
+        }
+      }
+
+      // 3. Purge fake opportunities (only confirmed exact fixture IDs)
+      const exactFakeOppIds = new Set(['opp-01', 'opp-02', 'opp-03', 'opp-04', 'opp-05']);
+      const rawOpps = localStorage.getItem('nexus_opportunities');
+      if (rawOpps) {
+        const parsed = JSON.parse(rawOpps);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter((o: any) => !exactFakeOppIds.has(String(o.id || '')));
+          if (cleaned.length !== parsed.length) {
+            localStorage.setItem('nexus_opportunities', JSON.stringify(cleaned));
+          }
+        }
+      }
+
+      // 4. Purge fake consultations (only confirmed exact fixture IDs)
+      const exactFakeConsIds = new Set(['cns-01', 'cns-02', 'cns-03', 'cns-04', 'cns-05']);
+      const rawCons = localStorage.getItem('nexus_consultations');
+      if (rawCons) {
+        const parsed = JSON.parse(rawCons);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter((c: any) => !exactFakeConsIds.has(String(c.id || '')));
+          if (cleaned.length !== parsed.length) {
+            localStorage.setItem('nexus_consultations', JSON.stringify(cleaned));
+          }
+        }
+      }
+
+      // 5. Purge fake calls (only confirmed exact fixture IDs)
+      const exactFakeCallIds = new Set([
+        'call-01', 'call-02', 'call-03', 'call-04', 'call-05',
+        'call-06', 'call-07', 'call-08', 'call-09', 'call-10'
+      ]);
+      const rawCalls = localStorage.getItem('nexus_calls');
+      if (rawCalls) {
+        const parsed = JSON.parse(rawCalls);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter((c: any) => !exactFakeCallIds.has(String(c.id || '')));
+          if (cleaned.length !== parsed.length) {
+            localStorage.setItem('nexus_calls', JSON.stringify(cleaned));
+          }
+        }
+      }
+
+      // 6. Purge fake test users (only confirmed exact IDs)
+      const exactFakeUserIds = new Set(['28', '29', '30']);
+      ['nexus_dev_users', 'nexus_users'].forEach(key => {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            const cleaned = parsed.filter((u: any) => !exactFakeUserIds.has(String(u.id || '')));
+            if (cleaned.length !== parsed.length) {
+              localStorage.setItem(key, JSON.stringify(cleaned));
+            }
+          }
+        }
+      });
+
+      // 7. Purge fake admin kanban cards (only confirmed exact fixture IDs)
+      const exactFakeKanbanIds = new Set([
+        'kanban-se-01', 'kanban-se-02', 'kanban-se-03', 'kanban-se-04', 'kanban-se-05',
+        'kanban-se-06', 'kanban-se-07', 'kanban-se-08', 'kanban-se-09', 'kanban-se-10',
+        'kanban-irm-01', 'kanban-irm-02', 'kanban-irm-03', 'kanban-irm-04', 'kanban-irm-05',
+        'kanban-irm-06', 'kanban-irm-07', 'kanban-irm-08', 'kanban-irm-09', 'kanban-irm-10'
+      ]);
+      const rawKanban = localStorage.getItem('nexus_admin_kanban_cards_v1');
+      if (rawKanban) {
+        const parsed = JSON.parse(rawKanban);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter((c: any) => !exactFakeKanbanIds.has(String(c.id || '')));
+          if (cleaned.length !== parsed.length) {
+            localStorage.setItem('nexus_admin_kanban_cards_v1', JSON.stringify(cleaned));
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error in cleanupFakeRuntimeData:', e);
+    }
+  }
+
+  private get<T>(key: string, fallback: T): T {
+    try {
+      const data = localStorage.getItem(`nexus_${key}`);
       return data ? JSON.parse(data) : fallback;
     } catch {
       return fallback;
     }
   }
 
-  private setDev<T>(key: string, value: T): void {
+  private set<T>(key: string, value: T): void {
     try {
-      localStorage.setItem(`${this.devPrefix}${key}`, JSON.stringify(value));
+      localStorage.setItem(`nexus_${key}`, JSON.stringify(value));
       window.dispatchEvent(new Event('nexus_storage_updated'));
     } catch (e) {
-      console.error('Failed to save to dev localStorage', e);
+      console.error('Failed to save to localStorage', e);
     }
   }
 
-  // ── Tenants ─────────────────────────────────────────────────────────────────
+  // Tenants
   getTenants(): Tenant[] {
-    if (isMockMode()) {
-      return mockStorageAdapter.getTenants();
-    }
-    return this.getDev<Tenant[]>('tenants', []);
+    return this.get<Tenant[]>('tenants', Object.values(DEFAULT_TENANTS));
   }
 
   saveTenant(tenant: Tenant): void {
-    if (isMockMode()) {
-      const tenants = mockStorageAdapter.getTenants();
-      const index = tenants.findIndex(t => t.id === tenant.id);
-      if (index >= 0) tenants[index] = tenant;
-      else tenants.push(tenant);
-      mockStorageAdapter.saveTenants(tenants);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const tenants = this.getTenants();
     const index = tenants.findIndex(t => t.id === tenant.id);
-    if (index >= 0) tenants[index] = tenant;
-    else tenants.push(tenant);
-    this.setDev('tenants', tenants);
-  }
-
-  // ── Roles ───────────────────────────────────────────────────────────────────
-  getRoles(): Role[] {
-    if (isMockMode()) {
-      return mockStorageAdapter.getRoles();
+    if (index >= 0) {
+      tenants[index] = tenant;
+    } else {
+      tenants.push(tenant);
     }
-    return this.getDev<Role[]>('roles', []);
+    this.set('tenants', tenants);
   }
 
-  saveRoles(roles: Role[]): void {
-    if (isMockMode()) {
-      mockStorageAdapter.saveRoles(roles);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
-    this.setDev('roles', roles);
-  }
-
-  // ── Users ───────────────────────────────────────────────────────────────────
+  // Users
   getUsers(companySlug?: string): User[] {
-    if (isMockMode()) {
-      const users = mockStorageAdapter.getUsers();
-      return companySlug ? users.filter(u => u.companySlug === companySlug) : users;
+    let users = this.get<User[]>('users', []);
+    if (!users || users.length === 0) {
+      try {
+        const raw = localStorage.getItem('nexus_dev_users');
+        if (raw) users = JSON.parse(raw);
+      } catch {}
     }
-    const users = this.getDev<User[]>('users', []);
-    return companySlug ? users.filter(u => u.companySlug === companySlug) : users;
+    return companySlug ? users.filter(u => u.companySlug === companySlug || (u as any).companyId === companySlug) : users;
+  }
+
+  setUsers(users: User[]): void {
+    this.set('users', users);
+    try {
+      localStorage.setItem('nexus_dev_users', JSON.stringify(users));
+    } catch {}
+    window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 
   saveUser(user: User): void {
-    if (isMockMode()) {
-      const users = mockStorageAdapter.getUsers();
-      const index = users.findIndex(u => u.id === user.id);
-      if (index >= 0) users[index] = user;
-      else users.push(user);
-      mockStorageAdapter.saveUsers(users);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const users = this.getUsers();
     const index = users.findIndex(u => u.id === user.id);
-    if (index >= 0) users[index] = user;
-    else users.push(user);
-    this.setDev('users', users);
+    if (index >= 0) {
+      users[index] = user;
+    } else {
+      users.push(user);
+    }
+    this.set('users', users);
+    try {
+      localStorage.setItem('nexus_dev_users', JSON.stringify(users));
+    } catch {}
   }
 
   deleteUser(id: string): void {
-    if (isMockMode()) {
-      const users = mockStorageAdapter.getUsers().filter(u => u.id !== id);
-      mockStorageAdapter.saveUsers(users);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const users = this.getUsers().filter(u => u.id !== id);
-    this.setDev('users', users);
+    this.set('users', users);
+    try {
+      localStorage.setItem('nexus_dev_users', JSON.stringify(users));
+    } catch {}
   }
 
-  // ── Leads ───────────────────────────────────────────────────────────────────
+  // Leads (Defaults to empty [] - real-time data only)
   getLeads(companyId?: string): Lead[] {
-    if (isMockMode()) {
-      return mockStorageAdapter.getLeads(companyId);
-    }
-    const leads = this.getDev<Lead[]>('leads', []);
+    const leads = this.get<Lead[]>('leads', []);
     return companyId ? leads.filter(l => l.companyId === companyId) : leads;
   }
 
@@ -274,47 +266,28 @@ class StorageService {
   }
 
   saveLead(lead: Lead): void {
-    if (isMockMode()) {
-      const leads = mockStorageAdapter.getLeads();
-      const index = leads.findIndex(l => l.id === lead.id);
-      if (index >= 0) leads[index] = lead;
-      else leads.unshift(lead);
-      mockStorageAdapter.saveLeads(leads);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const leads = this.getLeads();
     const index = leads.findIndex(l => l.id === lead.id);
-    if (index >= 0) leads[index] = lead;
-    else leads.unshift(lead);
-    this.setDev('leads', leads);
+    if (index >= 0) {
+      leads[index] = lead;
+    } else {
+      leads.unshift(lead);
+    }
+    this.set('leads', leads);
   }
 
   saveLeads(leads: Lead[]): void {
-    if (isMockMode()) {
-      mockStorageAdapter.saveLeads(leads);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
-    this.setDev('leads', leads);
-    window.dispatchEvent(new Event('nexus_storage_updated'));
+    this.set('leads', leads);
   }
 
   deleteLead(id: string): void {
-    if (isMockMode()) {
-      const leads = mockStorageAdapter.getLeads().filter(l => l.id !== id);
-      mockStorageAdapter.saveLeads(leads);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const leads = this.getLeads().filter(l => l.id !== id);
-    this.setDev('leads', leads);
-    window.dispatchEvent(new Event('nexus_storage_updated'));
+    this.set('leads', leads);
   }
 
   cleanupDuplicateLeads(companyId?: string): { removedCount: number } {
     try {
-      const allLeads = this.getLeads();
+      const allLeads = this.get<Lead[]>('leads', []) || [];
       if (!allLeads.length) return { removedCount: 0 };
 
       const leadsToProcess = companyId
@@ -330,7 +303,9 @@ class StorageService {
       for (const lead of leadsToProcess) {
         const digits = (lead.phone || '').replace(/\D/g, '').slice(-10);
         if (digits) {
-          if (!groups.has(digits)) groups.set(digits, []);
+          if (!groups.has(digits)) {
+            groups.set(digits, []);
+          }
           groups.get(digits)!.push(lead);
         } else {
           ungrouped.push(lead);
@@ -348,6 +323,7 @@ class StorageService {
 
         removedCount += groupLeads.length - 1;
 
+        // Sort by recency descending: most recently updated record first
         groupLeads.sort((a, b) => {
           const getRecency = (l: Lead) => {
             const tUp = Date.parse((l as { updatedAt?: string }).updatedAt || '') || 0;
@@ -377,13 +353,11 @@ class StorageService {
       });
 
       const finalLeads = [...otherCompanyLeads, ...deduplicated, ...ungrouped];
+
       if (removedCount > 0) {
-        if (isMockMode()) {
-          mockStorageAdapter.saveLeads(finalLeads);
-        } else {
-          this.setDev('leads', finalLeads);
-        }
+        this.set('leads', finalLeads);
       }
+
       return { removedCount };
     } catch (e) {
       console.error('Error in cleanupDuplicateLeads:', e);
@@ -391,123 +365,84 @@ class StorageService {
     }
   }
 
-  // ── Customers ───────────────────────────────────────────────────────────────
+  // Customers (Defaults to empty [] - real-time data only)
   getCustomers(companyId?: string): Customer[] {
-    if (isMockMode()) {
-      return mockStorageAdapter.getCustomers(companyId);
-    }
-    const customers = this.getDev<Customer[]>('customers', []);
+    const customers = this.get<Customer[]>('customers', []);
     return companyId ? customers.filter(c => c.companyId === companyId) : customers;
   }
 
   saveCustomer(customer: Customer): void {
-    if (isMockMode()) {
-      const customers = mockStorageAdapter.getCustomers();
-      const index = customers.findIndex(c => c.id === customer.id);
-      if (index >= 0) customers[index] = customer;
-      else customers.unshift(customer);
-      mockStorageAdapter.saveCustomers(customers);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const customers = this.getCustomers();
     const index = customers.findIndex(c => c.id === customer.id);
-    if (index >= 0) customers[index] = customer;
-    else customers.unshift(customer);
-    this.setDev('customers', customers);
+    if (index >= 0) {
+      customers[index] = customer;
+    } else {
+      customers.unshift(customer);
+    }
+    this.set('customers', customers);
   }
 
-  // ── Deals ───────────────────────────────────────────────────────────────────
+  // Deals (Defaults to empty [] - real-time data only)
   getDeals(companyId?: string): Deal[] {
-    if (isMockMode()) {
-      return mockStorageAdapter.getDeals(companyId);
-    }
-    const deals = this.getDev<Deal[]>('deals', []);
+    const deals = this.get<Deal[]>('deals', []);
     return companyId ? deals.filter(d => d.companyId === companyId) : deals;
   }
 
   saveDeal(deal: Deal): void {
-    if (isMockMode()) {
-      const deals = mockStorageAdapter.getDeals();
-      const index = deals.findIndex(d => d.id === deal.id);
-      if (index >= 0) deals[index] = deal;
-      else deals.unshift(deal);
-      mockStorageAdapter.saveDeals(deals);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const deals = this.getDeals();
     const index = deals.findIndex(d => d.id === deal.id);
-    if (index >= 0) deals[index] = deal;
-    else deals.unshift(deal);
-    this.setDev('deals', deals);
+    if (index >= 0) {
+      deals[index] = deal;
+    } else {
+      deals.unshift(deal);
+    }
+    this.set('deals', deals);
   }
 
-  // ── Deal Activities ─────────────────────────────────────────────────────────
+  // Deal Activities
   getDealActivities(dealId: string, companyId?: string): DealActivity[] {
-    const key = isMockMode() ? 'nexus_mock_deal_activities' : `${this.devPrefix}deal_activities`;
-    try {
-      const raw = localStorage.getItem(key);
-      const activities: DealActivity[] = raw ? JSON.parse(raw) : [];
-      return activities.filter(a => a.dealId === dealId && (!companyId || a.companyId === companyId));
-    } catch {
-      return [];
-    }
+    const activities = this.get<DealActivity[]>('deal_activities', []);
+    return activities.filter(a => a.dealId === dealId && (!companyId || a.companyId === companyId));
   }
 
   addDealActivity(activity: DealActivity): void {
-    const key = isMockMode() ? 'nexus_mock_deal_activities' : `${this.devPrefix}deal_activities`;
-    try {
-      const raw = localStorage.getItem(key);
-      const activities: DealActivity[] = raw ? JSON.parse(raw) : [];
-      activities.unshift(activity);
-      localStorage.setItem(key, JSON.stringify(activities));
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-    } catch (e) {
-      console.error('Failed to add deal activity:', e);
-    }
+    const activities = this.get<DealActivity[]>('deal_activities', []);
+    activities.unshift(activity);
+    this.set('deal_activities', activities);
+    window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 
-  // ── Calls ───────────────────────────────────────────────────────────────────
+  // Calls
   getCalls(companyId?: string): CallRecord[] {
-    if (isMockMode()) {
-      return mockStorageAdapter.getCalls(companyId);
-    }
-    const calls = this.getDev<CallRecord[]>('calls', []);
-    return companyId ? calls.filter(c => c.companyId === companyId) : calls;
+    const stored = this.get<CallRecord[]>('calls', []);
+    return companyId ? stored.filter(c => c.companyId === companyId) : stored;
   }
 
   addCall(call: CallRecord): void {
-    if (isMockMode()) {
-      const calls = mockStorageAdapter.getCalls();
-      calls.unshift(call);
-      mockStorageAdapter.saveCalls(calls);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const calls = this.getCalls();
     calls.unshift(call);
-    this.setDev('calls', calls);
+    this.set('calls', calls);
   }
 
-  // ── Follow-ups ──────────────────────────────────────────────────────────────
+  // Follow-ups
   getFollowups(companyId?: string): Followup[] {
-    if (isMockMode()) {
-      return mockStorageAdapter.getFollowups(companyId);
-    }
-    const followups = this.getDev<Followup[]>('followups', []);
-    return companyId ? followups.filter(f => f.companyId === companyId) : followups;
+    const raw = this.get<Followup[]>('followups', []) || [];
+    return companyId ? raw.filter(f => f.companyId === companyId) : raw;
   }
 
   cleanupGhlPendingFollowups(companyId?: string): void {
     try {
-      const allFollowups = this.getFollowups();
+      const allFollowups = this.get<Followup[]>('followups', []) || [];
       if (!allFollowups.length) return;
 
       const targetCompanyId = companyId || 't-ghl-01';
+
+      // Load leads so we can check which contacts are already in NI/Junk
       const allLeads = this.getLeads(targetCompanyId);
       const niJunkLeadIds = new Set<string>(
-        allLeads.filter(l => l.status === 'Not Interested' || l.status === 'Junk').map(l => l.id)
+        allLeads
+          .filter(l => l.status === 'Not Interested' || l.status === 'Junk')
+          .map(l => l.id)
       );
       const niJunkPhones = new Set<string>(
         allLeads
@@ -516,20 +451,27 @@ class StorageService {
           .filter(Boolean)
       );
 
-      const ghlPending = allFollowups.filter(f => f.companyId === targetCompanyId && f.status === 'Pending');
+      const ghlPending = allFollowups.filter(
+        f => f.companyId === targetCompanyId && f.status === 'Pending'
+      );
+
       if (!ghlPending.length) return;
 
-      const nonPendingOrOtherCompany = allFollowups.filter(f => f.companyId !== targetCompanyId || f.status !== 'Pending');
+      const nonPendingOrOtherCompany = allFollowups.filter(
+        f => f.companyId !== targetCompanyId || f.status !== 'Pending'
+      );
+
       const seenContacts = new Map<string, Followup>();
       const keepPending: Followup[] = [];
 
       for (const item of ghlPending) {
+        // Hard-exclude any Pending followup whose lead is now NI or Junk
         if (item.contactId && item.contactId !== 'contact-new' && niJunkLeadIds.has(item.contactId)) {
-          continue;
+          continue; // drop — lead is no longer active
         }
         const phoneDigits = (item.contactPhone || '').replace(/\D/g, '').slice(-10);
         if (phoneDigits && niJunkPhones.has(phoneDigits)) {
-          continue;
+          continue; // drop — lead is no longer active (phone match)
         }
 
         const contactKey = (item.contactId && item.contactId !== 'contact-new')
@@ -548,330 +490,266 @@ class StorageService {
         }
       }
 
-      const finalFollowups = [...nonPendingOrOtherCompany, ...keepPending];
-      if (isMockMode()) {
-        mockStorageAdapter.saveFollowups(finalFollowups);
-      } else {
-        this.setDev('followups', finalFollowups);
-      }
+      this.set('followups', [...nonPendingOrOtherCompany, ...keepPending]);
     } catch (e) {
       console.error('Error in cleanupGhlPendingFollowups:', e);
     }
   }
 
   saveFollowup(followup: Followup): void {
-    if (isMockMode()) {
-      const followups = mockStorageAdapter.getFollowups();
-      const index = followups.findIndex(f => f.id === followup.id);
-      if (index >= 0) followups[index] = followup;
-      else followups.unshift(followup);
-      mockStorageAdapter.saveFollowups(followups);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const followups = this.getFollowups();
     const index = followups.findIndex(f => f.id === followup.id);
-    if (index >= 0) followups[index] = followup;
-    else followups.unshift(followup);
-    this.setDev('followups', followups);
+    if (index >= 0) {
+      followups[index] = followup;
+    } else {
+      followups.unshift(followup);
+    }
+    this.set('followups', followups);
   }
 
   deleteFollowup(id: string): void {
-    if (isMockMode()) {
-      const followups = mockStorageAdapter.getFollowups().filter(f => f.id !== id);
-      mockStorageAdapter.saveFollowups(followups);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
-    const followups = this.getFollowups().filter(f => f.id !== id);
-    this.setDev('followups', followups);
+    const followups = this.get<Followup[]>('followups', []).filter(f => f.id !== id);
+    this.set('followups', followups);
   }
 
-  purgeFollowupsForContact(companyId: string, contactId?: string | null, contactPhone?: string | null): void {
+  /**
+   * GHL Sales Exec – atomic purge of ALL Pending followup records for a contact
+   * (by id or phone). Used when routing a lead to Not Interested or Junk so the
+   * record is completely removed from the Follow-up queue instead of just being
+   * marked Completed (which would still appear in "All Tasks").
+   * Scoped to a single companyId; has no effect on other tenants.
+   */
+  purgeFollowupsForContact(
+    companyId: string,
+    contactId?: string | null,
+    contactPhone?: string | null
+  ): void {
     try {
-      const allFollowups = this.getFollowups();
+      const allFollowups = this.get<Followup[]>('followups', []) || [];
       const targetPhoneDigits = (contactPhone || '').replace(/\D/g, '').slice(-10);
 
       const remaining = allFollowups.filter(f => {
+        // Only touch Pending records for this company
         if (f.companyId !== companyId || f.status !== 'Pending') return true;
-        if (contactId && contactId !== 'contact-new' && f.contactId === contactId) return false;
+
+        // Match by contactId
+        if (contactId && contactId !== 'contact-new' && f.contactId === contactId) {
+          return false; // purge
+        }
+        // Match by phone
         const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-        if (fPhone && targetPhoneDigits && fPhone === targetPhoneDigits) return false;
+        if (fPhone && targetPhoneDigits && fPhone === targetPhoneDigits) {
+          return false; // purge
+        }
         return true;
       });
 
-      if (isMockMode()) {
-        mockStorageAdapter.saveFollowups(remaining);
-      } else {
-        this.setDev('followups', remaining);
-      }
+      this.set('followups', remaining);
     } catch (e) {
       console.error('Error in purgeFollowupsForContact:', e);
     }
   }
 
-  // ── Projects & Plots ────────────────────────────────────────────────────────
-  getProjects(companyId?: string): PropertyProject[] {
-    if (isMockMode()) {
-      return mockStorageAdapter.getProjects(companyId);
-    }
-    const projects = this.getDev<PropertyProject[]>('projects', []);
-    return companyId ? projects.filter(p => !companyId || (p as any).companyId === companyId) : projects;
+  // Projects & Plots (Defaults to empty [] - real-time data only)
+  getProjects(): PropertyProject[] {
+    return this.get<PropertyProject[]>('projects', []);
   }
 
   saveProject(project: PropertyProject): void {
-    if (isMockMode()) {
-      const projects = mockStorageAdapter.getProjects();
-      const index = projects.findIndex(p => p.id === project.id);
-      if (index >= 0) projects[index] = project;
-      else projects.push(project);
-      mockStorageAdapter.saveProjects(projects);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const projects = this.getProjects();
     const index = projects.findIndex(p => p.id === project.id);
-    if (index >= 0) projects[index] = project;
-    else projects.push(project);
-    this.setDev('projects', projects);
+    if (index >= 0) {
+      projects[index] = project;
+    } else {
+      projects.push(project);
+    }
+    this.set('projects', projects);
   }
 
   getPlots(projectId?: string): Plot[] {
-    if (isMockMode()) {
-      const plots = mockStorageAdapter.getPlots();
-      return projectId ? plots.filter(p => p.projectId === projectId) : plots;
-    }
-    const plots = this.getDev<Plot[]>('plots', []);
+    const plots = this.get<Plot[]>('plots', []);
     return projectId ? plots.filter(p => p.projectId === projectId) : plots;
   }
 
   savePlot(plot: Plot): void {
-    if (isMockMode()) {
-      const plots = mockStorageAdapter.getPlots();
-      const index = plots.findIndex(p => p.id === plot.id);
-      if (index >= 0) plots[index] = plot;
-      else plots.push(plot);
-      mockStorageAdapter.savePlots(plots);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const plots = this.getPlots();
     const index = plots.findIndex(p => p.id === plot.id);
-    if (index >= 0) plots[index] = plot;
-    else plots.push(plot);
-    this.setDev('plots', plots);
+    if (index >= 0) {
+      plots[index] = plot;
+    } else {
+      plots.push(plot);
+    }
+    this.set('plots', plots);
   }
 
-  // ── Site Visits ─────────────────────────────────────────────────────────────
+  // Site Visits (Defaults to empty [] - real-time data only)
   getSiteVisits(companyId?: string): SiteVisit[] {
-    if (isMockMode()) {
-      return mockStorageAdapter.getSiteVisits(companyId);
-    }
-    const visits = this.getDev<SiteVisit[]>('site_visits', []);
+    const visits = this.get<SiteVisit[]>('site_visits', []);
     return companyId ? visits.filter(v => v.companyId === companyId) : visits;
   }
 
   saveSiteVisit(visit: SiteVisit): void {
-    if (isMockMode()) {
-      const visits = mockStorageAdapter.getSiteVisits();
-      const index = visits.findIndex(v => v.id === visit.id);
-      if (index >= 0) visits[index] = visit;
-      else visits.unshift(visit);
-      mockStorageAdapter.saveSiteVisits(visits);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const visits = this.getSiteVisits();
     const index = visits.findIndex(v => v.id === visit.id);
-    if (index >= 0) visits[index] = visit;
-    else visits.unshift(visit);
-    this.setDev('site_visits', visits);
+    if (index >= 0) {
+      visits[index] = visit;
+    } else {
+      visits.unshift(visit);
+    }
+    this.set('site_visits', visits);
   }
 
-  // ── Bookings ────────────────────────────────────────────────────────────────
+  // Bookings (Defaults to empty [] - real-time data only)
   getBookings(companyId?: string): Booking[] {
-    if (isMockMode()) {
-      return mockStorageAdapter.getBookings(companyId);
-    }
-    const bookings = this.getDev<Booking[]>('bookings', []);
+    const bookings = this.get<Booking[]>('bookings', []);
     return companyId ? bookings.filter(b => b.companyId === companyId) : bookings;
   }
 
   saveBooking(booking: Booking): void {
-    if (isMockMode()) {
-      const bookings = mockStorageAdapter.getBookings();
-      const index = bookings.findIndex(b => b.id === booking.id);
-      if (index >= 0) bookings[index] = booking;
-      else bookings.unshift(booking);
-      mockStorageAdapter.saveBookings(bookings);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const bookings = this.getBookings();
     const index = bookings.findIndex(b => b.id === booking.id);
-    if (index >= 0) bookings[index] = booking;
-    else bookings.unshift(booking);
-    this.setDev('bookings', bookings);
+    if (index >= 0) {
+      bookings[index] = booking;
+    } else {
+      bookings.unshift(booking);
+    }
+    this.set('bookings', bookings);
   }
 
-  // ── Investors ───────────────────────────────────────────────────────────────
+  // Investors (Defaults to empty [] - real-time data only)
   getInvestors(companyId?: string): Investor[] {
-    if (isMockMode()) {
-      return mockStorageAdapter.getInvestors(companyId);
-    }
-    const investors = this.getDev<Investor[]>('investors', []);
+    const investors = this.get<Investor[]>('investors', []);
     return companyId ? investors.filter(i => i.companyId === companyId) : investors;
   }
 
   saveInvestor(investor: Investor): void {
-    if (isMockMode()) {
-      const investors = mockStorageAdapter.getInvestors();
-      const index = investors.findIndex(i => i.id === investor.id);
-      if (index >= 0) investors[index] = investor;
-      else investors.unshift(investor);
-      mockStorageAdapter.saveInvestors(investors);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const investors = this.getInvestors();
     const index = investors.findIndex(i => i.id === investor.id);
-    if (index >= 0) investors[index] = investor;
-    else investors.unshift(investor);
-    this.setDev('investors', investors);
+    if (index >= 0) {
+      investors[index] = investor;
+    } else {
+      investors.unshift(investor);
+    }
+    this.set('investors', investors);
   }
 
   deleteInvestor(id: string): void {
-    if (isMockMode()) {
-      const investors = mockStorageAdapter.getInvestors().filter(i => i.id !== id);
-      mockStorageAdapter.saveInvestors(investors);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const investors = this.getInvestors().filter(i => i.id !== id);
-    this.setDev('investors', investors);
+    this.set('investors', investors);
   }
 
-  // ── Consultations ───────────────────────────────────────────────────────────
+  // Consultations (Defaults to empty [] - real-time data only)
   getConsultations(companyId?: string): Consultation[] {
-    if (isMockMode()) {
-      return mockStorageAdapter.getConsultations(companyId);
-    }
-    const consultations = this.getDev<Consultation[]>('consultations', []);
+    const consultations = this.get<Consultation[]>('consultations', []);
     return companyId ? consultations.filter(c => c.companyId === companyId) : consultations;
   }
 
   saveConsultation(consultation: Consultation): void {
-    if (isMockMode()) {
-      const consultations = mockStorageAdapter.getConsultations();
-      const index = consultations.findIndex(c => c.id === consultation.id);
-      if (index >= 0) consultations[index] = consultation;
-      else consultations.unshift(consultation);
-      mockStorageAdapter.saveConsultations(consultations);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const consultations = this.getConsultations();
     const index = consultations.findIndex(c => c.id === consultation.id);
-    if (index >= 0) consultations[index] = consultation;
-    else consultations.unshift(consultation);
-    this.setDev('consultations', consultations);
+    if (index >= 0) {
+      consultations[index] = consultation;
+    } else {
+      consultations.unshift(consultation);
+    }
+    this.set('consultations', consultations);
   }
 
   deleteConsultation(id: string): void {
-    if (isMockMode()) {
-      const consultations = mockStorageAdapter.getConsultations().filter(c => c.id !== id);
-      mockStorageAdapter.saveConsultations(consultations);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const consultations = this.getConsultations().filter(c => c.id !== id);
-    this.setDev('consultations', consultations);
+    this.set('consultations', consultations);
   }
 
-  // ── Opportunities ───────────────────────────────────────────────────────────
+  // Opportunities (Defaults to empty [] - real-time data only)
   getOpportunities(companyId?: string): InvestmentOpportunity[] {
-    if (isMockMode()) {
-      return mockStorageAdapter.getOpportunities(companyId);
-    }
-    const opps = this.getDev<InvestmentOpportunity[]>('opportunities', []);
+    const opps = this.get<InvestmentOpportunity[]>('opportunities', []);
     return companyId ? opps.filter(o => o.companyId === companyId) : opps;
   }
 
   saveOpportunity(opportunity: InvestmentOpportunity): void {
-    if (isMockMode()) {
-      const opps = mockStorageAdapter.getOpportunities();
-      const index = opps.findIndex(o => o.id === opportunity.id);
-      if (index >= 0) opps[index] = opportunity;
-      else opps.unshift(opportunity);
-      mockStorageAdapter.saveOpportunities(opps);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const opps = this.getOpportunities();
     const index = opps.findIndex(o => o.id === opportunity.id);
-    if (index >= 0) opps[index] = opportunity;
-    else opps.unshift(opportunity);
-    this.setDev('opportunities', opps);
+    if (index >= 0) {
+      opps[index] = opportunity;
+    } else {
+      opps.unshift(opportunity);
+    }
+    this.set('opportunities', opps);
   }
 
   deleteOpportunity(id: string): void {
-    if (isMockMode()) {
-      const opps = mockStorageAdapter.getOpportunities().filter(o => o.id !== id);
-      mockStorageAdapter.saveOpportunities(opps);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const opps = this.getOpportunities().filter(o => o.id !== id);
-    this.setDev('opportunities', opps);
+    this.set('opportunities', opps);
   }
 
-  // ── Audit Logs ──────────────────────────────────────────────────────────────
+
+  // Audit Logs (Defaults to empty [] - real-time data only)
   getAuditLogs(companyId?: string): AuditLog[] {
-    if (isMockMode()) {
-      return mockStorageAdapter.getAuditLogs(companyId);
-    }
-    const logs = this.getDev<AuditLog[]>('audit_logs', []);
+    const logs = this.get<AuditLog[]>('audit_logs', []);
     return companyId ? logs.filter(l => !l.companyId || l.companyId === companyId) : logs;
   }
 
   addAuditLog(log: AuditLog): void {
-    if (isMockMode()) {
-      const logs = mockStorageAdapter.getAuditLogs();
-      logs.unshift(log);
-      mockStorageAdapter.saveAuditLogs(logs);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const logs = this.getAuditLogs();
     logs.unshift(log);
-    this.setDev('audit_logs', logs);
+    this.set('audit_logs', logs);
   }
 
-  // ── Notifications ───────────────────────────────────────────────────────────
+  // Notifications (Multi-tenant scoped with strict cross-tenant isolation)
   getNotifications(companyId?: string, userId?: string, userRoleCode?: string): NotificationItem[] {
-    const raw: NotificationItem[] = isMockMode()
-      ? mockStorageAdapter.getNotifications()
-      : this.getDev<NotificationItem[]>('notifications', []);
+    const raw = this.get<NotificationItem[]>('notifications', []);
 
-    if (!companyId) return raw;
+    // Auto-migrate any legacy items lacking tenant information (default to GHL)
+    let migrated = false;
+    const cleanList = raw.map(n => {
+      if (!n.companyId && !n.companySlug) {
+        migrated = true;
+        return {
+          ...n,
+          companyId: 't-ghl-01',
+          companySlug: 'ghl',
+          targetUserId: n.targetUserId || 'all',
+          priority: n.priority || 'normal',
+        };
+      }
+      return n;
+    });
+
+    if (migrated) {
+      try {
+        localStorage.setItem('nexus_notifications', JSON.stringify(cleanList));
+      } catch (e) {
+        console.error('Failed to update migrated notifications', e);
+      }
+    }
+
+    // 1. Strict Tenant Filtering
+    if (!companyId) return cleanList;
 
     const targetCompanyId = companyId.toLowerCase();
     const isGhlTarget = targetCompanyId === 't-ghl-01' || targetCompanyId === 'ghl';
     const isJaminTarget = targetCompanyId === 't-jamin-02' || targetCompanyId === 'jamin';
 
-    const tenantScoped = raw.filter(n => {
+    const tenantScoped = cleanList.filter(n => {
       const nCompId = (n.companyId || '').toLowerCase();
       const nSlug = (n.companySlug || '').toLowerCase();
 
-      if (isGhlTarget) return nCompId === 't-ghl-01' || nSlug === 'ghl';
-      if (isJaminTarget) return nCompId === 't-jamin-02' || nSlug === 'jamin';
+      if (isGhlTarget) {
+        return nCompId === 't-ghl-01' || nSlug === 'ghl';
+      }
+      if (isJaminTarget) {
+        return nCompId === 't-jamin-02' || nSlug === 'jamin';
+      }
       return nCompId === targetCompanyId || nSlug === targetCompanyId;
     });
 
+    // 2. User / Role Targeting within the Tenant
     if (!userId) return tenantScoped;
 
     return tenantScoped.filter(n => {
+      // Broadcast to all users in tenant
       if (!n.targetUserId || n.targetUserId === 'all') {
+        // If targeted to a specific role, verify role match or admin
         if (n.targetRole && n.targetRole !== 'all') {
           return (
             userRoleCode === n.targetRole ||
@@ -882,44 +760,32 @@ class StorageService {
         }
         return true;
       }
+      // Targeted directly to this user
       if (n.targetUserId === userId) return true;
+      // Sender admin can view what they sent
       if (n.createdById === userId) return true;
+
       return false;
     });
   }
 
   createNotification(notification: NotificationItem): void {
-    if (isMockMode()) {
-      const raw = mockStorageAdapter.getNotifications();
-      mockStorageAdapter.saveNotifications([notification, ...raw]);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
-    const raw = this.getDev<NotificationItem[]>('notifications', []);
-    this.setDev('notifications', [notification, ...raw]);
+    const raw = this.get<NotificationItem[]>('notifications', []);
+    const updated = [notification, ...raw];
+    this.set('notifications', updated);
   }
 
   markNotificationRead(id: string): void {
-    if (isMockMode()) {
-      const raw = mockStorageAdapter.getNotifications();
-      const found = raw.find(n => n.id === id);
-      if (found) {
-        found.read = true;
-        mockStorageAdapter.saveNotifications(raw);
-        window.dispatchEvent(new Event('nexus_storage_updated'));
-      }
-      return;
-    }
-    const raw = this.getDev<NotificationItem[]>('notifications', []);
+    const raw = this.get<NotificationItem[]>('notifications', []);
     const found = raw.find(n => n.id === id);
     if (found) {
       found.read = true;
-      this.setDev('notifications', raw);
+      this.set('notifications', raw);
     }
   }
 
   markAllNotificationsRead(companyId?: string, userId?: string): void {
-    const raw = isMockMode() ? mockStorageAdapter.getNotifications() : this.getDev<NotificationItem[]>('notifications', []);
+    const raw = this.get<NotificationItem[]>('notifications', []);
     const targetCompanyId = (companyId || '').toLowerCase();
     const isGhlTarget = targetCompanyId === 't-ghl-01' || targetCompanyId === 'ghl';
     const isJaminTarget = targetCompanyId === 't-jamin-02' || targetCompanyId === 'jamin';
@@ -942,21 +808,12 @@ class StorageService {
 
       return { ...n, read: true };
     });
-
-    if (isMockMode()) {
-      mockStorageAdapter.saveNotifications(updated);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-    } else {
-      this.setDev('notifications', updated);
-    }
+    this.set('notifications', updated);
   }
 
-  // ── Documents ───────────────────────────────────────────────────────────────
+  // Documents — metadata-only (no file bytes stored)
   getDocuments(entityType?: string, entityId?: string): DocumentItem[] {
-    const docs = isMockMode()
-      ? (JSON.parse(localStorage.getItem('nexus_mock_documents') || '[]') as DocumentItem[])
-      : this.getDev<DocumentItem[]>('documents', []);
-
+    const docs = this.get<DocumentItem[]>('documents', []);
     return docs.filter(d => {
       if (entityType && d.entityType !== entityType) return false;
       if (entityId && d.entityId !== entityId) return false;
@@ -965,99 +822,109 @@ class StorageService {
   }
 
   saveDocument(doc: DocumentItem): void {
-    const key = isMockMode() ? 'nexus_mock_documents' : `${this.devPrefix}documents`;
-    try {
-      const docs: DocumentItem[] = JSON.parse(localStorage.getItem(key) || '[]');
-      const index = docs.findIndex(d => d.id === doc.id);
-      if (index >= 0) docs[index] = doc;
-      else docs.unshift(doc);
-      localStorage.setItem(key, JSON.stringify(docs));
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-    } catch (e) {
-      console.error('Failed to save document:', e);
+    const docs = this.get<DocumentItem[]>('documents', []);
+    const index = docs.findIndex(d => d.id === doc.id);
+    if (index >= 0) {
+      docs[index] = doc;
+    } else {
+      docs.unshift(doc);
     }
+    this.set('documents', docs);
   }
 
   deleteDocument(id: string): void {
-    const key = isMockMode() ? 'nexus_mock_documents' : `${this.devPrefix}documents`;
-    try {
-      const docs: DocumentItem[] = JSON.parse(localStorage.getItem(key) || '[]');
-      const filtered = docs.filter(d => d.id !== id);
-      localStorage.setItem(key, JSON.stringify(filtered));
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-    } catch (e) {
-      console.error('Failed to delete document:', e);
-    }
+    const docs = this.get<DocumentItem[]>('documents', []).filter(d => d.id !== id);
+    this.set('documents', docs);
   }
 
-  // ── Departments, Teams, Queues, Routing ─────────────────────────────────────
+  // Departments
   getDepartments(companyId?: string): Department[] {
-    const departments = this.getDev<Department[]>('departments', []);
+    const departments = this.get<Department[]>('departments', []);
     return companyId ? departments.filter(d => d.companyId === companyId) : departments;
   }
 
   saveDepartment(department: Department): void {
     const departments = this.getDepartments();
     const index = departments.findIndex(d => d.id === department.id);
-    if (index >= 0) departments[index] = department;
-    else departments.unshift(department);
-    this.setDev('departments', departments);
+    if (index >= 0) {
+      departments[index] = department;
+    } else {
+      departments.unshift(department);
+    }
+    this.set('departments', departments);
   }
 
+  // Teams
   getTeams(companyId?: string): Team[] {
-    const teams = this.getDev<Team[]>('teams', []);
+    const teams = this.get<Team[]>('teams', []);
     return companyId ? teams.filter(t => t.companyId === companyId) : teams;
   }
 
   saveTeam(team: Team): void {
     const teams = this.getTeams();
     const index = teams.findIndex(t => t.id === team.id);
-    if (index >= 0) teams[index] = team;
-    else teams.unshift(team);
-    this.setDev('teams', teams);
+    if (index >= 0) {
+      teams[index] = team;
+    } else {
+      teams.unshift(team);
+    }
+    this.set('teams', teams);
   }
 
+  // Queues
   getQueues(companyId?: string): Queue[] {
-    const queues = this.getDev<Queue[]>('queues', []);
+    const queues = this.get<Queue[]>('queues', []);
     return companyId ? queues.filter(q => q.companyId === companyId) : queues;
   }
 
   saveQueue(queue: Queue): void {
     const queues = this.getQueues();
     const index = queues.findIndex(q => q.id === queue.id);
-    if (index >= 0) queues[index] = queue;
-    else queues.unshift(queue);
-    this.setDev('queues', queues);
+    if (index >= 0) {
+      queues[index] = queue;
+    } else {
+      queues.unshift(queue);
+    }
+    this.set('queues', queues);
   }
 
+  // Routing Rules
   getRoutingRules(companyId?: string): RoutingRule[] {
-    const rules = this.getDev<RoutingRule[]>('routing_rules', []);
+    const rules = this.get<RoutingRule[]>('routing_rules', []);
     return companyId ? rules.filter(r => r.companyId === companyId) : rules;
   }
 
   saveRoutingRule(rule: RoutingRule): void {
     const rules = this.getRoutingRules();
     const index = rules.findIndex(r => r.id === rule.id);
-    if (index >= 0) rules[index] = rule;
-    else rules.unshift(rule);
-    this.setDev('routing_rules', rules);
+    if (index >= 0) {
+      rules[index] = rule;
+    } else {
+      rules.unshift(rule);
+    }
+    this.set('routing_rules', rules);
   }
 
+  // Lead Assignments
   getLeadAssignments(companyId?: string): LeadAssignment[] {
-    const assignments = this.getDev<LeadAssignment[]>('lead_assignments', []);
+    const assignments = this.get<LeadAssignment[]>('lead_assignments', []);
     return companyId ? assignments.filter(a => a.companyId === companyId) : assignments;
   }
 
   saveLeadAssignment(assignment: LeadAssignment): void {
     const assignments = this.getLeadAssignments();
     const index = assignments.findIndex(a => a.id === assignment.id);
-    if (index >= 0) assignments[index] = assignment;
-    else assignments.unshift(assignment);
-    this.setDev('lead_assignments', assignments);
+    if (index >= 0) {
+      assignments[index] = assignment;
+    } else {
+      assignments.unshift(assignment);
+    }
+    this.set('lead_assignments', assignments);
   }
 
+  // Agent Presence
   getAgentPresence(companyId?: string): AgentPresence[] {
-    const presences = this.getDev<AgentPresence[]>('agent_presence', []);
+    const presences = this.get<AgentPresence[]>('agent_presence', []);
     return companyId ? presences.filter(p => p.companyId === companyId) : presences;
   }
 
@@ -1066,30 +933,34 @@ class StorageService {
     const index = presences.findIndex(
       p => (presence.id && p.id === presence.id) || (presence.userId && p.userId === presence.userId)
     );
-    if (index >= 0) presences[index] = presence;
-    else presences.unshift(presence);
-    this.setDev('agent_presence', presences);
+    if (index >= 0) {
+      presences[index] = presence;
+    } else {
+      presences.unshift(presence);
+    }
+    this.set('agent_presence', presences);
   }
 
+  // Routing Attempts
   getRoutingAttempts(companyId?: string): RoutingAttempt[] {
-    const attempts = this.getDev<RoutingAttempt[]>('routing_attempts', []);
+    const attempts = this.get<RoutingAttempt[]>('routing_attempts', []);
     return companyId ? attempts.filter(a => a.companyId === companyId) : attempts;
   }
 
   saveRoutingAttempt(attempt: RoutingAttempt): void {
     const attempts = this.getRoutingAttempts();
     const index = attempts.findIndex(a => a.id === attempt.id);
-    if (index >= 0) attempts[index] = attempt;
-    else attempts.unshift(attempt);
-    this.setDev('routing_attempts', attempts);
+    if (index >= 0) {
+      attempts[index] = attempt;
+    } else {
+      attempts.unshift(attempt);
+    }
+    this.set('routing_attempts', attempts);
   }
 
-  // ── Custom Field Definitions ────────────────────────────────────────────────
+  // Custom Field Definitions
   getCustomFieldDefinitions(companyId?: string): CustomFieldDefinition[] {
-    if (isMockMode()) {
-      return mockStorageAdapter.getCustomFields(companyId);
-    }
-    const definitions = this.getDev<CustomFieldDefinition[]>('custom_field_definitions', []);
+    const definitions = this.get<CustomFieldDefinition[]>('custom_field_definitions', DEFAULT_CUSTOM_FIELD_DEFINITIONS);
     if (!companyId) return definitions;
     return definitions.filter(d =>
       d.companyId === companyId ||
@@ -1101,54 +972,54 @@ class StorageService {
   }
 
   saveCustomFieldDefinition(def: CustomFieldDefinition): void {
-    if (isMockMode()) {
-      const definitions = mockStorageAdapter.getCustomFields();
-      const index = definitions.findIndex(d => d.id === def.id);
-      if (index >= 0) definitions[index] = def;
-      else definitions.unshift(def);
-      mockStorageAdapter.saveCustomFields(definitions);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return;
-    }
     const definitions = this.getCustomFieldDefinitions();
     const index = definitions.findIndex(d => d.id === def.id);
-    if (index >= 0) definitions[index] = def;
-    else definitions.unshift(def);
-    this.setDev('custom_field_definitions', definitions);
+    if (index >= 0) {
+      definitions[index] = def;
+    } else {
+      definitions.unshift(def);
+    }
+    this.set('custom_field_definitions', definitions);
   }
 
-  // ── Products / Services ─────────────────────────────────────────────────────
+  // Products / Services
   getProductsServices(companyId?: string): ProductService[] {
-    const items = this.getDev<ProductService[]>('products_services', []);
+    const items = this.get<ProductService[]>('products_services', []);
     return companyId ? items.filter(p => p.companyId === companyId) : items;
   }
 
   saveProductService(productService: ProductService): void {
     const items = this.getProductsServices();
     const index = items.findIndex(p => p.id === productService.id);
-    if (index >= 0) items[index] = productService;
-    else items.unshift(productService);
-    this.setDev('products_services', items);
+    if (index >= 0) {
+      items[index] = productService;
+    } else {
+      items.unshift(productService);
+    }
+    this.set('products_services', items);
   }
 
-  // ── Agents & IRMs ───────────────────────────────────────────────────────────
+  getMockAgents() {
+    return this.getAgents();
+  }
+
+  getMockIrms() {
+    return this.getIrms();
+  }
+
+  // Used by InCallBar, CustomersPage, FollowupsPage, AdminKanbanBoard.
   getAgents(companyId?: string): Array<{ id: number | string; name: string; email?: string; role?: string }> {
-    if (isMockMode()) {
-      return mockStorageAdapter.getAgents();
-    }
-    // Dev mode: return real users with sales_executive role
-    return this.getUsers(companyId)
-      .filter(u => u.role?.code === 'sales_executive')
+    const users = this.getUsers(companyId);
+    const agents = users
+      .filter(u => u.role?.code === 'sales_executive' || u.role?.name?.toLowerCase().includes('sales'))
       .map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role?.name || 'Sales Executive' }));
+    return agents;
   }
 
   getIrms(companyId?: string): IrmProfile[] {
-    if (isMockMode()) {
-      return mockStorageAdapter.getIrms();
-    }
-    // Dev mode: return real users with irm role mapped to IrmProfile contract
-    return this.getUsers(companyId)
-      .filter(u => u.role?.code === 'irm')
+    const users = this.getUsers(companyId);
+    const irms = users
+      .filter(u => u.role?.code === 'irm' || u.role?.name?.toLowerCase().includes('irm') || u.role?.name?.toLowerCase().includes('investor'))
       .map(u => ({
         id: u.id,
         name: u.name,
@@ -1160,19 +1031,20 @@ class StorageService {
         performance: 95,
         status: 'Available' as const,
       }));
+    return irms;
   }
 
-  // ── Bootstrap Loader (Mock Mode Only) ───────────────────────────────────────
-  async loadMockDataFromSeparateFolder(): Promise<void> {
-    if (isMockMode() && mockBootstrapRunner) {
-      mockBootstrapRunner(true);
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-    }
+  getInitialCustomers(): Customer[] {
+    return [];
   }
 
-  // ── Popup Position ──────────────────────────────────────────────────────────
+  // Incoming Call Popup Position
   getPopupPosition(): PopupPosition {
     try {
+      const rawPos = localStorage.getItem('nexus_popup_pos');
+      if (rawPos && ['top-right', 'top-left', 'bottom-right', 'bottom-left'].includes(rawPos)) {
+        return rawPos as PopupPosition;
+      }
       const data = localStorage.getItem('nexus_popup_position');
       if (!data) return 'top-right';
       try {
@@ -1194,31 +1066,31 @@ class StorageService {
   setPopupPosition(pos: PopupPosition): void {
     try {
       localStorage.setItem('nexus_popup_position', JSON.stringify(pos));
+      localStorage.setItem('nexus_popup_pos', pos);
       window.dispatchEvent(new Event('nexus_storage_updated'));
     } catch (e) {
       console.error('Failed to save popup position to localStorage', e);
     }
   }
 
-  // ── Call Preferences ────────────────────────────────────────────────────────
+  // Call Preferences (sound, desktop notifs, auto-busy, default followup time)
   getAdminCallSettings(): { allowSalesDecline: boolean; allowIrmDecline: boolean } {
-    const key = isMockMode() ? 'nexus_mock_admin_call_settings' : `${this.devPrefix}admin_call_settings`;
     try {
-      const data = localStorage.getItem(key);
-      return data ? JSON.parse(data) : { allowSalesDecline: true, allowIrmDecline: true };
-    } catch {
-      return { allowSalesDecline: true, allowIrmDecline: true };
-    }
+      const raw = localStorage.getItem('nexus_admin_call_settings');
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return this.get('admin_call_settings', {
+      allowSalesDecline: true,
+      allowIrmDecline: true,
+    });
   }
 
   setAdminCallSettings(settings: Partial<{ allowSalesDecline: boolean; allowIrmDecline: boolean }>): void {
     const existing = this.getAdminCallSettings();
-    const key = isMockMode() ? 'nexus_mock_admin_call_settings' : `${this.devPrefix}admin_call_settings`;
-    try {
-      localStorage.setItem(key, JSON.stringify({ ...existing, ...settings }));
-    } catch (e) {
-      console.error('Failed to save admin call settings', e);
-    }
+    const updated = { ...existing, ...settings };
+    this.set('admin_call_settings', updated);
+    localStorage.setItem('nexus_admin_call_settings', JSON.stringify(updated));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 
   getCallPreferences(): {
@@ -1227,23 +1099,16 @@ class StorageService {
     autoBusyEnabled: boolean;
     defaultFollowupTime: string;
   } {
-    const key = isMockMode() ? 'nexus_mock_call_preferences' : `${this.devPrefix}call_preferences`;
     try {
-      const data = localStorage.getItem(key);
-      return data ? JSON.parse(data) : {
-        soundEnabled: true,
-        desktopNotifEnabled: false,
-        autoBusyEnabled: true,
-        defaultFollowupTime: '11:00',
-      };
-    } catch {
-      return {
-        soundEnabled: true,
-        desktopNotifEnabled: false,
-        autoBusyEnabled: true,
-        defaultFollowupTime: '11:00',
-      };
-    }
+      const raw = localStorage.getItem('nexus_call_prefs') || localStorage.getItem('nexus_call_preferences');
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return this.get('call_preferences', {
+      soundEnabled: true,
+      desktopNotifEnabled: false,
+      autoBusyEnabled: true,
+      defaultFollowupTime: '11:00',
+    });
   }
 
   setCallPreferences(prefs: Partial<{
@@ -1253,25 +1118,16 @@ class StorageService {
     defaultFollowupTime: string;
   }>): void {
     const existing = this.getCallPreferences();
-    const key = isMockMode() ? 'nexus_mock_call_preferences' : `${this.devPrefix}call_preferences`;
-    try {
-      localStorage.setItem(key, JSON.stringify({ ...existing, ...prefs }));
-    } catch (e) {
-      console.error('Failed to save call preferences', e);
-    }
+    const updated = { ...existing, ...prefs };
+    this.set('call_preferences', updated);
+    localStorage.setItem('nexus_call_prefs', JSON.stringify(updated));
+    localStorage.setItem('nexus_call_preferences', JSON.stringify(updated));
+    window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 
+  // Reset to clean real-time empty slate
   resetData(): void {
-    if (isMockMode()) {
-      localStorage.clear();
-      mockBootstrapRunner?.(true);
-    } else {
-      Object.keys(localStorage).forEach(key => {
-        if (key.startsWith(this.devPrefix)) {
-          localStorage.removeItem(key);
-        }
-      });
-    }
+    localStorage.clear();
     window.dispatchEvent(new Event('nexus_storage_updated'));
   }
 }

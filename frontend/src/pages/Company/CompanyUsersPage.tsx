@@ -15,52 +15,13 @@ import {
   Check,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { storageService } from '../../services/storageService';
+import { SYSTEM_ROLES } from '../../constants/roles';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { User, RoleCode } from '../../types';
-import { SYSTEM_ROLES } from '../../constants/roles';
-import { useUnsavedChanges } from '../../context/NavigationGuardContext';
 import './CompanyUsersPage.css';
-
-const getStoredUsers = (tenantSlug?: string, tenantId?: string): User[] => {
-  try {
-    const raw = localStorage.getItem('nexus_users');
-    const all: User[] = raw ? JSON.parse(raw) : [];
-    return all.filter(u => {
-      if (tenantId && u.companyId === tenantId) return true;
-      if (tenantSlug && u.companySlug === tenantSlug) return true;
-      return false;
-    });
-  } catch {
-    return [];
-  }
-};
-
-const saveStoredUser = (user: User) => {
-  try {
-    const raw = localStorage.getItem('nexus_users');
-    const all: User[] = raw ? JSON.parse(raw) : [];
-    const idx = all.findIndex(u => u.id === user.id);
-    if (idx >= 0) all[idx] = user;
-    else all.push(user);
-    localStorage.setItem('nexus_users', JSON.stringify(all));
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-    window.dispatchEvent(new Event('nexus_admin_updated'));
-  } catch { }
-};
-
-const deleteStoredUser = (userId: string) => {
-  try {
-    const raw = localStorage.getItem('nexus_users');
-    const all: User[] = raw ? JSON.parse(raw) : [];
-    const filtered = all.filter(u => u.id !== userId);
-    localStorage.setItem('nexus_users', JSON.stringify(filtered));
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-    window.dispatchEvent(new Event('nexus_admin_updated'));
-  } catch { }
-};
+import { adminUserService } from '../../services/adminUserService';
 
 const addStoredAuditLog = (log: any) => {
   try {
@@ -70,21 +31,26 @@ const addStoredAuditLog = (log: any) => {
     localStorage.setItem('nexus_audit_logs', JSON.stringify(all));
     window.dispatchEvent(new Event('nexus_storage_updated'));
     window.dispatchEvent(new Event('nexus_admin_updated'));
-  } catch { }
+  } catch {}
 };
 
 export const CompanyUsersPage: React.FC = () => {
   const { tenant, user } = useAuth();
-  const [usersList, setUsersList] = useState<User[]>(() =>
-    getStoredUsers(tenant?.slug, tenant?.id),
-  );
+  const [usersList, setUsersList] = useState<User[]>([]);
 
   // ── Filters ───────────────────────────────────────────────────────────────
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
-  const loadData = () => {
-    setUsersList(getStoredUsers(tenant?.slug, tenant?.id));
+  const loadData = async () => {
+    if (!tenant?.id) return;
+    try {
+      const data = await adminUserService.getUsers(tenant.id);
+      setUsersList(data);
+    } catch (err) {
+      console.error('Failed to load users', err);
+      showToast('error', 'Failed to load users from backend.');
+    }
   };
 
   useEffect(() => {
@@ -95,7 +61,7 @@ export const CompanyUsersPage: React.FC = () => {
       window.removeEventListener('nexus_storage_updated', loadData);
       window.removeEventListener('nexus_admin_updated', loadData);
     };
-  }, [tenant?.slug, tenant?.id]);
+  }, [tenant?.id]);
 
   // ── Toast feedback ────────────────────────────────────────────────────────
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -104,12 +70,11 @@ export const CompanyUsersPage: React.FC = () => {
     setTimeout(() => setToast(null), 3500);
   };
 
-  // ── Assignable Tenant Roles ──────────────────────────────────────────────
-  const assignableRoles = React.useMemo(() => {
-    return storageService.getRoles().filter(
-      r => r.code !== 'super_admin' && r.code !== 'company_admin'
-    );
-  }, []);
+  // ── Assignable Company Roles (Strictly Sales Executive & IRM) ──────────────
+  const assignableRoles = [
+    SYSTEM_ROLES.sales_executive,
+    SYSTEM_ROLES.irm,
+  ].filter(Boolean);
 
   // ── Add / Invite User Modal State ─────────────────────────────────────────
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
@@ -130,24 +95,15 @@ export const CompanyUsersPage: React.FC = () => {
   const [editDesignation, setEditDesignation] = useState('');
   const [editRoleCode, setEditRoleCode] = useState<RoleCode>('sales_executive');
 
+  const [transferModalOpen, setTransferModalOpen] = useState(false);
+  const [transferFromUser, setTransferFromUser] = useState<User | null>(null);
+  const [transferTargetRole, setTransferTargetRole] = useState<any | null>(null);
+  const [selectedTransferUserId, setSelectedTransferUserId] = useState<string>('');
+
   // ── Reset Password Modal State ────────────────────────────────────────────
   const [resettingUser, setResettingUser] = useState<User | null>(null);
   const [tempPassword, setTempPassword] = useState('');
   const [hasCopiedTempPassword, setHasCopiedTempPassword] = useState(false);
-
-  const [isSubmittingInvite, setIsSubmittingInvite] = useState(false);
-  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
-  const [isActionInProgress, setIsActionInProgress] = useState<string | null>(null);
-
-  const isInviteDirty = isInviteModalOpen && (inviteName.trim().length > 0 || inviteEmail.trim().length > 0);
-  const isEditDirty = editingUser !== null && (
-    editName !== editingUser.name ||
-    editPhone !== (editingUser.phone || '') ||
-    editDesignation !== (editingUser.designation || '') ||
-    editRoleCode !== editingUser.role.code
-  );
-
-  useUnsavedChanges(isInviteDirty || isEditDirty, 'You have unsaved changes in user management. Are you sure you want to discard them?');
 
   // ── Invite / Add Handlers ─────────────────────────────────────────────────
   const handleOpenInvite = () => {
@@ -163,9 +119,8 @@ export const CompanyUsersPage: React.FC = () => {
     setIsInviteModalOpen(true);
   };
 
-  const handleCreateOrInvite = (e: React.FormEvent) => {
+  const handleCreateOrInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSubmittingInvite) return;
     setInviteError(null);
 
     const trimmedEmail = inviteEmail.trim();
@@ -181,53 +136,57 @@ export const CompanyUsersPage: React.FC = () => {
       return;
     }
 
-    setIsSubmittingInvite(true);
+    const assignedRole = SYSTEM_ROLES[inviteRole] || SYSTEM_ROLES.sales_executive;
+    const isInstant = creationMode === 'instant_password';
+    const tempPass = isInstant
+      ? `Nexus#${Math.floor(1000 + Math.random() * 9000)}`
+      : undefined;
+
+    const newUser: User = {
+      id: `usr-${tenant?.slug || 'ghl'}-${Date.now().toString(36)}`,
+      name: trimmedName,
+      email: trimmedEmail,
+      phone: invitePhone.trim() || '+91 98000 00000',
+      role: assignedRole,
+      companyId: tenant?.id,
+      companySlug: tenant?.slug,
+      companyName: tenant?.name,
+      designation: inviteDesignation.trim() || undefined,
+      status: isInstant ? 'Active' : 'Invited',
+      lastLogin: isInstant ? 'Pending First Login' : 'Never',
+    };
+
     try {
-      const assignedRole = SYSTEM_ROLES[inviteRole] || SYSTEM_ROLES.sales_executive;
-      const isInstant = creationMode === 'instant_password';
-      const tempPass = isInstant
-        ? `Nexus#${Math.floor(1000 + Math.random() * 9000)}`
-        : undefined;
-
-      const newUser: User = {
-        id: `usr-${tenant?.slug || 'ghl'}-${Date.now().toString(36)}`,
-        name: trimmedName,
-        email: trimmedEmail,
-        phone: invitePhone.trim() || '+91 98000 00000',
-        role: assignedRole,
-        companyId: tenant?.id,
-        companySlug: tenant?.slug,
-        companyName: tenant?.name,
-        designation: inviteDesignation.trim() || undefined,
-        status: isInstant ? 'Active' : 'Invited',
-        lastLogin: isInstant ? 'Pending First Login' : 'Never',
-      };
-
-      saveStoredUser(newUser);
-
-      // Audit log
-      addStoredAuditLog({
-        id: `aud-${Date.now()}`,
-        timestamp: 'Just now',
-        actorName: user?.name || 'Company Admin',
-        actorEmail: user?.email || 'admin@nexus.com',
-        action: isInstant ? 'USER_PROVISIONED' : 'USER_INVITED',
-        entityType: 'User',
-        entityId: newUser.id,
-        companyId: tenant?.id,
-        companyName: tenant?.name,
-        details: `${isInstant ? 'Provisioned' : 'Invited'} ${newUser.name} (${newUser.email}) as ${newUser.role.name} with designation [${newUser.designation || 'None'}].`,
+      await adminUserService.createUser({
+        ...newUser,
+        password: tempPass
       });
+      loadData();
+    } catch (err: any) {
+      setInviteError(err.message || 'Failed to create user on backend.');
+      return;
+    }
 
-      if (isInstant && tempPass) {
-        setGeneratedNewPassword(tempPass);
-        showToast('success', `Team member ${newUser.name} provisioned successfully.`);
-      } else {
-        setIsInviteModalOpen(false);
-        showToast('success', `Invitation sent to ${newUser.email}.`);
-      }
-    } finally {
-      setIsSubmittingInvite(false);
+    // Audit log
+    addStoredAuditLog({
+      id: `aud-${Date.now()}`,
+      timestamp: 'Just now',
+      actorName: user?.name || 'Company Admin',
+      actorEmail: user?.email || 'admin@nexus.com',
+      action: isInstant ? 'USER_PROVISIONED' : 'USER_INVITED',
+      entityType: 'User',
+      entityId: newUser.id,
+      companyId: tenant?.id,
+      companyName: tenant?.name,
+      details: `${isInstant ? 'Provisioned' : 'Invited'} ${newUser.name} (${newUser.email}) as ${newUser.role.name} with designation [${newUser.designation || 'None'}].`,
+    });
+
+    if (isInstant && tempPass) {
+      setGeneratedNewPassword(tempPass);
+      showToast('success', `Team member ${newUser.name} provisioned successfully.`);
+    } else {
+      setIsInviteModalOpen(false);
+      showToast('success', `Invitation sent to ${newUser.email}.`);
     }
   };
 
@@ -240,43 +199,66 @@ export const CompanyUsersPage: React.FC = () => {
     setEditRoleCode(u.role.code);
   };
 
-  const handleSaveEditUser = () => {
-    if (!editingUser || isSubmittingEdit) return;
+  const handleSaveEditUser = async () => {
+    if (!editingUser) return;
 
-    setIsSubmittingEdit(true);
+    const updatedRole = SYSTEM_ROLES[editRoleCode] || editingUser.role;
+    const oldRole = editingUser.role;
+
+    // Mandate transfer if role changes from Sales Exec to IRM or vice versa
+    if (oldRole.code !== updatedRole.code && (oldRole.code === 'sales_executive' || oldRole.code === 'irm')) {
+      setTransferFromUser(editingUser);
+      setTransferTargetRole(updatedRole);
+      setTransferModalOpen(true);
+      return;
+    }
+
+    const updated: User = {
+      ...editingUser,
+      name: editName.trim() || editingUser.name,
+      phone: editPhone.trim() || editingUser.phone,
+      designation: editDesignation.trim() || editingUser.designation,
+      role: updatedRole,
+    };
+
     try {
-      const updatedRole = SYSTEM_ROLES[editRoleCode] || editingUser.role;
-      const oldRole = editingUser.role;
+      await adminUserService.updateUser(updated.id, updated);
+      loadData();
+    } catch (err) {
+      showToast('error', 'Failed to update profile.');
+      return;
+    }
 
-      const updated: User = {
-        ...editingUser,
-        name: editName.trim() || editingUser.name,
-        phone: editPhone.trim() || editingUser.phone,
-        designation: editDesignation.trim() || editingUser.designation,
-        role: updatedRole,
-      };
+    addStoredAuditLog({
+      id: `aud-${Date.now()}`,
+      timestamp: 'Just now',
+      actorName: user?.name || 'Company Admin',
+      actorEmail: user?.email || 'admin@nexus.com',
+      action: 'USER_UPDATED',
+      entityType: 'User',
+      entityId: updated.id,
+      companyId: tenant?.id,
+      companyName: tenant?.name,
+      beforeValue: { roleCode: oldRole.code, roleName: oldRole.name, name: editingUser.name },
+      afterValue: { roleCode: updatedRole.code, roleName: updatedRole.name, name: updated.name },
+      details: `Company Admin updated team member profile for ${updated.name} (${updated.email}).`,
+    });
 
-      saveStoredUser(updated);
+    showToast('success', `Updated profile for ${updated.name}.`);
+    setEditingUser(null);
+  };
 
-      addStoredAuditLog({
-        id: `aud-${Date.now()}`,
-        timestamp: 'Just now',
-        actorName: user?.name || 'Company Admin',
-        actorEmail: user?.email || 'admin@nexus.com',
-        action: 'USER_UPDATED',
-        entityType: 'User',
-        entityId: updated.id,
-        companyId: tenant?.id,
-        companyName: tenant?.name,
-        beforeValue: { roleCode: oldRole.code, roleName: oldRole.name, name: editingUser.name },
-        afterValue: { roleCode: updatedRole.code, roleName: updatedRole.name, name: updated.name },
-        details: `Company Admin updated team member profile for ${updated.name} (${updated.email}).`,
-      });
-
-      showToast('success', `Updated profile for ${updated.name}.`);
+  const handleTransferAndSave = async () => {
+    if (!transferFromUser || !selectedTransferUserId || !transferTargetRole) return;
+    try {
+      await adminUserService.transferRole(transferFromUser.id, parseInt(selectedTransferUserId), transferTargetRole.code);
+      showToast('success', `Transferred pipeline and updated role for ${transferFromUser.name}.`);
+      setTransferModalOpen(false);
+      setTransferFromUser(null);
       setEditingUser(null);
-    } finally {
-      setIsSubmittingEdit(false);
+      loadData();
+    } catch (err) {
+      showToast('error', 'Failed to transfer data and update role.');
     }
   };
 
@@ -324,133 +306,114 @@ export const CompanyUsersPage: React.FC = () => {
     showToast('success', `Invitation email resent to ${u.email}.`);
   };
 
-  const handleRevokeInvite = (u: User) => {
-    if (isActionInProgress) return;
+  const handleRevokeInvite = async (u: User) => {
     if (!window.confirm(`Revoke pending invitation for ${u.name} (${u.email})?`)) return;
 
-    setIsActionInProgress(`revoke-${u.id}`);
     try {
-      deleteStoredUser(u.id);
-
-      addStoredAuditLog({
-        id: `aud-${Date.now()}`,
-        timestamp: 'Just now',
-        actorName: user?.name || 'Company Admin',
-        actorEmail: user?.email || 'admin@nexus.com',
-        action: 'INVITATION_REVOKED',
-        entityType: 'User',
-        entityId: u.id,
-        companyId: tenant?.id,
-        companyName: tenant?.name,
-        details: `Revoked pending invitation for ${u.name} (${u.email}).`,
-      });
-      showToast('success', `Invitation for ${u.name} has been revoked.`);
-    } finally {
-      setIsActionInProgress(null);
+      await adminUserService.deleteUser(u.id, tenant?.id || '');
+      loadData();
+    } catch (err) {
+      showToast('error', 'Failed to revoke invite.');
+      return;
     }
+
+    addStoredAuditLog({
+      id: `aud-${Date.now()}`,
+      timestamp: 'Just now',
+      actorName: user?.name || 'Company Admin',
+      actorEmail: user?.email || 'admin@nexus.com',
+      action: 'INVITATION_REVOKED',
+      entityType: 'User',
+      entityId: u.id,
+      companyId: tenant?.id,
+      companyName: tenant?.name,
+      details: `Revoked pending invitation for ${u.name} (${u.email}).`,
+    });
+    showToast('success', `Invitation for ${u.name} has been revoked.`);
   };
 
-  const handleDeactivateUser = (u: User) => {
-    if (isActionInProgress) return;
+  const handleDeactivateUser = async (u: User) => {
     if (!window.confirm(`Deactivate account for ${u.name}? They will lose active system access.`)) return;
 
-    setIsActionInProgress(`deactivate-${u.id}`);
     try {
-      saveStoredUser({ ...u, status: 'Disabled' });
-
-      addStoredAuditLog({
-        id: `aud-${Date.now()}`,
-        timestamp: 'Just now',
-        actorName: user?.name || 'Company Admin',
-        actorEmail: user?.email || 'admin@nexus.com',
-        action: 'USER_DEACTIVATED',
-        entityType: 'User',
-        entityId: u.id,
-        companyId: tenant?.id,
-        companyName: tenant?.name,
-        details: `Deactivated user account for ${u.name} (${u.email}).`,
-      });
-      showToast('success', `User account for ${u.name} has been deactivated.`);
-    } finally {
-      setIsActionInProgress(null);
+      await adminUserService.updateUser(u.id, { ...u, status: 'Disabled' });
+      loadData();
+    } catch (err) {
+      showToast('error', 'Failed to deactivate user.');
+      return;
     }
+
+    addStoredAuditLog({
+      id: `aud-${Date.now()}`,
+      timestamp: 'Just now',
+      actorName: user?.name || 'Company Admin',
+      actorEmail: user?.email || 'admin@nexus.com',
+      action: 'USER_DEACTIVATED',
+      entityType: 'User',
+      entityId: u.id,
+      companyId: tenant?.id,
+      companyName: tenant?.name,
+      details: `Deactivated user account for ${u.name} (${u.email}).`,
+    });
+    showToast('success', `User account for ${u.name} has been deactivated.`);
   };
 
-  const handleReactivateUser = (u: User) => {
-    if (isActionInProgress) return;
-    setIsActionInProgress(`reactivate-${u.id}`);
+  const handleReactivateUser = async (u: User) => {
     try {
-      saveStoredUser({ ...u, status: 'Active' });
-
-      addStoredAuditLog({
-        id: `aud-${Date.now()}`,
-        timestamp: 'Just now',
-        actorName: user?.name || 'Company Admin',
-        actorEmail: user?.email || 'admin@nexus.com',
-        action: 'USER_REACTIVATED',
-        entityType: 'User',
-        entityId: u.id,
-        companyId: tenant?.id,
-        companyName: tenant?.name,
-        details: `Reactivated user account for ${u.name} (${u.email}).`,
-      });
-      showToast('success', `User account for ${u.name} reactivated.`);
-    } finally {
-      setIsActionInProgress(null);
+      await adminUserService.updateUser(u.id, { ...u, status: 'Active' });
+      loadData();
+    } catch (err) {
+      showToast('error', 'Failed to reactivate user.');
+      return;
     }
+
+    addStoredAuditLog({
+      id: `aud-${Date.now()}`,
+      timestamp: 'Just now',
+      actorName: user?.name || 'Company Admin',
+      actorEmail: user?.email || 'admin@nexus.com',
+      action: 'USER_REACTIVATED',
+      entityType: 'User',
+      entityId: u.id,
+      companyId: tenant?.id,
+      companyName: tenant?.name,
+      details: `Reactivated user account for ${u.name} (${u.email}).`,
+    });
+    showToast('success', `User account for ${u.name} reactivated.`);
   };
 
-  const handleDeleteUser = (u: User) => {
-    if (isActionInProgress) return;
+  const handleDeleteUser = async (u: User) => {
     if (!window.confirm(`Permanently remove ${u.name} (${u.email}) from ${tenant?.name}? This cannot be undone.`)) return;
 
-    setIsActionInProgress(`delete-${u.id}`);
     try {
-      deleteStoredUser(u.id);
-
-      addStoredAuditLog({
-        id: `aud-${Date.now()}`,
-        timestamp: 'Just now',
-        actorName: user?.name || 'Company Admin',
-        actorEmail: user?.email || 'admin@nexus.com',
-        action: 'USER_DELETED',
-        entityType: 'User',
-        entityId: u.id,
-        companyId: tenant?.id,
-        companyName: tenant?.name,
-        details: `Deleted team member record for ${u.name} (${u.email}).`,
-      });
-      showToast('success', `User ${u.name} permanently removed.`);
-    } finally {
-      setIsActionInProgress(null);
+      await adminUserService.deleteUser(u.id, tenant?.id || '');
+      loadData();
+    } catch (err) {
+      showToast('error', 'Failed to delete user.');
+      return;
     }
+
+    addStoredAuditLog({
+      id: `aud-${Date.now()}`,
+      timestamp: 'Just now',
+      actorName: user?.name || 'Company Admin',
+      actorEmail: user?.email || 'admin@nexus.com',
+      action: 'USER_DELETED',
+      entityType: 'User',
+      entityId: u.id,
+      companyId: tenant?.id,
+      companyName: tenant?.name,
+      details: `Deleted team member record for ${u.name} (${u.email}).`,
+    });
+    showToast('success', `User ${u.name} permanently removed.`);
   };
 
-  // ── Roles Summary & Expand State ─────────────────────────────────────────
-  const [expandedRoleCode, setExpandedRoleCode] = useState<string | null>(null);
-
-  const roleSummary = React.useMemo(() => {
-    const groups: Record<string, { roleCode: string; roleName: string; total: number; active: number }> = {};
-    usersList.forEach(u => {
-      if (u.role.code === 'company_admin' || u.role.code === 'super_admin') return;
-      if (!groups[u.role.code]) {
-        groups[u.role.code] = { roleCode: u.role.code, roleName: u.role.name, total: 0, active: 0 };
-      }
-      groups[u.role.code].total += 1;
-      if (u.status === 'Active') groups[u.role.code].active += 1;
-    });
-    return Object.values(groups);
-  }, [usersList]);
-
-  const usersByRoleCode = React.useMemo(() => {
-    const groups: Record<string, User[]> = {};
-    usersList.forEach(u => {
-      if (u.role.code === 'company_admin' || u.role.code === 'super_admin') return; // admins never shown here
-      if (!groups[u.role.code]) groups[u.role.code] = [];
-      groups[u.role.code].push(u);
-    });
-    return groups;
-  }, [usersList]);
+  // ── Filtered Dataset ──────────────────────────────────────────────────────
+  const filteredUsersList = usersList.filter(u => {
+    if (roleFilter !== 'all' && u.role.code !== roleFilter) return false;
+    if (statusFilter !== 'all' && u.status !== statusFilter) return false;
+    return true;
+  });
 
   // ── Table Columns ─────────────────────────────────────────────────────────
   const columns: Column<User>[] = [
@@ -575,42 +538,6 @@ export const CompanyUsersPage: React.FC = () => {
         </button>
       </div>
 
-      {/* ── Roles summary ───────────────────────────────────────────────── */}
-      <div className="company-users-role-summary">
-        <h3 className="company-users-role-summary-title">Roles</h3>
-        <div className="company-users-role-cards">
-          {roleSummary.map(r => (
-            <div
-              key={r.roleCode}
-              className={`card company-users-role-card${expandedRoleCode === r.roleCode ? ' is-expanded' : ''}`}
-              onClick={() => setExpandedRoleCode(prev => (prev === r.roleCode ? null : r.roleCode))}
-            >
-              <div className="company-users-role-card-title">{r.roleName}</div>
-              <div className="company-users-role-card-stat">
-                <span className="company-users-role-card-label">Total Count of Employees</span>
-                <span className="company-users-role-card-value">{r.total}</span>
-              </div>
-              <div className="company-users-role-card-stat">
-                <span className="company-users-role-card-label">Active</span>
-                <span className="company-users-role-card-value">{r.active} / {r.total}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {expandedRoleCode && (
-          <div className="company-users-role-detail">
-            <DataTable
-              columns={columns}
-              data={usersByRoleCode[expandedRoleCode] || []}
-              keyExtractor={u => u.id}
-              rowActions={rowActions}
-              searchPlaceholder="Search users by name or email..."
-            />
-          </div>
-        )}
-      </div>
-
       {/* ── Fixed-position Toast (top-center) ────────────────────────────── */}
       {toast && (
         <>
@@ -632,8 +559,9 @@ export const CompanyUsersPage: React.FC = () => {
               gap: 8,
               padding: '10px 18px',
               borderRadius: 'var(--radius-md)',
-              border: `1px solid ${toast.type === 'success' ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'
-                }`,
+              border: `1px solid ${
+                toast.type === 'success' ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'
+              }`,
               backgroundColor:
                 toast.type === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
               backdropFilter: 'blur(6px)',
@@ -654,7 +582,61 @@ export const CompanyUsersPage: React.FC = () => {
         </>
       )}
 
-      {/* ── Invite Modal ─────────────────────────────────────────────────── */}
+      {/* ── Filter Bar ───────────────────────────────────────────────────── */}
+      <div className="company-users-filter-bar">
+        <div className="company-users-filter-item">
+          <label className="company-users-filter-label">Filter by Role:</label>
+          <select
+            className="form-select company-users-filter-select"
+            value={roleFilter}
+            onChange={e => setRoleFilter(e.target.value)}
+          >
+            <option value="all">All Roles</option>
+            <option value="sales_executive">Sales Executive</option>
+            <option value="irm">Institutional Relationship Manager (IRM)</option>
+            <option value="company_admin">Company Admin</option>
+          </select>
+        </div>
+
+        <div className="company-users-filter-item">
+          <label className="company-users-filter-label">Filter by Status:</label>
+          <select
+            className="form-select company-users-filter-select"
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+          >
+            <option value="all">All Statuses</option>
+            <option value="Active">Active</option>
+            <option value="Invited">Invited</option>
+            <option value="Disabled">Disabled</option>
+          </select>
+        </div>
+
+        {(roleFilter !== 'all' || statusFilter !== 'all') && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => {
+              setRoleFilter('all');
+              setStatusFilter('all');
+            }}
+            style={{ alignSelf: 'flex-end', height: '36px' }}
+          >
+            Reset Filters
+          </button>
+        )}
+      </div>
+
+      {/* ── Data Table ───────────────────────────────────────────────────── */}
+      <DataTable
+        columns={columns}
+        data={filteredUsersList}
+        keyExtractor={u => u.id}
+        rowActions={rowActions}
+        searchPlaceholder="Search team members by name, email, or designation..."
+      />
+
+      {/* ── Add / Invite Member Modal ────────────────────────────────────── */}
       <Modal
         isOpen={isInviteModalOpen}
         onClose={() => setIsInviteModalOpen(false)}
@@ -698,14 +680,12 @@ export const CompanyUsersPage: React.FC = () => {
           <form onSubmit={handleCreateOrInvite} className="company-user-form">
             <div className="company-user-form-row">
               <div className="form-group">
-                <label htmlFor="invite-name" className="form-label">Full Name *</label>
+                <label className="form-label">Full Name *</label>
                 <input
                   id="invite-name"
-                  name="name"
                   type="text"
                   className="form-input"
                   required
-                  autoComplete="name"
                   value={inviteName}
                   onChange={e => setInviteName(e.target.value)}
                   placeholder="e.g. Sumanth Hegde"
@@ -713,14 +693,12 @@ export const CompanyUsersPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label htmlFor="invite-email" className="form-label">Corporate Email Address *</label>
+                <label className="form-label">Corporate Email Address *</label>
                 <input
                   id="invite-email"
-                  name="email"
                   type="email"
                   className={`form-input${inviteError ? ' is-invalid' : ''}`}
                   required
-                  autoComplete="email"
                   value={inviteEmail}
                   onChange={e => {
                     setInviteEmail(e.target.value);
@@ -734,13 +712,10 @@ export const CompanyUsersPage: React.FC = () => {
 
             <div className="company-user-form-row">
               <div className="form-group">
-                <label htmlFor="invite-phone" className="form-label">Contact Phone</label>
+                <label className="form-label">Contact Phone</label>
                 <input
-                  id="invite-phone"
-                  name="phone"
                   type="text"
                   className="form-input"
-                  autoComplete="tel"
                   value={invitePhone}
                   onChange={e => setInvitePhone(e.target.value)}
                   placeholder="+91 98450 00000"
@@ -748,10 +723,8 @@ export const CompanyUsersPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label htmlFor="invite-designation" className="form-label">Designation / Title</label>
+                <label className="form-label">Designation / Title</label>
                 <input
-                  id="invite-designation"
-                  name="designation"
                   type="text"
                   className="form-input"
                   value={inviteDesignation}
@@ -762,10 +735,9 @@ export const CompanyUsersPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label htmlFor="invite-role" className="form-label">Assign Operational Role *</label>
+              <label className="form-label">Assign Operational Role *</label>
               <select
                 id="invite-role"
-                name="role"
                 className="form-select"
                 value={inviteRole}
                 onChange={e => setInviteRole(e.target.value as RoleCode)}
@@ -779,11 +751,10 @@ export const CompanyUsersPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <div className="form-label">Onboarding & Credential Mode</div>
+              <label className="form-label">Onboarding & Credential Mode</label>
               <div style={{ display: 'flex', gap: '16px', marginTop: '4px' }}>
-                <label htmlFor="creation-mode-invite" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
                   <input
-                    id="creation-mode-invite"
                     type="radio"
                     name="creationMode"
                     value="invite"
@@ -792,9 +763,8 @@ export const CompanyUsersPage: React.FC = () => {
                   />
                   Send Email Invitation Link
                 </label>
-                <label htmlFor="creation-mode-instant" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
                   <input
-                    id="creation-mode-instant"
                     type="radio"
                     name="creationMode"
                     value="instant_password"
@@ -807,16 +777,11 @@ export const CompanyUsersPage: React.FC = () => {
             </div>
 
             <div className="company-user-modal-actions">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setIsInviteModalOpen(false)}
-                disabled={isSubmittingInvite}
-              >
+              <button type="button" className="btn btn-secondary" onClick={() => setIsInviteModalOpen(false)}>
                 Cancel
               </button>
-              <button type="submit" className="btn btn-primary" disabled={isSubmittingInvite}>
-                {isSubmittingInvite ? 'Saving...' : (creationMode === 'instant_password' ? 'Create & View Credentials' : 'Send Email Invitation')}
+              <button type="submit" className="btn btn-primary">
+                {creationMode === 'instant_password' ? 'Create & View Credentials' : 'Send Email Invitation'}
               </button>
             </div>
           </form>
@@ -835,7 +800,6 @@ export const CompanyUsersPage: React.FC = () => {
               type="button"
               className="btn btn-secondary"
               onClick={() => setEditingUser(null)}
-              disabled={isSubmittingEdit}
             >
               Cancel
             </button>
@@ -843,9 +807,8 @@ export const CompanyUsersPage: React.FC = () => {
               type="button"
               className="btn btn-primary"
               onClick={handleSaveEditUser}
-              disabled={isSubmittingEdit}
             >
-              {isSubmittingEdit ? 'Saving Changes...' : 'Save Changes'}
+              Save Changes
             </button>
           </>
         }
@@ -853,26 +816,20 @@ export const CompanyUsersPage: React.FC = () => {
         {editingUser && (
           <div className="company-user-form">
             <div className="form-group">
-              <label htmlFor="edit-user-fullname" className="form-label">Full Name</label>
+              <label className="form-label">Full Name</label>
               <input
-                id="edit-user-fullname"
-                name="name"
                 type="text"
                 className="form-input"
-                autoComplete="name"
                 value={editName}
                 onChange={e => setEditName(e.target.value)}
               />
             </div>
 
             <div className="form-group">
-              <label htmlFor="edit-user-corp-email" className="form-label">Corporate Email (Read Only)</label>
+              <label className="form-label">Corporate Email (Read Only)</label>
               <input
-                id="edit-user-corp-email"
-                name="email"
                 type="email"
                 className="form-input"
-                autoComplete="email"
                 value={editingUser.email}
                 disabled
                 style={{ opacity: 0.7 }}
@@ -881,23 +838,18 @@ export const CompanyUsersPage: React.FC = () => {
 
             <div className="company-user-form-row">
               <div className="form-group">
-                <label htmlFor="edit-user-contact-phone" className="form-label">Contact Phone</label>
+                <label className="form-label">Contact Phone</label>
                 <input
-                  id="edit-user-contact-phone"
-                  name="phone"
                   type="text"
                   className="form-input"
-                  autoComplete="tel"
                   value={editPhone}
                   onChange={e => setEditPhone(e.target.value)}
                 />
               </div>
 
               <div className="form-group">
-                <label htmlFor="edit-user-title" className="form-label">Designation / Title</label>
+                <label className="form-label">Designation / Title</label>
                 <input
-                  id="edit-user-title"
-                  name="designation"
                   type="text"
                   className="form-input"
                   value={editDesignation}
@@ -907,10 +859,9 @@ export const CompanyUsersPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label htmlFor="edit-user-role-select" className="form-label">Assigned Role</label>
+              <label className="form-label">Assigned Role</label>
               <select
                 id="edit-user-role-select"
-                name="roleCode"
                 className="form-select"
                 value={editRoleCode}
                 onChange={e => setEditRoleCode(e.target.value as RoleCode)}
@@ -970,6 +921,60 @@ export const CompanyUsersPage: React.FC = () => {
             </p>
           </div>
         )}
+      </Modal>
+
+
+
+      {/* ── Transfer Desk Modal ────────────────────────────────────────────── */}
+      <Modal
+        isOpen={transferModalOpen}
+        onClose={() => setTransferModalOpen(false)}
+        title="Transfer Desk"
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setTransferModalOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleTransferAndSave}
+              disabled={!selectedTransferUserId}
+            >
+              Transfer & Change Role
+            </button>
+          </>
+        }
+      >
+        <div className="company-user-form">
+          <div style={{ backgroundColor: '#fff3cd', color: '#856404', padding: '12px', borderRadius: '8px', marginBottom: '16px' }}>
+            <strong>Action Required:</strong> {transferFromUser?.name} is changing roles from 
+            <strong> {transferFromUser?.role.name}</strong> to <strong>{transferTargetRole?.name}</strong>.
+            You must reassign their active pipeline (Leads and Follow-ups) to another agent before proceeding.
+          </div>
+          
+          <div className="form-group">
+            <label className="form-label">Transfer pipeline to:</label>
+            <select
+              className="form-select"
+              value={selectedTransferUserId}
+              onChange={e => setSelectedTransferUserId(e.target.value)}
+            >
+              <option value="">Select a new agent...</option>
+              {usersList
+                .filter(u => u.role.code === transferFromUser?.role.code && u.id !== transferFromUser?.id && u.status === 'Active')
+                .map(u => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({u.email})
+                  </option>
+                ))}
+            </select>
+          </div>
+        </div>
       </Modal>
     </div>
   );

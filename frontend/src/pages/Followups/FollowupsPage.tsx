@@ -31,12 +31,10 @@ import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { Drawer } from '../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
-import {
-  FollowupRoleFilter,
-  SALES_EXECUTIVE_USERS,
-  IRM_USERS,
-} from '../../mock_data/adminFollowupsData';
+type FollowupRoleFilter = 'sales_executive' | 'irm';
 import { DateRangePreset } from '../../types/kanban';
+import { adminUserService } from '../../services/adminUserService';
+import { User as UserModel } from '../../types';
 import './FollowupsPage.css';
 import '../Leads/LeadsPage.css';
 
@@ -47,6 +45,7 @@ export const FollowupsPage: React.FC = () => {
   const [followups, setFollowups] = useState<Followup[]>([]);
   const [callsList, setCallsList] = useState<CallRecord[]>([]);
   const [allLeads, setAllLeads] = useState<Lead[]>([]);
+  const [users, setUsers] = useState<UserModel[]>([]);
   const [activeTab, setActiveTab] = useState<'all' | 'due' | 'overdue'>('all');
   const [rescheduleItem, setRescheduleItem] = useState<Followup | null>(null);
   const [newDate, setNewDate] = useState('');
@@ -90,7 +89,7 @@ export const FollowupsPage: React.FC = () => {
   // ── Admin Filter States ──────────────────────────────────────────────────
   const [selectedRole, setSelectedRole] = useState<FollowupRoleFilter>('sales_executive');
   const [selectedPerson, setSelectedPerson] = useState<string>('All');
-  const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>('this_month');
+  const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>('all');
   const [customStartDate, setCustomStartDate] = useState<string>(() => {
     const d = new Date();
     d.setDate(1); // 1st of current month
@@ -105,23 +104,65 @@ export const FollowupsPage: React.FC = () => {
   };
 
   const personOptions = useMemo(() => {
-    if (selectedRole === 'sales_executive') {
-      return storageService.getAgents ? storageService.getAgents(tenant?.id) : SALES_EXECUTIVE_USERS;
+    if (users && users.length > 0) {
+      if (selectedRole === 'sales_executive') {
+        const sales = users.filter(u => {
+          const code = (u.role?.code || '').toLowerCase();
+          const roleId = String(u.role?.id || '');
+          const roleName = (u.role?.name || '').toLowerCase();
+          return code === 'sales_executive' || roleId === '3' || roleName.includes('sales');
+        });
+        if (sales.length > 0) return sales;
+      } else {
+        const irms = users.filter(u => {
+          const code = (u.role?.code || '').toLowerCase();
+          const roleId = String(u.role?.id || '');
+          const roleName = (u.role?.name || '').toLowerCase();
+          return code === 'irm' || roleId === '4' || roleName.includes('irm') || roleName.includes('investor');
+        });
+        if (irms.length > 0) return irms;
+      }
     }
-  }, [selectedRole, tenant?.id]);
+    if (selectedRole === 'sales_executive') {
+      const storageAgents = storageService.getAgents(tenant?.id);
+      if (storageAgents && storageAgents.length > 0) return storageAgents;
+      return [{ id: '3', name: 'Naveen' }];
+    }
+    const storageIrms = storageService.getIrms(tenant?.id);
+    if (storageIrms && storageIrms.length > 0) return storageIrms;
+    return [{ id: '5', name: 'Dhinakaran' }];
+  }, [selectedRole, users]);
+
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadData = async () => {
     try {
-      const [data, calls, leads] = await Promise.all([
+      setLoadError(null);
+      const [data, calls, leads, fetchedUsers] = await Promise.all([
         getFollowups(tenant?.id),
         getCalls(tenant?.id),
         getLeads(tenant?.id),
+        isAdmin ? adminUserService.getUsers(tenant?.id || '') : Promise.resolve([])
       ]);
-      setFollowups(data || []);
+
+      const followupsList = isMockMode()
+        ? ((data && data.length > 0) ? [...data] : (storageService.getFollowups(tenant?.id) || []))
+        : (data || []);
+
+      setFollowups(followupsList);
       setCallsList(calls || []);
       setAllLeads(leads || []);
-    } catch (err) {
+      if (fetchedUsers && fetchedUsers.length > 0) {
+        setUsers(fetchedUsers);
+      }
+    } catch (err: any) {
       console.error('Failed to load followups data', err);
+      if (isMockMode()) {
+        setFollowups(storageService.getFollowups(tenant?.id) || []);
+      } else {
+        setFollowups([]);
+        setLoadError(err?.message || 'Failed to load follow-up records from server.');
+      }
     }
   };
 
@@ -296,6 +337,22 @@ export const FollowupsPage: React.FC = () => {
     const num = parseFloat(investmentAmountValue.replace(/,/g, '').trim()) || 0;
     const cleanStr = num > 0 ? String(num) : '';
 
+    const fDigits = (drawerFollowup.contactPhone || '').replace(/\D/g, '').slice(-10);
+    const resolvedContactId = drawerFollowup.contactId || matchingLead?.id || matchingCustomer?.id;
+    const allDeals = storageService.getDeals(tenant?.id) || [];
+    const existingDeal = allDeals.find((deal: Deal) =>
+      (resolvedContactId && (deal.customerId === resolvedContactId || deal.id === resolvedContactId)) ||
+      (drawerFollowup.contactPhone && deal.phone === drawerFollowup.contactPhone) ||
+      (fDigits && deal.phone && deal.phone.replace(/\D/g, '').slice(-10) === fDigits)
+    );
+
+    if (!matchingLead && !matchingCustomer && !existingDeal) {
+      showToast('Cannot save Investment Amount: No matching lead, customer, or deal record found.');
+      return;
+    }
+
+    let serverSavesConfirmed = 0;
+
     if (matchingLead) {
       const updatedLead: Lead = {
         ...matchingLead,
@@ -306,10 +363,14 @@ export const FollowupsPage: React.FC = () => {
       };
       try {
         await apiSaveLead(updatedLead);
-      } catch {
-        storageService.saveLead(updatedLead);
+        serverSavesConfirmed++;
+      } catch (err: any) {
+        console.error('[FollowupsPage] Server saveLead failed:', err);
+        showToast(`Server save failed for lead: ${err?.message || 'Server error'}`);
+        return;
       }
     }
+
     if (matchingCustomer) {
       const updatedCust: Customer = {
         ...matchingCustomer,
@@ -320,19 +381,14 @@ export const FollowupsPage: React.FC = () => {
       };
       try {
         await apiSaveCustomer(updatedCust);
-      } catch {
-        storageService.saveCustomer(updatedCust);
+        serverSavesConfirmed++;
+      } catch (err: any) {
+        console.error('[FollowupsPage] Server saveCustomer failed:', err);
+        showToast(`Server save failed for customer: ${err?.message || 'Server error'}`);
+        return;
       }
     }
 
-    const fDigits = (drawerFollowup.contactPhone || '').replace(/\D/g, '').slice(-10);
-    const resolvedContactId = drawerFollowup.contactId || matchingLead?.id || matchingCustomer?.id;
-    const allDeals = storageService.getDeals(tenant?.id) || [];
-    const existingDeal = allDeals.find((deal: Deal) =>
-      (resolvedContactId && (deal.customerId === resolvedContactId || deal.id === resolvedContactId)) ||
-      (drawerFollowup.contactPhone && deal.phone === drawerFollowup.contactPhone) ||
-      (fDigits && deal.phone && deal.phone.replace(/\D/g, '').slice(-10) === fDigits)
-    );
     if (existingDeal) {
       const updatedDeal: Deal = {
         ...existingDeal,
@@ -340,15 +396,23 @@ export const FollowupsPage: React.FC = () => {
       };
       try {
         await apiSaveDeal(updatedDeal);
-      } catch {
-        storageService.saveDeal(updatedDeal);
+        serverSavesConfirmed++;
+      } catch (err: any) {
+        console.error('[FollowupsPage] Server saveDeal failed:', err);
+        showToast(`Server save failed for deal: ${err?.message || 'Server error'}`);
+        return;
       }
+    }
+
+    if (serverSavesConfirmed === 0) {
+      showToast('No matching record was saved to the server.');
+      return;
     }
 
     (drawerFollowup as any).investmentAmount = cleanStr;
 
     window.dispatchEvent(new Event('nexus_storage_updated'));
-    showToast('Investment Amount updated successfully');
+    showToast('✓ Investment Amount saved successfully to server');
     setIsEditingAmount(false);
   };
 
@@ -485,9 +549,10 @@ export const FollowupsPage: React.FC = () => {
     // Save deal to DB (API) — this persists stage='qualified_investor' in Neon
     try {
       await apiSaveDeal(kycDeal);
-    } catch (err) {
-      console.warn('[FollowupsPage] API saveDeal failed, saving locally:', err);
-      storageService.saveDeal(kycDeal);
+    } catch (err: any) {
+      console.error('[FollowupsPage] API saveDeal failed:', err);
+      showToast(`Failed to move to KYC: ${err?.message || 'Error updating deal status'}`);
+      return;
     }
 
     // 2. Mark the follow-up task as completed in DB so it does not show in the followup page
@@ -497,13 +562,10 @@ export const FollowupsPage: React.FC = () => {
         status: 'Completed',
         notes: `${drawerFollowup.notes ? drawerFollowup.notes + ' | ' : ''}Ready for KYC: Moved to KYC Module by IRM`,
       });
-    } catch (err) {
-      console.warn('[FollowupsPage] API saveFollowup (complete) failed:', err);
-      storageService.saveFollowup({
-        ...drawerFollowup,
-        status: 'Completed',
-        notes: `${drawerFollowup.notes ? drawerFollowup.notes + ' | ' : ''}Ready for KYC: Moved to KYC Module by IRM`,
-      });
+    } catch (err: any) {
+      console.error('[FollowupsPage] API saveFollowup (complete) failed:', err);
+      showToast(`Failed to complete follow-up task: ${err?.message || 'Error updating follow-up status'}`);
+      return;
     }
 
     // 3. If matching lead exists, update lead status to 'Ready for KYC' in DB
@@ -524,9 +586,10 @@ export const FollowupsPage: React.FC = () => {
       };
       try {
         await apiSaveLead(updatedLead);
-      } catch (err) {
-        console.warn('[FollowupsPage] API saveLead (qualified) failed:', err);
-        storageService.saveLead(updatedLead);
+      } catch (err: any) {
+        console.error('[FollowupsPage] API saveLead (qualified) failed:', err);
+        showToast(`Failed to update lead status: ${err?.message || 'Error updating lead'}`);
+        return;
       }
     }
 
@@ -551,65 +614,97 @@ export const FollowupsPage: React.FC = () => {
     showToast(`✓ ${drawerFollowup.contactName} moved to KYC module!`);
   };
 
-  const handleSaveReschedule = () => {
+  const handleSaveReschedule = async () => {
     if (rescheduleItem && newDate) {
-      apiSaveFollowup({ ...rescheduleItem, scheduledAt: newDate, status: 'Pending' }).catch(console.error);
-      setRescheduleItem(null);
-      setNewDate('');
+      try {
+        await apiSaveFollowup({ ...rescheduleItem, scheduledAt: newDate, status: 'Pending' });
+        setRescheduleItem(null);
+        setNewDate('');
+        loadData();
+        showToast('✓ Follow-up rescheduled successfully');
+      } catch (err: any) {
+        console.error('[FollowupsPage] API reschedule failed:', err);
+        showToast(`Failed to reschedule follow-up: ${err?.message || 'Server error'}`);
+      }
     }
   };
 
   // Helper to determine the assigned role of any followup
   const getFollowupRole = (f: Followup): 'Sales Executive' | 'IRM' => {
     if (f.assignedRole) {
-      if (f.assignedRole.toLowerCase().includes('irm')) return 'IRM';
+      const lower = f.assignedRole.toLowerCase();
+      if (lower.includes('irm') || lower.includes('investor')) return 'IRM';
+      if (lower.includes('sales')) return 'Sales Executive';
+    }
+
+    const agentName = (f.assignedAgentName || '').toLowerCase().trim();
+    const agentId = String(f.assignedAgentId || '').trim();
+
+    // Match against real DB users list
+    const foundUser = (users || []).find(u =>
+      (agentName && u.name.toLowerCase().trim() === agentName) ||
+      (agentId && String(u.id) === agentId)
+    );
+
+    if (foundUser) {
+      const code = (foundUser.role?.code || '').toLowerCase();
+      const roleId = String(foundUser.role?.id || '');
+      const roleName = (foundUser.role?.name || '').toLowerCase();
+      if (code === 'irm' || roleId === '4' || roleName.includes('irm') || roleName.includes('investor')) {
+        return 'IRM';
+      }
       return 'Sales Executive';
     }
-    if ((f.assignedAgentName || '').toLowerCase().includes('dhinakaran')) {
+    // Direct check for known IRMs in db or storage
+    if (agentName.includes('dhinakaran') || agentId === '5' || agentName.includes('irm')) {
       return 'IRM';
     }
-    const irmsList = storageService.getIrms ? storageService.getIrms(tenant?.id) : IRM_USERS;
+    const irmsList = storageService.getIrms ? storageService.getIrms(tenant?.id) : [];
     if (
       irmsList.some(
         (u: any) =>
-          u.name.toLowerCase() === (f.assignedAgentName || '').toLowerCase() ||
-          u.id === f.assignedAgentId
+          (u.name && u.name.toLowerCase() === agentName) ||
+          String(u.id) === agentId
       )
     ) {
       return 'IRM';
     }
+
     if (f.contactType === 'investor') {
       return 'IRM';
     }
+
     return 'Sales Executive';
   };
 
   // Helper to test if a followup date falls within date range filter
   const isFollowupInDateFilter = (f: Followup): boolean => {
+    if (dateRangePreset === 'all') return true;
     const schedStr = (f.scheduledAt || '').trim();
     const dateStr = (f.scheduledDate || '').trim();
     const now = new Date();
 
-    const isToday = schedStr.toLowerCase().includes('today');
-    const isYesterday = schedStr.toLowerCase().includes('yesterday');
+    const isToday = () => {
+      const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
+      if (isNaN(parsedTime)) return schedStr.toLowerCase().includes('today');
+      const d = new Date(parsedTime);
+      return d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    };
+    
+    const isYesterday = () => {
+      const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
+      if (isNaN(parsedTime)) return schedStr.toLowerCase().includes('yesterday');
+      const d = new Date(parsedTime);
+      const yest = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      return d.getDate() === yest.getDate() && d.getMonth() === yest.getMonth() && d.getFullYear() === yest.getFullYear();
+    };
 
     if (dateRangePreset === 'today') {
-      if (isToday) return true;
-      if (isYesterday) return false;
-      const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
-      if (!isNaN(parsedTime)) {
-        const d = new Date(parsedTime);
-        return (
-          d.getDate() === now.getDate() &&
-          d.getMonth() === now.getMonth() &&
-          d.getFullYear() === now.getFullYear()
-        );
-      }
-      return true;
+      return isToday();
     }
 
     if (dateRangePreset === 'this_week') {
-      if (isToday || isYesterday) return true;
+      if (isToday() || isYesterday()) return true;
       const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
       if (!isNaN(parsedTime)) {
         const sevenDaysAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
@@ -619,7 +714,7 @@ export const FollowupsPage: React.FC = () => {
     }
 
     if (dateRangePreset === 'this_month') {
-      if (isToday || isYesterday) return true;
+      if (isToday() || isYesterday()) return true;
       const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
       if (!isNaN(parsedTime)) {
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
@@ -633,14 +728,6 @@ export const FollowupsPage: React.FC = () => {
       const start = customStartDate ? new Date(`${customStartDate}T00:00:00`).getTime() : 0;
       const end = customEndDate ? new Date(`${customEndDate}T23:59:59`).getTime() : Infinity;
 
-      if (isToday) {
-        const todayMs = now.getTime();
-        return todayMs >= start && todayMs <= end;
-      }
-      if (isYesterday) {
-        const yestMs = now.getTime() - 24 * 60 * 60 * 1000;
-        return yestMs >= start && yestMs <= end;
-      }
       const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
       if (!isNaN(parsedTime)) {
         return parsedTime >= start && parsedTime <= end;
@@ -693,35 +780,25 @@ export const FollowupsPage: React.FC = () => {
     scopedFollowups = followups;
   }
 
-  // Safely deduplicate display rows for all roles so at most one active pending follow-up is rendered per contact
+  // Do NOT collapse legitimate separate tasks merely because they belong to the same customer or have nearby schedules.
+  // Deduplicate only by unique ID so distinct tasks are never merged
   let processedFollowups = scopedFollowups;
   try {
-    const seen = new Map<string, Followup>();
+    const seen = new Set<string>();
     const deduped: Followup[] = [];
 
-      for (const f of scopedFollowups) {
-        if (f.status !== 'Pending') {
-          deduped.push(f);
-          continue;
-        }
-        const phoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-        const key =
-          f.contactId && f.contactId !== 'contact-new'
-            ? `id:${f.contactId}`
-            : phoneDigits
-            ? `phone:${phoneDigits}`
-            : `raw:${f.id}`;
-
-        if (!seen.has(key)) {
-          seen.set(key, f);
-          deduped.push(f);
-        }
+    for (const f of scopedFollowups) {
+      const key = String(f.id);
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(f);
       }
-      processedFollowups = deduped;
-    } catch (err) {
-      console.error('Error deduping followups list:', err);
-      processedFollowups = scopedFollowups;
     }
+    processedFollowups = deduped;
+  } catch (err) {
+    console.error('Error deduping followups list:', err);
+    processedFollowups = scopedFollowups;
+  }
 
   const getCallCountForFollowup = (f: Followup): number => {
     const fPhoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
@@ -770,11 +847,28 @@ export const FollowupsPage: React.FC = () => {
   const activePendingFollowups = processedFollowups.filter(f => f.status === 'Pending');
 
   const filteredFollowups = processedFollowups.filter(f => {
+    const schedStr = (f.scheduledAt || '').trim();
+    const dateStr = (f.scheduledDate || '').trim();
+    const now = new Date();
+    
+    const isToday = () => {
+      const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
+      if (isNaN(parsedTime)) return schedStr.toLowerCase().includes('today');
+      const d = new Date(parsedTime);
+      return d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    };
+
+    const isOverdueFunc = () => {
+      const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
+      if (isNaN(parsedTime)) return schedStr.toLowerCase().includes('yesterday');
+      return parsedTime < new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    };
+
     if (activeTab === 'due') {
-      return f.status === 'Pending' && (f.scheduledAt || '').toLowerCase().includes('today');
+      return f.status === 'Pending' && isToday();
     }
     if (activeTab === 'overdue') {
-      return f.status === 'Pending' && (f.scheduledAt || '').toLowerCase().includes('yesterday');
+      return f.status === 'Pending' && isOverdueFunc() && !isToday();
     }
     return f.status === 'Pending';
   });
@@ -794,6 +888,25 @@ export const FollowupsPage: React.FC = () => {
           </p>
         </div>
       </div>
+
+      {loadError && (
+        <div
+          className="alert-banner error"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px 16px',
+            marginBottom: '16px',
+            borderRadius: '8px',
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            color: '#ef4444',
+          }}
+        >
+          <span>{loadError}</span>
+        </div>
+      )}
 
       {/* ── Admin Global Filter Bar ─────────────────────────────────────────── */}
       {isAdmin && (
@@ -854,6 +967,7 @@ export const FollowupsPage: React.FC = () => {
                 value={dateRangePreset}
                 onChange={e => setDateRangePreset(e.target.value as DateRangePreset)}
               >
+                <option value="all">All Records</option>
                 <option value="today">Today</option>
                 <option value="this_week">This Week</option>
                 <option value="this_month">This Month</option>
@@ -965,8 +1079,24 @@ export const FollowupsPage: React.FC = () => {
           </div>
         ) : (
           filteredFollowups.map(f => {
-            const isOverdue =
-              f.status === 'Pending' && (f.scheduledAt || '').toLowerCase().includes('yesterday');
+            const schedStr = (f.scheduledAt || '').trim();
+            const dateStr = (f.scheduledDate || '').trim();
+            const now = new Date();
+            
+            const isOverdueFunc = () => {
+              const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
+              if (isNaN(parsedTime)) return schedStr.toLowerCase().includes('yesterday');
+              return parsedTime < new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+            };
+
+            const isTodayFunc = () => {
+              const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
+              if (isNaN(parsedTime)) return schedStr.toLowerCase().includes('today');
+              const d = new Date(parsedTime);
+              return d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+            };
+
+            const isOverdue = f.status === 'Pending' && isOverdueFunc() && !isTodayFunc();
             const callCount = getCallCountForFollowup(f);
             const fRole = getFollowupRole(f);
 
@@ -1032,15 +1162,17 @@ export const FollowupsPage: React.FC = () => {
                 </div>
 
                 <div className="followup-actions-right">
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    onClick={e => {
-                      e.stopPropagation();
-                      setRescheduleItem(f);
-                    }}
-                  >
-                    Reschedule
-                  </button>
+                  {!(isGhlAdmin && fRole === 'IRM') && (
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={e => {
+                        e.stopPropagation();
+                        setRescheduleItem(f);
+                      }}
+                    >
+                      Reschedule
+                    </button>
+                  )}
                   <button
                     className="btn btn-call btn-sm"
                     onClick={e => {
@@ -1102,7 +1234,7 @@ export const FollowupsPage: React.FC = () => {
           title={drawerFollowup?.contactName || 'Contact Profile'}
           subtitle={
             isAdmin
-              ? `Phone: ${drawerFollowup?.contactPhone || '—'} • Assigned: ${
+              ? `Phone: ${drawerFollowup?.contactPhone || '—'} • Assigned : ${
                   drawerFollowup?.assignedAgentName || 'Unassigned'
                 } (${drawerFollowupRole})`
               : drawerFollowup?.contactPhone
@@ -1113,8 +1245,8 @@ export const FollowupsPage: React.FC = () => {
           footer={
             drawerFollowup && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: isExec ? 'flex-end' : 'space-between', width: '100%', gap: 10 }}>
-                {/* Ready for KYC button (Hidden for Sales Executive, available for IRM / Admins) */}
-                {!isExec && (
+                {/* Ready for KYC button (Hidden for Sales Executive and GHL Admin, available for IRM) */}
+                {!isExec && !isGhlAdmin && (
                   <button
                     type="button"
                     className="btn btn-primary"
@@ -1137,15 +1269,17 @@ export const FollowupsPage: React.FC = () => {
 
                 {/* Right side buttons */}
                 <div style={{ display: 'flex', gap: 10, marginLeft: isExec ? 'auto' : undefined }}>
-                  <button
-                    className="btn btn-secondary"
-                    onClick={() => {
-                      setRescheduleItem(drawerFollowup);
-                      setDrawerFollowup(null);
-                    }}
-                  >
-                    Reschedule
-                  </button>
+                  {!(isGhlAdmin && drawerFollowupRole === 'IRM') && (
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        setRescheduleItem(drawerFollowup);
+                        setDrawerFollowup(null);
+                      }}
+                    >
+                      Reschedule
+                    </button>
+                  )}
                   <button
                     className="btn btn-call"
                     onClick={() => {
@@ -1192,7 +1326,7 @@ export const FollowupsPage: React.FC = () => {
               matchingCustomer?.assignedAgentName ||
               'Unassigned';
 
-            const contactEmail = matchingLead?.email || matchingCustomer?.email || (drawerFollowup as any).email || '—';
+            const contactEmail = (drawerFollowup as any).contactEmail || (drawerFollowup as any).email || matchingLead?.email || matchingCustomer?.email || '—';
             const contactLocation = matchingLead?.location || matchingCustomer?.location || (drawerFollowup as any).location || '—';
             const contactSource = matchingLead?.source || (drawerFollowup as any).source || 'Follow-up Task';
 
@@ -1305,7 +1439,7 @@ export const FollowupsPage: React.FC = () => {
                 {!isAdmin && (
                   <div className="lead-quick-banner">
                     <div className="lead-assigned-note" style={{ fontSize: 13, marginTop: 0 }}>
-                      Assigned: <strong>{assignedAgent}</strong>
+                      Assigned : <strong>{assignedAgent}</strong>
                       {drawerFollowupRole && (
                         <span
                           style={{
@@ -1498,20 +1632,21 @@ export const FollowupsPage: React.FC = () => {
                       <h4 className="lead-custom-title" style={{ margin: 0 }}>
                         {tenant?.name || 'GHL India Ventures'} Custom Attributes
                       </h4>
-                      <label htmlFor="followup-drawer-set-by-irm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', fontWeight: 600, color: 'var(--text-primary)' }}>
+                      <label htmlFor="followup-drawer-set-by-irm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: isGhlAdmin ? 'default' : 'pointer', fontWeight: 600, color: 'var(--text-primary)' }}>
                         <input
                           id="followup-drawer-set-by-irm"
                           name="setByIrm"
                           type="checkbox"
                           checked={Boolean(isPrefConfirmed)}
+                          disabled={isGhlAdmin}
                           onChange={e => handleTogglePrefCheckbox(e.target.checked, matchingLead, matchingCustomer)}
-                          style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--primary-600)' }}
+                          style={{ width: 16, height: 16, cursor: isGhlAdmin ? 'not-allowed' : 'pointer', accentColor: 'var(--primary-600)' }}
                         />
-                        <span>Set by IRM</span>
+                        <span>Set by IRM {isGhlAdmin && '(Read-only)'}</span>
                       </label>
                     </div>
 
-                    {isEditingPref ? (
+                    {!isGhlAdmin && isEditingPref ? (
                       <div>
                         <div className="lead-detail-grid" style={{ gap: 14 }}>
                           <div>

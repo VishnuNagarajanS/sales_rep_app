@@ -13,15 +13,14 @@ import {
   Eye,
   Check,
   Clock,
-  Sparkles,
-  Smartphone,
-  Mail,
   Send,
   UserCheck,
+  AlertCircle,
+  Info,
+  Lock,
 } from 'lucide-react';
 import { Deal } from '../../../types';
-import { KycStatusDropdown } from './KycStatusDropdown';
-import { getCustomerKycStatus, getKycReviewData, normalizeLegacyKycStatus } from '../../../services/kycService';
+import { normalizeLegacyKycStatus } from '../../../services/kycService';
 import { saveDeal } from '../../../services/ghlApiService';
 import { getAuthHeaders } from '../../../utils/authHeaders';
 import './KycLinkComponents.css';
@@ -30,8 +29,27 @@ interface KycReviewDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   deal: Deal | null;
-  onChangeKycStatus?: (deal: Deal, newStatus: 'Pending' | 'Wrong' | 'Verified', comment?: string, flaggedSections?: string[], checklist?: any) => Promise<void>;
+  onChangeKycStatus?: (
+    deal: Deal,
+    newStatus: 'Pending' | 'Wrong' | 'Verified',
+    comment?: string,
+    flaggedSections?: string[],
+    checklist?: any
+  ) => Promise<void>;
   onShowToast: (msg: string) => void;
+}
+
+function maskAadhaar(v?: string | null): string {
+  if (!v) return 'Not provided';
+  const clean = v.replace(/\s/g, '');
+  if (clean.length < 4) return clean;
+  return 'XXXX XXXX ' + clean.slice(-4);
+}
+
+function maskAccount(v?: string | null): string {
+  if (!v) return 'Not provided';
+  if (v.length <= 4) return v;
+  return '\u2022'.repeat(Math.min(v.length - 4, 8)) + v.slice(-4);
 }
 
 export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
@@ -46,29 +64,35 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
     'Please re-upload a clearer image of your PAN card and ensure the name matches your Aadhaar.'
   );
   const [liveKyc, setLiveKyc] = useState<any | null>(null);
+  const [loadingKyc, setLoadingKyc] = useState<boolean>(false);
+  const [approving, setApproving] = useState<boolean>(false);
+
+  // Mandatory IRM verification checklist (Strictly initialized to false; no fabricated defaults)
+  const [reviewChecklist, setReviewChecklist] = useState({
+    identity: false,
+    bank: false,
+    documents: false,
+    nominee: false,
+    demat: false,
+  });
 
   useEffect(() => {
     if (!isOpen || !deal) {
       setLiveKyc(null);
+      setReviewChecklist({
+        identity: false,
+        bank: false,
+        documents: false,
+        nominee: false,
+        demat: false,
+      });
       return;
     }
 
     const fetchLiveKyc = async () => {
+      setLoadingKyc(true);
       try {
-        const email = deal.email;
-        if (email) {
-          const res = await fetch(`/api/irm/kyc/by-email?email=${encodeURIComponent(email)}`, {
-            headers: getAuthHeaders(),
-          });
-          if (res.ok) {
-            const json = await res.json();
-            if (json.success && json.data) {
-              setLiveKyc(json.data);
-              return;
-            }
-          }
-        }
-
+        // 1. Stable direct KYC record ID or investor/customer ID
         const kycId = (deal as any).kycId || (deal as any).kycRecordId || (deal as any).customerId;
         if (kycId) {
           const res = await fetch(`/api/irm/kyc/${kycId}`, {
@@ -82,8 +106,25 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
             }
           }
         }
+
+        // 2. Fallback to email match
+        const email = deal.email;
+        if (email) {
+          const res = await fetch(`/api/irm/kyc/by-email?email=${encodeURIComponent(email)}`, {
+            headers: getAuthHeaders(),
+          });
+          if (res.ok) {
+            const json = await res.json();
+            if (json.success && json.data) {
+              setLiveKyc(json.data);
+              return;
+            }
+          }
+        }
       } catch (err) {
         console.warn('Could not fetch live KYC from backend:', err);
+      } finally {
+        setLoadingKyc(false);
       }
     };
 
@@ -92,7 +133,17 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
 
   if (!isOpen || !deal) return null;
 
-  // Safe parse nominees
+  // Real submission check: A KYC record has a genuine submission only if submittedAt exists,
+  // or it is in PendingReview status, or it is an Assisted KYC with verified consent.
+  const hasRealSubmission = Boolean(
+    liveKyc?.submittedAt ||
+    liveKyc?.status === 'PendingReview' ||
+    (liveKyc?.isAssisted && liveKyc?.customerConsentObtained) ||
+    deal.customerKycStatus === 'Submitted' ||
+    deal.customerKycStatus === 'Assisted KYC – Submitted for Verification'
+  );
+
+  // Safe parse nominees from live submitted data
   let parsedNominees: any[] = [];
   if (liveKyc?.nomineesJson) {
     try {
@@ -102,13 +153,12 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
     }
   }
 
-  let savedLocalKyc: any = null;
   let assistedMeta: any = null;
   try {
     const raw = localStorage.getItem(`nexus_kyc_data_${deal.id}`);
     if (raw) {
-      savedLocalKyc = JSON.parse(raw);
-      assistedMeta = savedLocalKyc?.assistedMetadata;
+      const parsed = JSON.parse(raw);
+      assistedMeta = parsed?.assistedMetadata;
     }
     if (!assistedMeta) {
       const aRaw = localStorage.getItem(`nexus_kyc_assisted_${deal.id}`);
@@ -116,176 +166,201 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
     }
   } catch {}
 
-  const fallbackData = getKycReviewData(deal);
-
+  // Real uploaded documents only. An uploaded document is NOT automatically verified!
   const liveDocs: Array<{ id: string; name: string; size: string; verified: boolean; url?: string }> = [];
   if (liveKyc) {
     if (liveKyc.panDocumentUrl) {
-      liveDocs.push({ id: 'pan-doc', name: 'PAN Card Copy', size: 'Verified Document', verified: true, url: liveKyc.panDocumentUrl });
+      liveDocs.push({
+        id: 'pan-doc',
+        name: 'PAN Card Copy',
+        size: 'Uploaded Document',
+        verified: false,
+        url: liveKyc.panDocumentUrl,
+      });
     }
     if (liveKyc.aadhaarDocumentUrl) {
-      liveDocs.push({ id: 'aadhaar-doc', name: 'Aadhaar Card Copy', size: 'Verified Document', verified: true, url: liveKyc.aadhaarDocumentUrl });
+      liveDocs.push({
+        id: 'aadhaar-doc',
+        name: 'Aadhaar Card Copy',
+        size: 'Uploaded Document',
+        verified: false,
+        url: liveKyc.aadhaarDocumentUrl,
+      });
     }
     if (liveKyc.bankChequeUrl) {
-      liveDocs.push({ id: 'cheque-doc', name: 'Bank Cheque / Proof', size: 'Verified Document', verified: true, url: liveKyc.bankChequeUrl });
+      liveDocs.push({
+        id: 'cheque-doc',
+        name: 'Bank Cheque / Statement Proof',
+        size: 'Uploaded Document',
+        verified: false,
+        url: liveKyc.bankChequeUrl,
+      });
     }
     if (liveKyc.dematDocumentUrl) {
-      liveDocs.push({ id: 'demat-doc', name: 'Demat Statement Proof', size: 'Verified Document', verified: true, url: liveKyc.dematDocumentUrl });
+      liveDocs.push({
+        id: 'demat-doc',
+        name: 'Demat Statement Proof',
+        size: 'Uploaded Document',
+        verified: false,
+        url: liveKyc.dematDocumentUrl,
+      });
     }
     if (liveKyc.signatureUrl) {
-      liveDocs.push({ id: 'signature-doc', name: 'Investor Signature', size: 'Verified Document', verified: true, url: liveKyc.signatureUrl });
+      liveDocs.push({
+        id: 'signature-doc',
+        name: 'Investor Signature Specimen',
+        size: 'Uploaded Document',
+        verified: false,
+        url: liveKyc.signatureUrl,
+      });
     }
   }
 
-  const mockReviewData = liveKyc ? {
-    refId: `KYC-${liveKyc.id.toString().padStart(6, '0')}`,
-    submissionDate: liveKyc.submittedAt 
-      ? new Date(liveKyc.submittedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-      : (liveKyc.createdAt ? new Date(liveKyc.createdAt).toLocaleDateString('en-IN') : 'Pending Submission'),
-    ipAddress: 'Verified SSL/TLS',
-    userAgent: 'Web Portal',
+  // Real review data mapping: only genuine inputs from customer or backend.
+  // Fabricated defaults (Verified DOB, sample documents, 98.5% match, default bank details) removed.
+  const reviewData = {
+    refId: liveKyc?.id ? `KYC-${liveKyc.id.toString().padStart(6, '0')}` : 'KYC-PENDING',
+    submissionDate: liveKyc?.submittedAt
+      ? new Date(liveKyc.submittedAt).toLocaleDateString('en-IN', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      : liveKyc?.customerConsentTimestamp
+      ? new Date(liveKyc.customerConsentTimestamp).toLocaleDateString('en-IN')
+      : 'Not submitted',
     basicDetails: {
-      investorName: liveKyc.investorName || deal.customerName,
-      phone: liveKyc.phone || deal.phone || '',
-      email: liveKyc.email || deal.email || '',
-      gender: liveKyc.gender || 'N/A',
-      investorType: liveKyc.investorType || deal.investorType || 'Individual',
-      residentType: liveKyc.residentType || 'Resident Indian',
-      occupation: liveKyc.occupation || 'N/A',
+      investorName: liveKyc?.investorName || deal.customerName || 'Not provided',
+      phone: liveKyc?.phone || deal.phone || 'Not provided',
+      email: liveKyc?.email || deal.email || 'Not provided',
+      gender: liveKyc?.gender || 'Not provided',
+      investorType: liveKyc?.investorType || deal.investorType || 'Not provided',
+      residentType: liveKyc?.residentType || 'Not provided',
+      occupation: liveKyc?.occupation || 'Not provided',
     },
     identityDetails: {
-      panNumber: liveKyc.panNumber || 'Not provided',
-      nameAsPerPan: liveKyc.nameAsPerPan || liveKyc.investorName?.toUpperCase() || deal.customerName.toUpperCase(),
-      aadhaarNumber: liveKyc.aadhaarNumber || 'Not provided',
-      fatherName: liveKyc.fatherName || 'As per Aadhaar/PAN',
-      dob: liveKyc.dateOfBirth || liveKyc.dob || 'Verified DOB',
-      address: [liveKyc.addressLine1, liveKyc.addressLine2, liveKyc.city, liveKyc.state, liveKyc.pincode].filter(Boolean).join(', ') || 'Not provided',
-      courierAddress: [liveKyc.addressLine2 || liveKyc.addressLine1, liveKyc.city, liveKyc.pincode].filter(Boolean).join(', ') || 'Same as permanent',
+      panNumber: liveKyc?.panNumber || 'Not provided',
+      nameAsPerPan: liveKyc?.nameAsPerPan || 'Not provided',
+      aadhaarNumber: liveKyc?.aadhaarNumber ? maskAadhaar(liveKyc.aadhaarNumber) : 'Not provided',
+      fatherName: liveKyc?.fatherName || 'Not provided',
+      dob: liveKyc?.dateOfBirth || liveKyc?.dob || 'Not provided',
+      address:
+        [liveKyc?.addressLine1, liveKyc?.addressLine2, liveKyc?.city, liveKyc?.state, liveKyc?.pincode]
+          .filter(Boolean)
+          .join(', ') || 'Not provided',
+      courierAddress: liveKyc?.addressLine2
+        ? [liveKyc.addressLine2, liveKyc.city, liveKyc.pincode].filter(Boolean).join(', ')
+        : 'Not provided',
     },
     bankDetails: {
-      accountHolderName: liveKyc.investorName || deal.customerName,
-      bankName: liveKyc.bankName || 'Not provided',
-      accountNumber: liveKyc.accountNumber || 'Not provided',
-      accountType: liveKyc.accountType || 'Savings Account',
-      ifscCode: liveKyc.ifscCode || 'Not provided',
-      branchName: liveKyc.city || 'Main Branch',
+      accountHolderName: liveKyc?.accountHolderName || 'Not provided',
+      bankName: liveKyc?.bankName || 'Not provided',
+      accountNumber: liveKyc?.accountNumber ? maskAccount(liveKyc.accountNumber) : 'Not provided',
+      accountType: liveKyc?.accountType || 'Not provided',
+      ifscCode: liveKyc?.ifscCode || 'Not provided',
+      branchName: liveKyc?.branchName || 'Not provided',
     },
     dematDetails: {
-      hasNoDemat: !liveKyc.dematAccountNumber,
-      dematAccountNumber: liveKyc.dematAccountNumber || 'Not provided',
-      dematDepository: liveKyc.dematAccountNumber ? 'CDSL/NSDL' : 'N/A',
-      dematDpId: liveKyc.dpId || 'N/A',
-      dematClientId: liveKyc.dematAccountNumber ? liveKyc.dematAccountNumber.slice(-8) : 'N/A',
+      hasNoDemat: !liveKyc?.dematAccountNumber,
+      dematAccountNumber: liveKyc?.dematAccountNumber || 'Not provided',
+      dematDepository: liveKyc?.dematDepository || 'Not provided',
+      dematDpId: liveKyc?.dpId || liveKyc?.dematDpId || 'Not provided',
+      dematClientId: liveKyc?.dematClientId || 'Not provided',
     },
-    nominees: parsedNominees.length > 0 ? parsedNominees : (fallbackData?.nominees || []),
-    documents: liveDocs.length > 0 ? liveDocs : (fallbackData?.documents || [
-      { id: 'pan-doc', name: 'PAN_Card.pdf', size: '1.2 MB', verified: true },
-      { id: 'aadhaar-doc', name: 'Aadhaar_Card.pdf', size: '2.1 MB', verified: true },
-      { id: 'cheque-doc', name: 'Cancelled_Cheque.pdf', size: '890 KB', verified: true },
-    ]),
-    consent: fallbackData?.consent || {
-      acceptedAt: liveKyc.submittedAt ? new Date(liveKyc.submittedAt).toLocaleDateString('en-IN') : 'Completed',
-      termsVersion: 'v2.4 (SEBI Qualified)',
-      ipHash: 'SHA-256 Verified',
-    },
-    liveness: fallbackData?.liveness || {
-      capturedAt: liveKyc.submittedAt ? new Date(liveKyc.submittedAt).toLocaleTimeString('en-IN') : 'Verified',
-      matchScore: '98.5%',
-      livenessStatus: 'Passed',
-    },
-    providerVerifications: fallbackData?.providerVerifications || [
-      { name: 'NSDL PAN Verification', status: 'Passed', detail: 'PAN is valid & linked with Aadhaar' },
-      { name: 'UIDAI Aadhaar Verification', status: 'Passed', detail: 'OTP e-KYC Verified' },
-      { name: 'NPCI Penny-Drop Bank Auth', status: 'Passed', detail: 'Account Holder Name Matched' },
-      { name: 'SEBI Debarred Entities Check', status: 'Passed', detail: 'No regulatory sanctions found' },
-    ],
-  } : (fallbackData || {
-    refId: `KYC-${(deal.id || '').slice(-6).toUpperCase()}`,
-    submissionDate: 'Pending Submission',
-    ipAddress: 'N/A',
-    userAgent: 'N/A',
-    basicDetails: {
-      investorName: deal.customerName,
-      phone: deal.phone || '',
-      email: deal.email || '',
-      gender: 'N/A',
-      investorType: deal.investorType || 'Individual',
-      residentType: 'Resident Indian',
-      occupation: 'N/A',
-    },
-    identityDetails: {
-      panNumber: 'Not provided',
-      nameAsPerPan: deal.customerName.toUpperCase(),
-      aadhaarNumber: 'Not provided',
-      fatherName: 'Not provided',
-      dob: 'Not provided',
-      address: 'Not provided',
-      courierAddress: 'Not provided',
-    },
-    bankDetails: {
-      accountHolderName: deal.customerName,
-      bankName: 'Not provided',
-      accountNumber: 'Not provided',
-      accountType: 'Savings Account',
-      ifscCode: 'Not provided',
-      branchName: 'Not provided',
-    },
-    dematDetails: {
-      hasNoDemat: true,
-      dematAccountNumber: 'Not provided',
-      dematDepository: 'N/A',
-      dematDpId: 'N/A',
-      dematClientId: 'N/A',
-    },
-    nominees: [],
-    documents: [],
+    nominees: parsedNominees,
+    documents: liveDocs,
     consent: {
-      acceptedAt: 'Pending',
-      termsVersion: 'N/A',
-      ipHash: 'N/A',
+      acceptedAt: liveKyc?.submittedAt
+        ? new Date(liveKyc.submittedAt).toLocaleDateString('en-IN', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          })
+        : liveKyc?.customerConsentTimestamp
+        ? new Date(liveKyc.customerConsentTimestamp).toLocaleDateString('en-IN')
+        : 'Not submitted',
+      termsVersion: liveKyc?.customerConsentDetails || (liveKyc?.submittedAt ? 'SEBI Digital Undertaking' : 'Not submitted'),
+      ipHash: liveKyc?.submittedAt ? 'Recorded at submission' : 'Not recorded',
     },
     liveness: {
-      capturedAt: 'N/A',
-      matchScore: 'N/A',
-      livenessStatus: 'Pending Verification',
+      capturedAt: liveKyc?.photoUrl && liveKyc?.submittedAt
+        ? new Date(liveKyc.submittedAt).toLocaleTimeString('en-IN')
+        : 'Not submitted',
+      matchScore: liveKyc?.photoUrl ? 'Manual photo review required' : 'Not submitted',
+      livenessStatus: liveKyc?.photoUrl ? 'Selfie Uploaded (Awaiting IRM Verification)' : 'Not submitted',
     },
-    providerVerifications: [],
-  });
+  };
 
+  const hasNominees = Boolean(
+    parsedNominees && parsedNominees.length > 0 && parsedNominees[0]?.name
+  );
+
+  const allChecklistCompleted =
+    reviewChecklist.identity &&
+    reviewChecklist.bank &&
+    reviewChecklist.documents &&
+    (!hasNominees || reviewChecklist.nominee) &&
+    reviewChecklist.demat;
 
   const handleApprove = async () => {
-    if (liveKyc?.id) {
-      try {
-        const res = await fetch(`/api/irm/kyc/${liveKyc.id}/review`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify({ action: 'Approved', remarks: 'KYC verified and approved by IRM' }),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          console.error('Approval API error:', res.status, err);
-          onShowToast(`Error approving KYC: ${err.message || res.statusText}`);
-          return;
+    if (!hasRealSubmission) {
+      onShowToast('Cannot confirm KYC: No genuine submission exists for this customer.');
+      return;
+    }
+    if (!allChecklistCompleted) {
+      onShowToast(hasNominees ? 'Please complete all 5 checklist verification items before confirming approval.' : 'Please complete all required checklist verification items before confirming approval.');
+      return;
+    }
+
+    setApproving(true);
+    try {
+      const effectiveChecklist = {
+        ...reviewChecklist,
+        nominee: !hasNominees ? true : reviewChecklist.nominee,
+      };
+
+      if (onChangeKycStatus) {
+        await onChangeKycStatus(deal, 'Verified', 'KYC verified and approved by IRM', undefined, effectiveChecklist);
+      } else {
+        const kycId = liveKyc?.id || (deal as any).kycId || (deal as any).kycRecordId;
+        if (kycId) {
+          const res = await fetch(`/api/irm/kyc/${kycId}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify({
+              status: 'Verified',
+              comment: 'KYC verified and approved by IRM',
+              checklist: effectiveChecklist,
+            }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.message || `KYC verification failed (HTTP ${res.status})`);
+          }
         }
-      } catch (err) {
-        console.error('Approval API error:', err);
-        onShowToast('Network error while approving KYC.');
-        return;
+        if (deal?.id) {
+          await saveDeal({
+            ...deal,
+            kycStatus: 'Completed',
+            verifiedBy: 'IRM Officer',
+            verifiedAt: new Date().toISOString(),
+          });
+          localStorage.setItem(`nexus_kyc_status_${deal.id}`, 'Completed');
+        }
+        onShowToast(`KYC Approved for ${deal?.customerName || 'Investor'}! Verified in Database.`);
+        window.dispatchEvent(new CustomEvent('nexus_storage_updated'));
       }
+      onClose();
+    } catch (err: any) {
+      console.error('Approval API error:', err);
+      onShowToast(err?.message || 'Error confirming KYC verification.');
+    } finally {
+      setApproving(false);
     }
-
-    if (deal?.id) {
-      try {
-        await saveDeal({ ...deal, kycStatus: 'Completed' });
-      } catch (err) {
-        console.warn('Could not update deal kycStatus in DB:', err);
-      }
-      localStorage.setItem(`nexus_kyc_status_${deal.id}`, 'Completed');
-    }
-
-    onShowToast(`KYC Approved for ${deal?.customerName || 'Investor'}! Verified in Database.`);
-    window.dispatchEvent(new CustomEvent('nexus_storage_updated'));
-    onClose();
   };
 
   const handleSendCorrection = async () => {
@@ -320,34 +395,26 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
     onClose();
   };
 
-  const handleViewDoc = (doc: { name: string; url?: string } | string) => {
-    const docObj = typeof doc === 'string' ? { name: doc, url: undefined } : doc;
-    if (docObj.url) {
+  const handleViewDoc = (doc: { name: string; url?: string }) => {
+    if (doc.url) {
       const w = window.open('');
       if (w) {
-        if (docObj.url.startsWith('data:application/pdf')) {
-          w.document.write(`<iframe src="${docObj.url}" style="width:100%;height:100%;border:none;"></iframe>`);
+        if (doc.url.startsWith('data:application/pdf')) {
+          w.document.write(`<iframe src="${doc.url}" style="width:100%;height:100%;border:none;"></iframe>`);
         } else {
-          w.document.write(`<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0f172a;margin:0;"><img src="${docObj.url}" style="max-width:90%;max-height:90vh;border-radius:8px;" alt="${docObj.name}" /></div>`);
+          w.document.write(
+            `<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0f172a;margin:0;"><img src="${doc.url}" style="max-width:90%;max-height:90vh;border-radius:8px;" alt="${doc.name}" /></div>`
+          );
         }
       }
     } else {
-      onShowToast(`Viewing ${docObj.name}`);
+      onShowToast(`Viewing ${doc.name}`);
     }
   };
 
   return (
-    <div
-      className="kyc-link-drawer-overlay"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-    >
-      <div
-        className="kyc-link-drawer"
-        onClick={e => e.stopPropagation()}
-        style={{ position: 'relative' }}
-      >
+    <div className="kyc-link-drawer-overlay" onClick={onClose} role="dialog" aria-modal="true">
+      <div className="kyc-link-drawer" onClick={e => e.stopPropagation()} style={{ position: 'relative' }}>
         {/* Header */}
         <div className="kyc-link-drawer-header">
           <div className="kyc-link-drawer-title-area">
@@ -356,23 +423,66 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
               {deal.customerName}
             </h2>
             <div className="kyc-link-drawer-ref">
-              <span>{mockReviewData.refId}</span>
+              <span>{reviewData.refId}</span>
               <span>•</span>
-              <span>Submitted {mockReviewData.submissionDate}</span>
+              <span>Submitted: {reviewData.submissionDate}</span>
             </div>
           </div>
-          <button
-            type="button"
-            className="kyc-link-modal-close-btn"
-            onClick={onClose}
-            aria-label="Close drawer"
-          >
+          <button type="button" className="kyc-link-modal-close-btn" onClick={onClose} aria-label="Close drawer">
             <X size={20} />
           </button>
         </div>
 
         {/* Drawer Body */}
         <div className="kyc-link-drawer-body">
+          {/* Submission status banner */}
+          {!hasRealSubmission ? (
+            <div
+              style={{
+                padding: '12px 16px',
+                borderRadius: 8,
+                background: 'rgba(239, 68, 68, 0.08)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 12,
+                fontSize: 12,
+                color: '#b91c1c',
+                marginBottom: 16,
+              }}
+            >
+              <AlertCircle size={18} style={{ flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <strong>Customer Has Not Submitted KYC:</strong>
+                <div style={{ marginTop: 2, color: 'var(--text-secondary)' }}>
+                  This customer record does not have a genuine submitted KYC form. KYC approval cannot be confirmed
+                  until a real submission is completed by the customer or entered through Assisted KYC with verified consent.
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div
+              style={{
+                padding: '10px 14px',
+                borderRadius: 8,
+                background: 'rgba(59, 130, 246, 0.08)',
+                border: '1px solid rgba(59, 130, 246, 0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                fontSize: 12,
+                color: '#1d4ed8',
+                marginBottom: 16,
+              }}
+            >
+              <Info size={16} style={{ flexShrink: 0 }} />
+              <span>
+                <strong>Genuine Customer Submission Received:</strong> Inspect all submitted details and uploaded documents
+                below. IRM manual verification is required before confirming approval.
+              </span>
+            </div>
+          )}
+
           {assistedMeta && (
             <div
               style={{
@@ -387,7 +497,9 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
                 <UserCheck size={16} /> Assisted KYC – Submitted on Behalf by IRM
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
-                Entered by IRM: <strong style={{ color: 'var(--text-primary)' }}>{assistedMeta.assistedByIrmName || 'IRM'}</strong> (ID: {assistedMeta.assistedByIrmId || '—'}) • Submitted: <strong>{new Date(assistedMeta.submittedAt).toLocaleString()}</strong>
+                Entered by IRM: <strong style={{ color: 'var(--text-primary)' }}>{assistedMeta.assistedByIrmName || 'IRM'}</strong>{' '}
+                (ID: {assistedMeta.assistedByIrmId || '—'}) • Submitted:{' '}
+                <strong>{new Date(assistedMeta.submittedAt).toLocaleString()}</strong>
               </div>
               <div style={{ fontSize: 11, color: '#059669', marginTop: 4, fontWeight: 600 }}>
                 ✓ Customer consent and authorization recorded at submission
@@ -412,36 +524,18 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
             >
               <ShieldCheck size={18} color="#10b981" />
               <span>
-                <strong>Manually Verified by {deal.verifiedBy || 'IRM'}</strong>
-                {deal.verifiedAt && ` on ${new Date(deal.verifiedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`}
+                <strong>Verified by {deal.verifiedBy || 'IRM'}</strong>
+                {deal.verifiedAt &&
+                  ` on ${new Date(deal.verifiedAt).toLocaleDateString('en-IN', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}`}
               </span>
             </div>
           )}
-          {/* Provider Verification Live Checks */}
-          <div className="kyc-link-section-card" style={{ borderColor: 'rgba(16, 185, 129, 0.3)' }}>
-            <div className="kyc-link-section-header">
-              <h4 className="kyc-link-section-title" style={{ color: '#059669' }}>
-                <ShieldCheck size={16} /> Automated Provider Verifications
-              </h4>
-              <span className="kyc-link-badge kyc-link-badge-verified">4/4 Checks Passed</span>
-            </div>
-            <div className="kyc-link-providers-grid">
-              {mockReviewData.providerVerifications.map((pv, idx) => (
-                <div key={idx} className="kyc-link-provider-item">
-                  <div>
-                    <div className="kyc-link-provider-name">{pv.name}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{pv.detail}</div>
-                  </div>
-                  <span
-                    className="kyc-link-badge kyc-link-badge-verified"
-                    style={{ padding: '2px 7px', fontSize: 10 }}
-                  >
-                    <Check size={11} /> Pass
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
 
           {/* Section 1: Basic Details */}
           <div className="kyc-link-section-card">
@@ -453,31 +547,31 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
             <div className="kyc-link-field-grid">
               <div>
                 <div className="kyc-link-field-label">Full Name</div>
-                <div className="kyc-link-field-val">{mockReviewData.basicDetails.investorName}</div>
+                <div className="kyc-link-field-val">{reviewData.basicDetails.investorName}</div>
               </div>
               <div>
                 <div className="kyc-link-field-label">Mobile Number</div>
-                <div className="kyc-link-field-val">{mockReviewData.basicDetails.phone}</div>
+                <div className="kyc-link-field-val">{reviewData.basicDetails.phone}</div>
               </div>
               <div>
                 <div className="kyc-link-field-label">Email Address</div>
-                <div className="kyc-link-field-val">{mockReviewData.basicDetails.email}</div>
+                <div className="kyc-link-field-val">{reviewData.basicDetails.email}</div>
               </div>
               <div>
                 <div className="kyc-link-field-label">Gender</div>
-                <div className="kyc-link-field-val">{mockReviewData.basicDetails.gender}</div>
+                <div className="kyc-link-field-val">{reviewData.basicDetails.gender}</div>
               </div>
               <div>
                 <div className="kyc-link-field-label">Investor Category</div>
-                <div className="kyc-link-field-val">{mockReviewData.basicDetails.investorType}</div>
+                <div className="kyc-link-field-val">{reviewData.basicDetails.investorType}</div>
               </div>
               <div>
                 <div className="kyc-link-field-label">Residential Status</div>
-                <div className="kyc-link-field-val">{mockReviewData.basicDetails.residentType}</div>
+                <div className="kyc-link-field-val">{reviewData.basicDetails.residentType}</div>
               </div>
               <div className="kyc-link-field-full">
                 <div className="kyc-link-field-label">Occupation / Source of Wealth</div>
-                <div className="kyc-link-field-val">{mockReviewData.basicDetails.occupation}</div>
+                <div className="kyc-link-field-val">{reviewData.basicDetails.occupation}</div>
               </div>
             </div>
           </div>
@@ -493,34 +587,34 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
               <div>
                 <div className="kyc-link-field-label">Permanent Account Number (PAN)</div>
                 <div className="kyc-link-field-val kyc-link-field-val-masked" style={{ color: '#0284c7' }}>
-                  {mockReviewData.identityDetails.panNumber}
+                  {reviewData.identityDetails.panNumber}
                 </div>
               </div>
               <div>
                 <div className="kyc-link-field-label">Name as per PAN</div>
-                <div className="kyc-link-field-val">{mockReviewData.identityDetails.nameAsPerPan}</div>
+                <div className="kyc-link-field-val">{reviewData.identityDetails.nameAsPerPan}</div>
               </div>
               <div>
                 <div className="kyc-link-field-label">Aadhaar (Masked UID)</div>
                 <div className="kyc-link-field-val kyc-link-field-val-masked" style={{ color: '#0284c7' }}>
-                  {mockReviewData.identityDetails.aadhaarNumber}
+                  {reviewData.identityDetails.aadhaarNumber}
                 </div>
               </div>
               <div>
                 <div className="kyc-link-field-label">Father's Name</div>
-                <div className="kyc-link-field-val">{mockReviewData.identityDetails.fatherName}</div>
+                <div className="kyc-link-field-val">{reviewData.identityDetails.fatherName}</div>
               </div>
               <div>
                 <div className="kyc-link-field-label">Date of Birth</div>
-                <div className="kyc-link-field-val">{mockReviewData.identityDetails.dob}</div>
+                <div className="kyc-link-field-val">{reviewData.identityDetails.dob}</div>
               </div>
               <div>
                 <div className="kyc-link-field-label">Courier Address</div>
-                <div className="kyc-link-field-val">{mockReviewData.identityDetails.courierAddress}</div>
+                <div className="kyc-link-field-val">{reviewData.identityDetails.courierAddress}</div>
               </div>
               <div className="kyc-link-field-full">
                 <div className="kyc-link-field-label">Permanent Address</div>
-                <div className="kyc-link-field-val">{mockReviewData.identityDetails.address}</div>
+                <div className="kyc-link-field-val">{reviewData.identityDetails.address}</div>
               </div>
             </div>
           </div>
@@ -534,26 +628,30 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
             </div>
             <div className="kyc-link-field-grid">
               <div>
-                <div className="kyc-link-field-label">Bank Name</div>
-                <div className="kyc-link-field-val">{mockReviewData.bankDetails.bankName}</div>
+                <div className="kyc-link-field-label">Account Holder Name</div>
+                <div className="kyc-link-field-val">{reviewData.bankDetails.accountHolderName}</div>
               </div>
               <div>
-                <div className="kyc-link-field-label">Account Number (Masked)</div>
+                <div className="kyc-link-field-label">Bank Name</div>
+                <div className="kyc-link-field-val">{reviewData.bankDetails.bankName}</div>
+              </div>
+              <div>
+                <div className="kyc-link-field-label">Account Number</div>
                 <div className="kyc-link-field-val kyc-link-field-val-masked" style={{ color: '#059669' }}>
-                  {mockReviewData.bankDetails.accountNumber}
+                  {reviewData.bankDetails.accountNumber}
                 </div>
               </div>
               <div>
                 <div className="kyc-link-field-label">Account Type</div>
-                <div className="kyc-link-field-val">{mockReviewData.bankDetails.accountType}</div>
+                <div className="kyc-link-field-val">{reviewData.bankDetails.accountType}</div>
               </div>
               <div>
                 <div className="kyc-link-field-label">IFSC Code</div>
-                <div className="kyc-link-field-val">{mockReviewData.bankDetails.ifscCode}</div>
+                <div className="kyc-link-field-val">{reviewData.bankDetails.ifscCode}</div>
               </div>
               <div className="kyc-link-field-full">
                 <div className="kyc-link-field-label">Branch</div>
-                <div className="kyc-link-field-val">{mockReviewData.bankDetails.branchName}</div>
+                <div className="kyc-link-field-val">{reviewData.bankDetails.branchName}</div>
               </div>
             </div>
           </div>
@@ -568,21 +666,21 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
             <div className="kyc-link-field-grid">
               <div>
                 <div className="kyc-link-field-label">Depository</div>
-                <div className="kyc-link-field-val">{mockReviewData.dematDetails.dematDepository}</div>
+                <div className="kyc-link-field-val">{reviewData.dematDetails.dematDepository}</div>
               </div>
               <div>
                 <div className="kyc-link-field-label">Demat Account Number</div>
                 <div className="kyc-link-field-val kyc-link-field-val-masked">
-                  {mockReviewData.dematDetails.dematAccountNumber}
+                  {reviewData.dematDetails.dematAccountNumber}
                 </div>
               </div>
               <div>
                 <div className="kyc-link-field-label">DP ID</div>
-                <div className="kyc-link-field-val">{mockReviewData.dematDetails.dematDpId}</div>
+                <div className="kyc-link-field-val">{reviewData.dematDetails.dematDpId}</div>
               </div>
               <div>
                 <div className="kyc-link-field-label">Client ID</div>
-                <div className="kyc-link-field-val">{mockReviewData.dematDetails.dematClientId}</div>
+                <div className="kyc-link-field-val">{reviewData.dematDetails.dematClientId}</div>
               </div>
             </div>
           </div>
@@ -594,68 +692,93 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
                 <User size={15} /> 5. Nominees
               </h4>
             </div>
-            {mockReviewData.nominees.map((nom, idx) => (
-              <div key={idx} className="kyc-link-field-grid">
-                <div>
-                  <div className="kyc-link-field-label">Nominee Name</div>
-                  <div className="kyc-link-field-val">{nom.name}</div>
-                </div>
-                <div>
-                  <div className="kyc-link-field-label">Relationship</div>
-                  <div className="kyc-link-field-val">{nom.relationship}</div>
-                </div>
-                <div>
-                  <div className="kyc-link-field-label">Date of Birth</div>
-                  <div className="kyc-link-field-val">{nom.dob}</div>
-                </div>
-                <div>
-                  <div className="kyc-link-field-label">Allocation Share</div>
-                  <div className="kyc-link-field-val" style={{ color: '#059669' }}>
-                    {nom.allocationPercentage}%
+            {reviewData.nominees.length > 0 ? (
+              reviewData.nominees.map((nom: any, idx: number) => (
+                <div key={idx} className="kyc-link-field-grid" style={{ marginBottom: 8 }}>
+                  <div>
+                    <div className="kyc-link-field-label">Nominee Name</div>
+                    <div className="kyc-link-field-val">{nom.name || 'Not provided'}</div>
+                  </div>
+                  <div>
+                    <div className="kyc-link-field-label">Relationship</div>
+                    <div className="kyc-link-field-val">{nom.relationship || 'Not provided'}</div>
+                  </div>
+                  <div>
+                    <div className="kyc-link-field-label">Date of Birth</div>
+                    <div className="kyc-link-field-val">{nom.dob || 'Not provided'}</div>
+                  </div>
+                  <div>
+                    <div className="kyc-link-field-label">Allocation Share</div>
+                    <div className="kyc-link-field-val" style={{ color: '#059669' }}>
+                      {nom.allocationPercentage ? `${nom.allocationPercentage}%` : 'Not provided'}
+                    </div>
                   </div>
                 </div>
+              ))
+            ) : (
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                No nominees submitted (Single applicant estate).
               </div>
-            ))}
+            )}
           </div>
 
-          {/* Section 6: Documents */}
+          {/* Section 6: Uploaded Documents */}
           <div className="kyc-link-section-card">
             <div className="kyc-link-section-header">
               <h4 className="kyc-link-section-title">
                 <FileText size={15} /> 6. Uploaded Documents
               </h4>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                {reviewData.documents.length} document{reviewData.documents.length === 1 ? '' : 's'} submitted
+              </span>
             </div>
-            <div className="kyc-link-doc-list">
-              {mockReviewData.documents.map(doc => (
-                <div key={doc.id} className="kyc-link-doc-row">
-                  <div className="kyc-link-doc-info">
-                    <FileText size={16} color="var(--primary-600)" />
-                    <div>
-                      <div className="kyc-link-doc-name">{doc.name}</div>
-                      <div className="kyc-link-doc-size">{doc.size} • Verified Format</div>
+            {reviewData.documents.length > 0 ? (
+              <div className="kyc-link-doc-list">
+                {reviewData.documents.map(doc => (
+                  <div key={doc.id} className="kyc-link-doc-row">
+                    <div className="kyc-link-doc-info">
+                      <FileText size={16} color="var(--primary-600)" />
+                      <div>
+                        <div className="kyc-link-doc-name">{doc.name}</div>
+                        <div className="kyc-link-doc-size" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span>{doc.size}</span>
+                          <span>•</span>
+                          <span style={{ color: '#d97706', fontWeight: 600 }}>Uploaded (Pending IRM Review)</span>
+                        </div>
+                      </div>
                     </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontSize: 11, padding: '4px 10px', height: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                      onClick={() => handleViewDoc(doc)}
+                    >
+                      <Eye size={12} /> View
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    style={{ fontSize: 11, padding: '4px 10px', height: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5 }}
-                    onClick={() => handleViewDoc(doc)}
-                  >
-                    <Eye size={12} /> View
-                  </button>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                No documents submitted by the customer.
+              </div>
+            )}
           </div>
 
           {/* Section 7: Liveness Check */}
           <div className="kyc-link-section-card">
             <div className="kyc-link-section-header">
               <h4 className="kyc-link-section-title">
-                <Camera size={15} /> 7. Liveness Verification
+                <Camera size={15} /> 7. Liveness &amp; Photo Verification
               </h4>
-              <span className="kyc-link-badge kyc-link-badge-verified">
-                <Check size={11} /> {mockReviewData.liveness.matchScore} Match
+              <span
+                className="kyc-link-badge"
+                style={{
+                  background: liveKyc?.photoUrl ? 'rgba(59, 130, 246, 0.1)' : 'rgba(100, 116, 139, 0.1)',
+                  color: liveKyc?.photoUrl ? '#2563eb' : '#64748b',
+                }}
+              >
+                {liveKyc?.photoUrl ? 'Selfie Uploaded' : 'Not submitted'}
               </span>
             </div>
             <div className="kyc-link-liveness-container">
@@ -663,32 +786,34 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
                 {liveKyc?.photoUrl ? (
                   <img src={liveKyc.photoUrl} alt="Liveness Selfie" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 ) : (
-                  <Camera size={26} />
+                  <Camera size={26} color="#94a3b8" />
                 )}
-                <span
-                  style={{
-                    position: 'absolute',
-                    bottom: 2,
-                    fontSize: 8,
-                    fontWeight: 800,
-                    background: '#10b981',
-                    color: '#fff',
-                    padding: '1px 4px',
-                    borderRadius: 3,
-                  }}
-                >
-                  LIVE
-                </span>
+                {liveKyc?.photoUrl && (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      bottom: 2,
+                      fontSize: 8,
+                      fontWeight: 800,
+                      background: '#2563eb',
+                      color: '#fff',
+                      padding: '1px 4px',
+                      borderRadius: 3,
+                    }}
+                  >
+                    SELFIE
+                  </span>
+                )}
               </div>
               <div className="kyc-link-liveness-info">
                 <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>
-                  {mockReviewData.liveness.livenessStatus}
+                  {reviewData.liveness.livenessStatus}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                  Captured on: {mockReviewData.liveness.capturedAt}
+                  Verification Status: <strong>{reviewData.liveness.matchScore}</strong>
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                  Device: {mockReviewData.userAgent}
+                  Captured on: {reviewData.liveness.capturedAt}
                 </div>
               </div>
             </div>
@@ -704,41 +829,183 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
             <div className="kyc-link-field-grid">
               <div>
                 <div className="kyc-link-field-label">Consent Timestamp</div>
-                <div className="kyc-link-field-val">{mockReviewData.consent.acceptedAt}</div>
+                <div className="kyc-link-field-val">{reviewData.consent.acceptedAt}</div>
               </div>
               <div>
-                <div className="kyc-link-field-label">Agreement Policy Version</div>
-                <div className="kyc-link-field-val">{mockReviewData.consent.termsVersion}</div>
+                <div className="kyc-link-field-label">Agreement Policy Terms</div>
+                <div className="kyc-link-field-val">{reviewData.consent.termsVersion}</div>
               </div>
               <div className="kyc-link-field-full">
-                <div className="kyc-link-field-label">IP &amp; Geolocation Trail</div>
+                <div className="kyc-link-field-label">Audit Log Signature</div>
                 <div className="kyc-link-field-val" style={{ fontFamily: 'monospace', fontSize: 12 }}>
-                  {mockReviewData.consent.ipHash}
+                  {reviewData.consent.ipHash}
                 </div>
               </div>
             </div>
           </div>
+
+          {/* Section 9: Provider Verification Check Status */}
+          <div className="kyc-link-section-card" style={{ borderColor: 'rgba(100, 116, 139, 0.3)' }}>
+            <div className="kyc-link-section-header">
+              <h4 className="kyc-link-section-title" style={{ color: '#475569' }}>
+                <ShieldCheck size={16} /> Automated Provider Verifications
+              </h4>
+              <span className="kyc-link-badge" style={{ background: 'rgba(100, 116, 139, 0.1)', color: '#475569' }}>
+                Provider APIs Pending
+              </span>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', padding: '4px 0' }}>
+              External verification provider integrations (NSDL PAN, UIDAI Aadhaar, NPCI Penny-Drop) are not connected.
+              All fields and documents must be verified manually by the IRM below.
+            </div>
+          </div>
+
+          {/* Section 10: Mandatory IRM Verification Checklist */}
+          <div
+            className="kyc-link-section-card"
+            style={{
+              border: '2px solid #2563eb',
+              background: 'rgba(37, 99, 235, 0.03)',
+            }}
+          >
+            <div className="kyc-link-section-header">
+              <h4 className="kyc-link-section-title" style={{ color: '#1d4ed8' }}>
+                <CheckCircle size={16} /> Mandatory IRM Verification Checklist
+              </h4>
+              <span
+                className="kyc-link-badge"
+                style={{
+                  background: allChecklistCompleted ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.1)',
+                  color: allChecklistCompleted ? '#059669' : '#dc2626',
+                  fontWeight: 700,
+                }}
+              >
+                {allChecklistCompleted
+                  ? 'All Required Items Completed'
+                  : `${(reviewChecklist.identity ? 1 : 0) + (reviewChecklist.bank ? 1 : 0) + (reviewChecklist.documents ? 1 : 0) + (hasNominees ? (reviewChecklist.nominee ? 1 : 0) : 1) + (reviewChecklist.demat ? 1 : 0)}/5 Completed`}
+              </span>
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 12px 0' }}>
+              IRMs must genuinely verify each submitted section against documents before confirming approval.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={reviewChecklist.identity}
+                  onChange={e => setReviewChecklist(prev => ({ ...prev, identity: e.target.checked }))}
+                />
+                <span>
+                  1. <strong>Identity & Personal Details:</strong> I have verified the PAN and Identity against submitted documents.
+                </span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={reviewChecklist.bank}
+                  onChange={e => setReviewChecklist(prev => ({ ...prev, bank: e.target.checked }))}
+                />
+                <span>
+                  2. <strong>Bank Account Details:</strong> I have verified the bank account, IFSC code, and account holder name.
+                </span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={reviewChecklist.documents}
+                  onChange={e => setReviewChecklist(prev => ({ ...prev, documents: e.target.checked }))}
+                />
+                <span>
+                  3. <strong>Uploaded Documents:</strong> I have manually inspected all uploaded document copies (uploads are not automatically verified).
+                </span>
+              </label>
+              {hasNominees ? (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={reviewChecklist.nominee}
+                    onChange={e => setReviewChecklist(prev => ({ ...prev, nominee: e.target.checked }))}
+                  />
+                  <span>
+                    4. <strong>Nominee Information:</strong> I have inspected nominee allocations ({parsedNominees.length} nominee(s) totaling 100%).
+                  </span>
+                </label>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#059669', background: 'rgba(16, 185, 129, 0.08)', padding: '6px 10px', borderRadius: 6, fontSize: 12 }}>
+                  <CheckCircle size={15} style={{ flexShrink: 0 }} />
+                  <span>
+                    4. <strong>Nominee Information:</strong> No nominee submitted (Opted out / Single applicant — Verified &amp; Waived)
+                  </span>
+                </div>
+              )}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={reviewChecklist.demat}
+                  onChange={e => setReviewChecklist(prev => ({ ...prev, demat: e.target.checked }))}
+                />
+                <span>
+                  5. <strong>Demat Details:</strong> I have inspected demat account information or verified no demat is required.
+                </span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer Buttons */}
+        <div
+          className="kyc-link-drawer-footer"
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '16px 20px',
+            borderTop: '1px solid var(--border-color, #e2e8f0)',
+            background: 'var(--bg-surface, #ffffff)',
+          }}
+        >
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setShowCorrectionModal(true)}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <AlertTriangle size={14} color="#f59e0b" /> Request Correction
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={!hasRealSubmission || !allChecklistCompleted || approving}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              backgroundColor: hasRealSubmission && allChecklistCompleted ? '#10b981' : '#94a3b8',
+              borderColor: hasRealSubmission && allChecklistCompleted ? '#10b981' : '#94a3b8',
+              cursor: hasRealSubmission && allChecklistCompleted ? 'pointer' : 'not-allowed',
+            }}
+            onClick={handleApprove}
+            title={
+              !hasRealSubmission
+                ? 'Cannot approve: Customer has not submitted KYC details yet'
+                : !allChecklistCompleted
+                ? 'Please complete all 5 checklist verification items'
+                : 'Confirm KYC Verification'
+            }
+          >
+            <CheckCircle size={15} /> {approving ? 'Verifying...' : 'Approve & Confirm KYC'}
+          </button>
         </div>
 
         {/* Sub-modal for Request Correction */}
         {showCorrectionModal && (
-          <div
-            className="kyc-link-correction-modal"
-            onClick={() => setShowCorrectionModal(false)}
-          >
-            <div
-              className="kyc-link-correction-box"
-              onClick={e => e.stopPropagation()}
-            >
+          <div className="kyc-link-correction-modal" onClick={() => setShowCorrectionModal(false)}>
+            <div className="kyc-link-correction-box" onClick={e => e.stopPropagation()}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <AlertTriangle size={16} color="#ea580c" /> Request Correction
                 </h4>
-                <button
-                  type="button"
-                  className="kyc-link-modal-close-btn"
-                  onClick={() => setShowCorrectionModal(false)}
-                >
+                <button type="button" className="kyc-link-modal-close-btn" onClick={() => setShowCorrectionModal(false)}>
                   <X size={16} />
                 </button>
               </div>
@@ -758,11 +1025,7 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
                 placeholder="Enter specific correction instructions..."
               />
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => setShowCorrectionModal(false)}
-                >
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowCorrectionModal(false)}>
                   Cancel
                 </button>
                 <button
