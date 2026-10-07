@@ -132,6 +132,7 @@ import { AssignedLeadsPage } from './pages/AssignedLeads/AssignedLeadsPage';
 import { PendingLeadsPage } from './pages/PendingLeads/PendingLeadsPage';
 import { KYCPage } from './pages/KYC/KYCPage';
 import { IrmOtherPage } from './pages/IrmOther/IrmOtherPage';
+import { AllLeadsPage } from './pages/Irm/AllLeadsPage';
 
 // Company Admin
 import { CompanyUsersPage } from './pages/Company/CompanyUsersPage';
@@ -697,6 +698,14 @@ export const App: React.FC = () => {
     >
       {currentRoute === 'dashboard' ? (
         <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+      ) : currentRoute === 'all-leads' ? (
+        user?.role?.code !== 'irm' && !isGhlAdmin && !isSuperAdmin ? (
+          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+        ) : (
+          <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
+            <AllLeadsPage onNavigate={navigate} />
+          </ProtectedRoute>
+        )
       ) : currentRoute === 'leads' ? (
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
           <LeadsPage onNavigate={navigate} />

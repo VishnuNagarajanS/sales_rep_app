@@ -30,6 +30,7 @@ import {
   Server,
   KeyRound,
   FolderArchive,
+  Layers,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
@@ -275,6 +276,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
     {
       header: 'Investors',
       items: [
+        { id: 'all-leads', label: 'All Leads', icon: <Layers size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
         { id: 'leads', label: 'My Leads', icon: <Users size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
         { id: 'followups', label: 'Follow-up', icon: <CalendarCheck size={18} />, feature: FEATURES.FOLLOWUPS, permission: PERMISSIONS.FOLLOWUPS_VIEW },
         { id: 'kyc', label: 'KYC', icon: <FileCheck size={18} />, feature: FEATURES.INVESTORS, permission: PERMISSIONS.INVESTORS_VIEW },

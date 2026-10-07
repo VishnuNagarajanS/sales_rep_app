@@ -31,6 +31,7 @@ import {
   getInvestors,
   getIrmOtherRecords,
 } from '../../../services/ghlApiService';
+import { storageService } from '../../../services/storageService';
 import { apiUrl } from '../../../utils/apiUrl';
 import { getAuthHeaders } from '../../../utils/authHeaders';
 import {
@@ -83,13 +84,63 @@ export const IrmReportsView: React.FC = () => {
       const getVal = <T,>(res: PromiseSettledResult<T>, fb: T): T =>
         res.status === 'fulfilled' ? res.value : fb;
 
-      setLeads(getVal(l, []));
-      setDeals(getVal(d, []));
-      setCalls(getVal(c, []));
-      setConsultations(getVal(cs, []));
-      setOpportunities(getVal(opp, []));
-      setFollowups(getVal(flw, []));
-      setInvestors(getVal(inv, []));
+      const apiLeads = getVal(l, []);
+      const localLeads = storageService.getLeads(tenant?.id) || [];
+      const leadsMap = new Map<string, Lead>();
+      [...localLeads, ...apiLeads].forEach(item => {
+        const key = (item.phone ? item.phone.replace(/\D/g, '').slice(-10) : '') || String(item.id);
+        if (!leadsMap.has(key)) leadsMap.set(key, item);
+      });
+      setLeads(Array.from(leadsMap.values()));
+
+      const apiDeals = getVal(d, []);
+      const localDeals = storageService.getDeals(tenant?.id) || [];
+      const dealsMap = new Map<string, Deal>();
+      [...localDeals, ...apiDeals].forEach(item => {
+        dealsMap.set(String(item.id), item);
+      });
+      setDeals(Array.from(dealsMap.values()));
+
+      const apiCalls = getVal(c, []);
+      const localCalls = storageService.getCalls(tenant?.id) || [];
+      const callsMap = new Map<string, CallRecord>();
+      [...localCalls, ...apiCalls].forEach(item => {
+        callsMap.set(String(item.id), item);
+      });
+      setCalls(Array.from(callsMap.values()));
+
+      const apiConsultations = getVal(cs, []);
+      const localConsultations = storageService.getConsultations(tenant?.id) || [];
+      const consultationsMap = new Map<string, Consultation>();
+      [...localConsultations, ...apiConsultations].forEach(item => {
+        consultationsMap.set(String(item.id), item);
+      });
+      setConsultations(Array.from(consultationsMap.values()));
+
+      const apiOpps = getVal(opp, []);
+      const localOpps = storageService.getOpportunities(tenant?.id) || [];
+      const oppsMap = new Map<string, InvestmentOpportunity>();
+      [...localOpps, ...apiOpps].forEach(item => {
+        oppsMap.set(String(item.id), item);
+      });
+      setOpportunities(Array.from(oppsMap.values()));
+
+      const apiFollowups = getVal(flw, []);
+      const localFollowups = storageService.getFollowups(tenant?.id) || [];
+      const followupsMap = new Map<string, Followup>();
+      [...localFollowups, ...apiFollowups].forEach(item => {
+        followupsMap.set(String(item.id), item);
+      });
+      setFollowups(Array.from(followupsMap.values()));
+
+      const apiInvestors = getVal(inv, []);
+      const localInvestors = storageService.getInvestors(tenant?.id) || [];
+      const investorsMap = new Map<string, Investor>();
+      [...localInvestors, ...apiInvestors].forEach(item => {
+        investorsMap.set(String(item.id), item);
+      });
+      setInvestors(Array.from(investorsMap.values()));
+
       setOtherRecords(getVal(oth, []));
 
       // Fetch dynamic KYC records from backend
@@ -269,10 +320,26 @@ export const IrmReportsView: React.FC = () => {
     ? Math.min(Math.round((totalCommittedAUM / totalTargetCorpus) * 100), 100)
     : 0;
 
+  // KYC pipeline deals (matching KYCPage stage === 'qualified_investor')
+  const qualifiedKycDeals = useMemo(() => {
+    return deals.filter(d => d.stage === 'qualified_investor' && isMyRecord(d.assignedAgentId, d.assignedAgentName));
+  }, [deals, isMyRecord]);
+
+  const totalKycTargetCount = qualifiedKycDeals.length > 0 ? qualifiedKycDeals.length : (scopedKycs.length || 0);
+
   // 2. KYC Compliance & Clearance Health
   const kycVerified = useMemo(() => {
-    return scopedKycs.filter(k => (k.status || '').toLowerCase() === 'verified');
-  }, [scopedKycs]);
+    const verifiedDbIds = new Set(
+      scopedKycs
+        .filter(k => (k.status || '').toLowerCase() === 'verified' || (k.status || '').toLowerCase() === 'approved')
+        .map(k => String(k.investorId || k.id))
+    );
+    const verifiedDeals = qualifiedKycDeals.filter(d => {
+      const status = ((d as any).kycStatus || (d as any).customerKycStatus || '').toLowerCase();
+      return status === 'verified' || status === 'approved' || verifiedDbIds.has(String(d.customerId || d.id));
+    });
+    return verifiedDeals.length > 0 ? verifiedDeals : scopedKycs.filter(k => (k.status || '').toLowerCase() === 'verified');
+  }, [scopedKycs, qualifiedKycDeals]);
 
   const kycInReview = useMemo(() => {
     return scopedKycs.filter(k => {
@@ -286,15 +353,16 @@ export const IrmReportsView: React.FC = () => {
   }, [scopedKycs]);
 
   const kycPending = useMemo(() => {
-    return scopedKycs.filter(k => {
+    const pendingDeals = qualifiedKycDeals.filter(d => !kycVerified.some(v => v.id === d.id));
+    return pendingDeals.length > 0 ? pendingDeals : scopedKycs.filter(k => {
       const s = (k.status || '').toLowerCase();
       return s === 'initiated' || s === 'draft' || s === 'pending' || !s;
     });
-  }, [scopedKycs]);
+  }, [scopedKycs, qualifiedKycDeals, kycVerified]);
 
-  const kycClearanceRate = scopedKycs.length > 0
-    ? Math.round((kycVerified.length / scopedKycs.length) * 100)
-    : 0;
+  const kycClearanceRate = totalKycTargetCount > 0
+    ? Math.round((kycVerified.length / totalKycTargetCount) * 100)
+    : 100;
 
   // 3. Active Pipeline Opportunities
   const activeOpps = useMemo(() => {
@@ -331,9 +399,11 @@ export const IrmReportsView: React.FC = () => {
   const funnelSteps = useMemo(() => {
     const s1 = periodLeads.length;
     const s2 = periodFollowups.length;
-    const s3 = scopedKycs.length;
-    const s4 = periodOpps.length;
-    const s5 = committedOpps.length || scopedInvestors.filter(i => i.status === 'Active Investor' || i.status === 'HNW Investor').length;
+    const s3 = totalKycTargetCount;
+    const oppDeals = deals.filter(d => (d.stage === 'investment_opportunity' || d.stage === 'opportunity') && isMyRecord(d.assignedAgentId, d.assignedAgentName));
+    const s4 = periodOpps.length || oppDeals.length;
+    const convertedDeals = deals.filter(d => (d.stage === 'converted' || d.stage === 'won') && isMyRecord(d.assignedAgentId, d.assignedAgentName));
+    const s5 = committedOpps.length || convertedDeals.length || scopedInvestors.filter(i => i.status === 'Active Investor' || i.status === 'HNW Investor').length;
     const base = Math.max(s1, s2, s3, s4, s5, 1);
 
     return [
@@ -343,7 +413,7 @@ export const IrmReportsView: React.FC = () => {
       { label: '4. Opportunities', count: s4, pct: `${Math.round((s4 / base) * 100)}%`, color: '#06b6d4', sub: formatCurrency(activePipelineValue) },
       { label: '5. Converted / Committed', count: s5, pct: `${Math.round((s5 / base) * 100)}%`, color: '#10b981', sub: formatCurrency(totalCommittedAUM) },
     ];
-  }, [periodLeads, periodFollowups, scopedKycs, periodOpps, committedOpps, scopedInvestors, kycVerified, activePipelineValue, totalCommittedAUM]);
+  }, [periodLeads, periodFollowups, totalKycTargetCount, deals, isMyRecord, periodOpps, committedOpps, scopedInvestors, kycVerified, activePipelineValue, totalCommittedAUM]);
 
   // ── Asset Class Allocation Breakdown ─────────────────────────────────────────
   const assetClassBreakdown = useMemo(() => {
@@ -496,7 +566,7 @@ export const IrmReportsView: React.FC = () => {
       ['Under Review', kycInReview.length],
       ['Pending / Initiated', kycPending.length],
       ['Rejected', kycRejected.length],
-      ['Total KYC Cases Handled', scopedKycs.length],
+      ['Total KYC Cases Handled', totalKycTargetCount],
       [],
       ['=== TELEPHONY & INVESTOR ENGAGEMENT ==='],
       ['Total Calls Made', totalCallsCount],
@@ -609,7 +679,7 @@ export const IrmReportsView: React.FC = () => {
             </div>
           </div>
           <div className="irm-reports-kpi-value">
-            {kycVerified.length} <span className="irm-reports-kpi-sub-count">/ {scopedKycs.length}</span>
+            {kycVerified.length} <span className="irm-reports-kpi-sub-count">/ {totalKycTargetCount}</span>
           </div>
           <div className="irm-reports-progress-wrap">
             <div className="irm-reports-progress-bar" style={{ width: `${kycClearanceRate}%`, backgroundColor: '#8b5cf6' }} />
@@ -667,7 +737,7 @@ export const IrmReportsView: React.FC = () => {
         >
           <FileCheck size={15} />
           <span>KYC & Compliance Health</span>
-          <span className="irm-reports-tab-counter">{scopedKycs.length}</span>
+          <span className="irm-reports-tab-counter">{totalKycTargetCount}</span>
         </button>
         <button
           className={`irm-reports-tab-btn ${activeTab === 'dispositions' ? 'active' : ''}`}
@@ -848,7 +918,7 @@ export const IrmReportsView: React.FC = () => {
                   <div className="irm-kyc-status-bar">
                     <div
                       style={{
-                        width: `${scopedKycs.length ? (kycVerified.length / scopedKycs.length) * 100 : 0}%`,
+                        width: `${totalKycTargetCount ? (kycVerified.length / totalKycTargetCount) * 100 : 0}%`,
                         backgroundColor: '#10b981',
                       }}
                     />
@@ -861,7 +931,7 @@ export const IrmReportsView: React.FC = () => {
                   <div className="irm-kyc-status-bar">
                     <div
                       style={{
-                        width: `${scopedKycs.length ? (kycInReview.length / scopedKycs.length) * 100 : 0}%`,
+                        width: `${totalKycTargetCount ? (kycInReview.length / totalKycTargetCount) * 100 : 0}%`,
                         backgroundColor: '#f59e0b',
                       }}
                     />
@@ -874,7 +944,7 @@ export const IrmReportsView: React.FC = () => {
                   <div className="irm-kyc-status-bar">
                     <div
                       style={{
-                        width: `${scopedKycs.length ? (kycPending.length / scopedKycs.length) * 100 : 0}%`,
+                        width: `${totalKycTargetCount ? (kycPending.length / totalKycTargetCount) * 100 : 0}%`,
                         backgroundColor: '#06b6d4',
                       }}
                     />
@@ -887,7 +957,7 @@ export const IrmReportsView: React.FC = () => {
                   <div className="irm-kyc-status-bar">
                     <div
                       style={{
-                        width: `${scopedKycs.length ? (kycRejected.length / scopedKycs.length) * 100 : 0}%`,
+                        width: `${totalKycTargetCount ? (kycRejected.length / totalKycTargetCount) * 100 : 0}%`,
                         backgroundColor: '#ef4444',
                       }}
                     />

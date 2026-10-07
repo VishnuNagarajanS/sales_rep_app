@@ -119,6 +119,8 @@ export interface Lead {
   priority: 'Low' | 'Medium' | 'High' | 'Urgent';
   assignedAgentId: string;
   assignedAgentName: string;
+  assignedById?: string | number;
+  assignedByName?: string;
   nextFollowupDate?: string;
   createdAt: string;
   notes: string;

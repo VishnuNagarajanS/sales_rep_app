@@ -262,14 +262,24 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
     ? Math.round((verifiedKycs.length / totalKycTargetCount) * 100)
     : 100;
 
-  // Active Opportunities
+  // Active Opportunities (matches OpportunitiesPage irmDeals + scopedOpportunities)
+  const irmOpportunitiesDeals = useMemo(() => {
+    return deals.filter(d => (d.stage === 'investment_opportunity' || d.stage === 'opportunity') && isMine(d.assignedAgentId, d.assignedAgentName));
+  }, [deals, isMine]);
+
   const activeOpportunities = useMemo(() => {
     return scopedOpportunities.filter(o => o.stage !== 'Closed Lost');
   }, [scopedOpportunities]);
 
+  const activeOpportunitiesCount = useMemo(() => {
+    return activeOpportunities.length + irmOpportunitiesDeals.length;
+  }, [activeOpportunities, irmOpportunitiesDeals]);
+
   const totalPipelineCorpus = useMemo(() => {
-    return activeOpportunities.reduce((s, o) => s + (Number(o.targetAmount) || 0), 0);
-  }, [activeOpportunities]);
+    const oppCorpus = activeOpportunities.reduce((s, o) => s + (Number(o.targetAmount) || 0), 0);
+    const dealCorpus = irmOpportunitiesDeals.reduce((s, d) => s + (Number(d.value) || 0), 0);
+    return oppCorpus + dealCorpus;
+  }, [activeOpportunities, irmOpportunitiesDeals]);
 
   // Follow-ups
   const pendingFollowups = useMemo(() => {
@@ -308,6 +318,41 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
       return !isNaN(d.getTime()) && d.getTime() >= sevenDaysAgo;
     }).length;
   }, [scopedInvestors, sevenDaysAgo]);
+
+  // ── Today's Assigned Leads for this IRM (Present Day only) ──────────────────
+  const isDateToday = (dateVal?: string | Date) => {
+    if (!dateVal) return false;
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return false;
+    const now = new Date();
+    return (
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() &&
+      d.getDate() === now.getDate()
+    );
+  };
+
+  const todayLeads = useMemo(() => {
+    return scopedLeads.filter(l => {
+      const d = l.assignedAt || l.createdAt;
+      return isDateToday(d);
+    });
+  }, [scopedLeads]);
+
+  const todayDateLabel = useMemo(() => {
+    return new Date().toLocaleDateString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+  }, []);
+
+  const formatLeadTime = (dateVal?: string | Date) => {
+    if (!dateVal) return 'Today';
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return 'Today';
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
 
   return (
     <div className="irm-dashboard-container">
@@ -406,7 +451,7 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
             <span className="irm-kpi-label">DEAL PIPELINE</span>
             <div className="irm-kpi-icon deals"><Briefcase size={16} /></div>
           </div>
-          <div className="irm-kpi-val">{activeOpportunities.length}</div>
+          <div className="irm-kpi-val">{activeOpportunitiesCount}</div>
           <div className="irm-kpi-progress-track">
             <div className="irm-kpi-progress-fill deals" style={{ width: '75%' }} />
           </div>
@@ -469,303 +514,198 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
         </div>
       </div>
 
-      {/* ── Main Split View ── */}
+      {/* ── Main Clean 2-Column Split View ── */}
       <div className="irm-dashboard-split">
-        {/* Left Column: Opportunities & Investor 360 */}
-        <div className="irm-split-col">
-          {/* Active Opportunities Widget */}
-          <div className="card irm-widget-card">
-            <div className="irm-widget-header">
-              <div>
-                <h3 className="irm-widget-title">Active Investment Opportunities</h3>
-                <p className="irm-widget-subtitle">Pipeline capital commitments in negotiation</p>
-              </div>
-              <button className="btn btn-ghost btn-sm" onClick={() => onNavigate('opportunities')}>
-                View All Deals <ArrowRight size={13} />
-              </button>
-            </div>
-
-            <div className="irm-opps-list">
-              {activeOpportunities.slice(0, 4).map(opp => (
-                <div key={opp.id} className="irm-opp-card" onClick={() => onNavigate('opportunities')}>
-                  <div className="irm-opp-top">
-                    <div>
-                      <div className="irm-opp-title">{opp.title}</div>
-                      <div className="irm-opp-investor">{opp.investorName}</div>
-                    </div>
-                    <span
-                      className={`irm-opp-badge ${opp.stage.toLowerCase().replace(/\s+/g, '-')}`}
-                    >
-                      {opp.stage}
-                    </span>
-                  </div>
-                  <div className="irm-opp-bottom">
-                    <div className="irm-opp-amount">
-                      <span className="irm-opp-amt-label">Target:</span>
-                      <strong>{formatCurrency(opp.targetAmount)}</strong>
-                    </div>
-                    {opp.committedAmount ? (
-                      <div className="irm-opp-committed">
-                        <span className="irm-opp-amt-label">Committed:</span>
-                        <strong style={{ color: '#059669' }}>{formatCurrency(opp.committedAmount)}</strong>
-                      </div>
-                    ) : null}
-                    <div className="irm-opp-date">
-                      {opp.expectedCloseDate ? `Close: ${opp.expectedCloseDate}` : 'In Discussion'}
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              {activeOpportunities.length === 0 && (
-                <div className="irm-empty-box">
-                  <Briefcase size={28} color="var(--text-muted)" />
-                  <p>No active opportunities logged in the pipeline.</p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Assigned HNW Investors Table */}
-          <div className="card irm-widget-card">
-            <div className="irm-widget-header">
-              <div>
-                <h3 className="irm-widget-title">Assigned HNW Investors (Investor 360)</h3>
-                <p className="irm-widget-subtitle">Key portfolio accounts requiring active advisory</p>
-              </div>
-              <button className="btn btn-ghost btn-sm" onClick={() => onNavigate('investors')}>
-                View 360 <ArrowRight size={13} />
-              </button>
-            </div>
-
-            <div className="irm-table-wrap">
-              <table className="irm-table">
-                <thead>
-                  <tr>
-                    <th>Investor</th>
-                    <th>Status</th>
-                    <th>Capacity / AUM</th>
-                    <th className="right">Outreach</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {scopedInvestors.slice(0, 4).map(inv => (
-                    <tr key={inv.id}>
-                      <td>
-                        <div className="irm-td-name">{inv.name}</div>
-                        <div className="irm-td-sub">
-                          {inv.phone} • {inv.preferredAssetClass || 'AIF Category II'}
-                        </div>
-                      </td>
-                      <td>
-                        <StatusChip status={inv.status} size="sm" />
-                      </td>
-                      <td>
-                        <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>
-                          {inv.committedAUM || inv.investmentCapacity || '—'}
-                        </strong>
-                      </td>
-                      <td className="right">
-                        <button
-                          className="btn btn-call btn-sm btn-icon irm-call-btn"
-                          title={`Dial ${inv.name}`}
-                          onClick={() => initiateCall(inv.name, inv.phone, 'customer', inv.id)}
-                        >
-                          <Phone size={13} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-
-                  {scopedInvestors.length === 0 && (
-                    <tr>
-                      <td colSpan={4} className="irm-td-empty">
-                        No assigned investors in portfolio.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Column: Pending KYC & Follow-ups */}
-        <div className="irm-split-col">
-          {/* Pending KYC Compliance Widget */}
-          <div className="card irm-widget-card">
-            <div className="irm-widget-header">
-              <div>
-                <h3 className="irm-widget-title">Pending KYC Verification</h3>
-                <p className="irm-widget-subtitle">Prospective investors awaiting SEBI compliance clearance</p>
-              </div>
-              <button className="btn btn-ghost btn-sm" onClick={() => onNavigate('kyc')}>
-                Open KYC <ArrowRight size={13} />
-              </button>
-            </div>
-
-            <div className="irm-kyc-queue">
-              {inReviewKycs.slice(0, 3).map((k, idx) => (
-                <div key={idx} className="irm-kyc-item" onClick={() => onNavigate('kyc')}>
-                  <div className="irm-kyc-item-left">
-                    <div className="irm-kyc-avatar">
-                      {(k.investorName || k.name || 'IN').slice(0, 2).toUpperCase()}
-                    </div>
-                    <div>
-                      <div className="irm-kyc-name">{k.investorName || k.name}</div>
-                      <div className="irm-kyc-sub">
-                        {k.phone} • PAN: {k.panNumber || 'Pending'}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="irm-kyc-item-right">
-                    <span className="irm-kyc-pill review">Under Review</span>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={e => {
-                        e.stopPropagation();
-                        initiateCall(k.investorName || k.name, k.phone, 'customer', String(k.investorId || k.id));
-                      }}
-                    >
-                      <Phone size={11} /> Call
-                    </button>
-                  </div>
-                </div>
-              ))}
-
-              {inReviewKycs.length === 0 && (
-                <div className="irm-empty-box">
-                  <CheckCircle2 size={28} color="#10b981" />
-                  <p>All KYC investor dossiers are fully verified &amp; cleared!</p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Actionable Follow-ups & Consultations */}
-          <div className="card irm-widget-card">
-            <div className="irm-widget-header">
-              <div className="irm-tab-toggle">
-                <button
-                  className={`irm-toggle-btn ${scheduleTab === 'followups' ? 'active' : ''}`}
-                  onClick={() => setScheduleTab('followups')}
+        {/* Left Column: Today's Assigned Leads (Present day only) */}
+        <div className="card irm-widget-card">
+          <div className="irm-widget-header">
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <h3 className="irm-widget-title">Today's Assigned Leads</h3>
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: 12,
+                    background: 'rgba(59, 130, 246, 0.15)',
+                    color: '#3b82f6',
+                    border: '1px solid rgba(59, 130, 246, 0.3)',
+                  }}
                 >
-                  <Calendar size={13} /> Follow-ups ({pendingFollowups.length})
-                </button>
-                <button
-                  className={`irm-toggle-btn ${scheduleTab === 'consultations' ? 'active' : ''}`}
-                  onClick={() => setScheduleTab('consultations')}
-                >
-                  <CalendarCheck size={13} /> Consultations ({scopedConsultations.length})
-                </button>
+                  {todayLeads.length} Today
+                </span>
               </div>
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => onNavigate(scheduleTab === 'followups' ? 'followups' : 'consultations')}
-              >
-                View All <ArrowRight size={13} />
-              </button>
+              <p className="irm-widget-subtitle">
+                Leads assigned to you today ({todayDateLabel}) • Older leads available in All Leads
+              </p>
             </div>
+            <button className="btn btn-ghost btn-sm" onClick={() => onNavigate('all-leads')}>
+              View All Leads <ArrowRight size={13} />
+            </button>
+          </div>
 
-            {scheduleTab === 'followups' ? (
-              <div className="irm-followups-list">
-                {pendingFollowups.slice(0, 4).map(f => (
-                  <div key={f.id} className="irm-followup-row">
-                    <div className="irm-followup-info">
-                      <div className="irm-followup-top">
-                        <span className="irm-followup-name">{f.contactName}</span>
-                        <StatusChip status={f.priority} size="sm" />
-                      </div>
-                      <p className="irm-followup-notes">{f.notes || 'Scheduled touchpoint'}</p>
-                      <div className="irm-followup-due">
-                        ⏰ Due: <strong>{f.scheduledAt}</strong>
-                      </div>
-                    </div>
-                    <button
-                      className="btn btn-call btn-sm irm-action-call-btn"
-                      onClick={() => initiateCall(f.contactName, f.contactPhone, 'customer', f.contactId)}
-                    >
-                      <Phone size={12} /> Call
-                    </button>
+          <div className="irm-followups-list">
+            {todayLeads.slice(0, 5).map(lead => (
+              <div key={lead.id} className="irm-followup-row">
+                <div className="irm-followup-info">
+                  <div className="irm-followup-top">
+                    <span className="irm-followup-name">{lead.name}</span>
+                    <StatusChip status={lead.status} size="sm" />
+                    {lead.priority && (
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: '1px 6px',
+                          borderRadius: 4,
+                          textTransform: 'uppercase',
+                          background:
+                            lead.priority.toLowerCase() === 'high' || lead.priority.toLowerCase() === 'urgent'
+                              ? 'rgba(239, 68, 68, 0.15)'
+                              : 'rgba(59, 130, 246, 0.15)',
+                          color:
+                            lead.priority.toLowerCase() === 'high' || lead.priority.toLowerCase() === 'urgent'
+                              ? '#ef4444'
+                              : '#3b82f6',
+                        }}
+                      >
+                        {lead.priority}
+                      </span>
+                    )}
                   </div>
-                ))}
-
-                {pendingFollowups.length === 0 && (
-                  <div className="irm-empty-box">
-                    <CheckCircle2 size={28} color="#10b981" />
-                    <p>No pending follow-ups. You are completely caught up!</p>
+                  <div className="irm-td-sub" style={{ marginTop: 2 }}>
+                    📞 {lead.phone} {lead.location ? `• 📍 ${lead.location}` : ''}
                   </div>
-                )}
+                  <div className="irm-followup-due" style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+                    👤 Assigned by: <strong>{lead.assignedAgentName || 'Sales Agent'}</strong> • 🕒 {formatLeadTime(lead.assignedAt || lead.createdAt)}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <button
+                    className="btn btn-call btn-sm irm-action-call-btn"
+                    title={`Dial ${lead.name}`}
+                    onClick={() => initiateCall(lead.name, lead.phone, 'lead', lead.id)}
+                  >
+                    <Phone size={12} /> Call
+                  </button>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    title="Open in My Leads"
+                    onClick={() => onNavigate('leads')}
+                  >
+                    <ArrowRight size={12} />
+                  </button>
+                </div>
               </div>
-            ) : (
-              <div className="irm-followups-list">
-                {scopedConsultations.slice(0, 4).map(c => (
-                  <div key={c.id} className="irm-followup-row">
-                    <div className="irm-followup-info">
-                      <div className="irm-followup-top">
-                        <span className="irm-followup-name">{c.investorName}</span>
-                        <StatusChip status={c.status} size="sm" />
-                      </div>
-                      <p className="irm-followup-notes">{c.agenda || 'Advisory session'}</p>
-                      <div className="irm-followup-due">
-                        📅 Scheduled: <strong>{c.scheduledAt}</strong>
-                      </div>
-                    </div>
-                    <button
-                      className="btn btn-call btn-sm irm-action-call-btn"
-                      onClick={() => initiateCall(c.investorName, c.investorPhone, 'customer', c.investorId)}
-                    >
-                      <Phone size={12} /> Call
-                    </button>
-                  </div>
-                ))}
+            ))}
 
-                {scopedConsultations.length === 0 && (
-                  <div className="irm-empty-box">
-                    <Calendar size={28} color="var(--text-muted)" />
-                    <p>No upcoming advisory consultations scheduled.</p>
-                  </div>
-                )}
+            {todayLeads.length === 0 && (
+              <div className="irm-empty-box">
+                <Clock size={28} color="var(--text-muted)" />
+                <p>No new leads assigned today yet.</p>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  When sales agents assign leads to you today, they will appear here in real time.
+                </span>
               </div>
             )}
           </div>
         </div>
-      </div>
 
-      {/* ── Quick IRM Workflow Navigation Bar ── */}
-      <div className="card irm-workflow-nav-bar">
-        <span className="irm-nav-label">IRM WORKFLOW QUICK ACCESS:</span>
-        <div className="irm-nav-chips">
-          <button className="irm-nav-chip" onClick={() => onNavigate('leads')}>
-            <Users size={13} />
-            <span>My Leads</span>
-            <strong>{scopedLeads.length}</strong>
-          </button>
-          <button className="irm-nav-chip" onClick={() => onNavigate('followups')}>
-            <Clock size={13} />
-            <span>Follow-up</span>
-            <strong>{pendingFollowups.length}</strong>
-          </button>
-          <button className="irm-nav-chip" onClick={() => onNavigate('kyc')}>
-            <FileCheck size={13} />
-            <span>KYC Onboarding</span>
-            <strong>{totalKycTargetCount}</strong>
-          </button>
-          <button className="irm-nav-chip" onClick={() => onNavigate('opportunities')}>
-            <Briefcase size={13} />
-            <span>Opportunities</span>
-            <strong>{activeOpportunities.length}</strong>
-          </button>
-          <button className="irm-nav-chip" onClick={() => onNavigate('investors')}>
-            <TrendingUp size={13} />
-            <span>Investor 360</span>
-            <strong>{scopedInvestors.length}</strong>
-          </button>
-          <button className="irm-nav-chip" onClick={() => onNavigate('irm-other')}>
-            <FolderArchive size={13} />
-            <span>Other Repository</span>
-            <strong>{scopedOther.length}</strong>
-          </button>
+        {/* Right Column: Follow-ups & Consultations */}
+        <div className="card irm-widget-card">
+          <div className="irm-widget-header">
+            <div className="irm-tab-toggle">
+              <button
+                className={`irm-toggle-btn ${scheduleTab === 'followups' ? 'active' : ''}`}
+                onClick={() => setScheduleTab('followups')}
+              >
+                <Calendar size={13} /> Follow-ups ({pendingFollowups.length})
+              </button>
+              <button
+                className={`irm-toggle-btn ${scheduleTab === 'consultations' ? 'active' : ''}`}
+                onClick={() => setScheduleTab('consultations')}
+              >
+                <CalendarCheck size={13} /> Consultations ({scopedConsultations.length})
+              </button>
+            </div>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => onNavigate(scheduleTab === 'followups' ? 'followups' : 'consultations')}
+            >
+              View All <ArrowRight size={13} />
+            </button>
+          </div>
+
+          {scheduleTab === 'followups' ? (
+            <div className="irm-followups-list">
+              {pendingFollowups.slice(0, 5).map(f => (
+                <div key={f.id} className="irm-followup-row">
+                  <div className="irm-followup-info">
+                    <div className="irm-followup-top">
+                      <span className="irm-followup-name">{f.contactName}</span>
+                      <StatusChip status={f.priority} size="sm" />
+                    </div>
+                    <p className="irm-followup-notes">{f.notes || 'Scheduled touchpoint'}</p>
+                    <div className="irm-followup-due">
+                      ⏰ Due: <strong>{f.scheduledAt}</strong>
+                    </div>
+                  </div>
+                  <button
+                    className="btn btn-call btn-sm irm-action-call-btn"
+                    onClick={() => initiateCall(f.contactName, f.contactPhone, 'customer', f.contactId)}
+                  >
+                    <Phone size={12} /> Call
+                  </button>
+                </div>
+              ))}
+
+              {pendingFollowups.length === 0 && (
+                <div className="irm-empty-box">
+                  <CheckCircle2 size={28} color="#10b981" />
+                  <p>No pending follow-ups. You are completely caught up!</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="irm-followups-list">
+              {scopedConsultations.slice(0, 5).map(c => (
+                <div key={c.id} className="irm-followup-row">
+                  <div className="irm-followup-info">
+                    <div className="irm-followup-top">
+                      <span className="irm-followup-name">{c.investorName}</span>
+                      <StatusChip status={c.status} size="sm" />
+                      {c.referredByAgentName && (
+                        <span style={{ fontSize: 11, color: '#3b82f6', fontWeight: 600 }}>
+                          • Sent by {c.referredByAgentName}
+                        </span>
+                      )}
+                    </div>
+                    <p className="irm-followup-notes">{c.agenda || 'Advisory session'}</p>
+                    <div className="irm-followup-due">
+                      📅 Scheduled: <strong>{c.scheduledAt}</strong>
+                    </div>
+                  </div>
+                  <button
+                    className="btn btn-call btn-sm irm-action-call-btn"
+                    onClick={() => initiateCall(c.investorName, c.investorPhone, 'customer', c.investorId)}
+                  >
+                    <Phone size={12} /> Call
+                  </button>
+                </div>
+              ))}
+
+              {scopedConsultations.length === 0 && (
+                <div className="irm-empty-box">
+                  <CalendarCheck size={28} color="var(--text-muted)" />
+                  <p>No upcoming advisory consultations scheduled.</p>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    When sales agents refer customer consultations, they will appear here.
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

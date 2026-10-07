@@ -174,7 +174,7 @@ export const IncomingCallPopup: React.FC = () => {
     };
   }, []);
 
-  if (!activeCall || activeCall.status !== 'ringing') return null;
+  if (!activeCall || activeCall.status !== 'ringing' || activeCall.direction !== 'inbound') return null;
 
   const getPositionStyles = (): React.CSSProperties => {
     switch (popupPosition) {
@@ -492,7 +492,14 @@ export const InCallBar: React.FC = () => {
     }
   }, [activeCall]);
 
-  if (!activeCall || activeCall.status !== 'connected') return null;
+  if (
+    !activeCall ||
+    activeCall.status === 'idle' ||
+    activeCall.status === 'ended' ||
+    (activeCall.direction === 'inbound' && activeCall.status === 'ringing')
+  ) {
+    return null;
+  }
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -535,14 +542,27 @@ export const InCallBar: React.FC = () => {
           {/* Pulse dot */}
           <div
             className="incall-minimized-dot"
-            style={activeCall.isSimulated ? { background: '#f59e0b', animation: 'none' } : undefined}
+            style={activeCall.status === 'ringing' ? { background: '#38bdf8' } : (activeCall.isSimulated ? { background: '#f59e0b', animation: 'none' } : undefined)}
           />
 
           {/* Name + timer */}
           <div className="incall-minimized-info">
             <div className="incall-minimized-name">{activeCall.contactName}</div>
-            <div className="incall-minimized-timer" style={activeCall.isSimulated ? { color: '#f59e0b', fontSize: 11 } : undefined}>
-              {activeCall.isSimulated ? 'Simulated (Not Connected)' : formatDuration(activeCall.duration)}
+            <div
+              className="incall-minimized-timer"
+              style={
+                activeCall.status === 'ringing'
+                  ? { color: '#38bdf8', fontSize: 11, fontWeight: 600 }
+                  : activeCall.isSimulated
+                  ? { color: '#f59e0b', fontSize: 11 }
+                  : undefined
+              }
+            >
+              {activeCall.status === 'ringing'
+                ? 'Dialing...'
+                : activeCall.isSimulated
+                ? `Simulated (${formatDuration(activeCall.duration)})`
+                : formatDuration(activeCall.duration)}
             </div>
           </div>
 
@@ -599,11 +619,18 @@ export const InCallBar: React.FC = () => {
               <div className="incall-caller-sub">
                 {activeCall.contactPhone}
                 <span>•</span>
-                {activeCall.isSimulated ? (
+                {activeCall.status === 'ringing' ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    <span className="incall-live-dot" style={{ background: '#38bdf8' }} />
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Dialing Outbound...
+                    </span>
+                  </span>
+                ) : activeCall.isSimulated ? (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#f59e0b', display: 'inline-block' }} />
                     <span style={{ fontSize: 11, fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                      Simulated (Not Connected)
+                      Simulated Call ({formatDuration(activeCall.duration)})
                     </span>
                   </span>
                 ) : (
@@ -646,9 +673,20 @@ export const InCallBar: React.FC = () => {
             </div>
 
             {/* Simulated-call disclaimer */}
-            <span className="incall-simulated-tag" style={activeCall.isSimulated ? { color: '#f59e0b', fontWeight: 600 } : undefined}>
-              {activeCall.isSimulated
-                ? 'Actual provider results: Carrier trunk offline • Call not connected'
+            <span
+              className="incall-simulated-tag"
+              style={
+                activeCall.status === 'ringing'
+                  ? { color: '#38bdf8', fontWeight: 600 }
+                  : activeCall.isSimulated
+                  ? { color: '#f59e0b', fontWeight: 600 }
+                  : undefined
+              }
+            >
+              {activeCall.status === 'ringing'
+                ? 'Outbound call initiating • Ringing softphone carrier...'
+                : activeCall.isSimulated
+                ? (activeCall.providerStatus || 'Carrier trunk offline • Simulated Sandbox Mode')
                 : 'Live audio call in progress'}
             </span>
           </div>
@@ -1113,6 +1151,7 @@ export const DispositionModal: React.FC = () => {
     if (!m) return undefined;
     const clean = m.trim().toLowerCase().replace(/-/g, '_').replace(/ /g, '_');
     if (clean === 'myleads' || clean === 'leads') return 'my_leads';
+    if (clean === 'allleads' || clean === 'all_leads') return 'all_leads';
     if (clean === 'followup' || clean === 'followups') return 'follow_up';
     if (clean === 'investor360' || clean === 'investors' || clean === 'investor') return 'investor_360';
     if (clean === 'opportunity' || clean === 'opps') return 'opportunities';
@@ -1120,6 +1159,7 @@ export const DispositionModal: React.FC = () => {
   };
 
   const IRM_MODULE_OUTCOMES: Record<string, CallDisposition[]> = {
+    all_leads: ['Follow-up Required', 'Call Back', 'Ready for KYC', 'Other', 'No Response'],
     my_leads: ['Follow-up Required', 'No Response', 'Call Back'],
     follow_up: ['Follow-up Required', 'Other', 'No Response', 'Call Back', 'Ready for KYC'],
     kyc: ['Contacted', 'Other', 'No Response', 'Call Back'],

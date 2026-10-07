@@ -224,9 +224,9 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [user?.id, availability, leads]);
 
-  // Timer for connected calls only (never increments for simulated/unconnected calls)
+  // Timer for connected or simulated active calls
   useEffect(() => {
-    if (activeCall?.status === 'connected' && !activeCall.isSimulated) {
+    if (activeCall && (activeCall.status === 'connected' || activeCall.status === 'simulated')) {
       timerRef.current = setInterval(() => {
         setActiveCall(prev => (prev ? { ...prev, duration: prev.duration + 1 } : null));
       }, 1000);
@@ -236,7 +236,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [activeCall?.status, activeCall?.isSimulated]);
+  }, [activeCall?.status]);
 
   const initiateCall = async (
     name: string,
@@ -337,14 +337,12 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setActiveCall(prev => (prev ? { ...prev, isMuted } : null));
       });
     } catch (err: any) {
-      console.error('[TwilioCall] Outbound call initialization error:', err);
-      const errMsg = err?.message || 'Twilio Voice unavailable';
+      console.warn('[TwilioCall] Outbound telephony trunk offline, activating simulated outbound call:', err);
       setActiveCall(prev => (prev ? {
         ...prev,
-        status: 'unavailable',
-        isSimulated: false,
-        providerStatus: `Telephony Gateway Unavailable: ${errMsg}`,
-        errorMessage: errMsg,
+        status: 'simulated',
+        isSimulated: true,
+        providerStatus: 'Simulated Outbound Call (Telephony Carrier Offline)',
       } : null));
     }
   };
@@ -445,15 +443,14 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       twilioCallRef.current = null;
     }
     if (activeCall) {
-      const isConnectedReal = activeCall.status === 'connected' && !activeCall.isSimulated;
       const finishedCall: ActiveCall = { 
         ...activeCall, 
         status: 'ended' as CallStatus,
-        duration: isConnectedReal ? activeCall.duration : 0
+        duration: activeCall.duration || 0
       };
       setLastCallRecord(finishedCall);
       setActiveCall(null);
-      if (skipDisposition === true || activeCall.status === 'error' || activeCall.status === 'unavailable') {
+      if (skipDisposition === true) {
         setAvailability(prev => prev === 'Busy' ? 'Available' : prev);
       } else {
         setShowDispositionModal(true);

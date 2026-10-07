@@ -43,13 +43,15 @@ import {
   getConsultations as apiGetConsultations,
   getOpportunities as apiGetOpportunities,
   getInvestors as apiGetInvestors,
+  getDeals as apiGetDeals,
   getIrmOtherRecords,
 } from '../../../services/ghlApiService';
+import { storageService } from '../../../services/storageService';
 import { apiUrl } from '../../../utils/apiUrl';
 import { getAuthHeaders } from '../../../utils/authHeaders';
 import { Drawer } from '../../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../../components/common/LeadDetailDrawerContent';
-import { CallRecord, Lead, Followup, Consultation, InvestmentOpportunity, Investor, IrmOtherRecord } from '../../../types';
+import { CallRecord, Lead, Followup, Consultation, InvestmentOpportunity, Investor, Deal, IrmOtherRecord } from '../../../types';
 import './IrmProfileView.css';
 
 // ── Persistence helper ─────────────────────────────────────────────────────────
@@ -155,30 +157,71 @@ export const IrmProfileView: React.FC = () => {
   const [allConsultations, setAllConsultations] = useState<Consultation[]>([]);
   const [allOpportunities, setAllOpportunities] = useState<InvestmentOpportunity[]>([]);
   const [allInvestors, setAllInvestors] = useState<Investor[]>([]);
+  const [allDeals, setAllDeals] = useState<Deal[]>([]);
   const [allKycs, setAllKycs] = useState<any[]>([]);
   const [allOther, setAllOther] = useState<IrmOtherRecord[]>([]);
 
   // ── Load live data ──────────────────────────────────────────────────────────
   const loadLiveData = useCallback(async () => {
     try {
-      const [calls, leads, followups, consultations, opps, invs, others] = await Promise.allSettled([
+      const [calls, leads, followups, consultations, opps, invs, dealsRes, others] = await Promise.allSettled([
         apiGetCalls(tenant?.id),
         apiGetLeads(tenant?.id),
         apiGetFollowups(tenant?.id),
         apiGetConsultations(tenant?.id),
         apiGetOpportunities(tenant?.id),
         apiGetInvestors(tenant?.id),
+        apiGetDeals(tenant?.id),
         getIrmOtherRecords(),
       ]);
 
       const getVal = <T,>(r: PromiseSettledResult<T>, fb: T): T => (r.status === 'fulfilled' ? r.value : fb);
 
-      setAllCalls(getVal(calls, []));
-      setAllLeads(getVal(leads, []));
-      setAllFollowups(getVal(followups, []));
-      setAllConsultations(getVal(consultations, []));
-      setAllOpportunities(getVal(opps, []));
-      setAllInvestors(getVal(invs, []));
+      const apiCalls = getVal(calls, []);
+      const localCalls = storageService.getCalls(tenant?.id) || [];
+      const callsMap = new Map<string, CallRecord>();
+      [...localCalls, ...apiCalls].forEach(c => callsMap.set(String(c.id), c));
+      setAllCalls(Array.from(callsMap.values()));
+
+      const apiLeads = getVal(leads, []);
+      const localLeads = storageService.getLeads(tenant?.id) || [];
+      const leadsMap = new Map<string, Lead>();
+      [...localLeads, ...apiLeads].forEach(l => {
+        const key = (l.phone ? l.phone.replace(/\D/g, '').slice(-10) : '') || String(l.id);
+        if (!leadsMap.has(key)) leadsMap.set(key, l);
+      });
+      setAllLeads(Array.from(leadsMap.values()));
+
+      const apiFollowups = getVal(followups, []);
+      const localFollowups = storageService.getFollowups(tenant?.id) || [];
+      const followupsMap = new Map<string, Followup>();
+      [...localFollowups, ...apiFollowups].forEach(f => followupsMap.set(String(f.id), f));
+      setAllFollowups(Array.from(followupsMap.values()));
+
+      const apiConsultations = getVal(consultations, []);
+      const localConsultations = storageService.getConsultations(tenant?.id) || [];
+      const consultationsMap = new Map<string, Consultation>();
+      [...localConsultations, ...apiConsultations].forEach(c => consultationsMap.set(String(c.id), c));
+      setAllConsultations(Array.from(consultationsMap.values()));
+
+      const apiOpps = getVal(opps, []);
+      const localOpps = storageService.getOpportunities(tenant?.id) || [];
+      const oppsMap = new Map<string, InvestmentOpportunity>();
+      [...localOpps, ...apiOpps].forEach(o => oppsMap.set(String(o.id), o));
+      setAllOpportunities(Array.from(oppsMap.values()));
+
+      const apiInvestors = getVal(invs, []);
+      const localInvestors = storageService.getInvestors(tenant?.id) || [];
+      const investorsMap = new Map<string, Investor>();
+      [...localInvestors, ...apiInvestors].forEach(i => investorsMap.set(String(i.id), i));
+      setAllInvestors(Array.from(investorsMap.values()));
+
+      const apiDeals = getVal(dealsRes, []);
+      const localDeals = storageService.getDeals(tenant?.id) || [];
+      const dealsMap = new Map<string, Deal>();
+      [...localDeals, ...apiDeals].forEach(d => dealsMap.set(String(d.id), d));
+      setAllDeals(Array.from(dealsMap.values()));
+
       setAllOther(getVal(others, []));
 
       // Fetch live KYCs
@@ -236,6 +279,8 @@ export const IrmProfileView: React.FC = () => {
   const myConsultations = useMemo(() => allConsultations.filter(c => isMine(c.consultantId, c.consultantName)), [allConsultations, isMine]);
   const myOpportunities = useMemo(() => allOpportunities.filter(o => isMine(o.assignedAgentId, o.assignedAgentName)), [allOpportunities, isMine]);
   const myInvestors = useMemo(() => allInvestors.filter(i => isMine(i.assignedAgentId, i.assignedAgentName)), [allInvestors, isMine]);
+  const myDeals = useMemo(() => allDeals.filter(d => isMine(d.assignedAgentId, d.assignedAgentName)), [allDeals, isMine]);
+  const qualifiedKycDeals = useMemo(() => myDeals.filter(d => d.stage === 'qualified_investor'), [myDeals]);
 
   const myKycs = useMemo(() => {
     return allKycs.filter(k => {
@@ -256,16 +301,28 @@ export const IrmProfileView: React.FC = () => {
 
   const totalCommittedAUM = useMemo(() => {
     const oppAum = wonOpps.reduce((s, o) => s + (Number(o.committedAmount) || 0), 0);
+    const dealAum = myDeals
+      .filter(d => d.stage === 'converted' || d.stage === 'won' || d.stage === 'investment_opportunity')
+      .reduce((s, d) => s + (Number(d.value) || 0), 0);
     const invAum = myInvestors.reduce((s, inv) => {
       const parsed = parseAumToNumber(inv.committedAUM || inv.investmentCapacity);
       return s + parsed;
     }, 0);
-    return Math.max(oppAum, invAum);
-  }, [wonOpps, myInvestors]);
+    return Math.max(oppAum, dealAum, invAum);
+  }, [wonOpps, myDeals, myInvestors]);
 
   const verifiedKycCount = useMemo(() => {
-    return myKycs.filter(k => (k.status || '').toLowerCase() === 'verified').length;
-  }, [myKycs]);
+    const verifiedDbIds = new Set(
+      myKycs
+        .filter(k => (k.status || '').toLowerCase() === 'verified' || (k.status || '').toLowerCase() === 'approved')
+        .map(k => String(k.investorId || k.id))
+    );
+    const verifiedDeals = qualifiedKycDeals.filter(d => {
+      const status = ((d as any).kycStatus || (d as any).customerKycStatus || '').toLowerCase();
+      return status === 'verified' || status === 'approved' || verifiedDbIds.has(String(d.customerId || d.id));
+    });
+    return verifiedDeals.length > 0 ? verifiedDeals.length : myKycs.filter(k => (k.status || '').toLowerCase() === 'verified').length;
+  }, [myKycs, qualifiedKycDeals]);
 
   const inReviewKycCount = useMemo(() => {
     return myKycs.filter(k => {
