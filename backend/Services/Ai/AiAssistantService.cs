@@ -132,12 +132,7 @@ SECURITY
                 {
                     responseDto.Answer = llmRes.Content ?? "";
                     
-                    // Simple injection detection fallback
-                    if (string.IsNullOrEmpty(toolsCalledStr) && responseDto.Answer.Length > 400 && !responseDto.Answer.Contains("NexusSales"))
-                    {
-                        responseDto.Answer = _settings.OutOfScopeMessage;
-                        responseDto.Declined = true;
-                    }
+                    // Injection detection fallback removed to prevent false positives when LLM gives detailed answers
                     
                     break;
                 }

@@ -9,7 +9,7 @@ namespace backend.Services.Ai.Tools
     public class SearchLeadsTool : AiTool
     {
         public override string Name => "search_leads";
-        public override string Description => "Search leads by date range, status, or text.";
+        public override string Description => "Search leads by date range, status, or text. The returned results include the lead's AssignedTo agent name, status, priority, and notes.";
         
         public override JsonObject Parameters => new JsonObject
         {

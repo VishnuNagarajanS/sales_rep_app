@@ -8,7 +8,7 @@ namespace backend.Services.Ai.Tools
     public class SearchInvestorsTool : AiTool
     {
         public override string Name => "search_investors";
-        public override string Description => "Search for investors in the system.";
+        public override string Description => "Search for investors in the system. Use this for ANY queries about investors, including 'high valued', 'AUM', capacities, or assigned agents.";
         
         public override JsonObject Parameters => JsonNode.Parse(@"
         {
