@@ -470,7 +470,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
                   : `linear-gradient(135deg, ${tenant?.brandColor || '#ef4444'} 0%, #991b1b 100%)`,
               }}
             >
-              {user?.name.charAt(0)}
+              {user?.name?.charAt(0) || '?'}
             </div>
           </button>
 
@@ -485,7 +485,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
                   <div style={{ fontWeight: 700, fontSize: 13 }}>{user?.name}</div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{user?.email}</div>
                   <div className="topbar-user-role-label">
-                    {user?.role.name}
+                    {user?.role?.name || 'User'}
                   </div>
                 </div>
 

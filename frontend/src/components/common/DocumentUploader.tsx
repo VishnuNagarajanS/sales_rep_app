@@ -128,10 +128,12 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({
     <div className="document-uploader-container">
       {/* Category selector */}
       <div className="document-uploader-category-row">
-        <label className="document-uploader-label">
+        <label htmlFor={`doc-uploader-cat-${entityType}-${entityId}`} className="document-uploader-label">
           Category:
         </label>
         <select
+          id={`doc-uploader-cat-${entityType}-${entityId}`}
+          name="documentCategory"
           className="form-select document-uploader-select"
           value={selectedCategory}
           onChange={e => setSelectedCategory(e.target.value)}
@@ -177,6 +179,9 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({
       {/* Hidden file input */}
       <input
         ref={fileInputRef}
+        id={`doc-uploader-file-${entityType}-${entityId}`}
+        name="documentFile"
+        aria-label="Upload document file"
         type="file"
         style={{ display: 'none' }}
         onChange={handleInputChange}

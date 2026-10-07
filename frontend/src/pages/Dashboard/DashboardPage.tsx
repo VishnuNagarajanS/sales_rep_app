@@ -298,7 +298,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
             {tenant?.name} • OPERATIONAL SNAPSHOT
           </div>
           <h1 className="dashboard-banner-title">
-            Welcome back, {user?.name.split(' ')[0]} 👋
+            Welcome back, {user?.name?.split(' ')[0] || user?.name || 'User'} 👋
           </h1>
           <p className="dashboard-banner-subtitle">
             {label.bannerSubtitle}

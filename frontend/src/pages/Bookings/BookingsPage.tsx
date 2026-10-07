@@ -257,9 +257,12 @@ export const BookingsPage: React.FC = () => {
       >
         <form onSubmit={handleCreateBooking} className="booking-form">
           <div className="form-group">
-            <label className="form-label">Buyer Full Name *</label>
+            <label htmlFor="booking-customer-name" className="form-label">Buyer Full Name *</label>
             <input
+              id="booking-customer-name"
+              name="customerName"
               type="text"
+              autoComplete="name"
               className="form-input"
               required
               value={customerName}
@@ -270,9 +273,12 @@ export const BookingsPage: React.FC = () => {
 
           <div className="booking-form-grid-2">
             <div className="form-group">
-              <label className="form-label">Buyer Phone *</label>
+              <label htmlFor="booking-customer-phone" className="form-label">Buyer Phone *</label>
               <input
-                type="text"
+                id="booking-customer-phone"
+                name="customerPhone"
+                type="tel"
+                autoComplete="tel"
                 className="form-input"
                 required
                 value={customerPhone}
@@ -281,8 +287,10 @@ export const BookingsPage: React.FC = () => {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Plot Number *</label>
+              <label htmlFor="booking-plot-number" className="form-label">Plot Number *</label>
               <input
+                id="booking-plot-number"
+                name="plotNumber"
                 type="text"
                 className="form-input"
                 required
@@ -295,8 +303,10 @@ export const BookingsPage: React.FC = () => {
 
           <div className="booking-form-grid-2">
             <div className="form-group">
-              <label className="form-label">Token Advance (₹) *</label>
+              <label htmlFor="booking-amount" className="form-label">Token Advance (₹) *</label>
               <input
+                id="booking-amount"
+                name="bookingAmount"
                 type="number"
                 className="form-input"
                 required
@@ -305,8 +315,10 @@ export const BookingsPage: React.FC = () => {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Total Agreement Value (₹) *</label>
+              <label htmlFor="booking-total-amount" className="form-label">Total Agreement Value (₹) *</label>
               <input
+                id="booking-total-amount"
+                name="totalAmount"
                 type="number"
                 className="form-input"
                 required
@@ -317,8 +329,10 @@ export const BookingsPage: React.FC = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Payment Terms & Milestones</label>
+            <label htmlFor="booking-payment-terms" className="form-label">Payment Terms & Milestones</label>
             <textarea
+              id="booking-payment-terms"
+              name="paymentTerms"
               className="form-textarea"
               rows={2}
               value={paymentTerms}

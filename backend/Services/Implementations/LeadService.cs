@@ -247,7 +247,6 @@ public class LeadService : ILeadService
             List<Followup> companyFollowups = new();
             InvestorKyc? matchingKyc = null;
             GhlDeal? matchingKycDeal = null;
-            IrmPipelineCard? matchingKycCard = null;
             List<GhlDeal> companyDeals = new();
 
             if (hasIdentifier)
@@ -348,7 +347,7 @@ public class LeadService : ILeadService
                 (existingLead.CustomFieldsJson != null && existingLead.CustomFieldsJson.Contains("\"movedToKycAt\""))
             );
 
-            var isContactInKyc = matchingKyc != null || matchingKycDeal != null || matchingKycCard != null || isLeadInKyc;
+            var isContactInKyc = matchingKyc != null || matchingKycDeal != null || isLeadInKyc;
 
             if (isContactInKyc)
             {
@@ -364,21 +363,18 @@ public class LeadService : ILeadService
                     ?? matchingKycDeal?.CustomerName
                     ?? existingCustomer?.Name
                     ?? existingLead?.Name
-                    ?? matchingKycCard?.InvestorName
                     ?? dto.Name;
 
                 var assignedAgentName = matchingKyc?.Irm?.Name
                     ?? matchingKycDeal?.AssignedAgent?.Name
                     ?? existingCustomer?.AssignedAgent?.Name
                     ?? existingLead?.AssignedAgent?.Name
-                    ?? matchingKycCard?.AssignedIrmName
                     ?? "an assigned agent";
 
                 var assignedAgentId = matchingKyc?.IrmId
                     ?? matchingKycDeal?.AssignedAgentId
                     ?? existingCustomer?.AssignedAgentId
                     ?? existingLead?.AssignedAgentId
-                    ?? matchingKycCard?.AssignedIrmId
                     ?? 0;
 
                 var contactType = existingCustomer != null ? "customer" : "lead";

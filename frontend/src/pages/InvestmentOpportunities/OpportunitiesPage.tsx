@@ -906,9 +906,10 @@ export const OpportunitiesPage: React.FC = () => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {/* Title */}
           <div className="form-group">
-            <label className="form-label">Opportunity Title *</label>
+            <label htmlFor="opp-form-title" className="form-label">Opportunity Title *</label>
             <input
               id="opp-form-title"
+              name="title"
               className={`form-input${formErrors.title ? ' is-invalid' : ''}`}
               placeholder="e.g. Warehouse Tranche A — Phase II"
               value={form.title}
@@ -920,9 +921,10 @@ export const OpportunitiesPage: React.FC = () => {
           {/* Row: Investor + Stage */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="form-group">
-              <label className="form-label">Investor *</label>
+              <label htmlFor="opp-form-investor" className="form-label">Investor *</label>
               <select
                 id="opp-form-investor"
+                name="investorId"
                 className={`form-select${formErrors.investorId ? ' is-invalid' : ''}`}
                 value={form.investorId}
                 onChange={e => {
@@ -944,9 +946,10 @@ export const OpportunitiesPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Stage</label>
+              <label htmlFor="opp-form-stage" className="form-label">Stage</label>
               <select
                 id="opp-form-stage"
+                name="stage"
                 className="form-select"
                 value={form.stage}
                 onChange={e =>
@@ -965,9 +968,10 @@ export const OpportunitiesPage: React.FC = () => {
           {/* Row: Target Amount + Committed Amount */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="form-group">
-              <label className="form-label">Target Amount (₹)</label>
+              <label htmlFor="opp-form-target" className="form-label">Target Amount (₹)</label>
               <input
                 id="opp-form-target"
+                name="targetAmount"
                 className="form-input"
                 placeholder="e.g. 5000000"
                 type="number"
@@ -977,9 +981,10 @@ export const OpportunitiesPage: React.FC = () => {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Committed Amount (₹)</label>
+              <label htmlFor="opp-form-committed" className="form-label">Committed Amount (₹)</label>
               <input
                 id="opp-form-committed"
+                name="committedAmount"
                 className="form-input"
                 placeholder="e.g. 2500000"
                 type="number"
@@ -993,7 +998,7 @@ export const OpportunitiesPage: React.FC = () => {
           {/* Row: Assigned Agent + Expected Close Date */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="form-group">
-              <label className="form-label">
+              <label htmlFor="opp-form-agent" className="form-label">
                 Assigned Agent
                 {isExec && (
                   <span
@@ -1010,6 +1015,8 @@ export const OpportunitiesPage: React.FC = () => {
               </label>
               {isExec ? (
                 <input
+                  id="opp-form-agent"
+                  name="assignedAgentName"
                   className="form-input"
                   value={form.assignedAgentName}
                   readOnly
@@ -1022,6 +1029,7 @@ export const OpportunitiesPage: React.FC = () => {
               ) : (
                 <input
                   id="opp-form-agent"
+                  name="assignedAgentName"
                   className="form-input"
                   placeholder="e.g. Ananya Iyer"
                   value={form.assignedAgentName}
@@ -1034,9 +1042,10 @@ export const OpportunitiesPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Expected Close Date</label>
+              <label htmlFor="opp-form-close-date" className="form-label">Expected Close Date</label>
               <input
                 id="opp-form-close-date"
+                name="expectedCloseDate"
                 className="form-input"
                 type="date"
                 value={form.expectedCloseDate}
@@ -1047,9 +1056,10 @@ export const OpportunitiesPage: React.FC = () => {
 
           {/* Notes */}
           <div className="form-group">
-            <label className="form-label">Notes</label>
+            <label htmlFor="opp-form-notes" className="form-label">Notes</label>
             <textarea
               id="opp-form-notes"
+              name="notes"
               className="form-input"
               rows={3}
               placeholder="Deal highlights, key terms, risk summary…"
@@ -1080,9 +1090,10 @@ export const OpportunitiesPage: React.FC = () => {
         }
       >
         <div className="form-group">
-          <label className="form-label">New Stage</label>
+          <label htmlFor="opp-stage-select" className="form-label">New Stage</label>
           <select
             id="opp-stage-select"
+            name="newStage"
             className="form-select"
             value={newStage}
             onChange={e =>
@@ -1283,6 +1294,9 @@ export const OpportunitiesPage: React.FC = () => {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <div style={{ flex: 1, position: 'relative' }}>
                           <input
+                            id="opp-confirmed-amount"
+                            name="confirmedAmount"
+                            aria-label="Confirmed Investment Amount"
                             type="text"
                             readOnly
                             className="form-input"
@@ -1312,6 +1326,9 @@ export const OpportunitiesPage: React.FC = () => {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                           <div style={{ position: 'relative', flex: 1 }}>
                             <input
+                              id="opp-enter-amount"
+                              name="amountInput"
+                              aria-label="Enter investment amount in rupees"
                               type="number"
                               min="0"
                               step="100000"

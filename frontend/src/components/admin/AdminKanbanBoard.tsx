@@ -680,11 +680,13 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({
         <div className="admin-kanban-filter-group">
           {/* 1. Role Filter */}
           <div className="kanban-filter-item">
-            <span className="kanban-filter-label">
+            <label htmlFor="kanban-filter-role" className="kanban-filter-label">
               <Briefcase size={14} color="var(--primary-600)" />
               Role:
-            </span>
+            </label>
             <select
+              id="kanban-filter-role"
+              name="role"
               className="kanban-filter-select"
               value={selectedRole}
               onChange={e => handleRoleChange(e.target.value as KanbanRole)}
@@ -696,11 +698,13 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({
 
           {/* 2. Person Filter (Dynamic based on Role) */}
           <div className="kanban-filter-item">
-            <span className="kanban-filter-label">
+            <label htmlFor="kanban-filter-person" className="kanban-filter-label">
               <User size={14} color="var(--text-muted)" />
               Person:
-            </span>
+            </label>
             <select
+              id="kanban-filter-person"
+              name="person"
               className="kanban-filter-select"
               value={selectedPerson}
               onChange={e => setSelectedPerson(e.target.value)}
@@ -718,11 +722,13 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({
 
           {/* 3. Date Range Filter */}
           <div className="kanban-filter-item">
-            <span className="kanban-filter-label">
+            <label htmlFor="kanban-filter-date-preset" className="kanban-filter-label">
               <Calendar size={14} color="var(--text-muted)" />
               Date Range:
-            </span>
+            </label>
             <select
+              id="kanban-filter-date-preset"
+              name="dateRangePreset"
               className="kanban-filter-select"
               value={dateRangePreset}
               onChange={e => setDateRangePreset(e.target.value as DateRangePreset)}
@@ -739,19 +745,25 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({
           {dateRangePreset === 'custom' && (
             <div className="kanban-date-custom-inputs">
               <input
+                id="kanban-custom-start-date"
+                name="customStartDate"
                 type="date"
                 className="kanban-date-input"
                 value={customStartDate}
                 onChange={e => setCustomStartDate(e.target.value)}
                 title="Start Date"
+                aria-label="Start Date"
               />
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>to</span>
               <input
+                id="kanban-custom-end-date"
+                name="customEndDate"
                 type="date"
                 className="kanban-date-input"
                 value={customEndDate}
                 onChange={e => setCustomEndDate(e.target.value)}
                 title="End Date"
+                aria-label="End Date"
               />
             </div>
           )}

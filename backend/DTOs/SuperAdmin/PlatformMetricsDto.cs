@@ -15,6 +15,9 @@ public class PlatformMetricsDto
     public int TotalCalls { get; set; }
     public int CallsToday { get; set; }
     public int CallsConnected { get; set; }
+    public int CallsFailed { get; set; }
+    public int CallsDurationToday { get; set; }
+    public double CallSuccessRate { get; set; }
     public int TotalLeads { get; set; }
     public int CurrentMonthLeads { get; set; }
     public int PreviousMonthLeads { get; set; }
@@ -22,4 +25,3 @@ public class PlatformMetricsDto
     public int TotalCustomers { get; set; }
     public double SystemHealthScore { get; set; }
 }
-

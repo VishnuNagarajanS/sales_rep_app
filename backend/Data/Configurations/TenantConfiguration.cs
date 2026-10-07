@@ -76,5 +76,8 @@ public class TenantConfiguration : IEntityTypeConfiguration<Tenant>
 
         builder.Property(t => t.CreatedAt)
             .HasDefaultValueSql("NOW()");
+
+        builder.Property(t => t.IsProtected)
+            .HasDefaultValue(false);
     }
 }

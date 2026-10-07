@@ -812,10 +812,13 @@ export const AssignedLeadsPage: React.FC = () => {
       >
         <form onSubmit={handleSaveLead} className="lead-form">
           <div className="form-group">
-            <label className="form-label">Full Name *</label>
+            <label htmlFor="assigned-lead-name" className="form-label">Full Name *</label>
             <input
+              id="assigned-lead-name"
+              name="name"
               type="text"
               required
+              autoComplete="name"
               className="form-input"
               value={formData.name || ''}
               onChange={e => setFormData({ ...formData, name: e.target.value })}
@@ -825,10 +828,13 @@ export const AssignedLeadsPage: React.FC = () => {
 
           <div className="form-grid-2">
             <div className="form-group">
-              <label className="form-label">Phone *</label>
+              <label htmlFor="assigned-lead-phone" className="form-label">Phone *</label>
               <input
+                id="assigned-lead-phone"
+                name="phone"
                 type="tel"
                 required
+                autoComplete="tel"
                 className="form-input"
                 value={formData.phone || ''}
                 onChange={e => setFormData({ ...formData, phone: e.target.value })}
@@ -836,9 +842,12 @@ export const AssignedLeadsPage: React.FC = () => {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Email</label>
+              <label htmlFor="assigned-lead-email" className="form-label">Email</label>
               <input
+                id="assigned-lead-email"
+                name="email"
                 type="email"
+                autoComplete="email"
                 className="form-input"
                 value={formData.email || ''}
                 onChange={e => setFormData({ ...formData, email: e.target.value })}
@@ -849,9 +858,12 @@ export const AssignedLeadsPage: React.FC = () => {
 
           <div className="form-grid-2">
             <div className="form-group">
-              <label className="form-label">Location / City</label>
+              <label htmlFor="assigned-lead-location" className="form-label">Location / City</label>
               <input
+                id="assigned-lead-location"
+                name="location"
                 type="text"
+                autoComplete="address-level2"
                 className="form-input"
                 value={formData.location || ''}
                 onChange={e => setFormData({ ...formData, location: e.target.value })}
@@ -859,8 +871,10 @@ export const AssignedLeadsPage: React.FC = () => {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Lead Source</label>
+              <label htmlFor="assigned-lead-source" className="form-label">Lead Source</label>
               <select
+                id="assigned-lead-source"
+                name="source"
                 className="form-select"
                 value={formData.source || 'Website Inbound'}
                 onChange={e => setFormData({ ...formData, source: e.target.value })}
@@ -876,8 +890,10 @@ export const AssignedLeadsPage: React.FC = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Assigned Agent</label>
+            <label htmlFor="assigned-lead-agent" className="form-label">Assigned Agent</label>
             <select
+              id="assigned-lead-agent"
+              name="assignedAgent"
               className="form-select"
               value={formData.assignedAgentName || ''}
               onChange={handleAgentChange}
@@ -892,8 +908,10 @@ export const AssignedLeadsPage: React.FC = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Notes & Requirements</label>
+            <label htmlFor="assigned-lead-notes" className="form-label">Notes & Requirements</label>
             <textarea
+              id="assigned-lead-notes"
+              name="notes"
               className="form-textarea"
               rows={3}
               value={formData.notes || ''}

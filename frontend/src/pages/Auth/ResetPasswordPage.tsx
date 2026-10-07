@@ -137,11 +137,14 @@ export const ResetPasswordPage: React.FC = () => {
             <form onSubmit={handleSubmit} className="auth-form">
               {/* New Password */}
               <div className="form-group">
-                <label className="form-label auth-form-label">New Password</label>
+                <label htmlFor="reset-new-password" className="form-label auth-form-label">New Password</label>
                 <div className="auth-input-wrapper">
                   <Lock size={15} className="auth-input-icon" />
                   <input
+                    id="reset-new-password"
+                    name="newPassword"
                     type={showPassword ? 'text' : 'password'}
+                    autoComplete="new-password"
                     className="form-input auth-input-field"
                     placeholder="Enter new password (min. 8 characters)"
                     value={newPassword}
@@ -162,11 +165,14 @@ export const ResetPasswordPage: React.FC = () => {
 
               {/* Confirm New Password */}
               <div className="form-group">
-                <label className="form-label auth-form-label">Confirm New Password</label>
+                <label htmlFor="reset-confirm-password" className="form-label auth-form-label">Confirm New Password</label>
                 <div className="auth-input-wrapper">
                   <Lock size={15} className="auth-input-icon" />
                   <input
+                    id="reset-confirm-password"
+                    name="confirmPassword"
                     type={showConfirm ? 'text' : 'password'}
+                    autoComplete="new-password"
                     className="form-input auth-input-field"
                     placeholder="Re-enter new password"
                     value={confirmPassword}

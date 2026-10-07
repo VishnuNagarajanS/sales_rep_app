@@ -582,8 +582,10 @@ export const KycStatusDropdown: React.FC<Props> = ({
               ✓ Mandatory IRM Verification Checklist (Must tick all 5 to approve)
             </h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <label htmlFor={`kyc-checklist-identity-${deal.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                 <input
+                  id={`kyc-checklist-identity-${deal.id}`}
+                  name="checklistIdentity"
                   type="checkbox"
                   checked={checklist.identity}
                   onChange={e => setChecklist(prev => ({ ...prev, identity: e.target.checked }))}
@@ -591,8 +593,10 @@ export const KycStatusDropdown: React.FC<Props> = ({
                 <span>I have verified the customer's Identity (PAN & Aadhaar match)</span>
               </label>
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <label htmlFor={`kyc-checklist-bank-${deal.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                 <input
+                  id={`kyc-checklist-bank-${deal.id}`}
+                  name="checklistBank"
                   type="checkbox"
                   checked={checklist.bank}
                   onChange={e => setChecklist(prev => ({ ...prev, bank: e.target.checked }))}
@@ -600,8 +604,10 @@ export const KycStatusDropdown: React.FC<Props> = ({
                 <span>I have verified the Bank details and account ownership</span>
               </label>
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <label htmlFor={`kyc-checklist-documents-${deal.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                 <input
+                  id={`kyc-checklist-documents-${deal.id}`}
+                  name="checklistDocuments"
                   type="checkbox"
                   checked={checklist.documents}
                   onChange={e => setChecklist(prev => ({ ...prev, documents: e.target.checked }))}
@@ -610,8 +616,10 @@ export const KycStatusDropdown: React.FC<Props> = ({
               </label>
 
               {hasNominees ? (
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <label htmlFor={`kyc-checklist-nominee-${deal.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                   <input
+                    id={`kyc-checklist-nominee-${deal.id}`}
+                    name="checklistNominee"
                     type="checkbox"
                     checked={checklist.nominee}
                     onChange={e => setChecklist(prev => ({ ...prev, nominee: e.target.checked }))}
@@ -625,8 +633,10 @@ export const KycStatusDropdown: React.FC<Props> = ({
                 </div>
               )}
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <label htmlFor={`kyc-checklist-demat-${deal.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                 <input
+                  id={`kyc-checklist-demat-${deal.id}`}
+                  name="checklistDemat"
                   type="checkbox"
                   checked={checklist.demat}
                   onChange={e => setChecklist(prev => ({ ...prev, demat: e.target.checked }))}
@@ -727,10 +737,12 @@ export const KycStatusDropdown: React.FC<Props> = ({
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+            <label htmlFor={`kyc-wrong-comment-${deal.id}`} style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
               Reason / Remarks for Rejection <span style={{ color: '#ef4444' }}>* (Mandatory)</span>
             </label>
             <textarea
+              id={`kyc-wrong-comment-${deal.id}`}
+              name="wrongComment"
               rows={3}
               value={wrongComment}
               onChange={e => setWrongComment(e.target.value)}
@@ -748,13 +760,14 @@ export const KycStatusDropdown: React.FC<Props> = ({
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+            <div style={{ display: 'block', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
               Select Incorrect / Incomplete Sections:
-            </label>
+            </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
               {SECTION_OPTIONS.map(opt => (
                 <label
                   key={opt.id}
+                  htmlFor={`kyc-wrong-section-${deal.id}-${opt.id}`}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -766,6 +779,8 @@ export const KycStatusDropdown: React.FC<Props> = ({
                   }}
                 >
                   <input
+                    id={`kyc-wrong-section-${deal.id}-${opt.id}`}
+                    name={`wrongSection_${opt.id}`}
                     type="checkbox"
                     checked={wrongFlaggedSections.includes(opt.id)}
                     onChange={() => toggleSection(opt.id)}

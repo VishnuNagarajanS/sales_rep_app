@@ -30,7 +30,7 @@ public class PlatformCallConfigController : ControllerBase
     [HttpGet("carrier")]
     public async Task<ActionResult<ApiResponse<CarrierSettingsResponseDto>>> GetCarrierSettings(CancellationToken ct = default)
     {
-        var settings = await _context.CarrierSettings.FirstOrDefaultAsync(ct);
+        var settings = await _context.CarrierSettings.OrderBy(c => c.Id).FirstOrDefaultAsync(ct);
         if (settings == null)
         {
             settings = new CarrierSettings
@@ -87,7 +87,7 @@ public class PlatformCallConfigController : ControllerBase
         [FromBody] UpdateCarrierSettingsRequestDto req,
         CancellationToken ct = default)
     {
-        var settings = await _context.CarrierSettings.FirstOrDefaultAsync(ct);
+        var settings = await _context.CarrierSettings.OrderBy(c => c.Id).FirstOrDefaultAsync(ct);
         if (settings == null)
         {
             settings = new CarrierSettings();
@@ -216,7 +216,7 @@ public class PlatformCallConfigController : ControllerBase
     [HttpPost("carrier/test")]
     public async Task<ActionResult<ApiResponse<CarrierTestResultDto>>> TestCarrierConnection(CancellationToken ct = default)
     {
-        var settings = await _context.CarrierSettings.FirstOrDefaultAsync(ct);
+        var settings = await _context.CarrierSettings.OrderBy(c => c.Id).FirstOrDefaultAsync(ct);
         var host = settings?.PrimaryGatewayHost ?? "sip.trunk.nexusplatform.io";
 
         var sw = Stopwatch.StartNew();
@@ -592,7 +592,7 @@ public class PlatformCallConfigController : ControllerBase
 
         if (did == null && !string.IsNullOrWhiteSpace(targetPhone))
         {
-            did = await _context.TenantDidMappings.Include(d => d.Tenant).FirstOrDefaultAsync(ct);
+            did = await _context.TenantDidMappings.Include(d => d.Tenant).OrderBy(d => d.Id).FirstOrDefaultAsync(ct);
         }
 
         if (did == null)
@@ -600,7 +600,7 @@ public class PlatformCallConfigController : ControllerBase
             return NotFound(ApiResponse<SimulateCallResultDto>.FailureResult("No virtual DID mapping found to simulate."));
         }
 
-        var carrier = await _context.CarrierSettings.FirstOrDefaultAsync(ct);
+        var carrier = await _context.CarrierSettings.OrderBy(c => c.Id).FirstOrDefaultAsync(ct);
         var primaryCarrier = carrier?.PrimaryCarrier ?? "Platform SIP Gateway";
         var gatewayHost = carrier?.PrimaryGatewayHost ?? "sip.trunk.nexusplatform.io";
         var isGatewayOnline = carrier?.Status != "Inactive";

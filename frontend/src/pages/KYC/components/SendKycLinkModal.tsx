@@ -325,7 +325,7 @@ Please click the secure link below to complete your verification:
 
           {/* Delivery Channel Selector */}
           <div className="kyc-link-form-group">
-            <label className="kyc-link-form-label">Delivery Channel</label>
+            <div className="kyc-link-form-label">Delivery Channel</div>
             <div className="kyc-link-channel-chips">
               <button
                 type="button"
@@ -424,6 +424,7 @@ Please click the secure link below to complete your verification:
             <div style={{ position: 'relative' }}>
               <select
                 id="kyc-expiry-select"
+                name="expiry"
                 className="form-select"
                 value={expiry}
                 onChange={e => handleExpiryChange(e.target.value)}

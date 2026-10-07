@@ -702,8 +702,8 @@ export const ProfilePage: React.FC = () => {
   return (
     <div className="profile-page">
       {/* Hidden file inputs */}
-      <input ref={avatarInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarChange} />
-      <input ref={bannerInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleBannerImageChange} />
+      <input id="profile-avatar-input" name="avatarFile" aria-label="Upload Profile Avatar" ref={avatarInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarChange} />
+      <input id="profile-banner-input" name="bannerFile" aria-label="Upload Profile Banner" ref={bannerInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleBannerImageChange} />
 
       {/* ── Hero Banner ── */}
       <div className="profile-hero">
@@ -1123,20 +1123,20 @@ export const ProfilePage: React.FC = () => {
           <div className="profile-card">
             <div className="profile-card-title"><User size={14} /> Personal Information</div>
             <div className="form-group">
-              <label className="form-label">Full Name</label>
-              <input className="form-input" value={editName} onChange={e => setEditName(e.target.value)} placeholder="Your full name" />
+              <label htmlFor="profile-edit-name" className="form-label">Full Name</label>
+              <input id="profile-edit-name" name="name" autoComplete="name" className="form-input" value={editName} onChange={e => setEditName(e.target.value)} placeholder="Your full name" />
             </div>
             <div className="form-group">
-              <label className="form-label">Phone</label>
-              <input className="form-input" value={editPhone} onChange={e => setEditPhone(e.target.value)} placeholder="+91 98000 00000" />
+              <label htmlFor="profile-edit-phone" className="form-label">Phone</label>
+              <input id="profile-edit-phone" name="phone" autoComplete="tel" className="form-input" value={editPhone} onChange={e => setEditPhone(e.target.value)} placeholder="+91 98000 00000" />
             </div>
             <div className="form-group">
-              <label className="form-label">Email <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>(read-only)</span></label>
-              <input className="form-input" value={user?.email || ''} readOnly style={{ opacity: 0.6, cursor: 'not-allowed' }} />
+              <label htmlFor="profile-edit-email" className="form-label">Email <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>(read-only)</span></label>
+              <input id="profile-edit-email" name="email" autoComplete="email" className="form-input" value={user?.email || ''} readOnly style={{ opacity: 0.6, cursor: 'not-allowed' }} />
             </div>
             <div className="form-group">
-              <label className="form-label">Designation</label>
-              <input className="form-input" value={editDesignation} onChange={e => setEditDesignation(e.target.value)} placeholder="e.g. Senior Sales Executive" />
+              <label htmlFor="profile-edit-designation" className="form-label">Designation</label>
+              <input id="profile-edit-designation" name="designation" className="form-input" value={editDesignation} onChange={e => setEditDesignation(e.target.value)} placeholder="e.g. Senior Sales Executive" />
             </div>
             <button
               id="profile-save-personal-btn"
@@ -1153,16 +1153,16 @@ export const ProfilePage: React.FC = () => {
           <div className="profile-card">
             <div className="profile-card-title"><Zap size={14} /> Skills & Languages</div>
             <div className="form-group">
-              <label className="form-label">Skills <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>(comma-separated)</span></label>
-              <input className="form-input" value={editSkills} onChange={e => setEditSkills(e.target.value)} placeholder="e.g. Lead Qualification, Cold Calling" />
+              <label htmlFor="profile-edit-skills" className="form-label">Skills <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>(comma-separated)</span></label>
+              <input id="profile-edit-skills" name="skills" className="form-input" value={editSkills} onChange={e => setEditSkills(e.target.value)} placeholder="e.g. Lead Qualification, Cold Calling" />
             </div>
             <div className="form-group">
-              <label className="form-label">Languages <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>(comma-separated)</span></label>
-              <input className="form-input" value={editLanguages} onChange={e => setEditLanguages(e.target.value)} placeholder="e.g. English, Hindi" />
+              <label htmlFor="profile-edit-languages" className="form-label">Languages <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>(comma-separated)</span></label>
+              <input id="profile-edit-languages" name="languages" className="form-input" value={editLanguages} onChange={e => setEditLanguages(e.target.value)} placeholder="e.g. English, Hindi" />
             </div>
             <div className="form-group">
-              <label className="form-label">Specializations <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>(comma-separated)</span></label>
-              <input className="form-input" value={editSpecializations} onChange={e => setEditSpecializations(e.target.value)} placeholder="e.g. Real Estate, HNW Investors" />
+              <label htmlFor="profile-edit-specializations" className="form-label">Specializations <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>(comma-separated)</span></label>
+              <input id="profile-edit-specializations" name="specializations" className="form-input" value={editSpecializations} onChange={e => setEditSpecializations(e.target.value)} placeholder="e.g. Real Estate, HNW Investors" />
             </div>
             <button
               id="profile-save-skills-btn"
@@ -1179,16 +1179,16 @@ export const ProfilePage: React.FC = () => {
           <div className="profile-card">
             <div className="profile-card-title"><Clock size={14} /> Working Hours & Capacity</div>
             <div className="form-group">
-              <label className="form-label">Shift Start</label>
-              <input className="form-input" type="time" value={editWorkStart} onChange={e => setEditWorkStart(e.target.value)} />
+              <label htmlFor="profile-edit-work-start" className="form-label">Shift Start</label>
+              <input id="profile-edit-work-start" name="workStart" className="form-input" type="time" value={editWorkStart} onChange={e => setEditWorkStart(e.target.value)} />
             </div>
             <div className="form-group">
-              <label className="form-label">Shift End</label>
-              <input className="form-input" type="time" value={editWorkEnd} onChange={e => setEditWorkEnd(e.target.value)} />
+              <label htmlFor="profile-edit-work-end" className="form-label">Shift End</label>
+              <input id="profile-edit-work-end" name="workEnd" className="form-input" type="time" value={editWorkEnd} onChange={e => setEditWorkEnd(e.target.value)} />
             </div>
             <div className="form-group">
-              <label className="form-label">Max Active Leads</label>
-              <input className="form-input" type="number" min="1" max="500" value={editMaxLeads} onChange={e => setEditMaxLeads(e.target.value)} />
+              <label htmlFor="profile-edit-max-leads" className="form-label">Max Active Leads</label>
+              <input id="profile-edit-max-leads" name="maxLeads" className="form-input" type="number" min="1" max="500" value={editMaxLeads} onChange={e => setEditMaxLeads(e.target.value)} />
             </div>
             <button
               id="profile-save-hours-btn"
@@ -1235,6 +1235,9 @@ export const ProfilePage: React.FC = () => {
             <div className="profile-stat-search-wrap">
               <Search size={15} className="profile-stat-search-icon" />
               <input
+                id="profile-stat-search"
+                name="statSearch"
+                aria-label="Search by name or phone"
                 type="text"
                 className="profile-stat-search-input"
                 placeholder="Search by name or phone…"

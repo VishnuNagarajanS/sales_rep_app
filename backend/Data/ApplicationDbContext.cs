@@ -45,6 +45,8 @@ public class ApplicationDbContext : DbContext
     public DbSet<TenantDidMapping> TenantDidMappings => Set<TenantDidMapping>();
     public DbSet<BroadcastAnnouncement> BroadcastAnnouncements => Set<BroadcastAnnouncement>();
     public DbSet<PlatformSetting> PlatformSettings => Set<PlatformSetting>();
+    public DbSet<UserSession> UserSessions => Set<UserSession>();
+    public DbSet<SecurityEvent> SecurityEvents => Set<SecurityEvent>();
 
     // IRM Entities
     public DbSet<Investor> Investors => Set<Investor>();
@@ -221,7 +223,9 @@ public class ApplicationDbContext : DbContext
                 Timezone = "Asia/Kolkata (IST)",
                 Currency = "₹ INR",
                 BusinessHours = "10:00 AM - 06:30 PM IST",
+                SubscriptionPlan = "Wealth Advisory Enterprise Suite",
                 IsActive = true,
+                IsProtected = true,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
             new Tenant
@@ -240,7 +244,9 @@ public class ApplicationDbContext : DbContext
                 Timezone = "Asia/Kolkata (IST)",
                 Currency = "₹ INR",
                 BusinessHours = "10:00 AM - 06:30 PM IST",
+                SubscriptionPlan = "Wealth Advisory Enterprise Suite",
                 IsActive = true,
+                IsProtected = true,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             }
         );
@@ -260,6 +266,7 @@ public class ApplicationDbContext : DbContext
                 RoleId = superAdminRoleId,
                 CompanyId = null,
                 Status = UserStatus.Active,
+                IsProtected = true,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             },
             // 2. GHL Company Admin (Vishnu)

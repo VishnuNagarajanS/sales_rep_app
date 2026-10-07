@@ -18,6 +18,8 @@ export const routeToPath = (route: string, isSuperAdmin: boolean): string => {
         return '/settings';
       case 'admin-audit':
         return '/audit';
+      case 'admin-security':
+        return '/security';
       case 'admin-system':
         return '/system-health';
       default:
@@ -59,6 +61,8 @@ export const pathToRoute = (pathname: string, isSuperAdmin: boolean): string => 
         return 'admin-call-config';
       case '/audit':
         return 'admin-audit';
+      case '/security':
+        return 'admin-security';
       case '/system-health':
       case '/system':
         return 'admin-system';
@@ -137,6 +141,8 @@ import { PlatformFeaturesPage } from './pages/Admin/Features/PlatformFeaturesPag
 import { PlatformCallConfigPage } from './pages/Admin/CallConfig/PlatformCallConfigPage';
 import { PlatformAuditPage } from './pages/Admin/Audit/PlatformAuditPage';
 import { PlatformSystemPage } from './pages/Admin/System/PlatformSystemPage';
+import { PlatformSecurityPage } from './pages/Admin/Security/PlatformSecurityPage';
+import { signalRService } from './services/signalRService';
 
 import { ProtectedRoute } from './components/common/Guards';
 import { Modal } from './components/common/Modal';
@@ -152,6 +158,7 @@ import {
   getCustomers as apiGetCustomers,
 } from './services/ghlApiService';
 import { PERMISSIONS } from './constants/permissions';
+import { useNavigationGuard, useUnsavedChanges } from './context/NavigationGuardContext';
 import './App.css';
 
 export const App: React.FC = () => {
@@ -191,6 +198,49 @@ export const App: React.FC = () => {
     }
   }, [user?.role?.code, currentRoute]);
 
+  // Real-Time SignalR Fleet Event Listener
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    signalRService.startConnection().catch((err) => {
+      console.warn('Real-time SignalR connection failed to initialize:', err);
+    });
+
+    const unsubUserSuspended = signalRService.on('UserSuspended', (data: any) => {
+      console.warn('Real-time event: User suspended', data);
+      if (data?.userId === user?.id) {
+        alert('Your user account has been suspended by an administrator. You will be signed out.');
+        window.location.href = '/login';
+      }
+    });
+
+    const unsubTenantSuspended = signalRService.on('TenantSuspended', (data: any) => {
+      console.warn('Real-time event: Tenant suspended', data);
+      if (data?.tenantId === tenant?.id && !isSuperAdmin) {
+        alert('Your organization has been suspended by the platform administrator. Access is restricted.');
+        window.location.href = '/login';
+      }
+    });
+
+    const unsubMaintenance = signalRService.on('MaintenanceModeToggled', (data: any) => {
+      console.info('Real-time event: Maintenance mode toggled', data);
+      if (data?.isEnabled && !isSuperAdmin) {
+        alert(`Platform Maintenance Notice: ${data.message || 'System maintenance in progress.'}`);
+      }
+    });
+
+    const unsubPlatformUpdated = signalRService.on('PlatformDataUpdated', (data: any) => {
+      window.dispatchEvent(new CustomEvent('nexus_admin_updated', { detail: data }));
+    });
+
+    return () => {
+      unsubUserSuspended();
+      unsubTenantSuspended();
+      unsubMaintenance();
+      unsubPlatformUpdated();
+    };
+  }, [isAuthenticated, user?.id, tenant?.id, isSuperAdmin]);
+
   // Quick Create Modal State
   const [quickCreateType, setQuickCreateType] = useState<
     'lead' | 'followup' | 'deal' | 'visit' | 'consultation' | null
@@ -226,6 +276,12 @@ export const App: React.FC = () => {
   const [navExtraState, setNavExtraState] = useState<any>(() => {
     return window.history.state?.extraState || null;
   });
+
+  const { isDirty, dirtyMessage, confirmNavigation, clearDirty } = useNavigationGuard();
+  const isDirtyRef = useRef(isDirty);
+  isDirtyRef.current = isDirty;
+  const dirtyMessageRef = useRef(dirtyMessage);
+  dirtyMessageRef.current = dirtyMessage;
 
   const currentRouteRef = useRef(currentRoute);
   currentRouteRef.current = currentRoute;
@@ -271,8 +327,6 @@ export const App: React.FC = () => {
 
     const targetPath = routeToPath(activeRoute, isSuperAdmin);
 
-    // CRITICAL: Ensure there is always a deep anti-exit trap buffer in history
-    // so pressing the browser Back button can NEVER escape to the Edge new tab!
     const isArmed = sessionStorage.getItem('nexus_has_armed_trap') === 'true';
     if (!isArmed || !window.history.state || !window.history.state.auth || window.history.state.isTrap || !window.history.state.index) {
       window.history.replaceState(
@@ -316,7 +370,7 @@ export const App: React.FC = () => {
     };
   }, [isAuthenticated]);
 
-  // Handle browser Back / Forward events
+  // Handle browser Back / Forward events & back-forward cache protection
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
       // 1. If unauthenticated, ensure user stays on /login
@@ -327,14 +381,30 @@ export const App: React.FC = () => {
         return;
       }
 
-      // 2. User is authenticated:
+      // 2. If there are unsaved changes, prompt user before navigating
+      if (isDirtyRef.current) {
+        const confirmed = window.confirm(
+          dirtyMessageRef.current || 'You have unsaved changes. Are you sure you want to discard them and navigate away?'
+        );
+        if (!confirmed) {
+          const currentPath = routeToPath(currentRouteRef.current, isSuperAdminRef.current);
+          window.history.pushState(
+            { auth: true, route: currentRouteRef.current, index: currentIndexRef.current },
+            '',
+            currentPath
+          );
+          return;
+        }
+        clearDirty();
+      }
+
+      // 3. User is authenticated:
       const state = event.state;
 
       // Trap Back button if it attempts to leave authenticated application,
       // lands on trap entry, has no state, or returns to /login
       if (!state || !state.auth || state.isTrap || !state.index || state.index <= 0 || window.location.pathname === '/login') {
         const currentPath = routeToPath(currentRouteRef.current, isSuperAdminRef.current);
-        // Immediately replenish the anti-exit trap buffer at current location
         window.history.pushState(
           { auth: true, route: currentRouteRef.current, index: 0, isTrap: true },
           '',
@@ -349,7 +419,7 @@ export const App: React.FC = () => {
         return;
       }
 
-      // 3. Normal in-app internal navigation (Back / Forward between pages)
+      // 4. Normal in-app internal navigation (Back / Forward between pages)
       if (state.route) {
         currentIndexRef.current = state.index || 1;
         setCurrentRoute(state.route);
@@ -358,25 +428,41 @@ export const App: React.FC = () => {
       }
     };
 
+    // Back-Forward Cache (bfcache) revalidation
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        const hasAuth = !!sessionStorage.getItem('nexus_current_user') || !!localStorage.getItem('nexus_current_user');
+        if (!hasAuth && window.location.pathname !== '/login') {
+          window.location.replace('/login');
+        }
+      }
+    };
+
     window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+    window.addEventListener('pageshow', handlePageShow);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('pageshow', handlePageShow);
+    };
+  }, [clearDirty]);
 
-  // Handle route change
+  // Handle route change with Navigation Guard confirmation
   const navigate = (route: string, extraState?: any) => {
-    setCurrentRoute(route);
-    setNavExtraState(extraState || null);
-    sessionStorage.setItem('nexus_current_route', route);
+    confirmNavigation(() => {
+      setCurrentRoute(route);
+      setNavExtraState(extraState || null);
+      sessionStorage.setItem('nexus_current_route', route);
 
-    const nextIndex = (currentIndexRef.current || 1) + 1;
-    currentIndexRef.current = nextIndex;
+      const nextIndex = (currentIndexRef.current || 1) + 1;
+      currentIndexRef.current = nextIndex;
 
-    const targetPath = routeToPath(route, isSuperAdmin);
-    window.history.pushState(
-      { auth: true, route, extraState: extraState || null, index: nextIndex },
-      '',
-      targetPath
-    );
+      const targetPath = routeToPath(route, isSuperAdmin);
+      window.history.pushState(
+        { auth: true, route, extraState: extraState || null, index: nextIndex },
+        '',
+        targetPath
+      );
+    });
   };
 
   useEffect(() => {
@@ -389,8 +475,20 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('nexus_navigate', handleCustomNav);
   }, []);
 
+  const [isSavingQuickCreate, setIsSavingQuickCreate] = useState(false);
+  const [quickCreateError, setQuickCreateError] = useState<string | null>(null);
+
+  const isQuickCreateDirty = quickCreateType !== null && (
+    quickName.trim().length > 0 ||
+    quickPhone.replace('+91 ', '').trim().length > 0 ||
+    quickNotes.trim().length > 0
+  );
+  useUnsavedChanges(isQuickCreateDirty, 'You have unsaved changes in Quick Create. Are you sure you want to discard them?', 'app-quick-create');
+
   const handleOpenQuickCreate = (type: 'lead' | 'followup' | 'deal' | 'visit' | 'consultation') => {
     setQuickCreateType(type);
+    setQuickCreateError(null);
+    setIsSavingQuickCreate(false);
     setQuickName('');
     setQuickPhone('+91 ');
     setQuickEmail('');
@@ -416,137 +514,135 @@ export const App: React.FC = () => {
     setSelectedCustomerId(existingCustomers[0]?.id || '');
   };
 
-  const handleSaveQuickCreate = (e: React.FormEvent) => {
+  const handleSaveQuickCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!quickName) return;
+    if (!quickName.trim() || isSavingQuickCreate) return;
+    setQuickCreateError(null);
+    setIsSavingQuickCreate(true);
 
-    if (quickCreateType === 'lead') {
-      storageService.saveLead({
-        id: `lead-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
-        name: quickName,
-        phone: quickPhone,
-        email: quickEmail,
-        location: quickLocation,
-        source: quickSource,
-        status: 'New',
-        priority: 'Medium',
-        assignedAgentId: user?.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec'),
-        assignedAgentName: user?.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer'),
-        createdAt: new Date().toISOString().split('T')[0],
-        notes: quickNotes,
-        customFields: {
-          assetClass: quickAssetClass,
-          preferredAssetClass: quickAssetClass,
-          investmentCapacity: quickInvestmentCapacity,
-        },
-      });
-
-    } else if (quickCreateType === 'followup') {
-      const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
-      storageService.saveFollowup({
-        id: `flw-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
-        contactId: `contact-${Date.now()}`,
-        contactName: quickName,
-        contactPhone: quickPhone,
-        contactType: 'lead',
-        scheduledAt: combinedDateTime,
-        scheduledDate,
-        scheduledTime,
-        priority: 'High',
-        status: 'Pending',
-        notes: quickNotes,
-        assignedAgentId: user?.id || 'usr-exec',
-        assignedAgentName: user?.name || 'Agent',
-      });
-
-    } else if (quickCreateType === 'consultation') {
-      // Task 1 — Schedule Consultation
-      storageService.saveConsultation({
-        id: `cons-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
-        investorId: consInvestorId || `investor-${Date.now()}`,
-        investorName: consInvestorName,
-        investorPhone: consInvestorPhone,
-        scheduledAt: consSlot.trim(),
-        consultantId: user?.id || 'usr-exec',
-        consultantName: consConsultantName.trim() || user?.name || 'Agent',
-        status: consStatus,
-        agenda: consAgenda.trim(),
-        outcomeNotes: consOutcome.trim() || undefined,
-      });
-
-    } else if (quickCreateType === 'visit') {
-      // Task 2 — Schedule Site Visit
-      const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
-      storageService.saveSiteVisit({
-        id: `visit-${Date.now()}`,
-        companyId: tenant?.id || 't-jamin-02',
-        customerId: `cust-${Date.now()}`,
-        customerName: quickName,
-        customerPhone: quickPhone,
-        projectId: 'proj-01',
-        projectName: 'Greenfield Meadows Phase 2',
-        scheduledAt: combinedDateTime,
-        assignedAgentId: user?.id || 'usr-exec',
-        assignedAgentName: user?.name || 'Agent',
-        status: 'Scheduled',
-        outcomeNotes: quickNotes,
-      });
-
-    } else if (quickCreateType === 'deal') {
-      // Task 4 — Deal linked to real customer
-      let resolvedCustomerId: string;
-      let resolvedCustomerName: string;
-
-      if (dealCustomerMode === 'existing' && selectedCustomerId) {
-        // Link to the chosen existing customer
-        const existing = storageService.getCustomers(tenant?.id)
-          .find(c => c.id === selectedCustomerId);
-        resolvedCustomerId = existing?.id || selectedCustomerId;
-        resolvedCustomerName = existing?.name || 'Customer';
-      } else {
-        // Create a real Customer record first so it shows in Customer 360
-        if (!newCustomerName) return;
-        resolvedCustomerId = `cust-${Date.now()}`;
-        resolvedCustomerName = newCustomerName;
-        storageService.saveCustomer({
-          id: resolvedCustomerId,
+    try {
+      if (quickCreateType === 'lead') {
+        const newLead = {
+          id: `lead-${Date.now()}`,
           companyId: tenant?.id || 't-ghl-01',
-          name: resolvedCustomerName,
-          phone: quickPhone,
-          email: '',
-          status: 'Active',
+          name: quickName.trim(),
+          phone: quickPhone.trim(),
+          email: quickEmail.trim(),
+          location: quickLocation.trim(),
+          source: quickSource,
+          status: 'New' as const,
+          priority: 'Medium' as const,
+          assignedAgentId: user?.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec'),
+          assignedAgentName: user?.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer'),
+          createdAt: new Date().toISOString().split('T')[0],
+          notes: quickNotes,
+          customFields: {
+            assetClass: quickAssetClass,
+            preferredAssetClass: quickAssetClass,
+            investmentCapacity: quickInvestmentCapacity,
+          },
+        };
+        await apiSaveLead(newLead);
+
+      } else if (quickCreateType === 'followup') {
+        const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
+        const newFlw = {
+          id: `flw-${Date.now()}`,
+          companyId: tenant?.id || 't-ghl-01',
+          contactId: `contact-${Date.now()}`,
+          contactName: quickName.trim(),
+          contactPhone: quickPhone.trim(),
+          contactType: 'lead' as const,
+          scheduledAt: combinedDateTime,
+          scheduledDate,
+          scheduledTime,
+          priority: 'High' as const,
+          status: 'Pending' as const,
+          notes: quickNotes,
           assignedAgentId: user?.id || 'usr-exec',
           assignedAgentName: user?.name || 'Agent',
-          location: 'Bengaluru',
-          lastContacted: new Date().toISOString().split('T')[0],
-          openDealsCount: 1,
-          totalValue: 5000000,
+        };
+        await apiSaveFollowup(newFlw);
+
+      } else if (quickCreateType === 'consultation') {
+        // Task 1 — Schedule Consultation
+        const newCons = {
+          id: `cons-${Date.now()}`,
+          companyId: tenant?.id || 't-ghl-01',
+          investorId: consInvestorId || `investor-${Date.now()}`,
+          investorName: consInvestorName || quickName.trim(),
+          investorPhone: consInvestorPhone || quickPhone.trim(),
+          scheduledAt: consSlot.trim(),
+          consultantId: user?.id || 'usr-exec',
+          consultantName: consConsultantName.trim() || user?.name || 'Agent',
+          status: consStatus,
+          agenda: consAgenda.trim(),
+          outcomeNotes: consOutcome.trim() || undefined,
+        };
+        await apiSaveConsultation(newCons);
+
+      } else if (quickCreateType === 'visit') {
+        // Task 2 — Schedule Site Visit
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+
+      } else if (quickCreateType === 'deal') {
+        // Task 4 — Deal linked to real customer
+        let resolvedCustomerId: string;
+        let resolvedCustomerName: string;
+
+        if (dealCustomerMode === 'existing' && selectedCustomerId) {
+          const existing = storageService.getCustomers(tenant?.id).find((c: any) => c.id === selectedCustomerId);
+          resolvedCustomerId = existing?.id || selectedCustomerId;
+          resolvedCustomerName = existing?.name || 'Customer';
+        } else {
+          if (!newCustomerName.trim()) {
+            throw new Error('Please enter customer full name.');
+          }
+          resolvedCustomerId = `cust-${Date.now()}`;
+          resolvedCustomerName = newCustomerName.trim();
+          const newCust = {
+            id: resolvedCustomerId,
+            companyId: tenant?.id || 't-ghl-01',
+            name: resolvedCustomerName,
+            phone: quickPhone.trim(),
+            email: '',
+            status: 'Active' as const,
+            assignedAgentId: user?.id || 'usr-exec',
+            assignedAgentName: user?.name || 'Agent',
+            location: 'Bengaluru',
+            lastContacted: new Date().toISOString().split('T')[0],
+            openDealsCount: 1,
+            totalValue: 5000000,
+            createdAt: new Date().toISOString().split('T')[0],
+            notes: '',
+            customFields: {},
+          };
+          await apiSaveCustomer(newCust);
+        }
+
+        const newDeal = {
+          id: `deal-${Date.now()}`,
+          companyId: tenant?.id || 't-ghl-01',
+          title: quickName.trim(),
+          customerId: resolvedCustomerId,
+          customerName: resolvedCustomerName,
+          stage: 'new',
+          value: 5000000,
+          expectedCloseDate: '30 Days',
+          assignedAgentId: user?.id || 'usr-exec',
+          assignedAgentName: user?.name || 'Agent',
+          notes: quickNotes,
           createdAt: new Date().toISOString().split('T')[0],
-          notes: '',
-          customFields: {},
-        });
+        };
+        await apiSaveDeal(newDeal);
       }
 
-      storageService.saveDeal({
-        id: `deal-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
-        title: quickName,
-        customerId: resolvedCustomerId,
-        customerName: resolvedCustomerName,
-        stage: 'new',
-        value: 5000000,
-        expectedCloseDate: '30 Days',
-        assignedAgentId: user?.id || 'usr-exec',
-        assignedAgentName: user?.name || 'Agent',
-        notes: quickNotes,
-        createdAt: new Date().toISOString().split('T')[0],
-      });
+      setQuickCreateType(null);
+    } catch (err: any) {
+      setQuickCreateError(err.message || 'Failed to save entry. Please verify your connection and try again.');
+    } finally {
+      setIsSavingQuickCreate(false);
     }
-
-    setQuickCreateType(null);
   };
 
   // If unauthenticated
@@ -577,6 +673,8 @@ export const App: React.FC = () => {
           <PlatformAuditPage />
         ) : currentRoute === 'admin-system' ? (
           <PlatformSystemPage />
+        ) : currentRoute === 'admin-security' ? (
+          <PlatformSecurityPage />
         ) : (
           <PlatformDashboardPage onNavigate={navigate} />
         )}
@@ -729,8 +827,10 @@ export const App: React.FC = () => {
             <>
               {/* Full Name */}
               <div className="form-group">
-                <label className="form-label">Full Name *</label>
+                <label htmlFor="quick-lead-name" className="form-label">Full Name *</label>
                 <input
+                  id="quick-lead-name"
+                  name="fullName"
                   type="text"
                   className="form-input"
                   required
@@ -743,8 +843,10 @@ export const App: React.FC = () => {
               {/* Phone + Email */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group">
-                  <label className="form-label">Phone Number *</label>
+                  <label htmlFor="quick-lead-phone" className="form-label">Phone Number *</label>
                   <input
+                    id="quick-lead-phone"
+                    name="phone"
                     type="text"
                     className="form-input"
                     required
@@ -754,9 +856,12 @@ export const App: React.FC = () => {
                   />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Email Address</label>
+                  <label htmlFor="quick-lead-email" className="form-label">Email Address</label>
                   <input
+                    id="quick-lead-email"
+                    name="email"
                     type="email"
+                    autoComplete="email"
                     className="form-input"
                     value={quickEmail}
                     onChange={e => setQuickEmail(e.target.value)}
@@ -768,8 +873,10 @@ export const App: React.FC = () => {
               {/* Location + Source */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group">
-                  <label className="form-label">Location / City</label>
+                  <label htmlFor="quick-lead-location" className="form-label">Location / City</label>
                   <input
+                    id="quick-lead-location"
+                    name="location"
                     type="text"
                     className="form-input"
                     value={quickLocation}
@@ -778,8 +885,10 @@ export const App: React.FC = () => {
                   />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Source</label>
+                  <label htmlFor="quick-lead-source" className="form-label">Source</label>
                   <select
+                    id="quick-lead-source"
+                    name="source"
                     className="form-select"
                     value={quickSource}
                     onChange={e => setQuickSource(e.target.value)}
@@ -801,8 +910,10 @@ export const App: React.FC = () => {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   {user?.role?.code !== 'sales_executive' && (
                     <div className="form-group">
-                      <label className="form-label">Asset Class</label>
+                      <label htmlFor="quick-lead-asset-class" className="form-label">Asset Class</label>
                       <select
+                        id="quick-lead-asset-class"
+                        name="assetClass"
                         className="form-select"
                         value={quickAssetClass}
                         onChange={e => setQuickAssetClass(e.target.value)}
@@ -814,8 +925,10 @@ export const App: React.FC = () => {
                     </div>
                   )}
                   <div className="form-group">
-                    <label className="form-label">Investment Capacity</label>
+                    <label htmlFor="quick-lead-capacity" className="form-label">Investment Capacity</label>
                     <select
+                      id="quick-lead-capacity"
+                      name="investmentCapacity"
                       className="form-select"
                       value={quickInvestmentCapacity}
                       onChange={e => setQuickInvestmentCapacity(e.target.value)}
@@ -837,8 +950,10 @@ export const App: React.FC = () => {
 
               {/* Notes & Requirements */}
               <div className="form-group">
-                <label className="form-label">Notes & Requirements</label>
+                <label htmlFor="quick-lead-notes" className="form-label">Notes & Requirements</label>
                 <textarea
+                  id="quick-lead-notes"
+                  name="notes"
                   className="form-textarea"
                   rows={3}
                   value={quickNotes}
@@ -855,8 +970,10 @@ export const App: React.FC = () => {
                 return (
                   <>
                     <div className="form-group">
-                      <label className="form-label">Investor *</label>
+                      <label htmlFor="quick-cons-investor" className="form-label">Investor *</label>
                       <select
+                        id="quick-cons-investor"
+                        name="investorId"
                         className="form-select"
                         value={consInvestorId}
                         required
@@ -878,8 +995,10 @@ export const App: React.FC = () => {
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                       <div className="form-group">
-                        <label className="form-label">Investor Phone</label>
+                        <label htmlFor="quick-cons-phone" className="form-label">Investor Phone</label>
                         <input
+                          id="quick-cons-phone"
+                          name="investorPhone"
                           type="text"
                           className="form-input"
                           placeholder="+91 98800 00000"
@@ -888,8 +1007,10 @@ export const App: React.FC = () => {
                         />
                       </div>
                       <div className="form-group">
-                        <label className="form-label">Consultation Slot *</label>
+                        <label htmlFor="quick-cons-slot" className="form-label">Consultation Slot *</label>
                         <input
+                          id="quick-cons-slot"
+                          name="consultationSlot"
                           type="text"
                           className="form-input"
                           required
@@ -902,7 +1023,7 @@ export const App: React.FC = () => {
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                       <div className="form-group">
-                        <label className="form-label">
+                        <label htmlFor="quick-cons-advisor" className="form-label">
                           Private Wealth Advisor
                           {user?.role?.code === 'sales_executive' && (
                             <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--text-muted)' }}>
@@ -912,6 +1033,8 @@ export const App: React.FC = () => {
                         </label>
                         {user?.role?.code === 'sales_executive' ? (
                           <input
+                            id="quick-cons-advisor"
+                            name="advisorName"
                             className="form-input"
                             value={consConsultantName}
                             readOnly
@@ -919,6 +1042,8 @@ export const App: React.FC = () => {
                           />
                         ) : (
                           <input
+                            id="quick-cons-advisor"
+                            name="advisorName"
                             className="form-input"
                             placeholder="e.g. Vikram Malhotra"
                             value={consConsultantName}
@@ -927,8 +1052,10 @@ export const App: React.FC = () => {
                         )}
                       </div>
                       <div className="form-group">
-                        <label className="form-label">Status</label>
+                        <label htmlFor="quick-cons-status" className="form-label">Status</label>
                         <select
+                          id="quick-cons-status"
+                          name="status"
                           className="form-select"
                           value={consStatus}
                           onChange={e => setConsStatus(e.target.value as any)}
@@ -941,8 +1068,10 @@ export const App: React.FC = () => {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label">Discussion Agenda & Objectives</label>
+                      <label htmlFor="quick-cons-agenda" className="form-label">Discussion Agenda & Objectives</label>
                       <textarea
+                        id="quick-cons-agenda"
+                        name="agenda"
                         className="form-textarea"
                         rows={3}
                         placeholder="e.g. Commercial REIT yield analysis & pass-through taxation discussion."
@@ -952,8 +1081,10 @@ export const App: React.FC = () => {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label">Outcome Notes & Recommendations</label>
+                      <label htmlFor="quick-cons-outcome" className="form-label">Outcome Notes & Recommendations</label>
                       <textarea
+                        id="quick-cons-outcome"
+                        name="outcome"
                         className="form-textarea"
                         rows={3}
                         placeholder="Record key takeaways, investor interest level, follow-up requirements..."
@@ -973,7 +1104,7 @@ export const App: React.FC = () => {
                 const hasCustomers = tenantCustomers.length > 0;
                 return (
                   <div className="form-group">
-                    <label className="form-label">Link to Customer</label>
+                    <label htmlFor={dealCustomerMode === 'existing' && hasCustomers ? 'quick-deal-customer' : 'quick-deal-new-customer'} className="form-label">Link to Customer</label>
 
                     {/* Segmented toggle — same style as Reports page period toggle */}
                     <div className="app-segmented-toggle">
@@ -998,6 +1129,9 @@ export const App: React.FC = () => {
 
                     {dealCustomerMode === 'existing' && hasCustomers ? (
                       <select
+                        id="quick-deal-customer"
+                        name="customerId"
+                        aria-label="Link to existing customer"
                         className="form-select"
                         value={selectedCustomerId}
                         onChange={e => setSelectedCustomerId(e.target.value)}
@@ -1011,10 +1145,12 @@ export const App: React.FC = () => {
                       </select>
                     ) : (
                       <div>
-                        <label className="form-label app-new-customer-label">
+                        <label htmlFor="quick-deal-new-customer" className="form-label app-new-customer-label">
                           New Customer Name * — a new Customer record will be created
                         </label>
                         <input
+                          id="quick-deal-new-customer"
+                          name="newCustomerName"
                           type="text"
                           className="form-input"
                           required
@@ -1031,8 +1167,10 @@ export const App: React.FC = () => {
               {/* ── Phone (non-lead, non-deal-existing) ── */}
               {!(quickCreateType === 'deal' && dealCustomerMode === 'existing') && (
                 <div className="form-group">
-                  <label className="form-label">Phone Number</label>
+                  <label htmlFor="quick-generic-phone" className="form-label">Phone Number</label>
                   <input
+                    id="quick-generic-phone"
+                    name="phone"
                     type="text"
                     className="form-input"
                     value={quickPhone}
@@ -1045,8 +1183,10 @@ export const App: React.FC = () => {
               {(quickCreateType === 'followup' || quickCreateType === 'visit') && (
                 <div className="app-schedule-grid">
                   <div className="form-group">
-                    <label className="form-label">Scheduled Date *</label>
+                    <label htmlFor="quick-schedule-date" className="form-label">Scheduled Date *</label>
                     <input
+                      id="quick-schedule-date"
+                      name="scheduledDate"
                       type="date"
                       className="form-input"
                       required
@@ -1055,8 +1195,10 @@ export const App: React.FC = () => {
                     />
                   </div>
                   <div className="form-group">
-                    <label className="form-label">Scheduled Time *</label>
+                    <label htmlFor="quick-schedule-time" className="form-label">Scheduled Time *</label>
                     <input
+                      id="quick-schedule-time"
+                      name="scheduledTime"
                       type="time"
                       className="form-input"
                       required
@@ -1069,8 +1211,10 @@ export const App: React.FC = () => {
 
               {/* ── Notes/Agenda (non-lead types) ── */}
               <div className="form-group">
-                <label className="form-label">Quick Notes</label>
+                <label htmlFor="quick-generic-notes" className="form-label">Quick Notes</label>
                 <textarea
+                  id="quick-generic-notes"
+                  name="notes"
                   className="form-textarea"
                   rows={2}
                   value={quickNotes}
@@ -1085,12 +1229,38 @@ export const App: React.FC = () => {
             </>
           )}
 
+          {quickCreateError && (
+            <div
+              className="alert alert-danger"
+              style={{
+                marginBottom: 12,
+                padding: '8px 12px',
+                background: 'rgba(239, 68, 68, 0.12)',
+                color: '#ef4444',
+                borderRadius: 6,
+                fontSize: 13,
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+              }}
+            >
+              {quickCreateError}
+            </div>
+          )}
+
           <div className="app-modal-actions">
-            <button type="button" className="btn btn-secondary" onClick={() => setQuickCreateType(null)}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setQuickCreateType(null)}
+              disabled={isSavingQuickCreate}
+            >
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
-              Save Entry
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={isSavingQuickCreate}
+            >
+              {isSavingQuickCreate ? 'Saving Entry...' : 'Save Entry'}
             </button>
           </div>
         </form>

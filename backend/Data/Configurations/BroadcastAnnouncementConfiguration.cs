@@ -42,5 +42,10 @@ public class BroadcastAnnouncementConfiguration : IEntityTypeConfiguration<Broad
             .WithMany()
             .HasForeignKey(a => a.TargetTenantId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasIndex(a => a.IsActive)
+            .HasDatabaseName("ux_broadcast_announcements_single_active_global")
+            .IsUnique()
+            .HasFilter("\"IsActive\" = TRUE AND \"TargetTenantId\" IS NULL");
     }
 }

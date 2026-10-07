@@ -52,7 +52,10 @@ public class AuthController : ControllerBase
             return BadRequest(ApiResponse<LoginResponseDto>.FailureResult("Validation failed", errors));
         }
 
-        var result = await _authService.LoginAsync(request, cancellationToken);
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? Request.Headers["X-Forwarded-For"].FirstOrDefault() ?? "127.0.0.1";
+        var userAgent = Request.Headers["User-Agent"].ToString();
+
+        var result = await _authService.LoginAsync(request, ip, userAgent, cancellationToken);
 
         if (!result.Success)
         {
@@ -114,7 +117,41 @@ public class AuthController : ControllerBase
         return result.Success ? Ok(result) : BadRequest(result);
     }
 
+    [HttpPost("two-factor/verify")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<LoginResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<LoginResponseDto>), StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> VerifyTwoFactor([FromBody] backend.DTOs.SuperAdmin.TwoFactorLoginVerifyRequestDto request, CancellationToken cancellationToken)
+    {
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? Request.Headers["X-Forwarded-For"].FirstOrDefault() ?? "127.0.0.1";
+        var userAgent = Request.Headers["User-Agent"].ToString();
+        var result = await _authService.VerifyTwoFactorLoginAsync(request, ip, userAgent, cancellationToken);
+        if (!result.Success)
+        {
+            return Unauthorized(result);
+        }
+        return Ok(result);
+    }
+
+    [HttpPost("change-password")]
+    [Authorize]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ChangePassword([FromBody] backend.DTOs.SuperAdmin.ChangePasswordRequestDto request, CancellationToken cancellationToken)
+    {
+        var result = await _authService.ChangePasswordAsync(request, cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
     [HttpGet("me")]
     [Authorize]
-    public async Task<IActionResult> Me(CancellationToken cancellationToken) => Ok(await _authService.GetCurrentUserAsync(cancellationToken));
+    public async Task<IActionResult> Me(CancellationToken cancellationToken)
+    {
+        var result = await _authService.GetCurrentUserAsync(cancellationToken);
+        if (!result.Success)
+        {
+            return Unauthorized(result);
+        }
+        return Ok(result);
+    }
 }

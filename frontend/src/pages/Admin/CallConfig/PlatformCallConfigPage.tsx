@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { TenantDidMapping, PlatformCarrierSettings, Tenant } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
+import { useUnsavedChanges } from '../../../context/NavigationGuardContext';
 import { Modal } from '../../../components/common/Modal';
 import './PlatformCallConfigPage.css';
 
@@ -52,6 +53,15 @@ export const PlatformCallConfigPage: React.FC = () => {
   const [didEnableRecording, setDidEnableRecording] = useState(true);
   const [didEnableAiWhisper, setDidEnableAiWhisper] = useState(true);
   const [didChannels, setDidChannels] = useState(8);
+  const [isSavingDid, setIsSavingDid] = useState(false);
+  const [isActionInProgress, setIsActionInProgress] = useState(false);
+
+  // Unsaved changes check
+  useUnsavedChanges(
+    isDidModalOpen && didPhone.trim() !== '',
+    'You have unsaved changes in virtual DID allocation. Are you sure you want to leave?',
+    'callconfig-page'
+  );
 
   // Carrier Test state
   const [isTestingCarrier, setIsTestingCarrier] = useState(false);
@@ -126,7 +136,8 @@ export const PlatformCallConfigPage: React.FC = () => {
   };
 
   const handleSaveDid = async () => {
-    if (!didPhone.trim()) return;
+    if (!didPhone.trim() || isSavingDid) return;
+    setIsSavingDid(true);
 
     try {
       if (editingDidId) {
@@ -159,17 +170,23 @@ export const PlatformCallConfigPage: React.FC = () => {
       setIsDidModalOpen(false);
     } catch (err: any) {
       alert(err.message || 'Failed to save virtual DID');
+    } finally {
+      setIsSavingDid(false);
     }
   };
 
   const handleDeleteDid = async (did: TenantDidMapping) => {
+    if (isActionInProgress) return;
     if (confirm(`Release virtual DID number "${did.phoneNumber}" back to reserve pool?`)) {
+      setIsActionInProgress(true);
       try {
         await superAdminService.deleteDidMappingApi(did.id);
         setDids(prev => prev.filter(d => d.id !== did.id));
         showSuccess(`DID ${did.phoneNumber} released.`);
       } catch (err: any) {
         alert(err.message || 'Failed to release DID');
+      } finally {
+        setIsActionInProgress(false);
       }
     }
   };
@@ -293,7 +310,7 @@ export const PlatformCallConfigPage: React.FC = () => {
                 <tr>
                   <td colSpan={7} style={{ textAlign: 'center', padding: '32px', color: '#94a3b8' }}>
                     <Activity size={16} className="animate-spin" style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: '8px' }} />
-                    Loading virtual DIDs from database...
+                    Loading virtual DIDs...
                   </td>
                 </tr>
               ) : dids.length === 0 ? (
@@ -304,71 +321,72 @@ export const PlatformCallConfigPage: React.FC = () => {
                 </tr>
               ) : (
                 dids.map(d => (
-                <tr key={d.id} className="did-row">
-                  <td>
-                    <div className="did-phone-cell">
-                      <PhoneCall size={14} color="#38bdf8" />
-                      <code className="did-number-text">{d.phoneNumber}</code>
-                    </div>
-                  </td>
+                  <tr key={d.id} className="did-row">
+                    <td>
+                      <div className="did-phone-cell">
+                        <PhoneCall size={14} color="#38bdf8" />
+                        <code className="did-number-text">{d.phoneNumber}</code>
+                      </div>
+                    </td>
 
-                  <td>
-                    <div className="did-tenant-cell">
-                      <Building2 size={13} color="#94a3b8" />
-                      <span className="did-tenant-name">{d.tenantName}</span>
-                    </div>
-                  </td>
+                    <td>
+                      <div className="did-tenant-cell">
+                        <Building2 size={13} color="#94a3b8" />
+                        <span className="did-tenant-name">{d.tenantName}</span>
+                      </div>
+                    </td>
 
-                  <td>
-                    <div className="did-queue-cell">
-                      <span className="routing-strategy-tag">{d.routingStrategy}</span>
-                      <span className="queue-name-sub">{d.queueName}</span>
-                    </div>
-                  </td>
+                    <td>
+                      <div className="did-queue-cell">
+                        <span className="routing-strategy-tag">{d.routingStrategy}</span>
+                        <span className="queue-name-sub">{d.queueName}</span>
+                      </div>
+                    </td>
 
-                  <td>
-                    <span className="channels-pill">{d.channelsCount} SIP Trunks</span>
-                  </td>
+                    <td>
+                      <span className="channels-pill">{d.channelsCount} SIP Trunks</span>
+                    </td>
 
-                  <td>
-                    <div className="ai-features-cell">
-                      {d.enableAiWhisper && (
-                        <span className="ai-tag">
-                          <Sparkles size={11} /> Whisper AI
-                        </span>
-                      )}
-                      {d.enableRecording && <span className="rec-tag">● Rec</span>}
-                    </div>
-                  </td>
+                    <td>
+                      <div className="ai-features-cell">
+                        {d.enableAiWhisper && (
+                          <span className="ai-tag">
+                            <Sparkles size={11} /> Whisper AI
+                          </span>
+                        )}
+                        {d.enableRecording && <span className="rec-tag">● Rec</span>}
+                      </div>
+                    </td>
 
-                  <td>
-                    <span className={`did-status-pill ${d.status.toLowerCase()}`}>
-                      ● {d.status}
-                    </span>
-                  </td>
+                    <td>
+                      <span className={`did-status-pill ${d.status.toLowerCase()}`}>
+                        ● {d.status}
+                      </span>
+                    </td>
 
-                  <td style={{ textAlign: 'right' }}>
-                    <div className="did-actions-group">
-                      <button
-                        className="action-btn"
-                        title="Edit DID Configuration"
-                        onClick={() => handleOpenEditDid(d)}
-                      >
-                        <Edit2 size={13} />
-                      </button>
-                      <button
-                        className="action-btn text-danger"
-                        title="Release Number"
-                        onClick={() => handleDeleteDid(d)}
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
+                    <td style={{ textAlign: 'right' }}>
+                      <div className="did-actions-group">
+                        <button
+                          className="action-btn"
+                          title="Edit DID Configuration"
+                          onClick={() => handleOpenEditDid(d)}
+                        >
+                          <Edit2 size={13} />
+                        </button>
+                        <button
+                          className="action-btn text-danger"
+                          title="Release Number"
+                          disabled={isActionInProgress}
+                          onClick={() => handleDeleteDid(d)}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
           </table>
         </div>
       </div>
@@ -412,8 +430,10 @@ export const PlatformCallConfigPage: React.FC = () => {
 
           <div className="carrier-form-grid">
             <div className="form-group">
-              <label className="form-label">Primary SIP Carrier Gateway</label>
+              <label htmlFor="carrier-primary" className="form-label">Primary SIP Carrier Gateway</label>
               <input
+                id="carrier-primary"
+                name="primaryCarrier"
                 type="text"
                 className="form-control"
                 value={carrierSettings.primaryCarrier}
@@ -424,8 +444,10 @@ export const PlatformCallConfigPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Failover Backup Gateway</label>
+              <label htmlFor="carrier-secondary" className="form-label">Failover Backup Gateway</label>
               <input
+                id="carrier-secondary"
+                name="secondaryCarrier"
                 type="text"
                 className="form-control"
                 value={carrierSettings.secondaryCarrier}
@@ -436,8 +458,10 @@ export const PlatformCallConfigPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">SIP Realm & Domain</label>
+              <label htmlFor="carrier-sip-realm" className="form-label">SIP Realm & Domain</label>
               <input
+                id="carrier-sip-realm"
+                name="sipRealm"
                 type="text"
                 className="form-control font-mono"
                 value={carrierSettings.sipRealm}
@@ -448,8 +472,10 @@ export const PlatformCallConfigPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">WebRTC Signaling Gateway</label>
+              <label htmlFor="carrier-webrtc-gateway" className="form-label">WebRTC Signaling Gateway</label>
               <input
+                id="carrier-webrtc-gateway"
+                name="webrtcGatewayUrl"
                 type="text"
                 className="form-control font-mono"
                 value={carrierSettings.webrtcGatewayUrl}
@@ -460,8 +486,10 @@ export const PlatformCallConfigPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Cloud Call Recording Retention (Days)</label>
+              <label htmlFor="carrier-recording-retention" className="form-label">Cloud Call Recording Retention (Days)</label>
               <input
+                id="carrier-recording-retention"
+                name="recordingRetentionDays"
                 type="number"
                 className="form-control"
                 value={carrierSettings.recordingRetentionDays}
@@ -475,8 +503,10 @@ export const PlatformCallConfigPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Speech-to-Text Transcription AI Model</label>
+              <label htmlFor="carrier-whisper-model" className="form-label">Speech-to-Text Transcription AI Model</label>
               <input
+                id="carrier-whisper-model"
+                name="whisperAiModel"
                 type="text"
                 className="form-control"
                 value={carrierSettings.whisperAiModel}
@@ -511,8 +541,10 @@ export const PlatformCallConfigPage: React.FC = () => {
 
           <div className="simulator-controls">
             <div className="form-group">
-              <label className="form-label">Select Inbound DID to Test</label>
+              <label htmlFor="simulator-did" className="form-label">Select Inbound DID to Test</label>
               <select
+                id="simulator-did"
+                name="simulatedDid"
                 className="form-control"
                 value={simulatedDid}
                 onChange={e => setSimulatedDid(e.target.value)}
@@ -574,8 +606,10 @@ export const PlatformCallConfigPage: React.FC = () => {
         >
           <div className="did-modal-content">
             <div className="form-group">
-              <label className="form-label required">Inbound DID Number (E.164 Format)</label>
+              <label htmlFor="did-phone-number" className="form-label required">Inbound DID Number (E.164 Format)</label>
               <input
+                id="did-phone-number"
+                name="phoneNumber"
                 type="text"
                 className="form-control font-mono"
                 placeholder="+91 80 4700 8004"
@@ -585,8 +619,10 @@ export const PlatformCallConfigPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Assign to Tenant Organization</label>
+              <label htmlFor="did-tenant-id" className="form-label">Assign to Tenant Organization</label>
               <select
+                id="did-tenant-id"
+                name="tenantId"
                 className="form-control"
                 value={didTenantId}
                 onChange={e => setDidTenantId(e.target.value)}
@@ -602,8 +638,10 @@ export const PlatformCallConfigPage: React.FC = () => {
 
             <div className="form-grid-two">
               <div className="form-group">
-                <label className="form-label">Routing Strategy</label>
+                <label htmlFor="did-routing-strategy" className="form-label">Routing Strategy</label>
                 <select
+                  id="did-routing-strategy"
+                  name="routingStrategy"
                   className="form-control"
                   value={didRoutingStrategy}
                   onChange={e => setDidRoutingStrategy(e.target.value as any)}
@@ -616,8 +654,10 @@ export const PlatformCallConfigPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Concurrent SIP Trunks</label>
+                <label htmlFor="did-concurrent-channels" className="form-label">Concurrent SIP Trunks</label>
                 <input
+                  id="did-concurrent-channels"
+                  name="channels"
                   type="number"
                   className="form-control"
                   value={didChannels}
@@ -627,8 +667,10 @@ export const PlatformCallConfigPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Queue Name</label>
+              <label htmlFor="did-queue-name" className="form-label">Queue Name</label>
               <input
+                id="did-queue-name"
+                name="queueName"
                 type="text"
                 className="form-control"
                 value={didQueueName}
@@ -637,18 +679,22 @@ export const PlatformCallConfigPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Telephony Features</label>
+              <div className="form-label">Telephony Features</div>
               <div className="checkbox-stack">
-                <label className="checkbox-row">
+                <label htmlFor="did-enable-recording" className="checkbox-row">
                   <input
+                    id="did-enable-recording"
+                    name="enableRecording"
                     type="checkbox"
                     checked={didEnableRecording}
                     onChange={e => setDidEnableRecording(e.target.checked)}
                   />
                   <span>Enable Cloud Voice Call Recording</span>
                 </label>
-                <label className="checkbox-row">
+                <label htmlFor="did-enable-ai-whisper" className="checkbox-row">
                   <input
+                    id="did-enable-ai-whisper"
+                    name="enableAiWhisper"
                     type="checkbox"
                     checked={didEnableAiWhisper}
                     onChange={e => setDidEnableAiWhisper(e.target.checked)}
@@ -659,11 +705,11 @@ export const PlatformCallConfigPage: React.FC = () => {
             </div>
 
             <div className="modal-actions-footer">
-              <button className="btn btn-ghost" onClick={() => setIsDidModalOpen(false)}>
+              <button className="btn btn-ghost" disabled={isSavingDid} onClick={() => setIsDidModalOpen(false)}>
                 Cancel
               </button>
-              <button className="btn btn-primary" onClick={handleSaveDid}>
-                {editingDidId ? 'Save Configuration' : 'Allocate DID'}
+              <button className="btn btn-primary" disabled={isSavingDid || !didPhone.trim()} onClick={handleSaveDid}>
+                {isSavingDid ? 'Saving...' : (editingDidId ? 'Save Configuration' : 'Allocate DID')}
               </button>
             </div>
           </div>

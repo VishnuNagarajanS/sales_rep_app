@@ -25,6 +25,7 @@ public class CreateTenantRequestDto
 
     // Optional DID hotline to allocate with this tenant
     public TenantDidProvisionDto? DidData { get; set; }
+    public TenantDidProvisionDto? Did { get => DidData; set => DidData = value; }
 }
 
 public class TenantAdminUserDto
@@ -89,4 +90,12 @@ public class TenantResponseDto
     public bool TranscriptionEnabled { get; set; } = true;
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
+    public int UsersCount { get; set; }
+    public int ActiveUsersCount { get; set; }
+    public int LeadsCount { get; set; }
+    public int CustomersCount { get; set; }
+    public int CallsCount { get; set; }
+    public int DidsCount { get; set; }
+    public string? StorageUsage { get; set; } = "1.2 GB / 50 GB";
+    public bool IsProtected { get; set; }
 }

@@ -417,8 +417,12 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
 
               {crossActive && canVerify && (
                 <div className="kvm-reason-row">
-                  <label className="kvm-reason-label">Reason / what is wrong *</label>
+                  <label htmlFor={`kvm-reason-${deal.id}-${key}`} className="kvm-reason-label">
+                    Reason / what is wrong *
+                  </label>
                   <textarea
+                    id={`kvm-reason-${deal.id}-${key}`}
+                    name={`reason_${key}`}
                     className={'kvm-reason-input' + (!s.reason.trim() ? ' kvm-reason-input--error' : '')}
                     placeholder="Describe what is incorrect in this section…"
                     value={s.reason}

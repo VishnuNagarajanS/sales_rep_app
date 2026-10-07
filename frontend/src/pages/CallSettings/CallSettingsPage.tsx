@@ -94,6 +94,7 @@ const SettingToggle: React.FC<{
     >
       <input
         id={id}
+        name={id}
         type="checkbox"
         checked={checked}
         onChange={e => onChange(e.target.checked)}
@@ -283,7 +284,8 @@ export const CallSettingsPage: React.FC = () => {
             {options.map(opt => {
               const isSelected = position === opt.value;
               return (
-                <div
+                <label
+                  htmlFor={`pos-${opt.value}`}
                   key={opt.value}
                   role="button"
                   tabIndex={0}
@@ -375,7 +377,7 @@ export const CallSettingsPage: React.FC = () => {
                   >
                     {opt.icon}
                   </div>
-                </div>
+                </label>
               );
             })}
           </div>
@@ -633,14 +635,17 @@ export const CallSettingsPage: React.FC = () => {
               <Clock size={18} />
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+              <label htmlFor="settings-default-followup-time" style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', display: 'block' }}>
                 Default Follow-up Time
-              </div>
+              </label>
               <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3, marginBottom: 12 }}>
                 Pre-fills the time field in Quick Create follow-ups and the post-call Disposition Modal.
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <input
+                  id="settings-default-followup-time"
+                  name="defaultFollowupTime"
+                  aria-label="Default Follow-up Time"
                   type="time"
                   className="form-input"
                   style={{ width: 140 }}

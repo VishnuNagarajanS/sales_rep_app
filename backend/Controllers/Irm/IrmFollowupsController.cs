@@ -69,7 +69,7 @@ public class IrmFollowupsController : ControllerBase
         if (role == "irm" || role == "sales_executive")
         {
             var existing = await _followupService.GetAllAsync(companyId, userId, null, ct);
-            if (!existing.Success || !existing.Data.Any(f => f.Id == id))
+            if (!existing.Success || existing.Data == null || !existing.Data.Any(f => f.Id == id))
             {
                 return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<FollowupDto>.ErrorResponse("Access denied: You can only complete follow-ups assigned to you."));
             }
@@ -98,7 +98,7 @@ public class IrmFollowupsController : ControllerBase
         if (role == "irm" || role == "sales_executive")
         {
             var existing = await _followupService.GetAllAsync(companyId, userId, null, ct);
-            if (!existing.Success || !existing.Data.Any(f => f.Id == id))
+            if (!existing.Success || existing.Data == null || !existing.Data.Any(f => f.Id == id))
             {
                 return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<FollowupDto>.ErrorResponse("Access denied: You can only reschedule follow-ups assigned to you."));
             }

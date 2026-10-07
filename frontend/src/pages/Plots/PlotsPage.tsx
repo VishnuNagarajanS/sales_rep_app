@@ -148,8 +148,10 @@ export const PlotsPage: React.FC = () => {
 
         {/* Project Selector */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>Project:</span>
+          <label htmlFor="plots-project-selector" style={{ fontSize: 13, fontWeight: 600 }}>Project:</label>
           <select
+            id="plots-project-selector"
+            name="selectedProject"
             className="form-select plots-project-selector"
             value={selectedProject}
             onChange={e => setSelectedProject(e.target.value)}
@@ -341,9 +343,12 @@ export const PlotsPage: React.FC = () => {
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="form-group">
-            <label className="form-label">Client / Prospect Name *</label>
+            <label htmlFor="plot-hold-customer" className="form-label">Client / Prospect Name *</label>
             <input
+              id="plot-hold-customer"
+              name="holdCustomer"
               type="text"
+              autoComplete="name"
               className="form-input"
               required
               value={holdCustomer}
@@ -353,8 +358,10 @@ export const PlotsPage: React.FC = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Hold Validity Duration</label>
+            <label htmlFor="plot-hold-days" className="form-label">Hold Validity Duration</label>
             <select
+              id="plot-hold-days"
+              name="holdDays"
               className="form-select"
               value={holdDays}
               onChange={e => setHoldDays(e.target.value)}

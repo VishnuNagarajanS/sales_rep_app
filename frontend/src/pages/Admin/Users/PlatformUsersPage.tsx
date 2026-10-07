@@ -22,6 +22,7 @@ import { superAdminService } from '../../../services/superAdminService';
 import { StatusChip } from '../../../components/common/StatusChip';
 import { Modal } from '../../../components/common/Modal';
 import { Drawer } from '../../../components/common/Drawer';
+import { useUnsavedChanges } from '../../../context/NavigationGuardContext';
 import './PlatformUsersPage.css';
 
 export const PlatformUsersPage: React.FC = () => {
@@ -34,6 +35,9 @@ export const PlatformUsersPage: React.FC = () => {
   const [selectedCompanyFilter, setSelectedCompanyFilter] = useState('all');
   const [selectedRoleFilter, setSelectedRoleFilter] = useState('all');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalUsersCount, setTotalUsersCount] = useState(0);
 
   // Provision User Modal state (Super Admin can create ONLY Company Admins)
   const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false);
@@ -56,30 +60,55 @@ export const PlatformUsersPage: React.FC = () => {
   const [editCompanyId, setEditCompanyId] = useState('');
   const [editRoleCode, setEditRoleCode] = useState('');
   const [editDesignation, setEditDesignation] = useState('');
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+  const [isActionInProgress, setIsActionInProgress] = useState<string | null>(null);
 
   // Password Reset Modal state
   const [resettingUser, setResettingUser] = useState<User | null>(null);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [generatedTempPassword, setGeneratedTempPassword] = useState('');
   const [hasCopiedPassword, setHasCopiedPassword] = useState(false);
+  const [isResettingPwd, setIsResettingPwd] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
 
   // Success Feedback
   const [feedbackMsg, setFeedbackMsg] = useState('');
 
-  const loadData = async () => {
+  // Unsaved changes tracking
+  const isProvisionDirty = isProvisionModalOpen && (newName.trim().length > 0 || newEmail.trim().length > 0);
+  const isEditDirty = isEditDrawerOpen && editingUser !== null && (
+    editName !== editingUser.name ||
+    editEmail !== editingUser.email ||
+    editPhone !== editingUser.phone ||
+    editDesignation !== (editingUser.designation || '') ||
+    editRoleCode !== editingUser.role.code ||
+    (editCompanyId === 'global' ? Boolean(editingUser.companyId) : editCompanyId !== (editingUser.companyId || ''))
+  );
+  useUnsavedChanges(isProvisionDirty || isEditDirty, 'You have unsaved changes in user details. Are you sure you want to discard them?');
+
+  const loadData = async (pageToLoad: number = currentPage) => {
     setIsLoading(true);
     setLoadError(null);
     try {
-      const [tList, rMap, uList] = await Promise.all([
+      const [tList, rMap, pagedRes] = await Promise.all([
         superAdminService.fetchTenantsFromApi(),
         superAdminService.fetchRolesFromApi(),
-        superAdminService.fetchUsersFromApi(),
+        superAdminService.fetchUsersPagedFromApi({
+          companyId: selectedCompanyFilter,
+          roleCode: selectedRoleFilter,
+          status: selectedStatusFilter,
+          search: searchQuery,
+          page: pageToLoad,
+          pageSize: 25,
+        }),
       ]);
       setTenants(tList || []);
       setRoles(rMap || {});
-      setUsers(uList || []);
+      setUsers(pagedRes.items || []);
+      setTotalUsersCount(pagedRes.totalCount ?? 0);
+      setTotalPages(pagedRes.totalPages ?? 1);
+      setCurrentPage(pageToLoad);
     } catch (err: any) {
       console.error('Failed to load user directory from API:', err);
       setLoadError(err.message || 'Failed to load user directory from database.');
@@ -89,21 +118,19 @@ export const PlatformUsersPage: React.FC = () => {
   };
 
   const applyFilters = async () => {
-    await loadData();
+    await loadData(1);
   };
 
   useEffect(() => {
-    loadData();
+    loadData(1);
     const handleUpdate = () => {
-      loadData();
+      loadData(currentPage);
     };
     window.addEventListener('nexus_admin_updated', handleUpdate);
-    window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => {
       window.removeEventListener('nexus_admin_updated', handleUpdate);
-      window.removeEventListener('nexus_storage_updated', handleUpdate);
     };
-  }, []);
+  }, [selectedCompanyFilter, selectedRoleFilter, selectedStatusFilter]);
 
   const showFeedback = (msg: string) => {
     setFeedbackMsg(msg);
@@ -133,7 +160,7 @@ export const PlatformUsersPage: React.FC = () => {
 
     setIsSubmitting(true);
     try {
-      await superAdminService.createUserApi({
+      const createdUser = await superAdminService.createUserApi({
         name: newName.trim(),
         email: newEmail.trim(),
         phone: newPhone.trim(),
@@ -149,6 +176,14 @@ export const PlatformUsersPage: React.FC = () => {
       setNewName('');
       setNewEmail('');
       setNewEmployeeCode('');
+
+      if (createdUser && createdUser.temporaryPassword) {
+        setResettingUser(createdUser);
+        setGeneratedTempPassword(createdUser.temporaryPassword);
+        setHasCopiedPassword(false);
+        setIsResetModalOpen(true);
+      }
+
       showFeedback(`Company Admin account "${newName.trim()}" provisioned successfully in database.`);
       await loadData();
     } catch (err: any) {
@@ -171,35 +206,50 @@ export const PlatformUsersPage: React.FC = () => {
   };
 
   const handleSaveEditUser = async () => {
-    if (!editingUser) return;
+    if (!editingUser || isSubmittingEdit) return;
 
-    const isGlobal = editCompanyId === 'global';
-    const targetRole = roles[editRoleCode] || editingUser.role;
-    const tenantObj = isGlobal ? undefined : tenants.find(t => t.id === editCompanyId);
+    setIsSubmittingEdit(true);
+    try {
+      const isGlobal = editCompanyId === 'global';
+      const targetRole = roles[editRoleCode] || editingUser.role;
+      const tenantObj = isGlobal ? undefined : tenants.find(t => t.id === editCompanyId);
 
-    await superAdminService.updateUserApi(editingUser.id, {
-      name: editName,
-      email: editEmail,
-      phone: editPhone,
-      role: targetRole,
-      companyId: isGlobal ? undefined : editCompanyId,
-      companyName: isGlobal ? 'Platform Console (Global)' : tenantObj?.name,
-      companySlug: isGlobal ? undefined : tenantObj?.slug,
-      designation: editDesignation,
-    });
+      await superAdminService.updateUserApi(editingUser.id, {
+        name: editName.trim(),
+        email: editEmail.trim(),
+        phone: editPhone.trim(),
+        role: targetRole,
+        companyId: isGlobal ? undefined : editCompanyId,
+        companyName: isGlobal ? 'Platform Console (Global)' : tenantObj?.name,
+        companySlug: isGlobal ? undefined : tenantObj?.slug,
+        designation: editDesignation.trim(),
+      });
 
-    setIsEditDrawerOpen(false);
-    showFeedback(`User profile for "${editName}" updated in database.`);
-    await applyFilters();
+      setIsEditDrawerOpen(false);
+      showFeedback(`User profile for "${editName}" updated in database.`);
+      await applyFilters();
+    } catch (err: any) {
+      alert(err.message || 'Failed to update user profile in database.');
+    } finally {
+      setIsSubmittingEdit(false);
+    }
   };
 
   // Handle Password Reset
   const openResetModal = async (u: User) => {
-    setResettingUser(u);
-    const result = await superAdminService.resetUserPasswordApi(u.id);
-    setGeneratedTempPassword(result.tempPassword || 'Nexus#2026!');
-    setHasCopiedPassword(false);
-    setIsResetModalOpen(true);
+    if (isResettingPwd) return;
+    setIsResettingPwd(true);
+    try {
+      setResettingUser(u);
+      const result = await superAdminService.resetUserPasswordApi(u.id);
+      setGeneratedTempPassword(result.tempPassword || 'Nexus#2026!');
+      setHasCopiedPassword(false);
+      setIsResetModalOpen(true);
+    } catch (err: any) {
+      alert(err.message || 'Failed to reset password.');
+    } finally {
+      setIsResettingPwd(false);
+    }
   };
 
   const copyToClipboard = () => {
@@ -210,22 +260,49 @@ export const PlatformUsersPage: React.FC = () => {
 
   // Handle Toggle Status
   const handleToggleStatus = async (u: User) => {
-    const nextStatus = u.status === 'Active' ? 'Disabled' : 'Active';
-    await superAdminService.toggleUserStatusApi(u.id, nextStatus);
-    showFeedback(`User status for ${u.name} set to ${nextStatus}.`);
-    await applyFilters();
+    if (isActionInProgress) return;
+    setIsActionInProgress(`status-${u.id}`);
+    try {
+      const nextStatus = u.status === 'Active' ? 'Disabled' : 'Active';
+      await superAdminService.toggleUserStatusApi(u.id, nextStatus);
+      if (nextStatus === 'Disabled') {
+        const suspensionEvent = { userId: String(u.id), email: u.email, timestamp: Date.now() };
+        localStorage.setItem('nexus_account_suspended', JSON.stringify(suspensionEvent));
+        try {
+          if (typeof BroadcastChannel !== 'undefined') {
+            const bc = new BroadcastChannel('nexus_auth_channel');
+            bc.postMessage({ type: 'ACCOUNT_SUSPENDED', ...suspensionEvent });
+            bc.close();
+          }
+        } catch { }
+      }
+      showFeedback(`User status for ${u.name} set to ${nextStatus}.`);
+      await applyFilters();
+    } catch (err: any) {
+      alert(err.message || 'Failed to update user status.');
+    } finally {
+      setIsActionInProgress(null);
+    }
   };
 
   // Handle Delete
   const handleDeleteUser = async (u: User) => {
+    if (isActionInProgress) return;
     if (u.email === 'yanosh@ghlindiaventures.com') {
       alert('The root platform Super Admin cannot be deleted.');
       return;
     }
     if (confirm(`Are you sure you want to permanently delete user "${u.name}" (${u.email})?`)) {
-      await superAdminService.deleteUserApi(u.id);
-      showFeedback(`User account "${u.name}" removed from database.`);
-      await applyFilters();
+      setIsActionInProgress(`delete-${u.id}`);
+      try {
+        await superAdminService.deleteUserApi(u.id);
+        showFeedback(`User account "${u.name}" removed from database.`);
+        await applyFilters();
+      } catch (err: any) {
+        alert(err.message || 'Failed to delete user account.');
+      } finally {
+        setIsActionInProgress(null);
+      }
     }
   };
 
@@ -300,7 +377,7 @@ export const PlatformUsersPage: React.FC = () => {
             disabled={isLoading}
             title="Reload users directly from development database"
           >
-            <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} /> Refresh Directory
+            <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
           </button>
           <button
             className="btn btn-primary btn-sm btn-provision-user"
@@ -332,8 +409,11 @@ export const PlatformUsersPage: React.FC = () => {
         <div className="users-search-box">
           <Search size={16} className="search-icon" />
           <input
+            id="platform-users-search"
+            name="searchQuery"
             type="text"
             className="users-search-input"
+            aria-label="Search users by name, email, phone, or organization"
             placeholder="Search by name, email, phone, or organization..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
@@ -343,7 +423,10 @@ export const PlatformUsersPage: React.FC = () => {
         <div className="users-dropdown-filters">
           {/* Organization Filter */}
           <select
+            id="platform-users-filter-company"
+            name="companyFilter"
             className="filter-select"
+            aria-label="Filter by organization"
             value={selectedCompanyFilter}
             onChange={e => setSelectedCompanyFilter(e.target.value)}
           >
@@ -358,7 +441,10 @@ export const PlatformUsersPage: React.FC = () => {
 
           {/* Role Filter */}
           <select
+            id="platform-users-filter-role"
+            name="roleFilter"
             className="filter-select"
+            aria-label="Filter by role"
             value={selectedRoleFilter}
             onChange={e => setSelectedRoleFilter(e.target.value)}
           >
@@ -372,7 +458,10 @@ export const PlatformUsersPage: React.FC = () => {
 
           {/* Status Filter */}
           <select
+            id="platform-users-filter-status"
+            name="statusFilter"
             className="filter-select"
+            aria-label="Filter by status"
             value={selectedStatusFilter}
             onChange={e => setSelectedStatusFilter(e.target.value)}
           >
@@ -508,6 +597,41 @@ export const PlatformUsersPage: React.FC = () => {
             </tbody>
           </table>
         </div>
+
+        {/* Server-Side Pagination Bar */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '12px 18px',
+          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+          backgroundColor: 'rgba(255, 255, 255, 0.02)',
+          fontSize: '13px',
+          color: '#94a3b8'
+        }}>
+          <div>
+            Showing {totalUsersCount === 0 ? 0 : (currentPage - 1) * 25 + 1} to {Math.min(currentPage * 25, totalUsersCount)} of {totalUsersCount} platform users
+          </div>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button
+              className="btn btn-secondary btn-sm"
+              disabled={currentPage <= 1 || isLoading}
+              onClick={() => loadData(currentPage - 1)}
+            >
+              Previous
+            </button>
+            <span style={{ padding: '0 8px', fontWeight: 600, color: '#f8fafc' }}>
+              Page {currentPage} of {Math.max(1, totalPages)}
+            </span>
+            <button
+              className="btn btn-secondary btn-sm"
+              disabled={currentPage >= totalPages || isLoading}
+              onClick={() => loadData(currentPage + 1)}
+            >
+              Next
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* ========================================================================= */}
@@ -525,22 +649,28 @@ export const PlatformUsersPage: React.FC = () => {
         >
           <div className="provision-modal-content">
             <div className="form-group">
-              <label className="form-label required">Full Name</label>
+              <label htmlFor="provision-user-name" className="form-label required">Full Name</label>
               <input
+                id="provision-user-name"
+                name="name"
                 type="text"
                 className="form-control"
                 placeholder="e.g. Rahul Sen"
+                autoComplete="name"
                 value={newName}
                 onChange={e => setNewName(e.target.value)}
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label required">Official Work Email</label>
+              <label htmlFor="provision-user-email" className="form-label required">Official Work Email</label>
               <input
+                id="provision-user-email"
+                name="email"
                 type="email"
                 className="form-control"
                 placeholder="rahul@ghlindiatrust.com"
+                autoComplete="email"
                 value={newEmail}
                 onChange={e => setNewEmail(e.target.value)}
               />
@@ -548,18 +678,23 @@ export const PlatformUsersPage: React.FC = () => {
 
             <div className="form-grid-two">
               <div className="form-group">
-                <label className="form-label">Contact Number</label>
+                <label htmlFor="provision-user-phone" className="form-label">Contact Number</label>
                 <input
+                  id="provision-user-phone"
+                  name="phone"
                   type="text"
                   className="form-control"
+                  autoComplete="tel"
                   value={newPhone}
                   onChange={e => setNewPhone(e.target.value)}
                 />
               </div>
 
               <div className="form-group">
-                <label className="form-label">Employee Code</label>
+                <label htmlFor="provision-user-empcode" className="form-label">Employee Code</label>
                 <input
+                  id="provision-user-empcode"
+                  name="employeeCode"
                   type="text"
                   className="form-control"
                   placeholder="EMP-1042"
@@ -570,8 +705,10 @@ export const PlatformUsersPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label required">Assign Tenant Organization</label>
+              <label htmlFor="provision-user-company" className="form-label required">Assign Tenant Organization</label>
               <select
+                id="provision-user-company"
+                name="companyId"
                 className="form-control"
                 value={newCompanyId}
                 onChange={e => setNewCompanyId(e.target.value)}
@@ -586,8 +723,10 @@ export const PlatformUsersPage: React.FC = () => {
 
             <div className="form-grid-two">
               <div className="form-group">
-                <label className="form-label required">Role Scope</label>
+                <label htmlFor="provision-user-role" className="form-label required">Role Scope</label>
                 <select
+                  id="provision-user-role"
+                  name="role"
                   className="form-control"
                   value="company_admin"
                   disabled
@@ -600,8 +739,10 @@ export const PlatformUsersPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Designation / Title</label>
+                <label htmlFor="provision-user-designation" className="form-label">Designation / Title</label>
                 <input
+                  id="provision-user-designation"
+                  name="designation"
                   type="text"
                   className="form-control"
                   value={newDesignation}
@@ -638,38 +779,49 @@ export const PlatformUsersPage: React.FC = () => {
         >
           <div className="edit-drawer-content">
             <div className="form-group">
-              <label className="form-label">Full Name</label>
+              <label htmlFor="edit-user-name" className="form-label">Full Name</label>
               <input
+                id="edit-user-name"
+                name="name"
                 type="text"
                 className="form-control"
+                autoComplete="name"
                 value={editName}
                 onChange={e => setEditName(e.target.value)}
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label">Work Email</label>
+              <label htmlFor="edit-user-email" className="form-label">Work Email</label>
               <input
+                id="edit-user-email"
+                name="email"
                 type="email"
                 className="form-control"
+                autoComplete="email"
                 value={editEmail}
                 onChange={e => setEditEmail(e.target.value)}
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label">Phone Number</label>
+              <label htmlFor="edit-user-phone" className="form-label">Phone Number</label>
               <input
+                id="edit-user-phone"
+                name="phone"
                 type="text"
                 className="form-control"
+                autoComplete="tel"
                 value={editPhone}
                 onChange={e => setEditPhone(e.target.value)}
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label">Designation</label>
+              <label htmlFor="edit-user-designation" className="form-label">Designation</label>
               <input
+                id="edit-user-designation"
+                name="designation"
                 type="text"
                 className="form-control"
                 value={editDesignation}
@@ -678,8 +830,10 @@ export const PlatformUsersPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Organization Assignment</label>
+              <label htmlFor="edit-user-company" className="form-label">Organization Assignment</label>
               <select
+                id="edit-user-company"
+                name="companyId"
                 className="form-control"
                 value={editCompanyId}
                 onChange={e => setEditCompanyId(e.target.value)}
@@ -694,8 +848,10 @@ export const PlatformUsersPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Assigned Role</label>
+              <label htmlFor="edit-user-role" className="form-label">Assigned Role</label>
               <select
+                id="edit-user-role"
+                name="roleCode"
                 className="form-control"
                 value={editRoleCode}
                 onChange={e => setEditRoleCode(e.target.value)}

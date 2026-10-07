@@ -38,4 +38,18 @@ public class CurrentUserService : ICurrentUserService
     public string? Role => User?.FindFirst(ClaimTypes.Role)?.Value;
 
     public string? Email => User?.FindFirst(ClaimTypes.Email)?.Value;
+
+    public string? Name => User?.FindFirst(ClaimTypes.Name)?.Value ?? User?.FindFirst("name")?.Value;
+
+    public backend.Models.Entities.User? ValidatedUser
+    {
+        get
+        {
+            if (_httpContextAccessor.HttpContext?.Items.TryGetValue("ValidatedCurrentUser", out var obj) == true && obj is backend.Models.Entities.User u)
+            {
+                return u;
+            }
+            return null;
+        }
+    }
 }

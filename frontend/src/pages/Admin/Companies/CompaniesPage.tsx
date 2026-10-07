@@ -26,6 +26,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
+import { useUnsavedChanges } from '../../../context/NavigationGuardContext';
 import { Tenant, User, SubscriptionPackage } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
 import { storageService } from '../../../services/storageService';
@@ -95,6 +96,33 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPhone, setNewUserPhone] = useState('+91 98450 ');
   const [newUserRole, setNewUserRole] = useState<'company_admin'>('company_admin');
+  const [isSavingDrawer, setIsSavingDrawer] = useState(false);
+  const [isDeployingWizard, setIsDeployingWizard] = useState(false);
+  const [isActionInProgress, setIsActionInProgress] = useState(false);
+  const [isAddingUser, setIsAddingUser] = useState(false);
+
+  // Unsaved changes check
+  const isWizardDirty = isWizardOpen && (wizardName.trim() !== '' || wizardSlug.trim() !== '' || wizardAdminEmail.trim() !== '');
+  const isDrawerDirty = isDetailDrawerOpen && !!drawerTenantEdit && !!selectedTenant && (
+    drawerTenantEdit.name !== selectedTenant.name ||
+    drawerTenantEdit.industry !== selectedTenant.industry ||
+    drawerTenantEdit.tagline !== selectedTenant.tagline ||
+    drawerTenantEdit.brandColor !== selectedTenant.brandColor ||
+    drawerTenantEdit.timezone !== selectedTenant.timezone ||
+    drawerTenantEdit.currency !== selectedTenant.currency ||
+    drawerTenantEdit.businessHours !== selectedTenant.businessHours ||
+    drawerTenantEdit.subscriptionPlan !== selectedTenant.subscriptionPlan ||
+    (drawerTenantEdit.phone || '') !== (selectedTenant.phone || '') ||
+    (drawerTenantEdit.defaultRoutingStrategy || '') !== (selectedTenant.defaultRoutingStrategy || '') ||
+    JSON.stringify(drawerTenantEdit.enabledFeatures || []) !== JSON.stringify(selectedTenant.enabledFeatures || [])
+  );
+  const isAddUserDirty = isAddUserModalOpen && (newUserName.trim() !== '' || newUserEmail.trim() !== '');
+
+  useUnsavedChanges(
+    isWizardDirty || isDrawerDirty || isAddUserDirty,
+    'You have unsaved changes in organization configuration. Are you sure you want to leave?',
+    'companies-page'
+  );
 
   // ── Assigned Reps & Tenant Isolation ──────────────────────────────────────
   const activeTenantKeyRef = useRef<string | null>(null);
@@ -270,10 +298,8 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
   useEffect(() => {
     loadData();
     window.addEventListener('nexus_admin_updated', handleStorageUpdate);
-    window.addEventListener('nexus_storage_updated', handleStorageUpdate);
     return () => {
       window.removeEventListener('nexus_admin_updated', handleStorageUpdate);
-      window.removeEventListener('nexus_storage_updated', handleStorageUpdate);
     };
   }, []);
 
@@ -295,7 +321,8 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
   };
 
   const handleSaveDrawerTenant = async () => {
-    if (!drawerTenantEdit) return;
+    if (!drawerTenantEdit || isSavingDrawer) return;
+    setIsSavingDrawer(true);
     try {
       const updated = await superAdminService.updateTenantApi(drawerTenantEdit);
       setSelectedTenant(updated);
@@ -305,6 +332,8 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       setTimeout(() => setSaveSuccessMsg(''), 3000);
     } catch (err: any) {
       alert(err.message || 'Failed to update organization settings.');
+    } finally {
+      setIsSavingDrawer(false);
     }
   };
 
@@ -318,7 +347,8 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
   };
 
   const handleToggleTenantStatus = async (newStatus: 'Active' | 'Inactive' | 'Suspended') => {
-    if (!selectedTenant) return;
+    if (!selectedTenant || isActionInProgress) return;
+    setIsActionInProgress(true);
     try {
       const updated = await superAdminService.toggleTenantStatusApi(selectedTenant.id, newStatus);
       if (updated) {
@@ -330,11 +360,14 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       }
     } catch (err: any) {
       alert(err.message || 'Failed to update organization status.');
+    } finally {
+      setIsActionInProgress(false);
     }
   };
 
   const handleAddUserToCompany = async () => {
-    if (!selectedTenant || !newUserName || !newUserEmail) return;
+    if (!selectedTenant || !newUserName || !newUserEmail || isAddingUser) return;
+    setIsAddingUser(true);
     const roles = superAdminService.getRoles();
     try {
       await superAdminService.createUserApi({
@@ -354,12 +387,15 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       setNewUserEmail('');
     } catch (err: any) {
       alert(err.message || 'Failed to provision company administrator.');
+    } finally {
+      setIsAddingUser(false);
     }
   };
 
   // Complete Onboarding Wizard
   const handleDeployOrganization = async () => {
-    if (!wizardName.trim()) return;
+    if (!wizardName.trim() || isDeployingWizard) return;
+    setIsDeployingWizard(true);
 
     try {
       const newTenant = await superAdminService.createTenantApi(
@@ -400,6 +436,8 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       setWizardAdminEmail('');
     } catch (err: any) {
       alert(err.message || 'Failed to deploy new organization.');
+    } finally {
+      setIsDeployingWizard(false);
     }
   };
 
@@ -506,8 +544,11 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
         <div className="filter-search-box">
           <Search size={16} className="search-icon" />
           <input
+            id="companies-search-input"
+            name="searchQuery"
             type="text"
             className="companies-search-input"
+            aria-label="Search organizations by name, slug, or industry"
             placeholder="Search organizations by name, slug, or industry..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
@@ -545,7 +586,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
 
           {/* Industry Filter Dropdown */}
           <select
+            id="companies-filter-industry"
+            name="industryFilter"
             className="companies-select-input"
+            aria-label="Filter by industry"
             value={industryFilter}
             onChange={e => setIndustryFilter(e.target.value)}
           >
@@ -761,8 +805,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
 
                 <div className="form-grid-two">
                   <div className="form-group">
-                    <label className="form-label required">Organization Display Name</label>
+                    <label htmlFor="wizard-company-name" className="form-label required">Organization Display Name</label>
                     <input
+                      id="wizard-company-name"
+                      name="name"
                       type="text"
                       className="form-control"
                       placeholder="e.g. Paramount Asset Capital"
@@ -777,10 +823,12 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label required">Tenant URL Slug (Unique Namespace)</label>
+                    <label htmlFor="wizard-company-slug" className="form-label required">Tenant URL Slug (Unique Namespace)</label>
                     <div className="input-group-prefix">
                       <span className="prefix-tag">nexus.io/</span>
                       <input
+                        id="wizard-company-slug"
+                        name="slug"
                         type="text"
                         className="form-control"
                         placeholder="paramount"
@@ -791,8 +839,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Legal Registered Entity Name</label>
+                    <label htmlFor="wizard-company-legal-name" className="form-label">Legal Registered Entity Name</label>
                     <input
+                      id="wizard-company-legal-name"
+                      name="legalName"
                       type="text"
                       className="form-control"
                       placeholder="Paramount Capital Ventures Private Limited"
@@ -802,8 +852,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Domain Specialization / Industry</label>
+                    <label htmlFor="wizard-company-industry" className="form-label">Domain Specialization / Industry</label>
                     <select
+                      id="wizard-company-industry"
+                      name="industry"
                       className="form-control"
                       value={wizardIndustry}
                       onChange={e => setWizardIndustry(e.target.value)}
@@ -817,8 +869,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group span-2">
-                    <label className="form-label">Corporate Tagline / Subtitle</label>
+                    <label htmlFor="wizard-company-tagline" className="form-label">Corporate Tagline / Subtitle</label>
                     <input
+                      id="wizard-company-tagline"
+                      name="tagline"
                       type="text"
                       className="form-control"
                       placeholder="Premier commercial real estate syndication and wealth advisory"
@@ -828,17 +882,23 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Brand Color Accent</label>
+                    <label htmlFor="wizard-company-brand-color-text" className="form-label">Brand Color Accent</label>
                     <div className="color-picker-row">
                       <input
+                        id="wizard-company-brand-color"
+                        name="brandColorPicker"
                         type="color"
                         className="color-swatch-input"
+                        aria-label="Brand color picker"
                         value={wizardBrandColor}
                         onChange={e => setWizardBrandColor(e.target.value)}
                       />
                       <input
+                        id="wizard-company-brand-color-text"
+                        name="brandColor"
                         type="text"
                         className="form-control"
+                        aria-label="Brand color hex code"
                         value={wizardBrandColor}
                         onChange={e => setWizardBrandColor(e.target.value)}
                       />
@@ -858,8 +918,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
 
                 <div className="form-grid-two">
                   <div className="form-group">
-                    <label className="form-label">Default System Timezone</label>
+                    <label htmlFor="wizard-company-timezone" className="form-label">Default System Timezone</label>
                     <select
+                      id="wizard-company-timezone"
+                      name="timezone"
                       className="form-control"
                       value={wizardTimezone}
                       onChange={e => setWizardTimezone(e.target.value)}
@@ -873,8 +935,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Base Currency & Denomination</label>
+                    <label htmlFor="wizard-company-currency" className="form-label">Base Currency & Denomination</label>
                     <select
+                      id="wizard-company-currency"
+                      name="currency"
                       className="form-control"
                       value={wizardCurrency}
                       onChange={e => setWizardCurrency(e.target.value)}
@@ -887,8 +951,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Sales Working Shift Hours</label>
+                    <label htmlFor="wizard-company-business-hours" className="form-label">Sales Working Shift Hours</label>
                     <input
+                      id="wizard-company-business-hours"
+                      name="businessHours"
                       type="text"
                       className="form-control"
                       value={wizardBusinessHours}
@@ -897,8 +963,13 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Inbound Lead SLA Escalation Timer</label>
-                    <select className="form-control" defaultValue="15">
+                    <label htmlFor="wizard-company-sla-timer" className="form-label">Inbound Lead SLA Escalation Timer</label>
+                    <select
+                      id="wizard-company-sla-timer"
+                      name="slaTimer"
+                      className="form-control"
+                      defaultValue="15"
+                    >
                       <option value="5">5 Minutes (Hyper-Fast SLA)</option>
                       <option value="15">15 Minutes (Standard VIP)</option>
                       <option value="30">30 Minutes (Standard Sales)</option>
@@ -949,8 +1020,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                         {cat.features.map(f => {
                           const isChecked = wizardSelectedFeatures.includes(f.key);
                           return (
-                            <label key={f.key} className="feature-check-label">
+                            <label key={f.key} htmlFor={`wizard-feature-${f.key}`} className="feature-check-label">
                               <input
+                                id={`wizard-feature-${f.key}`}
+                                name={`wizard_feature_${f.key}`}
                                 type="checkbox"
                                 checked={isChecked}
                                 onChange={() => {
@@ -982,42 +1055,55 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
 
                 <div className="form-grid-two">
                   <div className="form-group">
-                    <label className="form-label required">Administrator Full Name</label>
+                    <label htmlFor="wizard-admin-name" className="form-label required">Administrator Full Name</label>
                     <input
+                      id="wizard-admin-name"
+                      name="adminName"
                       type="text"
                       className="form-control"
                       placeholder="e.g. Siddharth Menon"
+                      autoComplete="name"
                       value={wizardAdminName}
                       onChange={e => setWizardAdminName(e.target.value)}
                     />
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label required">Work Email Address</label>
+                    <label htmlFor="wizard-admin-email" className="form-label required">Work Email Address</label>
                     <input
+                      id="wizard-admin-email"
+                      name="adminEmail"
                       type="email"
                       className="form-control"
                       placeholder="siddharth@paramountcapital.io"
+                      autoComplete="email"
                       value={wizardAdminEmail}
                       onChange={e => setWizardAdminEmail(e.target.value)}
                     />
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Direct Mobile Number</label>
+                    <label htmlFor="wizard-admin-phone" className="form-label">Direct Mobile Number</label>
                     <input
+                      id="wizard-admin-phone"
+                      name="adminPhone"
                       type="text"
                       className="form-control"
+                      autoComplete="tel"
                       value={wizardAdminPhone}
                       onChange={e => setWizardAdminPhone(e.target.value)}
                     />
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Initial Password Strategy</label>
-                    <select className="form-control" defaultValue="auto">
-                      <option value="auto">Generate Secure Password & Invite via Email</option>
-                      <option value="preset">Preset to 'Password@123' (Demo Mode)</option>
+                    <label htmlFor="wizard-admin-password-strategy" className="form-label">Initial Password Strategy</label>
+                    <select
+                      id="wizard-admin-password-strategy"
+                      name="passwordStrategy"
+                      className="form-control"
+                      defaultValue="auto"
+                    >
+                      <option value="auto">Generate Secure Cryptographic Temporary Password</option>
                     </select>
                   </div>
                 </div>
@@ -1034,8 +1120,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
 
                 <div className="form-grid-two">
                   <div className="form-group">
-                    <label className="form-label required">Inbound Hotline Virtual DID</label>
+                    <label htmlFor="wizard-did-number" className="form-label required">Inbound Hotline Virtual DID</label>
                     <input
+                      id="wizard-did-number"
+                      name="didNumber"
                       type="text"
                       className="form-control"
                       value={wizardDidNumber}
@@ -1044,8 +1132,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Call Distribution Routing Strategy</label>
+                    <label htmlFor="wizard-routing-strategy" className="form-label">Call Distribution Routing Strategy</label>
                     <select
+                      id="wizard-routing-strategy"
+                      name="routingStrategy"
                       className="form-control"
                       value={wizardRoutingStrategy}
                       onChange={e => setWizardRoutingStrategy(e.target.value)}
@@ -1137,9 +1227,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
               ) : (
                 <button
                   className="btn btn-primary btn-deploy-confirm"
+                  disabled={isDeployingWizard}
                   onClick={handleDeployOrganization}
                 >
-                  <Sparkles size={15} /> Confirm & Deploy Organization
+                  <Sparkles size={15} /> {isDeployingWizard ? 'Deploying...' : 'Confirm & Deploy Organization'}
                 </button>
               )}
             </div>
@@ -1189,9 +1280,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                 </button>
                 <button
                   className="btn btn-primary btn-sm"
+                  disabled={isSavingDrawer}
                   onClick={handleSaveDrawerTenant}
                 >
-                  <Save size={13} /> Save Changes
+                  <Save size={13} /> {isSavingDrawer ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
             </div>
@@ -1241,8 +1333,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
               <div className="drawer-tab-pane animate-fade-in">
                 <div className="form-grid-two">
                   <div className="form-group">
-                    <label className="form-label">Organization Name</label>
+                    <label htmlFor="drawer-tenant-name" className="form-label">Organization Name</label>
                     <input
+                      id="drawer-tenant-name"
+                      name="name"
                       type="text"
                       className="form-control"
                       value={drawerTenantEdit.name}
@@ -1251,8 +1345,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Legal Name</label>
+                    <label htmlFor="drawer-tenant-legal-name" className="form-label">Legal Name</label>
                     <input
+                      id="drawer-tenant-legal-name"
+                      name="legalName"
                       type="text"
                       className="form-control"
                       value={drawerTenantEdit.legalName || ''}
@@ -1261,8 +1357,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group span-2">
-                    <label className="form-label">Tagline / Mission</label>
+                    <label htmlFor="drawer-tenant-tagline" className="form-label">Tagline / Mission</label>
                     <input
+                      id="drawer-tenant-tagline"
+                      name="tagline"
                       type="text"
                       className="form-control"
                       value={drawerTenantEdit.tagline || ''}
@@ -1271,8 +1369,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Industry Classification</label>
+                    <label htmlFor="drawer-tenant-industry" className="form-label">Industry Classification</label>
                     <input
+                      id="drawer-tenant-industry"
+                      name="industry"
                       type="text"
                       className="form-control"
                       value={drawerTenantEdit.industry || ''}
@@ -1281,17 +1381,23 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Brand Color</label>
+                    <label htmlFor="drawer-tenant-brand-color-text" className="form-label">Brand Color</label>
                     <div className="color-picker-row">
                       <input
+                        id="drawer-tenant-brand-color"
+                        name="brandColorPicker"
                         type="color"
                         className="color-swatch-input"
+                        aria-label="Brand color picker"
                         value={drawerTenantEdit.brandColor || '#8b5cf6'}
                         onChange={e => setDrawerTenantEdit({ ...drawerTenantEdit, brandColor: e.target.value })}
                       />
                       <input
+                        id="drawer-tenant-brand-color-text"
+                        name="brandColor"
                         type="text"
                         className="form-control"
+                        aria-label="Brand color hex code"
                         value={drawerTenantEdit.brandColor || '#8b5cf6'}
                         onChange={e => setDrawerTenantEdit({ ...drawerTenantEdit, brandColor: e.target.value })}
                       />
@@ -1299,8 +1405,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Timezone</label>
+                    <label htmlFor="drawer-tenant-timezone" className="form-label">Timezone</label>
                     <input
+                      id="drawer-tenant-timezone"
+                      name="timezone"
                       type="text"
                       className="form-control"
                       value={drawerTenantEdit.timezone || 'Asia/Kolkata (IST)'}
@@ -1309,8 +1417,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Currency</label>
+                    <label htmlFor="drawer-tenant-currency" className="form-label">Currency</label>
                     <input
+                      id="drawer-tenant-currency"
+                      name="currency"
                       type="text"
                       className="form-control"
                       value={drawerTenantEdit.currency || '₹ INR'}
@@ -1341,9 +1451,12 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                                 <div className="feature-row-label">{f.label}</div>
                                 <code className="feature-row-code">{f.key}</code>
                               </div>
-                              <label className="switch-control">
+                              <label htmlFor={`drawer-feature-${f.key}`} className="switch-control">
                                 <input
+                                  id={`drawer-feature-${f.key}`}
+                                  name={`drawer_feature_${f.key}`}
                                   type="checkbox"
+                                  aria-label={`Toggle module ${f.label}`}
                                   checked={isEnabled}
                                   onChange={() => handleToggleFeatureInDrawer(f.key)}
                                 />
@@ -1397,8 +1510,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
               <div className="drawer-tab-pane animate-fade-in">
                 <div className="form-grid-two">
                   <div className="form-group span-2">
-                    <label className="form-label">Dedicated Virtual DID Number</label>
+                    <label htmlFor="drawer-tenant-phone" className="form-label">Dedicated Virtual DID Number</label>
                     <input
+                      id="drawer-tenant-phone"
+                      name="phone"
                       type="text"
                       className="form-control"
                       value={drawerTenantEdit.phone || '+91 80 4700 8001'}
@@ -1407,8 +1522,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group span-2">
-                    <label className="form-label">Inbound Call Routing Strategy</label>
+                    <label htmlFor="drawer-tenant-routing-strategy" className="form-label">Inbound Call Routing Strategy</label>
                     <select
+                      id="drawer-tenant-routing-strategy"
+                      name="defaultRoutingStrategy"
                       className="form-control"
                       value={drawerTenantEdit.defaultRoutingStrategy || 'Round-Robin'}
                       onChange={e =>
@@ -1447,6 +1564,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                       {selectedTenant.status !== 'Active' && (
                         <button
                           className="btn btn-secondary btn-sm"
+                          disabled={isActionInProgress}
                           onClick={() => handleToggleTenantStatus('Active')}
                         >
                           <CheckCircle2 size={13} color="#10b981" /> Activate Organization
@@ -1456,6 +1574,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                       {selectedTenant.status !== 'Suspended' && (
                         <button
                           className="btn btn-secondary btn-sm btn-suspend"
+                          disabled={isActionInProgress}
                           onClick={() => handleToggleTenantStatus('Suspended')}
                         >
                           <AlertTriangle size={13} color="#f59e0b" /> Suspend Organization
@@ -1464,19 +1583,23 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
 
                       <button
                         className="btn btn-danger btn-sm"
+                        disabled={isActionInProgress}
                         onClick={async () => {
                           if (confirm(`Are you sure you want to permanently delete organization "${selectedTenant.name}"?`)) {
+                            setIsActionInProgress(true);
                             try {
                               await superAdminService.deleteTenantApi(selectedTenant.id);
                               setTenants(prev => prev.filter(t => t.id !== selectedTenant.id));
                               setIsDetailDrawerOpen(false);
                             } catch (err: any) {
                               alert(err.message || 'Failed to delete organization');
+                            } finally {
+                              setIsActionInProgress(false);
                             }
                           }
                         }}
                       >
-                        <Trash2 size={13} /> Delete Organization
+                        <Trash2 size={13} /> {isActionInProgress ? 'Processing...' : 'Delete Organization'}
                       </button>
                     </div>
                   </div>
@@ -1497,40 +1620,51 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
         >
           <div className="add-user-modal-form">
             <div className="form-group">
-              <label className="form-label required">Employee Full Name</label>
+              <label htmlFor="company-add-user-name" className="form-label required">Employee Full Name</label>
               <input
+                id="company-add-user-name"
+                name="name"
                 type="text"
                 className="form-control"
                 placeholder="e.g. Priya Nair"
+                autoComplete="name"
                 value={newUserName}
                 onChange={e => setNewUserName(e.target.value)}
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label required">Work Email Address</label>
+              <label htmlFor="company-add-user-email" className="form-label required">Work Email Address</label>
               <input
+                id="company-add-user-email"
+                name="email"
                 type="email"
                 className="form-control"
                 placeholder="priya@company.com"
+                autoComplete="email"
                 value={newUserEmail}
                 onChange={e => setNewUserEmail(e.target.value)}
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label">Phone Number</label>
+              <label htmlFor="company-add-user-phone" className="form-label">Phone Number</label>
               <input
+                id="company-add-user-phone"
+                name="phone"
                 type="text"
                 className="form-control"
+                autoComplete="tel"
                 value={newUserPhone}
                 onChange={e => setNewUserPhone(e.target.value)}
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label">Role Assignment</label>
+              <label htmlFor="company-add-user-role" className="form-label">Role Assignment</label>
               <select
+                id="company-add-user-role"
+                name="role"
                 className="form-control"
                 value="company_admin"
                 disabled
@@ -1545,10 +1679,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
               </button>
               <button
                 className="btn btn-primary"
-                disabled={!newUserName || !newUserEmail}
+                disabled={!newUserName || !newUserEmail || isAddingUser}
                 onClick={handleAddUserToCompany}
               >
-                Provision Account
+                {isAddingUser ? 'Provisioning...' : 'Provision Account'}
               </button>
             </div>
           </div>

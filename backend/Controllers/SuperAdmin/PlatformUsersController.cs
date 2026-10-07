@@ -2,10 +2,12 @@ using backend.Authentication.Interfaces;
 using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.SuperAdmin;
+using backend.Hubs;
 using backend.Models.Entities;
 using backend.Models.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace backend.Controllers.SuperAdmin;
@@ -18,23 +20,32 @@ public class PlatformUsersController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
+    private readonly IHubContext<PlatformHub, IPlatformHubClient> _hubContext;
 
-    public PlatformUsersController(ApplicationDbContext context, ICurrentUserService currentUser)
+    public PlatformUsersController(
+        ApplicationDbContext context,
+        ICurrentUserService currentUser,
+        IHubContext<PlatformHub, IPlatformHubClient> hubContext)
     {
         _context = context;
         _currentUser = currentUser;
+        _hubContext = hubContext;
     }
 
     /// <summary>
-    /// Returns all users across all tenants, including Super Admins, filtered by optional parameters.
+    /// Returns paginated users across all tenants, including Super Admins, filtered by optional parameters.
     /// Never excludes Super Admins unless specifically requested.
     /// </summary>
     [HttpGet]
-    public async Task<ActionResult<ApiResponse<List<PlatformUserDto>>>> GetAllUsers(
+    public async Task<ActionResult<ApiResponse<PagedResult<PlatformUserDto>>>> GetAllUsers(
         [FromQuery] string? companyId,
         [FromQuery] string? roleCode,
         [FromQuery] string? status,
-        [FromQuery] string? search)
+        [FromQuery] string? search,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 25,
+        [FromQuery] string? sortBy = "id",
+        [FromQuery] string? sortDir = "asc")
     {
         var query = _context.Users
             .Include(u => u.Role)
@@ -96,7 +107,29 @@ public class PlatformUsersController : ControllerBase
                 (u.Company != null && (u.Company.Name.ToLower().Contains(s) || u.Company.Slug.ToLower().Contains(s))));
         }
 
-        var users = await query.OrderBy(u => u.Id).ToListAsync();
+        var totalCount = await query.CountAsync();
+
+        // 5. Sorting
+        var isDesc = sortDir?.Equals("desc", StringComparison.OrdinalIgnoreCase) ?? false;
+        query = (sortBy?.ToLower()) switch
+        {
+            "name" => isDesc ? query.OrderByDescending(u => u.Name) : query.OrderBy(u => u.Name),
+            "email" => isDesc ? query.OrderByDescending(u => u.Email) : query.OrderBy(u => u.Email),
+            "role" => isDesc ? query.OrderByDescending(u => u.Role.Name) : query.OrderBy(u => u.Role.Name),
+            "company" => isDesc ? query.OrderByDescending(u => u.Company != null ? u.Company.Name : "") : query.OrderBy(u => u.Company != null ? u.Company.Name : ""),
+            "status" => isDesc ? query.OrderByDescending(u => u.Status) : query.OrderBy(u => u.Status),
+            "lastlogin" => isDesc ? query.OrderByDescending(u => u.LastLoginAt) : query.OrderBy(u => u.LastLoginAt),
+            _ => isDesc ? query.OrderByDescending(u => u.Id) : query.OrderBy(u => u.Id)
+        };
+
+        // 6. Pagination
+        var safePage = page < 1 ? 1 : page;
+        var safePageSize = pageSize < 1 ? 25 : (pageSize > 200 ? 200 : pageSize);
+
+        var users = await query
+            .Skip((safePage - 1) * safePageSize)
+            .Take(safePageSize)
+            .ToListAsync();
 
         var result = users.Select(u => new PlatformUserDto
         {
@@ -122,7 +155,8 @@ public class PlatformUsersController : ControllerBase
             UpdatedAt = u.UpdatedAt?.ToString("o")
         }).ToList();
 
-        return Ok(ApiResponse<List<PlatformUserDto>>.SuccessResult(result));
+        var pagedResult = PagedResult<PlatformUserDto>.Create(result, totalCount, safePage, safePageSize);
+        return Ok(ApiResponse<PagedResult<PlatformUserDto>>.SuccessResult(pagedResult));
     }
 
     [HttpGet("{id}")]
@@ -214,8 +248,11 @@ public class PlatformUsersController : ControllerBase
         if (role == null)
             return BadRequest(ApiResponse<PlatformUserDto>.FailureResult("Role 'company_admin' is not configured in database."));
 
-        var password = string.IsNullOrWhiteSpace(req.Password) ? "Password@123" : req.Password;
-        var passwordHash = BCrypt.Net.BCrypt.HashPassword(password);
+        var isGeneratedTemp = string.IsNullOrWhiteSpace(req.Password);
+        var tempPassword = isGeneratedTemp
+            ? backend.Helpers.PasswordHasher.GenerateTemporaryPassword()
+            : req.Password!.Trim();
+        var passwordHash = backend.Helpers.PasswordHasher.HashPassword(tempPassword);
 
         var newUser = new User
         {
@@ -226,6 +263,7 @@ public class PlatformUsersController : ControllerBase
             RoleId = role.Id,
             CompanyId = companyId,
             Status = Enum.TryParse<UserStatus>(req.Status, true, out var st) ? st : UserStatus.Active,
+            MustChangePassword = true,
             CreatedAt = DateTime.UtcNow
         };
 
@@ -249,6 +287,12 @@ public class PlatformUsersController : ControllerBase
         });
         await _context.SaveChangesAsync();
 
+        try
+        {
+            await _hubContext.Clients.All.PlatformDataUpdated("User", "Created");
+        }
+        catch { }
+
         var dto = new PlatformUserDto
         {
             Id = newUser.Id.ToString(),
@@ -270,6 +314,8 @@ public class PlatformUsersController : ControllerBase
             Avatar = newUser.AvatarUrl,
             EmployeeCode = req.EmployeeCode,
             Designation = req.Designation ?? newUser.Role?.Name ?? "Company Administrator",
+            MustChangePassword = newUser.MustChangePassword,
+            TemporaryPassword = tempPassword,
             CreatedAt = newUser.CreatedAt.ToString("o")
         };
 
@@ -321,12 +367,45 @@ public class PlatformUsersController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(req.Status) && Enum.TryParse<UserStatus>(req.Status, true, out var st))
         {
+            if (user.IsProtected && st == UserStatus.Disabled)
+            {
+                return BadRequest(ApiResponse<PlatformUserDto>.FailureResult(
+                    $"User '{user.Name}' is a protected system administrator and cannot be deactivated or disabled."));
+            }
+
+            var previousStatus = user.Status;
             user.Status = st;
+
+            if (st == UserStatus.Disabled)
+            {
+                var sessions = await _context.UserSessions.Where(s => s.UserId == user.Id && s.IsActive).ToListAsync();
+                foreach (var s in sessions)
+                {
+                    s.IsActive = false;
+                    s.RevokedAt = DateTime.UtcNow;
+                    s.RevokedReason = "User account was suspended or disabled by Super Admin.";
+                }
+
+                try
+                {
+                    await _hubContext.Clients.Group($"user_{user.Id}").UserSuspended(user.Id, user.Email, "Your account has been suspended by platform administration.");
+                }
+                catch { }
+            }
+            else if (previousStatus != UserStatus.Active && st == UserStatus.Active)
+            {
+                try
+                {
+                    await _hubContext.Clients.Group($"user_{user.Id}").UserActivated(user.Id, user.Email);
+                }
+                catch { }
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(req.Password))
         {
-            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password);
+            user.PasswordHash = backend.Helpers.PasswordHasher.HashPassword(req.Password.Trim());
+            user.MustChangePassword = false;
         }
 
         user.UpdatedAt = DateTime.UtcNow;
@@ -346,6 +425,12 @@ public class PlatformUsersController : ControllerBase
         });
 
         await _context.SaveChangesAsync();
+
+        try
+        {
+            await _hubContext.Clients.All.PlatformDataUpdated("User", "Updated");
+        }
+        catch { }
 
         var dto = new PlatformUserDto
         {
@@ -379,8 +464,8 @@ public class PlatformUsersController : ControllerBase
         if (user == null)
             return NotFound(ApiResponse<bool>.FailureResult($"User with ID {id} not found."));
 
-        if (user.Email.Equals("yanosh@ghlindiaventures.com", StringComparison.OrdinalIgnoreCase))
-            return BadRequest(ApiResponse<bool>.FailureResult("Root Super Admin cannot be deleted."));
+        if (user.IsProtected)
+            return BadRequest(ApiResponse<bool>.FailureResult("Root Super Admin and protected system accounts cannot be deleted."));
 
         var userName = user.Name;
         var userEmail = user.Email;
@@ -404,6 +489,12 @@ public class PlatformUsersController : ControllerBase
 
         await _context.SaveChangesAsync();
 
+        try
+        {
+            await _hubContext.Clients.All.PlatformDataUpdated("User", "Deleted");
+        }
+        catch { }
+
         return Ok(ApiResponse<bool>.SuccessResult(true, "User deleted successfully."));
     }
 
@@ -415,10 +506,20 @@ public class PlatformUsersController : ControllerBase
             return NotFound(ApiResponse<object>.FailureResult($"User with ID {id} not found."));
 
         var tempPassword = !string.IsNullOrWhiteSpace(req?.NewPassword)
-            ? req.NewPassword
-            : $"Nexus#{new Random().Next(1000, 9999)}!";
-        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(tempPassword);
+            ? req.NewPassword.Trim()
+            : backend.Helpers.PasswordHasher.GenerateTemporaryPassword();
+        user.PasswordHash = backend.Helpers.PasswordHasher.HashPassword(tempPassword);
+        user.MustChangePassword = true;
         user.UpdatedAt = DateTime.UtcNow;
+
+        // Invalidate active sessions for this user
+        var sessions = await _context.UserSessions.Where(s => s.UserId == user.Id && s.IsActive).ToListAsync();
+        foreach (var s in sessions)
+        {
+            s.IsActive = false;
+            s.RevokedAt = DateTime.UtcNow;
+            s.RevokedReason = "Administrator reset account credentials.";
+        }
 
         _context.AuditLogs.Add(new AuditLog
         {
@@ -428,13 +529,19 @@ public class PlatformUsersController : ControllerBase
             CompanyId = user.CompanyId,
             ActorName = _currentUser.Email ?? "Super Admin",
             ActorEmail = _currentUser.Email ?? "admin@platform.com",
-            Details = $"Super Admin generated temporary credentials for user '{user.Name}' ({user.Email}).",
+            Details = $"Super Admin generated temporary credentials for user '{user.Name}' ({user.Email}). Active sessions revoked.",
             Module = "Users",
             Status = "success",
             Timestamp = DateTime.UtcNow
         });
 
         await _context.SaveChangesAsync();
+
+        try
+        {
+            await _hubContext.Clients.Group($"user_{user.Id}").SessionRevoked("ALL", user.Id);
+        }
+        catch { }
 
         return Ok(ApiResponse<object>.SuccessResult(new { tempPassword }, "Temporary password generated successfully."));
     }
@@ -462,7 +569,7 @@ public class PlatformUsersController : ControllerBase
         var irmCount = await _context.Users.CountAsync(u => u.RoleId == 4, ct);
 
         var totalCalls = await _context.CallRecords.CountAsync(ct);
-        var (callsToday, callsConnected) = await CalculateCallsTodayAsync(timeZone, ct);
+        var (callsToday, callsConnected, callsFailed, callDuration, callSuccessRate) = await CalculateCallsTodayAsync(timeZone, ct);
 
         var totalLeads = await _context.Leads.CountAsync(ct);
         var currentMonthLeads = await _context.Leads.CountAsync(l => l.CreatedAt >= currentMonthStart && l.CreatedAt < nextMonthStart, ct);
@@ -511,6 +618,9 @@ public class PlatformUsersController : ControllerBase
             TotalCalls = totalCalls,
             CallsToday = callsToday,
             CallsConnected = callsConnected,
+            CallsFailed = callsFailed,
+            CallsDurationToday = callDuration,
+            CallSuccessRate = callSuccessRate,
             TotalLeads = totalLeads,
             CurrentMonthLeads = currentMonthLeads,
             PreviousMonthLeads = previousMonthLeads,
@@ -528,12 +638,15 @@ public class PlatformUsersController : ControllerBase
         [FromQuery] string? timeZone = null,
         CancellationToken ct = default)
     {
-        var (callsToday, callsConnected) = await CalculateCallsTodayAsync(timeZone, ct);
+        var (callsToday, callsConnected, callsFailed, duration, successRate) = await CalculateCallsTodayAsync(timeZone, ct);
 
         var result = new CallsTodayMetricsDto
         {
             CallsToday = callsToday,
-            CallsConnected = callsConnected
+            CallsConnected = callsConnected,
+            CallsFailed = callsFailed,
+            TotalDurationSeconds = duration,
+            SuccessRate = successRate
         };
 
         return Ok(ApiResponse<CallsTodayMetricsDto>.SuccessResult(result));
@@ -607,7 +720,7 @@ public class PlatformUsersController : ControllerBase
         return (currentMonthStart, nextMonthStart, prevMonthStart);
     }
 
-    private async Task<(int CallsToday, int CallsConnected)> CalculateCallsTodayAsync(string? timeZone, CancellationToken ct)
+    private async Task<(int CallsToday, int CallsConnected, int CallsFailed, int TotalDuration, double SuccessRate)> CalculateCallsTodayAsync(string? timeZone, CancellationToken ct)
     {
         var (utcStart, utcEnd) = GetTodayUtcRange(timeZone);
 
@@ -616,11 +729,21 @@ public class PlatformUsersController : ControllerBase
 
         var nonConnectedDispositions = new[] { "Failed", "No Answer", "No Response", "Missed", "Busy" };
 
+        var callsFailed = await _context.CallRecords
+            .CountAsync(c => c.Timestamp >= utcStart && c.Timestamp < utcEnd
+                && nonConnectedDispositions.Contains(c.Disposition), ct);
+
         var callsConnected = await _context.CallRecords
             .CountAsync(c => c.Timestamp >= utcStart && c.Timestamp < utcEnd
                 && !nonConnectedDispositions.Contains(c.Disposition)
                 && (c.Duration > 0 || (c.Disposition != null && c.Disposition != "")), ct);
 
-        return (callsToday, callsConnected);
+        var totalDuration = await _context.CallRecords
+            .Where(c => c.Timestamp >= utcStart && c.Timestamp < utcEnd)
+            .SumAsync(c => c.Duration, ct);
+
+        var successRate = callsToday > 0 ? Math.Round(((double)callsConnected / callsToday) * 100.0, 1) : 100.0;
+
+        return (callsToday, callsConnected, callsFailed, totalDuration, successRate);
     }
 }

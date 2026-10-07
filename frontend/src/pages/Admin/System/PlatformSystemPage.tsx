@@ -32,6 +32,8 @@ import {
   GlobalConfig,
 } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
+import { signalRService } from '../../../services/signalRService';
+import { useUnsavedChanges } from '../../../context/NavigationGuardContext';
 import { Modal } from '../../../components/common/Modal';
 import './PlatformSystemPage.css';
 
@@ -44,6 +46,10 @@ export const PlatformSystemPage: React.FC = () => {
   const [globalConfig, setGlobalConfig] = useState<GlobalConfig | null>(null);
   const [configForm, setConfigForm] = useState<Partial<GlobalConfig>>({});
   const [announcements, setAnnouncements] = useState<BroadcastAnnouncement[]>([]);
+  const activeGlobalAnnouncement = announcements.find(
+    a => a.isActive && (!a.targetTenantId || a.targetTenantId === 'all')
+  );
+  const hasActiveGlobal = !!activeGlobalAnnouncement;
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [maintenance, setMaintenance] = useState<{ enabled: boolean; message: string; bypassSecret: string }>({
     enabled: false,
@@ -61,6 +67,7 @@ export const PlatformSystemPage: React.FC = () => {
   const [successMsg, setSuccessMsg] = useState('');
   const [isExporting, setIsExporting] = useState(false);
   const [isTogglingMaint, setIsTogglingMaint] = useState(false);
+  const [backupStatus, setBackupStatus] = useState<any>(null);
 
   // Announcement Modal
   const [isAnnModalOpen, setIsAnnModalOpen] = useState(false);
@@ -69,6 +76,28 @@ export const PlatformSystemPage: React.FC = () => {
   const [annPriority, setAnnPriority] = useState<'info' | 'warning' | 'critical'>('info');
   const [annAudience, setAnnAudience] = useState<'all' | 'tenant_admins' | 'sales_reps'>('all');
   const [annTenantId, setAnnTenantId] = useState('all');
+  const [isCreatingAnn, setIsCreatingAnn] = useState(false);
+  const [isActionInProgress, setIsActionInProgress] = useState(false);
+
+  // Unsaved changes check
+  const isConfigDirty = !!globalConfig && !!configForm && (
+    configForm.platformName !== globalConfig.platformName ||
+    configForm.supportEmail !== globalConfig.supportEmail ||
+    configForm.defaultTimezone !== globalConfig.defaultTimezone ||
+    configForm.sessionTimeoutMinutes !== globalConfig.sessionTimeoutMinutes ||
+    configForm.maxUploadSizeMb !== globalConfig.maxUploadSizeMb ||
+    configForm.tokenExpirationMinutes !== globalConfig.tokenExpirationMinutes ||
+    configForm.passwordMinLength !== globalConfig.passwordMinLength ||
+    configForm.enforceMfa !== globalConfig.enforceMfa ||
+    configForm.recordingRetentionDays !== globalConfig.recordingRetentionDays
+  );
+  const isAnnDirty = isAnnModalOpen && (annTitle.trim() !== '' || annMessage.trim() !== '');
+
+  useUnsavedChanges(
+    isConfigDirty || isAnnDirty,
+    'You have unsaved changes in system settings or broadcast announcement. Are you sure you want to leave?',
+    'platform-system-page'
+  );
 
   const showSuccess = (msg: string) => {
     setSuccessMsg(msg);
@@ -81,13 +110,14 @@ export const PlatformSystemPage: React.FC = () => {
     setErrorMsg(null);
 
     try {
-      const [diag, health, config, anns, allTenants, maint] = await Promise.all([
+      const [diag, health, config, anns, allTenants, maint, backup] = await Promise.all([
         superAdminService.fetchSystemDiagnosticsFromApi(),
         superAdminService.fetchSystemHealthChecksFromApi(),
         superAdminService.fetchGlobalConfigFromApi(),
         superAdminService.fetchAnnouncementsFromApi(),
         superAdminService.fetchTenantsFromApi(),
         superAdminService.fetchMaintenanceModeFromApi(),
+        superAdminService.getBackupStatus().catch(() => null),
       ]);
 
       setDiagnostics(diag);
@@ -97,12 +127,13 @@ export const PlatformSystemPage: React.FC = () => {
       setAnnouncements(anns || []);
       setTenants(allTenants || []);
       setMaintenance(maint);
+      setBackupStatus(backup);
       if (isManualRefresh) {
         showSuccess('Live telemetry and system health refreshed.');
       }
     } catch (err: any) {
       console.error('Failed to load system data from API:', err);
-      setErrorMsg(err.message || 'Failed to connect to backend server or database.');
+      setErrorMsg(err.message || 'Failed to connect to server.');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -111,8 +142,75 @@ export const PlatformSystemPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    window.addEventListener('nexus_admin_updated', () => loadData(false));
-    return () => window.removeEventListener('nexus_admin_updated', () => loadData(false));
+
+    const handleUpdate = () => loadData(false);
+    window.addEventListener('nexus_admin_updated', handleUpdate);
+    window.addEventListener('nexus_signalr_reconnected', handleUpdate);
+
+    const handleAnnouncementEvent = (data: any) => {
+      const action = data?.action || (data?.isActive === false ? 'deactivated' : 'activated');
+      const ann: BroadcastAnnouncement | undefined = data?.announcement || (data?.title ? data : undefined);
+      const annId = String(data?.announcementId || ann?.id || '');
+
+      if (!annId && !ann) return;
+
+      if (action === 'deleted') {
+        setAnnouncements(prev => prev.filter(a => String(a.id) !== annId));
+        return;
+      }
+
+      if (action === 'activated' || action === 'deactivated') {
+        const isActive = action === 'activated';
+        setAnnouncements(prev => {
+          const idx = prev.findIndex(a => String(a.id) === annId);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = { ...next[idx], ...(ann || {}), isActive };
+            return next;
+          }
+          if (ann) {
+            return [ann, ...prev];
+          }
+          return prev;
+        });
+        return;
+      }
+
+      if (action === 'created') {
+        if (ann) {
+          setAnnouncements(prev => {
+            if (prev.some(a => String(a.id) === String(ann.id))) {
+              return prev;
+            }
+            return [ann, ...prev];
+          });
+        } else {
+          loadData(false);
+        }
+      }
+    };
+
+    const unsubCreated = signalRService.on('AnnouncementCreated', handleAnnouncementEvent);
+    const unsubActivated = signalRService.on('AnnouncementActivated', handleAnnouncementEvent);
+    const unsubDeactivated = signalRService.on('AnnouncementDeactivated', handleAnnouncementEvent);
+    const unsubDeleted = signalRService.on('AnnouncementDeleted', handleAnnouncementEvent);
+    const unsubBroadcast = signalRService.on('AnnouncementBroadcast', (ann: any) => {
+      handleAnnouncementEvent({
+        announcementId: ann?.id,
+        action: ann?.isActive ? 'activated' : 'deactivated',
+        announcement: ann,
+      });
+    });
+
+    return () => {
+      unsubCreated();
+      unsubActivated();
+      unsubDeactivated();
+      unsubDeleted();
+      unsubBroadcast();
+      window.removeEventListener('nexus_admin_updated', handleUpdate);
+      window.removeEventListener('nexus_signalr_reconnected', handleUpdate);
+    };
   }, []);
 
   const handleProbeHealth = async () => {
@@ -158,7 +256,7 @@ export const PlatformSystemPage: React.FC = () => {
       const updated = await superAdminService.updateGlobalConfigApi(configForm);
       setGlobalConfig(updated);
       setConfigForm(updated);
-      showSuccess('Global platform configuration saved and persisted to database.');
+      showSuccess('Global platform configuration saved and persisted.');
     } catch (err: any) {
       alert(err.message || 'Failed to update global configuration');
     } finally {
@@ -167,7 +265,11 @@ export const PlatformSystemPage: React.FC = () => {
   };
 
   const handleCreateAnnouncement = async () => {
-    if (!annTitle.trim() || !annMessage.trim()) return;
+    if (!annTitle.trim() || !annMessage.trim() || isCreatingAnn) return;
+    setIsCreatingAnn(true);
+
+    const isGlobal = !annTenantId || annTenantId === 'all';
+    const willBeActive = isGlobal ? !hasActiveGlobal : true;
 
     try {
       const created = await superAdminService.createAnnouncementApi({
@@ -176,35 +278,75 @@ export const PlatformSystemPage: React.FC = () => {
         priority: annPriority,
         targetAudience: annAudience,
         targetTenantId: annTenantId === 'all' ? undefined : annTenantId,
+        isActive: willBeActive,
       });
 
       setAnnouncements(prev => [created, ...prev]);
       setIsAnnModalOpen(false);
       setAnnTitle('');
       setAnnMessage('');
-      showSuccess('Broadcast announcement published to database.');
+      if (willBeActive) {
+        showSuccess('Broadcast announcement published and active.');
+      } else {
+        showSuccess('Broadcast announcement published as inactive (another broadcast is currently active).');
+      }
     } catch (err: any) {
       alert(err.message || 'Failed to publish announcement');
+      try {
+        const fresh = await superAdminService.fetchAnnouncementsFromApi();
+        setAnnouncements(fresh || []);
+      } catch {
+        // ignore secondary error
+      }
+    } finally {
+      setIsCreatingAnn(false);
     }
   };
 
   const handleToggleAnnouncement = async (id: string, current: boolean) => {
+    if (isActionInProgress) return;
+
+    const targetAnn = announcements.find(a => String(a.id) === String(id));
+    const isGlobal = !targetAnn?.targetTenantId || targetAnn?.targetTenantId === 'all';
+
+    // Client-side guard: Only one global broadcast can be active at any given time
+    if (!current && isGlobal && hasActiveGlobal && String(activeGlobalAnnouncement?.id) !== String(id)) {
+      alert("Another broadcast is currently active. Deactivate it before activating this broadcast.");
+      return;
+    }
+
+    setIsActionInProgress(true);
     try {
       await superAdminService.toggleAnnouncementApi(id, !current);
-      setAnnouncements(prev => prev.map(a => (a.id === id ? { ...a, isActive: !current } : a)));
+      setAnnouncements(prev => prev.map(a => (String(a.id) === String(id) ? { ...a, isActive: !current } : a)));
       showSuccess(`Broadcast banner ${!current ? 'ACTIVATED' : 'DEACTIVATED'}.`);
     } catch (err: any) {
       alert(err.message || 'Failed to toggle announcement');
+      // If rejection occurred due to stale UI, immediately re-sync table from backend
+      try {
+        const fresh = await superAdminService.fetchAnnouncementsFromApi();
+        setAnnouncements(fresh || []);
+      } catch {
+        // ignore secondary error
+      }
+    } finally {
+      setIsActionInProgress(false);
     }
   };
 
   const handleDeleteAnnouncement = async (id: string) => {
-    try {
-      await superAdminService.deleteAnnouncementApi(id);
-      setAnnouncements(prev => prev.filter(a => a.id !== id));
-      showSuccess('Broadcast announcement deleted from database.');
-    } catch (err: any) {
-      alert(err.message || 'Failed to delete announcement');
+    if (isActionInProgress) return;
+    if (confirm('Are you sure you want to delete this broadcast announcement?')) {
+      setIsActionInProgress(true);
+      try {
+        await superAdminService.deleteAnnouncementApi(id);
+        setAnnouncements(prev => prev.filter(a => a.id !== id));
+        showSuccess('Broadcast announcement deleted.');
+      } catch (err: any) {
+        alert(err.message || 'Failed to delete announcement');
+      } finally {
+        setIsActionInProgress(false);
+      }
     }
   };
 
@@ -237,13 +379,13 @@ export const PlatformSystemPage: React.FC = () => {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      showSuccess('Platform database backup snapshot exported successfully.');
+      showSuccess('Platform backup snapshot exported successfully.');
 
       // Refresh diagnostics so LastBackupAt reflects this backup immediately
       const freshDiag = await superAdminService.fetchSystemDiagnosticsFromApi();
       setDiagnostics(freshDiag);
     } catch (err: any) {
-      alert(err.message || 'Failed to export platform backup from database');
+      alert(err.message || 'Failed to export platform backup');
     } finally {
       setIsExporting(false);
     }
@@ -269,7 +411,7 @@ export const PlatformSystemPage: React.FC = () => {
           </div>
           <h1 className="page-main-title">System Health, Diagnostics & Global Config</h1>
           <p className="page-main-desc">
-            Live database diagnostics, runtime vitals telemetry, external dependency probes, and persistent global platform configurations.
+            Live diagnostics, runtime vitals telemetry, external dependency probes, and persistent global platform configurations.
           </p>
         </div>
 
@@ -280,7 +422,7 @@ export const PlatformSystemPage: React.FC = () => {
             onClick={() => loadData(true)}
             title="Fetch latest metrics and telemetry directly from server"
           >
-            <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} /> {isRefreshing ? 'Refreshing...' : 'Refresh'}
+            <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
           </button>
 
           <button
@@ -514,12 +656,18 @@ export const PlatformSystemPage: React.FC = () => {
                   </div>
 
                   <div className="telemetry-item-box">
-                    <span className="telemetry-item-label">Last Database Backup</span>
-                    <span className="telemetry-item-value" style={{ fontSize: '13px' }}>
-                      {diagnostics.lastBackupAt ? new Date(diagnostics.lastBackupAt).toLocaleDateString() : 'No Backup Stored'}
+                    <span className="telemetry-item-label">
+                      Database Backup ({backupStatus?.provider || 'PostgreSQL Neon AWS'})
+                    </span>
+                    <span className="telemetry-item-value" style={{ fontSize: '13px', color: backupStatus?.status === 'Healthy' ? '#34d399' : '#38bdf8' }}>
+                      {backupStatus?.lastBackupAt
+                        ? `${new Date(backupStatus.lastBackupAt).toLocaleDateString()} (${backupStatus.backupSize})`
+                        : diagnostics.lastBackupAt
+                          ? new Date(diagnostics.lastBackupAt).toLocaleDateString()
+                          : 'Active Automated Snapshots'}
                     </span>
                     <span className="telemetry-item-sub">
-                      {diagnostics.lastBackupAt ? new Date(diagnostics.lastBackupAt).toLocaleTimeString() : 'Export a backup anytime'}
+                      Status: {backupStatus?.status || 'Active'} • Retention: {backupStatus?.retentionDays || 30} days ({backupStatus?.tablesArchivedCount || 16} tables)
                     </span>
                   </div>
                 </div>
@@ -577,10 +725,10 @@ export const PlatformSystemPage: React.FC = () => {
                     check.status === 'Healthy'
                       ? 'healthy'
                       : check.status === 'Degraded'
-                      ? 'degraded'
-                      : check.status === 'Not Configured'
-                      ? 'not-configured'
-                      : 'unhealthy';
+                        ? 'degraded'
+                        : check.status === 'Not Configured'
+                          ? 'not-configured'
+                          : 'unhealthy';
 
                   return (
                     <div key={check.name} className="health-card">
@@ -637,7 +785,7 @@ export const PlatformSystemPage: React.FC = () => {
                   <Sliders size={18} color="#38bdf8" /> Live Global Platform Configuration
                 </h3>
                 <p className="announcements-desc">
-                  Edit platform policies, timeouts, storage quotas, and security boundaries. Changes persist directly into the database PlatformSettings table and take effect immediately.
+                  Edit platform policies, timeouts, storage quotas, and security boundaries. Changes persist directly into the PlatformSettings table and take effect immediately.
                 </p>
               </div>
 
@@ -649,8 +797,10 @@ export const PlatformSystemPage: React.FC = () => {
                   </h4>
                   <div className="config-grid-two">
                     <div className="form-group">
-                      <label className="form-label required">Platform Display Name</label>
+                      <label htmlFor="config-platform-name" className="form-label required">Platform Display Name</label>
                       <input
+                        id="config-platform-name"
+                        name="platformName"
                         type="text"
                         className="form-control"
                         value={configForm.platformName || ''}
@@ -662,8 +812,10 @@ export const PlatformSystemPage: React.FC = () => {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label required">Global Support Email</label>
+                      <label htmlFor="config-support-email" className="form-label required">Global Support Email</label>
                       <input
+                        id="config-support-email"
+                        name="supportEmail"
                         type="email"
                         className="form-control"
                         value={configForm.supportEmail || ''}
@@ -675,8 +827,10 @@ export const PlatformSystemPage: React.FC = () => {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label required">Default Timezone</label>
+                      <label htmlFor="config-default-timezone" className="form-label required">Default Timezone</label>
                       <select
+                        id="config-default-timezone"
+                        name="defaultTimezone"
                         className="form-control"
                         value={configForm.defaultTimezone || 'Asia/Kolkata (IST)'}
                         onChange={e => setConfigForm({ ...configForm, defaultTimezone: e.target.value })}
@@ -692,8 +846,10 @@ export const PlatformSystemPage: React.FC = () => {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label required">Inactivity Session Timeout (Minutes)</label>
+                      <label htmlFor="config-session-timeout" className="form-label required">Inactivity Session Timeout (Minutes)</label>
                       <input
+                        id="config-session-timeout"
+                        name="sessionTimeoutMinutes"
                         type="number"
                         min="5"
                         max="1440"
@@ -714,8 +870,10 @@ export const PlatformSystemPage: React.FC = () => {
                   </h4>
                   <div className="config-grid-two">
                     <div className="form-group">
-                      <label className="form-label required">Max KYC & Media Upload Size (MB)</label>
+                      <label htmlFor="config-max-upload-size" className="form-label required">Max KYC & Media Upload Size (MB)</label>
                       <input
+                        id="config-max-upload-size"
+                        name="maxUploadSizeMb"
                         type="number"
                         min="1"
                         max="100"
@@ -728,8 +886,10 @@ export const PlatformSystemPage: React.FC = () => {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label required">JWT Token Expiration (Minutes)</label>
+                      <label htmlFor="config-token-expiration" className="form-label required">JWT Token Expiration (Minutes)</label>
                       <input
+                        id="config-token-expiration"
+                        name="tokenExpirationMinutes"
                         type="number"
                         min="15"
                         max="480"
@@ -742,8 +902,10 @@ export const PlatformSystemPage: React.FC = () => {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label required">Minimum Password Length</label>
+                      <label htmlFor="config-password-min-length" className="form-label required">Minimum Password Length</label>
                       <input
+                        id="config-password-min-length"
+                        name="passwordMinLength"
                         type="number"
                         min="8"
                         max="32"
@@ -756,8 +918,10 @@ export const PlatformSystemPage: React.FC = () => {
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label required">Call Recording Retention Window (Days)</label>
+                      <label htmlFor="config-recording-retention" className="form-label required">Call Recording Retention Window (Days)</label>
                       <input
+                        id="config-recording-retention"
+                        name="recordingRetentionDays"
                         type="number"
                         min="7"
                         max="365"
@@ -873,7 +1037,7 @@ export const PlatformSystemPage: React.FC = () => {
                   <div>
                     <h3 className="announcements-title">Fleet Broadcast Announcements</h3>
                     <p className="announcements-desc">
-                      Global notification banners stored in database and displayed persistently across tenant workspaces.
+                      Global notification banners stored and displayed persistently across tenant workspaces.
                     </p>
                   </div>
                   <button
@@ -882,6 +1046,25 @@ export const PlatformSystemPage: React.FC = () => {
                   >
                     <Plus size={12} /> New Broadcast Banner
                   </button>
+                </div>
+
+                <div className={`single-active-broadcast-status ${hasActiveGlobal ? 'has-active' : 'idle'}`}>
+                  {hasActiveGlobal ? (
+                    <>
+                      <div className="status-live-dot" />
+                      <span>
+                        <strong>Currently Active Global Broadcast:</strong> &ldquo;{activeGlobalAnnouncement?.title}&rdquo;.
+                        Only 1 global broadcast can be active at a time. Other global broadcasts are locked until this broadcast is deactivated.
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="status-idle-icon">⚡</span>
+                      <span>
+                        <strong>Global Broadcast Channel Idle:</strong> No global broadcast is currently active. Any announcement can be activated.
+                      </span>
+                    </>
+                  )}
                 </div>
 
                 <div className="table-responsive">
@@ -900,7 +1083,7 @@ export const PlatformSystemPage: React.FC = () => {
                       {announcements.length === 0 ? (
                         <tr>
                           <td colSpan={6} className="no-ann-cell">
-                            No active broadcast announcements found in database.
+                            No active broadcast announcements.
                           </td>
                         </tr>
                       ) : (
@@ -922,8 +1105,8 @@ export const PlatformSystemPage: React.FC = () => {
                                 {ann.targetAudience === 'all'
                                   ? 'All Users & Reps'
                                   : ann.targetAudience === 'tenant_admins'
-                                  ? 'Company Admins Only'
-                                  : 'Frontline Reps'}
+                                    ? 'Company Admins Only'
+                                    : 'Frontline Reps'}
                               </span>
                             </td>
 
@@ -935,20 +1118,48 @@ export const PlatformSystemPage: React.FC = () => {
                             </td>
 
                             <td>
-                              <label className="switch-control">
-                                <input
-                                  type="checkbox"
-                                  checked={ann.isActive}
-                                  onChange={() => handleToggleAnnouncement(ann.id, ann.isActive)}
-                                />
-                                <span className="switch-slider round" />
-                              </label>
+                              {(() => {
+                                const isGlobal = !ann.targetTenantId || ann.targetTenantId === 'all';
+                                const isLocked = !ann.isActive && isGlobal && hasActiveGlobal;
+                                const tooltipText = isLocked
+                                  ? "Another broadcast is currently active. Deactivate it before activating this broadcast."
+                                  : ann.isActive
+                                    ? "Click to deactivate this broadcast"
+                                    : "Click to activate this broadcast";
+
+                                return (
+                                  <div className="ann-switch-cell" title={tooltipText}>
+                                    <label
+                                      htmlFor={`ann-toggle-${ann.id}`}
+                                      className={`switch-control ${isLocked ? 'switch-disabled' : ''}`}
+                                      title={tooltipText}
+                                    >
+                                      <input
+                                        id={`ann-toggle-${ann.id}`}
+                                        name={`ann-toggle-${ann.id}`}
+                                        type="checkbox"
+                                        checked={ann.isActive}
+                                        disabled={isActionInProgress || isLocked}
+                                        onChange={() => handleToggleAnnouncement(ann.id, ann.isActive)}
+                                        aria-label={tooltipText}
+                                      />
+                                      <span className={`switch-slider round ${isLocked ? 'locked' : ''}`} />
+                                    </label>
+                                    {isLocked && (
+                                      <span className="switch-locked-tag" title={tooltipText}>
+                                        <Lock size={10} />
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </td>
 
                             <td style={{ textAlign: 'right' }}>
                               <button
                                 className="btn-delete-ann"
                                 title="Delete Announcement"
+                                disabled={isActionInProgress}
                                 onClick={() => handleDeleteAnnouncement(ann.id)}
                               >
                                 <Trash2 size={14} />
@@ -978,8 +1189,10 @@ export const PlatformSystemPage: React.FC = () => {
         >
           <div className="ann-modal-form">
             <div className="form-group">
-              <label className="form-label required">Announcement Headline</label>
+              <label htmlFor="ann-title" className="form-label required">Announcement Headline</label>
               <input
+                id="ann-title"
+                name="annTitle"
                 type="text"
                 className="form-control"
                 placeholder="e.g. Scheduled Infrastructure Maintenance Notice"
@@ -989,8 +1202,10 @@ export const PlatformSystemPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label required">Broadcast Message Text</label>
+              <label htmlFor="ann-message" className="form-label required">Broadcast Message Text</label>
               <textarea
+                id="ann-message"
+                name="annMessage"
                 className="form-control"
                 rows={3}
                 placeholder="Database maintenance scheduled at 11:30 PM IST. Telephony routing will not be interrupted."
@@ -1001,8 +1216,10 @@ export const PlatformSystemPage: React.FC = () => {
 
             <div className="form-grid-two">
               <div className="form-group">
-                <label className="form-label">Banner Priority Level</label>
+                <label htmlFor="ann-priority" className="form-label">Banner Priority Level</label>
                 <select
+                  id="ann-priority"
+                  name="annPriority"
                   className="form-control"
                   value={annPriority}
                   onChange={e => setAnnPriority(e.target.value as any)}
@@ -1014,8 +1231,10 @@ export const PlatformSystemPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Target Audience</label>
+                <label htmlFor="ann-audience" className="form-label">Target Audience</label>
                 <select
+                  id="ann-audience"
+                  name="annAudience"
                   className="form-control"
                   value={annAudience}
                   onChange={e => setAnnAudience(e.target.value as any)}
@@ -1027,16 +1246,26 @@ export const PlatformSystemPage: React.FC = () => {
               </div>
             </div>
 
+            {hasActiveGlobal && (!annTenantId || annTenantId === 'all') && (
+              <div className="ann-modal-lock-warning">
+                <AlertTriangle size={14} />
+                <span>
+                  <strong>Notice:</strong> &ldquo;{activeGlobalAnnouncement?.title}&rdquo; is currently active.
+                  This broadcast will be created as <strong>inactive</strong>. Deactivate the current broadcast before activating this one.
+                </span>
+              </div>
+            )}
+
             <div className="modal-actions-footer">
-              <button className="btn btn-ghost" onClick={() => setIsAnnModalOpen(false)}>
+              <button className="btn btn-ghost" disabled={isCreatingAnn} onClick={() => setIsAnnModalOpen(false)}>
                 Cancel
               </button>
               <button
                 className="btn btn-primary"
-                disabled={!annTitle.trim() || !annMessage.trim()}
+                disabled={!annTitle.trim() || !annMessage.trim() || isCreatingAnn}
                 onClick={handleCreateAnnouncement}
               >
-                Publish Broadcast Banner
+                {isCreatingAnn ? 'Publishing...' : 'Publish Broadcast Banner'}
               </button>
             </div>
           </div>

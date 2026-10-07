@@ -166,8 +166,11 @@ export const PlatformAuditPage: React.FC = () => {
         <div className="audit-search-box">
           <Search size={16} className="search-icon" />
           <input
+            id="audit-search-query"
+            name="searchQuery"
             type="text"
             className="audit-search-input"
+            aria-label="Search audit trail"
             placeholder="Search audit trail by actor, email, entity ID, or description..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
@@ -177,7 +180,10 @@ export const PlatformAuditPage: React.FC = () => {
         <div className="audit-dropdown-filters">
           {/* Organization Filter */}
           <select
+            id="audit-filter-company"
+            name="companyFilter"
             className="filter-select"
+            aria-label="Filter by organization"
             value={selectedCompanyFilter}
             onChange={e => setSelectedCompanyFilter(e.target.value)}
           >
@@ -192,7 +198,10 @@ export const PlatformAuditPage: React.FC = () => {
 
           {/* Action Filter */}
           <select
+            id="audit-filter-action"
+            name="actionFilter"
             className="filter-select"
+            aria-label="Filter by action"
             value={selectedActionFilter}
             onChange={e => setSelectedActionFilter(e.target.value)}
           >
@@ -206,7 +215,10 @@ export const PlatformAuditPage: React.FC = () => {
 
           {/* Module Filter */}
           <select
+            id="audit-filter-module"
+            name="moduleFilter"
             className="filter-select"
+            aria-label="Filter by system module"
             value={selectedModuleFilter}
             onChange={e => setSelectedModuleFilter(e.target.value)}
           >
@@ -221,19 +233,25 @@ export const PlatformAuditPage: React.FC = () => {
           {/* Date Range Inputs */}
           <div className="date-filter-group">
             <input
+              id="audit-filter-from-date"
+              name="fromDate"
               type="date"
               className="date-input"
               value={fromDate}
               onChange={e => setFromDate(e.target.value)}
               title="From Date"
+              aria-label="From Date"
             />
             <span className="date-sep">&rarr;</span>
             <input
+              id="audit-filter-to-date"
+              name="toDate"
               type="date"
               className="date-input"
               value={toDate}
               onChange={e => setToDate(e.target.value)}
               title="To Date"
+              aria-label="To Date"
             />
           </div>
         </div>
@@ -277,8 +295,14 @@ export const PlatformAuditPage: React.FC = () => {
 
                     <td>
                       <div className="actor-cell">
-                        <div className="actor-name-text">{l.actorName}</div>
-                        <div className="actor-email-text">{l.actorEmail}</div>
+                        <div className="actor-name-text">
+                          {l.actorName && !l.actorName.includes('(ID:') && l.actorName.toLowerCase() !== (l.actorEmail || '').toLowerCase()
+                            ? l.actorName
+                            : (l.actorEmail || (l.actorName && !l.actorName.includes('(ID:') ? l.actorName : 'System User'))}
+                        </div>
+                        {l.actorEmail && l.actorName && !l.actorName.includes('(ID:') && l.actorName.toLowerCase() !== l.actorEmail.toLowerCase() && (
+                          <div className="actor-email-text">{l.actorEmail}</div>
+                        )}
                       </div>
                     </td>
 
@@ -343,7 +367,9 @@ export const PlatformAuditPage: React.FC = () => {
               <div className="meta-row">
                 <span className="meta-key">Actor Name & Email:</span>
                 <span className="meta-val font-bold">
-                  {inspectedLog.actorName} &lt;{inspectedLog.actorEmail}&gt;
+                  {inspectedLog.actorName && !inspectedLog.actorName.includes('(ID:') && inspectedLog.actorName.toLowerCase() !== (inspectedLog.actorEmail || '').toLowerCase()
+                    ? `${inspectedLog.actorName}${inspectedLog.actorEmail ? ` <${inspectedLog.actorEmail}>` : ''}`
+                    : (inspectedLog.actorEmail || (inspectedLog.actorName && !inspectedLog.actorName.includes('(ID:') ? inspectedLog.actorName : 'System User'))}
                 </span>
               </div>
               <div className="meta-row">
@@ -369,7 +395,7 @@ export const PlatformAuditPage: React.FC = () => {
             </div>
 
             {/* Visual JSON Before / After Diff */}
-            <div className="diff-section">
+            {/* <div className="diff-section">
               <h4 className="diff-heading">Payload State Diff (Before vs After)</h4>
               <div className="diff-grid">
                 <div className="diff-pane before-pane">
@@ -400,7 +426,7 @@ export const PlatformAuditPage: React.FC = () => {
                   </pre>
                 </div>
               </div>
-            </div>
+            </div> */}
 
             <div className="drawer-footer-actions">
               <button className="btn btn-primary" onClick={() => setIsInspectDrawerOpen(false)}>

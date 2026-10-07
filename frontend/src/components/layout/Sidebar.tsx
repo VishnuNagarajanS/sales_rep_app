@@ -28,6 +28,7 @@ import {
   UserCheck,
   Clock,
   Server,
+  KeyRound,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
@@ -140,6 +141,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
         { id: 'admin-features', label: 'Feature Packages', icon: <Sparkles size={18} /> },
         { id: 'admin-call-config', label: 'Call Configuration', icon: <PhoneCall size={18} /> },
         { id: 'admin-audit', label: 'Platform Audit Logs', icon: <FileCheck size={18} /> },
+        { id: 'admin-security', label: 'Security & Access', icon: <KeyRound size={18} /> },
         { id: 'admin-system', label: 'System & Health', icon: <Server size={18} /> },
       ],
     },

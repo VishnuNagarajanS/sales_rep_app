@@ -23,6 +23,7 @@ import {
 import { Customer, CallRecord, Followup, Deal, Lead, IrmProfile, CustomFieldDefinition } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
+import { useUnsavedChanges } from '../../context/NavigationGuardContext';
 import { storageService } from '../../services/storageService';
 import { isMockMode } from '../../config/environment';
 import {
@@ -125,6 +126,16 @@ export const CustomersPage: React.FC = () => {
   const [newStatus, setNewStatus] = useState<'Active' | 'VIP' | 'Inactive'>('Active');
   const [newCustomFields, setNewCustomFields] = useState<Record<string, any>>({});
   const [addErrors, setAddErrors] = useState<{ name?: string; phone?: string }>({});
+  const [isSubmittingCustomer, setIsSubmittingCustomer] = useState(false);
+  const [addCustomerError, setAddCustomerError] = useState<string | null>(null);
+
+  // Unsaved changes check
+  const isAddCustomerDirty = isAddModalOpen && (newName.trim() !== '' || newPhone.trim() !== '' || newEmail.trim() !== '');
+  useUnsavedChanges(
+    isAddCustomerDirty,
+    'You have unsaved information in the Add Customer form. Are you sure you want to leave?',
+    'customers-page'
+  );
 
   const [calls, setCalls] = useState<CallRecord[]>([]);
   const [followups, setFollowups] = useState<Followup[]>([]);
@@ -620,9 +631,11 @@ export const CustomersPage: React.FC = () => {
     setNewStatus('Active');
     setNewCustomFields({});
     setAddErrors({});
+    setAddCustomerError(null);
   };
 
-  const handleAddCustomer = () => {
+  const handleAddCustomer = async () => {
+    if (isSubmittingCustomer) return;
     const errors: { name?: string; phone?: string } = {};
     if (!newName.trim()) errors.name = 'Name is required.';
     if (!newPhone.trim()) errors.phone = 'Phone is required.';
@@ -630,31 +643,40 @@ export const CustomersPage: React.FC = () => {
       setAddErrors(errors);
       return;
     }
-    const newCustomer: import('../../types').Customer = {
-      id: `cust-${Date.now()}`,
-      companyId: tenant?.id || '',
-      name: newName.trim(),
-      phone: newPhone.trim(),
-      email: newEmail.trim(),
-      status: newStatus,
-      assignedAgentId: user?.id || '',
-      assignedAgentName: user?.name || '',
-      location: newLocation.trim(),
-      lastContacted: new Date().toISOString().split('T')[0],
-      openDealsCount: 0,
-      totalValue: 0,
-      createdAt: new Date().toISOString().split('T')[0],
-      notes: '',
-      customFields: newCustomFields,
-    };
-    apiSaveCustomer(newCustomer)
-      .then(saved => {
-        setSelectedCustomer(saved);
-        loadData();
-      })
-      .catch(console.error);
-    setIsAddModalOpen(false);
-    resetAddForm();
+
+    setAddCustomerError(null);
+    setIsSubmittingCustomer(true);
+    try {
+      const newCustomer: import('../../types').Customer = {
+        id: `cust-${Date.now()}`,
+        companyId: tenant?.id || '',
+        name: newName.trim(),
+        phone: newPhone.trim(),
+        email: newEmail.trim(),
+        status: newStatus,
+        assignedAgentId: user?.id || '',
+        assignedAgentName: user?.name || '',
+        location: newLocation.trim(),
+        lastContacted: new Date().toISOString().split('T')[0],
+        openDealsCount: 0,
+        totalValue: 0,
+        createdAt: new Date().toISOString().split('T')[0],
+        notes: '',
+        customFields: newCustomFields,
+      };
+
+      const saved = await apiSaveCustomer(newCustomer);
+      setSelectedCustomer(saved);
+      await loadData();
+      setIsAddModalOpen(false);
+      resetAddForm();
+      showToast(`✓ Customer "${saved.name}" created successfully.`);
+    } catch (err: any) {
+      console.error('Failed to create customer:', err);
+      setAddCustomerError(err?.message || 'Failed to create customer. Please check your connection and retry.');
+    } finally {
+      setIsSubmittingCustomer(false);
+    }
   };
 
   const getCustomerValueDisplay = (c: Customer): string => {
@@ -846,6 +868,7 @@ export const CustomersPage: React.FC = () => {
                 </label>
                 <select
                   id="filter-customer-status"
+                  name="statusFilter"
                   className={`form-select customers-filter-select ${statusFilter !== 'All' && statusFilter !== '' ? 'is-filtered' : ''}`}
                   value={statusFilter}
                   onChange={e => setStatusFilter(e.target.value)}
@@ -868,6 +891,7 @@ export const CustomersPage: React.FC = () => {
                   </label>
                   <select
                     id="filter-customer-assignment"
+                    name="assignmentFilter"
                     className={`form-select customers-filter-select ${assignmentFilter !== 'All' ? 'is-filtered' : ''}`}
                     value={assignmentFilter}
                     onChange={e => setAssignmentFilter(e.target.value as any)}
@@ -890,6 +914,7 @@ export const CustomersPage: React.FC = () => {
                   </label>
                   <select
                     id="filter-customer-agent"
+                    name="agentFilter"
                     className={`form-select customers-filter-select ${agentFilter !== 'All' && agentFilter !== '' ? 'is-filtered' : ''}`}
                     value={agentFilter}
                     onChange={e => setAgentFilter(e.target.value)}
@@ -921,6 +946,9 @@ export const CustomersPage: React.FC = () => {
                           assignSubMode === 'manual' ? (
                             isEligible ? (
                               <input
+                                id={`customer-select-${c.id}`}
+                                name="selectedCustomer"
+                                aria-label={`Select ${c.name}`}
                                 type="checkbox"
                                 className="customer-select-checkbox"
                                 checked={selectedCustomerIds.has(c.id)}
@@ -1582,20 +1610,28 @@ export const CustomersPage: React.FC = () => {
         subtitle="Create a fresh customer account and assign it to yourself."
         footer={
           <>
-            <button className="btn btn-secondary" onClick={() => { setIsAddModalOpen(false); resetAddForm(); }}>
+            <button className="btn btn-secondary" disabled={isSubmittingCustomer} onClick={() => { setIsAddModalOpen(false); resetAddForm(); }}>
               Cancel
             </button>
-            <button className="btn btn-primary" onClick={handleAddCustomer}>
-              Create Customer
+            <button className="btn btn-primary" disabled={isSubmittingCustomer} onClick={handleAddCustomer}>
+              {isSubmittingCustomer ? 'Creating Customer...' : 'Create Customer'}
             </button>
           </>
         }
       >
         <div className="customer-modal-stack">
+          {addCustomerError && (
+            <div className="form-error" style={{ padding: '8px 12px', background: 'rgba(239, 68, 68, 0.15)', borderRadius: 6, border: '1px solid #ef4444' }}>
+              ⚠️ {addCustomerError}
+            </div>
+          )}
           {/* Name */}
           <div className="form-group">
-            <label className="form-label">Name *</label>
+            <label htmlFor="add-customer-name" className="form-label">Name *</label>
             <input
+              id="add-customer-name"
+              name="name"
+              autoComplete="name"
               className={`form-input${addErrors.name ? ' is-invalid' : ''}`}
               placeholder="e.g. Priya Sharma"
               value={newName}
@@ -1605,8 +1641,11 @@ export const CustomersPage: React.FC = () => {
           </div>
           {/* Phone */}
           <div className="form-group">
-            <label className="form-label">Phone *</label>
+            <label htmlFor="add-customer-phone" className="form-label">Phone *</label>
             <input
+              id="add-customer-phone"
+              name="phone"
+              autoComplete="tel"
               className={`form-input${addErrors.phone ? ' is-invalid' : ''}`}
               placeholder="e.g. +91 98765 43210"
               value={newPhone}
@@ -1616,8 +1655,11 @@ export const CustomersPage: React.FC = () => {
           </div>
           {/* Email */}
           <div className="form-group">
-            <label className="form-label">Email</label>
+            <label htmlFor="add-customer-email" className="form-label">Email</label>
             <input
+              id="add-customer-email"
+              name="email"
+              autoComplete="email"
               className="form-input"
               type="email"
               placeholder="e.g. priya@example.com"
@@ -1627,8 +1669,11 @@ export const CustomersPage: React.FC = () => {
           </div>
           {/* Location */}
           <div className="form-group">
-            <label className="form-label">Location</label>
+            <label htmlFor="add-customer-location" className="form-label">Location</label>
             <input
+              id="add-customer-location"
+              name="location"
+              autoComplete="address-level2"
               className="form-input"
               placeholder="e.g. Bengaluru"
               value={newLocation}
@@ -1637,8 +1682,10 @@ export const CustomersPage: React.FC = () => {
           </div>
           {/* Status */}
           <div className="form-group">
-            <label className="form-label">Status</label>
+            <label htmlFor="add-customer-status" className="form-label">Status</label>
             <select
+              id="add-customer-status"
+              name="status"
               className="form-select"
               value={newStatus}
               onChange={e => setNewStatus(e.target.value as 'Active' | 'VIP' | 'Inactive')}
@@ -1661,12 +1708,14 @@ export const CustomersPage: React.FC = () => {
               const val = newCustomFields[key] ?? def.defaultValue ?? '';
               return (
                 <div key={def.id} className="form-group">
-                  <label className="form-label">
+                  <label htmlFor={`add-customer-cf-${def.id}`} className="form-label">
                     {def.label || key}
                     {def.required ? ' *' : ''}
                   </label>
                   {def.fieldType === 'select' && def.options && def.options.length > 0 ? (
                     <select
+                      id={`add-customer-cf-${def.id}`}
+                      name={`cf_${key}`}
                       className="form-select"
                       required={def.required}
                       value={val}
@@ -1683,6 +1732,8 @@ export const CustomersPage: React.FC = () => {
                     </select>
                   ) : (
                     <input
+                      id={`add-customer-cf-${def.id}`}
+                      name={`cf_${key}`}
                       type={def.fieldType === 'number' ? 'number' : 'text'}
                       className="form-input"
                       required={def.required}
@@ -1742,8 +1793,10 @@ export const CustomersPage: React.FC = () => {
                   {/* Col 1 – Radio */}
                   <div className="irm-col-radio">
                     <input
+                      id={`irm-select-${irm.id}`}
                       type="radio"
                       name="selectedIrm"
+                      aria-label={`Select IRM ${irm.name}`}
                       checked={isSelected}
                       onChange={() => setSelectedIrmId(irm.id)}
                       style={{ accentColor: 'var(--primary-600)', width: 16, height: 16 }}
@@ -1841,6 +1894,9 @@ export const CustomersPage: React.FC = () => {
                     <td>
                       {editingRecommendationCustomerId === rec.customerId ? (
                         <select
+                          id={`auto-edit-irm-${rec.customerId}`}
+                          name="recommendedIrm"
+                          aria-label={`Change IRM recommendation for ${rec.customerName}`}
                           className="auto-edit-select"
                           value={rec.recommendedIrmId}
                           onChange={e => handleUpdateSingleRecommendation(rec.customerId, e.target.value)}

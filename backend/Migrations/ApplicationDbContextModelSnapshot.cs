@@ -2401,6 +2401,7 @@ namespace backend.Migrations
                             RecordingEnabled = true,
                             Slug = "ghl",
                             Status = "Active",
+                            SubscriptionPlan = "Wealth Advisory Enterprise Suite",
                             Tagline = "Institutional Wealth & Real Estate Investment Advisory",
                             Timezone = "Asia/Kolkata (IST)",
                             TranscriptionEnabled = true
@@ -2419,6 +2420,7 @@ namespace backend.Migrations
                             RecordingEnabled = true,
                             Slug = "jamin",
                             Status = "Active",
+                            SubscriptionPlan = "Wealth Advisory Enterprise Suite",
                             Tagline = "Premium Plotted Enclaves & Farmland Communities",
                             Timezone = "Asia/Kolkata (IST)",
                             TranscriptionEnabled = true
