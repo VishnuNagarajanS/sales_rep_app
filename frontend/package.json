@@ -15,6 +15,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.44.0",
     "node-fetch": "^3.3.2",
     "ogl": "^1.0.11",

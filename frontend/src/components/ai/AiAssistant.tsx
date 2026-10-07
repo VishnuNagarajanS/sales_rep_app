@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, X, Send, ChevronDown } from 'lucide-react';
+import { Sparkles, X, Send, ChevronDown, Bot } from 'lucide-react';
 import { aiAssistantService, AiChatMessage } from '../../services/aiAssistantService';
 import './AiAssistant.css';
 import ReactMarkdown from 'react-markdown';
@@ -88,7 +88,7 @@ export const AiAssistant: React.FC = () => {
     <div className="ai-assistant-wrapper">
       {!isOpen && (
         <button className="ai-fab" onClick={() => setIsOpen(true)}>
-          <Sparkles size={24} />
+          <Bot size={28} className="animated-bot" />
         </button>
       )}
 

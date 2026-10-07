@@ -51,13 +51,49 @@ namespace backend.Services.Ai
             };
 
             var jsonOptions = new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
-            var response = await _httpClient.PostAsJsonAsync("chat/completions", payload, jsonOptions, ct);
             
-            if (!response.IsSuccessStatusCode)
+            HttpResponseMessage? response = null;
+            for (int i = 0; i < 3; i++)
             {
+                response = await _httpClient.PostAsJsonAsync("chat/completions", payload, jsonOptions, ct);
+                if (response.IsSuccessStatusCode) break;
+                
                 var errStr = await response.Content.ReadAsStringAsync(ct);
+                if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                {
+                    double waitSeconds = 4.0;
+                    // Try to match seconds (e.g. 15.536s) or minutes and seconds (e.g. 15m49.536s)
+                    var matchSec = System.Text.RegularExpressions.Regex.Match(errStr, @"try again in ([0-9.]+)s");
+                    var matchMin = System.Text.RegularExpressions.Regex.Match(errStr, @"try again in ([0-9]+)m([0-9.]+)s");
+                    
+                    if (matchMin.Success && double.TryParse(matchMin.Groups[1].Value, out double m) && double.TryParse(matchMin.Groups[2].Value, out double s))
+                    {
+                        waitSeconds = (m * 60) + s + 0.5;
+                    }
+                    else if (matchSec.Success && double.TryParse(matchSec.Groups[1].Value, out double parsedSec))
+                    {
+                        waitSeconds = parsedSec + 0.5;
+                    }
+
+                    // If wait time is reasonable (e.g. < 20s) and we have retries left, wait and retry.
+                    if (waitSeconds < 20.0 && i < 2)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(waitSeconds), ct);
+                        continue;
+                    }
+                    
+                    // Otherwise, gracefully return a friendly error message as the AI's response
+                    return new LlmResponse
+                    {
+                        Content = "I apologize, but I am currently receiving too many requests and have temporarily reached my data processing limit. Please try again in a little while.",
+                        PromptTokens = 0,
+                        CompletionTokens = 0
+                    };
+                }
+                
                 throw new Exception($"LLM API Error: {response.StatusCode} - {errStr}");
             }
+
             
             var responseData = await response.Content.ReadFromJsonAsync<OpenAiResponse>(jsonOptions, ct);
             var choice = responseData?.Choices?.FirstOrDefault()?.Message;

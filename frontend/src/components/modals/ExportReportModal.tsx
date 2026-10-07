@@ -11,7 +11,7 @@ export const ExportReportModal: React.FC<ExportReportModalProps> = ({ onClose, o
   const [exportType, setExportType] = useState<'All' | 'Specific'>('All');
   const [selectedModule, setSelectedModule] = useState<string>('Leads');
 
-  const modules = ['Leads', 'Deals', 'LeaveRequests', 'Consultations'];
+  const modules = ['Leads', 'Deals', 'LeaveRequests', 'Consultations', 'Users', 'WorkHandovers', 'AuditLogs', 'CallHistory', 'Investors', 'Opportunities'];
 
   const handleExport = () => {
     onExport(exportType === 'All' ? 'All' : selectedModule);
@@ -74,9 +74,14 @@ export const ExportReportModal: React.FC<ExportReportModalProps> = ({ onClose, o
                 onChange={e => setSelectedModule(e.target.value)}
                 className="form-control"
               >
-                {modules.map(m => (
-                  <option key={m} value={m}>{m === 'LeaveRequests' ? 'Leave Requests' : m}</option>
-                ))}
+                {modules.map(m => {
+                  let label = m;
+                  if (m === 'LeaveRequests') label = 'Leave Requests';
+                  if (m === 'WorkHandovers') label = 'Work Handovers';
+                  if (m === 'AuditLogs') label = 'Audit Logs';
+                  if (m === 'CallHistory') label = 'Call History';
+                  return <option key={m} value={m}>{label}</option>;
+                })}
               </select>
             </div>
           )}

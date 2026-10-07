@@ -99,6 +99,17 @@ public static class ServiceExtensions
             var registry = new backend.Services.Ai.AiToolRegistry();
             registry.Register(new backend.Services.Ai.Tools.DeclineOutOfScopeTool());
             registry.Register(new backend.Services.Ai.Tools.SearchLeadsTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchFollowupsTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchDealsTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchUsersTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchInvestorsTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchCustomersTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchLeaveRequestsTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchCallsTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchConsultationsTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchWorkHandoversTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchNotificationsTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchCompanyKnowledgeTool());
             return registry;
         });
         services.AddScoped<backend.Services.Ai.AiAssistantService>();

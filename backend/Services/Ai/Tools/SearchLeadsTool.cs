@@ -52,7 +52,13 @@ namespace backend.Services.Ai.Tools
             {
                 l.Id,
                 l.Name,
+                l.Email,
+                l.Phone,
+                l.Location,
+                l.Source,
                 l.Status,
+                l.Priority,
+                NextFollowup = l.NextFollowupDate != null ? l.NextFollowupDate.Value.ToString("yyyy-MM-dd") : null,
                 CreatedAt = l.CreatedAt.ToString("yyyy-MM-dd"),
                 AssignedTo = l.AssignedAgent != null ? l.AssignedAgent.Name : null
             }).ToListAsync(ct);

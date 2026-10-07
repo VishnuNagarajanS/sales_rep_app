@@ -136,7 +136,14 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
       const downloadUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = downloadUrl;
-      a.download = moduleName === 'All' ? 'Complete_Report.xlsx' : `${moduleName}_Report.xlsx`;
+      
+      const now = new Date();
+      const dateStr = now.toISOString().split('T')[0];
+      const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-');
+      const timestamp = `${dateStr}_${timeStr}`;
+      const baseName = moduleName === 'All' ? 'Complete_Report' : moduleName;
+      
+      a.download = `${baseName}_${timestamp}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();

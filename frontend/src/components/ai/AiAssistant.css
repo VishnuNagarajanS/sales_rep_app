@@ -9,7 +9,7 @@
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background-color: var(--primary-color, #2563eb);
+  background-color: #dc2626;
   color: white;
   border: none;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
@@ -42,7 +42,7 @@
 
 .ai-header {
   padding: 16px;
-  background: var(--primary-color, #2563eb);
+  background: #dc2626;
   color: white;
   display: flex;
   justify-content: space-between;
@@ -88,7 +88,7 @@
 
 .ai-message.user {
   align-self: flex-end;
-  background: var(--primary-color, #2563eb);
+  background: #dc2626;
   color: white;
   border-bottom-right-radius: 4px;
 }
@@ -171,4 +171,14 @@
 .ai-message.assistant ul {
   margin: 0;
   padding-left: 20px;
+}
+
+@keyframes floatAndPulse {
+  0% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-4px) scale(1.1); color: #fff; }
+  100% { transform: translateY(0) scale(1); }
+}
+
+.animated-bot {
+  animation: floatAndPulse 2s ease-in-out infinite;
 }
