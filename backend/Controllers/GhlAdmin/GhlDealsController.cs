@@ -139,10 +139,10 @@ public class GhlDealsController : ControllerBase
         }
 
         var role = _currentUser.Role?.ToLowerInvariant();
-        if (role == "irm")
+        if (role == "irm" && (string.IsNullOrWhiteSpace(dto.Stage) || !IrmStages.Contains(dto.Stage.Trim())))
         {
             return StatusCode(StatusCodes.Status403Forbidden,
-                ApiResponse<GhlDealResponseDto>.FailureResult("Access denied: IRM users cannot create deals directly."));
+                ApiResponse<GhlDealResponseDto>.FailureResult("Access denied: IRM users cannot create deals directly outside IRM stages."));
         }
 
         var agentId = _currentUser.UserId;
