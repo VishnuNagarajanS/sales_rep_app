@@ -197,127 +197,144 @@ public class IrmKycController : ControllerBase
     [Authorize]
     public async Task<IActionResult> SaveAssistedDraft([FromBody] SubmitKycDto dto, CancellationToken ct)
     {
-        if (User.IsGhlAdmin())
+        try
         {
-            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<KycDto>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM KYC records."));
-        }
-
-        var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
-        var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
-        var companyId = User.GetCompanyId(0);
-        if (companyId <= 0 && isPlatformAdmin) companyId = 1;
-        if (companyId <= 0)
-            return Unauthorized();
-
-        var userId = User.GetUserId();
-        if (userId <= 0)
-            return Unauthorized();
-
-        dto.IsFinalSubmit = false;
-        var result = await _kycService.SaveAssistedKycAsync(companyId, userId, dto, ct);
-        if (!result.Success)
-            return BadRequest(result);
-
-        if (result.Data != null)
-        {
-            var kycId = result.Data.Id;
-            try
+            if (User.IsGhlAdmin())
             {
-                GhlDeal? deal = null;
-                if (dto.DealId.HasValue && dto.DealId.Value > 0)
+                return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<KycDto>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM KYC records."));
+            }
+
+            var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
+            var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
+            var companyId = User.GetCompanyId(0);
+            if (companyId <= 0 && isPlatformAdmin) companyId = 1;
+            if (companyId <= 0)
+                return Unauthorized();
+
+            var userId = User.GetUserId();
+            if (userId <= 0)
+                return Unauthorized();
+
+            dto.IsFinalSubmit = false;
+            var result = await _kycService.SaveAssistedKycAsync(companyId, userId, dto, ct);
+            if (!result.Success)
+                return BadRequest(result);
+
+            if (result.Data != null)
+            {
+                var kycId = result.Data.Id;
+                try
                 {
-                    deal = await _db.GhlDeals.FirstOrDefaultAsync(d => d.Id == dto.DealId.Value && d.CompanyId == companyId, ct);
+                    GhlDeal? deal = null;
+                    if (dto.DealId.HasValue && dto.DealId.Value > 0)
+                    {
+                        deal = await _db.GhlDeals.FirstOrDefaultAsync(d => d.Id == dto.DealId.Value && d.CompanyId == companyId, ct);
+                    }
+                    if (deal == null && kycId > 0)
+                    {
+                        deal = await _db.GhlDeals.FirstOrDefaultAsync(d => d.KycId == kycId && d.CompanyId == companyId, ct);
+                    }
+                    if (deal == null && dto.InvestorId > 0)
+                    {
+                        deal = await _db.GhlDeals.FirstOrDefaultAsync(d => d.CustomerId == dto.InvestorId && d.CompanyId == companyId, ct);
+                    }
+                    if (deal != null && deal.KycId == null)
+                    {
+                        deal.KycId = kycId;
+                        deal.UpdatedAt = DateTime.UtcNow;
+                        await _db.SaveChangesAsync(ct);
+                    }
                 }
-                if (deal == null && kycId > 0)
+                catch (Exception ex)
                 {
-                    deal = await _db.GhlDeals.FirstOrDefaultAsync(d => d.KycId == kycId && d.CompanyId == companyId, ct);
-                }
-                if (deal == null && dto.InvestorId > 0)
-                {
-                    deal = await _db.GhlDeals.FirstOrDefaultAsync(d => d.CustomerId == dto.InvestorId && d.CompanyId == companyId, ct);
-                }
-                if (deal != null && deal.KycId == null)
-                {
-                    deal.KycId = kycId;
-                    deal.UpdatedAt = DateTime.UtcNow;
-                    await _db.SaveChangesAsync(ct);
+                    Console.WriteLine($"[SaveAssistedDraft] Deal link warning: {ex.Message}");
                 }
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[SaveAssistedDraft] Deal link warning: {ex.Message}");
-            }
-        }
 
-        return Ok(result);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SaveAssistedDraft] Error: {ex}");
+            return StatusCode(StatusCodes.Status500InternalServerError, ApiResponse<KycDto>.ErrorResponse($"Error saving assisted draft: {ex.Message}"));
+        }
     }
 
     [HttpPost("assisted-submit")]
     [Authorize]
     public async Task<IActionResult> SubmitAssistedKyc([FromBody] SubmitKycDto dto, CancellationToken ct)
     {
-        if (User.IsGhlAdmin())
+        try
         {
-            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<KycDto>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM KYC records."));
-        }
-
-        var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
-        var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
-        var companyId = User.GetCompanyId(0);
-        if (companyId <= 0 && isPlatformAdmin) companyId = 1;
-        if (companyId <= 0)
-            return Unauthorized();
-
-        var userId = User.GetUserId();
-        if (userId <= 0)
-            return Unauthorized();
-
-        if (!dto.CustomerConsentObtained)
-        {
-            return BadRequest(ApiResponse<KycDto>.ErrorResponse(
-                "Customer consent is required before submitting assisted KYC. Please obtain and confirm customer consent."));
-        }
-
-        dto.IsFinalSubmit = true;
-        var result = await _kycService.SaveAssistedKycAsync(companyId, userId, dto, ct);
-        if (!result.Success)
-            return BadRequest(result);
-
-        // Also update linked deal if present
-        if (result.Data != null)
-        {
-            var kycId = result.Data.Id;
-            try
+            if (User.IsGhlAdmin())
             {
-                GhlDeal? deal = null;
-                if (dto.DealId.HasValue && dto.DealId.Value > 0)
+                return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<KycDto>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM KYC records."));
+            }
+
+            var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
+            var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
+            var companyId = User.GetCompanyId(0);
+            if (companyId <= 0 && isPlatformAdmin) companyId = 1;
+            if (companyId <= 0)
+                return Unauthorized();
+
+            var userId = User.GetUserId();
+            if (userId <= 0)
+                return Unauthorized();
+
+            if (!dto.CustomerConsentObtained)
+            {
+                return BadRequest(ApiResponse<KycDto>.ErrorResponse(
+                    "Customer consent is required before submitting assisted KYC. Please obtain and confirm customer consent."));
+            }
+
+            dto.IsFinalSubmit = true;
+            var result = await _kycService.SaveAssistedKycAsync(companyId, userId, dto, ct);
+            if (!result.Success)
+                return BadRequest(result);
+
+            // Also update linked deal if present
+            if (result.Data != null)
+            {
+                var kycId = result.Data.Id;
+                try
                 {
-                    deal = await _db.GhlDeals.FirstOrDefaultAsync(d => d.Id == dto.DealId.Value && d.CompanyId == companyId, ct);
+                    GhlDeal? deal = null;
+                    if (dto.DealId.HasValue && dto.DealId.Value > 0)
+                    {
+                        deal = await _db.GhlDeals.FirstOrDefaultAsync(d => d.Id == dto.DealId.Value && d.CompanyId == companyId, ct);
+                    }
+                    if (deal == null && kycId > 0)
+                    {
+                        deal = await _db.GhlDeals.FirstOrDefaultAsync(d => d.KycId == kycId && d.CompanyId == companyId, ct);
+                    }
+                    if (deal == null && dto.InvestorId > 0)
+                    {
+                        deal = await _db.GhlDeals.FirstOrDefaultAsync(d => d.CustomerId == dto.InvestorId && d.CompanyId == companyId, ct);
+                    }
+                    if (deal != null)
+                    {
+                        deal.KycId = kycId;
+                        deal.KycStatus = "Assisted KYC – Submitted for Verification";
+                        deal.UpdatedAt = DateTime.UtcNow;
+                        await _db.SaveChangesAsync(ct);
+                    }
                 }
-                if (deal == null && kycId > 0)
+                catch (Exception ex)
                 {
-                    deal = await _db.GhlDeals.FirstOrDefaultAsync(d => d.KycId == kycId && d.CompanyId == companyId, ct);
-                }
-                if (deal == null && dto.InvestorId > 0)
-                {
-                    deal = await _db.GhlDeals.FirstOrDefaultAsync(d => d.CustomerId == dto.InvestorId && d.CompanyId == companyId, ct);
-                }
-                if (deal != null)
-                {
-                    deal.KycId = kycId;
-                    deal.KycStatus = "Assisted KYC – Submitted for Verification";
-                    deal.UpdatedAt = DateTime.UtcNow;
-                    await _db.SaveChangesAsync(ct);
+                    Console.WriteLine($"[SubmitAssistedKyc] Deal link warning: {ex.Message}");
                 }
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[SubmitAssistedKyc] Deal link warning: {ex.Message}");
-            }
-        }
 
-        return Ok(result);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SubmitAssistedKyc] Error: {ex}");
+            return StatusCode(StatusCodes.Status500InternalServerError, ApiResponse<KycDto>.ErrorResponse($"Error submitting assisted KYC: {ex.Message}"));
+        }
     }
+
 
     [HttpPost("{id:int}/review")]
     [Authorize]

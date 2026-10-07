@@ -32,8 +32,8 @@ public class InvestorRepository : IInvestorRepository
         => await _db.Investors
             .Include(i => i.Consultations)
             .Include(i => i.Followups)
-            .Include(i => i.Calls)
             .FirstOrDefaultAsync(i => i.Id == id && i.CompanyId == companyId, ct);
+
 
     public async Task<Investor> CreateAsync(Investor investor, CancellationToken ct = default)
     {

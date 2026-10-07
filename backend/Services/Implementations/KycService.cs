@@ -544,11 +544,12 @@ public class KycService : IKycService
         {
             kyc = await _kycRepo.GetByInvestorIdAsync(dto.InvestorId, companyId, ct);
         }
-        else if (kyc == null && !string.IsNullOrWhiteSpace(dto.Email))
+        if (kyc == null && !string.IsNullOrWhiteSpace(dto.Email))
         {
             var all = await _kycRepo.GetAllAsync(companyId, null, ct);
             kyc = all.FirstOrDefault(k => string.Equals(k.Email, dto.Email, StringComparison.OrdinalIgnoreCase));
         }
+
 
         if (kyc == null && !string.IsNullOrWhiteSpace(dto.Phone))
         {
@@ -703,20 +704,29 @@ public class KycService : IKycService
         // Reject assisted KYC submissions unless customer consent is confirmed
         if (dto.IsFinalSubmit && !dto.CustomerConsentObtained)
         {
-            var rejectAudit = new AuditLog
+            try
             {
-                CompanyId = companyId,
-                Action = "ASSISTED_KYC_SUBMIT_REJECTED",
-                EntityType = "InvestorKyc",
-                EntityId = kyc.Id != 0 ? kyc.Id.ToString() : (dto.InvestorId > 0 ? dto.InvestorId.ToString() : "0"),
-                Details = $"Assisted KYC submission rejected: Customer consent was not confirmed by IRM ID {irmId} for investor '{kyc.InvestorName}'.",
-                ActorName = $"IRM (ID: {irmId})",
-                Timestamp = DateTime.UtcNow,
-                Module = "KYC_ASSISTED",
-                Status = "failed"
-            };
-            _db.AuditLogs.Add(rejectAudit);
-            await _db.SaveChangesAsync(ct);
+                var irmUser = await _db.Users.FindAsync(new object[] { irmId }, ct);
+                var rejectAudit = new AuditLog
+                {
+                    CompanyId = companyId,
+                    Action = "ASSISTED_KYC_SUBMIT_REJECTED",
+                    EntityType = "InvestorKyc",
+                    EntityId = kyc.Id != 0 ? kyc.Id.ToString() : (dto.InvestorId > 0 ? dto.InvestorId.ToString() : "0"),
+                    Details = $"Assisted KYC submission rejected: Customer consent was not confirmed by IRM ID {irmId} for investor '{kyc.InvestorName}'.",
+                    ActorName = irmUser?.Name ?? $"IRM (ID: {irmId})",
+                    ActorEmail = irmUser?.Email ?? string.Empty,
+                    Timestamp = DateTime.UtcNow,
+                    Module = "KYC_ASSISTED",
+                    Status = "failed"
+                };
+                _db.AuditLogs.Add(rejectAudit);
+                await _db.SaveChangesAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[SaveAssistedKycAsync] Failed to record reject audit log: {Message}", ex.Message);
+            }
 
             return ApiResponse<KycDto>.ErrorResponse(
                 "Assisted KYC submission rejected: Confirmed customer consent is required before submission. Please obtain and confirm customer consent.");
@@ -740,20 +750,30 @@ public class KycService : IKycService
             await _kycRepo.UpdateAsync(kyc, ct);
 
         // Record immutable backend audit log retaining full consent and submission details
-        var audit = new AuditLog
+        try
         {
-            CompanyId = companyId,
-            Action = dto.IsFinalSubmit ? "ASSISTED_KYC_SUBMIT" : "ASSISTED_KYC_DRAFT",
-            EntityType = "InvestorKyc",
-            EntityId = kyc.Id.ToString(),
-            Details = $"Assisted KYC {(dto.IsFinalSubmit ? "submitted for verification" : "draft saved")} by IRM ID {irmId} for investor '{kyc.InvestorName}' (Consent: {kyc.CustomerConsentObtained}, Timestamp: {kyc.CustomerConsentTimestamp:O}, Details: {kyc.CustomerConsentDetails})",
-            ActorName = $"IRM (ID: {irmId})",
-            Timestamp = DateTime.UtcNow,
-            Module = "KYC_ASSISTED",
-            Status = "success"
-        };
-        _db.AuditLogs.Add(audit);
-        await _db.SaveChangesAsync(ct);
+            var irmUser = await _db.Users.FindAsync(new object[] { irmId }, ct);
+            var audit = new AuditLog
+            {
+                CompanyId = companyId,
+                Action = dto.IsFinalSubmit ? "ASSISTED_KYC_SUBMIT" : "ASSISTED_KYC_DRAFT",
+                EntityType = "InvestorKyc",
+                EntityId = kyc.Id.ToString(),
+                Details = $"Assisted KYC {(dto.IsFinalSubmit ? "submitted for verification" : "draft saved")} by IRM ID {irmId} for investor '{kyc.InvestorName}' (Consent: {kyc.CustomerConsentObtained}, Timestamp: {kyc.CustomerConsentTimestamp:O}, Details: {kyc.CustomerConsentDetails})",
+                ActorName = irmUser?.Name ?? $"IRM (ID: {irmId})",
+                ActorEmail = irmUser?.Email ?? string.Empty,
+                Timestamp = DateTime.UtcNow,
+                Module = "KYC_ASSISTED",
+                Status = "success"
+            };
+            _db.AuditLogs.Add(audit);
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[SaveAssistedKycAsync] Failed to record audit log: {Message}", ex.Message);
+        }
+
 
         return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc), dto.IsFinalSubmit ? "Assisted KYC submitted for verification" : "Assisted KYC draft saved");
     }
