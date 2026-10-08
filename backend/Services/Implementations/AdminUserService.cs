@@ -12,11 +12,13 @@ public class AdminUserService : IAdminUserService
 {
     private readonly ApplicationDbContext _context;
     private readonly backend.Services.Email.IEmailService _emailService;
+    private readonly backend.Services.Interfaces.ICompanyClock _clock;
 
-    public AdminUserService(ApplicationDbContext context, backend.Services.Email.IEmailService emailService)
+    public AdminUserService(ApplicationDbContext context, backend.Services.Email.IEmailService emailService, backend.Services.Interfaces.ICompanyClock clock)
     {
         _context = context;
         _emailService = emailService;
+        _clock = clock;
     }
 
     public async Task<ApiResponse<List<AdminUserDto>>> GetUsersByCompanyAsync(int companyId, CancellationToken cancellationToken = default)
@@ -26,7 +28,7 @@ public class AdminUserService : IAdminUserService
             .Where(u => u.CompanyId == companyId)
             .ToListAsync(cancellationToken);
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = await _clock.GetCompanyTodayAsync(companyId, cancellationToken);
 
         var activeHandovers = await _context.WorkHandovers
             .Include(wh => wh.CoveringUser)

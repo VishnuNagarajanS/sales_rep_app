@@ -20,16 +20,19 @@ public class GhlLeadAssignmentController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
+    private readonly backend.Services.Interfaces.ICompanyClock _clock;
 
-    public GhlLeadAssignmentController(ApplicationDbContext context, ICurrentUserService currentUserService)
+    public GhlLeadAssignmentController(ApplicationDbContext context, ICurrentUserService currentUserService, backend.Services.Interfaces.ICompanyClock clock)
     {
         _context = context;
         _currentUserService = currentUserService;
+        _clock = clock;
     }
 
     private int GetCompanyId()
     {
-        return _currentUserService.CompanyId ?? 1; // fallback
+        return _currentUserService.CompanyId
+            ?? throw new UnauthorizedAccessException("Company claim is missing from token.");
     }
 
     private int GetCurrentUserId()
@@ -41,7 +44,7 @@ public class GhlLeadAssignmentController : ControllerBase
     public async Task<IActionResult> GetAgents(CancellationToken ct)
     {
         var companyId = GetCompanyId();
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = await _clock.GetCompanyTodayAsync(companyId, ct);
 
         var activeHandovers = await _context.WorkHandovers
             .Include(wh => wh.CoveringUser)
@@ -91,7 +94,7 @@ public class GhlLeadAssignmentController : ControllerBase
     public async Task<IActionResult> GetWorkforceAvailability([FromQuery] DateOnly? date, CancellationToken ct)
     {
         var companyId = GetCompanyId();
-        var targetDate = date ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var targetDate = date ?? await _clock.GetCompanyTodayAsync(companyId, ct);
 
         var activeHandovers = await _context.WorkHandovers
             .Include(wh => wh.CoveringUser)
@@ -160,7 +163,7 @@ public class GhlLeadAssignmentController : ControllerBase
     {
         var companyId = GetCompanyId();
         var callerId = GetCurrentUserId();
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = await _clock.GetCompanyTodayAsync(companyId, ct);
 
         var usersCovered = await _context.WorkHandovers
             .Where(wh => wh.CompanyId == companyId && wh.Status == "active")
@@ -215,18 +218,24 @@ public class GhlLeadAssignmentController : ControllerBase
         int nextAgentIndex = 0;
         if (lastAssignment != null)
         {
-            var idx = agents.IndexOf(lastAssignment.ToAgentId);
-            if (idx >= 0)
-                nextAgentIndex = (idx + 1) % agents.Count;
+            var nextAgent = agents.FirstOrDefault(id => id > lastAssignment.ToAgentId);
+            if (nextAgent == 0)
+                nextAgentIndex = 0;
+            else
+                nextAgentIndex = agents.IndexOf(nextAgent);
         }
 
         using var transaction = await _context.Database.BeginTransactionAsync(ct);
+        
+        var leads = await _context.Leads
+            .Where(l => targetLeadIds.Contains(l.Id) && l.CompanyId == companyId)
+            .ToListAsync(ct);
         
         foreach (var leadId in targetLeadIds)
         {
             var agentId = agents[nextAgentIndex];
             
-            var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == leadId && l.CompanyId == companyId, ct);
+            var lead = leads.FirstOrDefault(l => l.Id == leadId);
             if (lead == null)
             {
                 skipped.Add(new { leadId, reason = "not found or access denied" });
@@ -258,8 +267,15 @@ public class GhlLeadAssignmentController : ControllerBase
             nextAgentIndex = (nextAgentIndex + 1) % agents.Count;
         }
 
-        await _context.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
+        try
+        {
+            await _context.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+        {
+            return StatusCode(409, new { success = false, message = "Concurrency conflict occurred while updating leads. Please try again." });
+        }
 
         return Ok(new { success = true, data = new { assigned = assignedCount, skipped } });
     }
@@ -276,7 +292,7 @@ public class GhlLeadAssignmentController : ControllerBase
         if (agent == null)
             return BadRequest(new { success = false, message = "Invalid agent." });
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = await _clock.GetCompanyTodayAsync(companyId, ct);
 
         var isCovered = await _context.WorkHandovers
             .Include(wh => wh.CoveringUser)
@@ -341,14 +357,44 @@ public class GhlLeadAssignmentController : ControllerBase
                 AssignedAt = DateTime.UtcNow
             });
 
+            if (lead.HandoverId.HasValue)
+            {
+                var handoverItem = await _context.WorkHandoverItems
+                    .FirstOrDefaultAsync(i => i.HandoverId == lead.HandoverId.Value && i.EntityType == "Lead" && i.EntityId == lead.Id && i.ReturnedAt == null, ct);
+                
+                if (handoverItem != null)
+                {
+                    handoverItem.ReturnedAt = DateTime.UtcNow;
+                    handoverItem.ReturnOutcome = "skipped_reassigned";
+                }
+                
+                lead.HandoverId = null;
+                lead.OriginalOwnerId = null;
+            }
+
             if (isReassign && oldAgentId.HasValue)
             {
                 var pendingFollowups = await _context.Followups
-                    .Where(f => f.ContactId == lead.Id.ToString() && f.ContactType == "lead" && f.Status == backend.Models.Enums.FollowupStatus.Pending)
+                    .Where(f => f.CompanyId == companyId && f.ContactId == lead.Id.ToString() && f.ContactType == "lead" && f.Status == backend.Models.Enums.FollowupStatus.Pending)
                     .ToListAsync(ct);
                 foreach (var f in pendingFollowups)
                 {
                     f.AssignedAgentId = agentId;
+                    
+                    if (f.HandoverId.HasValue)
+                    {
+                        var fHandoverItem = await _context.WorkHandoverItems
+                            .FirstOrDefaultAsync(i => i.HandoverId == f.HandoverId.Value && i.EntityType == "Followup" && i.EntityId == f.Id && i.ReturnedAt == null, ct);
+                        
+                        if (fHandoverItem != null)
+                        {
+                            fHandoverItem.ReturnedAt = DateTime.UtcNow;
+                            fHandoverItem.ReturnOutcome = "skipped_reassigned";
+                        }
+                        
+                        f.HandoverId = null;
+                        f.OriginalOwnerId = null;
+                    }
                 }
             }
 

@@ -292,6 +292,67 @@ public class SalesExecutiveCallsController : ControllerBase
             CreatedAt = DateTime.UtcNow
         };
 
+        int? resolvedLeadId = dto.LeadId;
+        if ((!resolvedLeadId.HasValue || resolvedLeadId.Value <= 0) && !string.IsNullOrWhiteSpace(dto.ContactPhone))
+        {
+            var cleanPhone = dto.ContactPhone.Trim();
+            var phoneDigits = System.Text.RegularExpressions.Regex.Replace(cleanPhone, @"\D", "");
+            if (phoneDigits.Length >= 10)
+            {
+                var last10 = phoneDigits.Substring(phoneDigits.Length - 10);
+                var matchingLead = await _context.Leads.FirstOrDefaultAsync(l =>
+                    l.CompanyId == companyId.Value &&
+                    (l.Phone.Contains(last10) || (l.NormalizedPhone != null && l.NormalizedPhone.Contains(last10))), ct);
+                if (matchingLead != null)
+                {
+                    resolvedLeadId = matchingLead.Id;
+                    call.LeadId = matchingLead.Id;
+                }
+            }
+        }
+
+        if (resolvedLeadId.HasValue && resolvedLeadId.Value > 0)
+        {
+            var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == resolvedLeadId.Value && l.CompanyId == companyId.Value, ct);
+            if (lead != null)
+            {
+                var dispo = dto.Disposition.Trim();
+                if (string.Equals(dispo, "Follow-up Required", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(dispo, "Follow Up Required", StringComparison.OrdinalIgnoreCase))
+                {
+                    lead.Status = "Follow-up Required";
+                }
+                else if (string.Equals(dispo, "Interested", StringComparison.OrdinalIgnoreCase))
+                {
+                    lead.Status = "Interested";
+
+                    // Qualified lead: close its pending sales follow-ups so they leave the Follow-ups page.
+                    var leadIdStr = lead.Id.ToString();
+                    var pendingFollowups = await _context.Followups
+                        .Where(f => f.CompanyId == lead.CompanyId &&
+                                    f.ContactType == "lead" &&
+                                    f.ContactId == leadIdStr &&
+                                    f.Status == backend.Models.Enums.FollowupStatus.Pending &&
+                                    f.AssignedToRole != "irm")
+                        .ToListAsync(ct);
+                    foreach (var pf in pendingFollowups)
+                    {
+                        pf.Status = backend.Models.Enums.FollowupStatus.Cancelled;
+                        pf.OutcomeNotes = "Auto-closed: lead marked Interested.";
+                        pf.UpdatedAt = DateTime.UtcNow;
+                    }
+                }
+                else if (string.Equals(dispo, "Not Interested", StringComparison.OrdinalIgnoreCase))
+                {
+                    lead.Status = "Not Interested";
+                }
+                else if (string.Equals(dispo, "Wrong Number", StringComparison.OrdinalIgnoreCase))
+                {
+                    lead.Status = "Junk";
+                }
+            }
+        }
+
         _context.CallRecords.Add(call);
         await _context.SaveChangesAsync(ct);
 

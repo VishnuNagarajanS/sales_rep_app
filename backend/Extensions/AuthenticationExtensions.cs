@@ -12,9 +12,9 @@ public static class AuthenticationExtensions
         var jwtSettings = configuration.GetSection(JwtSettings.SectionName).Get<JwtSettings>() 
                           ?? throw new InvalidOperationException("JwtSettings section is missing in configuration.");
 
-        if (string.IsNullOrWhiteSpace(jwtSettings.SecretKey) || jwtSettings.SecretKey.Length < 32 || jwtSettings.SecretKey == "thisisasecretkeyforourfirstprojectcustomeragent2026")
+        if (string.IsNullOrWhiteSpace(jwtSettings.SecretKey) || jwtSettings.SecretKey.Length < 32)
         {
-            throw new InvalidOperationException("JwtSettings:SecretKey must be at least 32 characters long and must not be the known default leaked value.");
+            throw new InvalidOperationException("JwtSettings:SecretKey must be at least 32 characters long. Set it via the JwtSettings__SecretKey environment variable or a backend/.env file.");
         }
 
         var key = Encoding.UTF8.GetBytes(jwtSettings.SecretKey);

@@ -2,9 +2,8 @@ namespace backend.Services.Ai
 {
     public static class AiDateResolver
     {
-        public static (DateTime From, DateTime To) ResolveDateRange(string? dateFrom, string? dateTo, string timeZoneId = "Asia/Kolkata")
+        public static (DateTime From, DateTime To) ResolveDateRange(string? dateFrom, string? dateTo, TimeZoneInfo tz)
         {
-            var tz = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
             var today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz).Date;
 
             DateTime fromDate = today;

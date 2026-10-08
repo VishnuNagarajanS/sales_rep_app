@@ -16,10 +16,12 @@ namespace backend.Services.Implementations;
 public class LeaveRequestService : ILeaveRequestService
 {
     private readonly ApplicationDbContext _db;
+    private readonly backend.Services.Interfaces.ICompanyClock _clock;
 
-    public LeaveRequestService(ApplicationDbContext db)
+    public LeaveRequestService(ApplicationDbContext db, backend.Services.Interfaces.ICompanyClock clock)
     {
         _db = db;
+        _clock = clock;
     }
 
     public static decimal CalculateWorkingDays(DateOnly start, DateOnly end, bool isHalfDay)
@@ -38,29 +40,6 @@ public class LeaveRequestService : ILeaveRequestService
             cur = cur.AddDays(1);
         }
         return days;
-    }
-
-    private DateOnly GetCompanyToday(Tenant? tenant)
-    {
-        var nowUtc = DateTime.UtcNow;
-        try
-        {
-            var tzId = string.IsNullOrWhiteSpace(tenant?.Timezone) ? "India Standard Time" : tenant.Timezone;
-            TimeZoneInfo tz;
-            if (tzId.Equals("Asia/Kolkata", StringComparison.OrdinalIgnoreCase) || tzId.Equals("India Standard Time", StringComparison.OrdinalIgnoreCase))
-            {
-                tz = TimeZoneInfo.FindSystemTimeZoneById(OperatingSystem.IsWindows() ? "India Standard Time" : "Asia/Kolkata");
-            }
-            else
-            {
-                tz = TimeZoneInfo.FindSystemTimeZoneById(tzId);
-            }
-            return DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(nowUtc, tz));
-        }
-        catch
-        {
-            return DateOnly.FromDateTime(nowUtc.AddHours(5).AddMinutes(30));
-        }
     }
 
     public async Task<ApiResponse<List<LeaveRequestDto>>> GetLeaveRequestsAsync(
@@ -199,7 +178,7 @@ public class LeaveRequestService : ILeaveRequestService
             .Where(lp => lp.CompanyId == companyId)
             .ToListAsync(cancellationToken);
 
-        var currentYear = DateTime.UtcNow.Year;
+        var currentYear = (await _clock.GetTodayAsync(companyId, cancellationToken)).Year;
 
         var userApprovedLeaves = await _db.LeaveRequests
             .Where(lr => lr.CompanyId == companyId && lr.UserId == userId && lr.Status == "Approved" && lr.StartDate.Year == currentYear)
@@ -310,7 +289,7 @@ public class LeaveRequestService : ILeaveRequestService
     public async Task<ApiResponse<LeaveRequestDto>> CreateLeaveRequestAsync(int companyId, int userId, CreateLeaveRequestDto dto, CancellationToken cancellationToken = default)
     {
         var tenant = await _db.Tenants.FindAsync(new object[] { companyId }, cancellationToken);
-        var today = GetCompanyToday(tenant);
+        var today = await _clock.GetCompanyTodayAsync(companyId, cancellationToken);
 
         if (dto.StartDate < today)
             return ApiResponse<LeaveRequestDto>.FailureResult("Start date cannot be in the past.");
@@ -429,7 +408,7 @@ public class LeaveRequestService : ILeaveRequestService
             return ApiResponse<LeaveRequestDto>.FailureResult("Only pending leave requests can be edited.");
 
         var tenant = await _db.Tenants.FindAsync(new object[] { companyId }, cancellationToken);
-        var today = GetCompanyToday(tenant);
+        var today = await _clock.GetCompanyTodayAsync(companyId, cancellationToken);
 
         if (dto.StartDate < today)
             return ApiResponse<LeaveRequestDto>.FailureResult("Start date cannot be in the past.");
@@ -494,7 +473,7 @@ public class LeaveRequestService : ILeaveRequestService
             return ApiResponse<LeaveRequestDto>.FailureResult("Leave request not found.");
 
         var tenant = await _db.Tenants.FindAsync(new object[] { companyId }, cancellationToken);
-        var today = GetCompanyToday(tenant);
+        var today = await _clock.GetCompanyTodayAsync(companyId, cancellationToken);
 
         if (req.Status == "Cancelled" || req.Status == "Rejected")
             return ApiResponse<LeaveRequestDto>.FailureResult($"Cannot cancel request with status {req.Status}.");

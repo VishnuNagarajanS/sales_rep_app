@@ -104,7 +104,7 @@ export const SalesLayout: React.FC<SalesLayoutProps> = ({
       <Sidebar currentRoute={currentRoute} onNavigate={onNavigate} />
 
       {/* Main Content Area */}
-      <div className="main-content-area">
+      <div className={`main-content-area ${currentRoute === 'smarty-ai' ? 'smarty-ai-route' : ''}`}>
         {/* Top Navigation Bar with Search, Call Toggle, New Menu */}
         <TopBar onNavigate={onNavigate} onOpenQuickCreate={onOpenQuickCreate} />
 
@@ -230,7 +230,7 @@ export const SalesLayout: React.FC<SalesLayoutProps> = ({
         {/* Dynamic Page Content */}
         <main
           className={`page-scrollable ${
-            currentRoute === 'chat'
+            currentRoute === 'chat' || currentRoute === 'smarty-ai'
               ? 'page-chat-layout'
               : currentRoute === 'assigned-leads'
               ? 'page-static-layout'

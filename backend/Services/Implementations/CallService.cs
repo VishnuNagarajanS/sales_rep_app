@@ -52,9 +52,49 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
         Followup? newFollowup = null;
         if (request.LeadId.HasValue)
         {
-            var lead = await context.Set<Lead>().FirstOrDefaultAsync(x => x.Id == request.LeadId && x.CompanyId == currentUser.CompanyId.Value && x.AssignedAgentId == currentUser.UserId.Value, cancellationToken);
-            if (lead != null && request.Disposition is "Interested" or "Not Interested" or "Wrong Number" or "No Response") lead.Status = request.Disposition == "Wrong Number" ? "Junk" : request.Disposition;
-            if (lead != null && request.Disposition is "Follow-up Required" or "Call Back" or "No Response") 
+            var lead = await context.Set<Lead>().FirstOrDefaultAsync(x => x.Id == request.LeadId && x.CompanyId == currentUser.CompanyId.Value, cancellationToken);
+            if (lead != null)
+            {
+                if (request.Disposition is "Interested" or "Not Interested" or "Wrong Number")
+                {
+                    lead.Status = request.Disposition == "Wrong Number" ? "Junk" : request.Disposition;
+
+                    if (request.Disposition == "Interested")
+                    {
+                        // Qualified lead: close its pending sales follow-ups so they leave the Follow-ups page.
+                        var leadIdStr = lead.Id.ToString();
+                        var pendingFollowups = await context.Set<Followup>()
+                            .Where(f => f.CompanyId == lead.CompanyId &&
+                                        f.ContactType == "lead" &&
+                                        f.ContactId == leadIdStr &&
+                                        f.Status == backend.Models.Enums.FollowupStatus.Pending &&
+                                        f.AssignedToRole != "irm")
+                            .ToListAsync(cancellationToken);
+                        foreach (var pf in pendingFollowups)
+                        {
+                            pf.Status = backend.Models.Enums.FollowupStatus.Cancelled;
+                            pf.OutcomeNotes = "Auto-closed: lead marked Interested.";
+                            pf.UpdatedAt = DateTime.UtcNow;
+                        }
+                    }
+                }
+                else if (request.Disposition is "Follow-up Required" or "Follow Up Required")
+                {
+                    lead.Status = "Follow-up Required";
+                    if (request.FollowupAt.HasValue) lead.NextFollowupDate = request.FollowupAt.Value;
+                }
+                else if (request.Disposition is "Call Back")
+                {
+                    lead.Status = "Callback";
+                    if (request.FollowupAt.HasValue) lead.NextFollowupDate = request.FollowupAt.Value;
+                }
+                else if (request.Disposition is "No Response")
+                {
+                    lead.Status = "No Response";
+                    if (request.FollowupAt.HasValue) lead.NextFollowupDate = request.FollowupAt.Value;
+                }
+            }
+            if (lead != null && request.Disposition is "Follow-up Required" or "Follow Up Required" or "Call Back" or "No Response") 
             {
                 newFollowup = new Followup { 
                     CompanyId = currentUser.CompanyId.Value, 

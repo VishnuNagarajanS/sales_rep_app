@@ -40,7 +40,7 @@ export const INITIAL_CONSULTATIONS: Consultation[] = [
     status: 'Scheduled',
     agenda: 'Whitefield Grade-A IT Park tranche allocation and yields discussion.',
     outcomeNotes: 'Term sheet shared; awaiting confirmation on ₹15 Cr ticket.',
-    referredByAgentName: 'Priya Rajan',
+    referredByAgentName: 'Agent Four',
   },
   {
     id: 'cns-04',

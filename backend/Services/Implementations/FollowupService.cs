@@ -212,12 +212,16 @@ public class FollowupService : IFollowupService
             existingPending.AssignedAgentId = agentId.Value;
             existingPending.UpdatedAt = DateTime.UtcNow;
 
-            if (existingPending.ContactType == "lead" && int.TryParse(existingPending.ContactId, out var existingLeadId))
+            var existingLeadId = int.TryParse(existingPending.ContactId, out var elid)
+                ? elid
+                : (int.TryParse(System.Text.RegularExpressions.Regex.Replace(existingPending.ContactId ?? "", @"\D", ""), out var elid2) ? elid2 : 0);
+            if (existingPending.ContactType == "lead" && existingLeadId > 0)
             {
                 var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == existingLeadId && l.CompanyId == companyId, ct);
                 if (lead != null)
                 {
                     lead.NextFollowupDate = existingPending.ScheduledAt;
+                    lead.Status = "Follow-up Required";
                 }
             }
 
@@ -229,9 +233,12 @@ public class FollowupService : IFollowupService
         string? resolvedEmail = dto.ContactEmail?.Trim();
         if (string.IsNullOrEmpty(resolvedEmail))
         {
-            if (dto.ContactType == "lead" && int.TryParse(dto.ContactId, out var parsedLeadId))
+            var pLeadId = int.TryParse(dto.ContactId, out var plid)
+                ? plid
+                : (int.TryParse(System.Text.RegularExpressions.Regex.Replace(dto.ContactId ?? "", @"\D", ""), out var plid2) ? plid2 : 0);
+            if (dto.ContactType == "lead" && pLeadId > 0)
             {
-                var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == parsedLeadId && l.CompanyId == companyId.Value, ct);
+                var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == pLeadId && l.CompanyId == companyId.Value, ct);
                 resolvedEmail = lead?.Email;
             }
             else if (int.TryParse(dto.ContactId, out var parsedCustId))
@@ -263,12 +270,16 @@ public class FollowupService : IFollowupService
         int? inheritedHandoverId = null;
         int? inheritedOriginalOwnerId = null;
 
-        if (followup.ContactType == "lead" && int.TryParse(followup.ContactId, out var leadId))
+        var leadId = int.TryParse(followup.ContactId, out var lid)
+            ? lid
+            : (int.TryParse(System.Text.RegularExpressions.Regex.Replace(followup.ContactId ?? "", @"\D", ""), out var lid2) ? lid2 : 0);
+        if (followup.ContactType == "lead" && leadId > 0)
         {
             var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == leadId && l.CompanyId == companyId, ct);
             if (lead != null)
             {
                 lead.NextFollowupDate = followup.ScheduledAt;
+                lead.Status = "Follow-up Required";
                 inheritedHandoverId = lead.HandoverId;
                 inheritedOriginalOwnerId = lead.OriginalOwnerId;
             }

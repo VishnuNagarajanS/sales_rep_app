@@ -116,7 +116,7 @@ export const IRM_STAGES: KanbanStageDef[] = [
 
 export const SALES_EXECUTIVE_USERS = [
   { id: 'usr-ghl-exec', name: 'Ananya Iyer', role: 'Sales Executive' },
-  { id: 'usr-ghl-exec-02', name: 'Priya Sharma', role: 'Sales Executive' },
+  { id: 'usr-ghl-exec-02', name: 'Agent Two', role: 'Sales Executive' },
   { id: 'usr-ghl-exec-03', name: 'Rahul Verma', role: 'Sales Executive' },
 ];
 
@@ -187,7 +187,7 @@ export const INITIAL_ADMIN_KANBAN_CARDS: AdminKanbanCard[] = [
     phone: '+91 94480 77889',
     email: 'karthik.s@somayajient.com',
     assignedPersonId: 'usr-ghl-exec-02',
-    assignedPersonName: 'Priya Sharma',
+    assignedPersonName: 'Agent Two',
     stageEnteredAt: daysAgo(0, 3), // Today
     createdAt: daysAgo(0, 3),
     lastActivityDate: daysAgo(0, 3),
@@ -201,7 +201,7 @@ export const INITIAL_ADMIN_KANBAN_CARDS: AdminKanbanCard[] = [
         id: 'act-se-102',
         timestamp: formatDateSnippet(daysAgo(0, 3)),
         isoDate: daysAgo(0, 3),
-        performedBy: 'Priya Sharma',
+        performedBy: 'Agent Two',
         performedByRole: 'Sales Executive',
         type: 'note',
         details: 'Reviewed initial web inquiry. Investor seeking quarterly dividend payouts.',
@@ -333,7 +333,7 @@ export const INITIAL_ADMIN_KANBAN_CARDS: AdminKanbanCard[] = [
     phone: '+91 99001 88223',
     email: 'v.singhania@apexindustries.co',
     assignedPersonId: 'usr-ghl-exec-02',
-    assignedPersonName: 'Priya Sharma',
+    assignedPersonName: 'Agent Two',
     stageEnteredAt: daysAgo(1),
     createdAt: daysAgo(14),
     lastActivityDate: daysAgo(0, 1),
@@ -347,7 +347,7 @@ export const INITIAL_ADMIN_KANBAN_CARDS: AdminKanbanCard[] = [
         id: 'act-se-109',
         timestamp: formatDateSnippet(daysAgo(0, 1)),
         isoDate: daysAgo(0, 1),
-        performedBy: 'Priya Sharma',
+        performedBy: 'Agent Two',
         performedByRole: 'Sales Executive',
         type: 'note',
         details: 'Client confirmed intent to invest ₹5 Cr. Preparing formal term sheet handover to IRM.',
@@ -356,7 +356,7 @@ export const INITIAL_ADMIN_KANBAN_CARDS: AdminKanbanCard[] = [
         id: 'act-se-110',
         timestamp: formatDateSnippet(daysAgo(1)),
         isoDate: daysAgo(1),
-        performedBy: 'Priya Sharma',
+        performedBy: 'Agent Two',
         performedByRole: 'Sales Executive',
         type: 'stage_change',
         stageTransition: { from: 'Consultations', to: 'Interested' },

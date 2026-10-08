@@ -10,6 +10,7 @@ import {
   getCustomers as apiGetCustomers,
 } from '../services/ghlApiService';
 import { storageService } from '../services/storageService';
+import { apiClient } from '../services/apiClient';
 import { useAuth } from './AuthContext';
 
 export type AgentAvailability = 'Available' | 'Busy' | 'Offline';
@@ -95,9 +96,16 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Sync leads for incoming call lookup
   useEffect(() => {
-    if (tenant?.id) {
-      apiGetLeads(tenant.id).then(setLeads).catch(console.error);
-    }
+    const fetchLeads = () => {
+      if (tenant?.id) {
+        apiGetLeads(tenant.id).then(setLeads).catch(console.error);
+      }
+    };
+    fetchLeads();
+    window.addEventListener('nexus_storage_updated', fetchLeads);
+    return () => {
+      window.removeEventListener('nexus_storage_updated', fetchLeads);
+    };
   }, [tenant?.id]);
 
   // Timer for connected calls
@@ -269,6 +277,9 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (reason?.trim()) {
         finalNotes = finalNotes ? `${finalNotes}\n[Reason]: ${reason.trim()}` : `[Reason]: ${reason.trim()}`;
       }
+      const rawLeadId = lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : undefined;
+      const rawCustomerId = lastCallRecord.matchedRecord?.type === 'customer' ? lastCallRecord.matchedRecord.id : undefined;
+
       const callRecord: CallRecord = {
         id: lastCallRecord.id,
         companyId: tenant.id,
@@ -284,99 +295,94 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         transcription: undefined,
         notes: finalNotes || undefined,
         reason: reason || undefined,
+        leadId: rawLeadId,
+        customerId: rawCustomerId,
       };
 
       await apiLogCall(callRecord);
 
       // Locate matched lead if any
-      const leadId = lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : null;
-      const allLeads = leads.length > 0 ? leads : (tenant ? storageService.getLeads(tenant.id) : []);
+      const leadId = rawLeadId || null;
       const normalize = (p: string) => (p || '').replace(/\D/g, '').slice(-10);
       const callPhoneDigits = normalize(lastCallRecord.contactPhone);
-      const matchedLead = leadId
-        ? allLeads.find((l: Lead) => l.id === leadId)
-        : allLeads.find((l: Lead) =>
-            (callPhoneDigits && normalize(l.phone) === callPhoneDigits) ||
-            (l.name && l.name.toLowerCase() === lastCallRecord.contactName.toLowerCase())
-          );
 
-      // 1. Interested -> Move to Customer 360, remove from active Leads
-      if (disposition === 'Interested') {
-        const existingCustomers = await apiGetCustomers(tenant.id).catch(() => []);
-        let cust = existingCustomers.find(c =>
-          (matchedLead && c.phone === matchedLead.phone) ||
-          c.phone === lastCallRecord.contactPhone ||
-          (matchedLead?.email && c.email === matchedLead.email)
-        );
+      const storedLeads = storageService.getLeads();
+      const combinedLeads = [...leads, ...storedLeads];
 
-        if (!cust) {
-          cust = {
-            id: matchedLead ? `cust-${matchedLead.id.replace('lead-', '')}` : `cust-${Date.now()}`,
-            companyId: tenant.id,
-            name: matchedLead?.name || lastCallRecord.contactName || 'Customer',
-            phone: matchedLead?.phone || lastCallRecord.contactPhone,
-            email: matchedLead?.email || '',
-            status: 'Active',
-            assignedAgentId: matchedLead?.assignedAgentId || user.id,
-            assignedAgentName: matchedLead?.assignedAgentName || user.name,
-            location: matchedLead?.location || '',
-            lastContacted: 'Just now',
-            openDealsCount: 0,
-            totalValue: 0,
-            createdAt: matchedLead?.createdAt || new Date().toISOString().split('T')[0],
-            notes: notes
-              ? `${matchedLead?.notes ? matchedLead.notes + '\n\n' : ''}[Call Disposition - Interested]: ${notes}`
-              : (matchedLead?.notes || 'Interested - Transferred to Customer 360'),
-            customFields: {
-              ...(matchedLead?.customFields || {}),
-              movedFromLeadAt: new Date().toISOString(),
-              disposition: 'Interested',
-            },
-          };
-        } else {
-          cust.lastContacted = 'Just now';
-          if (notes) {
-            cust.notes = cust.notes ? `${cust.notes}\n\n[Call Disposition - Interested]: ${notes}` : `[Call Disposition - Interested]: ${notes}`;
+      let matchedLead = leadId
+        ? combinedLeads.find((l: Lead) => String(l.id) === String(leadId))
+        : undefined;
+
+      if (!matchedLead && callPhoneDigits) {
+        matchedLead = combinedLeads.find((l: Lead) => normalize(l.phone) === callPhoneDigits);
+      }
+      if (!matchedLead && lastCallRecord.contactName) {
+        matchedLead = combinedLeads.find((l: Lead) => (l.name || '').trim().toLowerCase() === lastCallRecord.contactName.trim().toLowerCase());
+      }
+
+      if (!matchedLead && leadId) {
+        try {
+          const numId = parseInt(String(leadId).replace(/\D/g, ''), 10);
+          if (numId) {
+            const res = await apiClient.get<any>(`/sales-executive/leads/${numId}`);
+            if (res && res.success && res.data) {
+              matchedLead = {
+                id: String(res.data.id),
+                companyId: String(res.data.companyId || tenant.id),
+                name: res.data.name,
+                phone: res.data.phone,
+                email: res.data.email || '',
+                location: res.data.location || '',
+                source: res.data.source || 'Phone Call',
+                status: res.data.status,
+                priority: res.data.priority || 'Medium',
+                assignedAgentId: res.data.assignedAgentId ? String(res.data.assignedAgentId) : '',
+                assignedAgentName: res.data.assignedAgentName || '',
+                createdAt: res.data.createdAt,
+                notes: res.data.notes,
+                nextFollowupDate: res.data.nextFollowupDate,
+                customFields: res.data.customFields || {},
+              };
+            }
           }
-          if (matchedLead?.customFields) {
-            cust.customFields = { ...cust.customFields, ...matchedLead.customFields };
-          }
+        } catch (e) {
+          console.warn('[CallContext] Could not fetch matched lead from API:', e);
         }
-        await apiSaveCustomer(cust);
+      }
 
+      // 1. Interested -> Mark lead as Interested for IRM pickup.
+      // NOTE: The backend status update is already handled by apiLogCall() above — the LogCall
+      // endpoint updates lead.Status = 'Interested' using only CompanyId (no AssignedAgentId
+      // restriction), so it works even when the lead is assigned to another agent.
+      // We do NOT call apiSaveCustomer here — customer creation is the IRM team's responsibility
+      // when they formally convert the lead. Doing it here triggers a duplicate-phone backend error.
+      // We also skip apiSaveLead (PUT) for cross-agent leads since FindScopedLeadAsync restricts
+      // sales executives to only their own leads.
+      if (disposition === 'Interested') {
         if (matchedLead) {
+          // Update local state so the UI reacts immediately (lead removed from active list)
           matchedLead.status = 'Interested';
           matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Interested - Handed over to IRM${notes ? `: ${notes}` : ''}`;
           if (!matchedLead.customFields) matchedLead.customFields = {};
           matchedLead.customFields.qualifiedByAgentName = user.name;
           matchedLead.customFields.qualifiedAt = new Date().toISOString();
           matchedLead.customFields.transferredToIrm = 'true';
-          await apiSaveLead(matchedLead);
           storageService.saveLead(matchedLead);
-        } else if (lastCallRecord.contactPhone || lastCallRecord.contactName) {
-          const newInterestedLead: Lead = {
-            id: `lead-${Date.now()}`,
-            companyId: tenant.id,
-            name: lastCallRecord.contactName || 'Interested Prospect',
-            phone: lastCallRecord.contactPhone,
-            email: '',
-            location: '',
-            source: 'Phone Call',
-            status: 'Interested',
-            priority: 'High',
-            assignedAgentId: user.id,
-            assignedAgentName: user.name,
-            createdAt: new Date().toISOString().split('T')[0],
-            notes: notes ? `[Call Disposition - Interested]: ${notes}` : 'Interested prospect qualified via call',
-            customFields: {
-              qualifiedByAgentName: user.name,
-              qualifiedAt: new Date().toISOString(),
-              transferredToIrm: 'true',
-            },
-          };
-          await apiSaveLead(newInterestedLead);
-          storageService.saveLead(newInterestedLead);
+
+          // Attempt PUT on the lead only when it's the current exec's own lead (numeric backend ID).
+          // For leads assigned to other agents this will silently fail — the LogCall above already
+          // persisted the status change on the backend.
+          const matchedNumId = parseInt(String(matchedLead.id).replace(/\D/g, ''), 10);
+          if (matchedNumId > 0) {
+            try {
+              await apiSaveLead(matchedLead);
+            } catch (e) {
+              // Expected when lead belongs to another agent — LogCall already updated status.
+              console.warn('[CallContext] apiSaveLead skipped for cross-agent lead (Interested):', e);
+            }
+          }
         }
+        // No matchedLead case: apiLogCall already resolved and updated the lead by phone/ID.
       }
 
       // 2. Follow-up Required -> Create or reuse follow-up record; move lead status to 'Follow-up Required'
@@ -395,6 +401,19 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           await apiSaveLead(matchedLead);
           storageService.saveLead(matchedLead);
+        } else if (leadId) {
+          const numId = parseInt(String(leadId).replace(/\D/g, ''), 10);
+          if (numId) {
+            try {
+              await apiClient.put(`/sales-executive/leads/${numId}`, {
+                status: 'Follow-up Required',
+                nextFollowupDate: followupScheduledAt,
+                notes: notes ? `[${new Date().toLocaleDateString()}] Follow-up Required: ${notes}` : undefined
+              });
+            } catch (e) {
+              console.warn('[CallContext] Failed to update lead status via PUT:', e);
+            }
+          }
         }
 
         await apiSaveFollowup({
@@ -619,6 +638,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
+    window.dispatchEvent(new Event('nexus_storage_updated'));
     setShowDispositionModal(false);
     setLastCallRecord(null);
     setAvailability(prev => prev === 'Busy' ? 'Available' : prev);
@@ -660,9 +680,9 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const matchedLead = leadId
         ? allLeads.find((l: Lead) => l.id === leadId)
         : allLeads.find((l: Lead) =>
-            (callPhoneDigits && normalize(l.phone) === callPhoneDigits) ||
-            (l.name && l.name.toLowerCase() === lastCallRecord.contactName.toLowerCase())
-          );
+          (callPhoneDigits && normalize(l.phone) === callPhoneDigits) ||
+          (l.name && l.name.toLowerCase() === lastCallRecord.contactName.toLowerCase())
+        );
 
       if (matchedLead) {
         const durM = Math.floor(lastCallRecord.duration / 60);

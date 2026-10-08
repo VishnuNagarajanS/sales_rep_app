@@ -25,12 +25,12 @@ public class WorkHandoverController : ControllerBase
     [HttpGet("candidates")]
     public async Task<IActionResult> GetCandidates([FromQuery] string role, CancellationToken ct)
     {
-        var companyId = _currentUser.CompanyId ?? 1;
-        if (companyId <= 0) return Unauthorized();
+        var companyId = _currentUser.CompanyId;
+        if (companyId == null) return Unauthorized();
 
         try
         {
-            var candidates = await _handoverService.GetCandidatesAsync(companyId, role, ct);
+            var candidates = await _handoverService.GetCandidatesAsync(companyId.Value, role, ct);
             return Ok(ApiResponse<List<WorkHandoverCandidateDto>>.SuccessResponse(candidates));
         }
         catch (ArgumentException ex)
@@ -46,12 +46,12 @@ public class WorkHandoverController : ControllerBase
         [FromQuery] DateOnly? to,
         CancellationToken ct)
     {
-        var companyId = _currentUser.CompanyId ?? 1;
-        if (companyId <= 0) return Unauthorized();
+        var companyId = _currentUser.CompanyId;
+        if (companyId == null) return Unauthorized();
 
         try
         {
-            var suggestions = await _handoverService.GetCoverSuggestionsAsync(companyId, fromUserId, from, to, ct);
+            var suggestions = await _handoverService.GetCoverSuggestionsAsync(companyId.Value, fromUserId, from, to, ct);
             return Ok(ApiResponse<List<backend.DTOs.Admin.CoverSuggestionDto>>.SuccessResponse(suggestions));
         }
         catch (Exception ex)
@@ -63,12 +63,12 @@ public class WorkHandoverController : ControllerBase
     [HttpPost("preview")]
     public async Task<IActionResult> GetPreview([FromBody] StartWorkHandoverRequestDto request, CancellationToken ct)
     {
-        var companyId = _currentUser.CompanyId ?? 1;
-        if (companyId <= 0) return Unauthorized();
+        var companyId = _currentUser.CompanyId;
+        if (companyId == null) return Unauthorized();
 
         try
         {
-            var preview = await _handoverService.GetPreviewAsync(companyId, request.FromUserId, request.ToUserId, ct);
+            var preview = await _handoverService.GetPreviewAsync(companyId.Value, request.FromUserId, request.ToUserId, ct);
             return Ok(ApiResponse<WorkHandoverPreviewDto>.SuccessResponse(preview));
         }
         catch (Exception ex)
@@ -80,16 +80,16 @@ public class WorkHandoverController : ControllerBase
     [HttpPost("start")]
     public async Task<IActionResult> StartHandover([FromBody] StartWorkHandoverRequestDto request, CancellationToken ct)
     {
-        var companyId = _currentUser.CompanyId ?? 1;
-        if (companyId <= 0) return Unauthorized();
+        var companyId = _currentUser.CompanyId;
+        var actorId = _currentUser.UserId;
+        if (companyId == null || actorId == null) return Unauthorized();
 
-        var actorId = _currentUser.UserId ?? 1;
         var actorName = User.FindFirst(ClaimTypes.Name)?.Value ?? User.FindFirst("name")?.Value ?? "Administrator";
         var actorEmail = _currentUser.Email ?? "admin@ghl.com";
 
         try
         {
-            var handover = await _handoverService.StartHandoverAsync(companyId, actorId, actorName, actorEmail, request, ct);
+            var handover = await _handoverService.StartHandoverAsync(companyId.Value, actorId.Value, actorName, actorEmail, request, ct);
             return Ok(ApiResponse<WorkHandoverDto>.SuccessResponse(handover, "Work handover started successfully."));
         }
         catch (Exception ex)
@@ -101,30 +101,30 @@ public class WorkHandoverController : ControllerBase
     [HttpGet("active")]
     public async Task<IActionResult> GetActiveHandovers(CancellationToken ct)
     {
-        var companyId = _currentUser.CompanyId ?? 1;
-        if (companyId <= 0) return Unauthorized();
+        var companyId = _currentUser.CompanyId;
+        if (companyId == null) return Unauthorized();
 
-        var list = await _handoverService.GetActiveHandoversAsync(companyId, ct);
+        var list = await _handoverService.GetActiveHandoversAsync(companyId.Value, ct);
         return Ok(ApiResponse<List<WorkHandoverDto>>.SuccessResponse(list));
     }
 
     [HttpGet("history")]
     public async Task<IActionResult> GetHandoverHistory(CancellationToken ct)
     {
-        var companyId = _currentUser.CompanyId ?? 1;
-        if (companyId <= 0) return Unauthorized();
+        var companyId = _currentUser.CompanyId;
+        if (companyId == null) return Unauthorized();
 
-        var list = await _handoverService.GetHandoverHistoryAsync(companyId, ct);
+        var list = await _handoverService.GetHandoverHistoryAsync(companyId.Value, ct);
         return Ok(ApiResponse<List<WorkHandoverDto>>.SuccessResponse(list));
     }
 
     [HttpGet("{id}")]
     public async Task<IActionResult> GetHandoverById(int id, CancellationToken ct)
     {
-        var companyId = _currentUser.CompanyId ?? 1;
-        if (companyId <= 0) return Unauthorized();
+        var companyId = _currentUser.CompanyId;
+        if (companyId == null) return Unauthorized();
 
-        var handover = await _handoverService.GetHandoverByIdAsync(companyId, id, ct);
+        var handover = await _handoverService.GetHandoverByIdAsync(companyId.Value, id, ct);
         if (handover == null)
             return NotFound(ApiResponse<WorkHandoverDto>.ErrorResponse("Handover record not found."));
 
@@ -134,16 +134,16 @@ public class WorkHandoverController : ControllerBase
     [HttpPost("{id}/end")]
     public async Task<IActionResult> EndHandover(int id, CancellationToken ct)
     {
-        var companyId = _currentUser.CompanyId ?? 1;
-        if (companyId <= 0) return Unauthorized();
+        var companyId = _currentUser.CompanyId;
+        var actorId = _currentUser.UserId;
+        if (companyId == null || actorId == null) return Unauthorized();
 
-        var actorId = _currentUser.UserId ?? 1;
         var actorName = User.FindFirst(ClaimTypes.Name)?.Value ?? User.FindFirst("name")?.Value ?? "Administrator";
         var actorEmail = _currentUser.Email ?? "admin@ghl.com";
 
         try
         {
-            var handover = await _handoverService.EndHandoverAsync(companyId, id, actorId, actorName, actorEmail, ct);
+            var handover = await _handoverService.EndHandoverAsync(companyId.Value, id, actorId.Value, actorName, actorEmail, ct);
             return Ok(ApiResponse<WorkHandoverDto>.SuccessResponse(handover, "Work handover ended and records returned successfully."));
         }
         catch (Exception ex)
@@ -155,16 +155,16 @@ public class WorkHandoverController : ControllerBase
     [HttpPost("{id}/return-items")]
     public async Task<IActionResult> ReturnSelectedItems(int id, [FromBody] ReturnSelectedItemsRequestDto request, CancellationToken ct)
     {
-        var companyId = _currentUser.CompanyId ?? 1;
-        if (companyId <= 0) return Unauthorized();
+        var companyId = _currentUser.CompanyId;
+        var actorId = _currentUser.UserId;
+        if (companyId == null || actorId == null) return Unauthorized();
 
-        var actorId = _currentUser.UserId ?? 1;
         var actorName = User.FindFirst(ClaimTypes.Name)?.Value ?? User.FindFirst("name")?.Value ?? "Administrator";
         var actorEmail = _currentUser.Email ?? "admin@ghl.com";
 
         try
         {
-            var handover = await _handoverService.ReturnSelectedItemsAsync(companyId, id, request.ItemIds, actorId, actorName, actorEmail, ct);
+            var handover = await _handoverService.ReturnSelectedItemsAsync(companyId.Value, id, request.ItemIds, actorId.Value, actorName, actorEmail, ct);
             return Ok(ApiResponse<WorkHandoverDto>.SuccessResponse(handover, "Selected items returned successfully."));
         }
         catch (Exception ex)

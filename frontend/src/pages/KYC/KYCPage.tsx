@@ -2413,7 +2413,8 @@ const GhlIrmKycView: React.FC = () => {
           />
           )}
         </>
-      ) : (        /* ── 5-STEP KYC FLOW CONTAINER ── */
+      ) : (
+        /* ── 5-STEP KYC FLOW CONTAINER ── */
         <div className="kyc-flow-card">
           {/* Top Bar with Back to Table link */}
           <div className="kyc-flow-top-bar">
@@ -2536,7 +2537,7 @@ const GhlIrmKycView: React.FC = () => {
                       <input
                         type="text"
                         className={`form-input ${formErrors.investorName ? 'kyc-input-error' : ''}`}
-                        placeholder="e.g. Ramesh Chandra Verma"
+                        placeholder="e.g. Agent One"
                         value={formData.investorName}
                         onChange={e => {
                           setFormData({ ...formData, investorName: e.target.value });
@@ -2570,7 +2571,7 @@ const GhlIrmKycView: React.FC = () => {
                       <input
                         type="email"
                         className={`form-input ${formErrors.email ? 'kyc-input-error' : ''}`}
-                        placeholder="e.g. ramesh.verma@example.com"
+                        placeholder="e.g. agent1@example.com"
                         value={formData.email}
                         onChange={e => {
                           setFormData({ ...formData, email: e.target.value });

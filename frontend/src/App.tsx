@@ -774,7 +774,7 @@ export const App: React.FC = () => {
                   required
                   value={quickName}
                   onChange={e => setQuickName(e.target.value)}
-                  placeholder="e.g. Ramesh Chandra"
+                  placeholder="e.g. Agent One"
                 />
               </div>
 
@@ -798,7 +798,7 @@ export const App: React.FC = () => {
                     className="form-input"
                     value={quickEmail}
                     onChange={e => setQuickEmail(e.target.value)}
-                    placeholder="ramesh@example.com"
+                    placeholder="agent1@example.com"
                   />
                 </div>
               </div>

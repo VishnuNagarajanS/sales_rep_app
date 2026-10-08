@@ -6,6 +6,9 @@ public class LeadResponseDto
     public int CompanyId { get; set; }
     public int? AssignedAgentId { get; set; }
     public string? AssignedAgentName { get; set; }
+    public int? AssignedIrmId { get; set; }
+    public string? AssignedIrmName { get; set; }
+    public string? AssignedIrmAt { get; set; }
     public string Name { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;

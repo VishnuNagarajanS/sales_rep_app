@@ -358,4 +358,45 @@ public class ConsultationService : IConsultationService
         HandoverPlannedEnd = c.Handover?.PlannedEndAt,
         OriginalOwnerId = c.OriginalOwnerId
     };
+
+    public async Task<ApiResponse<List<IrmUserDto>>> GetCompanyIrmsAsync(CancellationToken ct = default)
+    {
+        var companyId = _currentUser.CompanyId ?? 1;
+
+        var query = _context.Users
+            .AsNoTracking()
+            .Include(u => u.Role)
+            .Where(u => u.Role != null && (u.Role.Code == "irm" || u.Role.Name.ToLower().Contains("irm") || u.Role.Name.ToLower().Contains("investor relationship")))
+            .Where(u => u.Status == UserStatus.Active);
+
+        var companyIrms = await query
+            .Where(u => u.CompanyId == companyId)
+            .Select(u => new IrmUserDto
+            {
+                Id = u.Id,
+                Name = u.Name,
+                Email = u.Email,
+                Phone = u.Phone,
+                Status = "Available",
+                Specialization = "Wealth & Private Advisory"
+            })
+            .ToListAsync(ct);
+
+        if (companyIrms.Count == 0)
+        {
+            companyIrms = await query
+                .Select(u => new IrmUserDto
+                {
+                    Id = u.Id,
+                    Name = u.Name,
+                    Email = u.Email,
+                    Phone = u.Phone,
+                    Status = "Available",
+                    Specialization = "Wealth & Private Advisory"
+                })
+                .ToListAsync(ct);
+        }
+
+        return ApiResponse<List<IrmUserDto>>.SuccessResult(companyIrms, "Active IRMs retrieved successfully.");
+    }
 }

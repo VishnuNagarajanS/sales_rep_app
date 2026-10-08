@@ -881,6 +881,34 @@ export const FollowupsPage: React.FC = () => {
     }
   }
 
+  // ── Interested leads leave the sales Follow-ups page ───────────────────────
+  // Once a lead is 'Interested' it is tracked in Customer 360, so any still-pending SALES follow-up
+  // for it is hidden. IRM follow-ups are kept: IRMs work Interested leads.
+  if (!isIrm) {
+    try {
+      const interestedLeads = allLeads.filter((l: Lead) => l.status === 'Interested');
+      const interestedLeadIds = new Set<string>(interestedLeads.map((l: Lead) => String(l.id)));
+      const interestedPhones = new Set<string>(
+        interestedLeads
+          .map((l: Lead) => (l.phone || '').replace(/\D/g, '').slice(-10))
+          .filter(Boolean)
+      );
+
+      processedFollowups = processedFollowups.filter(f => {
+        if (f.status !== 'Pending') return true;
+        if (f.contactType && f.contactType !== 'lead') return true;
+        if (getFollowupRole(f) === 'IRM') return true;
+        if (f.contactId && f.contactId !== 'contact-new' && interestedLeadIds.has(String(f.contactId)))
+          return false;
+        const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+        if (fPhone && interestedPhones.has(fPhone)) return false;
+        return true;
+      });
+    } catch (err) {
+      console.error('Error in Interested-lead followup filter:', err);
+    }
+  }
+
   // Count badges
   const activePendingFollowups = processedFollowups.filter(f => {
     if (f.status !== 'Pending') return false;

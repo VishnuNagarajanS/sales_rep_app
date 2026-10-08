@@ -106,7 +106,7 @@ export const ArchivedLeadsPage: React.FC = () => {
       key: 'updatedAt',
       render: (row: Lead) => (
         <span className="lead-text-muted">
-          {new Date(row.updatedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}
+          {row.updatedAt ? new Date(row.updatedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
         </span>
       )
     },
@@ -198,21 +198,17 @@ export const ArchivedLeadsPage: React.FC = () => {
       </div>
 
       <div className="data-table-container card" style={{ padding: 0, overflow: 'hidden' }}>
-        <DataTable
-          columns={columns}
-          data={filteredLeads}
-          keyExtractor={(row) => row.id}
-          isLoading={loading}
-          emptyMessage={
-            <div style={{ padding: '64px 24px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <div style={{ width: 64, height: 64, borderRadius: '50%', backgroundColor: 'rgba(100, 116, 139, 0.1)', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 24 }}>
-                <Trash2 size={32} />
-              </div>
-              <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)', fontSize: 18, fontWeight: 600 }}>No Archived Leads Found</h3>
-              <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 14 }}>Try adjusting your filters or search query.</p>
-            </div>
-          }
-        />
+        {loading ? (
+          <div style={{ padding: '64px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading archived leads...</div>
+        ) : (
+          <DataTable
+            columns={columns}
+            data={filteredLeads}
+            keyExtractor={(row) => row.id}
+            emptyTitle="No Archived Leads Found"
+            emptyDescription="Try adjusting your filters or search query."
+          />
+        )}
       </div>
     </div>
   );

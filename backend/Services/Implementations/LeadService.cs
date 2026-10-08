@@ -18,10 +18,13 @@ public class LeadService : ILeadService
     private readonly ICurrentUserService _currentUser;
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> _leadCreationLocks = new();
 
-    public LeadService(ApplicationDbContext context, ICurrentUserService currentUser)
+    private readonly backend.Services.Interfaces.ICompanyClock _clock;
+
+    public LeadService(ApplicationDbContext context, ICurrentUserService currentUser, backend.Services.Interfaces.ICompanyClock clock)
     {
         _context = context;
         _currentUser = currentUser;
+        _clock = clock;
     }
 
     private static readonly string[] ExcludedStatuses = { "Not Interested", "Junk", "Converted" };
@@ -134,7 +137,7 @@ public class LeadService : ILeadService
         }
         else
         {
-            query = query.Where(l => l.Status != "Not Interested" && l.Status != "Junk");
+            query = query.Where(l => l.Status != "Not Interested" && l.Status != "Junk" && l.Status != "Follow-up Required" && l.Status != "Converted");
         }
 
         // Search
@@ -192,27 +195,59 @@ public class LeadService : ILeadService
 
     public async Task<ApiResponse<LeadResponseDto>> CreateLeadAsync(CreateLeadDto dto, CancellationToken ct = default)
     {
-        int? agentId = null;
-        DateTime? assignedAt = null;
-        if (_currentUser.Role == "sales_executive" || _currentUser.Role == "irm")
+        var role = _currentUser.Role;
+
+        int companyId;
+        if (role == "super_admin")
         {
-            agentId = _currentUser.UserId;
+            if (dto.CompanyId.HasValue) companyId = dto.CompanyId.Value;
+            else if (_currentUser.CompanyId.HasValue) companyId = _currentUser.CompanyId.Value;
+            else return ApiResponse<LeadResponseDto>.FailureResult("Company ID is required.");
+        }
+        else
+        {
+            if (!_currentUser.CompanyId.HasValue)
+                return ApiResponse<LeadResponseDto>.FailureResult("User is not associated with a company.");
+            companyId = _currentUser.CompanyId.Value;
+        }
+
+        // S3: Validate the caller has a user identity before writing anything.
+        var callerId = _currentUser.UserId;
+        if (callerId == null)
+            return ApiResponse<LeadResponseDto>.FailureResult("User not authenticated.");
+
+        int? targetAgentId = null;
+        DateTime? assignedAt = null;
+
+        if (role == "sales_executive" || role == "irm")
+        {
+            targetAgentId = callerId;
             assignedAt = DateTime.UtcNow;
         }
-        else if (dto.AssignedAgentId.HasValue && dto.AssignedAgentId.Value > 0)
+        else if (role == "company_admin" || role == "super_admin")
         {
-            // Verify if the target user is a real agent (sales_executive / irm).
-            // If it belongs to an admin or super_admin, keep lead unassigned in the queue!
-            var targetAgent = await _context.Users.Include(u => u.Role)
-                .FirstOrDefaultAsync(u => u.Id == dto.AssignedAgentId.Value, ct);
-            if (targetAgent != null && targetAgent.Role?.Code != "company_admin" && targetAgent.Role?.Code != "super_admin")
+            if (dto.AssignedAgentId.HasValue && dto.AssignedAgentId.Value > 0)
             {
-                agentId = dto.AssignedAgentId.Value;
-                assignedAt = DateTime.UtcNow;
+                // S3: Use company-aware clock, not DateTime.UtcNow, to avoid
+                // midnight-UTC vs IST boundary incorrectly allowing on-leave agents.
+                var today = await _clock.GetCompanyTodayAsync(companyId, ct);
+
+                var targetUser = await _context.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == dto.AssignedAgentId.Value && u.CompanyId == companyId, ct);
+                if (targetUser != null && targetUser.Role?.Code == "sales_executive" && targetUser.Status == UserStatus.Active)
+                {
+                    var isOnLeave = await _context.LeaveRequests.AnyAsync(lr => lr.UserId == targetUser.Id && lr.Status == "Approved" && lr.StartDate <= today && lr.EndDate >= today, ct);
+                    // S3: Match GhlLeadAssignmentController's handover check (scoped to same company).
+                    var isCovered = await _context.WorkHandovers.AnyAsync(wh => wh.OriginalUserId == targetUser.Id && wh.CompanyId == companyId && wh.Status == "active", ct);
+
+                    if (!isOnLeave && !isCovered)
+                    {
+                        targetAgentId = targetUser.Id;
+                        assignedAt = DateTime.UtcNow;
+                    }
+                }
             }
         }
 
-        var companyId = dto.CompanyId ?? _currentUser.CompanyId ?? 1;
 
         // Build Custom Fields Dictionary for GHL
         var customFields = dto.AdditionalCustomFields ?? new Dictionary<string, string>();
@@ -231,16 +266,19 @@ public class LeadService : ILeadService
         if (!string.IsNullOrWhiteSpace(dto.Horizon)) customFields["horizon"] = dto.Horizon;
         if (!string.IsNullOrWhiteSpace(dto.InvestmentAmount)) customFields["investmentAmount"] = dto.InvestmentAmount.Trim();
 
+        if (dto.AssignedIrmId.HasValue) customFields["assignedIrmId"] = dto.AssignedIrmId.Value.ToString();
+        if (dto.AssignedIrmName != null) customFields["assignedIrmName"] = dto.AssignedIrmName.Trim();
+        if (dto.AssignedIrmAt != null) customFields["assignedIrmAt"] = dto.AssignedIrmAt.Trim();
+        else if (dto.AssignedIrmId.HasValue || dto.AssignedIrmName != null)
+        {
+            if (!customFields.ContainsKey("assignedIrmAt"))
+                customFields["assignedIrmAt"] = DateTime.UtcNow.ToString("o");
+        }
+
         // Canonical Customer Duplicate Check: check normalized phone (last 10 digits) and normalized email
         var normPhone = NormalizePhone(dto.Phone);
         var normEmail = NormalizeEmail(dto.Email);
         var hasIdentifier = normPhone != null || normEmail != null;
-
-        var targetAgentId = (dto.AssignedAgentId.HasValue && dto.AssignedAgentId.Value > 0)
-            ? dto.AssignedAgentId
-            : agentId;
-
-        var role = _currentUser.Role;
 
         // Concurrency lock to prevent race conditions when two simultaneous requests create the same contact
         var lockKey = hasIdentifier ? $"{companyId}:{normPhone ?? normEmail}" : null;
@@ -584,10 +622,29 @@ public class LeadService : ILeadService
             };
 
             _context.Leads.Add(lead);
+
+            // S3: Add the assignment history row before SaveChangesAsync so both
+            // the lead and its history are committed atomically in one round-trip.
+            if (targetAgentId.HasValue)
+            {
+                var history = new LeadAssignmentHistory
+                {
+                    Lead = lead,           // EF resolves LeadId from the navigation
+                    ToAgentId = targetAgentId.Value,
+                    AssignedById = callerId!.Value,
+                    Method = "manual",
+                    AssignedAt = assignedAt ?? DateTime.UtcNow
+                };
+                _context.LeadAssignmentHistories.Add(history);
+            }
+
             await _context.SaveChangesAsync(ct);
 
             // Reload agent navigation for DTO
-            await _context.Entry(lead).Reference(l => l.AssignedAgent).LoadAsync(ct);
+            if (lead.AssignedAgentId.HasValue)
+            {
+                await _context.Entry(lead).Reference(l => l.AssignedAgent).LoadAsync(ct);
+            }
 
             return ApiResponse<LeadResponseDto>.SuccessResult(MapToDto(lead), "Lead created successfully.");
         }
@@ -600,11 +657,37 @@ public class LeadService : ILeadService
         }
     }
 
+    /// <summary>
+    /// Once a lead is qualified as 'Interested' its sales follow-up tasks are no longer needed.
+    /// Cancels the lead's still-pending sales follow-ups so they drop off the Follow-ups page.
+    /// (IRM follow-ups are left alone; they belong to the IRM who now works the lead.)
+    /// </summary>
+    private async Task CancelPendingSalesFollowupsAsync(Lead lead, CancellationToken ct)
+    {
+        var leadIdStr = lead.Id.ToString();
+        var pending = await _context.Followups
+            .Where(f => f.CompanyId == lead.CompanyId &&
+                        f.ContactType == "lead" &&
+                        f.ContactId == leadIdStr &&
+                        f.Status == FollowupStatus.Pending &&
+                        f.AssignedToRole != "irm")
+            .ToListAsync(ct);
+
+        foreach (var f in pending)
+        {
+            f.Status = FollowupStatus.Cancelled;
+            f.OutcomeNotes = "Auto-closed: lead marked Interested.";
+            f.UpdatedAt = DateTime.UtcNow;
+        }
+    }
+
     public async Task<ApiResponse<LeadResponseDto>> UpdateLeadAsync(int id, UpdateLeadDto dto, CancellationToken ct = default)
     {
         var lead = await FindScopedLeadAsync(id, ct);
         if (lead == null)
             return ApiResponse<LeadResponseDto>.FailureResult("Lead not found or access denied.");
+
+        var previousStatus = lead.Status;
 
         if (dto.Name != null) lead.Name = dto.Name.Trim();
 
@@ -657,15 +740,32 @@ public class LeadService : ILeadService
         if (dto.Location != null) lead.Location = dto.Location.Trim();
         if (dto.Source != null) lead.Source = dto.Source.Trim();
         if (dto.Status != null) lead.Status = dto.Status.Trim();
+        if (lead.Status == "Interested" && previousStatus != "Interested")
+            await CancelPendingSalesFollowupsAsync(lead, ct);
         if (dto.Priority != null) lead.Priority = dto.Priority.Trim();
         if (dto.Notes != null) lead.Notes = dto.Notes.Trim();
         if (dto.NextFollowupDate.HasValue) lead.NextFollowupDate = dto.NextFollowupDate.Value;
-        if (dto.AssignedAgentId.HasValue) 
+        
+        if (dto.AssignedAgentId.HasValue && lead.AssignedAgentId != dto.AssignedAgentId.Value)
         {
+            var oldAgentId = lead.AssignedAgentId;
             lead.AssignedAgentId = dto.AssignedAgentId.Value;
+            lead.AssignedById = _currentUser.UserId;
             lead.AssignedAt = DateTime.UtcNow;
-        }
 
+            if (_currentUser.UserId.HasValue)
+            {
+                _context.LeadAssignmentHistories.Add(new LeadAssignmentHistory
+                {
+                    LeadId = lead.Id,
+                    FromAgentId = oldAgentId,
+                    ToAgentId = dto.AssignedAgentId.Value,
+                    AssignedById = _currentUser.UserId.Value,
+                    Method = "manual",
+                    AssignedAt = DateTime.UtcNow
+                });
+            }
+        }
         // Merge custom fields
         var customFields = DeserializeCustomFields(lead.CustomFieldsJson);
         
@@ -697,6 +797,14 @@ public class LeadService : ILeadService
         
         if (dto.Horizon != null) customFields["horizon"] = dto.Horizon;
         if (dto.DispositionReason != null) customFields["dispositionReason"] = dto.DispositionReason;
+        if (dto.AssignedIrmId.HasValue) customFields["assignedIrmId"] = dto.AssignedIrmId.Value.ToString();
+        if (dto.AssignedIrmName != null) customFields["assignedIrmName"] = dto.AssignedIrmName.Trim();
+        if (dto.AssignedIrmAt != null) customFields["assignedIrmAt"] = dto.AssignedIrmAt.Trim();
+        else if (dto.AssignedIrmId.HasValue || dto.AssignedIrmName != null)
+        {
+            if (!customFields.ContainsKey("assignedIrmAt"))
+                customFields["assignedIrmAt"] = DateTime.UtcNow.ToString("o");
+        }
         if (dto.AdditionalCustomFields != null)
         {
             foreach (var kvp in dto.AdditionalCustomFields)
@@ -741,7 +849,7 @@ public class LeadService : ILeadService
             customer = new Customer
             {
                 CompanyId = companyId,
-                AssignedAgentId = agentId ?? _currentUser.UserId ?? 1,
+                AssignedAgentId = agentId ?? _currentUser.UserId ?? throw new InvalidOperationException("User ID is required"),
                 Name = lead.Name,
                 Phone = lead.Phone,
                 Email = lead.Email,
@@ -854,11 +962,11 @@ public class LeadService : ILeadService
         }
 
         // Schedule fresh followup for tomorrow
-        var tomorrow = DateTime.UtcNow.Date.AddDays(1).AddHours(10); // 10:00 AM UTC tomorrow
+        var tomorrow = (await _clock.GetTodayAsync(lead.CompanyId, ct)).AddDays(1).AddHours(10); // 10:00 AM local tomorrow
         var freshFollowup = new Followup
         {
             CompanyId = lead.CompanyId,
-            AssignedAgentId = lead.AssignedAgentId ?? _currentUser.UserId ?? 1,
+            AssignedAgentId = lead.AssignedAgentId ?? _currentUser.UserId ?? throw new InvalidOperationException("User ID is required"),
             ContactId = lead.Id.ToString(),
             ContactType = "lead",
             ContactName = lead.Name,
@@ -879,12 +987,25 @@ public class LeadService : ILeadService
 
     private static LeadResponseDto MapToDto(Lead lead)
     {
+        var customFields = DeserializeCustomFields(lead.CustomFieldsJson);
+        int? assignedIrmId = null;
+        if (customFields.TryGetValue("assignedIrmId", out var irmIdStr) && int.TryParse(irmIdStr, out var parsedIrmId))
+        {
+            assignedIrmId = parsedIrmId;
+        }
+
+        string? assignedIrmName = customFields.TryGetValue("assignedIrmName", out var iname) ? iname : null;
+        string? assignedIrmAt = customFields.TryGetValue("assignedIrmAt", out var iat) ? iat : null;
+
         return new LeadResponseDto
         {
             Id = lead.Id,
             CompanyId = lead.CompanyId,
             AssignedAgentId = lead.AssignedAgentId,
             AssignedAgentName = lead.AssignedAgent?.Name,
+            AssignedIrmId = assignedIrmId,
+            AssignedIrmName = assignedIrmName,
+            AssignedIrmAt = assignedIrmAt,
             AssignedAt = lead.AssignedAt,
             Name = lead.Name,
             Phone = lead.Phone,
@@ -894,7 +1015,7 @@ public class LeadService : ILeadService
             Status = lead.Status,
             Priority = lead.Priority,
             Notes = lead.Notes,
-            CustomFields = DeserializeCustomFields(lead.CustomFieldsJson),
+            CustomFields = customFields,
             NextFollowupDate = lead.NextFollowupDate,
             CreatedAt = lead.CreatedAt,
             UpdatedAt = lead.UpdatedAt,

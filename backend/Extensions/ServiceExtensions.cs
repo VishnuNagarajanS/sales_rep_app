@@ -77,6 +77,7 @@ public static class ServiceExtensions
         services.AddScoped<IOpportunityService, OpportunityService>();
         services.AddScoped<IWorkHandoverService, WorkHandoverService>();
         services.AddScoped<ILeaveRequestService, LeaveRequestService>();
+        services.AddScoped<ICompanyClock, CompanyClock>();
 
         // AI Services
         services.Configure<backend.Services.Ai.AiSettings>(configuration.GetSection("Ai"));

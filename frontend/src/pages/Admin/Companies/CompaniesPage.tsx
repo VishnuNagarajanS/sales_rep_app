@@ -1501,7 +1501,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
               <input
                 type="text"
                 className="form-control"
-                placeholder="e.g. Priya Nair"
+                placeholder="e.g. Agent Three"
                 value={newUserName}
                 onChange={e => setNewUserName(e.target.value)}
               />
@@ -1512,7 +1512,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
               <input
                 type="email"
                 className="form-control"
-                placeholder="priya@company.com"
+                placeholder="agent2@example.com"
                 value={newUserEmail}
                 onChange={e => setNewUserEmail(e.target.value)}
               />

@@ -24,7 +24,8 @@ public class LeaveRequestsController : ControllerBase
 
     private int GetCompanyId()
     {
-        return _currentUserService.CompanyId ?? 1;
+        return _currentUserService.CompanyId
+            ?? throw new UnauthorizedAccessException("Company claim is missing from token.");
     }
 
     private int GetCurrentUserId()

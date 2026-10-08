@@ -67,10 +67,10 @@ public class IrmReassignmentController : ControllerBase
     [HttpGet("coverage/active")]
     public async Task<IActionResult> GetActiveCoverages(CancellationToken ct)
     {
-        var companyId = _currentUser.CompanyId ?? 1;
-        if (companyId <= 0) return Unauthorized();
+        var companyId = _currentUser.CompanyId;
+        if (companyId == null) return Unauthorized();
 
-        var handovers = await _handoverService.GetActiveHandoversAsync(companyId, ct);
+        var handovers = await _handoverService.GetActiveHandoversAsync(companyId.Value, ct);
         var dtos = handovers
             .Where(h => h.RoleCode.Equals("irm", StringComparison.OrdinalIgnoreCase))
             .Select(h => new IrmCoverageItemDto
@@ -102,18 +102,19 @@ public class IrmReassignmentController : ControllerBase
         if (dto.FromIrmId == dto.ToIrmId)
             return BadRequest(ApiResponse<ReassignIrmWorkResultDto>.ErrorResponse("Cannot reassign work to the same IRM."));
 
-        var companyId = _currentUser.CompanyId ?? 1;
-        if (companyId <= 0) return Unauthorized();
+        var companyId = _currentUser.CompanyId;
+        if (companyId == null) return Unauthorized();
 
-        var actorId = _currentUser.UserId ?? 1;
+        var actorId = _currentUser.UserId;
+        if (actorId == null) return Unauthorized();
         var actorName = User.FindFirst(ClaimTypes.Name)?.Value ?? User.FindFirst("name")?.Value ?? "Administrator";
         var actorEmail = _currentUser.Email ?? "admin@ghl.com";
 
         try
         {
             var handover = await _handoverService.StartHandoverAsync(
-                companyId,
-                actorId,
+                companyId.Value,
+                actorId.Value,
                 actorName,
                 actorEmail,
                 new StartWorkHandoverRequestDto
@@ -151,16 +152,17 @@ public class IrmReassignmentController : ControllerBase
         if (dto.CoverageId <= 0)
             return BadRequest(ApiResponse<bool>.ErrorResponse("Valid CoverageId is required."));
 
-        var companyId = _currentUser.CompanyId ?? 1;
-        if (companyId <= 0) return Unauthorized();
+        var companyId = _currentUser.CompanyId;
+        if (companyId == null) return Unauthorized();
 
-        var actorId = _currentUser.UserId ?? 1;
+        var actorId = _currentUser.UserId;
+        if (actorId == null) return Unauthorized();
         var actorName = User.FindFirst(ClaimTypes.Name)?.Value ?? User.FindFirst("name")?.Value ?? "Administrator";
         var actorEmail = _currentUser.Email ?? "admin@ghl.com";
 
         try
         {
-            await _handoverService.EndHandoverAsync(companyId, dto.CoverageId, actorId, actorName, actorEmail, ct);
+            await _handoverService.EndHandoverAsync(companyId.Value, dto.CoverageId, actorId.Value, actorName, actorEmail, ct);
             return Ok(ApiResponse<bool>.SuccessResponse(true, "Coverage ended successfully."));
         }
         catch (Exception ex)

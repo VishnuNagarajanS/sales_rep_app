@@ -114,7 +114,7 @@ export const INITIAL_CALLS: CallRecord[] = [
     direction: 'inbound',
     duration: 187, // 3m 7s
     agentId: 'usr-ghl-exec-02',
-    agentName: 'Priya Sharma',
+    agentName: 'Agent Two',
     disposition: 'Interested',
     timestamp: '2 days ago, 05:15 PM',
     notes: 'Karthik reached out after reading article on tax-optimised commercial yield funds. Requested product brochure.',

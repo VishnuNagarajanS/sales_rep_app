@@ -35,13 +35,13 @@ export const MOCK_IRMS: IrmProfile[] = [
   },
   {
     id: 'irm-04',
-    name: 'Priya Nair',
+    name: 'Agent Three',
     experience: '2 Years',
     experienceYears: 2,
     experienceLevel: 'Mid-Level',
     performance: 91,
     status: 'Available',
-    email: 'priya.nair@ghlindiatrust.com',
+    email: 'agent3@example.com',
     phone: '+91 98220 33445',
   },
   {

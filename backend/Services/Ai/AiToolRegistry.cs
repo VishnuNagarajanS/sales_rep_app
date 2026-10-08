@@ -63,7 +63,8 @@ namespace backend.Services.Ai
             }
             catch (Exception ex)
             {
-                return $"{{\"error\":\"{ex.Message}\"}}";
+                Console.WriteLine($"[AiToolRegistry] Error executing tool {name}: {ex.Message}");
+                return System.Text.Json.JsonSerializer.Serialize(new { error = "Tool failed" });
             }
         }
     }

@@ -24,14 +24,14 @@ public class WorkHandoverUserController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetMyStatus(CancellationToken ct)
     {
-        var companyId = _currentUser.CompanyId ?? 1;
+        var companyId = _currentUser.CompanyId;
         var userId = _currentUser.UserId;
 
-        if (companyId <= 0 || !userId.HasValue) return Unauthorized();
+        if (companyId == null || !userId.HasValue) return Unauthorized();
 
         try
         {
-            var status = await _handoverService.GetMyStatusAsync(companyId, userId.Value, ct);
+            var status = await _handoverService.GetMyStatusAsync(companyId.Value, userId.Value, ct);
             return Ok(ApiResponse<MyWorkHandoverStatusDto>.SuccessResponse(status));
         }
         catch (Exception ex)

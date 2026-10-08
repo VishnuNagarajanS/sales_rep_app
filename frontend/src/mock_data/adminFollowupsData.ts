@@ -11,7 +11,7 @@ export const ADMIN_FOLLOWUP_REPRESENTATIVES: Record<FollowupRoleFilter, Array<{ 
 };
 
 export const INITIAL_ADMIN_FOLLOWUPS: Followup[] = [
-  // ── Priya Sharma (Sales Executive) ─────────────────────────────────────────
+  // ── Agent Two (Sales Executive) ─────────────────────────────────────────
   {
     id: 'flw-se-ps-01',
     companyId: 't-ghl-01',
@@ -24,7 +24,7 @@ export const INITIAL_ADMIN_FOLLOWUPS: Followup[] = [
     status: 'Pending',
     notes: 'Follow-up call on commercial real estate portfolio presentation and floor layout options for CBD tower.',
     assignedAgentId: 'usr-ghl-exec-02',
-    assignedAgentName: 'Priya Sharma',
+    assignedAgentName: 'Agent Two',
     assignedRole: 'Sales Executive',
   },
   {
@@ -39,7 +39,7 @@ export const INITIAL_ADMIN_FOLLOWUPS: Followup[] = [
     status: 'Pending',
     notes: 'Review luxury 4BHK floor plans and payment milestone structure for Jubilee Hills residency.',
     assignedAgentId: 'usr-ghl-exec-02',
-    assignedAgentName: 'Priya Sharma',
+    assignedAgentName: 'Agent Two',
     assignedRole: 'Sales Executive',
   },
   {
@@ -54,7 +54,7 @@ export const INITIAL_ADMIN_FOLLOWUPS: Followup[] = [
     status: 'Pending',
     notes: 'Overdue follow-up: discuss financing schedule and bank pre-approval status for commercial showroom.',
     assignedAgentId: 'usr-ghl-exec-02',
-    assignedAgentName: 'Priya Sharma',
+    assignedAgentName: 'Agent Two',
     assignedRole: 'Sales Executive',
   },
 

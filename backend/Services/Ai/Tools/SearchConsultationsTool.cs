@@ -30,13 +30,19 @@ namespace backend.Services.Ai.Tools
         public override async Task<string> ExecuteAsync(string arguments, AiDataScope scope, IServiceProvider services, CancellationToken ct)
         {
             var args = ParseArgs<Args>(arguments) ?? new Args();
+            var aiSettings = services.GetRequiredService<Microsoft.Extensions.Options.IOptionsSnapshot<AiSettings>>().Value;
+            var limit = aiSettings.MaxRowsPerTool > 0 ? aiSettings.MaxRowsPerTool : 25;
+            var includeContact = aiSettings.IncludeContactDetails;
+            
             var db = services.GetRequiredService<ApplicationDbContext>();
 
             var query = db.Consultations.AsNoTracking().Where(c => c.CompanyId == scope.CompanyId);
 
             if (!string.IsNullOrEmpty(args.DateFrom) || !string.IsNullOrEmpty(args.DateTo))
             {
-                var (from, to) = AiDateResolver.ResolveDateRange(args.DateFrom, args.DateTo);
+                var clock = services.GetRequiredService<backend.Services.Interfaces.ICompanyClock>();
+                var tz = await clock.GetTimeZoneAsync(scope.CompanyId, ct);
+                var (from, to) = AiDateResolver.ResolveDateRange(args.DateFrom, args.DateTo, tz);
                 query = query.Where(c => c.ScheduledAt >= from && c.ScheduledAt <= to);
             }
 
@@ -49,7 +55,7 @@ namespace backend.Services.Ai.Tools
             }
 
             var totalCount = await query.CountAsync(ct);
-            var results = await query.OrderByDescending(c => c.ScheduledAt).Take(25).Select(c => new
+            var results = await query.OrderByDescending(c => c.ScheduledAt).Take(limit).Select(c => new
             {
                 c.Id,
                 Title = c.Agenda,

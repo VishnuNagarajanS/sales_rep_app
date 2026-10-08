@@ -28,6 +28,10 @@ namespace backend.Services.Ai.Tools
         public override async Task<string> ExecuteAsync(string arguments, AiDataScope scope, IServiceProvider services, CancellationToken ct)
         {
             var args = ParseArgs<Args>(arguments) ?? new Args();
+            var aiSettings = services.GetRequiredService<Microsoft.Extensions.Options.IOptionsSnapshot<AiSettings>>().Value;
+            var limit = aiSettings.MaxRowsPerTool > 0 ? aiSettings.MaxRowsPerTool : 25;
+            var includeContact = aiSettings.IncludeContactDetails;
+            
             var db = services.GetRequiredService<ApplicationDbContext>();
 
             var query = db.Investors.AsNoTracking().Where(i => i.CompanyId == scope.CompanyId);
@@ -47,12 +51,12 @@ namespace backend.Services.Ai.Tools
             }
 
             var totalCount = await query.CountAsync(ct);
-            var results = await query.OrderByDescending(i => i.CreatedAt).Take(25).Select(i => new
+            var results = await query.OrderByDescending(i => i.CreatedAt).Take(limit).Select(i => new
             {
                 i.Id,
                 i.Name,
-                i.Email,
-                i.Phone,
+                Email = includeContact ? i.Email : "[REDACTED]",
+                Phone = includeContact ? i.Phone : "[REDACTED]",
                 Status = i.Status.ToString(),
                 i.InvestmentCapacity,
                 i.PreferredAssetClass,

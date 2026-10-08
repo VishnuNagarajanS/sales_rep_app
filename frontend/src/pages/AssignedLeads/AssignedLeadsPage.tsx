@@ -793,7 +793,7 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
               className="form-input"
               value={formData.name || ''}
               onChange={e => setFormData({ ...formData, name: e.target.value })}
-              placeholder="e.g. Ramesh Kumar"
+              placeholder="e.g. Agent One"
             />
           </div>
 
@@ -816,7 +816,7 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
                 className="form-input"
                 value={formData.email || ''}
                 onChange={e => setFormData({ ...formData, email: e.target.value })}
-                placeholder="ramesh@gmail.com"
+                placeholder="agent1@example.com"
               />
             </div>
           </div>

@@ -106,6 +106,8 @@ export interface User {
   isCovered?: boolean;
 }
 
+
+
 export interface Lead {
   id: string;
   companyId: string;
@@ -118,6 +120,9 @@ export interface Lead {
   priority: 'Low' | 'Medium' | 'High' | 'Urgent';
   assignedAgentId: string;
   assignedAgentName: string;
+  assignedIrmId?: string;
+  assignedIrmName?: string;
+  assignedIrmAt?: string;
   nextFollowupDate?: string;
   createdAt: string;
   notes: string;
@@ -150,6 +155,8 @@ export interface Lead {
   handedOverFromName?: string;
   handoverPlannedEnd?: string;
   originalOwnerId?: number;
+  updatedAt?: string;
+  normalizedEmail?: string;
 }
 
 export interface Customer {
@@ -158,7 +165,7 @@ export interface Customer {
   name: string;
   phone: string;
   email: string;
-  status: 'Active' | 'VIP' | 'Inactive';
+  status: 'Active' | 'VIP' | 'Inactive' | 'Interested';
   assignedAgentId: string;
   assignedAgentName: string;
   location: string;
@@ -184,6 +191,9 @@ export interface Customer {
   handedOverFromName?: string;
   handoverPlannedEnd?: string;
   originalOwnerId?: number;
+  /** Set only for virtual Customer 360 entries built from an 'Interested' lead (not a row in the Customers table). */
+  isLeadRecord?: boolean;
+  sourceLeadId?: string;
 }
 
 export interface IrmProfile {

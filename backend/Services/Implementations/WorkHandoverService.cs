@@ -11,10 +11,12 @@ namespace backend.Services.Implementations;
 public class WorkHandoverService : IWorkHandoverService
 {
     private readonly ApplicationDbContext _db;
+    private readonly backend.Services.Interfaces.ICompanyClock _clock;
 
-    public WorkHandoverService(ApplicationDbContext db)
+    public WorkHandoverService(ApplicationDbContext db, backend.Services.Interfaces.ICompanyClock clock)
     {
         _db = db;
+        _clock = clock;
     }
 
     public async Task<List<WorkHandoverCandidateDto>> GetCandidatesAsync(int companyId, string roleCode, CancellationToken ct = default)
@@ -542,7 +544,15 @@ public class WorkHandoverService : IWorkHandoverService
                         else
                         {
                             isReassigned = true;
+                            lead.HandoverId = null;
+                            lead.OriginalOwnerId = null;
+                            lead.UpdatedAt = DateTime.UtcNow;
                         }
+                    }
+                    else
+                    {
+                        item.ReturnedAt = DateTime.UtcNow;
+                        item.ReturnOutcome = "missing";
                     }
                     break;
 
@@ -563,7 +573,15 @@ public class WorkHandoverService : IWorkHandoverService
                         else
                         {
                             isReassigned = true;
+                            customer.HandoverId = null;
+                            customer.OriginalOwnerId = null;
+                            customer.UpdatedAt = DateTime.UtcNow;
                         }
+                    }
+                    else
+                    {
+                        item.ReturnedAt = DateTime.UtcNow;
+                        item.ReturnOutcome = "missing";
                     }
                     break;
 
@@ -585,7 +603,15 @@ public class WorkHandoverService : IWorkHandoverService
                         else
                         {
                             isReassigned = true;
+                            followup.HandoverId = null;
+                            followup.OriginalOwnerId = null;
+                            followup.UpdatedAt = DateTime.UtcNow;
                         }
+                    }
+                    else
+                    {
+                        item.ReturnedAt = DateTime.UtcNow;
+                        item.ReturnOutcome = "missing";
                     }
                     break;
 
@@ -605,7 +631,14 @@ public class WorkHandoverService : IWorkHandoverService
                         else
                         {
                             isReassigned = true;
+                            deal.HandoverId = null;
+                            deal.OriginalOwnerId = null;
                         }
+                    }
+                    else
+                    {
+                        item.ReturnedAt = DateTime.UtcNow;
+                        item.ReturnOutcome = "missing";
                     }
                     break;
 
@@ -625,7 +658,14 @@ public class WorkHandoverService : IWorkHandoverService
                         else
                         {
                             isReassigned = true;
+                            ghlInv.HandoverId = null;
+                            ghlInv.OriginalOwnerId = null;
                         }
+                    }
+                    else
+                    {
+                        item.ReturnedAt = DateTime.UtcNow;
+                        item.ReturnOutcome = "missing";
                     }
                     break;
 
@@ -646,7 +686,15 @@ public class WorkHandoverService : IWorkHandoverService
                         else
                         {
                             isReassigned = true;
+                            opp.HandoverId = null;
+                            opp.OriginalOwnerId = null;
+                            opp.UpdatedAt = DateTime.UtcNow;
                         }
+                    }
+                    else
+                    {
+                        item.ReturnedAt = DateTime.UtcNow;
+                        item.ReturnOutcome = "missing";
                     }
                     break;
 
@@ -668,7 +716,15 @@ public class WorkHandoverService : IWorkHandoverService
                         else
                         {
                             isReassigned = true;
+                            cons.HandoverId = null;
+                            cons.OriginalOwnerId = null;
+                            cons.UpdatedAt = DateTime.UtcNow;
                         }
+                    }
+                    else
+                    {
+                        item.ReturnedAt = DateTime.UtcNow;
+                        item.ReturnOutcome = "missing";
                     }
                     break;
 
@@ -690,7 +746,15 @@ public class WorkHandoverService : IWorkHandoverService
                         else
                         {
                             isReassigned = true;
+                            inv.HandoverId = null;
+                            inv.OriginalOwnerId = null;
+                            inv.UpdatedAt = DateTime.UtcNow;
                         }
+                    }
+                    else
+                    {
+                        item.ReturnedAt = DateTime.UtcNow;
+                        item.ReturnOutcome = "missing";
                     }
                     break;
 
@@ -711,7 +775,15 @@ public class WorkHandoverService : IWorkHandoverService
                         else
                         {
                             isReassigned = true;
+                            kyc.HandoverId = null;
+                            kyc.OriginalOwnerId = null;
+                            kyc.UpdatedAt = DateTime.UtcNow;
                         }
+                    }
+                    else
+                    {
+                        item.ReturnedAt = DateTime.UtcNow;
+                        item.ReturnOutcome = "missing";
                     }
                     break;
 
@@ -733,7 +805,15 @@ public class WorkHandoverService : IWorkHandoverService
                         else
                         {
                             isReassigned = true;
+                            card.HandoverId = null;
+                            card.OriginalOwnerId = null;
+                            card.UpdatedAt = DateTime.UtcNow;
                         }
+                    }
+                    else
+                    {
+                        item.ReturnedAt = DateTime.UtcNow;
+                        item.ReturnOutcome = "missing";
                     }
                     break;
             }
@@ -1205,7 +1285,7 @@ public class WorkHandoverService : IWorkHandoverService
         if (fromUser == null || fromUser.Role == null) return new List<backend.DTOs.Admin.CoverSuggestionDto>();
 
         var roleCode = fromUser.Role.Code;
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = await _clock.GetCompanyTodayAsync(companyId, ct);
         var fromDate = from ?? today;
         var toDate = to ?? today;
 

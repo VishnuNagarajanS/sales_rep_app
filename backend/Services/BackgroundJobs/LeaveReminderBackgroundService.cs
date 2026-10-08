@@ -53,16 +53,17 @@ public class LeaveReminderBackgroundService : BackgroundService
     {
         await using var scope = _scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var clock = scope.ServiceProvider.GetRequiredService<backend.Services.Interfaces.ICompanyClock>();
 
         var nowUtc = DateTime.UtcNow;
-        var today = DateOnly.FromDateTime(nowUtc);
-        var tomorrow = today.AddDays(1);
 
         // Fetch all active companies
         var companyIds = await db.Tenants.Where(t => t.IsActive).Select(t => t.Id).ToListAsync(ct);
 
         foreach (var companyId in companyIds)
         {
+            var today = await clock.GetCompanyTodayAsync(companyId, ct);
+            var tomorrow = today.AddDays(1);
             var admins = await db.Users
                 .Include(u => u.Role)
                 .Where(u => u.CompanyId == companyId &&

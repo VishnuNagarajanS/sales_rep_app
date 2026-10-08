@@ -50,8 +50,8 @@ export const MOCK_USERS: User[] = [
   },
   {
     id: 'usr-ghl-exec-02',
-    name: 'Priya Sharma',
-    email: 'priya.irm@ghlindiatrust.com',
+    name: 'Agent Two',
+    email: 'agent2@example.com',
     phone: '+91 98450 66778',
     role: MOCK_ROLES.sales_executive,
     companyId: 't-ghl-01',
