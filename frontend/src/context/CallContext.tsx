@@ -676,6 +676,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           notes: followupNotes,
           assignedAgentId: matchedLead?.assignedAgentId || user.id,
           assignedAgentName: matchedLead?.assignedAgentName || user.name,
+          assignedById: matchedLead?.assignedById,
+          assignedByName: matchedLead?.assignedByName,
         });
       }
 
@@ -724,6 +726,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: scheduleFollowup.notes || (notes ? `Callback reminder: ${notes}` : `Callback reminder for ${lastCallRecord.contactName}`),
             assignedAgentId: user.id,
             assignedAgentName: user.name,
+            assignedById: matchedLead?.assignedById,
+            assignedByName: matchedLead?.assignedByName,
           });
         }
       }
@@ -829,6 +833,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: scheduleFollowup.notes || (notes ? `Follow-up from No Response: ${notes}` : `Follow-up required for ${lastCallRecord.contactName}`),
             assignedAgentId: user.id,
             assignedAgentName: user.name,
+            assignedById: matchedLead?.assignedById,
+            assignedByName: matchedLead?.assignedByName,
           });
         }
       }

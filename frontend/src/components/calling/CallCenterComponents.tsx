@@ -278,7 +278,9 @@ export const InCallBar: React.FC = () => {
   const matchedLead = activeCall?.matchedRecord?.type === 'lead'
     ? storageService.getLeads(tenant?.id).find((l: Lead) => l.id === activeCall.matchedRecord?.id)
     : (activeCall?.contactPhone ? storageService.findLeadByPhone(activeCall.contactPhone, tenant?.id) : undefined);
-  const previousAgentName = matchedLead?.assignedAgentName;
+  const previousAgentName = isIrm
+    ? (matchedLead?.assignedByName && matchedLead.assignedByName !== 'Created by IRM' ? matchedLead.assignedByName : (matchedLead?.customFields?.qualifiedByAgentName || matchedLead?.customFields?.assignedByAgentName || undefined))
+    : matchedLead?.assignedAgentName;
 
   const connectOptions = isIrm
     ? (() => {

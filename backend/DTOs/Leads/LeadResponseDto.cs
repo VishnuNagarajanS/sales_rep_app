@@ -19,6 +19,8 @@ public class LeadResponseDto
 
     public DateTime? NextFollowupDate { get; set; }
     public DateTime? AssignedAt { get; set; }
+    public int? AssignedById { get; set; }
+    public string? AssignedByName { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
 }

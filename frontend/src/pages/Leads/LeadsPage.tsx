@@ -1314,16 +1314,49 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     render: l => <span className="lead-text-muted">{l.source}</span>,
   };
 
+  const getLeadDisplayAgent = (l: Lead) => {
+    const isCreatedByIrm =
+      l.assignedByName === 'Created by IRM' ||
+      (l.assignedById && user?.id && String(l.assignedById) === String(user.id)) ||
+      l.createdBy === user?.name;
+
+    if (isCreatedByIrm) {
+      return {
+        name: user?.name || l.assignedAgentName || 'Dhinakaran',
+        role: 'IRM' as const,
+      };
+    }
+
+    const salesAgentName =
+      (l.assignedByName && l.assignedByName !== 'Created by IRM' ? l.assignedByName : null) ||
+      l.customFields?.qualifiedByAgentName ||
+      l.customFields?.assignedByAgentName ||
+      l.customFields?.agentName ||
+      (l.assignedById === '3' || l.assignedById === 3 ? 'Naveen' : null) ||
+      (l.assignedById === '2' || l.assignedById === 2 ? 'Vishnu' : null) ||
+      'Naveen';
+
+    return {
+      name: salesAgentName,
+      role: 'Sales Executive' as const,
+    };
+  };
+
   const assignedAgentColumn: Column<Lead> = {
     key: 'assignedAgentName',
     header: 'Assigned Agent',
     sortable: true,
     width: '18%',
     render: l => {
-      const agentName = (l.assignedAgentName && l.assignedAgentName !== 'Agent')
-        ? l.assignedAgentName
-        : (l.assignedAgentId === user?.id && user?.name ? user.name : (l.assignedAgentName || '—'));
-      return <span className="lead-text-muted">{agentName}</span>;
+      const agentInfo = getLeadDisplayAgent(l);
+      return (
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{agentInfo.name}</span>
+          <span className={`badge-role-inline ${agentInfo.role === 'IRM' ? 'badge-role-irm' : 'badge-role-sales'}`}>
+            {agentInfo.role}
+          </span>
+        </div>
+      );
     },
   };
 
@@ -1640,8 +1673,11 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
               <>
                 {/* ── Quick Info Banner (Assigned Agent) ── */}
                 <div className="lead-quick-banner">
-                  <div className="lead-assigned-note">
-                    Assigned : <strong>{selectedLead.assignedAgentName}</strong>
+                  <div className="lead-assigned-note" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    Assigned : <strong>{getLeadDisplayAgent(selectedLead).name}</strong>
+                    <span className={`badge-role-inline ${getLeadDisplayAgent(selectedLead).role === 'IRM' ? 'badge-role-irm' : 'badge-role-sales'}`}>
+                      {getLeadDisplayAgent(selectedLead).role}
+                    </span>
                   </div>
                 </div>
 

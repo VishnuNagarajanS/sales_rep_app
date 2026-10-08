@@ -169,7 +169,28 @@ public class FollowupService : IFollowupService
             .Take(pageSize)
             .ToList();
 
-        var items = paged.Select(MapToDto).ToList();
+        var contactPhones = paged.Where(f => !string.IsNullOrEmpty(f.ContactPhone)).Select(f => f.ContactPhone).Distinct().ToList();
+        var contactIds = paged.Where(f => !string.IsNullOrEmpty(f.ContactId)).Select(f => f.ContactId).Distinct().ToList();
+
+        var matchedLeads = await _context.Leads
+            .AsNoTracking()
+            .Include(l => l.AssignedBy)
+            .Include(l => l.AssignedAgent)
+            .Where(l => l.CompanyId == companyId && (contactIds.Contains(l.Id.ToString()) || contactPhones.Contains(l.Phone)))
+            .ToListAsync(ct);
+
+        var items = paged.Select(f =>
+        {
+            Lead? lead = null;
+            if (!string.IsNullOrWhiteSpace(f.ContactId))
+                lead = matchedLeads.FirstOrDefault(l => l.Id.ToString() == f.ContactId);
+            if (lead == null && !string.IsNullOrWhiteSpace(f.ContactPhone))
+            {
+                var p10 = f.ContactPhone.Length >= 10 ? f.ContactPhone[^10..] : f.ContactPhone;
+                lead = matchedLeads.FirstOrDefault(l => l.Phone.Contains(p10));
+            }
+            return MapToDto(f, lead);
+        }).ToList();
 
         return ApiResponse<PagedResult<FollowupResponseDto>>.SuccessResult(
             PagedResult<FollowupResponseDto>.Create(items, totalCount, page, pageSize),
@@ -182,7 +203,18 @@ public class FollowupService : IFollowupService
         if (followup == null)
             return ApiResponse<FollowupResponseDto>.FailureResult("Follow-up not found or access denied.");
 
-        return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(followup));
+        Lead? lead = null;
+        if (!string.IsNullOrWhiteSpace(followup.ContactId) && int.TryParse(followup.ContactId, out var cid))
+        {
+            lead = await _context.Leads.AsNoTracking().Include(l => l.AssignedBy).Include(l => l.AssignedAgent).FirstOrDefaultAsync(l => l.Id == cid, ct);
+        }
+        else if (!string.IsNullOrWhiteSpace(followup.ContactPhone))
+        {
+            var p10 = followup.ContactPhone.Length >= 10 ? followup.ContactPhone[^10..] : followup.ContactPhone;
+            lead = await _context.Leads.AsNoTracking().Include(l => l.AssignedBy).Include(l => l.AssignedAgent).FirstOrDefaultAsync(l => l.CompanyId == followup.CompanyId && l.Phone.Contains(p10), ct);
+        }
+
+        return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(followup, lead));
     }
 
     public async Task<ApiResponse<FollowupResponseDto>> CreateFollowupAsync(CreateFollowupDto dto, CancellationToken ct = default)
@@ -223,13 +255,13 @@ public class FollowupService : IFollowupService
         {
             if (int.TryParse(dto.ContactId, out var parsedLeadId))
             {
-                targetLead = await _context.Leads.Include(l => l.AssignedAgent).ThenInclude(a => a.Role)
+                targetLead = await _context.Leads.Include(l => l.AssignedAgent).ThenInclude(a => a.Role).Include(l => l.AssignedBy)
                     .FirstOrDefaultAsync(l => l.Id == parsedLeadId && l.CompanyId == companyId.Value, ct);
             }
             if (targetLead == null && !string.IsNullOrWhiteSpace(dto.ContactPhone))
             {
                 var p10 = dto.ContactPhone.Length >= 10 ? dto.ContactPhone[^10..] : dto.ContactPhone;
-                targetLead = await _context.Leads.Include(l => l.AssignedAgent).ThenInclude(a => a.Role)
+                targetLead = await _context.Leads.Include(l => l.AssignedAgent).ThenInclude(a => a.Role).Include(l => l.AssignedBy)
                     .FirstOrDefaultAsync(l => l.CompanyId == companyId.Value && l.Phone.Contains(p10), ct);
             }
         }
@@ -268,7 +300,7 @@ public class FollowupService : IFollowupService
             if (targetLead != null)
             {
                 targetLead.NextFollowupDate = existingPending.ScheduledAt;
-                if (targetLead.Status == "New" || targetLead.Status == "Contacted" || targetLead.Status == "Callback")
+                if (targetLead.Status == "New" || targetLead.Status == "Contacted" || targetLead.Status == "Callback" || targetLead.Status == "Interested")
                 {
                     targetLead.Status = "Follow-up Required";
                 }
@@ -276,7 +308,7 @@ public class FollowupService : IFollowupService
 
             await _context.SaveChangesAsync(ct);
             await _context.Entry(existingPending).Reference(f => f.AssignedAgent).LoadAsync(ct);
-            return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(existingPending), "Existing pending follow-up updated.");
+            return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(existingPending, targetLead), "Existing pending follow-up updated.");
         }
 
         string? resolvedEmail = dto.ContactEmail?.Trim();
@@ -336,9 +368,10 @@ public class FollowupService : IFollowupService
         if (targetLead != null)
         {
             targetLead.NextFollowupDate = followup.ScheduledAt;
-            if (targetLead.Status == "New" || targetLead.Status == "Contacted" || targetLead.Status == "Callback")
+            if (targetLead.Status == "New" || targetLead.Status == "Contacted" || targetLead.Status == "Callback" || targetLead.Status == "Interested")
             {
                 targetLead.Status = "Follow-up Required";
+                targetLead.UpdatedAt = DateTime.UtcNow;
             }
         }
 
@@ -346,7 +379,7 @@ public class FollowupService : IFollowupService
 
         await _context.Entry(followup).Reference(f => f.AssignedAgent).LoadAsync(ct);
 
-        return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(followup), "Follow-up scheduled successfully.");
+        return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(followup, targetLead), "Follow-up scheduled successfully.");
     }
 
     public async Task<ApiResponse<FollowupResponseDto>> UpdateFollowupAsync(int id, UpdateFollowupDto dto, CancellationToken ct = default)
@@ -372,7 +405,18 @@ public class FollowupService : IFollowupService
 
         await _context.SaveChangesAsync(ct);
 
-        return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(followup), "Follow-up updated successfully.");
+        Lead? lead = null;
+        if (!string.IsNullOrWhiteSpace(followup.ContactId) && int.TryParse(followup.ContactId, out var ucid))
+        {
+            lead = await _context.Leads.AsNoTracking().Include(l => l.AssignedBy).Include(l => l.AssignedAgent).FirstOrDefaultAsync(l => l.Id == ucid, ct);
+        }
+        else if (!string.IsNullOrWhiteSpace(followup.ContactPhone))
+        {
+            var p10 = followup.ContactPhone.Length >= 10 ? followup.ContactPhone[^10..] : followup.ContactPhone;
+            lead = await _context.Leads.AsNoTracking().Include(l => l.AssignedBy).Include(l => l.AssignedAgent).FirstOrDefaultAsync(l => l.CompanyId == followup.CompanyId && l.Phone.Contains(p10), ct);
+        }
+
+        return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(followup, lead), "Follow-up updated successfully.");
     }
 
     public async Task<ApiResponse<FollowupResponseDto>> CompleteFollowupAsync(int id, CancellationToken ct = default)
@@ -390,9 +434,61 @@ public class FollowupService : IFollowupService
         followup.CompletedAt = DateTime.UtcNow;
         followup.UpdatedAt = DateTime.UtcNow;
 
+        // If the related lead is in "Follow-up Required" status and no other pending followups remain,
+        // restore it to "Interested" so it flows back into the IRM's My Leads module.
+        Lead? followupLead = null;
+        if (!string.IsNullOrWhiteSpace(followup.ContactId) && int.TryParse(followup.ContactId, out var completeCid))
+        {
+            followupLead = await _context.Leads
+                .Include(l => l.AssignedBy).Include(l => l.AssignedAgent)
+                .FirstOrDefaultAsync(l => l.Id == completeCid && l.CompanyId == followup.CompanyId, ct);
+        }
+        else if (!string.IsNullOrWhiteSpace(followup.ContactPhone))
+        {
+            var p10c = followup.ContactPhone.Length >= 10 ? followup.ContactPhone[^10..] : followup.ContactPhone;
+            followupLead = await _context.Leads
+                .Include(l => l.AssignedBy).Include(l => l.AssignedAgent)
+                .FirstOrDefaultAsync(l => l.CompanyId == followup.CompanyId && l.Phone.Contains(p10c), ct);
+        }
+
+        if (followupLead != null && followupLead.Status == "Follow-up Required")
+        {
+            // Check if any OTHER pending followups still exist for this lead
+            var cleanContactId = followup.ContactId?.Trim() ?? string.Empty;
+            var cleanPhone10 = followup.ContactPhone?.Length >= 10 ? followup.ContactPhone[^10..] : followup.ContactPhone ?? string.Empty;
+            var otherPendingCount = await _context.Followups
+                .CountAsync(f =>
+                    f.Id != followup.Id &&
+                    f.CompanyId == followup.CompanyId &&
+                    f.Status == FollowupStatus.Pending &&
+                    ((cleanContactId != "" && f.ContactId == cleanContactId) ||
+                     (cleanPhone10 != "" && f.ContactPhone != null && f.ContactPhone.Contains(cleanPhone10))),
+                ct);
+
+            if (otherPendingCount == 0)
+            {
+                followupLead.Status = "Interested";
+                followupLead.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
         await _context.SaveChangesAsync(ct);
 
-        return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(followup), "Follow-up completed successfully.");
+        Lead? lead = followupLead;
+        if (lead == null)
+        {
+            if (!string.IsNullOrWhiteSpace(followup.ContactId) && int.TryParse(followup.ContactId, out var ccid))
+            {
+                lead = await _context.Leads.AsNoTracking().Include(l => l.AssignedBy).Include(l => l.AssignedAgent).FirstOrDefaultAsync(l => l.Id == ccid, ct);
+            }
+            else if (!string.IsNullOrWhiteSpace(followup.ContactPhone))
+            {
+                var p10 = followup.ContactPhone.Length >= 10 ? followup.ContactPhone[^10..] : followup.ContactPhone;
+                lead = await _context.Leads.AsNoTracking().Include(l => l.AssignedBy).Include(l => l.AssignedAgent).FirstOrDefaultAsync(l => l.CompanyId == followup.CompanyId && l.Phone.Contains(p10), ct);
+            }
+        }
+
+        return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(followup, lead), "Follow-up completed successfully.");
     }
 
     public async Task<ApiResponse<bool>> DeleteFollowupAsync(int id, CancellationToken ct = default)
@@ -412,8 +508,41 @@ public class FollowupService : IFollowupService
         return ApiResponse<bool>.SuccessResult(true, "Follow-up deleted successfully.");
     }
 
-    private static FollowupResponseDto MapToDto(Followup f)
+    private static FollowupResponseDto MapToDto(Followup f, Lead? lead = null)
     {
+        int? assignedById = null;
+        string? assignedByName = null;
+
+        if (lead != null)
+        {
+            if (lead.AssignedBy != null && lead.AssignedById != lead.AssignedAgentId)
+            {
+                assignedById = lead.AssignedById;
+                assignedByName = lead.AssignedBy.Name;
+            }
+            else if (lead.CustomFieldsJson != null && (lead.CustomFieldsJson.Contains("qualifiedByAgentName") || lead.CustomFieldsJson.Contains("assignedByAgentName")))
+            {
+                try
+                {
+                    var customFields = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(lead.CustomFieldsJson);
+                    if (customFields != null)
+                    {
+                        assignedByName = customFields.GetValueOrDefault("qualifiedByAgentName") ?? customFields.GetValueOrDefault("assignedByAgentName");
+                    }
+                }
+                catch { }
+            }
+
+            if (string.IsNullOrWhiteSpace(assignedByName))
+            {
+                if (lead.AssignedById == lead.AssignedAgentId || lead.AssignedBy == null)
+                {
+                    assignedById = lead.AssignedAgentId;
+                    assignedByName = lead.AssignedAgent?.Name ?? "Created by IRM";
+                }
+            }
+        }
+
         return new FollowupResponseDto
         {
             Id = f.Id,
@@ -421,6 +550,8 @@ public class FollowupService : IFollowupService
             AssignedAgentId = f.AssignedAgentId,
             AssignedAgentName = f.AssignedAgent?.Name,
             AssignedAgentRole = f.AssignedAgent?.Role?.Name ?? f.AssignedToRole,
+            AssignedById = assignedById,
+            AssignedByName = assignedByName,
             ContactId = f.ContactId,
             ContactType = f.ContactType,
             ContactName = f.ContactName,

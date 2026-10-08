@@ -95,17 +95,18 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
         l.assignedByName === 'Created by IRM' ||
         !l.assignedById ||
         l.assignedById === l.assignedAgentId;
-      const name = isIrm ? 'Created by IRM' : (l.assignedByName || 'Sales Agent');
+      const name = isIrm ? (user?.name || 'Dhinakaran') : (l.assignedByName || 'Sales Agent');
       if (name) {
         set.add(name);
       }
     });
     return Array.from(set).sort((a, b) => {
-      if (a === 'Created by IRM') return -1;
-      if (b === 'Created by IRM') return 1;
+      const myName = user?.name || 'Dhinakaran';
+      if (a === myName) return -1;
+      if (b === myName) return 1;
       return a.localeCompare(b);
     });
-  }, [scopedLeads]);
+  }, [scopedLeads, user?.name]);
 
   // Leads filtered by agent selection
   const agentFilteredLeads = useMemo(() => {
@@ -116,10 +117,10 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
         l.assignedByName === 'Created by IRM' ||
         !l.assignedById ||
         l.assignedById === l.assignedAgentId;
-      const name = isIrm ? 'Created by IRM' : (l.assignedByName || 'Sales Agent');
+      const name = isIrm ? (user?.name || 'Dhinakaran') : (l.assignedByName || 'Sales Agent');
       return name === selectedAgentFilter;
     });
-  }, [scopedLeads, selectedAgentFilter]);
+  }, [scopedLeads, selectedAgentFilter, user?.name]);
 
   // Stage counts dynamically updated based on active agent filter
   const stageCounts = useMemo(() => {
@@ -262,13 +263,16 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
           lead.assignedByName === 'Created by IRM' ||
           !lead.assignedById ||
           lead.assignedById === lead.assignedAgentId;
-        const displayName = isIrm ? 'Created by IRM' : (lead.assignedByName || 'Sales Agent');
+        const displayName = isIrm ? (user?.name || 'Dhinakaran') : (lead.assignedByName || 'Sales Agent');
         return (
           <div>
-            <div className="all-leads-assigned-name">
+            <div className="all-leads-assigned-name" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               <User size={12} color={isIrm ? '#8b5cf6' : '#3b82f6'} />
               <span style={{ fontWeight: 600, color: isIrm ? '#c084fc' : 'var(--text-primary)' }}>
                 {displayName}
+              </span>
+              <span className={`badge-role-inline ${isIrm ? 'badge-role-irm' : 'badge-role-sales'}`}>
+                {isIrm ? 'IRM' : 'Sales Executive'}
               </span>
             </div>
             <div className="all-leads-assigned-date">

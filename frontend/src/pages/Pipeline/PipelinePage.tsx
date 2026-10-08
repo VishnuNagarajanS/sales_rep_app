@@ -161,57 +161,77 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       })()
     : [];
 
-  const leadToPipelineCard = (lead: Lead): Deal => ({
-    id: lead.id,
-    companyId: lead.companyId || tenant?.id || '',
-    title: lead.name,
-    customerId: lead.id,
-    customerName: lead.name,
-    phone: lead.phone,
-    email: lead.email,
-    assignedAgentId: lead.assignedAgentId,
-    assignedAgentName: lead.assignedAgentName,
-    stage: 'leads',
-    stageEnteredAt: lead.createdAt,
-    createdAt: lead.createdAt,
-    expectedCloseDate: '',
-    notes: lead.notes || '',
-    value: 0,
-    priority: lead.priority === 'Urgent' ? 'High' : (lead.priority as 'High' | 'Medium' | 'Low'),
-    location: lead.location,
-    investmentRange:
-      lead.customFields?.investmentCapacity ||
-      lead.customFields?.capacityRange ||
-      lead.customFields?.investmentRange ||
-      (lead as any).investmentRange ||
-      undefined,
-    investorType: lead.customFields?.investorType || undefined,
-    preferredAssetClass: lead.customFields?.preferredAssetClass || undefined,
-  });
+  const leadToPipelineCard = (lead: Lead): Deal => {
+    const isLeadCreatedByIrm =
+      lead.assignedByName === 'Created by IRM' ||
+      (lead.assignedById && user?.id && String(lead.assignedById) === String(user.id)) ||
+      lead.createdBy === user?.name;
+    const dealAgentName = isIrm
+      ? (isLeadCreatedByIrm ? (user?.name || 'Dhinakaran') : (lead.assignedByName || 'Naveen'))
+      : (lead.assignedAgentName || user?.name || '');
 
-  const followupToPipelineCard = (followup: Followup): Deal => ({
-    id: followup.id,
-    companyId: followup.companyId || tenant?.id || '',
-    title: followup.contactName,
-    customerId: followup.contactId,
-    customerName: followup.contactName,
-    phone: followup.contactPhone,
-    email: (followup as any).email || undefined,
-    assignedAgentId: followup.assignedAgentId,
-    assignedAgentName: followup.assignedAgentName,
-    stage: 'followup',
-    stageEnteredAt: followup.scheduledAt,
-    createdAt: followup.scheduledAt || (followup as any).createdAt || '',
-    expectedCloseDate: '',
-    notes: followup.notes || '',
-    value: 0,
-    priority: (followup.priority as 'High' | 'Medium' | 'Low') || 'Medium',
-    investmentRange:
-      (followup as any).investmentCapacity ||
-      (followup as any).investmentRange ||
-      undefined,
-    preferredAssetClass: (followup as any).preferredAssetClass || (followup as any).customFields?.preferredAssetClass || undefined,
-  });
+    return {
+      id: lead.id,
+      companyId: lead.companyId || tenant?.id || '',
+      title: lead.name,
+      customerId: lead.id,
+      customerName: lead.name,
+      phone: lead.phone,
+      email: lead.email,
+      assignedAgentId: lead.assignedAgentId,
+      assignedAgentName: dealAgentName,
+      stage: 'leads',
+      stageEnteredAt: lead.createdAt,
+      createdAt: lead.createdAt,
+      expectedCloseDate: '',
+      notes: lead.notes || '',
+      value: 0,
+      priority: lead.priority === 'Urgent' ? 'High' : (lead.priority as 'High' | 'Medium' | 'Low'),
+      location: lead.location,
+      investmentRange:
+        lead.customFields?.investmentCapacity ||
+        lead.customFields?.capacityRange ||
+        lead.customFields?.investmentRange ||
+        (lead as any).investmentRange ||
+        undefined,
+      investorType: lead.customFields?.investorType || undefined,
+      preferredAssetClass: lead.customFields?.preferredAssetClass || undefined,
+    };
+  };
+
+  const followupToPipelineCard = (followup: Followup): Deal => {
+    const isFuCreatedByIrm =
+      followup.assignedByName === 'Created by IRM' ||
+      (followup.assignedById && user?.id && String(followup.assignedById) === String(user.id)) ||
+      followup.createdBy === user?.name;
+    const dealAgentName = isIrm
+      ? (isFuCreatedByIrm ? (user?.name || 'Dhinakaran') : (followup.assignedByName || 'Naveen'))
+      : (followup.assignedAgentName || user?.name || '');
+
+    return {
+      id: followup.id,
+      companyId: followup.companyId || tenant?.id || '',
+      title: followup.contactName,
+      customerId: followup.contactId,
+      customerName: followup.contactName,
+      phone: followup.contactPhone,
+      email: (followup as any).email || undefined,
+      assignedAgentId: followup.assignedAgentId,
+      assignedAgentName: dealAgentName,
+      stage: 'followup',
+      stageEnteredAt: followup.scheduledAt,
+      createdAt: followup.scheduledAt || (followup as any).createdAt || '',
+      expectedCloseDate: '',
+      notes: followup.notes || '',
+      value: 0,
+      priority: (followup.priority as 'High' | 'Medium' | 'Low') || 'Medium',
+      investmentRange:
+        (followup as any).investmentCapacity ||
+        (followup as any).investmentRange ||
+        undefined,
+      preferredAssetClass: (followup as any).preferredAssetClass || (followup as any).customFields?.preferredAssetClass || undefined,
+    };
+  };
 
   // Agent filter options — derived from the already-scoped pool so execs never see this.
   const agentOptions = Array.from(

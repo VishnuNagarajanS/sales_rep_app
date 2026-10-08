@@ -55,7 +55,7 @@ public class LeadService : ILeadService
             ? companyId.Value
             : (role == "super_admin" ? (filter?.CompanyId ?? (filter?.CompanySlug == "jamin" || filter?.CompanySlug == "2" ? 2 : 1)) : null);
 
-        var query = _context.Leads.AsNoTracking().Include(l => l.AssignedAgent).AsQueryable();
+        var query = _context.Leads.AsNoTracking().Include(l => l.AssignedAgent).Include(l => l.AssignedBy).AsQueryable();
 
         if (role == "super_admin")
         {
@@ -89,7 +89,7 @@ public class LeadService : ILeadService
         var agentId = _currentUser.UserId;
         var companyId = _currentUser.CompanyId;
 
-        var query = _context.Leads.Include(l => l.AssignedAgent).Where(l => l.Id == id);
+        var query = _context.Leads.Include(l => l.AssignedAgent).Include(l => l.AssignedBy).Where(l => l.Id == id);
 
         if (role == "super_admin")
         {
@@ -875,6 +875,12 @@ public class LeadService : ILeadService
             AssignedAgentId = lead.AssignedAgentId,
             AssignedAgentName = lead.AssignedAgent?.Name,
             AssignedAt = lead.AssignedAt,
+            AssignedById = lead.AssignedById,
+            AssignedByName = (lead.AssignedBy != null && lead.AssignedById != lead.AssignedAgentId)
+                ? lead.AssignedBy.Name
+                : (lead.CustomFieldsJson != null && lead.CustomFieldsJson.Contains("qualifiedByAgentName")
+                    ? DeserializeCustomFields(lead.CustomFieldsJson).GetValueOrDefault("qualifiedByAgentName")
+                    : null),
             Name = lead.Name,
             Phone = lead.Phone,
             Email = lead.Email,

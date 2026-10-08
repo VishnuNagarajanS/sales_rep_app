@@ -330,6 +330,8 @@ export interface Followup {
   assignedAgentId: string;
   assignedAgentName: string;
   assignedRole?: string;
+  assignedById?: string | number;
+  assignedByName?: string;
   followupType?: 'call' | 'meeting' | 'email' | 'whatsapp';
   scheduledDate?: string;
   scheduledTime?: string;

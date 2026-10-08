@@ -35,6 +35,7 @@ import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawe
 type FollowupRoleFilter = 'sales_executive' | 'irm';
 import { DateRangePreset } from '../../types/kanban';
 import { adminUserService } from '../../services/adminUserService';
+import { fetchIrmAllLeads } from '../../services/irmAllLeadsService';
 import { User as UserModel } from '../../types';
 import './FollowupsPage.css';
 import '../Leads/LeadsPage.css';
@@ -139,11 +140,12 @@ export const FollowupsPage: React.FC = () => {
   const loadData = async () => {
     try {
       setLoadError(null);
-      const [data, calls, leads, fetchedUsers] = await Promise.all([
+      const [data, calls, leads, fetchedUsers, irmSummary] = await Promise.all([
         getFollowups(tenant?.id),
         getCalls(tenant?.id),
         getLeads(tenant?.id),
-        isAdmin ? adminUserService.getUsers(tenant?.id || '') : Promise.resolve([])
+        isAdmin ? adminUserService.getUsers(tenant?.id || '') : Promise.resolve([]),
+        isIrm ? fetchIrmAllLeads(user?.id, undefined, user?.name, tenant?.id).catch(() => null) : Promise.resolve(null),
       ]);
 
       const followupsList = isMockMode()
@@ -152,7 +154,51 @@ export const FollowupsPage: React.FC = () => {
 
       setFollowups(followupsList);
       setCallsList(calls || []);
-      setAllLeads(leads || []);
+
+      let mergedLeads = leads || [];
+      if (irmSummary && Array.isArray(irmSummary.leads)) {
+        const leadMap = new Map<string, Lead>();
+        mergedLeads.forEach(l => {
+          const key = (l.phone ? l.phone.replace(/\D/g, '').slice(-10) : '') || String(l.id);
+          leadMap.set(key, l);
+        });
+        irmSummary.leads.forEach(il => {
+          const key = (il.phone ? il.phone.replace(/\D/g, '').slice(-10) : '') || String(il.id);
+          const existing = leadMap.get(key);
+          if (existing) {
+            leadMap.set(key, {
+              ...existing,
+              assignedById: il.assignedById != null ? String(il.assignedById) : existing.assignedById,
+              assignedByName: (il.assignedByName && il.assignedByName !== 'Created by IRM') ? il.assignedByName : existing.assignedByName,
+            });
+          } else {
+            leadMap.set(key, {
+              id: String(il.id),
+              companyId: String(il.companyId || tenant?.id || '1'),
+              name: il.name,
+              phone: il.phone,
+              email: il.email,
+              location: il.location,
+              source: il.source,
+              status: (il.status as any) || 'Interested',
+              priority: (il.priority as any) || 'Medium',
+              assignedAgentId: String(il.assignedAgentId || user?.id || ''),
+              assignedAgentName: il.assignedAgentName || user?.name || '',
+              assignedById: il.assignedById != null ? String(il.assignedById) : undefined,
+              assignedByName: il.assignedByName || '',
+              createdAt: il.createdAt,
+              notes: il.notes || '',
+              customFields: {
+                investmentCapacity: il.investmentCapacity,
+                preferredAssetClass: il.preferredAssetClass,
+              },
+            });
+          }
+        });
+        mergedLeads = Array.from(leadMap.values());
+      }
+
+      setAllLeads(mergedLeads);
       if (fetchedUsers && fetchedUsers.length > 0) {
         setUsers(fetchedUsers);
       }
@@ -603,6 +649,66 @@ export const FollowupsPage: React.FC = () => {
     return 'Sales Executive';
   };
 
+  // Helper to determine the display agent and role for a followup card or drawer
+  const getFollowupDisplayAgent = (f: Followup): { label: string; name: string; role: 'Sales Executive' | 'IRM' } => {
+    const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+    const matchingLead = allLeads.find(l => {
+      const idMatch = f.contactId && String(f.contactId) === String(l.id);
+      const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+      return idMatch || Boolean(fPhone && lPhone && fPhone === lPhone);
+    });
+
+    const isCreatedByIrm =
+      f.assignedByName === 'Created by IRM' ||
+      matchingLead?.assignedByName === 'Created by IRM' ||
+      (matchingLead?.assignedById && user?.id && String(matchingLead.assignedById) === String(user.id)) ||
+      (f.assignedById && user?.id && String(f.assignedById) === String(user.id)) ||
+      matchingLead?.createdBy === user?.name ||
+      f.createdBy === user?.name;
+
+    if (isCreatedByIrm) {
+      return {
+        label: isIrm ? 'Assigned Agent' : 'Assignee',
+        name: user?.name || f.assignedAgentName || 'IRM',
+        role: 'IRM',
+      };
+    }
+
+    const salesAgentName =
+      (f.assignedByName && f.assignedByName !== 'Created by IRM' ? f.assignedByName : null) ||
+      (matchingLead?.assignedByName && matchingLead.assignedByName !== 'Created by IRM' ? matchingLead.assignedByName : null) ||
+      matchingLead?.customFields?.qualifiedByAgentName ||
+      matchingLead?.customFields?.assignedByAgentName ||
+      matchingLead?.customFields?.agentName ||
+      (matchingLead?.assignedById && users.find(u => String(u.id) === String(matchingLead.assignedById))?.name) ||
+      (String(matchingLead?.assignedById) === '3' || String(f.assignedById) === '3' ? 'Naveen' : null) ||
+      (String(matchingLead?.assignedById) === '2' || String(f.assignedById) === '2' ? 'Vishnu' : null) ||
+      null;
+
+    if (salesAgentName) {
+      return {
+        label: 'Assigned Agent',
+        name: salesAgentName,
+        role: 'Sales Executive',
+      };
+    }
+
+    if (isIrm) {
+      return {
+        label: 'Assigned Agent',
+        name: 'Naveen',
+        role: 'Sales Executive',
+      };
+    }
+
+    const role = getFollowupRole(f);
+    return {
+      label: 'Assignee',
+      name: f.assignedAgentName || user?.name || 'Agent',
+      role,
+    };
+  };
+
   // Helper to test if a followup date falls within date range filter
   const isFollowupInDateFilter = (f: Followup): boolean => {
     if (dateRangePreset === 'all') return true;
@@ -715,17 +821,23 @@ export const FollowupsPage: React.FC = () => {
       if (f.status !== 'Pending') return false;
       if (f.companyId && tenant?.id && !isTenantMatch(f.companyId, tenant.id)) return false;
 
-      const isDirectlyAssigned =
-        (f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
-        (f.assignedAgentName && user?.name && f.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase());
-      if (isDirectlyAssigned) return true;
-
       const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
       const matchingLead = allLeads.find(l => {
         const idMatch = f.contactId && String(f.contactId) === String(l.id);
         const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
         return idMatch || Boolean(fPhone && lPhone && fPhone === lPhone);
       });
+
+      // A lead in "Interested" stage belongs strictly to "My Leads" in initial review.
+      // It must NOT appear in Follow-ups until an IRM actually moves it or schedules a follow-up.
+      if (matchingLead && matchingLead.status === 'Interested') {
+        return false;
+      }
+
+      const isDirectlyAssigned =
+        (f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
+        (f.assignedAgentName && user?.name && f.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase());
+      if (isDirectlyAssigned) return true;
 
       if (matchingLead) {
         return (
@@ -752,10 +864,13 @@ export const FollowupsPage: React.FC = () => {
       if (!isAssignedToMe) return false;
       if (l.companyId && tenant?.id && !isTenantMatch(l.companyId, tenant.id)) return false;
 
+      // An 'Interested' lead is in initial review in "My Leads" — it must NOT show in Follow-up
+      // until an IRM actually moves it or schedules a follow-up.
+      if (l.status === 'Interested') return false;
+
       const isInFollowupStage =
         l.status === 'Follow-up Required' ||
-        l.status === 'Callback' ||
-        Boolean(l.nextFollowupDate);
+        l.status === 'Callback';
       if (!isInFollowupStage) return false;
 
       const cleanPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
@@ -766,6 +881,12 @@ export const FollowupsPage: React.FC = () => {
     });
 
     for (const ml of missingFollowupLeads) {
+      const salesAgentName =
+        (ml.assignedByName && ml.assignedByName !== 'Created by IRM' ? ml.assignedByName : null) ||
+        ml.customFields?.qualifiedByAgentName ||
+        ml.customFields?.agentName ||
+        '';
+
       scopedFollowups.push({
         id: `lead-flw-${ml.id}`,
         companyId: tenant?.id || 't-ghl-01',
@@ -779,8 +900,8 @@ export const FollowupsPage: React.FC = () => {
         status: 'Pending',
         notes: ml.notes || 'Scheduled follow-up callback',
         assignedAgentId: String(user?.id || ''),
-        assignedAgentName: user?.name || ml.assignedAgentName || '',
-        assignedRole: 'IRM',
+        assignedAgentName: salesAgentName || user?.name || ml.assignedAgentName || '',
+        assignedRole: salesAgentName ? 'Sales Executive' : 'IRM',
       });
     }
   } else {
@@ -1147,6 +1268,7 @@ export const FollowupsPage: React.FC = () => {
             const isOverdue = f.status === 'Pending' && isOverdueFunc() && !isTodayFunc();
             const callCount = getCallCountForFollowup(f);
             const fRole = getFollowupRole(f);
+            const agentInfo = getFollowupDisplayAgent(f);
 
             return (
               <div
@@ -1197,12 +1319,12 @@ export const FollowupsPage: React.FC = () => {
                       <span className={`followup-schedule-time ${isOverdue ? 'overdue' : ''}`}>
                         ⏰ {f.scheduledAt}
                       </span>
-                      <span className="followup-assignee">• Assignee: {f.assignedAgentName}</span>
+                      <span className="followup-assignee">• {agentInfo.label}: {agentInfo.name}</span>
                       <span
-                        className={`badge-role-inline ${fRole === 'IRM' ? 'badge-role-irm' : 'badge-role-sales'
+                        className={`badge-role-inline ${agentInfo.role === 'IRM' ? 'badge-role-irm' : 'badge-role-sales'
                           }`}
                       >
-                        {fRole}
+                        {agentInfo.role}
                       </span>
                     </div>
                   </div>
@@ -1368,11 +1490,14 @@ export const FollowupsPage: React.FC = () => {
               return false;
             }) || null;
 
+            const drawerAgentInfo = drawerFollowup ? getFollowupDisplayAgent(drawerFollowup) : null;
             const assignedAgent =
+              drawerAgentInfo?.name ||
               drawerFollowup.assignedAgentName ||
               matchingLead?.assignedAgentName ||
               matchingCustomer?.assignedAgentName ||
               'Unassigned';
+            const assignedAgentRole = drawerAgentInfo?.role || drawerFollowupRole;
 
             const contactEmail = (drawerFollowup as any).contactEmail || (drawerFollowup as any).email || matchingLead?.email || matchingCustomer?.email || '—';
             const contactLocation = matchingLead?.location || matchingCustomer?.location || (drawerFollowup as any).location || '—';
@@ -1486,8 +1611,8 @@ export const FollowupsPage: React.FC = () => {
                 {!isAdmin && (
                   <div className="lead-quick-banner">
                     <div className="lead-assigned-note" style={{ fontSize: 13, marginTop: 0 }}>
-                      Assigned : <strong>{assignedAgent}</strong>
-                      {drawerFollowupRole && (
+                      Assigned Agent : <strong>{assignedAgent}</strong>
+                      {assignedAgentRole && (
                         <span
                           style={{
                             marginLeft: 8,
@@ -1495,13 +1620,13 @@ export const FollowupsPage: React.FC = () => {
                             fontWeight: 700,
                             padding: '2px 7px',
                             borderRadius: 4,
-                            background: drawerFollowupRole === 'IRM' ? 'rgba(124,58,237,0.1)' : 'rgba(14,165,233,0.1)',
-                            color: drawerFollowupRole === 'IRM' ? '#7c3aed' : '#0284c7',
+                            background: assignedAgentRole === 'IRM' ? 'rgba(124,58,237,0.1)' : 'rgba(14,165,233,0.1)',
+                            color: assignedAgentRole === 'IRM' ? '#7c3aed' : '#0284c7',
                             textTransform: 'uppercase',
                             letterSpacing: '0.04em',
                           }}
                         >
-                          {drawerFollowupRole}
+                          {assignedAgentRole}
                         </span>
                       )}
                     </div>

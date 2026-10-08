@@ -425,6 +425,8 @@ function mapLead(l: Record<string, any>): Lead {
     priority: l.priority ?? 'Medium',
     assignedAgentId: l.assignedAgentId != null && l.assignedAgentId !== '' ? sid(l.assignedAgentId) : '',
     assignedAgentName: l.assignedAgentName ?? '',
+    assignedById: l.assignedById != null ? sid(l.assignedById) : undefined,
+    assignedByName: l.assignedByName ?? l.customFields?.qualifiedByAgentName ?? '',
     nextFollowupDate: l.nextFollowupDate,
     createdAt: l.createdAt ?? new Date().toISOString(),
     notes: l.notes ?? '',
@@ -525,6 +527,8 @@ function mapFollowup(f: Record<string, any>): Followup {
     assignedAgentId: sid(f.assignedAgentId),
     assignedAgentName: f.assignedAgentName ?? f.assignedToName ?? '',
     assignedRole: f.assignedRole ?? f.assignedToRole ?? f.assignedAgentRole ?? undefined,
+    assignedById: f.assignedById != null ? sid(f.assignedById) : undefined,
+    assignedByName: f.assignedByName ?? undefined,
     completedAt: f.completedAt,
   };
 }
