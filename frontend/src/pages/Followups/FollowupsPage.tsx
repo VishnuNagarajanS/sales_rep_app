@@ -35,7 +35,7 @@ import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawe
 type FollowupRoleFilter = 'sales_executive' | 'irm';
 import { DateRangePreset } from '../../types/kanban';
 import { adminUserService } from '../../services/adminUserService';
-import { fetchIrmAllLeads } from '../../services/irmAllLeadsService';
+import { fetchIrmAllLeads, IrmAllLeadsSummary } from '../../services/irmAllLeadsService';
 import { User as UserModel } from '../../types';
 import './FollowupsPage.css';
 import '../Leads/LeadsPage.css';
@@ -48,6 +48,7 @@ export const FollowupsPage: React.FC = () => {
   const [callsList, setCallsList] = useState<CallRecord[]>([]);
   const [allLeads, setAllLeads] = useState<Lead[]>([]);
   const [users, setUsers] = useState<UserModel[]>([]);
+  const [irmSummaryData, setIrmSummaryData] = useState<IrmAllLeadsSummary | null>(null);
   const [activeTab, setActiveTab] = useState<'all' | 'due' | 'overdue'>('all');
   const [rescheduleItem, setRescheduleItem] = useState<Followup | null>(null);
   const [newDate, setNewDate] = useState('');
@@ -154,6 +155,7 @@ export const FollowupsPage: React.FC = () => {
 
       setFollowups(followupsList);
       setCallsList(calls || []);
+      setIrmSummaryData(irmSummary);
 
       let mergedLeads = leads || [];
       if (irmSummary && Array.isArray(irmSummary.leads)) {
@@ -822,8 +824,8 @@ export const FollowupsPage: React.FC = () => {
     const advancedContactPhones = new Set<string>();
     const advancedContactNames = new Set<string>();
 
-    if (irmSummary && Array.isArray(irmSummary.leads)) {
-      irmSummary.leads.forEach(il => {
+    if (irmSummaryData && Array.isArray(irmSummaryData.leads)) {
+      irmSummaryData.leads.forEach(il => {
         const stage = (il.currentStage || '').toLowerCase();
         const st = (il.status || '').toLowerCase();
         if (

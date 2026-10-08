@@ -919,7 +919,7 @@ export async function transitionFollowupToKyc(options: TransitionFollowupToKycOp
         irmPreferencesConfirmed: Boolean(options.isPrefConfirmed),
         movedToKycAt: new Date().toISOString(),
       },
-    } as Lead;
+    } as unknown as Lead;
 
     await saveLead(leadToSave);
   } catch (err) {
