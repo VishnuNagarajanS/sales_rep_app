@@ -49,7 +49,7 @@ public class FollowupService : IFollowupService
                 f.AssignedAgentId == agentId.Value ||
                 _context.Leads.Any(l => l.CompanyId == cid && l.AssignedAgentId == agentId.Value &&
                     ((f.ContactId != null && f.ContactId != "" && f.ContactId == l.Id.ToString()) ||
-                     (f.ContactPhone != null && f.ContactPhone != "" && f.ContactPhone == l.Phone)))
+                     (f.ContactPhone != null && f.ContactPhone != "" && (f.ContactPhone == l.Phone || f.ContactPhone.Contains(l.Phone) || l.Phone.Contains(f.ContactPhone)))))
             );
         }
 
@@ -107,7 +107,7 @@ public class FollowupService : IFollowupService
                 f.AssignedAgentId == agentId.Value ||
                 _context.Leads.Any(l => l.CompanyId == cid && l.AssignedAgentId == agentId.Value &&
                     ((f.ContactId != null && f.ContactId != "" && f.ContactId == l.Id.ToString()) ||
-                     (f.ContactPhone != null && f.ContactPhone != "" && f.ContactPhone == l.Phone)))
+                     (f.ContactPhone != null && f.ContactPhone != "" && (f.ContactPhone == l.Phone || f.ContactPhone.Contains(l.Phone) || l.Phone.Contains(f.ContactPhone)))))
             );
         }
 
@@ -163,7 +163,8 @@ public class FollowupService : IFollowupService
         // ── Stage isolation: auto-complete stale pending follow-ups for contacts
         // who have already advanced to KYC/Opportunities/Converted.
         // A followup is "stale" when the associated lead's status is no longer
-        // in the Follow-up stage (i.e., Qualified, Converted, Not Interested, Junk).
+        // in the Follow-up stage (i.e., Qualified, Converted, Not Interested, Junk)
+        // or a Deal exists in KYC or Opportunities stages.
         var pendingEntities = entities.Where(f => f.Status == FollowupStatus.Pending).ToList();
         if (pendingEntities.Count > 0)
         {
@@ -175,60 +176,77 @@ public class FollowupService : IFollowupService
 
             var promotedLeads = await _context.Leads
                 .AsNoTracking()
-                .Where(l => l.CompanyId == companyId &&
-                    promotedStatuses.Contains(l.Status) &&
-                    (pendingContactIds.Contains(l.Id.ToString()) || pendingContactPhones.Contains(l.Phone)))
-                .Select(l => new { LeadId = l.Id.ToString(), l.Phone, l.Status })
+                .Where(l => l.CompanyId == companyId && promotedStatuses.Contains(l.Status))
+                .Select(l => new { LeadId = l.Id.ToString(), l.Phone, l.Name, l.Status })
                 .ToListAsync(ct);
 
             // Also check if there's a KYC-stage or higher deal for these contacts
             var kycAndAboveStages = new[] { "qualified_investor", "qualified", "investment_opportunity", "opportunity", "term_sheet", "committed", "converted", "won" };
-            var kycDealsPhones = await _context.GhlDeals
+            var kycDeals = await _context.GhlDeals
                 .AsNoTracking()
                 .Include(d => d.Customer)
                 .Where(d => d.CompanyId == companyId && kycAndAboveStages.Contains(d.Stage))
-                .Select(d => d.Customer != null ? d.Customer.Phone : null)
-                .Where(p => p != null)
+                .Select(d => new { 
+                    CustomerId = d.CustomerId.HasValue ? d.CustomerId.Value.ToString() : null,
+                    d.CustomerName, 
+                    Phone = d.Customer != null ? d.Customer.Phone : null 
+                })
                 .ToListAsync(ct);
 
-            if (promotedLeads.Count > 0 || kycDealsPhones.Count > 0)
+            var kycRecords = await _context.InvestorKycs
+                .AsNoTracking()
+                .Where(k => k.CompanyId == companyId)
+                .Select(k => new { k.Phone, k.InvestorName })
+                .ToListAsync(ct);
+
+            var promotedContactIds = new HashSet<string>(
+                promotedLeads.Select(l => l.LeadId)
+                .Concat(kycDeals.Where(d => d.CustomerId != null).Select(d => d.CustomerId!))
+            );
+
+            var promotedPhones = new HashSet<string>(
+                promotedLeads.Where(l => !string.IsNullOrEmpty(l.Phone)).Select(l => l.Phone.Length >= 10 ? l.Phone[^10..] : l.Phone)
+                .Concat(kycDeals.Where(d => !string.IsNullOrEmpty(d.Phone)).Select(d => d.Phone!.Length >= 10 ? d.Phone![^10..] : d.Phone!))
+                .Concat(kycRecords.Where(k => !string.IsNullOrEmpty(k.Phone)).Select(k => k.Phone.Length >= 10 ? k.Phone[^10..] : k.Phone))
+            );
+
+            var promotedNames = new HashSet<string>(
+                promotedLeads.Where(l => !string.IsNullOrWhiteSpace(l.Name)).Select(l => l.Name.Trim().ToLower())
+                .Concat(kycDeals.Where(d => !string.IsNullOrWhiteSpace(d.CustomerName)).Select(d => d.CustomerName.Trim().ToLower()))
+                .Concat(kycRecords.Where(k => !string.IsNullOrWhiteSpace(k.InvestorName)).Select(k => k.InvestorName.Trim().ToLower()))
+            );
+
+            var staleFollowups = pendingEntities.Where(f =>
             {
-                var promotedLeadIds = new HashSet<string>(promotedLeads.Select(l => l.LeadId));
-                var promotedPhones = new HashSet<string>(
-                    promotedLeads.Select(l => l.Phone?.Length >= 10 ? l.Phone[^10..] : l.Phone ?? "")
-                    .Concat(kycDealsPhones.Select(p => p!.Length >= 10 ? p![^10..] : p ?? ""))
-                    .Where(p => !string.IsNullOrEmpty(p))
-                );
+                if (!string.IsNullOrEmpty(f.ContactId) && promotedContactIds.Contains(f.ContactId)) return true;
+                var fp10 = !string.IsNullOrEmpty(f.ContactPhone) && f.ContactPhone.Length >= 10 ? f.ContactPhone[^10..] : f.ContactPhone ?? "";
+                if (!string.IsNullOrEmpty(fp10) && promotedPhones.Contains(fp10)) return true;
+                var fname = (f.ContactName ?? "").Trim().ToLower();
+                if (!string.IsNullOrEmpty(fname) && promotedNames.Contains(fname)) return true;
+                return false;
+            }).ToList();
 
-                var staleFollowups = pendingEntities.Where(f =>
+            if (staleFollowups.Count > 0)
+            {
+                // Load them as tracked entities and mark as Completed
+                var staleIds = staleFollowups.Select(f => f.Id).ToList();
+                var trackedStale = await _context.Followups
+                    .Where(f => staleIds.Contains(f.Id))
+                    .ToListAsync(ct);
+                foreach (var stale in trackedStale)
                 {
-                    if (!string.IsNullOrEmpty(f.ContactId) && promotedLeadIds.Contains(f.ContactId)) return true;
-                    var fp10 = !string.IsNullOrEmpty(f.ContactPhone) && f.ContactPhone.Length >= 10 ? f.ContactPhone[^10..] : f.ContactPhone ?? "";
-                    return !string.IsNullOrEmpty(fp10) && promotedPhones.Contains(fp10);
-                }).ToList();
-
-                if (staleFollowups.Count > 0)
-                {
-                    // Load them as tracked entities and mark as Completed
-                    var staleIds = staleFollowups.Select(f => f.Id).ToList();
-                    var trackedStale = await _context.Followups
-                        .Where(f => staleIds.Contains(f.Id))
-                        .ToListAsync(ct);
-                    foreach (var stale in trackedStale)
-                    {
-                        stale.Status = FollowupStatus.Completed;
-                        stale.CompletedAt = DateTime.UtcNow;
-                        stale.UpdatedAt = DateTime.UtcNow;
-                        if (!string.IsNullOrWhiteSpace(stale.Notes) && !stale.Notes.Contains("Auto-completed"))
-                            stale.Notes += " | Auto-completed: contact advanced to KYC/Opportunity stage";
-                        else if (string.IsNullOrWhiteSpace(stale.Notes))
-                            stale.Notes = "Auto-completed: contact advanced to KYC/Opportunity stage";
-                    }
-                    await _context.SaveChangesAsync(ct);
-
-                    // Remove them from the in-memory list so they don't appear in results
-                    entities = entities.Where(f => !staleIds.Contains(f.Id)).ToList();
+                    stale.Status = FollowupStatus.Completed;
+                    stale.CompletedAt = DateTime.UtcNow;
+                    stale.UpdatedAt = DateTime.UtcNow;
+                    if (!string.IsNullOrWhiteSpace(stale.Notes) && !stale.Notes.Contains("Auto-completed"))
+                        stale.Notes += " | Auto-completed: contact advanced to KYC/Opportunity stage";
+                    else if (string.IsNullOrWhiteSpace(stale.Notes))
+                        stale.Notes = "Auto-completed: contact advanced to KYC/Opportunity stage";
                 }
+                await _context.SaveChangesAsync(ct);
+
+                // Remove them from the in-memory list so they don't appear in results
+                entities = entities.Where(f => !staleIds.Contains(f.Id)).ToList();
             }
         }
 
@@ -540,8 +558,20 @@ public class FollowupService : IFollowupService
 
             if (otherPendingCount == 0)
             {
-                followupLead.Status = "Interested";
-                followupLead.UpdatedAt = DateTime.UtcNow;
+                var kycAndAboveStages = new[] { "qualified_investor", "qualified", "investment_opportunity", "opportunity", "term_sheet", "committed", "converted", "won" };
+                var hasKycDeal = await _context.GhlDeals.AnyAsync(d =>
+                    d.CompanyId == followup.CompanyId &&
+                    kycAndAboveStages.Contains(d.Stage) &&
+                    ((d.CustomerId != null && d.CustomerId == followupLead.Id) ||
+                     (d.CustomerName != null && d.CustomerName == followupLead.Name) ||
+                     (cleanPhone10 != "" && d.Customer != null && d.Customer.Phone != null && d.Customer.Phone.Contains(cleanPhone10))),
+                    ct);
+
+                if (!hasKycDeal)
+                {
+                    followupLead.Status = "Interested";
+                    followupLead.UpdatedAt = DateTime.UtcNow;
+                }
             }
         }
 

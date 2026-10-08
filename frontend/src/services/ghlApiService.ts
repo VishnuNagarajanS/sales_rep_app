@@ -882,28 +882,46 @@ export async function transitionFollowupToKyc(options: TransitionFollowupToKycOp
   }
 
   try {
-    const leads = await getLeads(options.tenantId);
-    const matchingLead = leads.find(l => {
+    const leads = await getLeads(options.tenantId).catch(() => []);
+    const localLeads = storageService.getLeads(options.tenantId) || [];
+    const pool = [...leads, ...localLeads];
+    const matchingLead = pool.find(l => {
       if (l.id === options.contactId) return true;
       const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
       return Boolean(lDigits && fDigits && lDigits === fDigits);
     });
 
-    if (matchingLead) {
-      const updatedLead: Lead = {
-        ...matchingLead,
-        status: 'Qualified',
-        customFields: {
-          ...(matchingLead.customFields || {}),
-          ...(options.preferredAssetClass && options.isPrefConfirmed ? { preferredAssetClass: options.preferredAssetClass } : {}),
-          ...(options.investmentHorizon && options.isPrefConfirmed ? { horizon: options.investmentHorizon, investmentHorizon: options.investmentHorizon } : {}),
-          ...(numVal > 0 ? { investmentAmount: String(numVal) } : {}),
-          irmPreferencesConfirmed: Boolean(options.isPrefConfirmed),
-          movedToKycAt: new Date().toISOString(),
-        },
-      };
-      await saveLead(updatedLead);
-    }
+    const leadToSave: Lead = matchingLead ? {
+      ...matchingLead,
+      status: 'Qualified',
+      customFields: {
+        ...(matchingLead.customFields || {}),
+        ...(options.preferredAssetClass && options.isPrefConfirmed ? { preferredAssetClass: options.preferredAssetClass } : {}),
+        ...(options.investmentHorizon && options.isPrefConfirmed ? { horizon: options.investmentHorizon, investmentHorizon: options.investmentHorizon } : {}),
+        ...(numVal > 0 ? { investmentAmount: String(numVal) } : {}),
+        irmPreferencesConfirmed: Boolean(options.isPrefConfirmed),
+        movedToKycAt: new Date().toISOString(),
+      },
+    } : {
+      id: options.contactId,
+      companyId: options.tenantId || '1',
+      name: options.contactName,
+      phone: options.contactPhone,
+      email: options.contactEmail || '',
+      location: options.contactLocation || '',
+      status: 'Qualified',
+      priority: options.followupPriority || 'Medium',
+      createdAt: new Date().toISOString(),
+      customFields: {
+        ...(options.preferredAssetClass && options.isPrefConfirmed ? { preferredAssetClass: options.preferredAssetClass } : {}),
+        ...(options.investmentHorizon && options.isPrefConfirmed ? { horizon: options.investmentHorizon, investmentHorizon: options.investmentHorizon } : {}),
+        ...(numVal > 0 ? { investmentAmount: String(numVal) } : {}),
+        irmPreferencesConfirmed: Boolean(options.isPrefConfirmed),
+        movedToKycAt: new Date().toISOString(),
+      },
+    } as Lead;
+
+    await saveLead(leadToSave);
   } catch (err) {
     console.error('[transitionFollowupToKyc] Failed to update lead:', err);
   }

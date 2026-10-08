@@ -5,6 +5,7 @@ using backend.DTOs.Common;
 using backend.DTOs.GhlDeals;
 using backend.Extensions;
 using backend.Models.Entities;
+using backend.Models.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -220,6 +221,8 @@ public class GhlDealsController : ControllerBase
             await _db.SaveChangesAsync(ct);
             await _db.Entry(existingDeal).Reference(d => d.AssignedAgent).LoadAsync(ct);
 
+            await EnsureStageIsolationForDealAsync(existingDeal, ct);
+
             var existingDto = MapToDto(existingDeal);
             await PopulateContactDetailsAsync(new List<GhlDealResponseDto> { existingDto }, new List<GhlDeal> { existingDeal }, ct);
 
@@ -248,6 +251,8 @@ public class GhlDealsController : ControllerBase
         _db.GhlDeals.Add(deal);
         await _db.SaveChangesAsync(ct);
         await _db.Entry(deal).Reference(d => d.AssignedAgent).LoadAsync(ct);
+
+        await EnsureStageIsolationForDealAsync(deal, ct);
 
         var newDto = MapToDto(deal);
         await PopulateContactDetailsAsync(new List<GhlDealResponseDto> { newDto }, new List<GhlDeal> { deal }, ct);
@@ -292,6 +297,8 @@ public class GhlDealsController : ControllerBase
 
         deal.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
+
+        await EnsureStageIsolationForDealAsync(deal, ct);
 
         var updateDto = MapToDto(deal);
         await PopulateContactDetailsAsync(new List<GhlDealResponseDto> { updateDto }, new List<GhlDeal> { deal }, ct);
@@ -564,6 +571,63 @@ public class GhlDealsController : ControllerBase
                     ? matchedLead.Location
                     : matchedCust?.Location;
             }
+        }
+    }
+
+    private async Task EnsureStageIsolationForDealAsync(GhlDeal deal, CancellationToken ct)
+    {
+        var stage = (deal.Stage ?? string.Empty).Trim().ToLowerInvariant();
+        var kycAndAbove = new[] { "qualified_investor", "qualified", "investment_opportunity", "opportunity", "term_sheet", "committed", "converted", "won" };
+        if (!kycAndAbove.Contains(stage)) return;
+
+        var companyId = deal.CompanyId;
+        var custName = (deal.CustomerName ?? string.Empty).Trim().ToLower();
+
+        // Find matching lead
+        var matchingLeads = await _db.Leads
+            .Where(l => l.CompanyId == companyId &&
+                ((deal.CustomerId.HasValue && l.Id == deal.CustomerId.Value) ||
+                 (!string.IsNullOrWhiteSpace(custName) && l.Name.ToLower() == custName)))
+            .ToListAsync(ct);
+
+        bool changesMade = false;
+        foreach (var l in matchingLeads)
+        {
+            if (l.Status != "Qualified" && l.Status != "Converted")
+            {
+                l.Status = "Qualified";
+                l.UpdatedAt = DateTime.UtcNow;
+                changesMade = true;
+            }
+        }
+
+        // Complete any pending followups for this contact
+        var matchingLeadIds = matchingLeads.Select(l => l.Id.ToString()).ToList();
+        var matchingPhones = matchingLeads.Select(l => l.Phone).Where(p => !string.IsNullOrEmpty(p)).ToList();
+
+        var pendingFollowups = await _db.Followups
+            .Where(f => f.CompanyId == companyId && f.Status == FollowupStatus.Pending &&
+                ((f.ContactId != null && matchingLeadIds.Contains(f.ContactId)) ||
+                 (deal.CustomerId.HasValue && f.ContactId == deal.CustomerId.Value.ToString()) ||
+                 (!string.IsNullOrWhiteSpace(custName) && f.ContactName.ToLower() == custName) ||
+                 (f.ContactPhone != null && matchingPhones.Contains(f.ContactPhone))))
+            .ToListAsync(ct);
+
+        foreach (var pf in pendingFollowups)
+        {
+            pf.Status = FollowupStatus.Completed;
+            pf.CompletedAt = DateTime.UtcNow;
+            pf.UpdatedAt = DateTime.UtcNow;
+            if (!string.IsNullOrWhiteSpace(pf.Notes) && !pf.Notes.Contains("Auto-completed"))
+                pf.Notes += " | Auto-completed: deal advanced to KYC/Opportunities stage";
+            else if (string.IsNullOrWhiteSpace(pf.Notes))
+                pf.Notes = "Auto-completed: deal advanced to KYC/Opportunities stage";
+            changesMade = true;
+        }
+
+        if (changesMade)
+        {
+            await _db.SaveChangesAsync(ct);
         }
     }
 }

@@ -817,21 +817,57 @@ export const FollowupsPage: React.FC = () => {
     });
   } else if (isIrm) {
     // IRM: Show pending follow-ups assigned to THIS authenticated IRM OR associated with a lead assigned to THIS IRM
+    // Build sets of contacts that have moved beyond follow-up (KYC, Opportunities, Converted, etc.)
+    const advancedContactIds = new Set<string>();
+    const advancedContactPhones = new Set<string>();
+    const advancedContactNames = new Set<string>();
+
+    if (irmSummary && Array.isArray(irmSummary.leads)) {
+      irmSummary.leads.forEach(il => {
+        const stage = (il.currentStage || '').toLowerCase();
+        const st = (il.status || '').toLowerCase();
+        if (
+          stage === 'kyc' ||
+          stage === 'opportunities' ||
+          stage === 'converted' ||
+          stage === 'archived' ||
+          st === 'qualified' ||
+          st === 'converted' ||
+          st === 'not interested' ||
+          st === 'junk'
+        ) {
+          if (il.id) advancedContactIds.add(String(il.id));
+          const p10 = (il.phone || '').replace(/\D/g, '').slice(-10);
+          if (p10) advancedContactPhones.add(p10);
+          if (il.name) advancedContactNames.add(il.name.trim().toLowerCase());
+        }
+      });
+    }
+
     scopedFollowups = followups.filter(f => {
       if (f.status !== 'Pending') return false;
       if (f.companyId && tenant?.id && !isTenantMatch(f.companyId, tenant.id)) return false;
 
       const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+      const fName = (f.contactName || '').trim().toLowerCase();
+      const fId = f.contactId ? String(f.contactId) : '';
+
+      // Stage isolation: if this contact has moved to KYC, Opportunities, Converted, etc., NEVER show in Follow-up
+      if (fId && advancedContactIds.has(fId)) return false;
+      if (fPhone && advancedContactPhones.has(fPhone)) return false;
+      if (fName && advancedContactNames.has(fName)) return false;
+
       const matchingLead = allLeads.find(l => {
         const idMatch = f.contactId && String(f.contactId) === String(l.id);
         const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
         return idMatch || Boolean(fPhone && lPhone && fPhone === lPhone);
       });
 
-      // A lead in "Interested" stage belongs strictly to "My Leads" in initial review.
-      // It must NOT appear in Follow-ups until an IRM actually moves it or schedules a follow-up.
-      if (matchingLead && matchingLead.status === 'Interested') {
-        return false;
+      if (matchingLead) {
+        const mlStatus = (matchingLead.status || '').toLowerCase();
+        if (mlStatus === 'qualified' || mlStatus === 'converted' || mlStatus === 'not interested' || mlStatus === 'junk') {
+          return false;
+        }
       }
 
       const isDirectlyAssigned =
@@ -864,16 +900,26 @@ export const FollowupsPage: React.FC = () => {
       if (!isAssignedToMe) return false;
       if (l.companyId && tenant?.id && !isTenantMatch(l.companyId, tenant.id)) return false;
 
+      const lStatus = (l.status || '').toLowerCase();
       // An 'Interested' lead is in initial review in "My Leads" — it must NOT show in Follow-up
-      // until an IRM actually moves it or schedules a follow-up.
-      if (l.status === 'Interested') return false;
+      if (lStatus === 'interested') return false;
+
+      // Contacts in KYC, Opportunities, Converted, etc. must NEVER be synthesized into Follow-up
+      const cleanPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+      const lName = (l.name || '').trim().toLowerCase();
+      const lId = String(l.id);
+      if (advancedContactIds.has(lId) || (cleanPhone && advancedContactPhones.has(cleanPhone)) || (lName && advancedContactNames.has(lName))) {
+        return false;
+      }
+      if (lStatus === 'qualified' || lStatus === 'converted' || lStatus === 'not interested' || lStatus === 'junk') {
+        return false;
+      }
 
       const isInFollowupStage =
         l.status === 'Follow-up Required' ||
         l.status === 'Callback';
       if (!isInFollowupStage) return false;
 
-      const cleanPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
       if (existingFollowupContactIds.has(String(l.id))) return false;
       if (cleanPhone && existingFollowupPhones.has(cleanPhone)) return false;
 
