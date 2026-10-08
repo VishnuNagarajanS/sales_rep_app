@@ -199,13 +199,10 @@ public class JaminProjectService : IJaminProjectService
     private static JaminProjectResponseDto MapToDto(JaminProject p)
     {
         var plots = p.Plots ?? new List<JaminPlot>();
-        var hasPlots = plots.Count > 0;
-        var availableCount = hasPlots ? plots.Count(pl => pl.Status == "Available") : p.AvailablePlots;
-        var heldCount      = hasPlots ? plots.Count(pl => pl.Status == "Hold" || pl.Status == "Held") : 0;
-        var registeredCount = hasPlots ? plots.Count(pl => pl.Status == "Registered") : 0;
-        var bookedCount    = hasPlots 
-            ? plots.Count(pl => pl.Status == "Booked" || pl.Status == "Registered" || pl.Status == "Sold") 
-            : p.BookedPlots;
+        var availableCount = plots.Count(pl => pl.Status == "Available");
+        var heldCount = plots.Count(pl => pl.Status == "Hold" || pl.Status == "Held");
+        var registeredCount = plots.Count(pl => pl.Status == "Registered");
+        var bookedCount = plots.Count(pl => pl.Status == "Booked" || pl.Status == "Registered" || pl.Status == "Sold");
 
         var directVisits = p.SiteVisits?.Count ?? 0;
         var plotVisits = plots.Sum(pl => pl.SiteVisits?.Count ?? 0);
@@ -223,7 +220,7 @@ public class JaminProjectService : IJaminProjectService
             Location = p.Location,
             Status = p.Status,
             Description = p.Description,
-            TotalPlots = hasPlots ? plots.Count : p.TotalPlots,
+            TotalPlots = plots.Count,
             AvailablePlots = availableCount,
             BookedPlots = bookedCount,
             HeldPlots = heldCount,

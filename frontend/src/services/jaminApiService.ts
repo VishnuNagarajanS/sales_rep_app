@@ -1,6 +1,7 @@
 
 
 import { apiClient } from './apiClient';
+import { storageService } from './storageService';
 import type { Lead, SiteVisit, Followup } from '../types';
 
 export interface JaminAgent {
@@ -63,6 +64,8 @@ export interface UpdateJaminLeadPayload {
 export interface ScheduleFollowupPayload {
   contactId: string;
   contactType?: 'lead' | 'customer' | string;
+  leadId?: string | number;
+  customerId?: string | number;
   contactName: string;
   contactPhone?: string;
   scheduledAt: string;
@@ -164,7 +167,7 @@ export const jaminApiService = {
           },
         };
         const siteVisits = await this.getSiteVisits(true);
-        const linkedVisits = siteVisits.filter(v => v.leadId === String(id) || v.customerPhone === lead.phone);
+        const linkedVisits = siteVisits.filter(v => v.leadId === String(id));
         const followups = await this.getFollowups(true);
         const linkedFollowups = followups.filter(f => f.contactId === String(id) || f.contactPhone === lead.phone);
         return { lead, siteVisits: linkedVisits, followups: linkedFollowups };
@@ -263,7 +266,7 @@ export const jaminApiService = {
           id: String(sv.id),
           companyId: 't-jamin-02',
           leadId: sv.leadId ? String(sv.leadId) : undefined,
-          customerId: sv.customerId ? String(sv.customerId) : (sv.leadId ? String(sv.leadId) : undefined),
+          customerId: sv.customerId ? String(sv.customerId) : '',
           customerName: sv.customerName,
           customerPhone: sv.customerPhone,
           projectId: sv.projectId ? String(sv.projectId) : undefined,
@@ -271,7 +274,7 @@ export const jaminApiService = {
           projectName: sv.projectName,
           plotNumber: sv.plotNumber || 'Layout Tour',
           scheduledAt: sv.scheduledAt,
-          assignedAgentId: String(sv.assignedAgentId || '1'),
+          assignedAgentId: sv.assignedAgentId ? String(sv.assignedAgentId) : '',
           assignedAgentName: sv.assignedAgentName || 'Agent',
           status: sv.status,
           contactType: sv.contactType || 'lead',
@@ -299,7 +302,7 @@ export const jaminApiService = {
         plotNumber: payload.plotNumber,
         scheduledAt: payload.scheduledAt,
         visitorNote: payload.visitorNote,
-        assignedAgentId: payload.assignedAgentId || 1,
+        assignedAgentId: payload.assignedAgentId,
         assignedAgentName: payload.assignedAgentName || 'Agent',
       });
       if (res && res.success && res.data) {
@@ -308,7 +311,7 @@ export const jaminApiService = {
           id: String(sv.id),
           companyId: 't-jamin-02',
           leadId: sv.leadId ? String(sv.leadId) : undefined,
-          customerId: sv.customerId ? String(sv.customerId) : (sv.leadId ? String(sv.leadId) : ''),
+          customerId: sv.customerId ? String(sv.customerId) : undefined,
           customerName: sv.customerName,
           customerPhone: sv.customerPhone,
           projectId: sv.projectId ? String(sv.projectId) : '',
@@ -316,7 +319,7 @@ export const jaminApiService = {
           projectName: sv.projectName,
           plotNumber: sv.plotNumber || '',
           scheduledAt: sv.scheduledAt,
-          assignedAgentId: String(sv.assignedAgentId || '1'),
+          assignedAgentId: sv.assignedAgentId ? String(sv.assignedAgentId) : '',
           assignedAgentName: sv.assignedAgentName || 'Agent',
           status: sv.status,
           contactType: sv.contactType || 'lead',
@@ -377,28 +380,50 @@ export const jaminApiService = {
   async getFollowups(isAdmin: boolean = false, agentId?: number, status?: string): Promise<Followup[]> {
     try {
       const params = new URLSearchParams();
+      params.append('companyId', '2');
       if (agentId) params.append('agentId', String(agentId));
       if (status && status !== 'All') params.append('status', status);
 
       const res = await apiClient.get<any>(`/sales-executive/followups?${params.toString()}`);
       const items = Array.isArray(res?.data) ? res.data : (res?.data?.items || []);
       if (res && res.success && items.length > 0) {
-        return items.map((f: any) => ({
-          id: String(f.id),
-          companyId: 't-jamin-02',
-          contactId: String(f.contactId),
-          contactName: f.contactName,
-          contactPhone: f.contactPhone || '',
-          contactType: (f.contactType as any) || 'lead',
-          scheduledAt: f.scheduledAt ? new Date(f.scheduledAt).toISOString() : new Date().toISOString(),
-          priority: (f.priority as any) || 'Medium',
-          status: (f.status as any) || 'Pending',
-          notes: f.notes || '',
-          assignedAgentId: String(f.assignedAgentId || '1'),
-          assignedAgentName: f.assignedToName || f.assignedAgentName || 'Agent',
-          assignedRole: 'sales_executive',
-          completedAt: f.completedAt,
-        }));
+        const mapped = items.map((f: any) => {
+          const schedIso = f.scheduledAt ? new Date(f.scheduledAt).toISOString() : new Date().toISOString();
+          const schedDate = schedIso.split('T')[0];
+          const schedTime = (() => {
+            try {
+              return new Date(schedIso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+            } catch {
+              return '11:00 AM';
+            }
+          })();
+
+          return {
+            id: String(f.id),
+            companyId: 't-jamin-02',
+            contactId: String(f.contactId ?? ''),
+            contactName: f.contactName ?? '',
+            contactPhone: f.contactPhone || '',
+            contactType: (f.contactType as any) || 'lead',
+            leadId: f.leadId ? String(f.leadId) : undefined,
+            customerId: f.customerId ? String(f.customerId) : undefined,
+            scheduledAt: schedIso,
+            scheduledDate: schedDate,
+            scheduledTime: schedTime,
+            priority: (f.priority as any) || 'Medium',
+            status: (f.status as any) || 'Pending',
+            notes: f.notes || '',
+            followupType: f.followupType || 'call',
+            assignedAgentId: String(f.assignedAgentId || '1'),
+            assignedAgentName: f.assignedAgentName || f.assignedToName || 'Agent',
+            assignedRole: 'sales_executive',
+            completedAt: f.completedAt,
+            createdAt: f.createdAt,
+            updatedAt: f.updatedAt,
+          };
+        });
+        mapped.forEach((f: Followup) => storageService.saveFollowup(f));
+        return mapped;
       }
     } catch (err) {
       console.error('Failed to fetch followups from backend', err);
@@ -408,31 +433,57 @@ export const jaminApiService = {
 
   async scheduleFollowup(payload: ScheduleFollowupPayload): Promise<Followup | null> {
     try {
+      let schedIso = new Date().toISOString();
+      if (payload.scheduledAt) {
+        const pDate = new Date(payload.scheduledAt);
+        if (!isNaN(pDate.getTime())) {
+          schedIso = pDate.toISOString();
+        } else {
+          const cleaned = payload.scheduledAt.replace('•', ' ').replace(/\s+/g, ' ').trim();
+          const p2 = new Date(cleaned);
+          schedIso = !isNaN(p2.getTime()) ? p2.toISOString() : new Date().toISOString();
+        }
+      }
+
       const res = await apiClient.post<any>('/sales-executive/followups', {
-        contactId: payload.contactId,
+        companyId: 2,
+        contactId: String(payload.contactId || ''),
         contactType: payload.contactType || 'lead',
+        leadId: payload.leadId ? Number(String(payload.leadId).replace(/\D/g, '')) : undefined,
+        customerId: payload.customerId ? Number(String(payload.customerId).replace(/\D/g, '')) : undefined,
         contactName: payload.contactName,
         contactPhone: payload.contactPhone,
-        scheduledAt: payload.scheduledAt,
-        priority: payload.priority,
-        notes: payload.notes,
-        assignedAgentId: payload.assignedAgentId ? parseInt(payload.assignedAgentId, 10) : 1,
+        scheduledAt: schedIso,
+        priority: payload.priority || 'Medium',
+        notes: payload.notes || '',
+        followupType: 'call',
+        assignedAgentId: payload.assignedAgentId ? parseInt(String(payload.assignedAgentId).replace(/\D/g, ''), 10) || 1 : 1,
       });
-      if (res && res.success) {
-        return {
-          id: String(res.data?.id || res.data),
+
+      if (res && res.success && res.data) {
+        const d = res.data;
+        const savedFollowup: Followup = {
+          id: String(d.id || res.data),
           companyId: 't-jamin-02',
-          contactId: payload.contactId,
-          contactName: payload.contactName,
-          contactPhone: payload.contactPhone || '',
-          contactType: payload.contactType || 'lead',
-          scheduledAt: payload.scheduledAt,
-          priority: payload.priority || 'Medium',
-          status: 'Pending',
-          notes: payload.notes || '',
-          assignedAgentId: payload.assignedAgentId || '1',
-          assignedAgentName: 'Agent',
+          contactId: String(d.contactId || payload.contactId),
+          contactName: d.contactName || payload.contactName,
+          contactPhone: d.contactPhone || payload.contactPhone || '',
+          contactType: (d.contactType as any) || payload.contactType || 'lead',
+          leadId: d.leadId ? String(d.leadId) : (payload.leadId ? String(payload.leadId) : undefined),
+          customerId: d.customerId ? String(d.customerId) : (payload.customerId ? String(payload.customerId) : undefined),
+          scheduledAt: d.scheduledAt ? new Date(d.scheduledAt).toISOString() : schedIso,
+          scheduledDate: schedIso.split('T')[0],
+          scheduledTime: '11:00 AM',
+          priority: (d.priority as any) || payload.priority || 'Medium',
+          status: (d.status as any) || 'Pending',
+          notes: d.notes || payload.notes || '',
+          followupType: d.followupType || 'call',
+          assignedAgentId: String(d.assignedAgentId || payload.assignedAgentId || '1'),
+          assignedAgentName: d.assignedAgentName || 'Agent',
         };
+        storageService.saveFollowup(savedFollowup);
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+        return savedFollowup;
       }
     } catch (err) {
       console.error('Failed to schedule followup on backend', err);
@@ -442,7 +493,14 @@ export const jaminApiService = {
 
   async completeFollowup(id: string | number): Promise<boolean> {
     try {
-      const res = await apiClient.patch<any>(`/sales-executive/followups/${id}/complete`);
+      const cleanId = String(id).replace(/\D/g, '') || id;
+      const res = await apiClient.patch<any>(`/sales-executive/followups/${cleanId}/complete`);
+      const all = storageService.getFollowups();
+      const target = all.find(f => f.id === String(id));
+      if (target) {
+        storageService.saveFollowup({ ...target, status: 'Completed', completedAt: new Date().toISOString() });
+      }
+      window.dispatchEvent(new Event('nexus_storage_updated'));
       return res && res.success;
     } catch (err) {
       console.error(`Failed to complete followup #${id}`, err);
@@ -483,13 +541,13 @@ export const jaminApiService = {
     totalPlots: number;
     priceRange?: string;
     imageUrl?: string;
-  }): Promise<boolean> {
+  }): Promise<{ success: boolean; projectId?: number }> {
     try {
       const res = await apiClient.post<any>('/jamin/projects', project);
-      return res && res.success;
+      return { success: Boolean(res?.success), projectId: res?.data?.id };
     } catch (err) {
       console.error('Failed to create project on backend', err);
-      return false;
+      return { success: false };
     }
   },
 
@@ -503,13 +561,23 @@ export const jaminApiService = {
     bookedPlots: number;
     priceRange: string;
     imageUrl: string;
-  }>): Promise<boolean> {
+  }>): Promise<{ success: boolean; message?: string }> {
     try {
       const res = await apiClient.put<any>(`/jamin/projects/${id}`, project);
-      return res && res.success;
+      return { success: Boolean(res?.success), message: res?.message };
     } catch (err) {
       console.error(`Failed to update project #${id}`, err);
-      return false;
+      return { success: false, message: err instanceof Error ? err.message : 'Project update failed.' };
+    }
+  },
+
+  async generateProjectPlots(id: number | string): Promise<{ success: boolean; message?: string }> {
+    try {
+      const res = await apiClient.post<any>(`/jamin/projects/${id}/generate-plots`, {});
+      return { success: Boolean(res?.success), message: res?.message };
+    } catch (err) {
+      console.error(`Failed to generate plots for project #${id}`, err);
+      return { success: false, message: err instanceof Error ? err.message : 'Plot inventory update failed.' };
     }
   },
 

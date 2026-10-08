@@ -67,7 +67,7 @@ public class SiteVisitConfiguration : IEntityTypeConfiguration<SiteVisit>
             .OnDelete(DeleteBehavior.SetNull);
 
         builder.HasOne(sv => sv.Customer)
-            .WithMany()
+            .WithMany(c => c.SiteVisits)
             .HasForeignKey(sv => sv.CustomerId)
             .OnDelete(DeleteBehavior.SetNull);
 

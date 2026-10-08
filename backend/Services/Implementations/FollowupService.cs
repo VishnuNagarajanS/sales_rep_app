@@ -20,27 +20,26 @@ public class FollowupService : IFollowupService
         _currentUser = currentUser;
     }
 
-    private IQueryable<Followup> GetScopedFollowupsQuery()
+    private IQueryable<Followup> GetScopedFollowupsQuery(int? requestedCompanyId = null)
     {
         var role = _currentUser.Role;
         var agentId = _currentUser.UserId;
-        var companyId = _currentUser.CompanyId;
+        var tokenCompanyId = _currentUser.CompanyId;
+        var isSuperAdmin = string.Equals(role, "super_admin", StringComparison.OrdinalIgnoreCase);
+        var targetCompanyId = isSuperAdmin ? requestedCompanyId ?? tokenCompanyId : tokenCompanyId;
 
         var query = _context.Followups.AsNoTracking().Include(f => f.AssignedAgent).AsQueryable();
 
-        if (role == "super_admin")
+        if (isSuperAdmin)
         {
-            if (companyId.HasValue)
-                query = query.Where(f => f.CompanyId == companyId.Value);
+            if (targetCompanyId.HasValue)
+                query = query.Where(f => f.CompanyId == targetCompanyId.Value);
             return query;
         }
 
-        if (companyId.HasValue)
-        {
-            query = query.Where(f => f.CompanyId == companyId.Value);
-        }
+        query = query.Where(f => f.CompanyId == (targetCompanyId ?? 0));
 
-        if (role == "sales_executive" && agentId.HasValue)
+        if (string.Equals(role, "sales_executive", StringComparison.OrdinalIgnoreCase) && agentId.HasValue)
         {
             query = query.Where(f => f.AssignedAgentId == agentId.Value);
         }
@@ -56,17 +55,14 @@ public class FollowupService : IFollowupService
 
         var query = _context.Followups.Include(f => f.AssignedAgent).Where(f => f.Id == id);
 
-        if (role == "super_admin")
+        if (string.Equals(role, "super_admin", StringComparison.OrdinalIgnoreCase))
         {
             return await query.FirstOrDefaultAsync(ct);
         }
 
-        if (companyId.HasValue)
-        {
-            query = query.Where(f => f.CompanyId == companyId.Value);
-        }
+        query = query.Where(f => f.CompanyId == (companyId ?? 0));
 
-        if (role == "sales_executive" && agentId.HasValue)
+        if (string.Equals(role, "sales_executive", StringComparison.OrdinalIgnoreCase) && agentId.HasValue)
         {
             query = query.Where(f => f.AssignedAgentId == agentId.Value);
         }
@@ -76,7 +72,7 @@ public class FollowupService : IFollowupService
 
     public async Task<ApiResponse<PagedResult<FollowupResponseDto>>> GetFollowupsAsync(FollowupFilterDto filter, CancellationToken ct = default)
     {
-        var query = GetScopedFollowupsQuery();
+        var query = GetScopedFollowupsQuery(filter.CompanyId);
 
         // Status filter
         if (!string.IsNullOrWhiteSpace(filter.Status) && !filter.Status.Equals("all", StringComparison.OrdinalIgnoreCase))
@@ -85,6 +81,44 @@ public class FollowupService : IFollowupService
             {
                 query = query.Where(f => f.Status == stFilter);
             }
+        }
+
+        // Agent filter
+        if (filter.AgentId.HasValue && filter.AgentId.Value > 0)
+        {
+            query = query.Where(f => f.AssignedAgentId == filter.AgentId.Value);
+        }
+
+        // Contact ID filter
+        if (!string.IsNullOrWhiteSpace(filter.ContactId))
+        {
+            var cid = filter.ContactId.Trim();
+            query = query.Where(f => f.ContactId == cid);
+        }
+
+        // Direct primary key filters
+        if (filter.LeadId.HasValue && filter.LeadId.Value > 0)
+        {
+            query = query.Where(f => f.LeadId == filter.LeadId.Value);
+        }
+
+        if (filter.CustomerId.HasValue && filter.CustomerId.Value > 0)
+        {
+            query = query.Where(f => f.CustomerId == filter.CustomerId.Value);
+        }
+
+        // Contact Type filter
+        if (!string.IsNullOrWhiteSpace(filter.ContactType))
+        {
+            var ctType = filter.ContactType.Trim().ToLower();
+            query = query.Where(f => f.ContactType.ToLower() == ctType);
+        }
+
+        // Search filter
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            var s = filter.Search.Trim().ToLower();
+            query = query.Where(f => f.ContactName.ToLower().Contains(s) || f.ContactPhone.Contains(s) || f.Notes.ToLower().Contains(s));
         }
 
         // Scope filter ('all', 'due', 'overdue')
@@ -108,11 +142,11 @@ public class FollowupService : IFollowupService
         var totalCount = await query.CountAsync(ct);
 
         var page = Math.Max(1, filter.Page);
-        var pageSize = Math.Clamp(filter.PageSize, 1, 100);
+        var pageSize = Math.Clamp(filter.PageSize, 1, 500);
 
         var entities = await query
             .OrderBy(f => f.Status == FollowupStatus.Pending ? 0 : 1)
-            .ThenBy(f => f.ScheduledAt)
+            .ThenByDescending(f => f.ScheduledAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct);
@@ -135,40 +169,103 @@ public class FollowupService : IFollowupService
 
     public async Task<ApiResponse<FollowupResponseDto>> CreateFollowupAsync(CreateFollowupDto dto, CancellationToken ct = default)
     {
-        var agentId = dto.AssignedAgentId ?? _currentUser.UserId ?? 1;
-        var companyId = _currentUser.CompanyId ?? 1;
-        var assignedAgent = await _context.Users.FirstOrDefaultAsync(u => u.Id == agentId && u.CompanyId == companyId, ct);
-        if (assignedAgent == null)
-            return ApiResponse<FollowupResponseDto>.FailureResult("Assigned agent was not found in this company.");
+        var role = _currentUser.Role;
+        var isSuperAdmin = string.Equals(role, "super_admin", StringComparison.OrdinalIgnoreCase);
+        var companyId = isSuperAdmin ? dto.CompanyId ?? _currentUser.CompanyId ?? 1 : _currentUser.CompanyId ?? 0;
+        if (companyId <= 0)
+            return ApiResponse<FollowupResponseDto>.FailureResult("A valid company is required to schedule a follow-up.");
+
+        var contactType = string.IsNullOrWhiteSpace(dto.ContactType) ? "lead" : dto.ContactType.Trim().ToLowerInvariant();
+        var contactId = dto.ContactId?.Trim() ?? string.Empty;
+        int? leadId = dto.LeadId is > 0 ? dto.LeadId : null;
+        int? customerId = dto.CustomerId is > 0 ? dto.CustomerId : null;
+        int? investorId = dto.InvestorId is > 0 ? dto.InvestorId : null;
+        if ((leadId.HasValue ? 1 : 0) + (customerId.HasValue ? 1 : 0) + (investorId.HasValue ? 1 : 0) > 1)
+            return ApiResponse<FollowupResponseDto>.FailureResult("A follow-up can be linked to only one lead, customer, or investor.");
+
+        if (leadId.HasValue)
+        {
+            if (!await _context.Leads.AnyAsync(l => l.Id == leadId.Value && l.CompanyId == companyId, ct))
+                return ApiResponse<FollowupResponseDto>.FailureResult("Select a lead from this company before scheduling a follow-up.");
+            contactType = "lead";
+            contactId = leadId.Value.ToString();
+        }
+        else if (customerId.HasValue)
+        {
+            if (!await _context.Customers.AnyAsync(c => c.Id == customerId.Value && c.CompanyId == companyId, ct))
+                return ApiResponse<FollowupResponseDto>.FailureResult("Select a customer from this company before scheduling a follow-up.");
+            contactType = "customer";
+            contactId = customerId.Value.ToString();
+        }
+        else if (investorId.HasValue)
+        {
+            if (!await _context.Investors.AnyAsync(i => i.Id == investorId.Value && i.CompanyId == companyId, ct))
+                return ApiResponse<FollowupResponseDto>.FailureResult("Select an investor from this company before scheduling a follow-up.");
+            contactType = "investor";
+            contactId = investorId.Value.ToString();
+        }
+        else if (contactType == "lead")
+        {
+            if (!int.TryParse(contactId, out var parsedLeadId) ||
+                !await _context.Leads.AnyAsync(l => l.Id == parsedLeadId && l.CompanyId == companyId, ct))
+                return ApiResponse<FollowupResponseDto>.FailureResult("Select a lead from this company before scheduling a follow-up.");
+            leadId = parsedLeadId;
+        }
+        else if (contactType == "customer")
+        {
+            if (!int.TryParse(contactId, out var parsedCustomerId) ||
+                !await _context.Customers.AnyAsync(c => c.Id == parsedCustomerId && c.CompanyId == companyId, ct))
+                return ApiResponse<FollowupResponseDto>.FailureResult("Select a customer from this company before scheduling a follow-up.");
+            customerId = parsedCustomerId;
+        }
+        else if (contactType == "investor")
+        {
+            if (!int.TryParse(contactId, out var parsedInvestorId) ||
+                !await _context.Investors.AnyAsync(i => i.Id == parsedInvestorId && i.CompanyId == companyId, ct))
+                return ApiResponse<FollowupResponseDto>.FailureResult("Select an investor from this company before scheduling a follow-up.");
+            investorId = parsedInvestorId;
+        }
+        else if (contactType != "new")
+        {
+            return ApiResponse<FollowupResponseDto>.FailureResult("Contact type must be lead, customer, investor, or new.");
+        }
+
+        var isSalesExecutive = string.Equals(role, "sales_executive", StringComparison.OrdinalIgnoreCase);
+        var targetAgentId = isSalesExecutive ? _currentUser.UserId : dto.AssignedAgentId ?? _currentUser.UserId;
+        User? assignedAgent = null;
+        if (targetAgentId.HasValue)
+        {
+            assignedAgent = await _context.Users.Include(u => u.Role).FirstOrDefaultAsync(
+                u => u.Id == targetAgentId.Value && u.CompanyId == companyId, ct);
+            if (assignedAgent == null)
+                return ApiResponse<FollowupResponseDto>.FailureResult("The assigned user does not belong to this company.");
+        }
 
         var followup = new Followup
         {
             CompanyId = companyId,
-            AssignedAgentId = agentId,
-            ContactId = dto.ContactId.Trim(),
-            ContactType = string.IsNullOrWhiteSpace(dto.ContactType) ? "lead" : dto.ContactType.Trim().ToLower(),
-            ContactName = dto.ContactName.Trim(),
-            ContactPhone = dto.ContactPhone.Trim(),
+            AssignedAgentId = assignedAgent?.Id ?? targetAgentId,
+            AssignedToName = assignedAgent?.Name ?? "Unassigned",
+            AssignedToRole = assignedAgent?.Role?.Code ?? role ?? string.Empty,
+            ContactId = contactId,
+            ContactType = contactType,
+            LeadId = leadId,
+            CustomerId = customerId,
+            InvestorId = investorId,
+            ContactName = dto.ContactName?.Trim() ?? string.Empty,
+            ContactPhone = dto.ContactPhone?.Trim() ?? string.Empty,
             ScheduledAt = dto.ScheduledAt,
             Priority = string.IsNullOrWhiteSpace(dto.Priority) ? "Medium" : dto.Priority.Trim(),
             Status = FollowupStatus.Pending,
             Notes = dto.Notes?.Trim() ?? string.Empty,
+            FollowupType = string.IsNullOrWhiteSpace(dto.FollowupType) ? "call" : dto.FollowupType.Trim().ToLower(),
             CreatedAt = DateTime.UtcNow
         };
 
         _context.Followups.Add(followup);
 
-        // If this is for a Lead, update Lead's NextFollowupDate
-        if (followup.ContactType == "lead" && int.TryParse(followup.ContactId, out var leadId))
-        {
-            var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == leadId && l.CompanyId == companyId, ct);
-            if (lead != null)
-            {
-                lead.NextFollowupDate = followup.ScheduledAt;
-            }
-        }
-
         await _context.SaveChangesAsync(ct);
+        await RefreshLeadNextFollowupDateAsync(followup, ct);
 
         await _context.Entry(followup).Reference(f => f.AssignedAgent).LoadAsync(ct);
 
@@ -186,12 +283,96 @@ public class FollowupService : IFollowupService
         if (!string.IsNullOrWhiteSpace(dto.Status) && Enum.TryParse<FollowupStatus>(dto.Status, true, out var parsedSt))
         {
             followup.Status = parsedSt;
+            if (parsedSt == FollowupStatus.Completed && !followup.CompletedAt.HasValue)
+            {
+                followup.CompletedAt = DateTime.UtcNow;
+            }
+            else if (parsedSt == FollowupStatus.Pending)
+            {
+                followup.CompletedAt = null;
+            }
         }
         if (dto.Notes != null) followup.Notes = dto.Notes.Trim();
+        if (!string.IsNullOrWhiteSpace(dto.FollowupType)) followup.FollowupType = dto.FollowupType.Trim().ToLower();
+        var hasContactUpdate = dto.LeadId.HasValue || dto.CustomerId.HasValue || dto.InvestorId.HasValue;
+        if (hasContactUpdate)
+        {
+            if (dto.LeadId is <= 0 || dto.CustomerId is <= 0 || dto.InvestorId is <= 0)
+                return ApiResponse<FollowupResponseDto>.FailureResult("Contact IDs must be positive.");
+
+            var selectedCount = (dto.LeadId.HasValue ? 1 : 0) + (dto.CustomerId.HasValue ? 1 : 0) + (dto.InvestorId.HasValue ? 1 : 0);
+            if (selectedCount == 2 && dto.LeadId.HasValue && dto.CustomerId.HasValue &&
+                followup.LeadId == dto.LeadId && followup.CustomerId == dto.CustomerId)
+            {
+                var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == dto.LeadId.Value && l.CompanyId == followup.CompanyId, ct);
+                var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == dto.CustomerId.Value && c.CompanyId == followup.CompanyId, ct);
+                if (lead == null || lead.Status != "Converted" || customer == null || customer.Phone != lead.Phone)
+                    return ApiResponse<FollowupResponseDto>.FailureResult("A follow-up may retain both links only for its converted lead and matching customer.");
+                followup.ContactType = "customer";
+                followup.ContactId = customer.Id.ToString();
+                followup.ContactName = customer.Name;
+                followup.ContactPhone = customer.Phone;
+            }
+            else
+            {
+                if (selectedCount != 1)
+                    return ApiResponse<FollowupResponseDto>.FailureResult("Choose exactly one lead, customer, or investor.");
+
+                followup.LeadId = null;
+                followup.CustomerId = null;
+                followup.InvestorId = null;
+                if (dto.LeadId.HasValue)
+                {
+                    var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == dto.LeadId.Value && l.CompanyId == followup.CompanyId, ct);
+                    if (lead == null) return ApiResponse<FollowupResponseDto>.FailureResult("Select a lead from this company.");
+                    followup.LeadId = lead.Id;
+                    followup.ContactType = "lead";
+                    followup.ContactId = lead.Id.ToString();
+                    followup.ContactName = lead.Name;
+                    followup.ContactPhone = lead.Phone;
+                }
+                else if (dto.CustomerId.HasValue)
+                {
+                    var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == dto.CustomerId.Value && c.CompanyId == followup.CompanyId, ct);
+                    if (customer == null) return ApiResponse<FollowupResponseDto>.FailureResult("Select a customer from this company.");
+                    followup.CustomerId = customer.Id;
+                    followup.ContactType = "customer";
+                    followup.ContactId = customer.Id.ToString();
+                    followup.ContactName = customer.Name;
+                    followup.ContactPhone = customer.Phone;
+                }
+                else
+                {
+                    var investor = await _context.Investors.FirstOrDefaultAsync(i => i.Id == dto.InvestorId!.Value && i.CompanyId == followup.CompanyId, ct);
+                    if (investor == null) return ApiResponse<FollowupResponseDto>.FailureResult("Select an investor from this company.");
+                    followup.InvestorId = investor.Id;
+                    followup.ContactType = "investor";
+                    followup.ContactId = investor.Id.ToString();
+                    followup.ContactName = investor.Name;
+                    followup.ContactPhone = investor.Phone;
+                }
+            }
+        }
+
+        if (dto.AssignedAgentId.HasValue && dto.AssignedAgentId.Value > 0)
+        {
+            if (string.Equals(_currentUser.Role, "sales_executive", StringComparison.OrdinalIgnoreCase) &&
+                dto.AssignedAgentId.Value != _currentUser.UserId)
+                return ApiResponse<FollowupResponseDto>.FailureResult("Sales executives cannot reassign follow-ups.");
+
+            var agent = await _context.Users.Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.Id == dto.AssignedAgentId.Value && u.CompanyId == followup.CompanyId, ct);
+            if (agent == null)
+                return ApiResponse<FollowupResponseDto>.FailureResult("The assigned user does not belong to this company.");
+            followup.AssignedAgentId = agent.Id;
+            followup.AssignedToName = agent.Name;
+            followup.AssignedToRole = agent.Role?.Code ?? followup.AssignedToRole;
+        }
 
         followup.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(ct);
+        await RefreshLeadNextFollowupDateAsync(followup, ct);
 
         return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(followup), "Follow-up updated successfully.");
     }
@@ -207,6 +388,7 @@ public class FollowupService : IFollowupService
         followup.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(ct);
+        await RefreshLeadNextFollowupDateAsync(followup, ct);
 
         return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(followup), "Follow-up completed successfully.");
     }
@@ -219,6 +401,7 @@ public class FollowupService : IFollowupService
 
         _context.Followups.Remove(followup);
         await _context.SaveChangesAsync(ct);
+        await RefreshLeadNextFollowupDateAsync(followup, ct);
 
         return ApiResponse<bool>.SuccessResult(true, "Follow-up deleted successfully.");
     }
@@ -230,18 +413,42 @@ public class FollowupService : IFollowupService
             Id = f.Id,
             CompanyId = f.CompanyId,
             AssignedAgentId = f.AssignedAgentId,
-            AssignedAgentName = f.AssignedAgent?.Name,
+            AssignedAgentName = f.AssignedAgent?.Name ?? f.AssignedToName,
             ContactId = f.ContactId,
             ContactType = f.ContactType,
+            LeadId = f.LeadId,
+            CustomerId = f.CustomerId,
+            InvestorId = f.InvestorId,
             ContactName = f.ContactName,
             ContactPhone = f.ContactPhone,
             ScheduledAt = f.ScheduledAt,
             Priority = f.Priority,
             Status = f.Status.ToString(),
             Notes = f.Notes,
+            FollowupType = f.FollowupType ?? "call",
             CompletedAt = f.CompletedAt,
             CreatedAt = f.CreatedAt,
             UpdatedAt = f.UpdatedAt
         };
+    }
+
+    private async Task RefreshLeadNextFollowupDateAsync(Followup followup, CancellationToken ct)
+    {
+        if (!string.Equals(followup.ContactType, "lead", StringComparison.OrdinalIgnoreCase) ||
+            !followup.LeadId.HasValue)
+            return;
+
+        var lead = await _context.Leads.FirstOrDefaultAsync(
+            l => l.Id == followup.LeadId.Value && l.CompanyId == followup.CompanyId, ct);
+        if (lead == null) return;
+
+        lead.NextFollowupDate = await _context.Followups
+            .Where(f => f.CompanyId == followup.CompanyId && f.ContactType == "lead" &&
+                        f.LeadId == followup.LeadId && f.Status == FollowupStatus.Pending)
+            .OrderBy(f => f.ScheduledAt)
+            .Select(f => (DateTime?)f.ScheduledAt)
+            .FirstOrDefaultAsync(ct);
+        lead.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(ct);
     }
 }

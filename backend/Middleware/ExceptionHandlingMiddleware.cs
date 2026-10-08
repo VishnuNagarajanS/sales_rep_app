@@ -26,6 +26,12 @@ public class ExceptionHandlingMiddleware
             // Request was aborted by the client (e.g. browser navigation or refresh)
             _logger.LogInformation("Request was canceled by the client.");
         }
+        catch (Exception ex) when (context.RequestAborted.IsCancellationRequested)
+        {
+            // A disconnected client can surface as IOException/NpgsqlException while
+            // EF is writing or reading; don't report an aborted request as a server crash.
+            _logger.LogInformation(ex, "Request ended after the client disconnected.");
+        }
         catch (Exception ex)
         {
             Console.WriteLine($"[CRITICAL UNHANDLED EXCEPTION] {ex}");

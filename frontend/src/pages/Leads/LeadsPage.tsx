@@ -22,6 +22,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { apiClient } from '../../services/apiClient';
 import { jaminApiService } from '../../services/jaminApiService';
+import { getFollowups as apiGetFollowups, saveFollowup as apiSaveFollowup } from '../../services/ghlApiService';
 import { adminUserService } from '../../services/adminUserService';
 import { storageService } from '../../services/storageService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
@@ -67,6 +68,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   // Role-based scoping: Sales Executives and IRMs see their assigned leads.
   // Managers / Admins / Super Admins see the full company lead list.
   const roleCode = user?.role?.code;
+  const isAdmin = roleCode === 'company_admin' || roleCode === 'super_admin' || (roleCode as string) === 'admin';
   const isExec = roleCode === 'sales_executive';
   const isLeadScopedUser = roleCode === 'sales_executive' || roleCode === 'irm';
   const isIrm = roleCode === 'irm';
@@ -257,7 +259,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         }).catch(err => console.warn('Failed to load Jamin site visits in Leads:', err));
 
         jaminApiService.getFollowups(true).then(fws => {
-          if (fws && fws.length > 0) {
+          if (fws) {
             setApiFollowups(fws);
           }
         }).catch(err => console.warn('Failed to load Jamin followups in Leads:', err));
@@ -268,6 +270,16 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         window.removeEventListener('nexus_storage_updated', fetchJaminActivities);
       };
     } else {
+      const fetchGhlActivities = () => {
+        apiGetFollowups(tenant?.id).then(fws => {
+          if (fws) {
+            setApiFollowups(fws);
+          }
+        }).catch(err => console.warn('Failed to load GHL followups in Leads:', err));
+      };
+      fetchGhlActivities();
+      window.addEventListener('nexus_storage_updated', fetchGhlActivities);
+
       adminUserService.getUsers(tenant?.id || '1').then(users => {
         if (users && users.length > 0) {
           const valid = users
@@ -280,6 +292,10 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
           setApiAgents(valid);
         }
       }).catch(err => console.warn('Failed to load GHL agents:', err));
+
+      return () => {
+        window.removeEventListener('nexus_storage_updated', fetchGhlActivities);
+      };
     }
   }, [isJamin, tenant?.id]);
 
@@ -529,13 +545,8 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   const filteredLeads = scopedLeads.filter(lead => {
     if (assignedLeadIds.has(lead.id)) return false;
     if (isGhlSalesExec && lead.status !== 'Callback') {
-      const leadPhoneDigits = (lead.phone || '').replace(/\D/g, '').slice(-10);
       const hasPendingFollowup = ghlPendingFollowups.some(f => {
-        if (f.contactId && f.contactId !== 'contact-new' && f.contactId === lead.id) {
-          return true;
-        }
-        const fPhoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-        return fPhoneDigits && leadPhoneDigits && fPhoneDigits === leadPhoneDigits;
+        return f.contactType === 'lead' && String(f.contactId) === String(lead.id);
       });
       if (hasPendingFollowup) return false;
     }
@@ -742,16 +753,20 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     setScheduleDate(formatDateYMD(d));
   };
 
-  const handleSaveJaminSchedule = (e: React.FormEvent) => {
+  const handleSaveJaminSchedule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedLead || !scheduleDate) return;
 
+    const timeParts = (scheduleTime || '11:00').split(':').map(n => parseInt(n, 10));
+    const dt = new Date(scheduleDate);
+    dt.setHours(isNaN(timeParts[0]) ? 11 : timeParts[0], isNaN(timeParts[1]) ? 0 : timeParts[1], 0, 0);
+    const isoScheduledAt = dt.toISOString();
     const formattedFollowupString = `${scheduleDate}${scheduleTime ? ' ' + scheduleTime : ''}`;
 
     // 1. Update lead record
     const updatedLead: Lead = {
       ...selectedLead,
-      nextFollowupDate: formattedFollowupString,
+      nextFollowupDate: isoScheduledAt,
       nextFollowupType: scheduleType,
     };
     storageService.saveLead(updatedLead);
@@ -759,16 +774,13 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     setLeads(prev => prev.map(l => l.id === updatedLead.id ? updatedLead : l));
 
     // 2. Check for existing Pending follow-up for this lead to update/reschedule
-    const allFollowups = storageService.getFollowups(tenant?.id || 't-jamin-02');
-    const cleanLeadPhone = (selectedLead.phone || '').replace(/\D/g, '').slice(-10);
+    const allFollowups = apiFollowups;
     const existingPending = allFollowups.find(
       f =>
-        f.status === 'Pending' &&
-        (f.contactId === selectedLead.id ||
-          (cleanLeadPhone && (f.contactPhone || '').replace(/\D/g, '').slice(-10) === cleanLeadPhone))
+        f.status === 'Pending' && f.contactType === 'lead' && String(f.contactId) === String(selectedLead.id)
     );
 
-    const targetAgentId = scheduleAgentId || selectedLead.assignedAgentId || user?.id || 'usr-jamin-exec';
+    const targetAgentId = scheduleAgentId || selectedLead.assignedAgentId || user?.id || '1';
     const targetAgent = jaminAgents.find(a => a.id === targetAgentId) || {
       name:
         selectedLead.assignedAgentName && selectedLead.assignedAgentName !== 'Unassigned'
@@ -785,52 +797,41 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
           : 'Phone call follow-up on property requirements');
 
     if (existingPending) {
-      // Mark previous pending follow-up as Rescheduled
-      storageService.saveFollowup({
+      // Mark previous pending follow-up as Rescheduled in DB
+      await apiSaveFollowup({
         ...existingPending,
         status: 'Rescheduled',
       });
     }
 
+    const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2';
+
     const newFollowup: Followup = {
       id: `fup-${Date.now()}`,
-      companyId: tenant?.id || 't-jamin-02',
-      contactId: selectedLead.id,
+      companyId: isJamin ? 't-jamin-02' : (tenant?.id || 't-ghl-01'),
+      contactId: String(selectedLead.id),
       contactName: selectedLead.name,
       contactPhone: selectedLead.phone,
       contactType: 'lead',
-      scheduledAt: formattedFollowupString,
+      scheduledAt: isoScheduledAt,
       scheduledDate: scheduleDate,
       scheduledTime: scheduleTime || '11:00 AM',
       priority: 'Medium',
       status: 'Pending',
       followupType: scheduleType as any,
       notes: resolvedNotes,
-      assignedAgentId: targetAgentId,
+      assignedAgentId: String(targetAgentId),
       assignedAgentName: targetAgent.name,
       createdBy: user?.name || 'Admin',
     };
-    storageService.saveFollowup(newFollowup);
 
-    // Persist to backend API
     try {
-      const parsedLeadId = selectedLead.id && !isNaN(Number(selectedLead.id))
-        ? Number(selectedLead.id)
-        : (selectedLead.id.startsWith('db-') ? Number(selectedLead.id.replace('db-', '')) : undefined);
-      const parsedAgentId = targetAgentId && !isNaN(Number(targetAgentId)) ? Number(targetAgentId) : 1;
-
-      apiClient.post('/sales-executive/followups', {
-        contactId: parsedLeadId || selectedLead.id,
-        contactName: selectedLead.name,
-        contactPhone: selectedLead.phone,
-        contactType: 'lead',
-        scheduledAt: formattedFollowupString,
-        priority: 'Medium',
-        notes: resolvedNotes,
-        assignedAgentId: parsedAgentId,
-      }).catch(err => console.warn('[LeadsPage] Backend followup schedule warning:', err));
-    } catch (e) {
-      console.warn('[LeadsPage] Backend followup schedule warning:', e);
+      const created = await apiSaveFollowup(newFollowup);
+      setApiFollowups(prev => [created, ...prev.filter(f => f.id !== created.id)]);
+    } catch (err) {
+      console.warn('[LeadsPage] Error scheduling followup:', err);
+      alert(err instanceof Error ? err.message : 'Could not schedule the follow-up. Please retry.');
+      return;
     }
 
     // 3. Add Audit log
@@ -854,63 +855,22 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
   const leadSiteVisits = useMemo(() => {
     if (!selectedLead) return [];
-    const localVisits = storageService.getSiteVisits() || [];
-    const visitMap = new Map<string, SiteVisit>();
-    localVisits.forEach(v => visitMap.set(String(v.id), v));
-    apiSiteVisits.forEach(v => visitMap.set(String(v.id), v));
-    const allVisits = Array.from(visitMap.values());
-
-    const cleanPhone = (selectedLead.phone || '').replace(/\D/g, '').slice(-10);
-    const targetLeadId = String(selectedLead.id || '').replace('db-', '').replace('lead-', '').trim();
-    const targetName = (selectedLead.name || '').trim().toLowerCase();
-
-    return allVisits.filter(v => {
-      // 1. Phone match
-      const vPhone = (v.customerPhone || '').replace(/\D/g, '').slice(-10);
-      if (cleanPhone && vPhone && cleanPhone === vPhone) return true;
-
-      // 2. Direct ID match
-      if (v.customerId === selectedLead.id || v.leadId === selectedLead.id) return true;
-
-      // 3. Normalized ID match
-      const vLeadId = v.leadId ? String(v.leadId).replace('db-', '').replace('lead-', '').trim() : '';
-      const vCustId = v.customerId ? String(v.customerId).replace('db-', '').replace('lead-', '').trim() : '';
-      if (targetLeadId && (vLeadId === targetLeadId || vCustId === targetLeadId)) return true;
-
-      // 4. Name match
-      const vName = (v.customerName || '').trim().toLowerCase();
-      if (targetName && vName && targetName === vName) return true;
-
-      return false;
-    });
+    return apiSiteVisits.filter(v => String(v.leadId || '') === String(selectedLead.id));
   }, [selectedLead, apiSiteVisits, isDetailDrawerOpen]);
 
   const leadFollowups = useMemo(() => {
     if (!selectedLead) return [];
-    const local = storageService.getFollowups(tenant?.id) || [];
     const followupMap = new Map<string, Followup>();
-    local.forEach(f => followupMap.set(String(f.id), f));
-    apiFollowups.forEach(f => followupMap.set(String(f.id), f));
+    (apiFollowups || []).forEach(f => followupMap.set(String(f.id), f));
+    if (followupMap.size === 0) {
+      const local = storageService.getFollowups(tenant?.id) || [];
+      local.forEach(f => followupMap.set(String(f.id), f));
+    }
     const all = Array.from(followupMap.values());
 
-    const cleanPhone = (selectedLead.phone || '').replace(/\D/g, '').slice(-10);
-    const targetLeadId = String(selectedLead.id || '').replace('db-', '').replace('lead-', '').trim();
-    const targetName = (selectedLead.name || '').trim().toLowerCase();
-
     return all.filter(f => {
-      // 1. Direct ID match
-      if (f.contactId === selectedLead.id) return true;
-      // 2. Normalized ID match
-      const fContactId = f.contactId ? String(f.contactId).replace('db-', '').replace('lead-', '').trim() : '';
-      if (targetLeadId && fContactId === targetLeadId) return true;
-      // 3. Phone match
-      const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-      if (cleanPhone && fPhone && cleanPhone === fPhone) return true;
-      // 4. Name match
-      const fName = (f.contactName || '').trim().toLowerCase();
-      if (targetName && fName && targetName === fName) return true;
-
-      return false;
+      if ((f.contactType || 'lead') !== 'lead') return false;
+      return String(f.contactId) === String(selectedLead.id);
     });
   }, [selectedLead, tenant?.id, apiFollowups, isDetailDrawerOpen]);
 
@@ -1000,7 +960,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     setIsLeadSiteVisitModalOpen(true);
   };
 
-  const handleSaveLeadSiteVisit = (e: React.FormEvent) => {
+  const handleSaveLeadSiteVisit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedLead) return;
 
@@ -1018,49 +978,27 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
     const trimmedNotes = leadVisitNotes.trim();
 
-    const newVisit: SiteVisit = {
-      id: `sv-${Date.now()}`,
-      companyId: tenant?.id || 't-jamin-02',
-      customerId: selectedLead.id,
-      customerName: selectedLead.name,
-      customerPhone: selectedLead.phone,
-      contactType: 'lead',
-      leadId: selectedLead.id,
-      projectId: 'proj-01',
-      projectName: leadVisitProject,
-      plotNumber: leadVisitPlot,
-      scheduledAt: dateFormatted,
-      assignedAgentId: hostAg?.id || selectedLead.assignedAgentId || user?.id || '1',
-      assignedAgentName: hostAg?.name || leadVisitHostAgent || user?.name || 'Agent',
-      status: 'Scheduled',
-      outcomeNotes: trimmedNotes,
-      visitorNote: trimmedNotes,
-    };
-
-    storageService.saveSiteVisit(newVisit);
-
+    let created: SiteVisit | null = null;
     if (isJamin) {
-      jaminApiService.createSiteVisit({
-        companyId: tenant?.id || 't-jamin-02',
-        customerId: selectedLead.id,
+      created = await jaminApiService.scheduleSiteVisit({
+        leadId: Number(selectedLead.id),
+        contactType: 'lead',
         customerName: selectedLead.name,
         customerPhone: selectedLead.phone,
-        contactType: 'lead',
-        leadId: selectedLead.id,
         projectName: leadVisitProject,
         plotNumber: leadVisitPlot,
         scheduledAt: dateFormatted,
-        assignedAgentId: hostAg?.id ? Number(hostAg.id) : undefined,
+        assignedAgentId: Number(hostAg?.id || selectedLead.assignedAgentId || user?.id) || undefined,
         assignedAgentName: hostAg?.name || leadVisitHostAgent || user?.name || 'Agent',
-        status: 'Scheduled',
-        outcomeNotes: trimmedNotes,
         visitorNote: trimmedNotes,
-      }).then(created => {
-        if (created) {
-          setApiSiteVisits(prev => [created, ...prev.filter(v => v.id !== created.id)]);
-        }
-      }).catch(err => console.warn('API site visit save skipped:', err));
+      });
     }
+    if (!created) {
+      alert('The site visit could not be saved. Check the selected lead and company, then try again.');
+      return;
+    }
+    storageService.saveSiteVisit(created);
+    setApiSiteVisits(prev => [created!, ...prev.filter(v => v.id !== created!.id)]);
 
     storageService.addAuditLog({
       id: `aud-${Date.now()}`,
@@ -1069,7 +1007,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       actorEmail: user?.email || (isJaminUser ? 'agent@jaminbazaar.com' : 'admin@ghlindiaventures.com'),
       action: 'SITE_VISIT_SCHEDULED',
       entityType: 'SiteVisit',
-      entityId: newVisit.id,
+      entityId: created.id,
       companyId: tenant?.id,
       companyName: tenant?.name,
       details: `Scheduled site visit for LEAD: ${selectedLead.name} at ${leadVisitProject} (${leadVisitPlot}).`,
@@ -1401,12 +1339,17 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     if (!selectedLead || !tenant) return;
 
     const cleanId = String(selectedLead.id).replace('db-', '').replace('lead-', '').trim();
+    const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2';
     const conversionResult = !isNaN(Number(cleanId))
       ? await jaminApiService.convertLead(cleanId, undefined, undefined, selectedLead.notes)
       : { success: true, customerId: undefined };
 
     if (!conversionResult.success) {
       showToast('Unable to convert this lead. No records were changed.');
+      return;
+    }
+    if (isJamin && !conversionResult.customerId) {
+      showToast('Unable to create the customer record. The lead was not converted.');
       return;
     }
 
@@ -2304,14 +2247,11 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                   {/* ACTIVITY TAB */}
                   {drawerActiveTab === 'activity' && (() => {
                     const allLogs = storageService.getAuditLogs(tenant?.id) || [];
-                    const targetLeadId = selectedLead.id;
-                    const phoneDigits = (selectedLead.phone || '').replace(/\D/g, '').slice(-10);
-                    const targetName = (selectedLead.name || '').toLowerCase();
+                    const cleanLeadId = String(selectedLead.id || '').replace('lead-', '').replace('db-', '').replace('l-', '').trim();
                     const leadLogs = allLogs.filter(l => {
-                      if (targetLeadId && (l.entityId === targetLeadId || l.entityId === String(targetLeadId))) return true;
-                      if (l.details && phoneDigits && l.details.includes(phoneDigits)) return true;
-                      if (l.details && targetName && l.details.toLowerCase().includes(targetName)) return true;
-                      return false;
+                      if (!l.entityId) return false;
+                      const logId = String(l.entityId).replace('lead-', '').replace('db-', '').replace('l-', '').trim();
+                      return logId === cleanLeadId || l.entityId === String(selectedLead.id);
                     });
                     return (
                       <div className="card lead-detail-card">

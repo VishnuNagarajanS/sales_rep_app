@@ -28,7 +28,10 @@ public class CallRecord
     public string? Notes { get; set; } = string.Empty;
 
     public int? LeadId { get; set; }
+    public Lead? Lead { get; set; }
+
     public int? CustomerId { get; set; }
+    public Customer? Customer { get; set; }
 
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 

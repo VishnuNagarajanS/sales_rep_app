@@ -164,7 +164,7 @@ public class JaminPlotsController : JaminTenantControllerBase
         if (project != null)
         {
             project.TotalPlots = Math.Max(0, project.TotalPlots - 1);
-            if (project != null) await RecalculateInventoryAsync(project, ct, plot.Id);
+            await RecalculateInventoryAsync(project, ct, plot.Id);
             project.UpdatedAt = DateTime.UtcNow;
         }
 

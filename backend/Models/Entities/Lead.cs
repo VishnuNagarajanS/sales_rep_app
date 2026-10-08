@@ -45,4 +45,9 @@ public class Lead
     public DateTime? UpdatedAt { get; set; }
 
     public ICollection<SiteVisit> SiteVisits { get; set; } = new List<SiteVisit>();
+    public ICollection<Followup> Followups { get; set; } = new List<Followup>();
+    public ICollection<JaminBooking> Bookings { get; set; } = new List<JaminBooking>();
+    public ICollection<CallRecord> CallRecords { get; set; } = new List<CallRecord>();
+    public ICollection<Notification> Notifications { get; set; } = new List<Notification>();
+    public ICollection<AuditLog> AuditLogs { get; set; } = new List<AuditLog>();
 }

@@ -76,18 +76,23 @@ interface ApiResponse<T> {
 
 /** Fetch all pages and return flat array (backend defaults to pageSize=100). */
 async function fetchAll<T>(path: string, params: Record<string, string> = {}): Promise<T[]> {
-  const pageSize = 200;
+  const pageSize = 100;
   const items: T[] = [];
   let page = 1;
   let totalCount = 0;
 
   do {
     const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize), ...params }).toString();
-    const res: ApiResponse<PagedResult<T>> = await apiClient.get(`${path}?${qs}`);
-    if (!res.success || !res.data) return items;
-    if (res.data.items.length === 0) break;
-    items.push(...res.data.items);
-    totalCount = res.data.totalCount;
+    const res: any = await apiClient.get(`${path}?${qs}`);
+    if (!res || !res.success || !res.data) {
+      throw new Error(res?.message || `Could not load ${path}`);
+    }
+    const pageItems: T[] = Array.isArray(res.data)
+      ? res.data
+      : (Array.isArray(res.data.items) ? res.data.items : []);
+    if (pageItems.length === 0) break;
+    items.push(...pageItems);
+    totalCount = res.data.totalCount ?? pageItems.length;
     page += 1;
   } while (items.length < totalCount);
 
@@ -368,6 +373,8 @@ function mapAuditLog(l: Record<string, any>): AuditLog {
     action: l.action ?? '',
     entityType: l.entityType ?? '',
     entityId: sid(l.entityId),
+    leadId: sid(l.leadId),
+    customerId: sid(l.customerId),
     companyId: sid(l.companyId),
     details: l.details ?? '',
     ipAddress: l.ipAddress,
@@ -409,7 +416,7 @@ function mapLead(l: Record<string, any>): Lead {
     source: l.source ?? '',
     status: l.status ?? 'New',
     priority: l.priority ?? 'Medium',
-    assignedAgentId: l.assignedAgentId ? sid(l.assignedAgentId) : undefined,
+    assignedAgentId: l.assignedAgentId ? sid(l.assignedAgentId) : '',
     assignedAgentName: l.assignedAgentName || (l.assignedAgent?.name) || 'Unassigned',
     nextFollowupDate: l.nextFollowupDate,
     targetDevelopment: l.targetDevelopment,
@@ -504,83 +511,142 @@ export async function saveLead(lead: Lead): Promise<Lead> {
 // FOLLOWUPS  (delegates to existing SalesExecutiveFollowupsController)
 // ══════════════════════════════════════════════════════════════════════════════
 
+function toIsoString(d?: string | null): string {
+  if (!d) return new Date().toISOString();
+  const parsed = new Date(d);
+  if (!isNaN(parsed.getTime())) return parsed.toISOString();
+  const cleaned = d.replace('•', ' ').replace(/\s+/g, ' ').trim();
+  const p2 = new Date(cleaned);
+  if (!isNaN(p2.getTime())) return p2.toISOString();
+  return new Date().toISOString();
+}
+
 function mapFollowup(f: Record<string, any>): Followup {
+  const schedIso = toIsoString(f.scheduledAt);
+  const schedDate = schedIso.split('T')[0];
+  const schedTime = (() => {
+    try {
+      const d = new Date(schedIso);
+      return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    } catch {
+      return '11:00 AM';
+    }
+  })();
+
   return {
     id: sid(f.id),
     companyId: sid(f.companyId),
-    contactId: f.contactId ?? '',
+    contactId: sid(f.contactId ?? ''),
     contactName: f.contactName ?? '',
     contactPhone: f.contactPhone ?? '',
     contactType: f.contactType ?? 'lead',
-    scheduledAt: f.scheduledAt ?? new Date().toISOString(),
+    leadId: sid(f.leadId),
+    customerId: sid(f.customerId),
+    investorId: sid(f.investorId),
+    scheduledAt: schedIso,
+    scheduledDate: schedDate,
+    scheduledTime: schedTime,
     priority: f.priority ?? 'Medium',
     status: f.status ?? 'Pending',
     notes: f.notes ?? '',
+    followupType: f.followupType ?? 'call',
     assignedAgentId: sid(f.assignedAgentId),
-    assignedAgentName: f.assignedAgentName ?? '',
+    assignedAgentName: f.assignedAgentName ?? f.assignedToName ?? '',
     completedAt: f.completedAt,
+    createdAt: f.createdAt,
+    updatedAt: f.updatedAt,
   };
 }
 
 export async function getFollowups(companyId?: string): Promise<Followup[]> {
-  const raw = await fetchAll<any>('/sales-executive/followups');
+  const params: Record<string, string> = {};
+  if (companyId) {
+    const value = String(companyId).toLowerCase();
+    const cid = value === 'jamin' || value === 't-jamin-02' ? '2' : value === 'ghl' || value === 't-ghl-01' ? '1' : String(companyId).replace(/\D/g, '') || companyId;
+    if (cid) params.companyId = cid;
+  }
+  const raw = await fetchAll<any>('/sales-executive/followups', params);
   return raw.map(mapFollowup);
 }
 
-export async function saveFollowup(followup: Followup): Promise<Followup> {
+export async function saveFollowup(target: any, maybeFollowup?: Followup): Promise<Followup> {
+  const followup: Followup = maybeFollowup ? maybeFollowup : target;
+  const companyHint = maybeFollowup ? target : followup.companyId;
+  const compValue = String(companyHint || '').toLowerCase();
+  const compId = companyHint
+    ? (compValue === 'jamin' || compValue === 't-jamin-02' ? 2 : compValue === 'ghl' || compValue === 't-ghl-01' ? 1 : nid(compValue.replace(/\D/g, '')))
+    : undefined;
+
   const isNew =
-    !followup.id || followup.id.startsWith('flw-') || followup.id.startsWith('fu-') || followup.id.startsWith('f-');
+    !followup.id || followup.id.startsWith('flw-') || followup.id.startsWith('fu-') || followup.id.startsWith('f-') || followup.id.startsWith('fup-');
 
   try {
     if (isNew) {
       const payload = {
-        contactId: followup.contactId,
+        companyId: compId || 1,
+        contactId: String(followup.contactId || ''),
         contactType: followup.contactType || 'lead',
+        leadId: followup.leadId ? nid(followup.leadId) : (followup.contactType === 'lead' ? nid(followup.contactId) : undefined),
+        customerId: followup.customerId ? nid(followup.customerId) : (followup.contactType === 'customer' ? nid(followup.contactId) : undefined),
         contactName: followup.contactName,
         contactPhone: followup.contactPhone,
-        scheduledAt: followup.scheduledAt,
-        priority: followup.priority,
-        notes: followup.notes,
+        scheduledAt: toIsoString(followup.scheduledAt || (followup.scheduledDate && followup.scheduledTime ? `${followup.scheduledDate} ${followup.scheduledTime}` : undefined)),
+        priority: followup.priority || 'Medium',
+        notes: followup.notes || '',
+        followupType: followup.followupType || 'call',
+        assignedAgentId: followup.assignedAgentId ? nid(String(followup.assignedAgentId).replace(/\D/g, '')) : undefined,
       };
       const res: ApiResponse<any> = await apiClient.post(
         '/sales-executive/followups',
         payload
       );
-      if (res && res.success && res.data) {
-        const saved = mapFollowup(res.data);
-        storageService.saveFollowup(saved);
-        window.dispatchEvent(new Event('nexus_storage_updated'));
-        return saved;
-      }
+      if (!res?.success || !res.data) throw new Error(res?.message || 'The follow-up could not be saved.');
+      const saved = mapFollowup(res.data);
+      storageService.saveFollowup(saved);
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+      return saved;
     } else {
       const payload = {
-        scheduledAt: followup.scheduledAt,
+        scheduledAt: toIsoString(followup.scheduledAt || (followup.scheduledDate && followup.scheduledTime ? `${followup.scheduledDate} ${followup.scheduledTime}` : undefined)),
         priority: followup.priority,
         notes: followup.notes,
         status: followup.status,
+        followupType: followup.followupType || 'call',
+        leadId: followup.leadId ? nid(followup.leadId) : (followup.contactType === 'lead' ? nid(followup.contactId) : undefined),
+        customerId: followup.customerId ? nid(followup.customerId) : (followup.contactType === 'customer' ? nid(followup.contactId) : undefined),
+        assignedAgentId: followup.assignedAgentId ? nid(String(followup.assignedAgentId).replace(/\D/g, '')) : undefined,
       };
       const res: ApiResponse<any> = await apiClient.put(
         `/sales-executive/followups/${nid(followup.id)}`,
         payload
       );
-      if (res && res.success && res.data) {
-        const saved = mapFollowup(res.data);
-        storageService.saveFollowup(saved);
-        window.dispatchEvent(new Event('nexus_storage_updated'));
-        return saved;
-      }
+      if (!res?.success || !res.data) throw new Error(res?.message || 'The follow-up could not be updated.');
+      const saved = mapFollowup(res.data);
+      storageService.saveFollowup(saved);
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+      return saved;
     }
   } catch (err) {
-    console.warn('[ghlApiService] API saveFollowup failed, saving locally:', err);
+    console.error('[ghlApiService] API saveFollowup failed:', err);
+    throw err;
   }
-
-  storageService.saveFollowup(followup);
-  window.dispatchEvent(new Event('nexus_storage_updated'));
-  return followup;
 }
 
 export async function completeFollowup(followupId: string): Promise<void> {
-  await apiClient.patch(`/sales-executive/followups/${nid(followupId)}/complete`, {});
+  const response = await apiClient.patch<ApiResponse<any>>(`/sales-executive/followups/${nid(followupId)}/complete`, {});
+  if (!response?.success) throw new Error(response?.message || 'The follow-up could not be completed.');
+  const all = storageService.getFollowups();
+  const target = all.find(f => f.id === followupId || String(f.id) === String(followupId));
+  if (target) {
+    storageService.saveFollowup({ ...target, status: 'Completed', completedAt: new Date().toISOString() });
+  }
+  window.dispatchEvent(new Event('nexus_storage_updated'));
+}
+
+export async function deleteFollowup(followupId: string): Promise<void> {
+  const response = await apiClient.delete<ApiResponse<boolean>>(`/sales-executive/followups/${nid(followupId)}`);
+  if (!response?.success) throw new Error(response?.message || 'The follow-up could not be deleted.');
+  storageService.deleteFollowup(followupId);
   window.dispatchEvent(new Event('nexus_storage_updated'));
 }
 
@@ -596,7 +662,7 @@ function mapCustomer(c: Record<string, any>): Customer {
     phone: c.phone ?? '',
     email: c.email ?? '',
     status: c.status ?? 'Active',
-    assignedAgentId: sid(c.assignedAgentId),
+    assignedAgentId: c.assignedAgentId ? sid(c.assignedAgentId) : '',
     assignedAgentName: c.assignedAgentName ?? '',
     location: c.location ?? '',
     lastContacted: c.lastContactedAt ?? '',
@@ -609,7 +675,9 @@ function mapCustomer(c: Record<string, any>): Customer {
 }
 
 export async function getCustomers(companyId?: string): Promise<Customer[]> {
-  const raw = await fetchAll<any>('/sales-executive/customers');
+  const params: Record<string, string> = {};
+  if (companyId) params.tenantId = companyId;
+  const raw = await fetchAll<any>('/sales-executive/customers', params);
   return raw.map(mapCustomer);
 }
 
@@ -619,13 +687,27 @@ export async function saveCustomer(customer: Customer): Promise<Customer> {
     customer.id.startsWith('cust-') ||
     customer.id.startsWith('c-');
 
+  const companyId = (() => {
+    const value = String(customer.companyId || '').toLowerCase();
+    if (value === 'jamin') return 2;
+    if (value === 'ghl') return 1;
+    return nid(value.replace(/\D/g, ''));
+  })();
+  const assignedAgentId = customer.assignedAgentId
+    ? nid(String(customer.assignedAgentId).replace(/\D/g, ''))
+    : undefined;
   const payload = {
+    companyId: companyId || undefined,
+    assignedAgentId,
     name: customer.name,
     phone: customer.phone,
     email: customer.email,
     location: customer.location,
     status: customer.status,
+    totalValue: customer.totalValue ?? 0,
     notes: customer.notes,
+    customFields: customer.customFields ?? {},
+    clearAssignedAgent: !assignedAgentId,
   };
 
   if (isNew) {

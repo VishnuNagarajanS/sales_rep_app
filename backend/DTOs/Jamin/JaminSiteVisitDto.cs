@@ -48,6 +48,9 @@ public class UpdateSiteVisitOutcomeDto
 
 public class UpdateSiteVisitDto
 {
+    public int? LeadId { get; set; }
+    public int? CustomerId { get; set; }
+    public string? ContactType { get; set; }
     public int? ProjectId { get; set; }
     public int? PlotId { get; set; }
     public string? ProjectName { get; set; }

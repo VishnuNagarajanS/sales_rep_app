@@ -135,6 +135,49 @@ public class SalesExecutiveCallsController : ControllerBase
     {
         var agentId = _currentUser.UserId ?? 1;
         var companyId = _currentUser.CompanyId ?? 1;
+        if (!await _context.Users.AnyAsync(u => u.Id == agentId && u.CompanyId == companyId, ct))
+            return BadRequest(ApiResponse<CallRecordResponseDto>.FailureResult("The current agent does not belong to this company."));
+
+        int? customerId = dto.CustomerId;
+        int? leadId = dto.LeadId;
+
+        if (customerId.HasValue && leadId.HasValue)
+            return BadRequest(ApiResponse<CallRecordResponseDto>.FailureResult("A call can be linked to either a lead or a customer, not both."));
+
+        // Verify and link CustomerId or LeadId
+        if (customerId.HasValue)
+        {
+            var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == customerId.Value && c.CompanyId == companyId, ct);
+            if (customer == null)
+                return BadRequest(ApiResponse<CallRecordResponseDto>.FailureResult("Selected customer was not found in this company."));
+            customer.LastContactedAt = DateTime.UtcNow;
+        }
+        else if (leadId.HasValue)
+        {
+            var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == leadId.Value && l.CompanyId == companyId, ct);
+            if (lead == null)
+                return BadRequest(ApiResponse<CallRecordResponseDto>.FailureResult("Selected lead was not found in this company."));
+            lead.UpdatedAt = DateTime.UtcNow;
+        }
+        else if (!string.IsNullOrWhiteSpace(dto.ContactPhone))
+        {
+            var phone = dto.ContactPhone.Trim();
+            var customer = await _context.Customers.FirstOrDefaultAsync(c => c.CompanyId == companyId && c.Phone == phone, ct);
+            if (customer != null)
+            {
+                customerId = customer.Id;
+                customer.LastContactedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                var lead = await _context.Leads.FirstOrDefaultAsync(l => l.CompanyId == companyId && l.Phone == phone, ct);
+                if (lead != null)
+                {
+                    leadId = lead.Id;
+                    lead.UpdatedAt = DateTime.UtcNow;
+                }
+            }
+        }
 
         var call = new CallRecord
         {
@@ -146,8 +189,8 @@ public class SalesExecutiveCallsController : ControllerBase
             Duration = dto.Duration,
             Disposition = dto.Disposition.Trim(),
             Notes = dto.Notes?.Trim() ?? string.Empty,
-            LeadId = dto.LeadId,
-            CustomerId = dto.CustomerId,
+            LeadId = leadId,
+            CustomerId = customerId,
             Timestamp = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow
         };

@@ -42,8 +42,11 @@ public class Followup
     public Investor? Investor { get; set; }
     public string? InvestorName { get; set; }
 
-    [NotMapped]
     public int? LeadId { get; set; }
+    public Lead? Lead { get; set; }
+
+    public int? CustomerId { get; set; }
+    public Customer? Customer { get; set; }
 
     public string ContactId { get; set; } = string.Empty;
     public string ContactType { get; set; } = "lead"; // "lead" | "customer" | "investor"
@@ -54,6 +57,7 @@ public class Followup
     public string Priority { get; set; } = "Medium"; // Low, Medium, High, Urgent
     public FollowupStatus Status { get; set; } = FollowupStatus.Pending;
     public string Notes { get; set; } = string.Empty;
+    public string? FollowupType { get; set; } = "call";
 
     public string? Agenda { get; set; }
     public string? OutcomeNotes { get; set; }

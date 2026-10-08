@@ -9,7 +9,7 @@ namespace backend.Controllers.SalesExecutive;
 
 [ApiController]
 [Route("api/sales-executive/followups")]
-[Authorize(Roles = "sales_executive,company_admin,sales_manager,super_admin,irm")]
+[Authorize(Roles = "sales_executive,company_admin,sales_manager,super_admin,irm,admin")]
 public class SalesExecutiveFollowupsController : ControllerBase
 {
     private readonly IFollowupService _followupService;

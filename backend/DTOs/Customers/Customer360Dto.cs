@@ -17,6 +17,8 @@ public class Customer360Dto
     public CustomerResponseDto Customer { get; set; } = new();
     public List<Customer360CallSummaryDto> Calls { get; set; } = new();
     public List<FollowupResponseDto> Followups { get; set; } = new();
+    public List<backend.DTOs.Jamin.JaminSiteVisitDto> SiteVisits { get; set; } = new();
+    public List<backend.DTOs.Jamin.JaminBookingResponseDto> Bookings { get; set; } = new();
     public int TotalCalls => Calls.Count;
     public int PendingFollowupsCount => Followups.Count(f => f.Status == "Pending");
 }

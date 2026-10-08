@@ -39,14 +39,17 @@ public class CallRecordConfiguration : IEntityTypeConfiguration<CallRecord>
             .HasForeignKey(cr => cr.AgentId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        builder.HasOne<Lead>()
-            .WithMany()
+        builder.HasOne(cr => cr.Lead)
+            .WithMany(l => l.CallRecords)
             .HasForeignKey(cr => cr.LeadId)
             .OnDelete(DeleteBehavior.SetNull);
 
-        builder.HasOne<Customer>()
-            .WithMany()
+        builder.HasOne(cr => cr.Customer)
+            .WithMany(c => c.CallRecords)
             .HasForeignKey(cr => cr.CustomerId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasIndex(cr => cr.LeadId);
+        builder.HasIndex(cr => cr.CustomerId);
     }
 }

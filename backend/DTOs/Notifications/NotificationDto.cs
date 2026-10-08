@@ -7,5 +7,7 @@ public class NotificationDto
     public string Message { get; init; } = string.Empty;
     public string Type { get; init; } = string.Empty;
     public bool IsRead { get; init; }
+    public int? LeadId { get; init; }
+    public int? CustomerId { get; init; }
     public DateTime CreatedAt { get; init; }
 }

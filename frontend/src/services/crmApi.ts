@@ -18,6 +18,10 @@ export interface LeadDto {
   nextFollowupDate?: string;
   createdAt: string;
   updatedAt?: string;
+  siteVisits?: any[];
+  followups?: any[];
+  bookings?: any[];
+  callRecords?: any[];
 }
 
 export interface CreateLeadPayload {
@@ -101,6 +105,8 @@ export interface Customer360Dto {
   customer: CustomerDto;
   calls: Customer360CallSummary[];
   followups: FollowupDto[];
+  siteVisits?: any[];
+  bookings?: any[];
   totalCalls: number;
   pendingFollowupsCount: number;
 }
@@ -137,6 +143,8 @@ export interface FollowupDto {
   contactType: string;
   contactName: string;
   contactPhone: string;
+  leadId?: number;
+  customerId?: number;
   scheduledAt: string;
   priority: string;
   status: string;
@@ -151,12 +159,16 @@ export interface CreateFollowupPayload {
   contactType?: string;
   contactName: string;
   contactPhone: string;
+  leadId?: number;
+  customerId?: number;
   scheduledAt: string;
   priority?: string;
   notes?: string;
 }
 
 export interface UpdateFollowupPayload {
+  leadId?: number;
+  customerId?: number;
   scheduledAt?: string;
   priority?: string;
   status?: string;

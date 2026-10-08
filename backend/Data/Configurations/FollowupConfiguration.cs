@@ -54,5 +54,18 @@ public class FollowupConfiguration : IEntityTypeConfiguration<Followup>
             .WithMany(i => i.Followups)
             .HasForeignKey(f => f.InvestorId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(f => f.Lead)
+            .WithMany(l => l.Followups)
+            .HasForeignKey(f => f.LeadId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne(f => f.Customer)
+            .WithMany(c => c.Followups)
+            .HasForeignKey(f => f.CustomerId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasIndex(f => f.LeadId);
+        builder.HasIndex(f => f.CustomerId);
     }
 }

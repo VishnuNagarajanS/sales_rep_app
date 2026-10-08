@@ -19,12 +19,17 @@ public class JaminBookingsController : JaminTenantControllerBase
     public JaminBookingsController(ApplicationDbContext db) => _db = db;
 
     [HttpGet]
-    public async Task<IActionResult> GetBookings(CancellationToken ct)
+    public async Task<IActionResult> GetBookings([FromQuery] int? leadId, [FromQuery] int? customerId, CancellationToken ct)
     {
         try
         {
-            var bookings = (await _db.JaminBookings.AsNoTracking().Where(b => b.CompanyId == JaminCompanyId)
-                .OrderByDescending(b => b.BookingDate).ToListAsync(ct)).Select(ToDto).ToList();
+            var query = _db.JaminBookings.AsNoTracking().Where(b => b.CompanyId == JaminCompanyId);
+            if (leadId.HasValue && leadId.Value > 0)
+                query = query.Where(b => b.LeadId == leadId.Value);
+            if (customerId.HasValue && customerId.Value > 0)
+                query = query.Where(b => b.CustomerId == customerId.Value);
+
+            var bookings = (await query.OrderByDescending(b => b.BookingDate).ToListAsync(ct)).Select(ToDto).ToList();
             return Ok(ApiResponse<List<JaminBookingResponseDto>>.SuccessResult(bookings));
         }
         catch (Exception ex)
@@ -54,6 +59,11 @@ public class JaminBookingsController : JaminTenantControllerBase
         if (!dto.PlotId.HasValue || dto.PlotId.Value <= 0)
             return BadRequest(ApiResponse<JaminBookingResponseDto>.FailureResult("A plot must be selected before creating a booking."));
 
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync<IActionResult>(async () =>
+        {
+        // Each retry must start with a clean tracker after a failed transaction attempt.
+        _db.ChangeTracker.Clear();
         await using var transaction = await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
         JaminPlot? plot = null;
         JaminProject? project = null;
@@ -75,32 +85,41 @@ public class JaminBookingsController : JaminTenantControllerBase
             project = await _db.JaminProjects.FirstOrDefaultAsync(p => p.Id == plot.ProjectId && p.CompanyId == companyId, ct);
         }
 
-        var agentId = dto.AssignedAgentId ?? User.GetUserId();
-        var agent = agentId > 0 ? await _db.Users.FirstOrDefaultAsync(u => u.Id == agentId && u.CompanyId == companyId, ct) : null;
-        if (dto.AssignedAgentId.HasValue && agent == null)
-            return BadRequest(ApiResponse<JaminBookingResponseDto>.FailureResult("Assigned agent not found in Jamin Bazaar."));
         var totalPrice = dto.TotalPlotPrice > 0 ? dto.TotalPlotPrice : plot?.Price ?? 0;
         if (dto.TokenAmountPaid > totalPrice)
             return BadRequest(ApiResponse<JaminBookingResponseDto>.FailureResult("Token amount cannot exceed the total plot price."));
 
         // 1. Resolve Lead if explicitly provided or by phone
         Lead? matchedLead = null;
+        if (dto.LeadId is <= 0)
+            return BadRequest(ApiResponse<JaminBookingResponseDto>.FailureResult("Lead ID must be positive."));
         if (dto.LeadId.HasValue && dto.LeadId.Value > 0)
         {
             matchedLead = await _db.Leads.FirstOrDefaultAsync(l => l.Id == dto.LeadId.Value && l.CompanyId == companyId, ct);
+            if (matchedLead == null)
+                return BadRequest(ApiResponse<JaminBookingResponseDto>.FailureResult("Selected lead not found in Jamin Bazaar."));
         }
-        if (matchedLead == null && !string.IsNullOrWhiteSpace(dto.CustomerPhone))
+        if (matchedLead == null && !dto.LeadId.HasValue && !string.IsNullOrWhiteSpace(dto.CustomerPhone))
         {
             matchedLead = await _db.Leads.FirstOrDefaultAsync(l => l.Phone == dto.CustomerPhone.Trim() && l.CompanyId == companyId, ct);
         }
 
+        var agentId = dto.AssignedAgentId ?? matchedLead?.AssignedAgentId ?? User.GetUserId();
+        var agent = agentId > 0 ? await _db.Users.FirstOrDefaultAsync(u => u.Id == agentId && u.CompanyId == companyId, ct) : null;
+        if ((dto.AssignedAgentId.HasValue || matchedLead?.AssignedAgentId == agentId) && agentId > 0 && agent == null)
+            return BadRequest(ApiResponse<JaminBookingResponseDto>.FailureResult("Assigned agent not found in Jamin Bazaar."));
+
         // 2. Resolve Customer if explicitly provided or by phone
         Customer? customer = null;
+        if (dto.CustomerId is <= 0)
+            return BadRequest(ApiResponse<JaminBookingResponseDto>.FailureResult("Customer ID must be positive."));
         if (dto.CustomerId.HasValue && dto.CustomerId.Value > 0)
         {
             customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == dto.CustomerId.Value && c.CompanyId == companyId, ct);
+            if (customer == null)
+                return BadRequest(ApiResponse<JaminBookingResponseDto>.FailureResult("Selected customer not found in Jamin Bazaar."));
         }
-        if (customer == null && !string.IsNullOrWhiteSpace(dto.CustomerPhone))
+        if (customer == null && !dto.CustomerId.HasValue && !string.IsNullOrWhiteSpace(dto.CustomerPhone))
         {
             customer = await _db.Customers.FirstOrDefaultAsync(c => c.Phone == dto.CustomerPhone.Trim() && c.CompanyId == companyId, ct);
         }
@@ -128,6 +147,7 @@ public class JaminBookingsController : JaminTenantControllerBase
         {
             customer.TotalValue += totalPrice;
             customer.Status = "Active";
+            customer.AssignedAgentId ??= agent?.Id ?? matchedLead?.AssignedAgentId;
             if (string.IsNullOrWhiteSpace(customer.Name)) customer.Name = dto.CustomerName.Trim();
             customer.UpdatedAt = DateTime.UtcNow;
         }
@@ -137,6 +157,7 @@ public class JaminBookingsController : JaminTenantControllerBase
         {
             matchedLead.Status = "Converted";
             matchedLead.UpdatedAt = DateTime.UtcNow;
+            await LinkLeadHistoryToCustomerAsync(matchedLead, customer, companyId, ct);
         }
 
         var booking = new JaminBooking
@@ -173,6 +194,7 @@ public class JaminBookingsController : JaminTenantControllerBase
         await transaction.CommitAsync(ct);
         return CreatedAtAction(nameof(GetBooking), new { id = booking.Id },
             ApiResponse<JaminBookingResponseDto>.SuccessResult(ToDto(booking), "Booking created."));
+        });
     }
 
     [HttpPut("{id:int}/status")]
@@ -241,7 +263,7 @@ public class JaminBookingsController : JaminTenantControllerBase
 
     private static JaminBookingResponseDto ToDto(JaminBooking b) => new()
     {
-        Id = b.Id, CompanyId = b.CompanyId, ProjectId = b.ProjectId, PlotId = b.PlotId,
+        Id = b.Id, CompanyId = b.CompanyId, CustomerId = b.CustomerId, LeadId = b.LeadId, ProjectId = b.ProjectId, PlotId = b.PlotId,
         CustomerName = b.CustomerName, CustomerPhone = b.CustomerPhone, ProjectName = b.ProjectName,
         PlotNumber = b.PlotNumber, TotalPlotPrice = b.TotalPlotPrice, TokenAmountPaid = b.TokenAmountPaid,
         PaymentMode = b.PaymentMode, Status = b.Status, BookingDate = b.BookingDate,
@@ -256,6 +278,36 @@ public class JaminBookingsController : JaminTenantControllerBase
         project.BookedPlots = plots.Count(p => p.Status is "Booked" or "Registered" or "Sold");
         project.AvailablePlots = plots.Count(p => p.Status == "Available");
         project.UpdatedAt = DateTime.UtcNow;
+    }
+
+    private async Task LinkLeadHistoryToCustomerAsync(Lead lead, Customer customer, int companyId, CancellationToken ct)
+    {
+        var calls = await _db.CallRecords.Where(x => x.LeadId == lead.Id && x.CompanyId == companyId).ToListAsync(ct);
+        foreach (var call in calls) call.CustomerId = customer.Id;
+
+        var followups = await _db.Followups.Where(x => x.LeadId == lead.Id && x.CompanyId == companyId).ToListAsync(ct);
+        foreach (var followup in followups)
+        {
+            followup.CustomerId = customer.Id;
+            followup.ContactType = "customer";
+            followup.ContactId = customer.Id.ToString();
+        }
+
+        var visits = await _db.SiteVisits.Where(x => x.LeadId == lead.Id && x.TenantId == companyId).ToListAsync(ct);
+        foreach (var visit in visits)
+        {
+            visit.CustomerId = customer.Id;
+            visit.ContactType = "customer";
+        }
+
+        var bookings = await _db.JaminBookings.Where(x => x.LeadId == lead.Id && x.CompanyId == companyId).ToListAsync(ct);
+        foreach (var booking in bookings) booking.CustomerId = customer.Id;
+
+        var notifications = await _db.Notifications.Where(x => x.LeadId == lead.Id && x.CompanyId == companyId).ToListAsync(ct);
+        foreach (var notification in notifications) notification.CustomerId = customer.Id;
+
+        var auditLogs = await _db.AuditLogs.Where(x => x.LeadId == lead.Id && x.CompanyId == companyId).ToListAsync(ct);
+        foreach (var auditLog in auditLogs) auditLog.CustomerId = customer.Id;
     }
 
     private static int BookingRank(string status) => status switch

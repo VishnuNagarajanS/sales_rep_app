@@ -147,20 +147,25 @@ export const FollowupsPage: React.FC = () => {
       alert('Please provide contact name and phone number.');
       return;
     }
+    if ((createContactType === 'lead' && !createSelectedLeadId) ||
+        (createContactType === 'customer' && !createSelectedCustomerId)) {
+      alert(`Select an existing ${createContactType} so this follow-up can be linked to its database record.`);
+      return;
+    }
     setIsSubmittingCreate(true);
     try {
-      const formattedDateString = `${createDate} • ${createTime}`;
+      const formattedDateString = new Date(`${createDate}T${(() => { const [time, meridiem] = createTime.split(' '); let [hours, minutes] = time.split(':').map(Number); if (meridiem?.toUpperCase() === 'PM' && hours < 12) hours += 12; if (meridiem?.toUpperCase() === 'AM' && hours === 12) hours = 0; return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`; })()}`).toISOString();
       const agentObj = assignableAgents.find(a => String(a.id) === String(createAgentId));
       const agentName = agentObj?.name || user?.name || 'Agent';
-      const cleanContactId = createContactType === 'lead' ? createSelectedLeadId : (createContactType === 'customer' ? createSelectedCustomerId : `contact-${Date.now()}`);
+      const cleanContactId = createContactType === 'lead' ? createSelectedLeadId : (createContactType === 'customer' ? createSelectedCustomerId : '');
 
       const newFollowup: Followup = {
         id: `fu-${Date.now()}`,
         companyId: tenant?.id || 't-jamin-02',
-        contactId: cleanContactId || `lead-${Date.now()}`,
+        contactId: cleanContactId,
         contactName: createContactName.trim(),
         contactPhone: createContactPhone.trim(),
-        contactType: createContactType === 'customer' ? 'customer' : 'lead',
+        contactType: createContactType,
         scheduledDate: createDate,
         scheduledTime: createTime,
         scheduledAt: formattedDateString,
@@ -173,30 +178,15 @@ export const FollowupsPage: React.FC = () => {
         notes: createNotes.trim(),
       };
 
-      if (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2') {
-        const created = await jaminApiService.scheduleFollowup({
-          contactId: cleanContactId || '1',
-          contactType: newFollowup.contactType,
-          contactName: createContactName.trim(),
-          contactPhone: createContactPhone.trim(),
-          scheduledAt: `${createDate} ${createTime}`,
-          priority: createPriority,
-          notes: createNotes.trim(),
-          assignedAgentId: createAgentId || String(user?.id || '1'),
-        });
-        if (!created) {
-          throw new Error('The follow-up could not be saved. Please try again.');
-        }
-        storageService.saveFollowup({ ...newFollowup, id: created.id });
-      } else {
-        await apiSaveFollowup(tenant?.id, newFollowup).catch(() => { });
-        storageService.saveFollowup(newFollowup);
-      }
+      const created = await apiSaveFollowup(tenant?.id, newFollowup);
+      storageService.saveFollowup(created);
 
       window.dispatchEvent(new Event('nexus_storage_updated'));
       setIsCreateModalOpen(false);
       showToast(`✓ Follow-up scheduled with ${createContactName}!`);
       await loadData();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'The follow-up could not be saved. Please try again.');
     } finally {
       setIsSubmittingCreate(false);
     }
@@ -322,11 +312,7 @@ export const FollowupsPage: React.FC = () => {
       const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02';
       let apiFollowups: Followup[] = [];
       try {
-        if (isJamin) {
-          apiFollowups = await jaminApiService.getFollowups(true);
-        } else {
-          apiFollowups = await getFollowups(tenant?.id);
-        }
+        apiFollowups = await getFollowups(tenant?.id);
       } catch (err) {
         console.warn('[FollowupsPage] API getFollowups warning:', err);
       }
@@ -335,7 +321,7 @@ export const FollowupsPage: React.FC = () => {
 
       // Merge API and local follow-ups by unique ID and content
       const combinedMap = new Map<string, Followup>();
-      localFollowups.forEach(f => combinedMap.set(f.id, f));
+      if (apiFollowups.length === 0) localFollowups.forEach(f => combinedMap.set(f.id, f));
       (apiFollowups || []).forEach(f => combinedMap.set(f.id, f));
 
       const finalFollowups = Array.from(combinedMap.values());
@@ -399,9 +385,6 @@ export const FollowupsPage: React.FC = () => {
         console.warn('Failed to load converted leads as customers:', err);
       }
 
-      if (directCustomers.length === 0) {
-        directCustomers = storageService.getCustomers(tenant?.id) || [];
-      }
 
       // Deduplicate customers by 10-digit phone
       const custMap = new Map<string, Customer>();
@@ -435,20 +418,14 @@ export const FollowupsPage: React.FC = () => {
     if (!drawerFollowup) return;
     const leads = storageService.getLeads(tenant?.id) || [];
     const customers = storageService.getCustomers(tenant?.id) || [];
-    const fDigits = (drawerFollowup.contactPhone || '').replace(/\D/g, '').slice(-10);
+    const l = drawerFollowup.contactType === 'lead'
+      ? leads.find(item => String(item.id) === String(drawerFollowup.contactId))
+      : undefined;
+    const c = drawerFollowup.contactType === 'customer'
+      ? customers.find(item => String(item.id) === String(drawerFollowup.contactId))
+      : undefined;
 
-    const l = leads.find(item => {
-      if (drawerFollowup.contactId && drawerFollowup.contactId !== 'contact-new' && item.id === drawerFollowup.contactId) return true;
-      const lDigits = (item.phone || '').replace(/\D/g, '').slice(-10);
-      return lDigits && fDigits && lDigits === fDigits;
-    });
-    const c = customers.find(item => {
-      if (drawerFollowup.contactId && item.id === drawerFollowup.contactId) return true;
-      const cDigits = (item.phone || '').replace(/\D/g, '').slice(-10);
-      return cDigits && fDigits && cDigits === fDigits;
-    });
-
-    const contactKey = drawerFollowup.contactId || fDigits;
+    const contactKey = drawerFollowup.contactId;
     let savedLocal: any = null;
     if (contactKey) {
       try {
@@ -511,8 +488,7 @@ export const FollowupsPage: React.FC = () => {
       setIsPrefConfirmed(false);
 
       if (!drawerFollowup) return;
-      const fDigits = (drawerFollowup.contactPhone || '').replace(/\D/g, '').slice(-10);
-      const contactKey = drawerFollowup.contactId || fDigits;
+      const contactKey = drawerFollowup.contactId;
 
       if (matchingLead) {
         storageService.saveLead({
@@ -577,8 +553,7 @@ export const FollowupsPage: React.FC = () => {
 
   const handleSavePreferences = (matchingLead: Lead | null, matchingCustomer: Customer | null) => {
     if (!drawerFollowup) return;
-    const fDigits = (drawerFollowup.contactPhone || '').replace(/\D/g, '').slice(-10);
-    const contactKey = drawerFollowup.contactId || fDigits;
+    const contactKey = drawerFollowup.contactId;
 
     if (matchingLead) {
       const updatedLead: Lead = {
@@ -630,23 +605,12 @@ export const FollowupsPage: React.FC = () => {
 
     const leads = storageService.getLeads(tenant?.id) || [];
     const customers = storageService.getCustomers(tenant?.id) || [];
-    const fDigits = (drawerFollowup.contactPhone || '').replace(/\D/g, '').slice(-10);
-
-    const matchingLead = leads.find(l => {
-      if (drawerFollowup.contactId && drawerFollowup.contactId !== 'contact-new' && l.id === drawerFollowup.contactId) return true;
-      const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
-      if (lDigits && fDigits && lDigits === fDigits) return true;
-      if (l.name && drawerFollowup.contactName && l.name.trim().toLowerCase() === drawerFollowup.contactName.trim().toLowerCase()) return true;
-      return false;
-    }) || null;
-
-    const matchingCustomer = customers.find(c => {
-      if (drawerFollowup.contactId && c.id === drawerFollowup.contactId) return true;
-      const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
-      if (cDigits && fDigits && cDigits === fDigits) return true;
-      if (c.name && drawerFollowup.contactName && c.name.trim().toLowerCase() === drawerFollowup.contactName.trim().toLowerCase()) return true;
-      return false;
-    }) || null;
+    const matchingLead = drawerFollowup.contactType === 'lead'
+      ? leads.find(l => String(l.id) === String(drawerFollowup.contactId)) || null
+      : null;
+    const matchingCustomer = drawerFollowup.contactType === 'customer'
+      ? customers.find(c => String(c.id) === String(drawerFollowup.contactId)) || null
+      : null;
 
     const resolvedContactId = drawerFollowup.contactId || matchingLead?.id || matchingCustomer?.id || `contact-${Date.now()}`;
     const contactEmail = matchingLead?.email || matchingCustomer?.email || (drawerFollowup as any).email || '';
@@ -664,10 +628,7 @@ export const FollowupsPage: React.FC = () => {
 
     // 1. Create or update deal in stage 'qualified_investor' — save to DB first, fallback to localStorage
     const allDeals = storageService.getDeals(tenant?.id) || [];
-    const existingDeal = allDeals.find(d =>
-      (d.customerId && d.customerId === resolvedContactId) ||
-      (d.phone && fDigits && (d.phone || '').replace(/\D/g, '').slice(-10) === fDigits)
-    );
+    const existingDeal = allDeals.find(d => d.customerId && String(d.customerId) === String(resolvedContactId));
 
     const kycDeal: Deal = {
       id: existingDeal?.id || `deal-kyc-${Date.now()}`,
@@ -758,17 +719,11 @@ export const FollowupsPage: React.FC = () => {
     showToast(`✓ ${drawerFollowup.contactName} moved to KYC module!`);
   };
 
-  const handleSaveReschedule = (e?: React.FormEvent) => {
+  const handleSaveReschedule = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!rescheduleItem || !rescheduleDate) return;
 
-    const formattedFollowupString = `${rescheduleDate}${rescheduleTime ? ' ' + rescheduleTime : ''}`;
-
-    // Mark previous followup as Rescheduled
-    storageService.saveFollowup({
-      ...rescheduleItem,
-      status: 'Rescheduled',
-    });
+    const formattedFollowupString = new Date(`${rescheduleDate}T${rescheduleTime || '11:00 AM'}`).toISOString();
 
     const targetAgent = assignableAgentOptions.find((p: any) => p.id === rescheduleAgentId || p.name === rescheduleAgentId);
 
@@ -791,8 +746,15 @@ export const FollowupsPage: React.FC = () => {
       assignedRole: rescheduleItem.assignedRole,
       createdBy: user?.name || 'Agent',
     };
-    storageService.saveFollowup(newFollowup);
-    apiSaveFollowup(newFollowup).catch(console.error);
+    try {
+      await apiSaveFollowup({ ...rescheduleItem, status: 'Rescheduled' });
+      const created = await apiSaveFollowup(newFollowup);
+      storageService.saveFollowup(created);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Could not reschedule follow-up. Please retry.');
+      return;
+    }
+    storageService.saveFollowup({ ...rescheduleItem, status: 'Rescheduled' });
 
     // Also update lead record if matching
     const leads = storageService.getLeads(tenant?.id) || [];
@@ -826,27 +788,20 @@ export const FollowupsPage: React.FC = () => {
       notes: updatedNotes,
     };
 
-    // 1. Save locally
-    storageService.saveFollowup(completedFollowup);
-
-    // 2. Call API (both GHL and Jamin / SE)
     try {
-      const isJaminTenant = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02';
-      if (isJaminTenant) {
-        await jaminApiService.completeFollowup(followup.id);
-      } else {
-        await apiCompleteFollowup(followup.id).catch(() => apiSaveFollowup(completedFollowup));
-      }
+      await apiCompleteFollowup(followup.id);
+      if (outcomeNotes) await apiSaveFollowup({ ...completedFollowup, status: 'Completed' });
     } catch (err) {
-      console.warn('[FollowupsPage] API complete failed, saved locally:', err);
+      alert(err instanceof Error ? err.message : 'Could not complete follow-up. Please retry.');
+      return;
     }
+    storageService.saveFollowup(completedFollowup);
 
     // 3. If tied to a lead, update lead notes
     const leads = storageService.getLeads(tenant?.id) || [];
-    const matchingLead = leads.find(l =>
-      (followup.contactId && followup.contactId !== 'contact-new' && l.id === followup.contactId) ||
-      (followup.contactPhone && (l.phone || '').replace(/\D/g, '').slice(-10) === (followup.contactPhone || '').replace(/\D/g, '').slice(-10))
-    );
+    const matchingLead = followup.contactType === 'lead'
+      ? leads.find(l => String(l.id) === String(followup.contactId))
+      : undefined;
     if (matchingLead) {
       storageService.saveLead({
         ...matchingLead,
@@ -882,12 +837,13 @@ export const FollowupsPage: React.FC = () => {
       completedAt: undefined,
     };
 
-    storageService.saveFollowup(reopenedFollowup);
     try {
       await apiSaveFollowup(reopenedFollowup);
     } catch (err) {
-      console.warn('[FollowupsPage] API reopen failed:', err);
+      alert(err instanceof Error ? err.message : 'Could not reopen follow-up. Please retry.');
+      return;
     }
+    storageService.saveFollowup(reopenedFollowup);
 
     loadData();
     window.dispatchEvent(new Event('nexus_storage_updated'));
@@ -2028,23 +1984,12 @@ export const FollowupsPage: React.FC = () => {
           {drawerFollowup && (() => {
             const leads = storageService.getLeads(tenant?.id) || [];
             const customers = storageService.getCustomers(tenant?.id) || [];
-            const fDigits = (drawerFollowup.contactPhone || '').replace(/\D/g, '').slice(-10);
-
-            const matchingLead = leads.find(l => {
-              if (drawerFollowup.contactId && drawerFollowup.contactId !== 'contact-new' && l.id === drawerFollowup.contactId) return true;
-              const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
-              if (lDigits && fDigits && lDigits === fDigits) return true;
-              if (l.name && drawerFollowup.contactName && l.name.trim().toLowerCase() === drawerFollowup.contactName.trim().toLowerCase()) return true;
-              return false;
-            }) || null;
-
-            const matchingCustomer = customers.find(c => {
-              if (drawerFollowup.contactId && c.id === drawerFollowup.contactId) return true;
-              const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
-              if (cDigits && fDigits && cDigits === fDigits) return true;
-              if (c.name && drawerFollowup.contactName && c.name.trim().toLowerCase() === drawerFollowup.contactName.trim().toLowerCase()) return true;
-              return false;
-            }) || null;
+            const matchingLead = drawerFollowup.contactType === 'lead'
+              ? leads.find(l => String(l.id) === String(drawerFollowup.contactId)) || null
+              : null;
+            const matchingCustomer = drawerFollowup.contactType === 'customer'
+              ? customers.find(c => String(c.id) === String(drawerFollowup.contactId)) || null
+              : null;
 
             const assignedAgent =
               drawerFollowup.assignedAgentName ||

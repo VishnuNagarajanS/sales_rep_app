@@ -283,7 +283,9 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
                 className={`notification-item-row ${!n.read ? 'unread' : ''} ${isUrgent ? 'row-urgent' : ''}`}
                 onClick={() => {
                   markStoredNotificationRead(n.id);
-                  if (n.link) onNavigate(n.link.replace('/', ''));
+                  if (n.leadId) onNavigate(`leads`);
+                  else if (n.customerId) onNavigate(`customers`);
+                  else if (n.link) onNavigate(n.link.replace('/', ''));
                 }}
               >
                 <div className="notification-item-left">
@@ -331,6 +333,16 @@ export const NotificationsPage: React.FC<NotificationsPageProps> = ({ onNavigate
                       {n.targetUserName && (
                         <span className="notif-meta-item">
                           🎯 <strong>To:</strong> {n.targetUserName}
+                        </span>
+                      )}
+                      {n.leadId && (
+                        <span className="notif-meta-item notif-linked-entity">
+                          👤 <strong>Lead:</strong> #{n.leadId}
+                        </span>
+                      )}
+                      {n.customerId && (
+                        <span className="notif-meta-item notif-linked-entity">
+                          👥 <strong>Customer:</strong> #{n.customerId}
                         </span>
                       )}
                       {n.link && (

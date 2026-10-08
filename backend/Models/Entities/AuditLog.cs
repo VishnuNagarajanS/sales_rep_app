@@ -37,6 +37,14 @@ public class AuditLog
     /// <summary>String representation of the affected entity's primary key.</summary>
     public string EntityId { get; set; } = string.Empty;
 
+    /// <summary>Optional direct FK to leads when this activity pertains to a lead.</summary>
+    public int? LeadId { get; set; }
+    public Lead? Lead { get; set; }
+
+    /// <summary>Optional direct FK to customers when this activity pertains to a customer.</summary>
+    public int? CustomerId { get; set; }
+    public Customer? Customer { get; set; }
+
     /// <summary>Human-readable description of what changed.</summary>
     public string Details { get; set; } = string.Empty;
 

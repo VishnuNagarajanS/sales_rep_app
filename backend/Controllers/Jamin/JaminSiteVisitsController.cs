@@ -22,9 +22,13 @@ public class JaminSiteVisitsController : JaminTenantControllerBase
     /// </summary>
     [HttpGet]
     [Authorize]
-    public async Task<IActionResult> GetSiteVisits([FromQuery] int? agentId, [FromQuery] string? status, CancellationToken ct)
+    public async Task<IActionResult> GetSiteVisits([FromQuery] int? agentId, [FromQuery] string? status, [FromQuery] int? leadId, [FromQuery] int? customerId, CancellationToken ct)
     {
-        var result = await _siteVisitService.GetSiteVisitsAsync(agentId, status, ct);
+        var result = await _siteVisitService.GetSiteVisitsAsync(agentId, status, leadId, customerId, ct);
+        if (!result.Success)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, result);
+        }
         return Ok(result);
     }
 

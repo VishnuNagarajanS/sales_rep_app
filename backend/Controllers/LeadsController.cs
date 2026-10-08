@@ -1,6 +1,8 @@
 using backend.Data;
+using backend.Authentication.Interfaces;
 using backend.DTOs.Common;
 using backend.Models.Entities;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,21 +10,42 @@ namespace backend.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize(Roles = "sales_executive,company_admin,sales_manager,super_admin")]
 public class LeadsController : ControllerBase
 {
     private readonly ApplicationDbContext _db;
+    private readonly ICurrentUserService _currentUser;
 
-    public LeadsController(ApplicationDbContext db)
+    public LeadsController(ApplicationDbContext db, ICurrentUserService currentUser)
     {
         _db = db;
+        _currentUser = currentUser;
+    }
+
+    private IQueryable<Lead> GetScopedLeads()
+    {
+        var query = _db.Leads.AsQueryable();
+        if (string.Equals(_currentUser.Role, "super_admin", StringComparison.OrdinalIgnoreCase))
+            return query;
+
+        if (!_currentUser.CompanyId.HasValue)
+            return query.Where(_ => false);
+
+        query = query.Where(l => l.CompanyId == _currentUser.CompanyId.Value);
+        if (string.Equals(_currentUser.Role, "sales_executive", StringComparison.OrdinalIgnoreCase))
+            query = _currentUser.UserId.HasValue
+                ? query.Where(l => l.AssignedAgentId == _currentUser.UserId.Value)
+                : query.Where(_ => false);
+
+        return query;
     }
 
     [HttpGet]
     public async Task<IActionResult> GetLeads([FromQuery] int? tenantId, [FromQuery] string? status, CancellationToken ct)
     {
-        var query = _db.Leads.AsNoTracking().Include(l => l.AssignedAgent).AsQueryable();
+        IQueryable<Lead> query = GetScopedLeads().AsNoTracking().Include(l => l.AssignedAgent);
 
-        if (tenantId.HasValue)
+        if (_currentUser.Role == "super_admin" && tenantId.HasValue)
         {
             query = query.Where(l => l.CompanyId == tenantId.Value);
         }
@@ -48,7 +71,13 @@ public class LeadsController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetLeadById(int id, CancellationToken ct)
     {
-        var lead = await _db.Leads.Include(l => l.AssignedAgent).Include(l => l.SiteVisits).FirstOrDefaultAsync(l => l.Id == id, ct);
+        var lead = await GetScopedLeads().AsNoTracking()
+            .Include(l => l.AssignedAgent)
+            .Include(l => l.SiteVisits)
+            .Include(l => l.Followups)
+            .Include(l => l.Bookings)
+            .Include(l => l.CallRecords)
+            .FirstOrDefaultAsync(l => l.Id == id, ct);
         if (lead == null)
             return NotFound(ApiResponse<Lead>.FailureResult("Lead not found"));
 
@@ -60,6 +89,23 @@ public class LeadsController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(lead.Name) || string.IsNullOrWhiteSpace(lead.Phone))
             return BadRequest(ApiResponse<Lead>.FailureResult("Name and Phone are required"));
+
+        var isSuperAdmin = string.Equals(_currentUser.Role, "super_admin", StringComparison.OrdinalIgnoreCase);
+        if (!_currentUser.CompanyId.HasValue && !isSuperAdmin)
+            return Forbid();
+        if (isSuperAdmin && lead.CompanyId <= 0)
+            return BadRequest(ApiResponse<Lead>.FailureResult("A valid company is required."));
+        if (!isSuperAdmin)
+            lead.CompanyId = _currentUser.CompanyId!.Value;
+        if (string.Equals(_currentUser.Role, "sales_executive", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!_currentUser.UserId.HasValue)
+                return Forbid();
+            lead.AssignedAgentId = _currentUser.UserId;
+        }
+        if (lead.AssignedAgentId.HasValue && !await _db.Users.AnyAsync(
+                u => u.Id == lead.AssignedAgentId.Value && u.CompanyId == lead.CompanyId, ct))
+            return BadRequest(ApiResponse<Lead>.FailureResult("The selected agent does not belong to this company."));
 
         if (lead.AssignedAgentId.HasValue && lead.AssignedAgentId.Value > 0 && string.IsNullOrWhiteSpace(lead.AssignedAgentName))
         {
@@ -80,7 +126,7 @@ public class LeadsController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> UpdateLead(int id, [FromBody] Lead updated, CancellationToken ct)
     {
-        var existing = await _db.Leads.FirstOrDefaultAsync(l => l.Id == id, ct);
+        var existing = await GetScopedLeads().FirstOrDefaultAsync(l => l.Id == id, ct);
         if (existing == null)
             return NotFound(ApiResponse<Lead>.FailureResult("Lead not found"));
 
@@ -91,8 +137,14 @@ public class LeadsController : ControllerBase
         existing.Source = updated.Source;
         existing.Status = updated.Status;
         existing.Priority = updated.Priority;
-        existing.AssignedAgentId = updated.AssignedAgentId;
-        existing.AssignedAgentName = updated.AssignedAgentName;
+        if (!string.Equals(_currentUser.Role, "sales_executive", StringComparison.OrdinalIgnoreCase))
+        {
+            if (updated.AssignedAgentId.HasValue && !await _db.Users.AnyAsync(
+                    u => u.Id == updated.AssignedAgentId.Value && u.CompanyId == existing.CompanyId, ct))
+                return BadRequest(ApiResponse<Lead>.FailureResult("The selected agent does not belong to this company."));
+            existing.AssignedAgentId = updated.AssignedAgentId;
+            existing.AssignedAgentName = updated.AssignedAgentName;
+        }
 
         if (updated.AssignedAgentId.HasValue && updated.AssignedAgentId.Value > 0 && string.IsNullOrWhiteSpace(updated.AssignedAgentName))
         {
@@ -136,6 +188,7 @@ public class LeadsController : ControllerBase
     }
 
     [HttpPost("website-intake")]
+    [AllowAnonymous]
     public async Task<IActionResult> WebsiteIntake([FromBody] WebsiteIntakeDto dto, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(dto.Name) || string.IsNullOrWhiteSpace(dto.Phone))
@@ -201,54 +254,104 @@ public class LeadsController : ControllerBase
     [HttpPost("{id:int}/convert")]
     public async Task<IActionResult> ConvertLead(int id, [FromBody] ConvertLeadRequest? dto, CancellationToken ct)
     {
-        var lead = await _db.Leads.FirstOrDefaultAsync(l => l.Id == id, ct);
+        var lead = await GetScopedLeads().FirstOrDefaultAsync(l => l.Id == id, ct);
         if (lead == null)
             return NotFound(ApiResponse<object>.FailureResult("Lead not found"));
 
-        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
-        var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Phone == lead.Phone && c.CompanyId == lead.CompanyId, ct);
-        if (customer == null)
+        Customer? customer = null;
+        var strategy = _db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
         {
-            customer = new Customer
+            await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+            customer = await _db.Customers.FirstOrDefaultAsync(c => c.Phone == lead.Phone && c.CompanyId == lead.CompanyId, ct);
+            if (customer == null)
             {
-                CompanyId = lead.CompanyId,
-                AssignedAgentId = lead.AssignedAgentId,
-                Name = lead.Name,
-                Phone = lead.Phone,
-                Email = lead.Email ?? string.Empty,
-                Location = lead.Location ?? string.Empty,
-                Status = "Active",
-                TotalValue = dto?.DealValue ?? 0,
-                Notes = dto?.Notes ?? lead.Notes,
-                CustomFieldsJson = lead.CustomFieldsJson,
-                LastContactedAt = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow
-            };
-            _db.Customers.Add(customer);
-            await _db.SaveChangesAsync(ct);
-        }
-        else
-        {
-            if (string.IsNullOrWhiteSpace(customer.Name)) customer.Name = lead.Name;
-            if (string.IsNullOrWhiteSpace(customer.Email)) customer.Email = lead.Email ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(customer.Location)) customer.Location = lead.Location ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(customer.Notes)) customer.Notes = dto?.Notes ?? lead.Notes ?? string.Empty;
-            if (customer.AssignedAgentId == null) customer.AssignedAgentId = lead.AssignedAgentId;
-            customer.LastContactedAt = DateTime.UtcNow;
-            if (dto?.DealValue.HasValue == true)
-            {
-                customer.TotalValue += dto.DealValue.Value;
+                customer = new Customer
+                {
+                    CompanyId = lead.CompanyId,
+                    AssignedAgentId = lead.AssignedAgentId,
+                    Name = lead.Name,
+                    Phone = lead.Phone,
+                    Email = lead.Email ?? string.Empty,
+                    Location = lead.Location ?? string.Empty,
+                    Status = "Active",
+                    TotalValue = dto?.DealValue ?? 0,
+                    Notes = dto?.Notes ?? lead.Notes,
+                    CustomFieldsJson = lead.CustomFieldsJson,
+                    LastContactedAt = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow
+                };
+                _db.Customers.Add(customer);
+                await _db.SaveChangesAsync(ct);
             }
-        }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(customer.Name)) customer.Name = lead.Name;
+                if (string.IsNullOrWhiteSpace(customer.Email)) customer.Email = lead.Email ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(customer.Location)) customer.Location = lead.Location ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(customer.Notes)) customer.Notes = dto?.Notes ?? lead.Notes ?? string.Empty;
+                if (customer.AssignedAgentId == null) customer.AssignedAgentId = lead.AssignedAgentId;
+                customer.LastContactedAt = DateTime.UtcNow;
+                if (dto?.DealValue.HasValue == true)
+                {
+                    customer.TotalValue += dto.DealValue.Value;
+                }
+            }
 
-        lead.Status = "Converted";
-        lead.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
+            lead.Status = "Converted";
+            lead.UpdatedAt = DateTime.UtcNow;
+
+            var leadCalls = await _db.CallRecords
+                .Where(c => c.LeadId == lead.Id && c.CompanyId == lead.CompanyId)
+                .ToListAsync(ct);
+            foreach (var call in leadCalls)
+                call.CustomerId = customer.Id;
+
+            var leadFollowups = await _db.Followups
+                .Where(f => f.CompanyId == lead.CompanyId &&
+                    (f.LeadId == lead.Id || (f.ContactType == "lead" && f.ContactId == lead.Id.ToString())))
+                .ToListAsync(ct);
+            foreach (var followup in leadFollowups)
+            {
+                followup.CustomerId = customer.Id;
+                followup.ContactType = "customer";
+                followup.ContactId = customer.Id.ToString();
+            }
+
+            var leadSiteVisits = await _db.SiteVisits
+                .Where(s => s.LeadId == lead.Id && s.TenantId == lead.CompanyId)
+                .ToListAsync(ct);
+            foreach (var visit in leadSiteVisits)
+            {
+                visit.CustomerId = customer.Id;
+                visit.ContactType = "customer";
+            }
+
+            var leadBookings = await _db.JaminBookings
+                .Where(b => b.LeadId == lead.Id && b.CompanyId == lead.CompanyId)
+                .ToListAsync(ct);
+            foreach (var booking in leadBookings)
+                booking.CustomerId = customer.Id;
+
+            var leadNotifications = await _db.Notifications
+                .Where(n => n.LeadId == lead.Id && n.CompanyId == lead.CompanyId)
+                .ToListAsync(ct);
+            foreach (var notification in leadNotifications)
+                notification.CustomerId = customer.Id;
+
+            var leadAuditLogs = await _db.AuditLogs
+                .Where(a => a.LeadId == lead.Id && a.CompanyId == lead.CompanyId)
+                .ToListAsync(ct);
+            foreach (var auditLog in leadAuditLogs)
+                auditLog.CustomerId = customer.Id;
+
+            await _db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        });
 
         return Ok(ApiResponse<object>.SuccessResult(new
         {
-            customerId = customer.Id,
+            customerId = customer?.Id ?? 0,
             leadId = lead.Id,
             status = "Converted"
         }, "Lead converted to Customer 360 successfully"));
@@ -257,7 +360,7 @@ public class LeadsController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> DeleteLead(int id, CancellationToken ct)
     {
-        var lead = await _db.Leads.FirstOrDefaultAsync(l => l.Id == id, ct);
+        var lead = await GetScopedLeads().FirstOrDefaultAsync(l => l.Id == id, ct);
         if (lead == null)
             return NotFound(ApiResponse<bool>.FailureResult("Lead not found"));
 

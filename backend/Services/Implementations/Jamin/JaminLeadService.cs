@@ -149,13 +149,16 @@ public class JaminLeadService : IJaminLeadService
         }
 
         var siteVisits = await _context.SiteVisits
-            .Where(sv => sv.TenantId == JaminTenantId && (sv.LeadId == id || sv.CustomerPhone == lead.Phone))
+            .Where(sv => sv.TenantId == JaminTenantId && sv.LeadId == id)
             .OrderByDescending(sv => sv.CreatedAt)
             .Select(sv => new JaminSiteVisitDto
             {
                 Id = sv.Id,
                 TenantId = sv.TenantId,
                 LeadId = sv.LeadId,
+                CustomerId = sv.CustomerId,
+                ProjectId = sv.ProjectId,
+                PlotId = sv.PlotId,
                 CustomerName = sv.CustomerName,
                 CustomerPhone = sv.CustomerPhone,
                 ProjectName = sv.ProjectName,
@@ -326,6 +329,7 @@ public class JaminLeadService : IJaminLeadService
         var followup = new Followup
         {
             CompanyId = JaminTenantId,
+            LeadId = lead.Id,
             ContactId = lead.Id.ToString(),
             ContactType = "lead",
             ContactName = lead.Name,

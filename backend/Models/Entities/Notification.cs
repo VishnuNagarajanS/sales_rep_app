@@ -9,5 +9,9 @@ public class Notification
     public string Message { get; set; } = string.Empty;
     public string Type { get; set; } = "info";
     public bool IsRead { get; set; }
+    public int? LeadId { get; set; }
+    public Lead? Lead { get; set; }
+    public int? CustomerId { get; set; }
+    public Customer? Customer { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

@@ -27,6 +27,7 @@ import {
   getCalls,
   getFollowups,
   saveFollowup as apiSaveFollowup,
+  completeFollowup as apiCompleteFollowup,
   getDeals,
   getLeads,
 } from '../../services/ghlApiService';
@@ -42,7 +43,15 @@ const getCustomFieldDefinitions = (tenantId?: string): CustomFieldDefinition[] =
   try {
     const raw = localStorage.getItem('nexus_custom_fields');
     const all: CustomFieldDefinition[] = raw ? JSON.parse(raw) : [];
-    return tenantId ? all.filter(d => !d.companyId || d.companyId === tenantId) : all;
+    const normalizeTenant = (value?: string) => {
+      const normalized = String(value || '').toLowerCase();
+      if (['1', 't-ghl-01', 'ghl'].includes(normalized)) return '1';
+      if (['2', 't-jamin-02', 'jamin'].includes(normalized)) return '2';
+      return normalized;
+    };
+    return tenantId
+      ? all.filter(d => !d.companyId || normalizeTenant(d.companyId) === normalizeTenant(tenantId))
+      : all;
   } catch {
     return [];
   }
@@ -63,11 +72,14 @@ export const CustomersPage: React.FC = () => {
   const { initiateCall } = useCall();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [availableAgents, setAvailableAgents] = useState<Array<{ id: string; name: string; roleName?: string }>>([]);
   const irms = useMemo(() => storageService.getIrms(tenant?.id), [tenant?.id]);
 
   // Role-based scoping: Sales Executives see only their own customers.
-  // Managers / Admins / Super Admins see the full company customer list (no filter).
+  // Role-based scoping: Admin / Managers see the full company customer list.
+  // Others (Sales Executives, etc.) see only their assigned customers.
   const roleCode = user?.role?.code;
+  const isAdmin = roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin' || roleCode === 'sales_manager';
   const isExec = roleCode === 'sales_executive';
 
   // Strict Tenant + Role isolation: IRM assignment is available ONLY in GHL India Ventures -> Sales Executive
@@ -76,14 +88,49 @@ export const CustomersPage: React.FC = () => {
   const canAssignToIRM = Boolean(isGhlTenant && isSalesExecutive);
 
   const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2' || user?.companySlug === 'jamin';
+  const canManageAgentAssignments = roleCode === 'company_admin' || roleCode === 'super_admin' || (roleCode === 'sales_manager' && isJamin);
 
-  const scopedCustomers = (isExec && !isJamin)
-    ? customers.filter(c =>
-      (c.assignedAgentId && (String(c.assignedAgentId) === String(user?.id) || c.assignedAgentId === user?.id)) ||
-      (c.assignedAgentName && user?.name && c.assignedAgentName.toLowerCase() === user.name.toLowerCase()) ||
-      !c.assignedAgentId
-    )
-    : customers;
+  useEffect(() => {
+    let cancelled = false;
+    const loadAgents = async () => {
+      try {
+        if (isJamin && canManageAgentAssignments) {
+          const agents = await jaminApiService.getAgents();
+          const options = agents.map(a => ({ id: String(a.id), name: a.name, roleName: a.roleName }));
+          if (!cancelled) {
+            setAvailableAgents(options);
+            setNewAgentId(current => options.some(a => a.id === current) ? current : (isAdmin ? options[0]?.id || '' : String(user?.id || '')));
+          }
+        } else if (!isJamin && canManageAgentAssignments) {
+          const response = await apiClient.get<any>('/adminusers');
+          const users = Array.isArray(response?.data) ? response.data : [];
+          const options = users
+            .filter((a: any) => !a.status || ['active', '0'].includes(String(a.status).toLowerCase()))
+            .filter((a: any) => ['sales executive', 'sales manager', 'sales_executive', 'sales_manager'].includes(String(a.roleName || '').toLowerCase()))
+            .map((a: any) => ({ id: String(a.id), name: a.name, roleName: a.roleName }));
+          if (!cancelled) {
+            setAvailableAgents(options);
+            setNewAgentId(current => options.some((a: { id: string }) => a.id === current) ? current : options[0]?.id || '');
+          }
+        } else if (!cancelled) {
+          setAvailableAgents([]);
+        }
+      } catch (error) {
+        console.error('Failed to load customer assignment options:', error);
+        if (!cancelled) setAvailableAgents([]);
+      }
+    };
+    void loadAgents();
+    return () => { cancelled = true; };
+  }, [canManageAgentAssignments, isJamin, tenant?.id, user?.id]);
+
+  const scopedCustomers = isAdmin
+    ? customers
+    : customers.filter(c =>
+        (c.assignedAgentId && (String(c.assignedAgentId) === String(user?.id) || c.assignedAgentId === user?.id)) ||
+        (c.assignedAgentName && user?.name && c.assignedAgentName.toLowerCase() === user.name.toLowerCase()) ||
+        (isExec && !c.assignedAgentId)
+      );
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'calls' | 'followups' | 'timeline' | 'documents' | 'site_visits'>('overview');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -118,8 +165,10 @@ export const CustomersPage: React.FC = () => {
   const [newEmail, setNewEmail] = useState('');
   const [newLocation, setNewLocation] = useState('');
   const [newStatus, setNewStatus] = useState<'Active' | 'VIP' | 'Inactive'>('Active');
+  const [newAgentId, setNewAgentId] = useState(String(user?.id || ''));
   const [newCustomFields, setNewCustomFields] = useState<Record<string, any>>({});
-  const [addErrors, setAddErrors] = useState<{ name?: string; phone?: string }>({});
+  const [addErrors, setAddErrors] = useState<Record<string, string | undefined>>({});
+  const [isSubmittingAdd, setIsSubmittingAdd] = useState(false);
 
   // Edit Customer modal state
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -128,9 +177,10 @@ export const CustomersPage: React.FC = () => {
   const [editEmail, setEditEmail] = useState('');
   const [editLocation, setEditLocation] = useState('');
   const [editStatus, setEditStatus] = useState<'Active' | 'VIP' | 'Inactive'>('Active');
-  const [editAgentName, setEditAgentName] = useState('');
+  const [editAgentId, setEditAgentId] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [editTotalValue, setEditTotalValue] = useState<number | string>('');
+  const [editCustomFields, setEditCustomFields] = useState<Record<string, any>>({});
   const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
 
   const handleOpenEditModal = (c: Customer) => {
@@ -139,9 +189,10 @@ export const CustomersPage: React.FC = () => {
     setEditEmail(c.email || '');
     setEditLocation(c.location || '');
     setEditStatus(c.status || 'Active');
-    setEditAgentName(c.assignedAgentName || '');
+    setEditAgentId(c.assignedAgentId || '');
     setEditNotes(c.notes || '');
     setEditTotalValue(c.totalValue || '');
+    setEditCustomFields(c.customFields || {});
     setIsEditModalOpen(true);
   };
 
@@ -149,9 +200,28 @@ export const CustomersPage: React.FC = () => {
     e.preventDefault();
     if (!selectedCustomer) return;
     if (!editName.trim() || !editPhone.trim()) {
-      alert('Name and Phone are required.');
+      showToast('Name and phone are required.');
       return;
     }
+    const missingCustomField = getCustomFieldDefinitions(tenant?.id)
+      .filter(def => def.active !== false && def.module === 'customers' && def.required)
+      .find(def => {
+        const key = def.fieldKey || def.id;
+        const value = String(editCustomFields[key] ?? def.defaultValue ?? '').trim();
+        return !value || (def.fieldType === 'select' && Boolean(def.options?.length) && !def.options?.includes(value));
+      });
+    if (missingCustomField) {
+      showToast(`${missingCustomField.label || missingCustomField.fieldKey || 'Required field'} is required.`);
+      return;
+    }
+    const savedCustomFields = Object.fromEntries(
+      getCustomFieldDefinitions(tenant?.id)
+        .filter(def => def.active !== false && def.module === 'customers')
+        .map(def => {
+          const key = def.fieldKey || def.id;
+          return [key, String(editCustomFields[key] ?? def.defaultValue ?? '')];
+        })
+    );
     setIsSubmittingEdit(true);
     try {
       const updated: Customer = {
@@ -161,35 +231,23 @@ export const CustomersPage: React.FC = () => {
         email: editEmail.trim(),
         location: editLocation.trim(),
         status: editStatus,
-        assignedAgentName: editAgentName.trim() || selectedCustomer.assignedAgentName,
+        assignedAgentId: editAgentId || '',
+        assignedAgentName: availableAgents.find(a => a.id === editAgentId)?.name || '',
         notes: editNotes.trim(),
-        totalValue: editTotalValue ? Number(editTotalValue) : selectedCustomer.totalValue,
+        totalValue: editTotalValue === '' ? selectedCustomer.totalValue : Number(editTotalValue),
+        customFields: savedCustomFields,
       };
 
-      // 1. Immediately update UI state
-      setSelectedCustomer(updated);
-      setCustomers(prev => prev.map(c => c.id === updated.id ? updated : c));
-
-      // 2. Persist in storageService
-      storageService.saveCustomer(updated);
-
-      // 3. Persist in backend DB API
-      const numId = parseInt(String(updated.id).replace(/\D/g, ''), 10);
-      if (numId) {
-        await apiClient.put(`/leads/${numId}`, {
-          name: updated.name,
-          phone: updated.phone,
-          email: updated.email,
-          location: updated.location,
-          notes: updated.notes,
-          status: 'Converted',
-        }).catch(() => {});
-        await apiSaveCustomer(updated).catch(() => {});
-      }
+      const saved = await apiSaveCustomer(updated);
+      setSelectedCustomer(saved);
+      setCustomers(prev => prev.map(c => c.id === saved.id ? saved : c));
 
       setIsEditModalOpen(false);
-      showToast(`✓ Customer ${updated.name} updated successfully!`);
+      showToast(`Customer ${saved.name} updated successfully.`);
       window.dispatchEvent(new Event('nexus_storage_updated'));
+    } catch (error) {
+      console.error('Failed to update customer:', error);
+      showToast(error instanceof Error ? error.message : 'Could not save customer changes.');
     } finally {
       setIsSubmittingEdit(false);
     }
@@ -202,53 +260,19 @@ export const CustomersPage: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const tenantNum = (tenant?.id === '2' || tenant?.id === 't-jamin-02' || tenant?.slug === 'jamin') ? '2' : '1';
-
-      // 1. Fetch real converted leads directly from DB API
-      let convertedCusts: Customer[] = [];
-      try {
-        const res = await apiClient.get<any>(`/leads?tenantId=${tenantNum}&status=Converted`);
-        if (res && res.success && Array.isArray(res.data)) {
-          convertedCusts = res.data.map((l: any) => ({
-            id: String(l.id),
-            name: l.name,
-            phone: l.phone,
-            email: l.email || '',
-            location: l.location || '',
-            source: l.source || 'Converted Lead',
-            status: 'Active',
-            companyId: tenant?.id || (tenantNum === '2' ? 't-jamin-02' : 't-ghl-01'),
-            assignedAgentId: l.assignedAgentId ? String(l.assignedAgentId) : undefined,
-            assignedAgentName: l.assignedAgentName || l.assignedAgent?.name || 'Unassigned',
-            notes: l.notes || '',
-            createdAt: l.createdAt || new Date().toISOString(),
-          }));
-        }
-      } catch (e) {
-        console.warn('Failed to load converted DB leads in CustomersPage:', e);
-      }
-
-      // 2. Fetch customers directly from customers API and other entities
+      // Fetch customers directly from database API
       const [apiCusts, cCalls, cFollowups, cDeals, cLeads] = await Promise.all([
-        getCustomers(tenant?.id).catch(() => []),
+        getCustomers(tenant?.id).catch(err => {
+          console.error('Failed to fetch customers from the database:', err);
+          return [];
+        }),
         getCalls(tenant?.id).catch(() => []),
         getFollowups(tenant?.id).catch(() => []),
         getDeals(tenant?.id).catch(() => []),
         getLeads(tenant?.id).catch(() => []),
       ]);
 
-      // 3. Fallback to local storage if API returned nothing
-      const localCusts = storageService.getCustomers(tenant?.id) || [];
-
-      // 4. Combine and strictly deduplicate by 10-digit phone number
-      const combinedCustsMap = new Map<string, Customer>();
-      [...convertedCusts, ...(apiCusts || []), ...localCusts].forEach(c => {
-        const phoneKey = (c.phone || '').replace(/\D/g, '').slice(-10) || String(c.id);
-        if (phoneKey && !combinedCustsMap.has(phoneKey)) {
-          combinedCustsMap.set(phoneKey, c);
-        }
-      });
-      const allCusts = Array.from(combinedCustsMap.values());
+      const allCusts = apiCusts || [];
 
       setCustomers(allCusts);
       setCalls(cCalls);
@@ -256,13 +280,13 @@ export const CustomersPage: React.FC = () => {
       setDeals(cDeals);
       setLeads(cLeads);
 
-      const firstVisible = (isExec && !isJamin)
-        ? allCusts.filter(c =>
-          (c.assignedAgentId && (String(c.assignedAgentId) === String(user?.id) || c.assignedAgentId === user?.id)) ||
-          (c.assignedAgentName && user?.name && c.assignedAgentName.toLowerCase() === user.name.toLowerCase()) ||
-          !c.assignedAgentId
-        )[0]
-        : allCusts[0];
+      const userVisibleCusts = isAdmin
+        ? allCusts
+        : allCusts.filter(c =>
+            (c.assignedAgentId && (String(c.assignedAgentId) === String(user?.id) || c.assignedAgentId === user?.id)) ||
+            (c.assignedAgentName && user?.name && c.assignedAgentName.toLowerCase() === user.name.toLowerCase())
+          );
+      const firstVisible = userVisibleCusts[0] || allCusts[0];
       if (firstVisible) {
         setSelectedCustomer(prev => (prev && allCusts.some(c => c.id === prev.id)) ? prev : firstVisible);
       }
@@ -480,7 +504,7 @@ export const CustomersPage: React.FC = () => {
     if (!selectedIrm) return;
 
     let assignedCount = 0;
-    const allLatest = (storageService.getCustomers ? storageService.getCustomers(tenant?.id) : customers) || customers;
+    const allLatest = customers;
     const toUpdate: Customer[] = [];
 
     selectedCustomerIds.forEach(cid => {
@@ -494,7 +518,6 @@ export const CustomersPage: React.FC = () => {
           notes: `${cust.notes ? cust.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Assigned to IRM: ${selectedIrm.name} by ${user?.name || 'Sales Executive'}`,
         };
         toUpdate.push(updated);
-        storageService.saveCustomer?.(updated);
         assignedCount++;
       }
     });
@@ -512,7 +535,7 @@ export const CustomersPage: React.FC = () => {
 
   const handleConfirmAutoAssignment = async () => {
     let assignedCount = 0;
-    const allLatest = (storageService.getCustomers ? storageService.getCustomers(tenant?.id) : customers) || customers;
+    const allLatest = customers;
     const toUpdate: Customer[] = [];
 
     autoRecommendations.forEach(rec => {
@@ -526,7 +549,6 @@ export const CustomersPage: React.FC = () => {
           notes: `${cust.notes ? cust.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Auto-assigned to IRM: ${rec.recommendedIrmName} (${rec.matchReason})`,
         };
         toUpdate.push(updated);
-        storageService.saveCustomer?.(updated);
         assignedCount++;
       }
     });
@@ -563,60 +585,38 @@ export const CustomersPage: React.FC = () => {
     setEditingRecommendationCustomerId(null);
   };
 
-  // Filter linked records for selected customer
-  const customerCalls = calls.filter(
-    c => selectedCustomer && (c.contactPhone === selectedCustomer.phone || c.contactName === selectedCustomer.name)
-  );
+  // Filter linked records for selected customer strictly by primary key
+  const customerCalls = useMemo(() => {
+    if (!selectedCustomer) return [];
+    const custIdClean = String(selectedCustomer.id || '').replace('cust-', '').replace('db-', '').trim();
+
+    return calls.filter(c => {
+      if (!c.customerId) return false;
+      const callCustId = String(c.customerId).replace('cust-', '').replace('db-', '').trim();
+      return callCustId === custIdClean;
+    });
+  }, [calls, selectedCustomer]);
 
   const customerFollowups = useMemo(() => {
     if (!selectedCustomer) return [];
-    const cleanCustomerPhone = (selectedCustomer.phone || '').replace(/\D/g, '').slice(-10);
-    return followups.filter(
-      f =>
-        f.contactPhone === selectedCustomer.phone ||
-        f.contactName === selectedCustomer.name ||
-        (f.contactId && f.contactId === selectedCustomer.id) ||
-        (cleanCustomerPhone &&
-          (f.contactPhone || '').replace(/\D/g, '').slice(-10) === cleanCustomerPhone)
-    );
+    return followups.filter(f => f.contactType === 'customer' && String(f.contactId) === String(selectedCustomer.id));
   }, [followups, selectedCustomer]);
 
-  const customerDeals = deals.filter(
-    d => selectedCustomer && (d.customerId === selectedCustomer.id || d.customerName === selectedCustomer.name)
-  );
+  const customerDeals = useMemo(() => {
+    if (!selectedCustomer) return [];
+    const custIdClean = String(selectedCustomer.id || '').replace('cust-', '').replace('db-', '').trim();
+    return deals.filter(d => {
+      if (!d.customerId) return false;
+      const dealCustId = String(d.customerId).replace('cust-', '').replace('db-', '').trim();
+      return dealCustId === custIdClean;
+    });
+  }, [deals, selectedCustomer]);
 
   const [apiSiteVisits, setApiSiteVisits] = useState<SiteVisit[]>([]);
 
   const customerSiteVisits = useMemo(() => {
     if (!selectedCustomer || !isJamin) return [];
-    const localVisits = storageService.getSiteVisits() || [];
-    const visitMap = new Map<string, SiteVisit>();
-    localVisits.forEach(v => visitMap.set(String(v.id), v));
-    apiSiteVisits.forEach(v => visitMap.set(String(v.id), v));
-    const allVisits = Array.from(visitMap.values());
-
-    const cleanPhone = (selectedCustomer.phone || '').replace(/\D/g, '').slice(-10);
-    const targetCustId = String(selectedCustomer.id || '').replace('db-', '').replace('cust-', '').trim();
-    const targetName = (selectedCustomer.name || '').trim().toLowerCase();
-
-    return allVisits.filter(v => {
-      // 1. Phone match
-      const vPhone = (v.customerPhone || '').replace(/\D/g, '').slice(-10);
-      if (cleanPhone && vPhone && cleanPhone === vPhone) return true;
-
-      // 2. Direct ID match
-      if (v.customerId === selectedCustomer.id || (v as any).leadId === selectedCustomer.id) return true;
-
-      // 3. Normalized ID match
-      const vCustId = v.customerId ? String(v.customerId).replace('db-', '').replace('cust-', '').trim() : '';
-      if (targetCustId && vCustId === targetCustId) return true;
-
-      // 4. Name match
-      const vName = (v.customerName || '').trim().toLowerCase();
-      if (targetName && vName && targetName === vName) return true;
-
-      return false;
-    });
+    return apiSiteVisits.filter(v => String(v.customerId || '') === String(selectedCustomer.id));
   }, [selectedCustomer, isJamin, apiSiteVisits]);
 
   // Jamin Bazaar: Site Visit scheduling state
@@ -668,7 +668,65 @@ export const CustomersPage: React.FC = () => {
     setIsSiteVisitModalOpen(true);
   };
 
-  const handleSaveCustomerSiteVisit = (e: React.FormEvent) => {
+  const [isScheduleFollowupModalOpen, setIsScheduleFollowupModalOpen] = useState(false);
+  const [custFollowupDate, setCustFollowupDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split('T')[0];
+  });
+  const [custFollowupTime, setCustFollowupTime] = useState('11:00 AM');
+  const [custFollowupType, setCustFollowupType] = useState<'call' | 'whatsapp' | 'meeting'>('call');
+  const [custFollowupPriority, setCustFollowupPriority] = useState<'Low' | 'Medium' | 'High'>('Medium');
+  const [custFollowupNotes, setCustFollowupNotes] = useState('');
+  const [isSubmittingCustFollowup, setIsSubmittingCustFollowup] = useState(false);
+
+  const handleSaveCustomerFollowup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCustomer) return;
+    setIsSubmittingCustFollowup(true);
+    try {
+      const timeParts = custFollowupTime.match(/(\d+):(\d+)\s*(AM|PM)?/i);
+      let hours = timeParts ? parseInt(timeParts[1], 10) : 11;
+      const mins = timeParts ? parseInt(timeParts[2], 10) : 0;
+      const ampm = timeParts && timeParts[3] ? timeParts[3].toUpperCase() : 'AM';
+      if (ampm === 'PM' && hours < 12) hours += 12;
+      if (ampm === 'AM' && hours === 12) hours = 0;
+      const dt = new Date(custFollowupDate);
+      dt.setHours(hours, mins, 0, 0);
+      const isoScheduledAt = dt.toISOString();
+
+      const newF: Followup = {
+        id: `fu-${Date.now()}`,
+        companyId: selectedCustomer.companyId || tenant?.id || 't-ghl-01',
+        contactId: String(selectedCustomer.id),
+        contactName: selectedCustomer.name,
+        contactPhone: selectedCustomer.phone,
+        contactType: 'customer',
+        scheduledAt: isoScheduledAt,
+        scheduledDate: custFollowupDate,
+        scheduledTime: custFollowupTime,
+        priority: custFollowupPriority,
+        status: 'Pending',
+        followupType: custFollowupType,
+        notes: custFollowupNotes.trim() || `Follow-up with customer ${selectedCustomer.name}`,
+        assignedAgentId: selectedCustomer.assignedAgentId || (user?.id ? String(user.id) : '1'),
+        assignedAgentName: selectedCustomer.assignedAgentName || user?.name || 'Agent',
+      };
+
+      await apiSaveFollowup(newF);
+      showToast('✓ Follow-up scheduled successfully in database!');
+      setIsScheduleFollowupModalOpen(false);
+      setCustFollowupNotes('');
+      await loadData();
+    } catch (err) {
+      console.error('Failed to schedule customer followup:', err);
+      showToast('Failed to schedule follow-up.');
+    } finally {
+      setIsSubmittingCustFollowup(false);
+    }
+  };
+
+  const handleSaveCustomerSiteVisit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCustomer) return;
 
@@ -686,47 +744,24 @@ export const CustomersPage: React.FC = () => {
 
     const trimmedNotes = svNotes.trim();
 
-    const newVisit: SiteVisit = {
-      id: `sv-${Date.now()}`,
-      companyId: tenant?.id || 't-jamin-02',
-      customerId: selectedCustomer.id,
+    const created = isJamin ? await jaminApiService.scheduleSiteVisit({
+      customerId: Number(selectedCustomer.id),
+      contactType: 'customer',
       customerName: selectedCustomer.name,
       customerPhone: selectedCustomer.phone,
-      contactType: 'customer',
-      projectId: 'proj-01',
       projectName: svProject,
       plotNumber: svPlot,
       scheduledAt: dateFormatted,
-      assignedAgentId: hostAg?.id || user?.id || '1',
+      assignedAgentId: Number(hostAg?.id || selectedCustomer.assignedAgentId || user?.id) || undefined,
       assignedAgentName: hostAg?.name || svHostAgent || user?.name || 'Agent',
-      status: 'Scheduled',
-      outcomeNotes: trimmedNotes,
       visitorNote: trimmedNotes,
-    };
-
-    storageService.saveSiteVisit(newVisit);
-
-    if (isJamin) {
-      jaminApiService.createSiteVisit({
-        companyId: tenant?.id || 't-jamin-02',
-        customerId: selectedCustomer.id,
-        customerName: selectedCustomer.name,
-        customerPhone: selectedCustomer.phone,
-        contactType: 'customer',
-        projectName: svProject,
-        plotNumber: svPlot,
-        scheduledAt: dateFormatted,
-        assignedAgentId: hostAg?.id ? Number(hostAg.id) : undefined,
-        assignedAgentName: hostAg?.name || svHostAgent || user?.name || 'Agent',
-        status: 'Scheduled',
-        outcomeNotes: trimmedNotes,
-        visitorNote: trimmedNotes,
-      }).then(created => {
-        if (created) {
-          setApiSiteVisits(prev => [created, ...prev.filter(v => v.id !== created.id)]);
-        }
-      }).catch(err => console.warn('API customer site visit save skipped:', err));
+    }) : null;
+    if (!created) {
+      alert('The site visit could not be saved. Check the selected customer and company, then try again.');
+      return;
     }
+    storageService.saveSiteVisit(created);
+    setApiSiteVisits(prev => [created, ...prev.filter(v => v.id !== created.id)]);
 
     storageService.addAuditLog({
       id: `aud-${Date.now()}`,
@@ -735,7 +770,7 @@ export const CustomersPage: React.FC = () => {
       actorEmail: user?.email || 'admin@ghlindiaventures.com',
       action: 'SITE_VISIT_SCHEDULED',
       entityType: 'SiteVisit',
-      entityId: newVisit.id,
+      entityId: created.id,
       companyId: tenant?.id,
       companyName: tenant?.name,
       details: `Scheduled site visit for customer ${selectedCustomer.name} at ${svProject} (${svPlot}).`,
@@ -753,18 +788,30 @@ export const CustomersPage: React.FC = () => {
     setNewEmail('');
     setNewLocation('');
     setNewStatus('Active');
+    setNewAgentId(String(user?.id || ''));
     setNewCustomFields({});
     setAddErrors({});
   };
 
-  const handleAddCustomer = () => {
-    const errors: { name?: string; phone?: string } = {};
+  const handleAddCustomer = async () => {
+    const errors: Record<string, string | undefined> = {};
     if (!newName.trim()) errors.name = 'Name is required.';
     if (!newPhone.trim()) errors.phone = 'Phone is required.';
+    const customerFieldDefs = getCustomFieldDefinitions(tenant?.id)
+      .filter(def => def.active !== false && def.module === 'customers');
+    const requiredCustomFields = customerFieldDefs.filter(def => def.required);
+    requiredCustomFields.forEach(def => {
+      const key = def.fieldKey || def.id;
+      const value = newCustomFields[key] ?? def.defaultValue ?? '';
+      const valueText = String(value).trim();
+      const invalidOption = def.fieldType === 'select' && Boolean(def.options?.length) && !def.options?.includes(valueText);
+      if (!valueText || invalidOption) errors[`custom:${key}`] = `${def.label || key} is required.`;
+    });
     if (Object.keys(errors).length > 0) {
       setAddErrors(errors);
       return;
     }
+    setIsSubmittingAdd(true);
     const newCustomer: import('../../types').Customer = {
       id: `cust-${Date.now()}`,
       companyId: tenant?.id || '',
@@ -772,24 +819,32 @@ export const CustomersPage: React.FC = () => {
       phone: newPhone.trim(),
       email: newEmail.trim(),
       status: newStatus,
-      assignedAgentId: user?.id || '',
-      assignedAgentName: user?.name || '',
+      assignedAgentId: newAgentId || String(user?.id || ''),
+      assignedAgentName: availableAgents.find(a => a.id === newAgentId)?.name || user?.name || '',
       location: newLocation.trim(),
       lastContacted: new Date().toISOString().split('T')[0],
       openDealsCount: 0,
       totalValue: 0,
       createdAt: new Date().toISOString().split('T')[0],
       notes: '',
-      customFields: newCustomFields,
+      customFields: Object.fromEntries(customerFieldDefs.map(def => {
+        const key = def.fieldKey || def.id;
+        return [key, String(newCustomFields[key] ?? def.defaultValue ?? '')];
+      })),
     };
-    apiSaveCustomer(newCustomer)
-      .then(saved => {
-        setSelectedCustomer(saved);
-        loadData();
-      })
-      .catch(console.error);
-    setIsAddModalOpen(false);
-    resetAddForm();
+    try {
+      const saved = await apiSaveCustomer(newCustomer);
+      setSelectedCustomer(saved);
+      setIsAddModalOpen(false);
+      resetAddForm();
+      await loadData();
+      showToast(`Customer ${saved.name} created successfully.`);
+    } catch (error) {
+      console.error('Failed to create customer:', error);
+      showToast(error instanceof Error ? error.message : 'Could not create customer.');
+    } finally {
+      setIsSubmittingAdd(false);
+    }
   };
 
   const getCustomerValueDisplay = (c: Customer): string => {
@@ -1110,9 +1165,9 @@ export const CustomersPage: React.FC = () => {
                   <StatusChip status={selectedCustomer.status} />
                 </div>
                 <div className="customer-cockpit-meta-row">
-                  <span>📞 {selectedCustomer.phone}</span>
-                  {selectedCustomer.email && <span>✉️ {selectedCustomer.email}</span>}
-                  <span>📍 {selectedCustomer.location}</span>
+                  <span>📞 {selectedCustomer.phone || '--'}</span>
+                  <span>✉️ {selectedCustomer.email || '--'}</span>
+                  <span>📍 {selectedCustomer.location || '--'}</span>
                 </div>
               </div>
 
@@ -1165,7 +1220,7 @@ export const CustomersPage: React.FC = () => {
                     <div className="customer-profile-grid">
                       <div>
                         <span className="customer-profile-label">Assigned Account Manager:</span>
-                        <div className="customer-profile-val">{selectedCustomer.assignedAgentName}</div>
+                        <div className="customer-profile-val">{selectedCustomer.assignedAgentName || '--'}</div>
                       </div>
                       {canAssignToIRM && (
                         <div>
@@ -1376,10 +1431,15 @@ export const CustomersPage: React.FC = () => {
                           ) : (
                             <button
                               className="btn btn-secondary btn-sm"
-                              onClick={() => {
-                                storageService.saveFollowup({ ...f, status: 'Completed', completedAt: new Date().toISOString() });
-                                loadData();
-                                showToast('Follow-up marked as completed.');
+                              onClick={async () => {
+                                try {
+                                  await apiCompleteFollowup(f.id);
+                                  storageService.saveFollowup({ ...f, status: 'Completed', completedAt: new Date().toISOString() });
+                                  await loadData();
+                                  showToast('Follow-up marked as completed.');
+                                } catch (err) {
+                                  alert(err instanceof Error ? err.message : 'Could not complete follow-up. Please retry.');
+                                }
                               }}
                             >
                               Mark Done
@@ -1492,14 +1552,14 @@ export const CustomersPage: React.FC = () => {
         isOpen={isAddModalOpen}
         onClose={() => { setIsAddModalOpen(false); resetAddForm(); }}
         title="New Customer"
-        subtitle="Create a fresh customer account and assign it to yourself."
+        subtitle={isAdmin ? 'Create a customer account and choose its account executive.' : 'Create a customer account assigned to you.'}
         footer={
           <>
             <button className="btn btn-secondary" onClick={() => { setIsAddModalOpen(false); resetAddForm(); }}>
               Cancel
             </button>
-            <button className="btn btn-primary" onClick={handleAddCustomer}>
-              Create Customer
+            <button className="btn btn-primary" disabled={isSubmittingAdd} onClick={handleAddCustomer}>
+              {isSubmittingAdd ? 'Creating...' : 'Create Customer'}
             </button>
           </>
         }
@@ -1561,6 +1621,16 @@ export const CustomersPage: React.FC = () => {
               <option value="Inactive">Inactive</option>
             </select>
           </div>
+          {canManageAgentAssignments && (
+            <div className="form-group">
+              <label className="form-label">Assigned Executive</label>
+              <select className="form-select" value={newAgentId} onChange={e => setNewAgentId(e.target.value)}>
+                <option value="">Unassigned</option>
+                {newAgentId && !availableAgents.some(a => a.id === newAgentId) && <option value={newAgentId}>{user?.name || `Agent #${newAgentId}`}</option>}
+                {availableAgents.map(agent => <option key={agent.id} value={agent.id}>{agent.name}{agent.roleName ? ` · ${agent.roleName}` : ''}</option>)}
+              </select>
+            </div>
+          )}
           {/* Tenant-Specific Custom Fields */}
           {(() => {
             const customerDefs = getCustomFieldDefinitions(tenant?.id)
@@ -1583,7 +1653,10 @@ export const CustomersPage: React.FC = () => {
                       className="form-select"
                       required={def.required}
                       value={val}
-                      onChange={e => setNewCustomFields(prev => ({ ...prev, [key]: e.target.value }))}
+                      onChange={e => {
+                        setNewCustomFields(prev => ({ ...prev, [key]: e.target.value }));
+                        setAddErrors(prev => ({ ...prev, [`custom:${key}`]: undefined }));
+                      }}
                     >
                       {!def.defaultValue && !def.options.includes(val) && (
                         <option value="">Select {def.label}...</option>
@@ -1601,9 +1674,13 @@ export const CustomersPage: React.FC = () => {
                       required={def.required}
                       placeholder={`Enter ${def.label}...`}
                       value={val}
-                      onChange={e => setNewCustomFields(prev => ({ ...prev, [key]: e.target.value }))}
+                      onChange={e => {
+                        setNewCustomFields(prev => ({ ...prev, [key]: e.target.value }));
+                        setAddErrors(prev => ({ ...prev, [`custom:${key}`]: undefined }));
+                      }}
                     />
                   )}
+                  {addErrors[`custom:${key}`] && <div className="form-error">{addErrors[`custom:${key}`]}</div>}
                 </div>
               );
             });
@@ -1995,7 +2072,7 @@ export const CustomersPage: React.FC = () => {
               <div className="form-group">
                 <label className="form-label">Account Status</label>
                 <select
-                  className="form-input"
+                  className="form-select"
                   value={editStatus}
                   onChange={e => setEditStatus(e.target.value as any)}
                 >
@@ -2006,13 +2083,17 @@ export const CustomersPage: React.FC = () => {
               </div>
               <div className="form-group">
                 <label className="form-label">Assigned Executive</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={editAgentName}
-                  onChange={e => setEditAgentName(e.target.value)}
-                  placeholder="e.g. Sales Agent"
-                />
+                {canManageAgentAssignments ? (
+                  <select className="form-select" value={editAgentId} onChange={e => setEditAgentId(e.target.value)}>
+                    <option value="">Unassigned</option>
+                    {editAgentId && !availableAgents.some(a => a.id === editAgentId) && (
+                      <option value={editAgentId}>{selectedCustomer?.assignedAgentName || `Agent #${editAgentId}`}</option>
+                    )}
+                    {availableAgents.map(agent => <option key={agent.id} value={agent.id}>{agent.name}{agent.roleName ? ` · ${agent.roleName}` : ''}</option>)}
+                  </select>
+                ) : (
+                  <input type="text" className="form-input" value={selectedCustomer?.assignedAgentName || 'Unassigned'} readOnly />
+                )}
               </div>
             </div>
 
@@ -2026,6 +2107,48 @@ export const CustomersPage: React.FC = () => {
                 placeholder="Important client history, preferences, or negotiation notes..."
               />
             </div>
+
+            <div className="form-group">
+              <label className="form-label">Total Customer Value</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                className="form-input"
+                value={editTotalValue}
+                onChange={e => setEditTotalValue(e.target.value)}
+              />
+            </div>
+
+            {getCustomFieldDefinitions(tenant?.id)
+              .filter((def: CustomFieldDefinition) => def.active !== false && def.module === 'customers')
+              .sort((a: CustomFieldDefinition, b: CustomFieldDefinition) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0))
+              .map((def: CustomFieldDefinition) => {
+                const key = def.fieldKey || def.id;
+                const value = editCustomFields[key] ?? def.defaultValue ?? '';
+                return (
+                  <div key={def.id} className="form-group">
+                    <label className="form-label">{def.label || key}{def.required ? ' *' : ''}</label>
+                    {def.fieldType === 'select' && def.options?.length ? (
+                      <select
+                        className="form-select"
+                        value={value}
+                        onChange={e => setEditCustomFields(prev => ({ ...prev, [key]: e.target.value }))}
+                      >
+                        <option value="">Select {def.label || key}...</option>
+                        {def.options.map(option => <option key={option} value={option}>{option}</option>)}
+                      </select>
+                    ) : (
+                      <input
+                        className="form-input"
+                        type={def.fieldType === 'number' ? 'number' : 'text'}
+                        value={value}
+                        onChange={e => setEditCustomFields(prev => ({ ...prev, [key]: e.target.value }))}
+                      />
+                    )}
+                  </div>
+                );
+              })}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
               <button

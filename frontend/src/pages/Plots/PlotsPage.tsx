@@ -8,6 +8,16 @@ import { getCustomers, getLeads } from '../../services/ghlApiService';
 import { storageService } from '../../services/storageService';
 import './PlotsPage.css';
 
+const comparePlotNumbers = (left: any, right: any): number => {
+  const leftNumber = Number.parseInt(String(left.plotNumber ?? ''), 10);
+  const rightNumber = Number.parseInt(String(right.plotNumber ?? ''), 10);
+  const leftIsNumber = Number.isFinite(leftNumber);
+  const rightIsNumber = Number.isFinite(rightNumber);
+  if (leftIsNumber && rightIsNumber && leftNumber !== rightNumber) return leftNumber - rightNumber;
+  if (leftIsNumber !== rightIsNumber) return leftIsNumber ? -1 : 1;
+  return String(left.plotNumber ?? '').localeCompare(String(right.plotNumber ?? ''), undefined, { numeric: true });
+};
+
 export const PlotsPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const [plots, setPlots] = useState<any[]>([]);
@@ -100,9 +110,6 @@ export const PlotsPage: React.FC = () => {
   const [isDeletePlotModalOpen, setIsDeletePlotModalOpen] = useState(false);
   const [submittingDelete, setSubmittingDelete] = useState(false);
 
-  // Three-dots dropdown per plot card
-  const [activeCardMenuId, setActiveCardMenuId] = useState<number | string | null>(null);
-
   const loadData = async (projId?: string) => {
     setLoading(true);
     try {
@@ -114,7 +121,7 @@ export const PlotsPage: React.FC = () => {
       if (projList.length > 0 && !selectedProject && !projId) {
         setSelectedProject(String(projList[0].id));
       }
-      setPlots(plotList);
+      setPlots([...plotList].sort(comparePlotNumbers));
     } catch (err) {
       console.error('Failed to load plots/projects from backend', err);
     } finally {
@@ -125,9 +132,6 @@ export const PlotsPage: React.FC = () => {
   useEffect(() => {
     loadData();
     loadHoldEntities();
-    const closeMenu = () => setActiveCardMenuId(null);
-    window.addEventListener('click', closeMenu);
-    return () => window.removeEventListener('click', closeMenu);
   }, []);
 
   const handleProjectChange = async (projId: string) => {
@@ -135,7 +139,7 @@ export const PlotsPage: React.FC = () => {
     setLoading(true);
     try {
       const plotList = await jaminApiService.getPlots(projId || undefined);
-      setPlots(plotList);
+      setPlots([...plotList].sort(comparePlotNumbers));
     } catch (err) {
       console.error('Failed to filter plots', err);
     } finally {
@@ -144,8 +148,8 @@ export const PlotsPage: React.FC = () => {
   };
 
   const projectPlots = selectedProject
-    ? plots.filter(p => String(p.projectId) === String(selectedProject))
-    : plots;
+    ? plots.filter(p => String(p.projectId) === String(selectedProject)).sort(comparePlotNumbers)
+    : [...plots].sort(comparePlotNumbers);
 
   const availableCount = projectPlots.filter(p => p.status === 'Available').length;
   const holdCount = projectPlots.filter(p => p.status === 'Hold').length;
@@ -164,7 +168,7 @@ export const PlotsPage: React.FC = () => {
   const loadHoldEntities = async () => {
     try {
       const [custs, lds] = await Promise.all([
-        getCustomers(tenant?.id).catch(() => storageService.getCustomers(tenant?.id) || []),
+        getCustomers(tenant?.id).catch(() => []),
         getLeads(tenant?.id).catch(() => storageService.getLeads(tenant?.id) || []),
       ]);
       setCustomersList(custs || []);
@@ -546,7 +550,7 @@ export const PlotsPage: React.FC = () => {
             <Grid size={24} color="#059669" /> Interactive Plot Inventory
           </h1>
           <p className="page-subtitle">
-            Visual plot layout grid, availability statuses, and plot reservation management from backend DB.
+            Visual plot layout, availability status, and reservation management.
           </p>
         </div>
 
@@ -636,7 +640,7 @@ export const PlotsPage: React.FC = () => {
         </div>
       ) : projectPlots.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '48px', color: '#64748b' }}>
-          <p style={{ fontSize: '1.1rem', marginBottom: '16px' }}>No plots found for this project in the backend database.</p>
+          <p style={{ fontSize: '1.1rem', marginBottom: '16px' }}>No plots have been added to this project yet.</p>
           <button
             className="btn btn-primary"
             onClick={() => {
@@ -663,7 +667,7 @@ export const PlotsPage: React.FC = () => {
               <div
                 key={plot.id}
                 className={`card card-hover plot-item-card ${statusClass}`}
-                onClick={() => { setActiveCardMenuId(null); setSelectedPlot(plot); }}
+                onClick={() => setSelectedPlot(plot)}
                 style={{ position: 'relative' }}
               >
                 <div className="plot-card-header">
@@ -672,61 +676,6 @@ export const PlotsPage: React.FC = () => {
                   </span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <StatusChip status={plot.status} size="sm" />
-                    {canManagePlots && (
-                      <div style={{ position: 'relative' }}>
-                        <button
-                          title="Manage plot"
-                          onClick={e => {
-                            e.stopPropagation();
-                            setActiveCardMenuId(prev => prev === plot.id ? null : plot.id);
-                          }}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            cursor: 'pointer',
-                            padding: '2px 6px',
-                            borderRadius: 4,
-                            color: 'var(--text-secondary)',
-                            fontSize: 18,
-                            lineHeight: 1,
-                            display: 'flex',
-                            alignItems: 'center',
-                          }}
-                        >
-                          ⋮
-                        </button>
-                        {activeCardMenuId === plot.id && (
-                          <div
-                            onClick={e => e.stopPropagation()}
-                            style={{
-                              position: 'absolute',
-                              top: '100%',
-                              right: 0,
-                              zIndex: 999,
-                              background: 'var(--card-bg, #fff)',
-                              border: '1px solid var(--border, #e2e8f0)',
-                              borderRadius: 8,
-                              boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-                              minWidth: 130,
-                              overflow: 'hidden',
-                            }}
-                          >
-                            <button
-                              style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '10px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#0284c7', fontWeight: 500 }}
-                              onClick={() => { setActiveCardMenuId(null); handleOpenEditPlot(plot); }}
-                            >
-                              <Edit3 size={13} /> Edit Plot
-                            </button>
-                            <button
-                              style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '10px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#dc2626', fontWeight: 500 }}
-                              onClick={() => { setActiveCardMenuId(null); handleOpenDeletePlot(plot); }}
-                            >
-                              <Trash2 size={13} /> Delete Plot
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
                 </div>
 
@@ -837,9 +786,29 @@ export const PlotsPage: React.FC = () => {
               </>
             )}
 
-            <button className="btn btn-secondary" onClick={() => setSelectedPlot(null)}>
-              Close
-            </button>
+            {canManagePlots && selectedPlot && (
+              <>
+                <button
+                  className="btn btn-secondary"
+                  title="Edit Plot"
+                  aria-label="Edit Plot"
+                  onClick={() => handleOpenEditPlot(selectedPlot)}
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '8px 10px' }}
+                >
+                  <Edit3 size={14} />
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  title="Delete Plot"
+                  aria-label="Delete Plot"
+                  onClick={() => handleOpenDeletePlot(selectedPlot)}
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '8px 10px', color: '#b91c1c' }}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </>
+            )}
+
           </>
         }
       >
@@ -918,7 +887,7 @@ export const PlotsPage: React.FC = () => {
               Cancel
             </button>
             <button className="btn btn-primary" onClick={handleConfirmHold} disabled={submittingHold}>
-              {submittingHold ? 'Saving to Database...' : 'Confirm Hold Reservation'}
+              {submittingHold ? 'Saving Reservation...' : 'Confirm Hold Reservation'}
             </button>
           </>
         }
@@ -1275,7 +1244,7 @@ export const PlotsPage: React.FC = () => {
         isOpen={isEditPlotModalOpen && !!selectedPlot}
         onClose={() => setIsEditPlotModalOpen(false)}
         title={`Edit Plot — ${selectedPlot?.plotNumber}`}
-        subtitle="Update plot specifications in the backend database"
+        subtitle="Update plot specifications and inventory details"
       >
         <form onSubmit={handleSaveEditPlot}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -1407,7 +1376,7 @@ export const PlotsPage: React.FC = () => {
             Delete <strong>{selectedPlot?.plotNumber}</strong>?
           </p>
           <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: 0 }}>
-            This will permanently remove the plot from the database.
+            This will permanently remove the plot from the project inventory.
             Plots with active bookings cannot be deleted.
           </p>
         </div>
@@ -1418,7 +1387,7 @@ export const PlotsPage: React.FC = () => {
         isOpen={isAddPlotModalOpen}
         onClose={() => setIsAddPlotModalOpen(false)}
         title="Add New Plot to Inventory"
-        subtitle="Create an individual plot layout record directly in the backend database"
+        subtitle="Add an individual plot to the project inventory"
       >
         <form onSubmit={handleCreatePlot}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -1518,7 +1487,7 @@ export const PlotsPage: React.FC = () => {
                 Cancel
               </button>
               <button type="submit" className="btn btn-primary" disabled={submittingPlot}>
-                {submittingPlot ? 'Adding to Database...' : 'Add Plot'}
+                {submittingPlot ? 'Adding Plot...' : 'Add Plot'}
               </button>
             </div>
           </div>

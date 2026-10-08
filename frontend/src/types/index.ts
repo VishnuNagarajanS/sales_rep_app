@@ -175,7 +175,7 @@ export interface Deal {
   id: string;
   companyId: string;
   title: string;
-  customerId: string;
+  customerId?: string;
   customerName: string;
   stage: string;
   value: number;
@@ -259,10 +259,13 @@ export interface CallRecord {
 export interface Followup {
   id: string;
   companyId: string;
+  leadId?: string;
+  customerId?: string;
+  investorId?: string;
   contactId: string;
   contactName: string;
   contactPhone: string;
-  contactType: 'lead' | 'customer' | 'investor';
+  contactType: 'lead' | 'customer' | 'investor' | 'new';
   scheduledAt: string;
   priority: 'Low' | 'Medium' | 'High';
   status: 'Pending' | 'Completed' | 'Cancelled' | 'Overdue' | 'Rescheduled';
@@ -276,6 +279,8 @@ export interface Followup {
   scheduledTime?: string;
   createdBy?: string;
   completedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
   relatedCallId?: string;
   statusReason?: string;
 }
@@ -313,7 +318,7 @@ export interface Plot {
 export interface SiteVisit {
   id: string;
   companyId: string;
-  customerId: string;
+  customerId?: string;
   customerName: string;
   customerPhone: string;
   projectId: string;
@@ -407,6 +412,8 @@ export interface AuditLog {
   action: string;
   entityType: string;
   entityId: string;
+  leadId?: string | number;
+  customerId?: string | number;
   companyId?: string;
   companyName?: string;
   details: string;
@@ -425,6 +432,8 @@ export interface NotificationItem {
   message: string;
   timestamp: string;
   read: boolean;
+  leadId?: string | number;
+  customerId?: string | number;
   link?: string;
   companyId?: string;
   companySlug?: string;

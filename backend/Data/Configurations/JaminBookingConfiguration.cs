@@ -64,12 +64,12 @@ public class JaminBookingConfiguration : IEntityTypeConfiguration<JaminBooking>
             .OnDelete(DeleteBehavior.Cascade);
 
         builder.HasOne(b => b.Customer)
-            .WithMany()
+            .WithMany(c => c.Bookings)
             .HasForeignKey(b => b.CustomerId)
             .OnDelete(DeleteBehavior.SetNull);
 
         builder.HasOne(b => b.Lead)
-            .WithMany()
+            .WithMany(l => l.Bookings)
             .HasForeignKey(b => b.LeadId)
             .OnDelete(DeleteBehavior.SetNull);
 

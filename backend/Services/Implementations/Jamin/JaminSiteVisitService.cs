@@ -18,30 +18,32 @@ public class JaminSiteVisitService : IJaminSiteVisitService
         _context = context;
     }
 
-    public async Task<ApiResponse<List<JaminSiteVisitDto>>> GetSiteVisitsAsync(int? agentId = null, string? status = null, CancellationToken ct = default)
+    public async Task<ApiResponse<List<JaminSiteVisitDto>>> GetSiteVisitsAsync(int? agentId = null, string? status = null, int? leadId = null, int? customerId = null, CancellationToken ct = default)
     {
-        try
+        var query = _context.SiteVisits.Where(s => s.TenantId == JaminTenantId);
+
+        if (agentId.HasValue && agentId.Value > 0)
         {
-            var query = _context.SiteVisits.Where(s => s.TenantId == JaminTenantId);
-
-            if (agentId.HasValue && agentId.Value > 0)
-            {
-                query = query.Where(s => s.AssignedAgentId == agentId.Value);
-            }
-
-            if (!string.IsNullOrEmpty(status) && status != "All")
-            {
-                query = query.Where(s => s.Status == status);
-            }
-
-            var visits = await query.OrderByDescending(s => s.CreatedAt).ToListAsync(ct);
-            return ApiResponse<List<JaminSiteVisitDto>>.SuccessResult(visits.Select(MapToDto).ToList());
+            query = query.Where(s => s.AssignedAgentId == agentId.Value);
         }
-        catch (Exception ex)
+
+        if (leadId.HasValue && leadId.Value > 0)
         {
-            Console.WriteLine($"[JaminSiteVisitService Error] {ex.Message}");
-            return ApiResponse<List<JaminSiteVisitDto>>.SuccessResult(new List<JaminSiteVisitDto>());
+            query = query.Where(s => s.LeadId == leadId.Value);
         }
+
+        if (customerId.HasValue && customerId.Value > 0)
+        {
+            query = query.Where(s => s.CustomerId == customerId.Value);
+        }
+
+        if (!string.IsNullOrEmpty(status) && status != "All")
+        {
+            query = query.Where(s => s.Status == status);
+        }
+
+        var visits = await query.OrderByDescending(s => s.CreatedAt).ToListAsync(ct);
+        return ApiResponse<List<JaminSiteVisitDto>>.SuccessResult(visits.Select(MapToDto).ToList());
     }
 
 
@@ -50,11 +52,34 @@ public class JaminSiteVisitService : IJaminSiteVisitService
         if (string.IsNullOrWhiteSpace(dto.CustomerName) || string.IsNullOrWhiteSpace(dto.CustomerPhone))
             return ApiResponse<JaminSiteVisitDto>.FailureResult("Visitor name and phone are required.");
         if (dto.LeadId.HasValue && dto.CustomerId.HasValue)
-            return ApiResponse<JaminSiteVisitDto>.FailureResult("A site visit can be linked to a lead or a customer, not both.");
+            return ApiResponse<JaminSiteVisitDto>.FailureResult("A site visit can be linked to either a lead or a customer, not both.");
+        if (dto.LeadId is <= 0 || dto.CustomerId is <= 0)
+            return ApiResponse<JaminSiteVisitDto>.FailureResult("Contact IDs must be positive.");
+
+        // Auto-resolve Lead or Customer by phone if neither is specified
+        if (!dto.LeadId.HasValue && !dto.CustomerId.HasValue && !string.IsNullOrWhiteSpace(dto.CustomerPhone))
+        {
+            var phone = dto.CustomerPhone.Trim();
+            var customerMatch = await _context.Customers.FirstOrDefaultAsync(c => c.CompanyId == JaminTenantId && c.Phone == phone, ct);
+            if (customerMatch != null)
+            {
+                dto.CustomerId = customerMatch.Id;
+                dto.ContactType = "customer";
+            }
+            else
+            {
+                var leadMatch = await _context.Leads.FirstOrDefaultAsync(l => l.CompanyId == JaminTenantId && l.Phone == phone, ct);
+                if (leadMatch != null)
+                {
+                    dto.LeadId = leadMatch.Id;
+                    dto.ContactType = "lead";
+                }
+            }
+        }
 
         if (dto.LeadId.HasValue)
         {
-            var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == dto.LeadId.Value && l.CompanyId == JaminTenantId && l.Status != "Converted", ct);
+            var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == dto.LeadId.Value && l.CompanyId == JaminTenantId, ct);
             if (lead == null) return ApiResponse<JaminSiteVisitDto>.FailureResult("Active Jamin lead not found.");
         }
         if (dto.CustomerId.HasValue)
@@ -62,6 +87,9 @@ public class JaminSiteVisitService : IJaminSiteVisitService
             var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == dto.CustomerId.Value && c.CompanyId == JaminTenantId, ct);
             if (customer == null) return ApiResponse<JaminSiteVisitDto>.FailureResult("Jamin customer not found.");
         }
+        if (dto.AssignedAgentId.HasValue && !await _context.Users.AnyAsync(
+                u => u.Id == dto.AssignedAgentId.Value && u.CompanyId == JaminTenantId, ct))
+            return ApiResponse<JaminSiteVisitDto>.FailureResult("Selected host does not belong to Jamin.");
 
         int? resolvedProjectId = dto.ProjectId;
         int? resolvedPlotId = dto.PlotId;
@@ -114,7 +142,7 @@ public class JaminSiteVisitService : IJaminSiteVisitService
             PlotId = resolvedPlotId,
             CustomerName = dto.CustomerName.Trim(),
             CustomerPhone = dto.CustomerPhone.Trim(),
-            ContactType = dto.ContactType ?? "lead",
+            ContactType = dto.CustomerId.HasValue ? "customer" : dto.LeadId.HasValue ? "lead" : null,
             ProjectName = projectName,
             PlotNumber = plotNumber,
             ScheduledAt = dto.ScheduledAt,
@@ -205,13 +233,57 @@ public class JaminSiteVisitService : IJaminSiteVisitService
         }
 
         if (!string.IsNullOrWhiteSpace(dto.ScheduledAt)) visit.ScheduledAt = dto.ScheduledAt.Trim();
-        if (dto.ProjectId.HasValue) visit.ProjectId = dto.ProjectId;
-        if (dto.PlotId.HasValue) visit.PlotId = dto.PlotId;
+        if (dto.ProjectId.HasValue && !await _context.JaminProjects.AnyAsync(
+                p => p.Id == dto.ProjectId.Value && p.CompanyId == JaminTenantId, ct))
+            return ApiResponse<JaminSiteVisitDto>.FailureResult("Selected project was not found in Jamin.");
+        if (dto.PlotId.HasValue)
+        {
+            var plot = await _context.JaminPlots.FirstOrDefaultAsync(
+                p => p.Id == dto.PlotId.Value && p.CompanyId == JaminTenantId, ct);
+            if (plot == null || (dto.ProjectId.HasValue && plot.ProjectId != dto.ProjectId.Value))
+                return ApiResponse<JaminSiteVisitDto>.FailureResult("Selected plot does not belong to the selected project.");
+            visit.ProjectId = dto.ProjectId ?? plot.ProjectId;
+            visit.PlotId = plot.Id;
+        }
+        else if (dto.ProjectId.HasValue) visit.ProjectId = dto.ProjectId.Value;
         if (!string.IsNullOrWhiteSpace(dto.ProjectName)) visit.ProjectName = dto.ProjectName.Trim();
         if (dto.PlotNumber != null) visit.PlotNumber = dto.PlotNumber.Trim();
-        if (dto.AssignedAgentId.HasValue) visit.AssignedAgentId = dto.AssignedAgentId;
+        if (dto.AssignedAgentId.HasValue)
+        {
+            if (!await _context.Users.AnyAsync(u => u.Id == dto.AssignedAgentId.Value && u.CompanyId == JaminTenantId, ct))
+                return ApiResponse<JaminSiteVisitDto>.FailureResult("Selected host does not belong to Jamin.");
+            visit.AssignedAgentId = dto.AssignedAgentId.Value;
+        }
         if (!string.IsNullOrWhiteSpace(dto.AssignedAgentName)) visit.AssignedAgentName = dto.AssignedAgentName.Trim();
-        if (!string.IsNullOrWhiteSpace(dto.Status)) visit.Status = SiteVisitStatuses.First(s => string.Equals(s, dto.Status.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (dto.LeadId.HasValue || dto.CustomerId.HasValue)
+        {
+            if (dto.LeadId.HasValue && dto.CustomerId.HasValue)
+                return ApiResponse<JaminSiteVisitDto>.FailureResult("A site visit can be linked to either a lead or a customer, not both.");
+            if (dto.LeadId is <= 0 || dto.CustomerId is <= 0)
+                return ApiResponse<JaminSiteVisitDto>.FailureResult("Contact IDs must be positive.");
+
+            if (dto.LeadId.HasValue)
+            {
+                var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == dto.LeadId.Value && l.CompanyId == JaminTenantId, ct);
+                if (lead == null) return ApiResponse<JaminSiteVisitDto>.FailureResult("Selected lead was not found in Jamin.");
+                visit.LeadId = lead.Id;
+                visit.CustomerId = null;
+                visit.CustomerName = lead.Name;
+                visit.CustomerPhone = lead.Phone;
+                visit.ContactType = "lead";
+            }
+            else
+            {
+                var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == dto.CustomerId!.Value && c.CompanyId == JaminTenantId, ct);
+                if (customer == null) return ApiResponse<JaminSiteVisitDto>.FailureResult("Selected customer was not found in Jamin.");
+                visit.CustomerId = customer.Id;
+                visit.LeadId = null;
+                visit.CustomerName = customer.Name;
+                visit.CustomerPhone = customer.Phone;
+                visit.ContactType = "customer";
+            }
+        }
+
         if (dto.VisitorNote != null) visit.VisitorNote = dto.VisitorNote.Trim();
         if (dto.OutcomeNotes != null) visit.OutcomeNotes = dto.OutcomeNotes.Trim();
         visit.UpdatedAt = DateTime.UtcNow;
@@ -224,6 +296,16 @@ public class JaminSiteVisitService : IJaminSiteVisitService
     {
         var visits = await _context.SiteVisits
             .Where(s => s.TenantId == JaminTenantId && s.LeadId == leadId)
+            .OrderByDescending(s => s.CreatedAt)
+            .ToListAsync(ct);
+
+        return ApiResponse<List<JaminSiteVisitDto>>.SuccessResult(visits.Select(MapToDto).ToList());
+    }
+
+    public async Task<ApiResponse<List<JaminSiteVisitDto>>> GetCustomerSiteVisitsAsync(int customerId, CancellationToken ct = default)
+    {
+        var visits = await _context.SiteVisits
+            .Where(s => s.TenantId == JaminTenantId && s.CustomerId == customerId)
             .OrderByDescending(s => s.CreatedAt)
             .ToListAsync(ct);
 

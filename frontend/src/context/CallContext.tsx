@@ -265,9 +265,16 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     reason?: string
   ) => {
     if (lastCallRecord && tenant && user) {
+      const isCustomer = lastCallRecord.matchedRecord?.type === 'customer';
+      const isLead = lastCallRecord.matchedRecord?.type === 'lead';
+      const targetCustomerId = isCustomer ? lastCallRecord.matchedRecord?.id : undefined;
+      const targetLeadId = isLead ? lastCallRecord.matchedRecord?.id : undefined;
+
       const callRecord: CallRecord = {
         id: lastCallRecord.id,
         companyId: tenant.id,
+        customerId: targetCustomerId,
+        leadId: targetLeadId,
         contactName: lastCallRecord.contactName,
         contactPhone: lastCallRecord.contactPhone,
         direction: lastCallRecord.direction,
@@ -391,21 +398,47 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const followupScheduledAt = scheduleFollowup?.scheduledAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         const followupPriority = scheduleFollowup?.priority || 'High';
         const followupNotes = scheduleFollowup?.notes || (notes ? `Follow-up required: ${notes}` : `Follow-up required from call with ${lastCallRecord.contactName}`);
+        const isJaminTenant = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2';
+        if (!lastCallRecord.sourceFollowupId) {
+          const isCust = lastCallRecord.matchedRecord?.type === 'customer';
+          const targetCustId = isCust ? (lastCallRecord.matchedRecord?.id ? String(lastCallRecord.matchedRecord.id).replace(/\D/g, '') : undefined) : undefined;
+          const targetLeadIdNum = !isCust ? (matchedLead?.id ? String(matchedLead.id).replace(/\D/g, '') : (lastCallRecord.matchedRecord?.id ? String(lastCallRecord.matchedRecord.id).replace(/\D/g, '') : undefined)) : undefined;
 
-        apiSaveFollowup({
-          id: `flw-${Date.now()}`,
-          companyId: tenant.id,
-          contactId: matchedLead?.id || lastCallRecord.matchedRecord?.id || `contact-${Date.now()}`,
-          contactName: lastCallRecord.contactName,
-          contactPhone: lastCallRecord.contactPhone,
-          contactType: 'lead',
-          scheduledAt: followupScheduledAt,
-          priority: followupPriority,
-          status: 'Pending',
-          notes: followupNotes,
-          assignedAgentId: matchedLead?.assignedAgentId || user.id,
-          assignedAgentName: matchedLead?.assignedAgentName || user.name,
-        }).catch(console.error);
+          const followupPayload: Followup = {
+            id: `flw-${Date.now()}`,
+            companyId: tenant.id,
+            contactId: isCust
+              ? (lastCallRecord.matchedRecord?.id || `customer-${Date.now()}`)
+              : (matchedLead?.id || lastCallRecord.matchedRecord?.id || `contact-${Date.now()}`),
+            contactName: lastCallRecord.contactName,
+            contactPhone: lastCallRecord.contactPhone,
+            contactType: isCust ? 'customer' : 'lead',
+            leadId: targetLeadIdNum,
+            customerId: targetCustId,
+            scheduledAt: followupScheduledAt,
+            priority: followupPriority,
+            status: 'Pending',
+            notes: followupNotes,
+            assignedAgentId: matchedLead?.assignedAgentId || user.id,
+            assignedAgentName: matchedLead?.assignedAgentName || user.name,
+          };
+          if (isJaminTenant) {
+            await jaminApiService.scheduleFollowup({
+              contactId: followupPayload.contactId,
+              contactType: followupPayload.contactType,
+              leadId: targetLeadIdNum,
+              customerId: targetCustId,
+              contactName: followupPayload.contactName,
+              contactPhone: followupPayload.contactPhone,
+              scheduledAt: followupPayload.scheduledAt,
+              priority: followupPayload.priority,
+              notes: followupPayload.notes,
+              assignedAgentId: String(followupPayload.assignedAgentId || user.id),
+            });
+          } else {
+            apiSaveFollowup(followupPayload).catch(console.error);
+          }
+        }
 
         if (matchedLead) {
           matchedLead.status = 'Follow-up Required';

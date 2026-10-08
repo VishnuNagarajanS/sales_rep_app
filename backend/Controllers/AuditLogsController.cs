@@ -30,6 +30,8 @@ public class AuditLogsController : ControllerBase
         [FromQuery] string? action,
         [FromQuery] string? module,
         [FromQuery] string? search,
+        [FromQuery] int? leadId,
+        [FromQuery] int? customerId,
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] int page = 1,
@@ -51,6 +53,18 @@ public class AuditLogsController : ControllerBase
         else if (companyId.HasValue && companyId.Value > 0)
         {
             query = query.Where(l => l.CompanyId == companyId.Value);
+        }
+
+        if (leadId.HasValue && leadId.Value > 0)
+        {
+            var lidStr = leadId.Value.ToString();
+            query = query.Where(l => l.LeadId == leadId.Value || (l.EntityType.ToLower() == "lead" && l.EntityId == lidStr));
+        }
+
+        if (customerId.HasValue && customerId.Value > 0)
+        {
+            var cidStr = customerId.Value.ToString();
+            query = query.Where(l => l.CustomerId == customerId.Value || (l.EntityType.ToLower() == "customer" && l.EntityId == cidStr));
         }
 
         if (!string.IsNullOrWhiteSpace(entityType))
@@ -96,6 +110,8 @@ public class AuditLogsController : ControllerBase
                 Action = l.Action,
                 EntityType = l.EntityType,
                 EntityId = l.EntityId,
+                LeadId = l.LeadId,
+                CustomerId = l.CustomerId,
                 Details = l.Details,
                 IpAddress = l.IpAddress,
                 Module = l.Module,
@@ -120,6 +136,22 @@ public class AuditLogsController : ControllerBase
     {
         var companyId = _currentUser.CompanyId;
 
+        int? leadId = request.LeadId;
+        int? customerId = request.CustomerId;
+
+        if (!leadId.HasValue && string.Equals(request.EntityType, "Lead", StringComparison.OrdinalIgnoreCase) && int.TryParse(request.EntityId, out var parsedLid))
+            leadId = parsedLid;
+
+        if (!customerId.HasValue && string.Equals(request.EntityType, "Customer", StringComparison.OrdinalIgnoreCase) && int.TryParse(request.EntityId, out var parsedCid))
+            customerId = parsedCid;
+
+        if (leadId.HasValue && !await _db.Leads.AnyAsync(l => l.Id == leadId.Value &&
+                (!companyId.HasValue || l.CompanyId == companyId.Value), ct))
+            return BadRequest(ApiResponse<AuditLogResponseDto>.FailureResult("Selected lead was not found in the current company."));
+        if (customerId.HasValue && !await _db.Customers.AnyAsync(c => c.Id == customerId.Value &&
+                (!companyId.HasValue || c.CompanyId == companyId.Value), ct))
+            return BadRequest(ApiResponse<AuditLogResponseDto>.FailureResult("Selected customer was not found in the current company."));
+
         var log = new AuditLog
         {
             CompanyId = companyId,
@@ -129,6 +161,8 @@ public class AuditLogsController : ControllerBase
             Action = request.Action,
             EntityType = request.EntityType,
             EntityId = request.EntityId,
+            LeadId = leadId,
+            CustomerId = customerId,
             Details = request.Details,
             Module = request.Module,
             Status = request.Status ?? "success",
@@ -148,6 +182,8 @@ public class AuditLogsController : ControllerBase
             Action = log.Action,
             EntityType = log.EntityType,
             EntityId = log.EntityId,
+            LeadId = log.LeadId,
+            CustomerId = log.CustomerId,
             Details = log.Details,
             Module = log.Module,
             Status = log.Status,

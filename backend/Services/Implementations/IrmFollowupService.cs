@@ -30,24 +30,25 @@ public class IrmFollowupService : IIrmFollowupService
     {
         var user = await _userRepo.GetByIdAsync(assignedToId, ct);
 
-        string? investorName = null;
-        if (dto.InvestorId.HasValue)
-        {
-            var investor = await _investorRepo.GetByIdAsync(dto.InvestorId.Value, companyId, ct);
-            investorName = investor?.Name;
-        }
+        if (!dto.InvestorId.HasValue)
+            return ApiResponse<FollowupDto>.ErrorResponse("Select an investor before scheduling an IRM follow-up.");
+
+        var investor = await _investorRepo.GetByIdAsync(dto.InvestorId.Value, companyId, ct);
+        if (investor == null)
+            return ApiResponse<FollowupDto>.ErrorResponse("Investor not found in this company.");
 
         var followup = new Followup
         {
             CompanyId = companyId,
             InvestorId = dto.InvestorId,
-            InvestorName = investorName,
+            InvestorName = investor.Name,
             AssignedToId = assignedToId,
             AssignedToName = user?.Name ?? string.Empty,
             AssignedToRole = assignedToRole,
             ContactName = dto.ContactName,
             ContactPhone = dto.ContactPhone,
-            ContactId = dto.ContactId ?? string.Empty,
+            ContactId = investor.Id.ToString(),
+            ContactType = "investor",
             ScheduledAt = dto.ScheduledAt,
             Status = FollowupStatus.Pending,
             Agenda = dto.Agenda,

@@ -43,7 +43,10 @@ public class LeadService : ILeadService
 
         var query = _context.Leads.AsNoTracking().Include(l => l.AssignedAgent).AsQueryable();
 
-        if (role == "super_admin")
+        var isSuperAdmin = string.Equals(role, "super_admin", StringComparison.OrdinalIgnoreCase);
+        var isSalesExecutive = string.Equals(role, "sales_executive", StringComparison.OrdinalIgnoreCase);
+
+        if (isSuperAdmin)
         {
             var targetCompanyId = requestedCompanyId ?? companyId;
             if (targetCompanyId.HasValue)
@@ -51,16 +54,14 @@ public class LeadService : ILeadService
             return query;
         }
 
-        var effectiveCompanyId = companyId ?? requestedCompanyId;
-        if (effectiveCompanyId.HasValue)
-        {
-            query = query.Where(l => l.CompanyId == effectiveCompanyId.Value);
-        }
+        // Never let a query parameter supply tenant scope for an authenticated user.
+        if (!companyId.HasValue)
+            return query.Where(_ => false);
 
-        if (role == "sales_executive" && agentId.HasValue)
-        {
-            query = query.Where(l => l.AssignedAgentId == agentId.Value);
-        }
+        query = query.Where(l => l.CompanyId == companyId.Value);
+
+        if (isSalesExecutive)
+            query = agentId.HasValue ? query.Where(l => l.AssignedAgentId == agentId.Value) : query.Where(_ => false);
 
         return query;
     }
@@ -73,18 +74,19 @@ public class LeadService : ILeadService
 
         var query = _context.Leads.Include(l => l.AssignedAgent).Where(l => l.Id == id);
 
-        if (role == "super_admin")
+        if (string.Equals(role, "super_admin", StringComparison.OrdinalIgnoreCase))
         {
             return await query.FirstOrDefaultAsync(ct);
         }
 
-        if (companyId.HasValue)
-        {
-            query = query.Where(l => l.CompanyId == companyId.Value);
-        }
+        if (!companyId.HasValue)
+            return null;
 
-        if (role == "sales_executive" && agentId.HasValue)
+        query = query.Where(l => l.CompanyId == companyId.Value);
+
+        if (string.Equals(role, "sales_executive", StringComparison.OrdinalIgnoreCase))
         {
+            if (!agentId.HasValue) return null;
             query = query.Where(l => l.AssignedAgentId == agentId.Value);
         }
 
@@ -164,8 +166,21 @@ public class LeadService : ILeadService
     public async Task<ApiResponse<LeadResponseDto>> CreateLeadAsync(CreateLeadDto dto, CancellationToken ct = default)
     {
         // Unassigned leads should stay null and never default to admin
-        var agentId = dto.AssignedAgentId;
-        var companyId = dto.CompanyId ?? _currentUser.CompanyId ?? 1;
+        var isSuperAdmin = string.Equals(_currentUser.Role, "super_admin", StringComparison.OrdinalIgnoreCase);
+        var isSalesExecutive = string.Equals(_currentUser.Role, "sales_executive", StringComparison.OrdinalIgnoreCase);
+        var companyId = isSuperAdmin
+            ? dto.CompanyId ?? _currentUser.CompanyId
+            : _currentUser.CompanyId;
+        if (!companyId.HasValue)
+            return ApiResponse<LeadResponseDto>.FailureResult("The authenticated user is not assigned to a company.");
+
+        var agentId = isSalesExecutive ? _currentUser.UserId : dto.AssignedAgentId;
+        if (isSalesExecutive && !agentId.HasValue)
+            return ApiResponse<LeadResponseDto>.FailureResult("The authenticated sales agent could not be identified.");
+
+        if (agentId.HasValue && !await _context.Users.AnyAsync(
+                u => u.Id == agentId.Value && u.CompanyId == companyId.Value, ct))
+            return ApiResponse<LeadResponseDto>.FailureResult("The selected agent or manager does not belong to this company.");
 
         // Build Custom Fields Dictionary for GHL
         var customFields = dto.AdditionalCustomFields ?? new Dictionary<string, string>();
@@ -176,7 +191,7 @@ public class LeadService : ILeadService
 
         var lead = new Lead
         {
-            CompanyId = companyId,
+            CompanyId = companyId.Value,
             AssignedAgentId = agentId,
             Name = dto.Name.Trim(),
             Phone = dto.Phone.Trim(),
@@ -220,7 +235,18 @@ public class LeadService : ILeadService
         if (dto.BudgetRange != null) lead.BudgetRange = dto.BudgetRange.Trim();
         if (dto.ReadyToRegister != null) lead.ReadyToRegister = dto.ReadyToRegister.Trim();
         if (dto.NextFollowupDate.HasValue) lead.NextFollowupDate = dto.NextFollowupDate.Value;
-        if (dto.AssignedAgentId.HasValue) lead.AssignedAgentId = dto.AssignedAgentId.Value;
+        if (dto.AssignedAgentId.HasValue)
+        {
+            if (string.Equals(_currentUser.Role, "sales_executive", StringComparison.OrdinalIgnoreCase) &&
+                dto.AssignedAgentId.Value != _currentUser.UserId)
+                return ApiResponse<LeadResponseDto>.FailureResult("Sales agents cannot reassign leads.");
+
+            var belongsToCompany = await _context.Users.AnyAsync(
+                u => u.Id == dto.AssignedAgentId.Value && u.CompanyId == lead.CompanyId, ct);
+            if (!belongsToCompany)
+                return ApiResponse<LeadResponseDto>.FailureResult("The selected agent or manager does not belong to this company.");
+            lead.AssignedAgentId = dto.AssignedAgentId.Value;
+        }
 
         // Merge custom fields
         var customFields = DeserializeCustomFields(lead.CustomFieldsJson);
@@ -249,56 +275,109 @@ public class LeadService : ILeadService
         if (lead == null)
             return ApiResponse<object>.FailureResult("Lead not found or access denied.");
 
-        await using var transaction = await _context.Database.BeginTransactionAsync(ct);
-        var agentId = lead.AssignedAgentId;
-        var companyId = lead.CompanyId;
-
-        // Check if customer already exists with this phone
-        var customer = await _context.Customers
-            .FirstOrDefaultAsync(c => c.Phone == lead.Phone && c.CompanyId == companyId, ct);
-
-        if (customer == null)
+        Customer? customer = null;
+        var strategy = _context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
         {
-            customer = new Customer
+            await using var transaction = await _context.Database.BeginTransactionAsync(ct);
+            var agentId = lead.AssignedAgentId;
+            var companyId = lead.CompanyId;
+
+            // Check if customer already exists with this phone
+            customer = await _context.Customers
+                .FirstOrDefaultAsync(c => c.Phone == lead.Phone && c.CompanyId == companyId, ct);
+
+            if (customer == null)
             {
-                CompanyId = companyId,
-                AssignedAgentId = lead.AssignedAgentId,
-                Name = lead.Name,
-                Phone = lead.Phone,
-                Email = lead.Email,
-                Location = lead.Location,
-                Status = "Active",
-                TotalValue = dto.DealValue ?? 0,
-                Notes = dto.Notes ?? lead.Notes,
-                CustomFieldsJson = lead.CustomFieldsJson,
-                LastContactedAt = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow
-            };
-            _context.Customers.Add(customer);
-        }
-        else
-        {
-            if (string.IsNullOrWhiteSpace(customer.Name)) customer.Name = lead.Name;
-            if (string.IsNullOrWhiteSpace(customer.Email)) customer.Email = lead.Email;
-            if (string.IsNullOrWhiteSpace(customer.Location)) customer.Location = lead.Location;
-            if (string.IsNullOrWhiteSpace(customer.Notes)) customer.Notes = dto.Notes ?? lead.Notes;
-            if (customer.AssignedAgentId == null) customer.AssignedAgentId = lead.AssignedAgentId;
-            customer.LastContactedAt = DateTime.UtcNow;
-            if (dto.DealValue.HasValue)
-            {
-                customer.TotalValue += dto.DealValue.Value;
+                customer = new Customer
+                {
+                    CompanyId = companyId,
+                    AssignedAgentId = lead.AssignedAgentId,
+                    Name = lead.Name,
+                    Phone = lead.Phone,
+                    Email = lead.Email,
+                    Location = lead.Location,
+                    Status = "Active",
+                    TotalValue = dto.DealValue ?? 0,
+                    Notes = dto.Notes ?? lead.Notes,
+                    CustomFieldsJson = lead.CustomFieldsJson,
+                    LastContactedAt = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow
+                };
+                _context.Customers.Add(customer);
+                await _context.SaveChangesAsync(ct);
             }
-        }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(customer.Name)) customer.Name = lead.Name;
+                if (string.IsNullOrWhiteSpace(customer.Email)) customer.Email = lead.Email;
+                if (string.IsNullOrWhiteSpace(customer.Location)) customer.Location = lead.Location;
+                if (string.IsNullOrWhiteSpace(customer.Notes)) customer.Notes = dto.Notes ?? lead.Notes;
+                if (customer.AssignedAgentId == null) customer.AssignedAgentId = lead.AssignedAgentId;
+                customer.LastContactedAt = DateTime.UtcNow;
+                if (dto.DealValue.HasValue)
+                {
+                    customer.TotalValue += dto.DealValue.Value;
+                }
+            }
 
-        lead.Status = "Converted";
-        lead.UpdatedAt = DateTime.UtcNow;
+            lead.Status = "Converted";
+            lead.UpdatedAt = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync(ct);
-    await transaction.CommitAsync(ct);
+            // Link existing call records for this lead to the customer
+            var leadCalls = await _context.CallRecords
+                .Where(c => c.LeadId == lead.Id && c.CompanyId == companyId)
+                .ToListAsync(ct);
+            foreach (var call in leadCalls)
+            {
+                call.CustomerId = customer.Id;
+            }
+
+            // Link existing followups for this lead to the customer
+            var leadFollowups = await _context.Followups
+                .Where(f => (f.ContactId == lead.Id.ToString() || f.LeadId == lead.Id) && f.CompanyId == companyId)
+                .ToListAsync(ct);
+            foreach (var fu in leadFollowups)
+            {
+                fu.CustomerId = customer.Id;
+                fu.ContactType = "customer";
+                fu.ContactId = customer.Id.ToString();
+            }
+
+            var leadSiteVisits = await _context.SiteVisits
+                .Where(s => s.LeadId == lead.Id && s.TenantId == companyId)
+                .ToListAsync(ct);
+            foreach (var visit in leadSiteVisits)
+            {
+                visit.CustomerId = customer.Id;
+                visit.ContactType = "customer";
+            }
+
+            var leadBookings = await _context.JaminBookings
+                .Where(b => b.LeadId == lead.Id && b.CompanyId == companyId)
+                .ToListAsync(ct);
+            foreach (var booking in leadBookings)
+                booking.CustomerId = customer.Id;
+
+            var leadNotifications = await _context.Notifications
+                .Where(n => n.LeadId == lead.Id && n.CompanyId == companyId)
+                .ToListAsync(ct);
+            foreach (var notification in leadNotifications)
+                notification.CustomerId = customer.Id;
+
+            var leadAuditLogs = await _context.AuditLogs
+                .Where(a => a.LeadId == lead.Id && a.CompanyId == companyId)
+                .ToListAsync(ct);
+            foreach (var auditLog in leadAuditLogs)
+                auditLog.CustomerId = customer.Id;
+
+            await _context.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        });
 
         return ApiResponse<object>.SuccessResult(new
         {
-            customerId = customer.Id,
+            customerId = customer?.Id ?? 0,
             leadId = lead.Id,
             status = "Converted"
         }, "Lead converted to Customer 360 successfully.");
@@ -369,6 +448,7 @@ public class LeadService : ILeadService
         {
             CompanyId = lead.CompanyId,
             AssignedAgentId = lead.AssignedAgentId,
+            LeadId = lead.Id,
             ContactId = lead.Id.ToString(),
             ContactType = "lead",
             ContactName = lead.Name,

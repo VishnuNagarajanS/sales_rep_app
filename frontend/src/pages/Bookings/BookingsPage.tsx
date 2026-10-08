@@ -254,11 +254,11 @@ export const BookingsPage: React.FC = () => {
         setNotes('');
         await loadData();
       } else {
-        alert('Failed to create booking on the backend. Please check plot status.');
+        alert('Unable to create the booking. Please check plot availability.');
       }
     } catch (err) {
       console.error('Booking submission error', err);
-      alert('Error creating booking on backend.');
+      alert('Unable to create the booking. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -315,7 +315,7 @@ export const BookingsPage: React.FC = () => {
       }
     } catch (err) {
       console.error('Error updating booking', err);
-      alert('Error updating booking on backend.');
+      alert('Unable to update the booking. Please try again.');
     } finally {
       setIsSubmittingManage(false);
     }
@@ -407,7 +407,7 @@ export const BookingsPage: React.FC = () => {
       header: 'Status & Remarks',
       sortable: true,
       render: b => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '150px', maxWidth: '240px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', minWidth: '150px', maxWidth: '240px', width: '100%', textAlign: 'center' }}>
           <StatusChip status={b.status || 'Token Paid'} size="sm" />
           {b.notes ? (
             <div style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)', fontStyle: 'italic', wordBreak: 'break-word', lineHeight: 1.35 }} title={b.notes}>
@@ -427,7 +427,7 @@ export const BookingsPage: React.FC = () => {
             <CheckCircle size={24} color="#059669" /> Plot Bookings & Contracts
           </h1>
           <p className="page-subtitle">
-            Live database bookings, token receipts, and registry contracts for {tenant?.name}.
+            Bookings, token receipts, and registration contracts for {tenant?.name}.
           </p>
         </div>
 
@@ -958,7 +958,7 @@ export const BookingsPage: React.FC = () => {
             </>
           )}
 
-          {manageMode === 'details' && (
+          {manageMode === 'details' && manageStatus !== 'Agreement Signed' && manageStatus !== 'Registration Completed' && (
             <div className="form-group">
               <label className="form-label">Booking Notes / Remarks</label>
               <textarea

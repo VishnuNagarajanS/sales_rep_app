@@ -21,11 +21,25 @@ public class CustomerService : ICustomerService
         _currentUser = currentUser;
     }
 
-    private IQueryable<Customer> GetScopedCustomersQuery()
+    private IQueryable<Customer> GetScopedCustomersQuery(string? tenantId = null)
     {
         var role = _currentUser.Role;
         var agentId = _currentUser.UserId;
         var companyId = _currentUser.CompanyId;
+
+        if (!string.IsNullOrWhiteSpace(tenantId))
+        {
+            var t = tenantId.Trim().ToLowerInvariant();
+            int? requestedCompanyId = null;
+            if (t == "ghl" || t == "1" || t == "t-ghl-01") requestedCompanyId = 1;
+            else if (t == "jamin" || t == "2" || t == "t-jamin-02") requestedCompanyId = 2;
+            else if (int.TryParse(t, out var parsed)) requestedCompanyId = parsed;
+
+            // Only super admins may switch tenant through a query parameter.
+            // Other roles remain scoped to the company in their authenticated claims.
+            if (role == "super_admin")
+                companyId = requestedCompanyId ?? companyId;
+        }
 
         var query = _context.Customers.AsNoTracking().Include(c => c.AssignedAgent).AsQueryable();
 
@@ -43,7 +57,8 @@ public class CustomerService : ICustomerService
 
         if (role == "sales_executive" && agentId.HasValue)
         {
-            query = query.Where(c => c.AssignedAgentId == agentId.Value);
+            // Sales Executives see their own assigned customers and available (unassigned) customers
+            query = query.Where(c => c.AssignedAgentId == agentId.Value || c.AssignedAgentId == null);
         }
 
         return query;
@@ -69,15 +84,15 @@ public class CustomerService : ICustomerService
 
         if (role == "sales_executive" && agentId.HasValue)
         {
-            query = query.Where(c => c.AssignedAgentId == agentId.Value);
+            query = query.Where(c => c.AssignedAgentId == agentId.Value || c.AssignedAgentId == null);
         }
 
         return await query.FirstOrDefaultAsync(ct);
     }
 
-    public async Task<ApiResponse<PagedResult<CustomerResponseDto>>> GetCustomersAsync(string? status, string? search, int page = 1, int pageSize = 10, CancellationToken ct = default)
+    public async Task<ApiResponse<PagedResult<CustomerResponseDto>>> GetCustomersAsync(string? status, string? search, int page = 1, int pageSize = 10, string? tenantId = null, CancellationToken ct = default)
     {
-        var query = GetScopedCustomersQuery();
+        var query = GetScopedCustomersQuery(tenantId);
 
         if (!string.IsNullOrWhiteSpace(status) && !status.Equals("all", StringComparison.OrdinalIgnoreCase))
         {
@@ -143,7 +158,7 @@ public class CustomerService : ICustomerService
             .AsNoTracking()
             .Include(f => f.AssignedAgent)
             .Where(f => f.CompanyId == customer.CompanyId &&
-                         ((f.ContactId == customerIdStr && f.ContactType == "customer") || f.ContactPhone == customer.Phone))
+                         (f.CustomerId == customer.Id || (f.ContactId == customerIdStr && f.ContactType == "customer") || f.ContactPhone == customer.Phone))
             .OrderByDescending(f => f.ScheduledAt)
             .Take(50)
             .Select(f => new FollowupResponseDto
@@ -154,6 +169,9 @@ public class CustomerService : ICustomerService
                 AssignedAgentName = f.AssignedAgent != null ? f.AssignedAgent.Name : null,
                 ContactId = f.ContactId,
                 ContactType = f.ContactType,
+                LeadId = f.LeadId,
+                CustomerId = f.CustomerId,
+                InvestorId = f.InvestorId,
                 ContactName = f.ContactName,
                 ContactPhone = f.ContactPhone,
                 ScheduledAt = f.ScheduledAt,
@@ -166,11 +184,74 @@ public class CustomerService : ICustomerService
             })
             .ToListAsync(ct);
 
+        // 3. Fetch associated site visits
+        var siteVisits = await _context.SiteVisits
+            .AsNoTracking()
+            .Where(sv => (sv.TenantId == customer.CompanyId || sv.TenantId == 2) && (sv.CustomerId == customer.Id || sv.CustomerPhone == customer.Phone))
+            .OrderByDescending(sv => sv.CreatedAt)
+            .Take(50)
+            .Select(sv => new backend.DTOs.Jamin.JaminSiteVisitDto
+            {
+                Id = sv.Id,
+                TenantId = sv.TenantId,
+                LeadId = sv.LeadId,
+                CustomerId = sv.CustomerId,
+                ProjectId = sv.ProjectId,
+                PlotId = sv.PlotId,
+                CustomerName = sv.CustomerName,
+                CustomerPhone = sv.CustomerPhone,
+                ContactType = sv.ContactType,
+                ProjectName = sv.ProjectName,
+                PlotNumber = sv.PlotNumber,
+                ScheduledAt = sv.ScheduledAt,
+                AssignedAgentId = sv.AssignedAgentId,
+                AssignedAgentName = sv.AssignedAgentName,
+                Status = sv.Status,
+                VisitorNote = sv.VisitorNote,
+                OutcomeNotes = sv.OutcomeNotes,
+                CreatedAt = sv.CreatedAt
+            })
+            .ToListAsync(ct);
+
+        // 4. Fetch associated bookings
+        var bookings = await _context.JaminBookings
+            .AsNoTracking()
+            .Where(b => (b.CompanyId == customer.CompanyId || b.CompanyId == 2) && (b.CustomerId == customer.Id || b.CustomerPhone == customer.Phone))
+            .OrderByDescending(b => b.BookingDate)
+            .Take(50)
+            .Select(b => new backend.DTOs.Jamin.JaminBookingResponseDto
+            {
+                Id = b.Id,
+                CompanyId = b.CompanyId,
+                CustomerId = b.CustomerId,
+                LeadId = b.LeadId,
+                ProjectId = b.ProjectId,
+                PlotId = b.PlotId,
+                CustomerName = b.CustomerName,
+                CustomerPhone = b.CustomerPhone,
+                ProjectName = b.ProjectName,
+                PlotNumber = b.PlotNumber,
+                TotalPlotPrice = b.TotalPlotPrice,
+                TokenAmountPaid = b.TokenAmountPaid,
+                PaymentMode = b.PaymentMode,
+                PaymentTerms = b.PaymentTerms,
+                Status = b.Status,
+                BookingDate = b.BookingDate,
+                AssignedAgentId = b.AssignedAgentId,
+                AssignedAgentName = b.AssignedAgentName,
+                Notes = b.Notes,
+                CreatedAt = b.CreatedAt,
+                UpdatedAt = b.UpdatedAt
+            })
+            .ToListAsync(ct);
+
         var result = new Customer360Dto
         {
             Customer = MapToDto(customer),
             Calls = callRecords,
-            Followups = followups
+            Followups = followups,
+            SiteVisits = siteVisits,
+            Bookings = bookings
         };
 
         return ApiResponse<Customer360Dto>.SuccessResult(result, "Customer 360 profile loaded successfully.");
@@ -178,8 +259,17 @@ public class CustomerService : ICustomerService
 
     public async Task<ApiResponse<CustomerResponseDto>> CreateCustomerAsync(CreateCustomerDto dto, CancellationToken ct = default)
     {
-        var agentId = _currentUser.UserId ?? 1;
-        var companyId = _currentUser.CompanyId ?? 1;
+        var isSuperAdmin = string.Equals(_currentUser.Role, "super_admin", StringComparison.OrdinalIgnoreCase);
+        var companyId = isSuperAdmin
+            ? dto.CompanyId ?? _currentUser.CompanyId ?? 1
+            : _currentUser.CompanyId ?? 1;
+        var isSalesExecutive = string.Equals(_currentUser.Role, "sales_executive", StringComparison.OrdinalIgnoreCase);
+        var agentId = isSalesExecutive
+            ? _currentUser.UserId
+            : dto.ClearAssignedAgent ? null : dto.AssignedAgentId ?? _currentUser.UserId;
+
+        if (agentId.HasValue && !await _context.Users.AnyAsync(u => u.Id == agentId.Value && u.CompanyId == companyId, ct))
+            return ApiResponse<CustomerResponseDto>.FailureResult("The selected executive does not belong to this company.");
 
         var customer = new Customer
         {
@@ -210,6 +300,11 @@ public class CustomerService : ICustomerService
         if (customer == null)
             return ApiResponse<CustomerResponseDto>.FailureResult("Customer not found or access denied.");
 
+        if (string.Equals(_currentUser.Role, "sales_executive", StringComparison.OrdinalIgnoreCase) &&
+            ((dto.ClearAssignedAgent && customer.AssignedAgentId.HasValue) ||
+             (dto.AssignedAgentId.HasValue && dto.AssignedAgentId != customer.AssignedAgentId)))
+            return ApiResponse<CustomerResponseDto>.FailureResult("Sales executives cannot reassign customers.");
+
         if (dto.Name != null) customer.Name = dto.Name.Trim();
         if (dto.Phone != null) customer.Phone = dto.Phone.Trim();
         if (dto.Email != null) customer.Email = dto.Email.Trim();
@@ -217,6 +312,19 @@ public class CustomerService : ICustomerService
         if (dto.Status != null) customer.Status = dto.Status.Trim();
         if (dto.TotalValue.HasValue) customer.TotalValue = dto.TotalValue.Value;
         if (dto.Notes != null) customer.Notes = dto.Notes.Trim();
+
+        if (dto.ClearAssignedAgent)
+        {
+            customer.AssignedAgentId = null;
+        }
+        else if (dto.AssignedAgentId.HasValue)
+        {
+            var validAgent = await _context.Users.AnyAsync(
+                u => u.Id == dto.AssignedAgentId.Value && u.CompanyId == customer.CompanyId, ct);
+            if (!validAgent)
+                return ApiResponse<CustomerResponseDto>.FailureResult("The selected executive does not belong to this company.");
+            customer.AssignedAgentId = dto.AssignedAgentId.Value;
+        }
 
         if (dto.CustomFields != null)
         {
@@ -231,6 +339,8 @@ public class CustomerService : ICustomerService
         customer.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(ct);
+        _context.Entry(customer).Reference(c => c.AssignedAgent).IsLoaded = false;
+        await _context.Entry(customer).Reference(c => c.AssignedAgent).LoadAsync(ct);
 
         return ApiResponse<CustomerResponseDto>.SuccessResult(MapToDto(customer), "Customer updated successfully.");
     }

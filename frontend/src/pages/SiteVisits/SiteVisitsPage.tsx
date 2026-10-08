@@ -78,7 +78,7 @@ export const SiteVisitsPage: React.FC = () => {
         jaminApiService.getPlots().catch(() => []),
         jaminApiService.getAgents().catch(() => []),
         jaminApiService.getLeads(true).catch(() => storageService.getLeads(tenantId)),
-        getCustomers(tenantId).catch(() => storageService.getCustomers(tenantId)),
+        getCustomers(tenantId).catch(() => []),
       ]);
 
       const localVisits = storageService.getSiteVisits(tenantId) || [];
@@ -93,9 +93,8 @@ export const SiteVisitsPage: React.FC = () => {
 
       const normPhone = (p?: string) => (p || '').replace(/\D/g, '').slice(-10);
 
-      // 1. Deduplicate Customers by phone and name
-      const localCustomers = storageService.getCustomers(tenantId) || [];
-      const combinedCustomers = [...(custList || []), ...(localCustomers || [])];
+      // 1. Deduplicate Customers by phone and name strictly from DB API
+      const combinedCustomers = (custList || []) as Customer[];
       const seenCustomerPhones = new Set<string>();
       const seenCustomerNames = new Set<string>();
       const dedupedCustomers: Customer[] = [];

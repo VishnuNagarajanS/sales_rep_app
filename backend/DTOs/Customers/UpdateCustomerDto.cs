@@ -9,5 +9,7 @@ public class UpdateCustomerDto
     public string? Status { get; set; }
     public decimal? TotalValue { get; set; }
     public string? Notes { get; set; }
+    public int? AssignedAgentId { get; set; }
+    public bool ClearAssignedAgent { get; set; }
     public Dictionary<string, string>? CustomFields { get; set; }
 }

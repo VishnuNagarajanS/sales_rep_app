@@ -228,7 +228,7 @@ namespace backend.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<int>("AssignedAgentId")
+                    b.Property<int?>("AssignedAgentId")
                         .HasColumnType("integer");
 
                     b.Property<int>("CompanyId")
@@ -289,6 +289,8 @@ namespace backend.Migrations
                     b.HasIndex("AssignedAgentId");
 
                     b.HasIndex("CompanyId");
+
+                    b.Navigation("Followups");
 
                     b.ToTable("customers", (string)null);
                 });
@@ -403,6 +405,12 @@ namespace backend.Migrations
                     b.Property<int?>("InvestorId")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("LeadId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("CustomerId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("InvestorName")
                         .HasColumnType("text");
 
@@ -441,6 +449,10 @@ namespace backend.Migrations
                     b.HasIndex("AssignedAgentId");
 
                     b.HasIndex("CompanyId");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("LeadId");
 
                     b.HasIndex("InvestorId");
 
@@ -1303,6 +1315,8 @@ namespace backend.Migrations
 
                     b.HasIndex("CompanyId");
 
+                    b.Navigation("Followups");
+
                     b.ToTable("leads", (string)null);
                 });
 
@@ -1838,11 +1852,25 @@ namespace backend.Migrations
                         .HasForeignKey("InvestorId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("backend.Models.Entities.Customer", "Customer")
+                        .WithMany("Followups")
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("backend.Models.Entities.Lead", "Lead")
+                        .WithMany("Followups")
+                        .HasForeignKey("LeadId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("AssignedAgent");
 
                     b.Navigation("Company");
 
+                    b.Navigation("Customer");
+
                     b.Navigation("Investor");
+
+                    b.Navigation("Lead");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.GhlDeal", b =>

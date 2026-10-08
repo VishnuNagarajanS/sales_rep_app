@@ -31,11 +31,12 @@ public class SalesExecutiveCustomersController : ControllerBase
     public async Task<ActionResult<ApiResponse<PagedResult<CustomerResponseDto>>>> GetCustomers(
         [FromQuery] string? status,
         [FromQuery] string? search,
+        [FromQuery] string? tenantId,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 10,
         CancellationToken ct = default)
     {
-        var result = await _customerService.GetCustomersAsync(status, search, page, pageSize, ct);
+        var result = await _customerService.GetCustomersAsync(status, search, page, pageSize, tenantId, ct);
         if (!result.Success)
             return BadRequest(result);
 

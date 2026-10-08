@@ -17,7 +17,7 @@ public class JaminBookingService : IJaminBookingService
         _context = context;
     }
 
-    public async Task<ApiResponse<List<JaminBookingResponseDto>>> GetBookingsAsync(int? projectId = null, string? status = null, int? agentId = null, CancellationToken ct = default)
+    public async Task<ApiResponse<List<JaminBookingResponseDto>>> GetBookingsAsync(int? projectId = null, string? status = null, int? agentId = null, int? leadId = null, int? customerId = null, CancellationToken ct = default)
     {
         var query = _context.JaminBookings.Where(b => b.CompanyId == JaminTenantId);
 
@@ -34,6 +34,16 @@ public class JaminBookingService : IJaminBookingService
         if (agentId.HasValue && agentId.Value > 0)
         {
             query = query.Where(b => b.AssignedAgentId == agentId.Value);
+        }
+
+        if (leadId.HasValue && leadId.Value > 0)
+        {
+            query = query.Where(b => b.LeadId == leadId.Value);
+        }
+
+        if (customerId.HasValue && customerId.Value > 0)
+        {
+            query = query.Where(b => b.CustomerId == customerId.Value);
         }
 
         var bookings = await query.OrderByDescending(b => b.CreatedAt).ToListAsync(ct);
@@ -55,6 +65,9 @@ public class JaminBookingService : IJaminBookingService
 
     public async Task<ApiResponse<JaminBookingResponseDto>> CreateBookingAsync(CreateJaminBookingDto dto, CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(dto.CustomerName) || string.IsNullOrWhiteSpace(dto.CustomerPhone))
+            return ApiResponse<JaminBookingResponseDto>.FailureResult("Buyer name and phone are required.");
+
         string projectName = dto.ProjectName ?? string.Empty;
         string plotNumber = dto.PlotNumber ?? string.Empty;
 
@@ -63,24 +76,24 @@ public class JaminBookingService : IJaminBookingService
         {
             var project = await _context.JaminProjects
                 .FirstOrDefaultAsync(p => p.Id == dto.ProjectId.Value && p.CompanyId == JaminTenantId, ct);
-            if (project != null && string.IsNullOrEmpty(projectName))
-            {
-                projectName = project.Name;
-            }
+            if (project == null) return ApiResponse<JaminBookingResponseDto>.FailureResult("Selected project was not found.");
+            if (string.IsNullOrEmpty(projectName)) projectName = project.Name;
         }
+        else return ApiResponse<JaminBookingResponseDto>.FailureResult("Select a project for this booking.");
 
         // Resolve Plot details and update Plot status
         if (dto.PlotId.HasValue && dto.PlotId.Value > 0)
         {
             var plot = await _context.JaminPlots
                 .FirstOrDefaultAsync(p => p.Id == dto.PlotId.Value && p.CompanyId == JaminTenantId, ct);
-            if (plot != null)
-            {
-                if (string.IsNullOrEmpty(plotNumber)) plotNumber = plot.PlotNumber;
-                plot.Status = "Booked";
-                plot.UpdatedAt = DateTime.UtcNow;
-            }
+            if (plot == null) return ApiResponse<JaminBookingResponseDto>.FailureResult("Selected plot was not found.");
+            if (plot.ProjectId != dto.ProjectId) return ApiResponse<JaminBookingResponseDto>.FailureResult("Selected plot does not belong to the selected project.");
+            if (plot.Status is not ("Available" or "Hold")) return ApiResponse<JaminBookingResponseDto>.FailureResult("Selected plot is not available for booking.");
+            if (string.IsNullOrEmpty(plotNumber)) plotNumber = plot.PlotNumber;
+            plot.Status = "Booked";
+            plot.UpdatedAt = DateTime.UtcNow;
         }
+        else return ApiResponse<JaminBookingResponseDto>.FailureResult("Select a plot for this booking.");
 
         // Resolve Lead ID if passed or matched
         int? leadId = dto.LeadId;
@@ -90,12 +103,8 @@ public class JaminBookingService : IJaminBookingService
             matchedLead = await _context.Leads
                 .FirstOrDefaultAsync(l => l.Id == leadId.Value && l.CompanyId == JaminTenantId, ct);
         }
-        if (matchedLead == null && !string.IsNullOrEmpty(dto.CustomerPhone))
-        {
-            matchedLead = await _context.Leads
-                .FirstOrDefaultAsync(l => l.Phone == dto.CustomerPhone.Trim() && l.CompanyId == JaminTenantId, ct);
-            if (matchedLead != null) leadId = matchedLead.Id;
-        }
+        if (dto.LeadId.HasValue && matchedLead == null)
+            return ApiResponse<JaminBookingResponseDto>.FailureResult("Selected lead was not found in Jamin.");
 
         // Resolve Customer ID if not explicitly passed
         int? customerId = dto.CustomerId;
@@ -105,12 +114,17 @@ public class JaminBookingService : IJaminBookingService
             matchedCustomer = await _context.Customers
                 .FirstOrDefaultAsync(c => c.Id == customerId.Value && c.CompanyId == JaminTenantId, ct);
         }
-        if (matchedCustomer == null && !string.IsNullOrEmpty(dto.CustomerPhone))
-        {
-            matchedCustomer = await _context.Customers
-                .FirstOrDefaultAsync(c => c.Phone == dto.CustomerPhone.Trim() && c.CompanyId == JaminTenantId, ct);
-            if (matchedCustomer != null) customerId = matchedCustomer.Id;
-        }
+        if (dto.CustomerId.HasValue && matchedCustomer == null)
+            return ApiResponse<JaminBookingResponseDto>.FailureResult("Selected customer was not found in Jamin.");
+
+        if (dto.AssignedAgentId.HasValue && !await _context.Users.AnyAsync(
+                u => u.Id == dto.AssignedAgentId.Value && u.CompanyId == JaminTenantId, ct))
+            return ApiResponse<JaminBookingResponseDto>.FailureResult("Selected agent does not belong to Jamin.");
+
+        var resolvedAgentId = dto.AssignedAgentId ?? matchedCustomer?.AssignedAgentId ?? matchedLead?.AssignedAgentId;
+        if (resolvedAgentId.HasValue && !await _context.Users.AnyAsync(
+                u => u.Id == resolvedAgentId.Value && u.CompanyId == JaminTenantId, ct))
+            return ApiResponse<JaminBookingResponseDto>.FailureResult("The booking agent does not belong to Jamin.");
 
         // Automatically create or update buyer as an Active Customer in the CRM
         if (matchedCustomer == null)
@@ -118,7 +132,7 @@ public class JaminBookingService : IJaminBookingService
             var newCustomer = new Customer
             {
                 CompanyId = JaminTenantId,
-                AssignedAgentId = dto.AssignedAgentId ?? matchedLead?.AssignedAgentId,
+                AssignedAgentId = resolvedAgentId,
                 Name = dto.CustomerName.Trim(),
                 Phone = dto.CustomerPhone.Trim(),
                 Email = matchedLead?.Email ?? string.Empty,
@@ -137,6 +151,7 @@ public class JaminBookingService : IJaminBookingService
         {
             matchedCustomer.TotalValue += dto.TotalPlotPrice;
             matchedCustomer.Status = "Active";
+            matchedCustomer.AssignedAgentId ??= resolvedAgentId;
             if (string.IsNullOrWhiteSpace(matchedCustomer.Name)) matchedCustomer.Name = dto.CustomerName.Trim();
             matchedCustomer.UpdatedAt = DateTime.UtcNow;
             customerId = matchedCustomer.Id;
@@ -147,13 +162,14 @@ public class JaminBookingService : IJaminBookingService
         {
             matchedLead.Status = "Converted";
             matchedLead.UpdatedAt = DateTime.UtcNow;
+            await LinkLeadHistoryToCustomerAsync(matchedLead, customerId!.Value, ct);
         }
 
         // Resolve Agent name
         string agentName = string.Empty;
-        if (dto.AssignedAgentId.HasValue && dto.AssignedAgentId.Value > 0)
+        if (resolvedAgentId.HasValue)
         {
-            var agent = await _context.Users.FirstOrDefaultAsync(u => u.Id == dto.AssignedAgentId.Value, ct);
+            var agent = await _context.Users.FirstOrDefaultAsync(u => u.Id == resolvedAgentId.Value && u.CompanyId == JaminTenantId, ct);
             if (agent != null) agentName = agent.Name;
         }
 
@@ -174,7 +190,7 @@ public class JaminBookingService : IJaminBookingService
             PaymentTerms = dto.PaymentTerms?.Trim(),
             Status = "Token Paid",
             BookingDate = DateTime.UtcNow,
-            AssignedAgentId = dto.AssignedAgentId,
+            AssignedAgentId = resolvedAgentId,
             AssignedAgentName = agentName,
             Notes = dto.Notes?.Trim(),
             CreatedAt = DateTime.UtcNow
@@ -262,4 +278,34 @@ public class JaminBookingService : IJaminBookingService
         CreatedAt = b.CreatedAt,
         UpdatedAt = b.UpdatedAt
     };
+
+    private async Task LinkLeadHistoryToCustomerAsync(Lead lead, int customerId, CancellationToken ct)
+    {
+        var calls = await _context.CallRecords.Where(x => x.LeadId == lead.Id && x.CompanyId == JaminTenantId).ToListAsync(ct);
+        foreach (var call in calls) call.CustomerId = customerId;
+
+        var followups = await _context.Followups.Where(x => x.LeadId == lead.Id && x.CompanyId == JaminTenantId).ToListAsync(ct);
+        foreach (var followup in followups)
+        {
+            followup.CustomerId = customerId;
+            followup.ContactType = "customer";
+            followup.ContactId = customerId.ToString();
+        }
+
+        var visits = await _context.SiteVisits.Where(x => x.LeadId == lead.Id && x.TenantId == JaminTenantId).ToListAsync(ct);
+        foreach (var visit in visits)
+        {
+            visit.CustomerId = customerId;
+            visit.ContactType = "customer";
+        }
+
+        var bookings = await _context.JaminBookings.Where(x => x.LeadId == lead.Id && x.CompanyId == JaminTenantId).ToListAsync(ct);
+        foreach (var booking in bookings) booking.CustomerId = customerId;
+
+        var notifications = await _context.Notifications.Where(x => x.LeadId == lead.Id && x.CompanyId == JaminTenantId).ToListAsync(ct);
+        foreach (var notification in notifications) notification.CustomerId = customerId;
+
+        var auditLogs = await _context.AuditLogs.Where(x => x.LeadId == lead.Id && x.CompanyId == JaminTenantId).ToListAsync(ct);
+        foreach (var auditLog in auditLogs) auditLog.CustomerId = customerId;
+    }
 }

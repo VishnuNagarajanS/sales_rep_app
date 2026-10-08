@@ -15,7 +15,7 @@ import {
   User,
   MapPin,
 } from 'lucide-react';
-import { CallDisposition, Consultation, SiteVisit } from '../../types';
+import { CallDisposition, Consultation, SiteVisit, Followup } from '../../types';
 import { storageService } from '../../services/storageService';
 import { jaminApiService } from '../../services/jaminApiService';
 import { useAuth } from '../../context/AuthContext';
@@ -57,6 +57,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   contactName,
   contactPhone,
   contactId,
+  contactType = 'lead',
   tenantId,
   onCall,
   callDispositionFilter,
@@ -76,10 +77,11 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   const [isActivityOpen, setIsActivityOpen] = useState(true);
   const [, setSiteVisitsVersion] = useState(0);
   const [apiSiteVisits, setApiSiteVisits] = useState<SiteVisit[]>([]);
+  const [apiFollowups, setApiFollowups] = useState<Followup[]>([]);
 
   useEffect(() => {
     setCallTab('agent');
-  }, [contactPhone, contactId]);
+  }, [contactPhone, contactId, contactType]);
 
   useEffect(() => {
     let isMounted = true;
@@ -87,6 +89,9 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
       if (isMounted && visits && visits.length > 0) {
         setApiSiteVisits(visits);
       }
+    }).catch(() => {});
+    jaminApiService.getFollowups(true).then(followupItems => {
+      if (isMounted && followupItems) setApiFollowups(followupItems);
     }).catch(() => {});
     return () => { isMounted = false; };
   }, [contactPhone, contactId]);
@@ -119,33 +124,10 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
 
   // ── Site Visits lookup (Jamin Bazaar) ──────────────────────────────────────
   const leadSiteVisits = (() => {
-    if (!selectedLead && !contactPhone && !contactName) return [];
-    const localVisits = storageService.getSiteVisits() || [];
-    const visitMap = new Map<string, SiteVisit>();
-    localVisits.forEach(v => visitMap.set(String(v.id), v));
-    apiSiteVisits.forEach(v => visitMap.set(String(v.id), v));
-    const allVisits = Array.from(visitMap.values());
-
-    const phoneDigits = (selectedLead?.phone || contactPhone || '').replace(/\D/g, '').slice(-10);
-    const targetLeadId = String(selectedLead?.id || contactId || '').replace('db-', '').replace('lead-', '').trim();
-    const targetName = (selectedLead?.name || contactName || '').trim().toLowerCase();
-
-    return allVisits.filter(v => {
-      // 1. Phone match
-      const vPhone = (v.customerPhone || '').replace(/\D/g, '').slice(-10);
-      if (phoneDigits && vPhone && phoneDigits === vPhone) return true;
-
-      // 2. ID match
-      const vLeadId = v.leadId ? String(v.leadId).replace('db-', '').replace('lead-', '').trim() : '';
-      const vCustId = v.customerId ? String(v.customerId).replace('db-', '').replace('lead-', '').trim() : '';
-      if (targetLeadId && (vLeadId === targetLeadId || vCustId === targetLeadId || String(v.leadId) === String(selectedLead?.id))) return true;
-
-      // 3. Name match
-      const vName = (v.customerName || '').trim().toLowerCase();
-      if (targetName && vName && targetName === vName) return true;
-
-      return false;
-    });
+    if (!contactId || !['lead', 'customer'].includes(contactType)) return [];
+    return apiSiteVisits.filter(v => contactType === 'customer'
+      ? String(v.customerId || '') === String(contactId)
+      : String(v.leadId || '') === String(contactId));
   })();
 
   const handleConfirmLeadSiteVisit = (sv: SiteVisit) => {
@@ -183,12 +165,13 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   const tabCalls = isGhl ? (callTab === 'agent' ? agentCalls : irmCalls) : selectedCalls;
 
   // ── Active follow-up count ───────────────────────────────────────────────────
-  const followups = storageService.getFollowups(tenantId) || [];
+  const followupMap = new Map<string, Followup>();
+  (storageService.getFollowups(tenantId) || []).forEach(f => followupMap.set(String(f.id), f));
+  apiFollowups.forEach(f => followupMap.set(String(f.id), f));
+  const followups = Array.from(followupMap.values());
   const activeFollowupCount = followups.filter(f => {
-    if (f.status !== 'Pending') return false;
-    if (contactId && contactId !== 'contact-new' && f.contactId === contactId) return true;
-    const fwPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-    return fwPhone && fPhoneDigits && fwPhone === fPhoneDigits;
+    return f.status === 'Pending' && f.contactType === contactType &&
+      Boolean(contactId && contactId !== 'contact-new' && String(f.contactId) === String(contactId));
   }).length;
 
   const toggleTranscript = (callId: string) => {
@@ -278,10 +261,8 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
 
     // 5. Follow-ups
     const fPhoneDigits = (selectedLead?.phone || contactPhone || '').replace(/\D/g, '').slice(-10);
-    const leadFollowups = (storageService.getFollowups(tenantId) || []).filter(f => {
-      if (contactId && contactId !== 'contact-new' && f.contactId === contactId) return true;
-      const fwPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-      return Boolean(fwPhone && fPhoneDigits && fwPhone === fPhoneDigits);
+    const leadFollowups = followups.filter(f => {
+      return f.contactType === contactType && Boolean(contactId && contactId !== 'contact-new' && String(f.contactId) === String(contactId));
     });
 
     leadFollowups.forEach(f => {

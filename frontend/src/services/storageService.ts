@@ -52,7 +52,7 @@ class StorageService {
     try {
       const leads = this.get<Lead[]>('leads', []);
       if (!leads || leads.length === 0) return;
-      
+
       // Auto-migrate any Converted contacts from leads to customers
       const activeLeads: Lead[] = [];
       leads.forEach(l => {
@@ -64,11 +64,14 @@ class StorageService {
             phone: l.phone,
             email: l.email || '',
             location: l.location || '',
-            source: l.source || 'Converted Lead',
             status: 'Active',
             assignedAgentId: l.assignedAgentId,
             assignedAgentName: l.assignedAgentName,
+            lastContacted: '',
+            openDealsCount: 0,
+            totalValue: 0,
             notes: l.notes,
+            customFields: {},
             createdAt: l.createdAt || new Date().toISOString().split('T')[0],
           });
         } else {
@@ -185,14 +188,14 @@ class StorageService {
 
     const otherCompany = companyId
       ? existingActive.filter(l => {
-          if (companyId === '2' || companyId === 't-jamin-02') {
-            return l.companyId !== '2' && l.companyId !== 't-jamin-02';
-          }
-          if (companyId === '1' || companyId === 't-ghl-01') {
-            return l.companyId !== '1' && l.companyId !== 't-ghl-01';
-          }
-          return l.companyId !== companyId;
-        })
+        if (companyId === '2' || companyId === 't-jamin-02') {
+          return l.companyId !== '2' && l.companyId !== 't-jamin-02';
+        }
+        if (companyId === '1' || companyId === 't-ghl-01') {
+          return l.companyId !== '1' && l.companyId !== 't-ghl-01';
+        }
+        return l.companyId !== companyId;
+      })
       : [];
 
     // Deduplicate incoming and existing

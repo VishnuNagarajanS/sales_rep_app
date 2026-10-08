@@ -7,6 +7,16 @@ import { jaminApiService } from '../../services/jaminApiService';
 import { storageService } from '../../services/storageService';
 import './ProjectsPage.css';
 
+const comparePlotNumbers = (left: any, right: any): number => {
+  const leftNumber = Number.parseInt(String(left.plotNumber ?? ''), 10);
+  const rightNumber = Number.parseInt(String(right.plotNumber ?? ''), 10);
+  const leftIsNumber = Number.isFinite(leftNumber);
+  const rightIsNumber = Number.isFinite(rightNumber);
+  if (leftIsNumber && rightIsNumber && leftNumber !== rightNumber) return leftNumber - rightNumber;
+  if (leftIsNumber !== rightIsNumber) return leftIsNumber ? -1 : 1;
+  return String(left.plotNumber ?? '').localeCompare(String(right.plotNumber ?? ''), undefined, { numeric: true });
+};
+
 interface ProjectsPageProps {
   onNavigate: (route: string) => void;
 }
@@ -25,6 +35,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
   const [blueprintRotation, setBlueprintRotation] = useState<number>(0);
   const [isBlueprintFullScreen, setIsBlueprintFullScreen] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState(false);
+  const [syncingPlots, setSyncingPlots] = useState(false);
   const [selectedProject, setSelectedProject] = useState<any | null>(null);
   const [activeDropdownId, setActiveDropdownId] = useState<number | string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -103,7 +114,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
       (visits || []).forEach((v: any) => visitMap.set(String(v.id), v));
       setSiteVisits(Array.from(visitMap.values()));
       setProjects(data || []);
-      setAllPlots(plotsData || []);
+      setAllPlots([...(plotsData || [])].sort(comparePlotNumbers));
     } catch (err) {
       console.error('Failed to load projects from backend', err);
     } finally {
@@ -172,8 +183,8 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
     setIsDeleteModalOpen(true);
   };
 
-  const handleCreateProject = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCreateProject = async (e?: React.FormEvent, generatePlots = false) => {
+    e?.preventDefault();
     if (!name.trim() || !location.trim()) {
       alert('Project Name and Location are required.');
       return;
@@ -181,7 +192,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
 
     setSubmitting(true);
     try {
-      const success = await jaminApiService.createProject({
+      const result = await jaminApiService.createProject({
         name: name.trim(),
         location: location.trim(),
         totalPlots: Number(totalPlots) || 0,
@@ -191,15 +202,21 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
         status: status || 'Active',
       });
 
-      if (success) {
+      if (result.success) {
+        if (generatePlots && result.projectId) {
+          const generated = await jaminApiService.generateProjectPlots(result.projectId);
+          if (!generated.success) {
+            alert(generated.message || 'The project was created, but its plot inventory could not be generated. You can run it from Edit Project.');
+          }
+        }
         setIsAddModalOpen(false);
         await loadProjects();
       } else {
-        alert('Failed to create project in database. Ensure you are logged in with admin privileges.');
+        alert('Unable to create the project. Please check your permissions and try again.');
       }
     } catch (err) {
       console.error('Error creating project', err);
-      alert('Error creating project on backend.');
+      alert('Unable to create the project. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -212,13 +229,19 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
       return;
     }
 
+    const requestedTotal = Math.max(0, Number(totalPlots) || 0);
+    const totalChanged = requestedTotal !== Number(selectedProject.totalPlots || 0);
+    const syncInventory = totalChanged
+      ? window.confirm(`Update the plot inventory to ${requestedTotal} plots now?\n\nChoose Cancel to save only the project count without creating or changing plot records.`)
+      : false;
+
     setSubmitting(true);
     try {
       const success = await jaminApiService.updateProject(selectedProject.id, {
         name: name.trim(),
         location: location.trim(),
         status: status.trim(),
-        totalPlots: Number(totalPlots) || 0,
+        totalPlots: requestedTotal,
         availablePlots: Math.max(0, (Number(totalPlots) || 0) - (selectedProject.bookedPlots || 0)),
         bookedPlots: selectedProject.bookedPlots || 0,
         priceRange: priceRange.trim(),
@@ -226,18 +249,50 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
         imageUrl: imageUrl.trim() || '',
       });
 
-      if (success) {
+      if (success.success) {
+        if (syncInventory) {
+          const generated = await jaminApiService.generateProjectPlots(selectedProject.id);
+          if (!generated.success) {
+            alert(generated.message || 'The project was saved, but the plot inventory could not be updated.');
+          }
+        }
         setIsEditModalOpen(false);
         setSelectedProject(null);
         await loadProjects();
       } else {
-        alert('Failed to update project. Please verify inputs.');
+        alert(success.message || 'Unable to update the project.');
       }
     } catch (err) {
       console.error('Error updating project', err);
-      alert('Error updating project on backend.');
+      alert('Unable to update the project. Please try again.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleSyncProjectPlots = async () => {
+    if (!selectedProject) return;
+    const requestedTotal = Math.max(0, Number(totalPlots) || 0);
+    if (!window.confirm(`Update the plot inventory to ${requestedTotal} plots?\n\nExisting plot details will be preserved and only missing plots will be added.`)) {
+      return;
+    }
+
+    setSyncingPlots(true);
+    try {
+      const updated = await jaminApiService.updateProject(selectedProject.id, { totalPlots: requestedTotal });
+      if (!updated.success) {
+        alert(updated.message || 'Unable to update the project plot count.');
+        return;
+      }
+      const generated = await jaminApiService.generateProjectPlots(selectedProject.id);
+      if (generated.success) {
+        alert(`Plot inventory updated for ${requestedTotal} plots.`);
+        await loadProjects();
+      } else {
+        alert(generated.message || 'The plot count was saved, but the plot inventory could not be generated.');
+      }
+    } finally {
+      setSyncingPlots(false);
     }
   };
 
@@ -256,7 +311,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
       }
     } catch (err) {
       console.error('Error deleting project', err);
-      alert('Error deleting project from backend.');
+      alert('Unable to delete the project. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -445,18 +500,13 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
                 )}
 
                 {(() => {
-                  const projPlots = allPlots.filter(pl => String(pl.projectId) === String(proj.id));
-                  const hasPlots = projPlots.length > 0;
-                  const total = hasPlots ? projPlots.length : (proj.totalPlots || 0);
-                  const avail = hasPlots
-                    ? projPlots.filter(pl => pl.status === 'Available').length
-                    : (proj.availablePlots || 0);
-                  const hold = hasPlots
-                    ? projPlots.filter(pl => pl.status === 'Hold' || pl.status === 'Held').length
-                    : (proj.heldPlots ?? proj.holdPlots ?? 0);
-                  const bookedSold = hasPlots
-                    ? projPlots.filter(pl => pl.status === 'Booked' || pl.status === 'Registered' || pl.status === 'Sold').length
-                    : Math.max(proj.bookedPlots || 0, (proj.registeredPlots || 0) + (proj.soldPlots || 0));
+                  const projPlots = allPlots
+                    .filter(pl => String(pl.projectId) === String(proj.id))
+                    .sort(comparePlotNumbers);
+                  const total = projPlots.length;
+                  const avail = projPlots.filter(pl => pl.status === 'Available').length;
+                  const hold = projPlots.filter(pl => pl.status === 'Hold' || pl.status === 'Held').length;
+                  const bookedSold = projPlots.filter(pl => pl.status === 'Booked' || pl.status === 'Registered' || pl.status === 'Sold').length;
 
                   return (
                     <div className="project-stats-box" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
@@ -687,6 +737,9 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
               <button type="submit" className="btn btn-primary" disabled={submitting}>
                 {submitting ? 'Creating project' : 'Create Project'}
               </button>
+              <button type="button" className="btn btn-secondary" disabled={submitting} onClick={() => handleCreateProject(undefined, true)}>
+                {submitting ? 'Creating plots...' : 'Create Project & Plots'}
+              </button>
             </div>
           </div>
         </form>
@@ -849,6 +902,9 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
               </button>
               <button type="submit" className="btn btn-primary" disabled={submitting}>
                 {submitting ? 'Saving...' : 'Save Changes'}
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={handleSyncProjectPlots} disabled={syncingPlots || submitting}>
+                {syncingPlots ? 'Updating Plots...' : 'Create / Update Plots'}
               </button>
             </div>
           </div>
