@@ -59,7 +59,7 @@ export async function fetchIrmAllLeads(
     const queryString = query.toString() ? `?${query.toString()}` : '';
     const res = await apiClient.get<ApiResponse<IrmAllLeadsSummary>>(`/irm/all-leads${queryString}`);
 
-    if (res && res.success && res.data && res.data.leads && res.data.leads.length > 0) {
+    if (res && res.success && res.data && Array.isArray(res.data.leads)) {
       return res.data;
     }
   } catch (err) {

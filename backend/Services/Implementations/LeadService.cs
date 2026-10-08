@@ -646,8 +646,29 @@ public class LeadService : ILeadService
         if (dto.NextFollowupDate.HasValue) lead.NextFollowupDate = dto.NextFollowupDate.Value;
         if (dto.AssignedAgentId.HasValue) 
         {
-            lead.AssignedAgentId = dto.AssignedAgentId.Value;
+            var newAgentId = dto.AssignedAgentId.Value;
+            lead.AssignedAgentId = newAgentId;
             lead.AssignedAt = DateTime.UtcNow;
+
+            var pendingFollowups = await _context.Followups
+                .Where(f => f.CompanyId == lead.CompanyId &&
+                            (f.ContactId == lead.Id.ToString() || f.ContactPhone == lead.Phone) &&
+                            f.Status == FollowupStatus.Pending)
+                .ToListAsync(ct);
+            if (pendingFollowups.Count > 0)
+            {
+                var newAgent = await _context.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == newAgentId, ct);
+                foreach (var f in pendingFollowups)
+                {
+                    f.AssignedAgentId = newAgentId;
+                    if (newAgent != null)
+                    {
+                        f.AssignedToName = newAgent.Name;
+                        f.AssignedToRole = newAgent.Role?.Code ?? f.AssignedToRole;
+                    }
+                    f.UpdatedAt = DateTime.UtcNow;
+                }
+            }
         }
 
         // Merge custom fields

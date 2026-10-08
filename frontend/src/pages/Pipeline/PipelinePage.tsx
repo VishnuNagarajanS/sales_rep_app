@@ -840,14 +840,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                     {irmDetailDeal.preferredAssetClass || '—'}
                   </span>
                 </div>
-                <div className="irm-detail-grid-item">
-                  <span className="irm-detail-grid-label">
-                    Investor Structure / Mandate
-                  </span>
-                  <span className="irm-detail-grid-value">
-                    {irmDetailDeal.investorType || '—'}
-                  </span>
-                </div>
                 {irmDetailDeal.customerId && (
                   <div className="irm-detail-grid-item">
                     <span className="irm-detail-grid-label">

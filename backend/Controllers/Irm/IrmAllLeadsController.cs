@@ -43,6 +43,8 @@ public class IrmAllLeadsController : ControllerBase
         [FromQuery] int? irmId = null,
         [FromQuery] string? search = null,
         [FromQuery] string? stage = null,
+        [FromQuery] int? page = null,
+        [FromQuery] int? pageSize = null,
         CancellationToken ct = default)
     {
         var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
@@ -116,13 +118,21 @@ public class IrmAllLeadsController : ControllerBase
         var customers = await _db.Customers
             .AsNoTracking()
             .Where(c => c.CompanyId == companyId)
-            .Select(c => new { c.Id, c.Phone, c.Name })
+            .Select(c => new { c.Id, c.Phone, c.Email, c.Name })
             .ToListAsync(ct);
 
         var deals = await _db.GhlDeals
             .AsNoTracking()
+            .Include(d => d.Customer)
             .Where(d => d.CompanyId == companyId)
-            .Select(d => new { d.CustomerId, d.CustomerName, d.Stage, d.Value })
+            .Select(d => new { 
+                d.CustomerId, 
+                d.CustomerName, 
+                CustomerPhone = d.Customer != null ? d.Customer.Phone : null,
+                CustomerEmail = d.Customer != null ? d.Customer.Email : null,
+                d.Stage, 
+                d.Value 
+            })
             .ToListAsync(ct);
 
         var items = new List<IrmAllLeadItemDto>();
@@ -130,21 +140,26 @@ public class IrmAllLeadsController : ControllerBase
         foreach (var l in rawLeads)
         {
             var phoneLast10 = GetLast10(l.Phone);
+            var leadEmailLower = (l.Email ?? string.Empty).Trim().ToLower();
             var leadNameLower = (l.Name ?? string.Empty).Trim().ToLower();
 
-            // Match customer
+            // Match customer: prefer phone and email before exact name
             var matchedCustomer = customers.FirstOrDefault(c =>
                 (!string.IsNullOrWhiteSpace(phoneLast10) && GetLast10(c.Phone) == phoneLast10) ||
+                (!string.IsNullOrWhiteSpace(leadEmailLower) && !string.IsNullOrWhiteSpace(c.Email) && c.Email.Trim().ToLower() == leadEmailLower) ||
                 (!string.IsNullOrWhiteSpace(leadNameLower) && c.Name.Trim().ToLower() == leadNameLower));
 
-            // 1. Check if Deal/Opportunity exists
+            // 1. Check if Deal/Opportunity exists: prefer customerId first, then normalized phone/email, then exact name
             var matchedDeal = deals.FirstOrDefault(d =>
                 (matchedCustomer != null && d.CustomerId == matchedCustomer.Id) ||
+                (!string.IsNullOrWhiteSpace(phoneLast10) && GetLast10(d.CustomerPhone) == phoneLast10) ||
+                (!string.IsNullOrWhiteSpace(leadEmailLower) && !string.IsNullOrWhiteSpace(d.CustomerEmail) && d.CustomerEmail.Trim().ToLower() == leadEmailLower) ||
                 (!string.IsNullOrWhiteSpace(leadNameLower) && d.CustomerName.Trim().ToLower() == leadNameLower));
 
-            // 2. Check if KYC exists
+            // 2. Check if KYC exists: prefer phone and email before exact name
             var matchedKyc = kycRecords.FirstOrDefault(k =>
                 (!string.IsNullOrWhiteSpace(phoneLast10) && GetLast10(k.Phone) == phoneLast10) ||
+                (!string.IsNullOrWhiteSpace(leadEmailLower) && !string.IsNullOrWhiteSpace(k.Email) && k.Email.Trim().ToLower() == leadEmailLower) ||
                 (!string.IsNullOrWhiteSpace(leadNameLower) && k.InvestorName.Trim().ToLower() == leadNameLower));
 
             // 3. Check if Pending Follow-up exists
@@ -297,6 +312,14 @@ public class IrmAllLeadsController : ControllerBase
         if (!string.IsNullOrWhiteSpace(stage) && !stage.Equals("all", StringComparison.OrdinalIgnoreCase))
         {
             items = items.Where(i => i.CurrentStage.Equals(stage, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+
+        // Apply pagination if requested
+        if (page.HasValue && page.Value > 0 && pageSize.HasValue && pageSize.Value > 0)
+        {
+            var p = page.Value;
+            var ps = Math.Min(pageSize.Value, 200);
+            items = items.Skip((p - 1) * ps).Take(ps).ToList();
         }
 
         var result = new IrmAllLeadsSummaryDto

@@ -471,7 +471,7 @@ export const IrmProfileView: React.FC = () => {
         name: i.name,
         phone: i.phone,
         contactId: i.id,
-        subtext: `Capacity: ${i.investmentCapacity || '—'} · Asset Class: ${i.preferredAssetClass || 'AIF'}`,
+        subtext: `Capacity: ${i.investmentCapacity || '—'} · Asset Class: ${i.preferredAssetClass || '—'}`,
         badge: i.status,
         badgeColor: i.status.includes('HNW') ? '#10b981' : '#3b82f6',
       }));

@@ -420,7 +420,7 @@ export const IrmReportsView: React.FC = () => {
     const counts: Record<string, { count: number; value: number }> = {};
 
     periodOpps.forEach(o => {
-      const raw = (o as any).assetClass || (o as any).preferredAssetClass || 'Alternative Investment (AIF)';
+      const raw = (o as any).assetClass || (o as any).preferredAssetClass || 'Unspecified';
       const key = raw.includes('AIF') ? 'AIF Category II'
         : raw.includes('PMS') ? 'Portfolio Mgmt (PMS)'
         : raw.includes('Pre-IPO') ? 'Pre-IPO Equity'
@@ -435,7 +435,7 @@ export const IrmReportsView: React.FC = () => {
     // If no opps with asset class, populate from assigned investors
     if (Object.keys(counts).length === 0) {
       scopedInvestors.forEach(inv => {
-        const raw = inv.preferredAssetClass || 'AIF Category II';
+        const raw = inv.preferredAssetClass || 'Unspecified';
         const key = raw.includes('AIF') ? 'AIF Category II'
           : raw.includes('PMS') ? 'Portfolio Mgmt (PMS)'
           : raw.includes('Pre-IPO') ? 'Pre-IPO Equity'

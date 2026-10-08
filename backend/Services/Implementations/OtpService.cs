@@ -38,12 +38,14 @@ public class OtpService : IOtpService
         _logger = logger;
     }
 
+    private static readonly string _fallbackRuntimeKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+
     private string GetConfiguredSecretKey()
     {
         var key = _config["KycOtpSettings:SecretKey"]
-                  ?? _config["JwtSettings:SecretKey"]
-                  ?? "NexusSales_Configured_Secure_Kyc_Otp_Secret_Key_2026!";
-        return key;
+                  ?? _config["JwtSettings:SecretKey"];
+
+        return !string.IsNullOrWhiteSpace(key) ? key : _fallbackRuntimeKey;
     }
 
     private string ComputeOtpHash(string otp, string recordSalt)
@@ -81,8 +83,17 @@ public class OtpService : IOtpService
         var registeredEmail = kyc.Email?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(registeredEmail))
         {
-            return ApiResponse<SendKycOtpResponseDto>.ErrorResponse(
-                "No registered email address is associated with this KYC request. Please contact your Relationship Manager.");
+            if (!string.IsNullOrWhiteSpace(dto.Email) && System.Net.Mail.MailAddress.TryCreate(dto.Email.Trim(), out _))
+            {
+                registeredEmail = dto.Email.Trim();
+                kyc.Email = registeredEmail;
+                await _kycRepo.UpdateAsync(kyc, ct);
+            }
+            else
+            {
+                return ApiResponse<SendKycOtpResponseDto>.ErrorResponse(
+                    "No registered email address is associated with this KYC request. Please enter a valid email address to receive your verification code.");
+            }
         }
 
         var normalizedEmail = registeredEmail.ToLowerInvariant();
@@ -102,8 +113,9 @@ public class OtpService : IOtpService
 
         // 3. Multi-instance Database Resend Rate Limiting: Max 5 resends in 15 minutes, min 20 seconds between resends
         var recentCutoff = DateTime.UtcNow.AddMinutes(-15);
+        var tokenHash = HashToken(cleanToken);
         var recentOtps = await _db.KycOtpVerifications
-            .Where(v => v.Token == cleanToken && v.Email == normalizedEmail && v.CreatedAt >= recentCutoff)
+            .Where(v => (v.Token == cleanToken || v.TokenHash == tokenHash) && v.Email == normalizedEmail && v.CreatedAt >= recentCutoff)
             .OrderByDescending(v => v.CreatedAt)
             .ToListAsync(ct);
 
@@ -122,7 +134,6 @@ public class OtpService : IOtpService
         }
 
         // 4. Invalidate previous pending OTPs in database for this exact token and email
-        var tokenHash = HashToken(cleanToken);
         var pendingOtps = await _db.KycOtpVerifications
             .Where(v => (v.Token == cleanToken || v.TokenHash == tokenHash) && v.Email == normalizedEmail && !v.IsInvalidated && !v.IsVerified)
             .ToListAsync(ct);
@@ -144,9 +155,9 @@ public class OtpService : IOtpService
 
         if (!emailDelivered)
         {
-            _logger.LogWarning("[KYC OTP] Email delivery failed for registered email. Error: {Error}", _emailService.LastError);
+            _logger.LogError("[KYC OTP] Email delivery failed for registered email. Error: {Error}", _emailService.LastError);
             return ApiResponse<SendKycOtpResponseDto>.ErrorResponse(
-                $"Failed to deliver verification code to {masked}. {_emailService.LastError ?? "Please verify your email provider settings or try again."}");
+                $"Failed to deliver verification code to {masked}. Please check your email address or try again in a few moments.");
         }
 
         // 7. Record verified state in database with per-record salt and secure hash
@@ -154,7 +165,7 @@ public class OtpService : IOtpService
         {
             CompanyId = companyId,
             InvestorKycId = kyc.Id,
-            Token = cleanToken,
+            Token = string.Empty, // Do not persist raw token in plaintext
             TokenHash = tokenHash,
             Email = normalizedEmail,
             OtpHash = otpHash,
@@ -231,13 +242,18 @@ public class OtpService : IOtpService
                 "Verification code has expired or was not requested for this token and email. Please click Resend Code.");
         }
 
-        // 2. Check attempt limits
-        if (record.FailedAttempts >= 5)
+        // 2. Check total attempt limits across the active verification window
+        var windowCutoff = DateTime.UtcNow.AddMinutes(-15);
+        var totalFailedAttempts = await _db.KycOtpVerifications
+            .Where(v => (v.TokenHash == tokenHash || v.Token == cleanToken) && v.Email == cleanEmail && v.CreatedAt >= windowCutoff)
+            .SumAsync(v => v.FailedAttempts, ct);
+
+        if (record.FailedAttempts >= 5 || totalFailedAttempts >= 5)
         {
             record.IsInvalidated = true;
             await _db.SaveChangesAsync(ct);
             return ApiResponse<VerifyKycOtpResponseDto>.ErrorResponse(
-                "Too many incorrect attempts. Please request a new verification code.");
+                "Too many incorrect attempts. For security, please wait 15 minutes before requesting a new code.");
         }
 
         // 3. Verify entered OTP hash using per-record salt and secure configured key

@@ -64,7 +64,24 @@ export function sanitizeStoredKycData(): void {
   });
 }
 
+/** Removes all locally cached KYC keys (drafts, forms, assisted metadata, statuses) across the app. */
+export function clearAllKycLocalStorage(): void {
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('nexus_kyc_')) {
+        keys.push(k);
+      }
+    }
+    keys.forEach(k => localStorage.removeItem(k));
+  } catch (err) {
+    console.warn('[kycStorage] could not clear local KYC storage:', err);
+  }
+}
+
 /** Removes all locally cached KYC form data (call on logout). */
 export function clearKycLocalData(): void {
-  forEachKycKey(key => localStorage.removeItem(key));
+  clearAllKycLocalStorage();
 }
+

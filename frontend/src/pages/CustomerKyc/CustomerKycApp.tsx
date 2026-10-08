@@ -87,6 +87,9 @@ export const CustomerKycApp: React.FC = () => {
   const [otpError, setOtpError] = useState<string | null>(null);
   const [otpSuccess, setOtpSuccess] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number>(0);
+  const [userEnteredEmail, setUserEnteredEmail] = useState<string>('');
+  const [invalidTitle, setInvalidTitle] = useState<string>('This KYC Link Has Expired');
+  const [invalidReason, setInvalidReason] = useState<string>('');
   const otpInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const hasDispatchedOtpRef = useRef<boolean>(false);
 
@@ -224,10 +227,16 @@ export const CustomerKycApp: React.FC = () => {
     setOtpSuccess(null);
 
     const activeToken = customToken || token || extractTokenFromUrl();
-    const emailToSend = (customEmail || registeredEmail || formData.email || '').trim();
+    const emailToSend = (customEmail || registeredEmail || formData.email || userEnteredEmail || '').trim();
 
-    if (!emailToSend || !activeToken) {
-      setOtpError('Both KYC token and registered email address are required to send a verification code.');
+    if (!activeToken) {
+      setOtpError('KYC verification link is missing a valid token. Please contact your Relationship Manager.');
+      setOtpSending(false);
+      return;
+    }
+
+    if (!emailToSend) {
+      setOtpError('Please enter your email address to receive your 6-digit verification code.');
       setOtpSending(false);
       return;
     }
@@ -249,7 +258,9 @@ export const CustomerKycApp: React.FC = () => {
       }
       const json = await res.json().catch(() => ({} as any));
       if (res.ok && json.success && json.data?.success) {
-        setMaskedEmail(json.data.maskedEmail || 'your email');
+        setMaskedEmail(json.data.maskedEmail || emailToSend);
+        setRegisteredEmail(emailToSend);
+        setFormData(prev => ({ ...prev, email: emailToSend }));
         setOtpSuccess(json.data.message || 'Verification code sent to your email!');
         setCountdown(45);
         setOtpError(null);
@@ -257,7 +268,7 @@ export const CustomerKycApp: React.FC = () => {
         setTimeout(() => otpInputRefs.current[0]?.focus(), 100);
       } else {
         setOtpSuccess(null);
-        setOtpError(json.message || 'Failed to send verification code. Please try again or contact your IRM.');
+        setOtpError(json.message || 'Failed to send verification code. Please check your email or contact your IRM.');
       }
     } catch (err) {
       setOtpSuccess(null);
@@ -280,10 +291,10 @@ export const CustomerKycApp: React.FC = () => {
     setOtpSuccess(null);
 
     const activeToken = token || extractTokenFromUrl();
-    const emailToVerify = (registeredEmail || formData.email || '').trim();
+    const emailToVerify = (registeredEmail || formData.email || userEnteredEmail || '').trim();
 
     if (!activeToken || !emailToVerify) {
-      setOtpError('Both active KYC token and registered email address are required for verification.');
+      setOtpError('Both active KYC token and email address are required for verification.');
       setOtpVerifying(false);
       return;
     }
@@ -675,26 +686,27 @@ export const CustomerKycApp: React.FC = () => {
       const activeToken = token || extractTokenFromUrl();
       if (!activeToken) {
         setCurrentScreen('invalid');
+        setInvalidTitle('Invalid KYC Link');
+        setInvalidReason('No KYC verification token was provided in the URL. Please use the link provided by your Relationship Manager.');
         return;
       }
 
       setCurrentScreen('loading');
       try {
         const res = await fetch(apiUrl(`/irm/kyc/public/${encodeURIComponent(activeToken)}`));
-        if (!res.ok) {
-          setCurrentScreen('invalid');
-          return;
-        }
+        const json = await res.json().catch(() => null);
 
-        const json = await res.json();
-        if (!json.success || !json.data) {
+        if (!res.ok || !json?.success || !json?.data) {
           setCurrentScreen('invalid');
+          setInvalidTitle(res.status === 404 ? 'KYC Link Not Found' : 'Unable to Access KYC');
+          setInvalidReason(json?.message || 'This KYC link has expired or is invalid. Please request a new link from your Relationship Manager.');
           return;
         }
 
         const k = json.data;
         const regEmail = (k.email || '').trim();
         setRegisteredEmail(regEmail);
+        if (regEmail) setUserEnteredEmail(regEmail);
 
         // Parse nominees from backend record
         let parsedNominees: NomineeItem[] = [];
@@ -758,18 +770,29 @@ export const CustomerKycApp: React.FC = () => {
           setLivenessState('captured');
         }
 
-        setCurrentScreen('otp');
-
-        if (!regEmail) {
-          setOtpError('No registered email address is associated with this KYC request. Please contact your Relationship Manager.');
-          setOtpSuccess(null);
+        // If the KYC is already approved or submitted and under review:
+        if (k.status === 'Approved' || k.status === 'Verified') {
+          setCurrentScreen('submitted');
+          return;
+        }
+        if (k.status === 'PendingReview' && k.submittedAt) {
+          setCurrentScreen('submitted');
           return;
         }
 
-        // Send OTP to registered customer email
-        await handleSendOtp(regEmail, activeToken);
+        setCurrentScreen('otp');
+
+        if (regEmail) {
+          // Send OTP to registered customer email
+          await handleSendOtp(regEmail, activeToken);
+        } else {
+          setOtpError(null);
+          setOtpSuccess(null);
+        }
       } catch (e) {
         setCurrentScreen('invalid');
+        setInvalidTitle('Connection Error');
+        setInvalidReason('Unable to connect to verification server. Please ensure the backend is running.');
       }
     };
 
@@ -1035,9 +1058,9 @@ export const CustomerKycApp: React.FC = () => {
               <div className="ckyc-state-icon-wrap ckyc-state-icon-error">
                 <AlertCircle size={36} />
               </div>
-              <h2 className="ckyc-card-title">This KYC Link Has Expired</h2>
+              <h2 className="ckyc-card-title">{invalidTitle}</h2>
               <p className="ckyc-card-desc">
-                For security reasons, investor verification links expire after 48 hours or once revoked by your Relationship Manager.
+                {invalidReason || 'For security reasons, investor verification links expire after 48 hours or once revoked by your Relationship Manager.'}
               </p>
               <div style={{ width: '100%', maxWidth: 360, marginTop: 8 }}>
                 <button
@@ -1091,6 +1114,43 @@ export const CustomerKycApp: React.FC = () => {
                 )}
               </p>
             </div>
+
+            {/* Email Input if no email is registered */}
+            {!registeredEmail && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+                <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--ckyc-text-secondary)' }}>
+                  Enter your email address to receive your 6-digit passcode:
+                </label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    type="email"
+                    placeholder="e.g. investor@gmail.com"
+                    value={userEnteredEmail}
+                    onChange={e => {
+                      setUserEnteredEmail(e.target.value);
+                      if (otpError) setOtpError(null);
+                    }}
+                    style={{
+                      flex: 1,
+                      height: 40,
+                      padding: '0 12px',
+                      borderRadius: 8,
+                      border: '1px solid var(--ckyc-border)',
+                      fontSize: 14,
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="ckyc-btn-primary"
+                    style={{ width: 'auto', padding: '0 16px', height: 40, fontSize: 13 }}
+                    onClick={() => handleSendOtp(userEnteredEmail)}
+                    disabled={otpSending}
+                  >
+                    {otpSending ? 'Sending...' : 'Send Code'}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Error Message */}
             {otpError && (
@@ -1185,7 +1245,7 @@ export const CustomerKycApp: React.FC = () => {
                 <button
                   type="button"
                   className="ckyc-resend-link"
-                  onClick={() => handleSendOtp(registeredEmail)}
+                  onClick={() => handleSendOtp(registeredEmail || userEnteredEmail)}
                   disabled={otpSending}
                   style={{
                     display: 'inline-flex',

@@ -14,7 +14,7 @@ import { sanitizeStoredKycData } from './utils/kycStorage';
 // Remove PAN/Aadhaar/bank numbers that older versions cached in localStorage.
 sanitizeStoredKycData();
 
-const isCustomerKycRoute = /^\/kyc\/[^/]+/i.test(window.location.pathname);
+const isCustomerKycRoute = /^\/kyc\/[^/]+/i.test(window.location.pathname) || (window.location.pathname === '/kyc' && new URLSearchParams(window.location.search).has('token'));
 const isResetPasswordRoute = /^\/reset-password/i.test(window.location.pathname);
 
 createRoot(document.getElementById('root')!).render(

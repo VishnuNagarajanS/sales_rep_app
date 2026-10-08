@@ -198,7 +198,7 @@ export const FollowupsPage: React.FC = () => {
       try {
         const raw = localStorage.getItem(`nexus_irm_pref_${contactKey}`);
         if (raw) savedLocal = JSON.parse(raw);
-      } catch {}
+      } catch { }
     }
 
     const isConfirmed =
@@ -616,7 +616,7 @@ export const FollowupsPage: React.FC = () => {
       const d = new Date(parsedTime);
       return d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
     };
-    
+
     const isYesterday = () => {
       const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
       if (isNaN(parsedTime)) return schedStr.toLowerCase().includes('yesterday');
@@ -687,42 +687,171 @@ export const FollowupsPage: React.FC = () => {
       return true;
     });
   } else if (isExec) {
-    scopedFollowups = followups.filter(
-      f =>
-        (f.assignedAgentId && f.assignedAgentId === user?.id) ||
-        (f.assignedAgentName && f.assignedAgentName === user?.name)
-    );
+    scopedFollowups = followups.filter(f => {
+      if (f.status !== 'Pending') return false;
+      const isDirectlyAssigned =
+        (f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
+        (f.assignedAgentName && user?.name && f.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase());
+      if (isDirectlyAssigned) return true;
+
+      const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+      const matchingLead = allLeads.find(l => {
+        const idMatch = f.contactId && String(f.contactId) === String(l.id);
+        const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+        return idMatch || Boolean(fPhone && lPhone && fPhone === lPhone);
+      });
+
+      if (matchingLead) {
+        return (
+          (matchingLead.assignedAgentId && String(matchingLead.assignedAgentId) === String(user?.id)) ||
+          (matchingLead.assignedAgentName && user?.name && matchingLead.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase())
+        );
+      }
+      return false;
+    });
   } else if (isIrm) {
-    // IRM: Only show pending follow-ups assigned to THIS authenticated IRM
+    // IRM: Show pending follow-ups assigned to THIS authenticated IRM OR associated with a lead assigned to THIS IRM
     scopedFollowups = followups.filter(f => {
       if (f.status !== 'Pending') return false;
       if (f.companyId && tenant?.id && !isTenantMatch(f.companyId, tenant.id)) return false;
-      return (
+
+      const isDirectlyAssigned =
         (f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
-        (f.assignedAgentName && f.assignedAgentName === user?.name)
-      );
+        (f.assignedAgentName && user?.name && f.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase());
+      if (isDirectlyAssigned) return true;
+
+      const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+      const matchingLead = allLeads.find(l => {
+        const idMatch = f.contactId && String(f.contactId) === String(l.id);
+        const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+        return idMatch || Boolean(fPhone && lPhone && fPhone === lPhone);
+      });
+
+      if (matchingLead) {
+        return (
+          (matchingLead.assignedAgentId && String(matchingLead.assignedAgentId) === String(user?.id)) ||
+          (matchingLead.assignedAgentName && user?.name && matchingLead.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase())
+        );
+      }
+
+      return false;
     });
+
+    // Also synthesize follow-up tasks for any leads assigned to this IRM that are in Follow-up stage but lack a standalone followup record
+    const existingFollowupContactIds = new Set(
+      scopedFollowups.map(f => String(f.contactId)).filter(Boolean)
+    );
+    const existingFollowupPhones = new Set(
+      scopedFollowups.map(f => (f.contactPhone || '').replace(/\D/g, '').slice(-10)).filter(Boolean)
+    );
+
+    const missingFollowupLeads = allLeads.filter(l => {
+      const isAssignedToMe =
+        (l.assignedAgentId && String(l.assignedAgentId) === String(user?.id)) ||
+        (l.assignedAgentName && user?.name && l.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase());
+      if (!isAssignedToMe) return false;
+      if (l.companyId && tenant?.id && !isTenantMatch(l.companyId, tenant.id)) return false;
+
+      const isInFollowupStage =
+        l.status === 'Follow-up Required' ||
+        l.status === 'Callback' ||
+        Boolean(l.nextFollowupDate);
+      if (!isInFollowupStage) return false;
+
+      const cleanPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+      if (existingFollowupContactIds.has(String(l.id))) return false;
+      if (cleanPhone && existingFollowupPhones.has(cleanPhone)) return false;
+
+      return true;
+    });
+
+    for (const ml of missingFollowupLeads) {
+      scopedFollowups.push({
+        id: `lead-flw-${ml.id}`,
+        companyId: tenant?.id || 't-ghl-01',
+        contactId: String(ml.id),
+        contactType: 'lead',
+        contactName: ml.name,
+        contactPhone: ml.phone,
+        contactEmail: ml.email || '',
+        scheduledAt: ml.nextFollowupDate || new Date(Date.now() + 86400000).toISOString(),
+        priority: (ml.priority === 'Urgent' ? 'High' : (ml.priority || 'High')) as 'Low' | 'Medium' | 'High',
+        status: 'Pending',
+        notes: ml.notes || 'Scheduled follow-up callback',
+        assignedAgentId: String(user?.id || ''),
+        assignedAgentName: user?.name || ml.assignedAgentName || '',
+        assignedRole: 'IRM',
+      });
+    }
   } else {
     scopedFollowups = followups;
   }
 
-  // Do NOT collapse legitimate separate tasks merely because they belong to the same customer or have nearby schedules.
-  // Deduplicate only by unique ID so distinct tasks are never merged
-  let processedFollowups = scopedFollowups;
+  // Deduplicate follow-up tasks by contact so each contact has at most ONE active follow-up task card.
+  // If multiple records exist for the same contact (e.g. from repeated calls or fallback synthesis),
+  // pick the most actionable/recent one and merge any distinct notes so no contact is duplicated.
+  let processedFollowups: Followup[] = [];
   try {
-    const seen = new Set<string>();
-    const deduped: Followup[] = [];
+    const contactMap = new Map<string, Followup>();
 
     for (const f of scopedFollowups) {
-      const key = String(f.id);
-      if (!seen.has(key)) {
-        seen.add(key);
-        deduped.push(f);
+      const cleanContactId = (f.contactId || '').replace(/^lead-flw-/, '').trim();
+      const phoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+
+      const contactKey = (cleanContactId && cleanContactId !== 'contact-new')
+        ? `id:${cleanContactId}`
+        : phoneDigits
+          ? `phone:${phoneDigits}`
+          : (f.contactName ? `name:${f.contactName.trim().toLowerCase()}` : `item:${f.id}`);
+
+      if (contactMap.has(contactKey)) {
+        const existing = contactMap.get(contactKey)!;
+
+        // If one is Pending and the other is not, always keep the Pending one
+        if (existing.status !== 'Pending' && f.status === 'Pending') {
+          contactMap.set(contactKey, { ...f });
+          continue;
+        }
+        if (existing.status === 'Pending' && f.status !== 'Pending') {
+          continue;
+        }
+
+        // Both same status: prefer real database record over synthesized lead task ('lead-flw-')
+        const existingIsSynthetic = String(existing.id).startsWith('lead-flw-');
+        const currentIsSynthetic = String(f.id).startsWith('lead-flw-');
+
+        let winner = existing;
+        let secondary = f;
+
+        if (existingIsSynthetic && !currentIsSynthetic) {
+          winner = f;
+          secondary = existing;
+        } else if (!existingIsSynthetic && !currentIsSynthetic) {
+          // Both are real records: keep the one with the latest scheduled date or newest ID
+          const existingTime = Date.parse(existing.scheduledAt) || 0;
+          const currentTime = Date.parse(f.scheduledAt) || 0;
+          if (currentTime >= existingTime) {
+            winner = f;
+            secondary = existing;
+          }
+        }
+
+        // Merge notes if secondary has distinct information not in winner
+        const wNotes = (winner.notes || '').trim();
+        const sNotes = (secondary.notes || '').trim();
+        if (sNotes && !wNotes.includes(sNotes)) {
+          winner.notes = wNotes ? `${wNotes} | ${sNotes}` : sNotes;
+        }
+
+        contactMap.set(contactKey, winner);
+      } else {
+        contactMap.set(contactKey, { ...f });
       }
     }
-    processedFollowups = deduped;
+
+    processedFollowups = Array.from(contactMap.values());
   } catch (err) {
-    console.error('Error deduping followups list:', err);
+    console.error('Error deduping followups list by contact:', err);
     processedFollowups = scopedFollowups;
   }
 
@@ -769,34 +898,38 @@ export const FollowupsPage: React.FC = () => {
     }
   }
 
-  // Count badges
-  const activePendingFollowups = processedFollowups.filter(f => f.status === 'Pending');
-
-  const filteredFollowups = processedFollowups.filter(f => {
+  // Count badges & filters
+  const isFollowupToday = (f: Followup): boolean => {
     const schedStr = (f.scheduledAt || '').trim();
     const dateStr = (f.scheduledDate || '').trim();
     const now = new Date();
-    
-    const isToday = () => {
-      const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
-      if (isNaN(parsedTime)) return schedStr.toLowerCase().includes('today');
-      const d = new Date(parsedTime);
-      return d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    };
+    const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
+    if (isNaN(parsedTime)) return schedStr.toLowerCase().includes('today');
+    const d = new Date(parsedTime);
+    return d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  };
 
-    const isOverdueFunc = () => {
-      const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
-      if (isNaN(parsedTime)) return schedStr.toLowerCase().includes('yesterday');
-      return parsedTime < new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    };
+  const isFollowupOverdue = (f: Followup): boolean => {
+    const schedStr = (f.scheduledAt || '').trim();
+    const dateStr = (f.scheduledDate || '').trim();
+    const now = new Date();
+    const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
+    if (isNaN(parsedTime)) return schedStr.toLowerCase().includes('yesterday');
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    return parsedTime < todayStart;
+  };
 
+  const activePendingFollowups = processedFollowups.filter(f => f.status === 'Pending');
+
+  const filteredFollowups = processedFollowups.filter(f => {
+    if (f.status !== 'Pending') return false;
     if (activeTab === 'due') {
-      return f.status === 'Pending' && isToday();
+      return isFollowupToday(f);
     }
     if (activeTab === 'overdue') {
-      return f.status === 'Pending' && isOverdueFunc() && !isToday();
+      return isFollowupOverdue(f) && !isFollowupToday(f);
     }
-    return f.status === 'Pending';
+    return true;
   });
 
   const drawerFollowupRole = drawerFollowup ? getFollowupRole(drawerFollowup) : '';
@@ -932,9 +1065,8 @@ export const FollowupsPage: React.FC = () => {
           {/* Right Section: Role Mode Tag & Total Count */}
           <div className="admin-followup-meta-group">
             <span
-              className={`followup-role-tag ${
-                selectedRole === 'sales_executive' ? 'tag-sales-exec' : 'tag-irm'
-              }`}
+              className={`followup-role-tag ${selectedRole === 'sales_executive' ? 'tag-sales-exec' : 'tag-irm'
+                }`}
             >
               {selectedRole === 'sales_executive' ? (
                 <>
@@ -960,33 +1092,23 @@ export const FollowupsPage: React.FC = () => {
           { id: 'all', label: `All Tasks (${activePendingFollowups.length})` },
           {
             id: 'due',
-            label: `Due Today (${
-              activePendingFollowups.filter(f =>
-                (f.scheduledAt || '').toLowerCase().includes('today')
-              ).length
-            })`,
+            label: `Due Today (${activePendingFollowups.filter(isFollowupToday).length})`,
           },
           {
             id: 'overdue',
-            label: `Overdue (${
-              activePendingFollowups.filter(f =>
-                (f.scheduledAt || '').toLowerCase().includes('yesterday')
-              ).length
-            })`,
+            label: `Overdue (${activePendingFollowups.filter(f => isFollowupOverdue(f) && !isFollowupToday(f)).length})`,
             danger: true,
           },
         ].map(tab => (
           <button
             key={tab.id}
-            className={`btn btn-sm ${
-              activeTab === tab.id ? 'btn-primary' : 'btn-secondary'
-            } ${
-              tab.danger && activeTab === tab.id
+            className={`btn btn-sm ${activeTab === tab.id ? 'btn-primary' : 'btn-secondary'
+              } ${tab.danger && activeTab === tab.id
                 ? 'followups-tab-danger-active'
                 : tab.danger
-                ? 'followups-tab-danger-inactive'
-                : ''
-            }`}
+                  ? 'followups-tab-danger-inactive'
+                  : ''
+              }`}
             onClick={() => setActiveTab(tab.id as any)}
           >
             {tab.danger && (
@@ -1008,7 +1130,7 @@ export const FollowupsPage: React.FC = () => {
             const schedStr = (f.scheduledAt || '').trim();
             const dateStr = (f.scheduledDate || '').trim();
             const now = new Date();
-            
+
             const isOverdueFunc = () => {
               const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
               if (isNaN(parsedTime)) return schedStr.toLowerCase().includes('yesterday');
@@ -1077,9 +1199,8 @@ export const FollowupsPage: React.FC = () => {
                       </span>
                       <span className="followup-assignee">• Assignee: {f.assignedAgentName}</span>
                       <span
-                        className={`badge-role-inline ${
-                          fRole === 'IRM' ? 'badge-role-irm' : 'badge-role-sales'
-                        }`}
+                        className={`badge-role-inline ${fRole === 'IRM' ? 'badge-role-irm' : 'badge-role-sales'
+                          }`}
                       >
                         {fRole}
                       </span>
@@ -1161,12 +1282,11 @@ export const FollowupsPage: React.FC = () => {
           title={drawerFollowup?.contactName || 'Contact Profile'}
           subtitle={
             isAdmin
-              ? `Phone: ${drawerFollowup?.contactPhone || '—'} • Assigned : ${
-                  drawerFollowup?.assignedAgentName || 'Unassigned'
-                } (${drawerFollowupRole})`
+              ? `Phone: ${drawerFollowup?.contactPhone || '—'} • Assigned : ${drawerFollowup?.assignedAgentName || 'Unassigned'
+              } (${drawerFollowupRole})`
               : drawerFollowup?.contactPhone
-              ? `Phone: ${drawerFollowup.contactPhone} • ${tenant?.name || 'GHL India'}`
-              : (tenant?.name || '')
+                ? `Phone: ${drawerFollowup.contactPhone} • ${tenant?.name || 'GHL India'}`
+                : (tenant?.name || '')
           }
           width={720}
           footer={
@@ -1327,9 +1447,8 @@ export const FollowupsPage: React.FC = () => {
                             {assignedAgent}
                           </strong>
                           <span
-                            className={`admin-owner-role-tag ${
-                              drawerFollowupRole === 'IRM' ? 'tag-irm' : 'tag-sales-exec'
-                            }`}
+                            className={`admin-owner-role-tag ${drawerFollowupRole === 'IRM' ? 'tag-irm' : 'tag-sales-exec'
+                              }`}
                           >
                             <Briefcase size={12} />
                             {drawerFollowupRole === 'IRM'

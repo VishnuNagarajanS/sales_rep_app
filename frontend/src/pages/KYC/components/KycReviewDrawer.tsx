@@ -345,11 +345,11 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
         if (deal?.id) {
           await saveDeal({
             ...deal,
-            kycStatus: 'Completed',
+            kycStatus: 'Verified',
             verifiedBy: 'IRM Officer',
             verifiedAt: new Date().toISOString(),
           });
-          localStorage.setItem(`nexus_kyc_status_${deal.id}`, 'Completed');
+          localStorage.setItem(`nexus_kyc_status_${deal.id}`, 'Verified');
         }
         onShowToast(`KYC Approved for ${deal?.customerName || 'Investor'}! Verified in Database.`);
         window.dispatchEvent(new CustomEvent('nexus_storage_updated'));

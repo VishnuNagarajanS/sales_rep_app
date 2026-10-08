@@ -20,6 +20,7 @@ public class KycService : IKycService
     private readonly ApplicationDbContext _db;
     private readonly ILogger<KycService> _logger;
     private readonly IIrmOtherService _otherService;
+    private readonly IConfiguration _config;
 
     public KycService(
         IKycRepository kycRepo,
@@ -28,6 +29,7 @@ public class KycService : IKycService
         IOtpService otpService,
         ApplicationDbContext db,
         ILogger<KycService> logger,
+        IConfiguration config,
         IIrmOtherService? otherService = null)
     {
         _kycRepo = kycRepo;
@@ -36,7 +38,41 @@ public class KycService : IKycService
         _otpService = otpService;
         _db = db;
         _logger = logger;
+        _config = config;
         _otherService = otherService ?? new IrmOtherService(db);
+    }
+
+    public static bool IsValidPan(string? pan) =>
+        !string.IsNullOrWhiteSpace(pan) && System.Text.RegularExpressions.Regex.IsMatch(pan.Trim().ToUpperInvariant(), "^[A-Z]{5}[0-9]{4}[A-Z]{1}$");
+
+    public static bool IsValidAadhaar(string? aadhaar)
+    {
+        if (string.IsNullOrWhiteSpace(aadhaar)) return false;
+        var digits = new string(aadhaar.Where(char.IsDigit).ToArray());
+        return digits.Length == 12;
+    }
+
+    public static bool IsValidIfsc(string? ifsc) =>
+        !string.IsNullOrWhiteSpace(ifsc) && System.Text.RegularExpressions.Regex.IsMatch(ifsc.Trim().ToUpperInvariant(), "^[A-Z]{4}0[A-Z0-9]{6}$");
+
+    private static string? MaskPan(string? pan)
+    {
+        if (string.IsNullOrWhiteSpace(pan) || pan.Length < 10) return null;
+        return $"{pan[..2]}••••••{pan[^2..]}";
+    }
+
+    private static string? MaskAadhaar(string? aadhaar)
+    {
+        if (string.IsNullOrWhiteSpace(aadhaar)) return null;
+        var clean = new string(aadhaar.Where(char.IsDigit).ToArray());
+        if (clean.Length < 4) return null;
+        return $"•••• •••• {clean[^4..]}";
+    }
+
+    private static string? MaskAccount(string? acc)
+    {
+        if (string.IsNullOrWhiteSpace(acc) || acc.Length < 4) return null;
+        return $"••••••••{acc[^4..]}";
     }
 
     public async Task<ApiResponse<KycDto>> GetByInvestorIdAsync(int investorId, int companyId, CancellationToken ct = default)
@@ -122,8 +158,7 @@ public class KycService : IKycService
 
         if (existing == null && !string.IsNullOrWhiteSpace(recipientEmail))
         {
-            var all = await _kycRepo.GetAllAsync(companyId, null, ct);
-            existing = all.FirstOrDefault(k => string.Equals(k.Email, recipientEmail, StringComparison.OrdinalIgnoreCase));
+            existing = await _kycRepo.GetByEmailAsync(recipientEmail, companyId, ct);
         }
 
         if (existing == null && !string.IsNullOrWhiteSpace(recipientPhone))
@@ -132,8 +167,7 @@ public class KycService : IKycService
             if (phoneDigits.Length >= 10)
             {
                 var last10 = phoneDigits[^10..];
-                var all = await _kycRepo.GetAllAsync(companyId, null, ct);
-                existing = all.FirstOrDefault(k => (k.Phone ?? string.Empty).Replace("-", "").Replace(" ", "").EndsWith(last10));
+                existing = await _kycRepo.GetByPhoneLast10Async(last10, companyId, ct);
             }
         }
 
@@ -167,7 +201,20 @@ public class KycService : IKycService
             }
         }
 
-        var baseUrl = !string.IsNullOrWhiteSpace(dto.BaseUrl) ? dto.BaseUrl.TrimEnd('/') : "http://localhost:5173";
+        var defaultBaseUrl = _config["SmtpSettings:ClientBaseUrl"] ?? "http://localhost:5173";
+        string baseUrl = defaultBaseUrl;
+        if (!string.IsNullOrWhiteSpace(dto.BaseUrl))
+        {
+            var cleanInput = dto.BaseUrl.TrimEnd('/');
+            if (Uri.TryCreate(cleanInput, UriKind.Absolute, out var parsedUri) &&
+                (parsedUri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                 parsedUri.Host.EndsWith("ghl.com", StringComparison.OrdinalIgnoreCase) ||
+                 parsedUri.Host.EndsWith("nexus.com", StringComparison.OrdinalIgnoreCase) ||
+                 (Uri.TryCreate(defaultBaseUrl, UriKind.Absolute, out var defUri) && parsedUri.Host.Equals(defUri.Host, StringComparison.OrdinalIgnoreCase))))
+            {
+                baseUrl = cleanInput;
+            }
+        }
         var fullKycLink = $"{baseUrl}/kyc/{rawToken}";
 
         bool emailSent = false;
@@ -305,8 +352,7 @@ public class KycService : IKycService
         }
         else if (!string.IsNullOrWhiteSpace(dto.Email))
         {
-            var all = await _kycRepo.GetAllAsync(companyId, null, ct);
-            kyc = all.FirstOrDefault(k => string.Equals(k.Email, dto.Email, StringComparison.OrdinalIgnoreCase));
+            kyc = await _kycRepo.GetByEmailAsync(dto.Email, companyId, ct);
         }
 
         if (kyc == null)
@@ -321,6 +367,24 @@ public class KycService : IKycService
         if (kyc.SubmittedAt != null && kyc.Status == KycStatus.PendingReview)
         {
             return ApiResponse<KycDto>.ErrorResponse("You have already submitted your KYC. It is currently awaiting IRM verification.");
+        }
+
+        if (dto.IsFinalSubmit)
+        {
+            if (!string.IsNullOrWhiteSpace(dto.PanNumber) && !IsValidPan(dto.PanNumber))
+                return ApiResponse<KycDto>.ErrorResponse("Invalid PAN number format. Format must be 5 uppercase letters, 4 digits, 1 uppercase letter (e.g. ABCDE1234F).");
+
+            if (!string.IsNullOrWhiteSpace(dto.AadhaarNumber) && !IsValidAadhaar(dto.AadhaarNumber))
+                return ApiResponse<KycDto>.ErrorResponse("Invalid Aadhaar number format. Must be 12 numeric digits.");
+
+            if (!string.IsNullOrWhiteSpace(dto.IfscCode) && !IsValidIfsc(dto.IfscCode))
+                return ApiResponse<KycDto>.ErrorResponse("Invalid IFSC code format (e.g. HDFC0001234).");
+
+            if (!string.IsNullOrWhiteSpace(dto.PanDocumentUrl) && dto.PanDocumentUrl.Length > 7 * 1024 * 1024)
+                return ApiResponse<KycDto>.ErrorResponse("PAN document file size exceeds the 5 MB limit.");
+
+            if (!string.IsNullOrWhiteSpace(dto.AadhaarDocumentUrl) && dto.AadhaarDocumentUrl.Length > 7 * 1024 * 1024)
+                return ApiResponse<KycDto>.ErrorResponse("Aadhaar document file size exceeds the 5 MB limit.");
         }
 
         kyc.InvestorName = !string.IsNullOrWhiteSpace(dto.InvestorName) ? dto.InvestorName : kyc.InvestorName;
@@ -383,6 +447,11 @@ public class KycService : IKycService
         else
             await _kycRepo.UpdateAsync(kyc, ct);
 
+        if (dto.IsFinalSubmit)
+        {
+            await SyncLeadAndFollowupsOnKycProgressionAsync(companyId, kyc.Phone, kyc.Email, kyc.InvestorName, kyc.Id, kyc.Status, ct);
+        }
+
         return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc), dto.IsFinalSubmit ? "KYC submitted for review" : "KYC draft saved");
     }
 
@@ -392,7 +461,9 @@ public class KycService : IKycService
         if (kyc == null)
             return ApiResponse<KycDto>.ErrorResponse("KYC record not found");
 
-        if (!Enum.TryParse<KycStatus>(dto.Action, true, out var status))
+        var allowedActions = new[] { "Approved", "Rejected", "ReuploadRequested" };
+        if (string.IsNullOrWhiteSpace(dto.Action) || !allowedActions.Contains(dto.Action, StringComparer.OrdinalIgnoreCase) ||
+            !Enum.TryParse<KycStatus>(dto.Action, true, out var status))
         {
             return ApiResponse<KycDto>.ErrorResponse("Invalid review action. Allowed: Approved, Rejected, ReuploadRequested");
         }
@@ -408,13 +479,10 @@ public class KycService : IKycService
                 return ApiResponse<KycDto>.ErrorResponse("Cannot approve KYC: No genuine customer submission exists for this record.");
             }
 
-            if (dto.Checklist != null)
+            bool hasNominees = !string.IsNullOrWhiteSpace(kyc.NomineesJson) && kyc.NomineesJson.Trim() != "[]";
+            if (dto.Checklist == null || !dto.Checklist.IsValid(hasNominees))
             {
-                bool hasNominees = !string.IsNullOrWhiteSpace(kyc.NomineesJson) && kyc.NomineesJson.Trim() != "[]";
-                if (!dto.Checklist.IsValid(hasNominees))
-                {
-                    return ApiResponse<KycDto>.ErrorResponse("Required checklist items (Identity, Bank, Documents, Demat" + (hasNominees ? ", Nominee" : "") + ") must be verified.");
-                }
+                return ApiResponse<KycDto>.ErrorResponse("Required checklist items (Identity, Bank, Documents, Demat" + (hasNominees ? ", Nominee" : "") + ") must be verified.");
             }
 
             kyc.VerifiedAt = DateTime.UtcNow;
@@ -436,6 +504,7 @@ public class KycService : IKycService
         }
 
         await _kycRepo.UpdateAsync(kyc, ct);
+        await SyncLeadAndFollowupsOnKycProgressionAsync(companyId, kyc.Phone, kyc.Email, kyc.InvestorName, kyc.Id, kyc.Status, ct);
         return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc), $"KYC status updated to {kyc.Status}");
     }
 
@@ -451,13 +520,9 @@ public class KycService : IKycService
         if (kyc.KycLinkExpiresAt.HasValue && kyc.KycLinkExpiresAt.Value <= DateTime.UtcNow)
             return ApiResponse<PublicKycDto>.ErrorResponse("This KYC link has expired. Please request a new link.");
 
-        if (kyc.Status == KycStatus.Approved)
-            return ApiResponse<PublicKycDto>.ErrorResponse("This KYC has already been verified and approved.");
+        // Return customer & draft info. Require verified OTP session before releasing unmasked sensitive PII
+        bool isOtpVerified = await _otpService.HasVerifiedOtpAsync(token, kyc.Email, ct);
 
-        if (kyc.SubmittedAt != null && kyc.Status == KycStatus.PendingReview)
-            return ApiResponse<PublicKycDto>.ErrorResponse("You have already submitted your KYC. It is currently awaiting IRM verification.");
-
-        // Return full customer & draft info needed for form pre-fill and resumption
         var publicDto = new PublicKycDto
         {
             Id = kyc.Id,
@@ -469,37 +534,37 @@ public class KycService : IKycService
             IsExpired = kyc.KycLinkExpiresAt.HasValue && kyc.KycLinkExpiresAt.Value <= DateTime.UtcNow,
             ExpiresAt = kyc.KycLinkExpiresAt,
 
-            FatherName = kyc.FatherName,
-            DateOfBirth = kyc.DateOfBirth,
-            Dob = kyc.DateOfBirth,
-            NameAsPerPan = kyc.NameAsPerPan,
+            FatherName = isOtpVerified ? kyc.FatherName : null,
+            DateOfBirth = isOtpVerified ? kyc.DateOfBirth : null,
+            Dob = isOtpVerified ? kyc.DateOfBirth : null,
+            NameAsPerPan = isOtpVerified ? kyc.NameAsPerPan : null,
             Gender = kyc.Gender,
             InvestorType = kyc.InvestorType,
             ResidentType = kyc.ResidentType,
             Occupation = kyc.Occupation,
 
-            PanNumber = kyc.PanNumber,
-            AadhaarNumber = kyc.AadhaarNumber,
-            AddressLine1 = kyc.AddressLine1,
-            AddressLine2 = kyc.AddressLine2,
+            PanNumber = isOtpVerified ? kyc.PanNumber : MaskPan(kyc.PanNumber),
+            AadhaarNumber = isOtpVerified ? kyc.AadhaarNumber : MaskAadhaar(kyc.AadhaarNumber),
+            AddressLine1 = isOtpVerified ? kyc.AddressLine1 : null,
+            AddressLine2 = isOtpVerified ? kyc.AddressLine2 : null,
             City = kyc.City,
             State = kyc.State,
             Pincode = kyc.Pincode,
             Country = kyc.Country,
 
             BankName = kyc.BankName,
-            AccountNumber = kyc.AccountNumber,
-            IfscCode = kyc.IfscCode,
+            AccountNumber = isOtpVerified ? kyc.AccountNumber : MaskAccount(kyc.AccountNumber),
+            IfscCode = isOtpVerified ? kyc.IfscCode : null,
             AccountType = kyc.AccountType,
-            DematAccountNumber = kyc.DematAccountNumber,
-            DpId = kyc.DpId,
+            DematAccountNumber = isOtpVerified ? kyc.DematAccountNumber : MaskAccount(kyc.DematAccountNumber),
+            DpId = isOtpVerified ? kyc.DpId : null,
 
-            NomineesJson = kyc.NomineesJson,
+            NomineesJson = isOtpVerified ? kyc.NomineesJson : null,
 
-            PanDocumentUrl = kyc.PanDocumentUrl,
-            AadhaarDocumentUrl = kyc.AadhaarDocumentUrl,
-            BankChequeUrl = kyc.BankChequeUrl,
-            DematDocumentUrl = kyc.DematDocumentUrl,
+            PanDocumentUrl = isOtpVerified ? kyc.PanDocumentUrl : null,
+            AadhaarDocumentUrl = isOtpVerified ? kyc.AadhaarDocumentUrl : null,
+            BankChequeUrl = isOtpVerified ? kyc.BankChequeUrl : null,
+            DematDocumentUrl = isOtpVerified ? kyc.DematDocumentUrl : null,
             PhotoUrl = kyc.PhotoUrl,
             SignatureUrl = kyc.SignatureUrl,
 
@@ -530,7 +595,7 @@ public class KycService : IKycService
     public async Task<ApiResponse<List<KycListDto>>> GetAllAsync(int companyId, string? status, int? irmId, CancellationToken ct = default)
     {
         var list = await _kycRepo.GetAllAsync(companyId, status, irmId, ct);
-        var matcher = await _otherService.GetOtherMatcherAsync(companyId, "kyc", ct);
+        var matcher = await _otherService.GetOtherMatcherAsync(companyId, "kyc", irmId, ct);
         if (matcher.HasAnyOther)
         {
             list = list.Where(k => !matcher.IsInOther(k.Phone, k.InvestorId, null, k.InvestorName)).ToList();
@@ -554,10 +619,8 @@ public class KycService : IKycService
         }
         if (kyc == null && !string.IsNullOrWhiteSpace(dto.Email))
         {
-            var all = await _kycRepo.GetAllAsync(companyId, null, ct);
-            kyc = all.FirstOrDefault(k => string.Equals(k.Email, dto.Email, StringComparison.OrdinalIgnoreCase));
+            kyc = await _kycRepo.GetByEmailAsync(dto.Email, companyId, ct);
         }
-
 
         if (kyc == null && !string.IsNullOrWhiteSpace(dto.Phone))
         {
@@ -565,8 +628,7 @@ public class KycService : IKycService
             if (phoneDigits.Length >= 10)
             {
                 var last10 = phoneDigits[^10..];
-                var all = await _kycRepo.GetAllAsync(companyId, null, ct);
-                kyc = all.FirstOrDefault(k => (k.Phone ?? string.Empty).Replace("-", string.Empty).Replace(" ", string.Empty).EndsWith(last10));
+                kyc = await _kycRepo.GetByPhoneLast10Async(last10, companyId, ct);
             }
         }
 
@@ -646,8 +708,9 @@ public class KycService : IKycService
         }
         else
         {
+            int effectiveIrmId = (kyc.IrmId.HasValue && kyc.IrmId.Value > 0) ? kyc.IrmId.Value : irmId;
             kyc.InvestorId = investor.Id;
-            kyc.IrmId = irmId;
+            kyc.IrmId = effectiveIrmId;
             if (dto.IsFinalSubmit)
             {
                 kyc.Status = KycStatus.PendingReview;
@@ -656,6 +719,16 @@ public class KycService : IKycService
             {
                 kyc.Status = KycStatus.Draft;
             }
+        }
+
+        if (dto.IsFinalSubmit)
+        {
+            if (!string.IsNullOrWhiteSpace(dto.PanNumber) && !IsValidPan(dto.PanNumber))
+                return ApiResponse<KycDto>.ErrorResponse("Invalid PAN number format (e.g. ABCDE1234F).");
+            if (!string.IsNullOrWhiteSpace(dto.AadhaarNumber) && !IsValidAadhaar(dto.AadhaarNumber))
+                return ApiResponse<KycDto>.ErrorResponse("Invalid Aadhaar number format. Must be 12 numeric digits.");
+            if (!string.IsNullOrWhiteSpace(dto.IfscCode) && !IsValidIfsc(dto.IfscCode))
+                return ApiResponse<KycDto>.ErrorResponse("Invalid IFSC code format (e.g. HDFC0001234).");
         }
 
         kyc.InvestorName = !string.IsNullOrWhiteSpace(dto.InvestorName) ? dto.InvestorName : kyc.InvestorName;
@@ -757,6 +830,9 @@ public class KycService : IKycService
         else
             await _kycRepo.UpdateAsync(kyc, ct);
 
+        // Automatically cascade lifecycle progression to leads, followups, and pipeline deals
+        await SyncLeadAndFollowupsOnKycProgressionAsync(companyId, kyc.Phone, kyc.Email, kyc.InvestorName, kyc.Id, kyc.Status, ct);
+
         // Record immutable backend audit log retaining full consent and submission details
         try
         {
@@ -786,6 +862,83 @@ public class KycService : IKycService
         return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc), dto.IsFinalSubmit ? "Assisted KYC submitted for verification" : "Assisted KYC draft saved");
     }
 
+    public async Task<ApiResponse<bool>> RevokeKycLinkAsync(int id, int companyId, int? irmId, CancellationToken ct = default)
+    {
+        var kyc = await _kycRepo.GetByIdAsync(id, companyId, ct);
+        if (kyc == null)
+        {
+            kyc = await _kycRepo.GetByInvestorIdAsync(id, companyId, ct);
+        }
+        if (kyc == null)
+            return ApiResponse<bool>.ErrorResponse("KYC record not found");
+
+        if (irmId.HasValue && irmId.Value > 0 && kyc.IrmId.HasValue && kyc.IrmId.Value != irmId.Value)
+        {
+            return ApiResponse<bool>.ErrorResponse("Access denied: You can only revoke KYC records assigned to you.");
+        }
+
+        kyc.IsRevoked = true;
+        kyc.RevokedAt = DateTime.UtcNow;
+        kyc.KycLinkToken = null;
+        kyc.KycLinkExpiresAt = null;
+        kyc.UpdatedAt = DateTime.UtcNow;
+
+        await _kycRepo.UpdateAsync(kyc, ct);
+
+        try
+        {
+            var user = irmId.HasValue ? await _db.Users.FindAsync(new object[] { irmId.Value }, ct) : null;
+            var audit = new AuditLog
+            {
+                CompanyId = companyId,
+                Action = "REVOKE_KYC_LINK",
+                EntityType = "InvestorKyc",
+                EntityId = kyc.Id.ToString(),
+                Details = $"KYC link revoked for investor '{kyc.InvestorName}'",
+                ActorName = user?.Name ?? $"User #{irmId}",
+                ActorEmail = user?.Email ?? string.Empty,
+                Timestamp = DateTime.UtcNow,
+                Module = "KYC",
+                Status = "success"
+            };
+            _db.AuditLogs.Add(audit);
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[RevokeKycLinkAsync] Audit log failed: {Message}", ex.Message);
+        }
+
+        return ApiResponse<bool>.SuccessResponse(true, "KYC link has been revoked.");
+    }
+
+    public async Task<ApiResponse<SendKycLinkResponseDto>> ResendKycLinkAsync(int id, int companyId, int irmId, ResendKycLinkDto? dto, CancellationToken ct = default)
+    {
+        var kyc = await _kycRepo.GetByIdAsync(id, companyId, ct);
+        if (kyc == null)
+        {
+            kyc = await _kycRepo.GetByInvestorIdAsync(id, companyId, ct);
+        }
+        if (kyc == null)
+            return ApiResponse<SendKycLinkResponseDto>.ErrorResponse("KYC record not found");
+
+        if (kyc.Status == KycStatus.Approved)
+            return ApiResponse<SendKycLinkResponseDto>.ErrorResponse("This KYC has already been approved and verified.");
+
+        var sendDto = new SendKycLinkDto
+        {
+            InvestorId = kyc.InvestorId,
+            InvestorName = kyc.InvestorName,
+            Email = kyc.Email,
+            Phone = kyc.Phone,
+            ExpiryDays = dto?.ExpiryDays ?? 7,
+            ForceNewToken = true,
+            BaseUrl = dto?.BaseUrl
+        };
+
+        return await SendKycLinkAsync(companyId, irmId, sendDto, ct);
+    }
+
     private static KycListDto MapToListDto(InvestorKyc k) => new()
     {
         Id = k.Id,
@@ -804,7 +957,7 @@ public class KycService : IKycService
         ResidentType = k.ResidentType,
         Occupation = k.Occupation,
         PanNumber = k.PanNumber,
-        AadhaarNumber = k.AadhaarNumber,
+        AadhaarNumber = MaskAadhaar(k.AadhaarNumber),
         AddressLine1 = k.AddressLine1,
         AddressLine2 = k.AddressLine2,
         City = k.City,
@@ -812,10 +965,10 @@ public class KycService : IKycService
         Pincode = k.Pincode,
         Country = k.Country,
         BankName = k.BankName,
-        AccountNumber = k.AccountNumber,
+        AccountNumber = MaskAccount(k.AccountNumber),
         IfscCode = k.IfscCode,
         AccountType = k.AccountType,
-        DematAccountNumber = k.DematAccountNumber,
+        DematAccountNumber = MaskAccount(k.DematAccountNumber),
         DpId = k.DpId,
         NomineesJson = k.NomineesJson,
         HasPanDocument = !string.IsNullOrWhiteSpace(k.PanDocumentUrl),
@@ -887,7 +1040,151 @@ public class KycService : IKycService
         AssistedByUserId = k.AssistedByUserId,
         CustomerConsentObtained = k.CustomerConsentObtained,
         CustomerConsentTimestamp = k.CustomerConsentTimestamp,
+        KycLinkToken = k.KycLinkToken,
+        KycLinkExpiresAt = k.KycLinkExpiresAt,
         CreatedAt = k.CreatedAt,
         UpdatedAt = k.UpdatedAt
     };
+
+    private async Task SyncLeadAndFollowupsOnKycProgressionAsync(
+        int companyId, 
+        string? phone, 
+        string? email, 
+        string? name, 
+        int kycId, 
+        KycStatus kycStatus, 
+        CancellationToken ct)
+    {
+        try
+        {
+            var phoneDigits = !string.IsNullOrWhiteSpace(phone)
+                ? new string(phone.Where(char.IsDigit).ToArray())
+                : string.Empty;
+            var phoneLast10 = phoneDigits.Length >= 10 ? phoneDigits[^10..] : phoneDigits;
+            var cleanEmail = (email ?? string.Empty).Trim().ToLowerInvariant();
+            var cleanName = (name ?? string.Empty).Trim().ToLowerInvariant();
+
+            // 1. Advance corresponding Lead in Leads table
+            var leads = await _db.Leads
+                .Where(l => l.CompanyId == companyId)
+                .ToListAsync(ct);
+
+            var matchedLead = leads.FirstOrDefault(l =>
+            {
+                if (!string.IsNullOrWhiteSpace(phoneLast10))
+                {
+                    var lDigits = new string(l.Phone.Where(char.IsDigit).ToArray());
+                    if (lDigits.EndsWith(phoneLast10)) return true;
+                }
+                if (!string.IsNullOrWhiteSpace(cleanEmail) && !string.IsNullOrWhiteSpace(l.Email))
+                {
+                    if (l.Email.Trim().ToLowerInvariant() == cleanEmail) return true;
+                }
+                if (!string.IsNullOrWhiteSpace(cleanName) && !string.IsNullOrWhiteSpace(l.Name))
+                {
+                    if (l.Name.Trim().ToLowerInvariant() == cleanName) return true;
+                }
+                return false;
+            });
+
+            if (matchedLead != null)
+            {
+                if (!string.Equals(matchedLead.Status, "Converted", StringComparison.OrdinalIgnoreCase))
+                {
+                    matchedLead.Status = kycStatus == KycStatus.Approved ? "Converted" : "Qualified";
+                    matchedLead.UpdatedAt = DateTime.UtcNow;
+                }
+            }
+
+            // 2. Complete open/pending follow-ups
+            var openFollowups = await _db.Followups
+                .Where(f => f.CompanyId == companyId && f.Status == FollowupStatus.Pending)
+                .ToListAsync(ct);
+
+            foreach (var f in openFollowups)
+            {
+                bool isMatch = false;
+                if (matchedLead != null && f.ContactId == matchedLead.Id.ToString())
+                {
+                    isMatch = true;
+                }
+                else if (!string.IsNullOrWhiteSpace(phoneLast10) && !string.IsNullOrWhiteSpace(f.ContactPhone))
+                {
+                    var fDigits = new string(f.ContactPhone.Where(char.IsDigit).ToArray());
+                    if (fDigits.EndsWith(phoneLast10)) isMatch = true;
+                }
+                else if (!string.IsNullOrWhiteSpace(cleanName) && !string.IsNullOrWhiteSpace(f.ContactName))
+                {
+                    if (f.ContactName.Trim().ToLowerInvariant() == cleanName) isMatch = true;
+                }
+
+                if (isMatch)
+                {
+                    f.Status = FollowupStatus.Completed;
+                    f.CompletedAt = DateTime.UtcNow;
+                    var autoNote = "[System]: Auto-completed upon KYC progression";
+                    f.Notes = string.IsNullOrWhiteSpace(f.Notes) ? autoNote : $"{f.Notes} | {autoNote}";
+                }
+            }
+
+            // 3. Link or advance corresponding GhlDeal
+            var deals = await _db.GhlDeals
+                .Include(d => d.Customer)
+                .Where(d => d.CompanyId == companyId)
+                .ToListAsync(ct);
+
+            var matchedDeal = deals.FirstOrDefault(d =>
+            {
+                if (d.KycId == kycId) return true;
+                if (matchedLead != null && d.CustomerId == matchedLead.Id) return true;
+                if (!string.IsNullOrWhiteSpace(phoneLast10))
+                {
+                    var dPhone = d.Customer?.Phone;
+                    if (!string.IsNullOrWhiteSpace(dPhone))
+                    {
+                        var dDigits = new string(dPhone.Where(char.IsDigit).ToArray());
+                        if (dDigits.EndsWith(phoneLast10)) return true;
+                    }
+                }
+                if (!string.IsNullOrWhiteSpace(cleanEmail))
+                {
+                    var dEmail = d.Customer?.Email;
+                    if (!string.IsNullOrWhiteSpace(dEmail) && dEmail.Trim().ToLowerInvariant() == cleanEmail) return true;
+                }
+                if (!string.IsNullOrWhiteSpace(cleanName) && !string.IsNullOrWhiteSpace(d.CustomerName))
+                {
+                    if (d.CustomerName.Trim().ToLowerInvariant() == cleanName) return true;
+                }
+                return false;
+            });
+
+            if (matchedDeal != null)
+            {
+                matchedDeal.KycId = kycId;
+                if (kycStatus == KycStatus.Approved)
+                {
+                    matchedDeal.KycStatus = "Verified";
+                }
+                else if (kycStatus == KycStatus.Rejected)
+                {
+                    matchedDeal.KycStatus = "Rejected";
+                }
+                else
+                {
+                    matchedDeal.KycStatus = "PendingReview";
+                    if (string.IsNullOrWhiteSpace(matchedDeal.Stage) || matchedDeal.Stage == "new" || matchedDeal.Stage == "followup")
+                    {
+                        matchedDeal.Stage = "qualified_investor";
+                    }
+                }
+                matchedDeal.UpdatedAt = DateTime.UtcNow;
+            }
+
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[SyncLeadAndFollowupsOnKycProgressionAsync] Failed to cascade KYC lifecycle to leads/followups: {Message}", ex.Message);
+        }
+    }
 }

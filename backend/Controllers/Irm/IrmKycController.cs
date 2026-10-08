@@ -92,9 +92,12 @@ public class IrmKycController : ControllerBase
     public async Task<IActionResult> GetAllKycs([FromQuery] string? status, [FromQuery] int? companyId, CancellationToken ct)
     {
         var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
+        var isSuperAdmin = role == "super_admin";
         var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
-        var effectiveCompanyId = companyId ?? User.GetCompanyId(0);
-        if (effectiveCompanyId <= 0 && isPlatformAdmin) effectiveCompanyId = 1;
+        var userCompanyId = User.GetCompanyId(1);
+        var effectiveCompanyId = (isSuperAdmin && companyId.HasValue && companyId.Value > 0)
+            ? companyId.Value
+            : userCompanyId;
         if (effectiveCompanyId <= 0)
             return Unauthorized();
 
@@ -315,7 +318,10 @@ public class IrmKycController : ControllerBase
                     if (deal != null)
                     {
                         deal.KycId = kycId;
-                        deal.KycStatus = "Assisted KYC – Submitted for Verification";
+                        if (deal.KycStatus != "Verified" && deal.KycStatus != "Approved" && result.Data?.Status != "Approved")
+                        {
+                            deal.KycStatus = "Assisted KYC – Submitted for Verification";
+                        }
                         deal.UpdatedAt = DateTime.UtcNow;
                         await _db.SaveChangesAsync(ct);
                     }
@@ -353,6 +359,20 @@ public class IrmKycController : ControllerBase
             return Unauthorized();
 
         var userId = User.GetUserId();
+        if (userId <= 0)
+            return Unauthorized();
+
+        // Server-side permission check: user must have kyc.verify
+        var hasKycVerifyClaim = User.Claims.Any(c => c.Type == "permission" && c.Value == "kyc.verify");
+        if (!hasKycVerifyClaim)
+        {
+            var dbUser = await _db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == userId && u.CompanyId == companyId, ct);
+            if (dbUser?.Role?.Permissions == null || !dbUser.Role.Permissions.Contains("kyc.verify"))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<KycDto>.ErrorResponse("Forbidden: User lacks kyc.verify permission."));
+            }
+        }
+
         if (!isPlatformAdmin)
         {
             var kycRec = await _db.InvestorKycs.FirstOrDefaultAsync(k => k.Id == id && k.CompanyId == companyId, ct);
@@ -362,6 +382,117 @@ public class IrmKycController : ControllerBase
         }
 
         var result = await _kycService.ReviewKycAsync(id, companyId, dto, ct);
+        if (!result.Success)
+            return BadRequest(result);
+
+        var currentDbUser = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
+        var actorEmail = User.FindFirst(ClaimTypes.Email)?.Value
+            ?? User.FindFirst("email")?.Value
+            ?? currentDbUser?.Email
+            ?? "irm@ghl.com";
+        var actorName = User.FindFirst(ClaimTypes.Name)?.Value
+            ?? User.FindFirst("name")?.Value
+            ?? currentDbUser?.Name
+            ?? actorEmail;
+
+        // Write AuditLog
+        var audit = new AuditLog
+        {
+            CompanyId = companyId,
+            Timestamp = DateTime.UtcNow,
+            ActorName = actorName,
+            ActorEmail = actorEmail,
+            Action = "KYC_REVIEW",
+            EntityType = "InvestorKyc",
+            EntityId = id.ToString(),
+            Details = $"KYC review completed with action: {dto.Action}. Remarks: {dto.Remarks}",
+            Module = "KYC",
+            Status = "success"
+        };
+        _db.AuditLogs.Add(audit);
+
+        // Sync linked GhlDeal KycStatus
+        if (result.Data != null)
+        {
+            var kycData = result.Data;
+            var deal = await _db.GhlDeals.Include(d => d.Customer).FirstOrDefaultAsync(d =>
+                (d.KycId == id ||
+                 (kycData.InvestorId > 0 && d.CustomerId == kycData.InvestorId) ||
+                 (d.Customer != null && !string.IsNullOrEmpty(kycData.Email) && d.Customer.Email == kycData.Email)) &&
+                d.CompanyId == companyId, ct);
+
+            if (deal != null)
+            {
+                deal.KycId = id;
+                if (dto.Action.Equals("Approved", StringComparison.OrdinalIgnoreCase))
+                {
+                    deal.KycStatus = "Verified";
+                    deal.VerifiedBy = actorEmail;
+                    deal.VerifiedAt = DateTime.UtcNow;
+                }
+                else if (dto.Action.Equals("ReuploadRequested", StringComparison.OrdinalIgnoreCase))
+                {
+                    deal.KycStatus = "Needs Correction";
+                }
+                else if (dto.Action.Equals("Rejected", StringComparison.OrdinalIgnoreCase))
+                {
+                    deal.KycStatus = "Rejected";
+                }
+                deal.Remarks = dto.Remarks;
+                deal.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(result);
+    }
+
+    [HttpPost("{id:int}/revoke-link")]
+    [Authorize]
+    public async Task<IActionResult> RevokeLink(int id, CancellationToken ct)
+    {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<bool>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM KYC records."));
+        }
+
+        var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
+        var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
+        var companyId = User.GetCompanyId(0);
+        if (companyId <= 0 && isPlatformAdmin) companyId = 1;
+        if (companyId <= 0)
+            return Unauthorized();
+
+        var userId = User.GetUserId();
+        var result = await _kycService.RevokeKycLinkAsync(id, companyId, isPlatformAdmin ? null : userId, ct);
+        if (!result.Success)
+            return BadRequest(result);
+
+        return Ok(result);
+    }
+
+    [HttpPost("{id:int}/resend-link")]
+    [Authorize]
+    public async Task<IActionResult> ResendLink(int id, [FromBody] ResendKycLinkDto? dto, CancellationToken ct)
+    {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<SendKycLinkResponseDto>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM KYC records."));
+        }
+
+        var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
+        var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
+        var companyId = User.GetCompanyId(0);
+        if (companyId <= 0 && isPlatformAdmin) companyId = 1;
+        if (companyId <= 0)
+            return Unauthorized();
+
+        var userId = User.GetUserId();
+        if (userId <= 0)
+            return Unauthorized();
+
+        var result = await _kycService.ResendKycLinkAsync(id, companyId, userId, dto, ct);
         if (!result.Success)
             return BadRequest(result);
 
@@ -522,7 +653,11 @@ public class IrmKycController : ControllerBase
         _db.AuditLogs.Add(audit);
 
         // Update linked GhlDeal if one exists
-        var deal = await _db.GhlDeals.FirstOrDefaultAsync(d => (d.KycId == kyc.Id || d.CustomerId == kyc.InvestorId || (!string.IsNullOrEmpty(kyc.Email) && d.CustomerName == kyc.InvestorName)) && d.CompanyId == companyId, ct);
+        var deal = await _db.GhlDeals.Include(d => d.Customer).FirstOrDefaultAsync(d => 
+            (d.KycId == kyc.Id || 
+             (kyc.InvestorId > 0 && d.CustomerId == kyc.InvestorId) || 
+             (d.Customer != null && !string.IsNullOrEmpty(kyc.Email) && d.Customer.Email == kyc.Email)) && 
+            d.CompanyId == companyId, ct);
         if (deal != null)
         {
             deal.KycId = kyc.Id;
@@ -573,6 +708,9 @@ public class IrmKycController : ControllerBase
         if (userId <= 0)
             return Unauthorized();
 
+        var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
+        var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
+
         // Permission check — same as status endpoint
         var hasKycVerifyClaim = User.Claims.Any(c => c.Type == "permission" && c.Value == "kyc.verify");
         if (!hasKycVerifyClaim)
@@ -589,6 +727,12 @@ public class IrmKycController : ControllerBase
             .FirstOrDefaultAsync(k => k.Id == id && k.CompanyId == companyId, ct);
         if (kyc == null)
             return NotFound(ApiResponse<bool>.ErrorResponse("KYC record not found."));
+
+        if (!isPlatformAdmin && kyc.IrmId.HasValue && kyc.IrmId.Value != userId)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<bool>.ErrorResponse("Access denied: You can only update KYC records assigned to you."));
+        }
 
         // Validate section statuses
         string[] validStatuses = ["unchecked", "verified", "wrong"];

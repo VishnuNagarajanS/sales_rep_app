@@ -31,6 +31,7 @@ public class ReassignIrmWorkResultDto
     public int ReassignedKycsCount { get; set; }
     public int ReassignedDealsCount { get; set; }
     public int ReassignedInvestorsCount { get; set; }
+    public int ReassignedCardsCount { get; set; }
     public string FromIrmName { get; set; } = string.Empty;
     public string ToIrmName { get; set; } = string.Empty;
     public DateTime ReassignedAt { get; set; }
@@ -60,6 +61,7 @@ internal class ReassignedIdsPayload
     public List<int>? kycIds { get; set; }
     public List<int>? dealIds { get; set; }
     public List<int>? investorIds { get; set; }
+    public List<int>? cardIds { get; set; }
 }
 
 [ApiController]
@@ -103,7 +105,8 @@ public class IrmReassignmentController : ControllerBase
                                  (payload.followupIds?.Count ?? 0) +
                                  (payload.kycIds?.Count ?? 0) +
                                  (payload.dealIds?.Count ?? 0) +
-                                 (payload.investorIds?.Count ?? 0);
+                                 (payload.investorIds?.Count ?? 0) +
+                                 (payload.cardIds?.Count ?? 0);
                 }
             }
             catch { }
@@ -145,13 +148,21 @@ public class IrmReassignmentController : ControllerBase
         if (companyId <= 0)
             return Unauthorized();
 
-        var fromUser = await _db.Users.FirstOrDefaultAsync(u => u.Id == dto.FromIrmId && u.CompanyId == companyId, ct);
+        var fromUser = await _db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == dto.FromIrmId && u.CompanyId == companyId, ct);
         if (fromUser == null)
             return NotFound(ApiResponse<ReassignIrmWorkResultDto>.ErrorResponse($"Source IRM with ID {dto.FromIrmId} not found in this company."));
+
+        var isFromIrm = fromUser.Role?.Code == "irm" || (fromUser.Role?.Name != null && fromUser.Role.Name.Contains("irm", StringComparison.OrdinalIgnoreCase));
+        if (!isFromIrm)
+            return BadRequest(ApiResponse<ReassignIrmWorkResultDto>.ErrorResponse($"Source user '{fromUser.Name}' does not have the IRM role."));
 
         var toUser = await _db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == dto.ToIrmId && u.CompanyId == companyId, ct);
         if (toUser == null)
             return NotFound(ApiResponse<ReassignIrmWorkResultDto>.ErrorResponse($"Destination IRM with ID {dto.ToIrmId} not found in this company."));
+
+        var isToIrm = toUser.Role?.Code == "irm" || (toUser.Role?.Name != null && toUser.Role.Name.Contains("irm", StringComparison.OrdinalIgnoreCase));
+        if (!isToIrm)
+            return BadRequest(ApiResponse<ReassignIrmWorkResultDto>.ErrorResponse($"Destination user '{toUser.Name}' does not have the IRM role."));
 
         // Inactive IRMs must not receive new assignments
         if (toUser.Status != UserStatus.Active)
@@ -175,7 +186,8 @@ public class IrmReassignmentController : ControllerBase
 
         // 2. Reassign open follow-ups (preserve completed history)
         var openFollowups = await _db.Followups
-            .Where(f => f.CompanyId == companyId && f.AssignedAgentId == dto.FromIrmId && f.Status == FollowupStatus.Pending)
+            .Where(f => f.CompanyId == companyId && f.AssignedAgentId == dto.FromIrmId && 
+                       (f.Status == FollowupStatus.Pending || f.Status == FollowupStatus.Rescheduled))
             .ToListAsync(ct);
         foreach (var f in openFollowups)
         {
@@ -235,7 +247,8 @@ public class IrmReassignmentController : ControllerBase
                 followupIds = openFollowups.Select(f => f.Id).ToList(),
                 kycIds = openKycs.Select(k => k.Id).ToList(),
                 dealIds = openDeals.Select(d => d.Id).ToList(),
-                investorIds = openInvestors.Select(i => i.Id).ToList()
+                investorIds = openInvestors.Select(i => i.Id).ToList(),
+                cardIds = openDeals.Select(d => d.Id).ToList()
             })
         };
         _db.IrmCoverageAssignments.Add(coverage);
@@ -249,7 +262,7 @@ public class IrmReassignmentController : ControllerBase
             ActorEmail = actorEmail,
             Action = "REASSIGN_IRM_WORK",
             EntityType = "IrmCoverageAssignment",
-            EntityId = toUser.Id.ToString(),
+            EntityId = coverage.Id.ToString(),
             Details = $"Reassigned open work from {fromUser.Name} (ID:{fromUser.Id}) to covering IRM {toUser.Name} (ID:{toUser.Id}). Leads: {openLeads.Count}, Follow-ups: {openFollowups.Count}, KYCs: {openKycs.Count}, Deals: {openDeals.Count}, Investors: {openInvestors.Count}. Reason: {dto.Reason ?? "Not specified"}",
             Module = "IRM_ADMIN",
             Status = "success"
@@ -266,6 +279,7 @@ public class IrmReassignmentController : ControllerBase
             ReassignedKycsCount = openKycs.Count,
             ReassignedDealsCount = openDeals.Count,
             ReassignedInvestorsCount = openInvestors.Count,
+            ReassignedCardsCount = openDeals.Count,
             FromIrmName = fromUser.Name,
             ToIrmName = toUser.Name,
             ReassignedAt = DateTime.UtcNow
@@ -329,7 +343,8 @@ public class IrmReassignmentController : ControllerBase
         if (payload?.followupIds != null && payload.followupIds.Count > 0)
         {
             var followups = await _db.Followups
-                .Where(f => f.CompanyId == companyId && payload.followupIds.Contains(f.Id) && f.AssignedAgentId == coverage.CoveringIrmId && f.Status == FollowupStatus.Pending)
+                .Where(f => f.CompanyId == companyId && payload.followupIds.Contains(f.Id) && f.AssignedAgentId == coverage.CoveringIrmId && 
+                           (f.Status == FollowupStatus.Pending || f.Status == FollowupStatus.Rescheduled))
                 .ToListAsync(ct);
             foreach (var f in followups)
             {

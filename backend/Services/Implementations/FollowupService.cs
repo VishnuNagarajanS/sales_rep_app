@@ -44,7 +44,13 @@ public class FollowupService : IFollowupService
 
         if ((role == "sales_executive" || role == "irm") && agentId.HasValue)
         {
-            query = query.Where(f => f.AssignedAgentId == agentId.Value);
+            var cid = companyId ?? 1;
+            query = query.Where(f =>
+                f.AssignedAgentId == agentId.Value ||
+                _context.Leads.Any(l => l.CompanyId == cid && l.AssignedAgentId == agentId.Value &&
+                    ((f.ContactId != null && f.ContactId != "" && f.ContactId == l.Id.ToString()) ||
+                     (f.ContactPhone != null && f.ContactPhone != "" && f.ContactPhone == l.Phone)))
+            );
         }
 
         return query;
@@ -96,7 +102,13 @@ public class FollowupService : IFollowupService
 
         if ((role == "sales_executive" || role == "irm") && agentId.HasValue)
         {
-            query = query.Where(f => f.AssignedAgentId == agentId.Value);
+            var cid = companyId ?? 1;
+            query = query.Where(f =>
+                f.AssignedAgentId == agentId.Value ||
+                _context.Leads.Any(l => l.CompanyId == cid && l.AssignedAgentId == agentId.Value &&
+                    ((f.ContactId != null && f.ContactId != "" && f.ContactId == l.Id.ToString()) ||
+                     (f.ContactPhone != null && f.ContactPhone != "" && f.ContactPhone == l.Phone)))
+            );
         }
 
         return await query.FirstOrDefaultAsync(ct);
@@ -205,6 +217,37 @@ public class FollowupService : IFollowupService
                 f.CreatedAt >= DateTime.UtcNow.AddSeconds(-60))
             .FirstOrDefaultAsync(ct);
 
+        // Resolve target lead if this is a lead follow-up
+        Lead? targetLead = null;
+        if (string.Equals(dto.ContactType, "lead", StringComparison.OrdinalIgnoreCase))
+        {
+            if (int.TryParse(dto.ContactId, out var parsedLeadId))
+            {
+                targetLead = await _context.Leads.Include(l => l.AssignedAgent).ThenInclude(a => a.Role)
+                    .FirstOrDefaultAsync(l => l.Id == parsedLeadId && l.CompanyId == companyId.Value, ct);
+            }
+            if (targetLead == null && !string.IsNullOrWhiteSpace(dto.ContactPhone))
+            {
+                var p10 = dto.ContactPhone.Length >= 10 ? dto.ContactPhone[^10..] : dto.ContactPhone;
+                targetLead = await _context.Leads.Include(l => l.AssignedAgent).ThenInclude(a => a.Role)
+                    .FirstOrDefaultAsync(l => l.CompanyId == companyId.Value && l.Phone.Contains(p10), ct);
+            }
+        }
+
+        int targetAgentId = agentId.Value;
+        if (dto.AssignedAgentId.HasValue && dto.AssignedAgentId.Value > 0)
+        {
+            targetAgentId = dto.AssignedAgentId.Value;
+        }
+        else if (targetLead?.AssignedAgentId != null && targetLead.AssignedAgentId.Value > 0)
+        {
+            targetAgentId = targetLead.AssignedAgentId.Value;
+        }
+
+        var assignedUser = await _context.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == targetAgentId, ct);
+        var targetRole = dto.AssignedToRole ?? assignedUser?.Role?.Code ?? "sales_executive";
+        var targetName = assignedUser?.Name ?? string.Empty;
+
         if (existingPending != null)
         {
             if (IsIrmFollowup(existingPending) && IsGhlAdmin())
@@ -217,15 +260,17 @@ public class FollowupService : IFollowupService
             if (!string.IsNullOrWhiteSpace(dto.Priority)) existingPending.Priority = dto.Priority.Trim();
             if (!string.IsNullOrWhiteSpace(dto.Notes)) existingPending.Notes = dto.Notes.Trim();
             if (!string.IsNullOrWhiteSpace(dto.ContactEmail)) existingPending.ContactEmail = dto.ContactEmail.Trim();
-            existingPending.AssignedAgentId = agentId.Value;
+            existingPending.AssignedAgentId = targetAgentId;
+            existingPending.AssignedToRole = targetRole;
+            existingPending.AssignedToName = targetName;
             existingPending.UpdatedAt = DateTime.UtcNow;
 
-            if (existingPending.ContactType == "lead" && int.TryParse(existingPending.ContactId, out var existingLeadId))
+            if (targetLead != null)
             {
-                var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == existingLeadId && l.CompanyId == companyId, ct);
-                if (lead != null)
+                targetLead.NextFollowupDate = existingPending.ScheduledAt;
+                if (targetLead.Status == "New" || targetLead.Status == "Contacted" || targetLead.Status == "Callback")
                 {
-                    lead.NextFollowupDate = existingPending.ScheduledAt;
+                    targetLead.Status = "Follow-up Required";
                 }
             }
 
@@ -237,10 +282,9 @@ public class FollowupService : IFollowupService
         string? resolvedEmail = dto.ContactEmail?.Trim();
         if (string.IsNullOrEmpty(resolvedEmail))
         {
-            if (dto.ContactType == "lead" && int.TryParse(dto.ContactId, out var parsedLeadId))
+            if (targetLead != null)
             {
-                var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == parsedLeadId && l.CompanyId == companyId.Value, ct);
-                resolvedEmail = lead?.Email;
+                resolvedEmail = targetLead.Email;
             }
             else if (int.TryParse(dto.ContactId, out var parsedCustId))
             {
@@ -252,7 +296,9 @@ public class FollowupService : IFollowupService
         var followup = new Followup
         {
             CompanyId = companyId.Value,
-            AssignedAgentId = agentId.Value,
+            AssignedAgentId = targetAgentId,
+            AssignedToRole = targetRole,
+            AssignedToName = targetName,
             ContactId = dto.ContactId.Trim(),
             ContactType = string.IsNullOrWhiteSpace(dto.ContactType) ? "lead" : dto.ContactType.Trim().ToLower(),
             ContactName = dto.ContactName.Trim(),
@@ -265,15 +311,34 @@ public class FollowupService : IFollowupService
             CreatedAt = DateTime.UtcNow
         };
 
+        // Supersede any existing open pending follow-ups for this contact so only one active pending reminder exists per contact
+        var cleanPhone10 = dto.ContactPhone?.Length >= 10 ? dto.ContactPhone[^10..] : dto.ContactPhone ?? string.Empty;
+        var existingOldPending = await _context.Followups
+            .Where(f =>
+                f.CompanyId == companyId.Value &&
+                f.Status == FollowupStatus.Pending &&
+                ((f.ContactId != null && f.ContactId != "" && f.ContactId == cleanContactId) ||
+                 (cleanPhone10 != "" && f.ContactPhone != null && f.ContactPhone.Contains(cleanPhone10))))
+            .ToListAsync(ct);
+
+        foreach (var oldF in existingOldPending)
+        {
+            oldF.Status = FollowupStatus.Completed;
+            oldF.CompletedAt = DateTime.UtcNow;
+            if (!string.IsNullOrWhiteSpace(oldF.Notes) && !oldF.Notes.Contains("Superseded"))
+            {
+                oldF.Notes += $" | Superseded by follow-up scheduled for {dto.ScheduledAt:yyyy-MM-dd HH:mm}";
+            }
+        }
+
         _context.Followups.Add(followup);
 
-        // If this is for a Lead, update Lead's NextFollowupDate
-        if (followup.ContactType == "lead" && int.TryParse(followup.ContactId, out var leadId))
+        if (targetLead != null)
         {
-            var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == leadId && l.CompanyId == companyId, ct);
-            if (lead != null)
+            targetLead.NextFollowupDate = followup.ScheduledAt;
+            if (targetLead.Status == "New" || targetLead.Status == "Contacted" || targetLead.Status == "Callback")
             {
-                lead.NextFollowupDate = followup.ScheduledAt;
+                targetLead.Status = "Follow-up Required";
             }
         }
 

@@ -367,35 +367,6 @@ export const OpportunitiesPage: React.FC = () => {
     : deals;
   const irmDeals = scopedOpportunitiesDeals.filter(d => d.stage === 'investment_opportunity');
 
-  const handleSetInvestorType = async (deal: Deal, type: 'AIF' | 'Co-AIF') => {
-    const updatedDeal: Deal = {
-      ...deal,
-      investorType: type,
-    };
-    try {
-      await persistDeal(updatedDeal);
-    } catch (e) {
-      console.error("Error saving deal:", e);
-      showToast("Failed to update investor structure");
-      return;
-    }
-
-    const activity: DealActivity = {
-      id: `act-${Date.now()}`,
-      dealId: deal.id,
-      companyId: tenant?.id || '',
-      type: 'note',
-      text: `Investor structure set to: ${type}`,
-      loggedByName: user?.name || 'IRM User',
-      loggedByRole: 'IRM',
-      timestamp: new Date().toISOString(),
-    };
-    storageService.addDealActivity(activity);
-    await apiAddDealActivity(activity).catch(console.error);
-
-    loadData();
-    showToast(`Investor structure for "${deal.customerName}" set to ${type}`);
-  };
 
   const handleAdvanceToConverted = async (deal: Deal) => {
     // 1. Create or link Investor record in DB with stable ID
@@ -657,33 +628,6 @@ export const OpportunitiesPage: React.FC = () => {
       ),
     },
     {
-      key: 'investorType',
-      header: 'Investor Structure (AIF / Co-AIF)',
-      render: deal => {
-        const currentType = deal.investorType || '';
-        return (
-          <div className="irm-investor-type-toggle" onClick={e => e.stopPropagation()}>
-            <button
-              type="button"
-              className={`irm-type-btn ${currentType === 'AIF' ? 'active' : ''}`}
-              title="Classify as Direct AIF Investor"
-              onClick={() => handleSetInvestorType(deal, 'AIF')}
-            >
-              AIF
-            </button>
-            <button
-              type="button"
-              className={`irm-type-btn ${currentType === 'Co-AIF' ? 'active' : ''}`}
-              title="Classify as Co-Investment AIF Investor"
-              onClick={() => handleSetInvestorType(deal, 'Co-AIF')}
-            >
-              Co-AIF
-            </button>
-          </div>
-        );
-      },
-    },
-    {
       key: 'assignedAgentName',
       header: 'Assigned IRM',
       render: deal => (
@@ -772,7 +716,7 @@ export const OpportunitiesPage: React.FC = () => {
           </h1>
           <p className="page-subtitle">
             {isGhlIrm
-              ? 'Pitch deck shared, term sheet under review, legal team active. Classify investor structure (AIF vs Co-AIF).'
+              ? 'Pitch deck shared, term sheet under review, legal team active.'
               : `Commercial real-estate fractional tranches, warehousing yields, and capital commitments for ${tenant?.name}.`}
           </p>
         </div>

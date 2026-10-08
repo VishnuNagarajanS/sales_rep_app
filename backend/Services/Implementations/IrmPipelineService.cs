@@ -22,12 +22,17 @@ public class IrmPipelineService : IIrmPipelineService
         _otherService = otherService;
     }
 
+    private static readonly HashSet<string> AllowedStages = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "leads", "followup", "qualified_investor", "investment_opportunity", "converted"
+    };
+
     public async Task<ApiResponse<IrmPipelineBoardDto>> GetBoardAsync(int companyId, int? irmId, CancellationToken ct = default)
     {
         var cards = await _pipelineRepo.GetAllAsync(companyId, irmId, ct);
         if (_otherService != null)
         {
-            var matcher = await _otherService.GetOtherMatcherAsync(companyId, null, ct);
+            var matcher = await _otherService.GetOtherMatcherAsync(companyId, null, irmId, ct);
             if (matcher.HasAnyOther)
             {
                 cards = cards.Where(c => !matcher.IsInOther(c.InvestorPhone, c.InvestorId, null, c.InvestorName)).ToList();
@@ -49,15 +54,22 @@ public class IrmPipelineService : IIrmPipelineService
 
     public async Task<ApiResponse<IrmPipelineCardDto>> MoveStageAsync(int cardId, int companyId, int irmId, MoveIrmStageDto dto, CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(dto.TargetStageId) || !AllowedStages.Contains(dto.TargetStageId.Trim()))
+            return ApiResponse<IrmPipelineCardDto>.ErrorResponse($"Invalid target stage '{dto.TargetStageId}'. Allowed stages: leads, followup, qualified_investor, investment_opportunity, converted.");
+
         var card = await _pipelineRepo.GetByIdAsync(cardId, companyId, ct);
         if (card == null)
             return ApiResponse<IrmPipelineCardDto>.ErrorResponse("Pipeline card not found");
 
+        var targetStage = dto.TargetStageId.Trim().ToLowerInvariant();
         var oldStage = card.StageId;
-        card.StageId = dto.TargetStageId;
+        card.StageId = targetStage;
         card.StageEnteredAt = DateTime.UtcNow;
-        card.LastActionSnippet = $"Moved from {oldStage} to {dto.TargetStageId}";
+        card.LastActionSnippet = $"Moved from {oldStage} to {targetStage}";
         card.LastActivityDate = DateTime.UtcNow;
+
+        var actor = irmId > 0 ? await _userRepo.GetByIdAsync(irmId, ct) : null;
+        var actorName = actor?.Name ?? (irmId > 0 ? $"IRM #{irmId}" : "System");
 
         // Append to activity log
         var logs = new List<object>();
@@ -70,13 +82,15 @@ public class IrmPipelineService : IIrmPipelineService
         logs.Add(new
         {
             type = "stage_change",
-            details = $"Moved to stage {dto.TargetStageId}",
+            details = $"Moved to stage {targetStage}",
+            actorId = irmId,
+            actorName = actorName,
             timestamp = DateTime.UtcNow
         });
         card.ActivityLogsJson = JsonSerializer.Serialize(logs);
 
         var updated = await _pipelineRepo.UpdateAsync(card, ct);
-        return ApiResponse<IrmPipelineCardDto>.SuccessResponse(MapToCardDto(updated), $"Moved to {dto.TargetStageId}");
+        return ApiResponse<IrmPipelineCardDto>.SuccessResponse(MapToCardDto(updated), $"Moved to {targetStage}");
     }
 
     public async Task<ApiResponse<IrmPipelineCardDto>> LogActivityAsync(int cardId, int companyId, int irmId, LogIrmActivityDto dto, CancellationToken ct = default)
@@ -87,6 +101,9 @@ public class IrmPipelineService : IIrmPipelineService
 
         card.LastActionSnippet = dto.Details;
         card.LastActivityDate = DateTime.UtcNow;
+
+        var actor = irmId > 0 ? await _userRepo.GetByIdAsync(irmId, ct) : null;
+        var actorName = actor?.Name ?? (irmId > 0 ? $"IRM #{irmId}" : "System");
 
         var logs = new List<object>();
         if (!string.IsNullOrEmpty(card.ActivityLogsJson))
@@ -99,6 +116,8 @@ public class IrmPipelineService : IIrmPipelineService
         {
             type = dto.Type,
             details = dto.Details,
+            actorId = irmId,
+            actorName = actorName,
             timestamp = DateTime.UtcNow
         });
         card.ActivityLogsJson = JsonSerializer.Serialize(logs);

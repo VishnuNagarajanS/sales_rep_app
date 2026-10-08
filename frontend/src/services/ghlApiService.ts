@@ -536,7 +536,11 @@ export async function getFollowups(companyId?: string): Promise<Followup[]> {
 
 export async function saveFollowup(followup: Followup): Promise<Followup> {
   const isNew =
-    !followup.id || followup.id.startsWith('flw-') || followup.id.startsWith('fu-') || followup.id.startsWith('f-');
+    !followup.id ||
+    followup.id.startsWith('flw-') ||
+    followup.id.startsWith('fu-') ||
+    followup.id.startsWith('f-') ||
+    followup.id.startsWith('lead-flw-');
 
   try {
     if (isNew) {
@@ -549,6 +553,8 @@ export async function saveFollowup(followup: Followup): Promise<Followup> {
         scheduledAt: followup.scheduledAt,
         priority: followup.priority,
         notes: followup.notes,
+        assignedAgentId: followup.assignedAgentId && !isNaN(Number(followup.assignedAgentId)) ? Number(followup.assignedAgentId) : undefined,
+        assignedToRole: followup.assignedRole || undefined,
       };
       const res: ApiResponse<any> = await apiClient.post(
         '/sales-executive/followups',

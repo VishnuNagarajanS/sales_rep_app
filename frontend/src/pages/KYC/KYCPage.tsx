@@ -272,10 +272,8 @@ const resolvePreferredAssetClass = (deal: Deal, leadsList: Lead[] = [], customer
   if (savedLocal?.preferredAssetClass && savedLocal.confirmed) return savedLocal.preferredAssetClass;
   if (matchingLead?.customFields?.preferredAssetClass && isConfirmed) return matchingLead.customFields.preferredAssetClass;
   if (matchingCustomer?.customFields?.preferredAssetClass && isConfirmed) return matchingCustomer.customFields.preferredAssetClass;
-  if (deal.preferredAssetClass) {
-    return deal.preferredAssetClass;
-  }
-
+  // NOTE: deal.preferredAssetClass is intentionally NOT used as a fallback here.
+  // Only values the IRM has explicitly confirmed (see isConfirmed above) are shown.
   return '—';
 };
 
@@ -1331,6 +1329,7 @@ const GhlIrmKycView: React.FC = () => {
         investorType: current.investorType || '',
         residentType: current.residentType || '',
         preferredAssetClass: deal ? (getIrmPreferredAssetClass(deal) === '—' ? '' : getIrmPreferredAssetClass(deal)) : '',
+        preferredAssetClassConfirmed: deal ? getIrmPreferredAssetClass(deal) !== '—' : false,
       });
     } else {
       setSectionFormData({
@@ -1401,7 +1400,7 @@ const GhlIrmKycView: React.FC = () => {
       const val = sectionFormData.preferredAssetClass?.trim() || '';
       const prefObj = {
         preferredAssetClass: val,
-        confirmed: Boolean(val),
+        confirmed: Boolean(val) && sectionFormData.preferredAssetClassConfirmed === true,
       };
       if (deal.customerId) localStorage.setItem(`nexus_irm_pref_${deal.customerId}`, JSON.stringify(prefObj));
       if (fDigits) localStorage.setItem(`nexus_irm_pref_${fDigits}`, JSON.stringify(prefObj));
@@ -3887,6 +3886,14 @@ const GhlIrmKycView: React.FC = () => {
                     <option value="CO-AIF">CO-AIF</option>
                     <option value="AIF">AIF</option>
                   </select>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={sectionFormData.preferredAssetClassConfirmed === true}
+                      onChange={e => setSectionFormData({ ...sectionFormData, preferredAssetClassConfirmed: e.target.checked })}
+                    />
+                    Confirmed by investor
+                  </label>
                 </div>
               </div>
             </div>
