@@ -450,6 +450,7 @@ export const BookingsPage: React.FC = () => {
       <DataTable
         columns={columns}
         data={bookings}
+        loading={loading}
         keyExtractor={b => String(b.id)}
         rowActions={[
           {

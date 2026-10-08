@@ -113,6 +113,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [tenant]);
 
+  // Any API 401 (including an expired JWT) must clear React auth state as well
+  // as browser storage so ProtectedRoute immediately returns to the login page.
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      sessionStorage.removeItem('nexus_auth_token');
+      sessionStorage.removeItem('nexus_current_user');
+      sessionStorage.removeItem('nexus_current_tenant');
+      localStorage.removeItem('nexus_auth_token');
+      localStorage.removeItem('nexus_current_user');
+      localStorage.removeItem('nexus_current_tenant');
+      setLoginError('Your session expired. Please sign in again.');
+      setUser(null);
+      setTenant(null);
+    };
+
+    window.addEventListener('nexus_auth_unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('nexus_auth_unauthorized', handleUnauthorized);
+  }, []);
+
+  // Log out at the JWT expiry time even if the user makes no further API calls.
+  useEffect(() => {
+    const token = sessionStorage.getItem('nexus_auth_token') || localStorage.getItem('nexus_auth_token');
+    if (!user || !token) return;
+
+    let expiryTimer: number | undefined;
+    try {
+      const payload = token.split('.')[1];
+      if (!payload) throw new Error('JWT payload missing');
+      const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+      const claims = JSON.parse(window.atob(normalized));
+      if (typeof claims.exp !== 'number') throw new Error('JWT expiry missing');
+      const delay = claims.exp * 1000 - Date.now();
+      if (delay <= 0) {
+        window.dispatchEvent(new Event('nexus_auth_unauthorized'));
+      } else {
+        expiryTimer = window.setTimeout(
+          () => window.dispatchEvent(new Event('nexus_auth_unauthorized')),
+          Math.min(delay, 2_147_000_000),
+        );
+      }
+    } catch {
+      // Invalid tokens will be rejected by the API; do not treat opaque legacy tokens as valid JWTs.
+    }
+
+    return () => {
+      if (expiryTimer !== undefined) window.clearTimeout(expiryTimer);
+    };
+  }, [user]);
+
   const isSuperAdmin = user?.role?.code === 'super_admin';
 
   // Derive enabled features from live tenant object

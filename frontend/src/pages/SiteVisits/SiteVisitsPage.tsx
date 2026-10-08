@@ -21,6 +21,10 @@ const TIME_SLOTS = [
 export const SiteVisitsPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
+  const roleCode = String(user?.role?.code || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const canAssignSiteVisits = ['super_admin', 'company_admin', 'admin'].includes(
+    roleCode,
+  );
 
   const [siteVisits, setSiteVisits] = useState<SiteVisit[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
@@ -30,6 +34,7 @@ export const SiteVisitsPage: React.FC = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
 
@@ -72,8 +77,10 @@ export const SiteVisitsPage: React.FC = () => {
     setIsLoading(true);
     try {
       const tenantId = user?.companyId ? String(user.companyId) : 't-jamin-02';
-      const [visits, projs, allPlots, agentList, leadList, custList] = await Promise.all([
-        jaminApiService.getSiteVisits(true).catch(() => storageService.getSiteVisits(tenantId)),
+      const [visitsResult, projs, allPlots, agentList, leadList, custList] = await Promise.all([
+        jaminApiService.getSiteVisits(true)
+          .then(data => ({ data, error: '' }))
+          .catch(() => ({ data: [], error: 'Site visits could not be loaded from the server.' })),
         jaminApiService.getProjects().catch(() => []),
         jaminApiService.getPlots().catch(() => []),
         jaminApiService.getAgents().catch(() => []),
@@ -81,11 +88,9 @@ export const SiteVisitsPage: React.FC = () => {
         getCustomers(tenantId).catch(() => []),
       ]);
 
-      const localVisits = storageService.getSiteVisits(tenantId) || [];
-      const visitMap = new Map<string, SiteVisit>();
-      localVisits.forEach(v => visitMap.set(v.id, v));
-      (visits || []).forEach(v => visitMap.set(v.id, v));
-      setSiteVisits(Array.from(visitMap.values()));
+      // Site visits shown in the table come only from the backend.
+      setSiteVisits(visitsResult.data);
+      setLoadError(visitsResult.error);
 
       setProjects(projs || []);
       setPlots(allPlots || []);
@@ -140,6 +145,10 @@ export const SiteVisitsPage: React.FC = () => {
         dedupedLeads.push(l);
       }
       setLeads(dedupedLeads);
+    } catch (err) {
+      console.error('Failed to load site visit data', err);
+      setSiteVisits([]);
+      setLoadError('Site visits could not be loaded from the server.');
     } finally {
       setIsLoading(false);
     }
@@ -197,7 +206,9 @@ export const SiteVisitsPage: React.FC = () => {
     setSelectedCustomerId('');
     setCustomerName('');
     setCustomerPhone('');
-    const defaultAgent = agents.length > 0 ? agents[0] : null;
+    const defaultAgent = canAssignSiteVisits
+      ? agents[0]
+      : agents.find(agent => String(agent.id) === String(user?.id));
     setHostAgentId(defaultAgent ? defaultAgent.id : Number(user?.id) || 0);
     setHostAgentName(defaultAgent ? defaultAgent.name : (user?.name || 'Agent'));
     setSelectedProjectId(projects.length > 0 ? String(projects[0].id) : '');
@@ -426,8 +437,8 @@ export const SiteVisitsPage: React.FC = () => {
         if (project?.name) payload.projectName = project.name;
         if (managePlotId) payload.plotId = Number(managePlotId);
         if (plot?.plotNumber) payload.plotNumber = plot.plotNumber;
-        if (manageHostAgentId) payload.assignedAgentId = manageHostAgentId;
-        if (manageHostAgentName) payload.assignedAgentName = manageHostAgentName;
+        if (canAssignSiteVisits && manageHostAgentId) payload.assignedAgentId = manageHostAgentId;
+        if (canAssignSiteVisits && manageHostAgentName) payload.assignedAgentName = manageHostAgentName;
       }
 
       const updated = await jaminApiService.updateSiteVisit(managingVisit.id, payload);
@@ -615,9 +626,12 @@ export const SiteVisitsPage: React.FC = () => {
         </div>
       </div>
 
+      {loadError && <div className="card text-center" role="alert">{loadError}</div>}
+
       <DataTable
         columns={columns}
         data={siteVisits}
+          loading={isLoading}
         keyExtractor={sv => sv.id}
         rowActions={rowActions}
         searchPlaceholder="Search visits by customer, project, or plot..."
@@ -827,7 +841,7 @@ export const SiteVisitsPage: React.FC = () => {
           </div>
 
           {/* Host Agent */}
-          <div className="form-group">
+          {canAssignSiteVisits && <div className="form-group">
             <label className="form-label">Host Escort Agent</label>
             <select
               className="form-select"
@@ -846,7 +860,7 @@ export const SiteVisitsPage: React.FC = () => {
                 </option>
               ))}
             </select>
-          </div>
+          </div>}
 
           {/* Notes */}
           <div className="form-group">
@@ -1030,7 +1044,7 @@ export const SiteVisitsPage: React.FC = () => {
               </div>
 
               {/* Host Agent */}
-              <div className="form-group">
+              {canAssignSiteVisits && <div className="form-group">
                 <label className="form-label">Host Escort Agent</label>
                 <select
                   className="form-select"
@@ -1049,7 +1063,7 @@ export const SiteVisitsPage: React.FC = () => {
                     </option>
                   ))}
                 </select>
-              </div>
+              </div>}
 
               {/* Unified Reschedule Reason & Notes */}
               <div className="form-group">

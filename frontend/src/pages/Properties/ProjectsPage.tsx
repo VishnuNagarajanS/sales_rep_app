@@ -101,18 +101,13 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
   const loadProjects = async () => {
     setLoading(true);
     try {
-      const tenantId = user?.companyId ? String(user.companyId) : 't-jamin-02';
       const [data, visits, plotsData] = await Promise.all([
         jaminApiService.getProjects().catch(() => []),
-        jaminApiService.getSiteVisits(true).catch(() => storageService.getSiteVisits(tenantId)),
+        jaminApiService.getSiteVisits(true).catch(() => []),
         jaminApiService.getPlots().catch(() => []),
       ]);
 
-      const localVisits = storageService.getSiteVisits(tenantId) || [];
-      const visitMap = new Map<string, any>();
-      localVisits.forEach((v: any) => visitMap.set(String(v.id), v));
-      (visits || []).forEach((v: any) => visitMap.set(String(v.id), v));
-      setSiteVisits(Array.from(visitMap.values()));
+      setSiteVisits(visits || []);
       setProjects(data || []);
       setAllPlots([...(plotsData || [])].sort(comparePlotNumbers));
     } catch (err) {

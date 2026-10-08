@@ -148,7 +148,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
 
     const roleCode = user?.role?.code;
     const isExec = roleCode === 'sales_executive';
-    const isIrm = roleCode === 'irm';
+    const isIrm = roleCode === 'irm' && (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01');
     const scopedLeads = isIrm
       ? []
       : isExec

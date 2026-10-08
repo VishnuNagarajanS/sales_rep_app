@@ -1,5 +1,5 @@
 import { apiClient } from './apiClient';
-import { User, RoleCode } from '../types';
+import { User, Role, RoleCode } from '../types';
 
 interface ApiResponse<T> {
   data: T;
@@ -20,6 +20,10 @@ interface AdminUserDto {
   createdAt: string;
 }
 
+export interface CompanyRoleOption extends Role {
+  isAssignable: boolean;
+}
+
 const checkIsJaminTenant = (idOrSlug?: any): boolean => {
   if (!idOrSlug) return false;
   const s = String(idOrSlug).toLowerCase().trim();
@@ -37,7 +41,7 @@ const mapDtoToUser = (dto: AdminUserDto, isJaminTenant: boolean = false): User =
   if (dto.roleName?.toLowerCase().includes('admin') || dto.roleId === 2) {
     roleCode = 'company_admin';
     roleName = 'Company Admin';
-  } else if (dto.roleName?.toLowerCase().includes('manager') || dto.roleId === 3) {
+  } else if (!isJaminTenant && (dto.roleName?.toLowerCase().includes('manager') || dto.roleId === 3)) {
     roleCode = 'sales_manager';
     roleName = 'Sales Manager';
   } else if (!isJaminTenant && (dto.roleName?.toLowerCase().includes('irm') || dto.roleId === 5)) {
@@ -78,7 +82,15 @@ export const adminUserService = {
     const res = await apiClient.get<ApiResponse<AdminUserDto[]>>(`/AdminUsers?companyId=${companyId}`);
     if (!res.success) throw new Error(res.message);
     const isJaminTenant = checkIsJaminTenant(companyId);
-    return (res.data || []).map(dto => mapDtoToUser(dto, isJaminTenant));
+    return (res.data || [])
+      .filter(dto => !isJaminTenant || (dto.roleId !== 5 && !dto.roleName?.toLowerCase().includes('irm')))
+      .map(dto => mapDtoToUser(dto, isJaminTenant));
+  },
+
+  getCompanyRoles: async (companyId: string): Promise<CompanyRoleOption[]> => {
+    const res = await apiClient.get<ApiResponse<CompanyRoleOption[]>>(`/AdminUsers/roles?companyId=${encodeURIComponent(companyId)}`);
+    if (!res.success) throw new Error(res.message);
+    return (res.data || []).map(role => ({ ...role, id: String(role.id), permissions: [] }));
   },
 
   getUserById: async (id: string, companyId: string): Promise<User> => {
@@ -90,7 +102,7 @@ export const adminUserService = {
 
   createUser: async (userData: any): Promise<User> => {
     const isJaminTenant = checkIsJaminTenant(userData.companySlug) || checkIsJaminTenant(userData.companyId);
-    const roleId = resolveRoleId(userData.role?.code, isJaminTenant);
+    const roleId = Number(userData.role?.id) || resolveRoleId(userData.role?.code, isJaminTenant);
     const payload = {
       name: userData.name,
       email: userData.email,
@@ -108,7 +120,7 @@ export const adminUserService = {
 
   updateUser: async (id: string, userData: any): Promise<User> => {
     const isJaminTenant = checkIsJaminTenant(userData.companySlug) || checkIsJaminTenant(userData.companyId);
-    const roleId = resolveRoleId(userData.role?.code, isJaminTenant);
+    const roleId = Number(userData.role?.id) || resolveRoleId(userData.role?.code, isJaminTenant);
     const payload = {
       name: userData.name,
       phone: userData.phone || '',

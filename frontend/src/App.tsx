@@ -141,7 +141,7 @@ export const App: React.FC = () => {
 
   // Set default route for IRM user or redirect invalid routes
   useEffect(() => {
-    if (user?.role?.code === 'irm') {
+    if (user?.role?.code === 'irm' && !isJamin && (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01')) {
       const savedRoute = sessionStorage.getItem('nexus_current_route');
       if (!savedRoute) {
         setCurrentRoute('dashboard');
@@ -151,7 +151,7 @@ export const App: React.FC = () => {
       setCurrentRoute('dashboard');
       sessionStorage.setItem('nexus_current_route', 'dashboard');
     }
-  }, [user?.role?.code, currentRoute, isJamin]);
+  }, [user?.role?.code, currentRoute, isJamin, tenant?.slug, tenant?.id]);
 
   // Handle route change and synchronize browser URL bar & history
   const navigate = (route: string) => {
@@ -530,7 +530,7 @@ export const App: React.FC = () => {
           <CompanyAuditPage />
         </ProtectedRoute>
       ) : (
-        user?.role?.code === 'irm' ? (
+        user?.role?.code === 'irm' && !isJamin && (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') ? (
           <InvestorsPage />
         ) : (
           <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />

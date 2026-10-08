@@ -46,6 +46,7 @@ interface DataTableProps<T> {
   bulkActions?: { label: string; onClick: (selectedItems: T[]) => void; danger?: boolean }[];
   filtersNode?: React.ReactNode;
   hideSearch?: boolean; // when true, don't render the built-in search box
+  loading?: boolean;
 }
 
 export function DataTable<T>({
@@ -64,6 +65,7 @@ export function DataTable<T>({
   bulkActions,
   filtersNode,
   hideSearch = false,
+  loading = false,
 }: DataTableProps<T>) {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortKey, setSortKey] = useState<string | null>(null);
@@ -266,7 +268,11 @@ export function DataTable<T>({
       </div>
 
       {/* Table Body */}
-      {paginatedData.length === 0 ? (
+      {loading && data.length === 0 ? (
+        <div role="status" style={{ padding: 32, textAlign: 'center', color: 'var(--text-secondary)' }}>
+          Loading records...
+        </div>
+      ) : paginatedData.length === 0 ? (
         <EmptyState
           title={emptyTitle}
           description={emptyDescription}

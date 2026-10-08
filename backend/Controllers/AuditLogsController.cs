@@ -11,7 +11,7 @@ namespace backend.Controllers;
 
 [ApiController]
 [Route("api/audit-logs")]
-[Authorize(Roles = "company_admin,sales_manager,super_admin,irm,admin")]
+[Authorize(Roles = "company_admin,sales_manager,super_admin,irm,admin,sales_executive")]
 public class AuditLogsController : ControllerBase
 {
     private readonly ApplicationDbContext _db;
@@ -49,6 +49,29 @@ public class AuditLogsController : ControllerBase
                 query = query.Where(l => l.CompanyId == targetCompanyId.Value);
             else
                 query = query.Where(l => false);
+        }
+
+        // Sales executives may inspect activity only for leads/customers assigned to them.
+        if (string.Equals(_currentUser.Role, "sales_executive", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!_currentUser.UserId.HasValue || !_currentUser.CompanyId.HasValue)
+            {
+                query = query.Where(_ => false);
+            }
+            else
+            {
+                var userId = _currentUser.UserId.Value;
+                var userCompanyId = _currentUser.CompanyId.Value;
+                query = query.Where(log =>
+                    (log.LeadId.HasValue && _db.Leads.Any(lead => lead.Id == log.LeadId.Value &&
+                        lead.CompanyId == userCompanyId && lead.AssignedAgentId == userId)) ||
+                    (log.EntityType == "Lead" && _db.Leads.Any(lead => lead.Id.ToString() == log.EntityId &&
+                        lead.CompanyId == userCompanyId && lead.AssignedAgentId == userId)) ||
+                    (log.CustomerId.HasValue && _db.Customers.Any(customer => customer.Id == log.CustomerId.Value &&
+                        customer.CompanyId == userCompanyId && customer.AssignedAgentId == userId)) ||
+                    (log.EntityType == "Customer" && _db.Customers.Any(customer => customer.Id.ToString() == log.EntityId &&
+                        customer.CompanyId == userCompanyId && customer.AssignedAgentId == userId)));
+            }
         }
         else if (companyId.HasValue && companyId.Value > 0)
         {

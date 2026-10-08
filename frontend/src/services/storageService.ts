@@ -464,7 +464,7 @@ class StorageService {
     const isJamin = companyId === '2' || (companyId as any) === 2 || companyId === 't-jamin-02';
     return raw.filter((f: Followup) => {
       if (isGhl) return f.companyId === 't-ghl-01' || f.companyId === '1' || (f.companyId as any) === 1;
-      if (isJamin) return f.companyId === 't-jamin-02' || f.companyId === '2' || (f.companyId as any) === 2 || !f.companyId;
+      if (isJamin) return (f.companyId === 't-jamin-02' || f.companyId === '2' || (f.companyId as any) === 2) && f.contactType !== 'investor' && !f.investorId;
       return f.companyId === companyId;
     });
   }
@@ -1054,7 +1054,7 @@ class StorageService {
   // Proxy methods for remaining agent usage
   getAgents(tenantId?: string): User[] {
     const users = this.getUsers();
-    const agents = users.filter(u => u.role?.code === 'sales_executive' || u.role?.code === 'sales_manager' || u.role?.code === 'irm');
+    const agents = users.filter(u => u.role?.code === 'sales_executive' || u.role?.code === 'irm');
     return agents.length > 0 ? agents : users;
   }
 

@@ -26,23 +26,40 @@ public class FollowupService : IFollowupService
         var agentId = _currentUser.UserId;
         var tokenCompanyId = _currentUser.CompanyId;
         var isSuperAdmin = string.Equals(role, "super_admin", StringComparison.OrdinalIgnoreCase);
+        var canViewCompanyFollowups = isSuperAdmin ||
+            string.Equals(role, "company_admin", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(role, "admin", StringComparison.OrdinalIgnoreCase);
         var targetCompanyId = isSuperAdmin ? requestedCompanyId ?? tokenCompanyId : tokenCompanyId;
 
-        var query = _context.Followups.AsNoTracking().Include(f => f.AssignedAgent).AsQueryable();
+        var query = _context.Followups.AsNoTracking()
+            .Include(f => f.AssignedAgent)
+                .ThenInclude(a => a!.Role)
+            .AsQueryable();
 
         if (isSuperAdmin)
         {
             if (targetCompanyId.HasValue)
                 query = query.Where(f => f.CompanyId == targetCompanyId.Value);
+            if (targetCompanyId == 2)
+                query = query.Where(f => f.ContactType != "investor" && f.InvestorId == null);
             return query;
         }
 
-        query = query.Where(f => f.CompanyId == (targetCompanyId ?? 0));
+        if (!targetCompanyId.HasValue)
+            return query.Where(_ => false);
 
-        if (string.Equals(role, "sales_executive", StringComparison.OrdinalIgnoreCase) && agentId.HasValue)
+        query = query.Where(f => f.CompanyId == targetCompanyId.Value);
+
+        if (targetCompanyId == 2)
         {
-            query = query.Where(f => f.AssignedAgentId == agentId.Value);
+            // Jamin Bazaar is real estate only — no investor or IRM follow-ups
+            query = query.Where(f => f.ContactType != "investor" && f.InvestorId == null);
         }
+
+        if (!canViewCompanyFollowups)
+            query = agentId.HasValue
+                ? query.Where(f => f.AssignedAgentId == agentId.Value)
+                : query.Where(_ => false);
 
         return query;
     }
@@ -53,17 +70,32 @@ public class FollowupService : IFollowupService
         var agentId = _currentUser.UserId;
         var companyId = _currentUser.CompanyId;
 
-        var query = _context.Followups.Include(f => f.AssignedAgent).Where(f => f.Id == id);
+        var query = _context.Followups
+            .Include(f => f.AssignedAgent)
+                .ThenInclude(a => a!.Role)
+            .Where(f => f.Id == id);
 
         if (string.Equals(role, "super_admin", StringComparison.OrdinalIgnoreCase))
         {
             return await query.FirstOrDefaultAsync(ct);
         }
 
-        query = query.Where(f => f.CompanyId == (companyId ?? 0));
+        if (!companyId.HasValue)
+            return null;
 
-        if (string.Equals(role, "sales_executive", StringComparison.OrdinalIgnoreCase) && agentId.HasValue)
+        query = query.Where(f => f.CompanyId == companyId.Value);
+
+        if (companyId == 2)
         {
+            query = query.Where(f => f.ContactType != "investor" && f.InvestorId == null);
+        }
+
+        var canViewCompanyFollowups =
+            string.Equals(role, "company_admin", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(role, "admin", StringComparison.OrdinalIgnoreCase);
+        if (!canViewCompanyFollowups)
+        {
+            if (!agentId.HasValue) return null;
             query = query.Where(f => f.AssignedAgentId == agentId.Value);
         }
 
@@ -131,11 +163,13 @@ public class FollowupService : IFollowupService
             var scope = filter.Scope.Trim().ToLower();
             if (scope == "due")
             {
-                query = query.Where(f => f.ScheduledAt >= todayStart && f.ScheduledAt < tomorrowStart && f.Status == FollowupStatus.Pending);
+                query = query.Where(f => f.ScheduledAt >= todayStart && f.ScheduledAt < tomorrowStart &&
+                    (f.Status == FollowupStatus.Pending || f.Status == FollowupStatus.Rescheduled));
             }
             else if (scope == "overdue")
             {
-                query = query.Where(f => f.ScheduledAt < now && f.Status == FollowupStatus.Pending);
+                query = query.Where(f => f.ScheduledAt < now &&
+                    (f.Status == FollowupStatus.Pending || f.Status == FollowupStatus.Rescheduled));
             }
         }
 
@@ -145,7 +179,7 @@ public class FollowupService : IFollowupService
         var pageSize = Math.Clamp(filter.PageSize, 1, 500);
 
         var entities = await query
-            .OrderBy(f => f.Status == FollowupStatus.Pending ? 0 : 1)
+            .OrderBy(f => f.Status == FollowupStatus.Completed ? 1 : 0)
             .ThenByDescending(f => f.ScheduledAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -245,8 +279,9 @@ public class FollowupService : IFollowupService
         {
             CompanyId = companyId,
             AssignedAgentId = assignedAgent?.Id ?? targetAgentId,
+            AssignedAgent = assignedAgent,
             AssignedToName = assignedAgent?.Name ?? "Unassigned",
-            AssignedToRole = assignedAgent?.Role?.Code ?? role ?? string.Empty,
+            AssignedToRole = assignedAgent?.Role?.Name ?? "Sales Executive",
             ContactId = contactId,
             ContactType = contactType,
             LeadId = leadId,
@@ -267,7 +302,10 @@ public class FollowupService : IFollowupService
         await _context.SaveChangesAsync(ct);
         await RefreshLeadNextFollowupDateAsync(followup, ct);
 
-        await _context.Entry(followup).Reference(f => f.AssignedAgent).LoadAsync(ct);
+        if (followup.AssignedAgent == null && followup.AssignedAgentId.HasValue)
+        {
+            await _context.Entry(followup).Reference(f => f.AssignedAgent).Query().Include(a => a.Role).LoadAsync(ct);
+        }
 
         return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(followup), "Follow-up scheduled successfully.");
     }
@@ -287,7 +325,7 @@ public class FollowupService : IFollowupService
             {
                 followup.CompletedAt = DateTime.UtcNow;
             }
-            else if (parsedSt == FollowupStatus.Pending)
+            else if (parsedSt is FollowupStatus.Pending or FollowupStatus.Rescheduled)
             {
                 followup.CompletedAt = null;
             }
@@ -414,6 +452,7 @@ public class FollowupService : IFollowupService
             CompanyId = f.CompanyId,
             AssignedAgentId = f.AssignedAgentId,
             AssignedAgentName = f.AssignedAgent?.Name ?? f.AssignedToName,
+            AssignedRole = f.AssignedAgent?.Role?.Code ?? (!string.IsNullOrWhiteSpace(f.AssignedToRole) ? f.AssignedToRole : "sales_executive"),
             ContactId = f.ContactId,
             ContactType = f.ContactType,
             LeadId = f.LeadId,
@@ -444,7 +483,8 @@ public class FollowupService : IFollowupService
 
         lead.NextFollowupDate = await _context.Followups
             .Where(f => f.CompanyId == followup.CompanyId && f.ContactType == "lead" &&
-                        f.LeadId == followup.LeadId && f.Status == FollowupStatus.Pending)
+                        f.LeadId == followup.LeadId &&
+                        (f.Status == FollowupStatus.Pending || f.Status == FollowupStatus.Rescheduled))
             .OrderBy(f => f.ScheduledAt)
             .Select(f => (DateTime?)f.ScheduledAt)
             .FirstOrDefaultAsync(ct);

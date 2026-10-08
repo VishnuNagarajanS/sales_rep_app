@@ -463,6 +463,7 @@ if (app.Environment.IsDevelopment())
 app.UseCors("DefaultCorsPolicy");
 
 app.UseAuthentication();
+app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseAuthorization();
 
 app.MapControllers();

@@ -385,20 +385,32 @@ function mapAuditLog(l: Record<string, any>): AuditLog {
 
 export async function getAuditLogs(
   companyId?: string,
-  filters?: { entityType?: string; module?: string; from?: string; to?: string }
+  filters?: { entityType?: string; module?: string; from?: string; to?: string; leadId?: string | number; customerId?: string | number }
 ): Promise<AuditLog[]> {
-  const params: Record<string, string> = { pageSize: '200' };
+  const pageSize = 200;
+  const params: Record<string, string> = { pageSize: String(pageSize), page: '1' };
   if (filters?.entityType) params.entityType = filters.entityType;
   if (filters?.module) params.module = filters.module;
   if (filters?.from) params.from = filters.from;
   if (filters?.to) params.to = filters.to;
+  if (filters?.leadId) params.leadId = String(filters.leadId);
+  if (filters?.customerId) params.customerId = String(filters.customerId);
 
-  const qs = new URLSearchParams(params).toString();
-  const res: ApiResponse<PagedResult<any>> = await apiClient.get(
-    `/audit-logs?${qs}`
-  );
-  if (!res.success || !res.data) return [];
-  return res.data.items.map(mapAuditLog);
+  const logs: AuditLog[] = [];
+  let page = 1;
+  let totalCount = 0;
+  do {
+    params.page = String(page);
+    const qs = new URLSearchParams(params).toString();
+    const res: ApiResponse<PagedResult<any>> = await apiClient.get(`/audit-logs?${qs}`);
+    if (!res.success || !res.data) break;
+    if (res.data.items.length === 0) break;
+    logs.push(...res.data.items.map(mapAuditLog));
+    totalCount = res.data.totalCount;
+    page += 1;
+  } while (logs.length < totalCount);
+
+  return logs;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -552,6 +564,7 @@ function mapFollowup(f: Record<string, any>): Followup {
     followupType: f.followupType ?? 'call',
     assignedAgentId: sid(f.assignedAgentId),
     assignedAgentName: f.assignedAgentName ?? f.assignedToName ?? '',
+    assignedRole: f.assignedRole ?? f.assignedToRole,
     completedAt: f.completedAt,
     createdAt: f.createdAt,
     updatedAt: f.updatedAt,
@@ -635,11 +648,6 @@ export async function saveFollowup(target: any, maybeFollowup?: Followup): Promi
 export async function completeFollowup(followupId: string): Promise<void> {
   const response = await apiClient.patch<ApiResponse<any>>(`/sales-executive/followups/${nid(followupId)}/complete`, {});
   if (!response?.success) throw new Error(response?.message || 'The follow-up could not be completed.');
-  const all = storageService.getFollowups();
-  const target = all.find(f => f.id === followupId || String(f.id) === String(followupId));
-  if (target) {
-    storageService.saveFollowup({ ...target, status: 'Completed', completedAt: new Date().toISOString() });
-  }
   window.dispatchEvent(new Event('nexus_storage_updated'));
 }
 

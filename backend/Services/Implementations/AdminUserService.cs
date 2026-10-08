@@ -85,23 +85,15 @@ public class AdminUserService : IAdminUserService
             return ApiResponse<AdminUserDto>.FailureResult("Email is already registered.");
         }
 
-        var targetRoleId = request.RoleId;
-        if (companyId == 2)
-        {
-            var salesExecRole = await _context.Roles.FirstOrDefaultAsync(r => r.Code == "sales_executive", cancellationToken);
-            if (salesExecRole != null && targetRoleId == 5)
-            {
-                targetRoleId = salesExecRole.Id;
-            }
-        }
-
-        // Check if role exists
-        var role = await _context.Roles.FirstOrDefaultAsync(r => r.Id == targetRoleId, cancellationToken);
+        var role = await _context.Roles.FirstOrDefaultAsync(r => r.Id == request.RoleId, cancellationToken);
         if (role == null)
         {
-            Console.WriteLine($"[AdminUserService] CreateUser FAILED: role not found for roleId={targetRoleId}");
+            Console.WriteLine($"[AdminUserService] CreateUser FAILED: role not found for roleId={request.RoleId}");
             return ApiResponse<AdminUserDto>.FailureResult("Invalid Role ID.");
         }
+
+        if (companyId == 2 && role.Code is not ("company_admin" or "sales_executive"))
+            return ApiResponse<AdminUserDto>.FailureResult("Jamin users can only have Company Admin or Sales Executive roles.");
         Console.WriteLine($"[AdminUserService] CreateUser: role found = {role.Name} (id={role.Id}, code={role.Code})");
 
         var newUser = new User
@@ -179,23 +171,15 @@ public class AdminUserService : IAdminUserService
 
         var oldRoleName = user.Role?.Name ?? "Unknown";
 
-        var targetRoleId = request.RoleId;
-        // Jamin tenant (CompanyId = 2) must never have IRM role
-        if (companyId == 2)
-        {
-            var salesExecRole = await _context.Roles.FirstOrDefaultAsync(r => r.Code == "sales_executive", cancellationToken);
-            if (salesExecRole != null && (targetRoleId == 5 || user.Role?.Code == "irm"))
-            {
-                targetRoleId = salesExecRole.Id;
-            }
-        }
-
-        var role = await _context.Roles.FirstOrDefaultAsync(r => r.Id == targetRoleId, cancellationToken);
+        var role = await _context.Roles.FirstOrDefaultAsync(r => r.Id == request.RoleId, cancellationToken);
         if (role == null)
         {
-            Console.WriteLine($"[AdminUserService] UpdateUser FAILED: role not found roleId={targetRoleId}");
+            Console.WriteLine($"[AdminUserService] UpdateUser FAILED: role not found roleId={request.RoleId}");
             return ApiResponse<AdminUserDto>.FailureResult("Invalid Role ID.");
         }
+
+        if (companyId == 2 && role.Code is not ("company_admin" or "sales_executive"))
+            return ApiResponse<AdminUserDto>.FailureResult("Jamin users can only have Company Admin or Sales Executive roles.");
         Console.WriteLine($"[AdminUserService] UpdateUser: resolved role to {role.Name} (id={role.Id}, code={role.Code})");
         user.Role = role;
         user.RoleId = role.Id;

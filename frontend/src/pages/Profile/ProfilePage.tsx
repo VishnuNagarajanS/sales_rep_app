@@ -246,14 +246,14 @@ export const ProfilePage: React.FC = () => {
           if (isMounted) {
             setAllCalls(calls && calls.length > 0 ? calls : storageService.getCalls(tenant?.id) || []);
             setAllLeads(leads && leads.length > 0 ? leads : storageService.getLeads(tenant?.id) || []);
-            setAllFollowups(followups && followups.length > 0 ? followups : storageService.getFollowups(tenant?.id) || []);
+            setAllFollowups(followups || []);
             setAllConsultations(consultations && consultations.length > 0 ? consultations : storageService.getConsultations(tenant?.id) || []);
           }
         } catch {
           if (isMounted) {
             setAllCalls(storageService.getCalls(tenant?.id) || []);
             setAllLeads(storageService.getLeads(tenant?.id) || []);
-            setAllFollowups(storageService.getFollowups(tenant?.id) || []);
+            setAllFollowups([]);
             setAllConsultations(storageService.getConsultations(tenant?.id) || []);
           }
         }
@@ -261,7 +261,11 @@ export const ProfilePage: React.FC = () => {
         if (isMounted) {
           setAllCalls(storageService.getCalls(tenant?.id) || []);
           setAllLeads(storageService.getLeads(tenant?.id) || []);
-          setAllFollowups(storageService.getFollowups(tenant?.id) || []);
+          try {
+            setAllFollowups(await apiGetFollowups(tenant?.id));
+          } catch {
+            setAllFollowups([]);
+          }
           setAllConsultations(storageService.getConsultations(tenant?.id) || []);
         }
       }

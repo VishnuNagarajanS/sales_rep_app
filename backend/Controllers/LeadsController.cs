@@ -10,7 +10,7 @@ namespace backend.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "sales_executive,company_admin,sales_manager,super_admin")]
+[Authorize(Roles = "sales_executive,company_admin,sales_manager,super_admin,admin,manager")]
 public class LeadsController : ControllerBase
 {
     private readonly ApplicationDbContext _db;

@@ -1,4 +1,5 @@
 using backend.Data;
+using backend.Authentication.Interfaces;
 using backend.DTOs.Common;
 using backend.DTOs.Jamin;
 using backend.Models.Entities;
@@ -10,17 +11,39 @@ namespace backend.Services.Implementations.Jamin;
 public class JaminSiteVisitService : IJaminSiteVisitService
 {
     private readonly ApplicationDbContext _context;
+    private readonly ICurrentUserService _currentUser;
     private const int JaminTenantId = 2;
     private static readonly string[] SiteVisitStatuses = { "Requested", "Pending", "Scheduled", "Completed", "Rescheduled", "Cancelled", "No-show" };
 
-    public JaminSiteVisitService(ApplicationDbContext context)
+    public JaminSiteVisitService(ApplicationDbContext context, ICurrentUserService currentUser)
     {
         _context = context;
+        _currentUser = currentUser;
     }
+
+    private bool IsSalesExecutive => string.Equals(_currentUser.Role, "sales_executive", StringComparison.OrdinalIgnoreCase);
+
+    private IQueryable<SiteVisit> GetScopedSiteVisits()
+    {
+        var query = _context.SiteVisits.Where(s => s.TenantId == JaminTenantId);
+        var role = _currentUser.Role;
+        var canViewAll = string.Equals(role, "super_admin", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(role, "company_admin", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(role, "admin", StringComparison.OrdinalIgnoreCase);
+
+        if (canViewAll) return query;
+        if (!_currentUser.UserId.HasValue) return query.Where(_ => false);
+        return query.Where(s => s.AssignedAgentId == _currentUser.UserId.Value);
+    }
+
+    private bool CanManageAllSiteVisits =>
+        string.Equals(_currentUser.Role, "super_admin", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(_currentUser.Role, "company_admin", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(_currentUser.Role, "admin", StringComparison.OrdinalIgnoreCase);
 
     public async Task<ApiResponse<List<JaminSiteVisitDto>>> GetSiteVisitsAsync(int? agentId = null, string? status = null, int? leadId = null, int? customerId = null, CancellationToken ct = default)
     {
-        var query = _context.SiteVisits.Where(s => s.TenantId == JaminTenantId);
+        var query = GetScopedSiteVisits();
 
         if (agentId.HasValue && agentId.Value > 0)
         {
@@ -77,18 +100,30 @@ public class JaminSiteVisitService : IJaminSiteVisitService
             }
         }
 
+        if (IsSalesExecutive && !_currentUser.UserId.HasValue)
+            return ApiResponse<JaminSiteVisitDto>.FailureResult("The authenticated sales agent could not be identified.");
+
         if (dto.LeadId.HasValue)
         {
             var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == dto.LeadId.Value && l.CompanyId == JaminTenantId, ct);
             if (lead == null) return ApiResponse<JaminSiteVisitDto>.FailureResult("Active Jamin lead not found.");
+            if (IsSalesExecutive && lead.AssignedAgentId != _currentUser.UserId)
+                return ApiResponse<JaminSiteVisitDto>.FailureResult("You can schedule site visits only for leads assigned to you.");
         }
         if (dto.CustomerId.HasValue)
         {
             var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == dto.CustomerId.Value && c.CompanyId == JaminTenantId, ct);
             if (customer == null) return ApiResponse<JaminSiteVisitDto>.FailureResult("Jamin customer not found.");
+            if (IsSalesExecutive && customer.AssignedAgentId != _currentUser.UserId)
+                return ApiResponse<JaminSiteVisitDto>.FailureResult("You can schedule site visits only for customers assigned to you.");
         }
-        if (dto.AssignedAgentId.HasValue && !await _context.Users.AnyAsync(
-                u => u.Id == dto.AssignedAgentId.Value && u.CompanyId == JaminTenantId, ct))
+        if (IsSalesExecutive && dto.AssignedAgentId.HasValue && dto.AssignedAgentId != _currentUser.UserId)
+            return ApiResponse<JaminSiteVisitDto>.FailureResult("Sales agents can assign site visits only to themselves.");
+        if (!CanManageAllSiteVisits && dto.AssignedAgentId.HasValue && dto.AssignedAgentId != _currentUser.UserId)
+            return ApiResponse<JaminSiteVisitDto>.FailureResult("You can assign site visits only to yourself.");
+        var scheduledAgentId = CanManageAllSiteVisits ? dto.AssignedAgentId : _currentUser.UserId;
+        if (scheduledAgentId.HasValue && !await _context.Users.AnyAsync(
+                u => u.Id == scheduledAgentId.Value && u.CompanyId == JaminTenantId, ct))
             return ApiResponse<JaminSiteVisitDto>.FailureResult("Selected host does not belong to Jamin.");
 
         int? resolvedProjectId = dto.ProjectId;
@@ -146,8 +181,8 @@ public class JaminSiteVisitService : IJaminSiteVisitService
             ProjectName = projectName,
             PlotNumber = plotNumber,
             ScheduledAt = dto.ScheduledAt,
-            AssignedAgentId = dto.AssignedAgentId,
-            AssignedAgentName = dto.AssignedAgentName ?? string.Empty,
+            AssignedAgentId = scheduledAgentId,
+            AssignedAgentName = !CanManageAllSiteVisits ? _currentUser.Name ?? string.Empty : dto.AssignedAgentName ?? string.Empty,
             Status = "Scheduled",
             VisitorNote = dto.VisitorNote,
             OutcomeNotes = dto.OutcomeNotes,
@@ -162,7 +197,7 @@ public class JaminSiteVisitService : IJaminSiteVisitService
 
     public async Task<ApiResponse<JaminSiteVisitDto>> ConfirmSiteVisitAsync(int id, CancellationToken ct = default)
     {
-        var visit = await _context.SiteVisits.FirstOrDefaultAsync(s => s.Id == id && s.TenantId == JaminTenantId, ct);
+        var visit = await GetScopedSiteVisits().FirstOrDefaultAsync(s => s.Id == id, ct);
         if (visit == null)
         {
             return ApiResponse<JaminSiteVisitDto>.FailureResult("Site visit not found.");
@@ -181,7 +216,7 @@ public class JaminSiteVisitService : IJaminSiteVisitService
 
     public async Task<ApiResponse<JaminSiteVisitDto>> CompleteSiteVisitAsync(int id, UpdateSiteVisitOutcomeDto dto, CancellationToken ct = default)
     {
-        var visit = await _context.SiteVisits.FirstOrDefaultAsync(s => s.Id == id && s.TenantId == JaminTenantId, ct);
+        var visit = await GetScopedSiteVisits().FirstOrDefaultAsync(s => s.Id == id, ct);
         if (visit == null)
         {
             return ApiResponse<JaminSiteVisitDto>.FailureResult("Site visit not found.");
@@ -209,7 +244,7 @@ public class JaminSiteVisitService : IJaminSiteVisitService
 
     public async Task<ApiResponse<JaminSiteVisitDto>> UpdateSiteVisitAsync(int id, UpdateSiteVisitDto dto, CancellationToken ct = default)
     {
-        var visit = await _context.SiteVisits.FirstOrDefaultAsync(s => s.Id == id && s.TenantId == JaminTenantId, ct);
+        var visit = await GetScopedSiteVisits().FirstOrDefaultAsync(s => s.Id == id, ct);
         if (visit == null)
         {
             return ApiResponse<JaminSiteVisitDto>.FailureResult("Site visit not found.");
@@ -250,11 +285,13 @@ public class JaminSiteVisitService : IJaminSiteVisitService
         if (dto.PlotNumber != null) visit.PlotNumber = dto.PlotNumber.Trim();
         if (dto.AssignedAgentId.HasValue)
         {
+            if (!CanManageAllSiteVisits && dto.AssignedAgentId.Value != _currentUser.UserId)
+                return ApiResponse<JaminSiteVisitDto>.FailureResult("You can assign site visits only to yourself.");
             if (!await _context.Users.AnyAsync(u => u.Id == dto.AssignedAgentId.Value && u.CompanyId == JaminTenantId, ct))
                 return ApiResponse<JaminSiteVisitDto>.FailureResult("Selected host does not belong to Jamin.");
-            visit.AssignedAgentId = dto.AssignedAgentId.Value;
+            visit.AssignedAgentId = CanManageAllSiteVisits ? dto.AssignedAgentId.Value : _currentUser.UserId;
         }
-        if (!string.IsNullOrWhiteSpace(dto.AssignedAgentName)) visit.AssignedAgentName = dto.AssignedAgentName.Trim();
+        if (CanManageAllSiteVisits && !string.IsNullOrWhiteSpace(dto.AssignedAgentName)) visit.AssignedAgentName = dto.AssignedAgentName.Trim();
         if (dto.LeadId.HasValue || dto.CustomerId.HasValue)
         {
             if (dto.LeadId.HasValue && dto.CustomerId.HasValue)
@@ -266,6 +303,8 @@ public class JaminSiteVisitService : IJaminSiteVisitService
             {
                 var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == dto.LeadId.Value && l.CompanyId == JaminTenantId, ct);
                 if (lead == null) return ApiResponse<JaminSiteVisitDto>.FailureResult("Selected lead was not found in Jamin.");
+                if (IsSalesExecutive && lead.AssignedAgentId != _currentUser.UserId)
+                    return ApiResponse<JaminSiteVisitDto>.FailureResult("You can link visits only to leads assigned to you.");
                 visit.LeadId = lead.Id;
                 visit.CustomerId = null;
                 visit.CustomerName = lead.Name;
@@ -276,6 +315,8 @@ public class JaminSiteVisitService : IJaminSiteVisitService
             {
                 var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == dto.CustomerId!.Value && c.CompanyId == JaminTenantId, ct);
                 if (customer == null) return ApiResponse<JaminSiteVisitDto>.FailureResult("Selected customer was not found in Jamin.");
+                if (IsSalesExecutive && customer.AssignedAgentId != _currentUser.UserId)
+                    return ApiResponse<JaminSiteVisitDto>.FailureResult("You can link visits only to customers assigned to you.");
                 visit.CustomerId = customer.Id;
                 visit.LeadId = null;
                 visit.CustomerName = customer.Name;
@@ -294,8 +335,8 @@ public class JaminSiteVisitService : IJaminSiteVisitService
 
     public async Task<ApiResponse<List<JaminSiteVisitDto>>> GetLeadSiteVisitsAsync(int leadId, CancellationToken ct = default)
     {
-        var visits = await _context.SiteVisits
-            .Where(s => s.TenantId == JaminTenantId && s.LeadId == leadId)
+        var visits = await GetScopedSiteVisits()
+            .Where(s => s.LeadId == leadId)
             .OrderByDescending(s => s.CreatedAt)
             .ToListAsync(ct);
 
@@ -304,8 +345,8 @@ public class JaminSiteVisitService : IJaminSiteVisitService
 
     public async Task<ApiResponse<List<JaminSiteVisitDto>>> GetCustomerSiteVisitsAsync(int customerId, CancellationToken ct = default)
     {
-        var visits = await _context.SiteVisits
-            .Where(s => s.TenantId == JaminTenantId && s.CustomerId == customerId)
+        var visits = await GetScopedSiteVisits()
+            .Where(s => s.CustomerId == customerId)
             .OrderByDescending(s => s.CreatedAt)
             .ToListAsync(ct);
 
@@ -314,7 +355,7 @@ public class JaminSiteVisitService : IJaminSiteVisitService
 
     public async Task<ApiResponse<bool>> DeleteSiteVisitAsync(int id, CancellationToken ct = default)
     {
-        var visit = await _context.SiteVisits.FirstOrDefaultAsync(s => s.Id == id && s.TenantId == JaminTenantId, ct);
+        var visit = await GetScopedSiteVisits().FirstOrDefaultAsync(s => s.Id == id, ct);
         if (visit == null)
         {
             return ApiResponse<bool>.FailureResult("Site visit not found.");

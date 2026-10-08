@@ -284,6 +284,7 @@ export const jaminApiService = {
       }
     } catch (err) {
       console.error('Failed to fetch site visits from backend', err);
+      throw err;
     }
     return [];
   },
@@ -414,9 +415,9 @@ export const jaminApiService = {
             status: (f.status as any) || 'Pending',
             notes: f.notes || '',
             followupType: f.followupType || 'call',
-            assignedAgentId: String(f.assignedAgentId || '1'),
+            assignedAgentId: f.assignedAgentId ? String(f.assignedAgentId) : '',
             assignedAgentName: f.assignedAgentName || f.assignedToName || 'Agent',
-            assignedRole: 'sales_executive',
+            assignedRole: f.assignedRole || f.assignedToRole || 'sales_executive',
             completedAt: f.completedAt,
             createdAt: f.createdAt,
             updatedAt: f.updatedAt,
@@ -495,11 +496,6 @@ export const jaminApiService = {
     try {
       const cleanId = String(id).replace(/\D/g, '') || id;
       const res = await apiClient.patch<any>(`/sales-executive/followups/${cleanId}/complete`);
-      const all = storageService.getFollowups();
-      const target = all.find(f => f.id === String(id));
-      if (target) {
-        storageService.saveFollowup({ ...target, status: 'Completed', completedAt: new Date().toISOString() });
-      }
       window.dispatchEvent(new Event('nexus_storage_updated'));
       return res && res.success;
     } catch (err) {

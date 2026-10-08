@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
+import { getFollowups } from '../../services/ghlApiService';
 import { FEATURES } from '../../constants/features';
 import { PERMISSIONS } from '../../constants/permissions';
 import './Sidebar.css';
@@ -56,10 +57,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
   const { isSuperAdmin, tenant, enabledFeatures, permissions, user } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [isCollapseHovered, setIsCollapseHovered] = useState(false);
+  const [pendingFollowupsCount, setPendingFollowupsCount] = useState(0);
 
   const roleCode = user?.role?.code;
   const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.name === 'Jamin Bazaar' || user?.companySlug === 'jamin';
-  const isJaminSalesExec = isJamin && user?.role?.code === 'sales_executive';
+  const isJaminSalesExec = isJamin && ['sales_executive', 'irm'].includes(String(user?.role?.code || '').toLowerCase());
   const isJaminAdmin = isJamin && (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
 
   const isGhlAdmin =
@@ -69,11 +71,29 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
   const isIrm = user?.role?.code === 'irm';
   const isGhlIrm = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.name === 'GHL India Ventures' || user?.companySlug === 'ghl' || user?.companyName === 'GHL India Ventures') && isIrm;
 
-  const pendingFollowupsCount = isGhlSalesExec
-    ? (storageService.getFollowups(tenant?.id) || []).filter(
-      f => f.status === 'Pending' && (f.assignedAgentId === user?.id || f.assignedAgentName === user?.name)
-    ).length
-    : 0;
+  useEffect(() => {
+    if (!isGhlSalesExec) {
+      setPendingFollowupsCount(0);
+      return;
+    }
+
+    let active = true;
+    const loadPendingFollowups = async () => {
+      try {
+        const items = await getFollowups(tenant?.id);
+        if (active) setPendingFollowupsCount(items.filter(f => f.status === 'Pending').length);
+      } catch {
+        if (active) setPendingFollowupsCount(0);
+      }
+    };
+
+    loadPendingFollowups();
+    window.addEventListener('nexus_storage_updated', loadPendingFollowups);
+    return () => {
+      active = false;
+      window.removeEventListener('nexus_storage_updated', loadPendingFollowups);
+    };
+  }, [isGhlSalesExec, tenant?.id]);
 
   const companyId = (user?.companyId as string | undefined) ?? tenant?.id ?? '';
   const [unreadChatCount, setUnreadChatCount] = useState(0);
@@ -389,7 +409,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
     return section.items.filter(item => {
       if (item.feature && !enabledFeatures.includes(item.feature)) return false;
       if (item.permission && !permissions.includes(item.permission)) {
-        if (isIrm && (item.permission === PERMISSIONS.LEADS_VIEW || item.permission === PERMISSIONS.FOLLOWUPS_VIEW || item.permission === PERMISSIONS.DEALS_VIEW)) {
+        if (isGhlIrm && (item.permission === PERMISSIONS.LEADS_VIEW || item.permission === PERMISSIONS.FOLLOWUPS_VIEW || item.permission === PERMISSIONS.DEALS_VIEW)) {
           return true;
         }
         return false;
@@ -404,7 +424,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
       ? jaminSalesExecSections
       : isJaminAdmin
         ? jaminAdminSections
-        : isIrm
+        : isGhlIrm
           ? irmSections
           : isGhlSalesExec
             ? ghlSalesExecSections

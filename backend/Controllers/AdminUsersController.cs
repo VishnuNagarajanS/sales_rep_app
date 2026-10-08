@@ -1,22 +1,26 @@
 using backend.DTOs.Admin;
 using backend.DTOs.Common;
+using backend.Data;
 using backend.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
 namespace backend.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "company_admin,super_admin")]
+[Authorize(Roles = "company_admin,super_admin,admin")]
 public class AdminUsersController : ControllerBase
 {
     private readonly IAdminUserService _adminUserService;
+    private readonly ApplicationDbContext _db;
 
-    public AdminUsersController(IAdminUserService adminUserService)
+    public AdminUsersController(IAdminUserService adminUserService, ApplicationDbContext db)
     {
         _adminUserService = adminUserService;
+        _db = db;
     }
 
     private int GetCompanyId()
@@ -38,6 +42,32 @@ public class AdminUsersController : ControllerBase
 
         var result = await _adminUserService.GetUsersByCompanyAsync(companyId, cancellationToken);
         return Ok(result);
+    }
+
+    [HttpGet("roles")]
+    [ProducesResponseType(typeof(ApiResponse<List<CompanyRoleOptionDto>>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetCompanyRoles(CancellationToken cancellationToken)
+    {
+        var companyId = GetCompanyId();
+        if (companyId == 0) return Forbid();
+
+        var allowedCodes = companyId == 2
+            ? new[] { "company_admin", "sales_executive" }
+            : new[] { "company_admin", "sales_executive" };
+
+        var roles = await _db.Roles.AsNoTracking()
+            .Where(role => allowedCodes.Contains(role.Code))
+            .OrderBy(role => role.Code == "company_admin" ? 0 : role.Code == "sales_executive" ? 1 : 2)
+            .Select(role => new CompanyRoleOptionDto
+            {
+                Id = role.Id,
+                Code = role.Code,
+                Name = role.Name,
+                IsAssignable = role.Code != "company_admin"
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(ApiResponse<List<CompanyRoleOptionDto>>.SuccessResult(roles));
     }
 
     [HttpGet("{id}")]

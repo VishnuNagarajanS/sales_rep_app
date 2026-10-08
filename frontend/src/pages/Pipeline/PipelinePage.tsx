@@ -193,7 +193,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       setFollowups(apiFollowups || []);
     } catch {
       setLeads(storageService.getLeads(tenant?.id) || []);
-      setFollowups(storageService.getFollowups(tenant?.id) || []);
+      setFollowups([]);
     }
 
     setIrmDetailDeal(prev => {

@@ -12,8 +12,14 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
 {
     public async Task<PagedResult<CallRecordDto>> GetAsync(int page, int pageSize, string? direction, string? disposition, DateTime? from, DateTime? to, CancellationToken cancellationToken)
     {
-        page = Math.Max(page, 1); pageSize = Math.Clamp(pageSize, 1, 100);
-        var query = context.Set<CallRecord>().AsNoTracking().Where(x => x.CompanyId == currentUser.CompanyId && x.AgentId == currentUser.UserId);
+        var canViewCompanyCalls = string.Equals(currentUser.Role, "company_admin", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(currentUser.Role, "super_admin", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(currentUser.Role, "admin", StringComparison.OrdinalIgnoreCase);
+        var query = context.Set<CallRecord>().AsNoTracking().Where(x => x.CompanyId == currentUser.CompanyId);
+        if (!canViewCompanyCalls && currentUser.UserId.HasValue)
+        {
+            query = query.Where(x => x.AgentId == currentUser.UserId.Value);
+        }
         if (!string.IsNullOrWhiteSpace(direction)) query = query.Where(x => x.Direction == direction.ToLower());
         if (!string.IsNullOrWhiteSpace(disposition)) query = query.Where(x => x.Disposition == disposition);
         if (from.HasValue) query = query.Where(x => x.Timestamp >= from.Value.ToUniversalTime());

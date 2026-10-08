@@ -87,20 +87,27 @@ export const InvestorsPage: React.FC = () => {
   // ── Data loading ──────────────────────────────────────────────────────────
   const loadData = async () => {
     try {
-      const [apiInvestors, apiDeals] = await Promise.all([
+      const [apiInvestors, apiDeals, apiFollowups] = await Promise.all([
         getInvestors(tenant?.id),
         getDeals(tenant?.id),
+        getFollowups(tenant?.id),
       ]);
       setInvestors(apiInvestors || []);
       setDeals(apiDeals || []);
+      setAllFollowups(apiFollowups || []);
     } catch {
       setInvestors(storageService.getInvestors(tenant?.id));
       setDeals(storageService.getDeals(tenant?.id));
+      setAllFollowups([]);
     }
     setAllCalls(storageService.getCalls(tenant?.id));
     setAllConsultations(storageService.getConsultations(tenant?.id));
     setAllOpportunities(storageService.getOpportunities(tenant?.id));
-    setAllFollowups(storageService.getFollowups(tenant?.id));
+    if (tenant?.id) {
+      getFollowups(tenant.id).then(setAllFollowups).catch(() => setAllFollowups([]));
+    } else {
+      setAllFollowups([]);
+    }
   };
 
   useEffect(() => {

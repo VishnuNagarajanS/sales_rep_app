@@ -15,13 +15,12 @@ import {
   Check,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { SYSTEM_ROLES } from '../../constants/roles';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { User, RoleCode } from '../../types';
 import './CompanyUsersPage.css';
-import { adminUserService } from '../../services/adminUserService';
+import { adminUserService, CompanyRoleOption } from '../../services/adminUserService';
 
 const addStoredAuditLog = (log: any) => {
   try {
@@ -37,6 +36,7 @@ const addStoredAuditLog = (log: any) => {
 export const CompanyUsersPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const [usersList, setUsersList] = useState<User[]>([]);
+  const [roleOptions, setRoleOptions] = useState<CompanyRoleOption[]>([]);
 
   // ── Filters ───────────────────────────────────────────────────────────────
   const [roleFilter, setRoleFilter] = useState<string>('all');
@@ -45,8 +45,12 @@ export const CompanyUsersPage: React.FC = () => {
   const loadData = async () => {
     if (!tenant?.id) return;
     try {
-      const data = await adminUserService.getUsers(tenant.id);
+      const [data, roles] = await Promise.all([
+        adminUserService.getUsers(tenant.id),
+        adminUserService.getCompanyRoles(tenant.id),
+      ]);
       setUsersList(data);
+      setRoleOptions(roles);
     } catch (err) {
       console.error('Failed to load users', err);
       showToast('error', 'Failed to load users from backend.');
@@ -73,19 +77,7 @@ export const CompanyUsersPage: React.FC = () => {
   const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2';
 
   // ── Assignable Company Roles (Jamin: Sales Manager & Sales Executive; GHL: Sales Manager, Sales Executive & IRM) ──
-  const assignableRoles = useMemo(() => {
-    if (isJamin) {
-      return [
-        SYSTEM_ROLES.sales_manager,
-        SYSTEM_ROLES.sales_executive,
-      ].filter(Boolean);
-    }
-    return [
-      SYSTEM_ROLES.sales_manager,
-      SYSTEM_ROLES.sales_executive,
-      SYSTEM_ROLES.irm,
-    ].filter(Boolean);
-  }, [isJamin]);
+  const assignableRoles = useMemo(() => roleOptions.filter(role => role.isAssignable), [roleOptions]);
 
   // ── Add / Invite User Modal State ─────────────────────────────────────────
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
@@ -142,7 +134,11 @@ export const CompanyUsersPage: React.FC = () => {
       return;
     }
 
-    const assignedRole = SYSTEM_ROLES[inviteRole] || SYSTEM_ROLES.sales_executive;
+    const assignedRole = assignableRoles.find(role => role.code === inviteRole) || assignableRoles[0];
+    if (!assignedRole) {
+      setInviteError('No assignable roles are configured for this company.');
+      return;
+    }
     const isInstant = creationMode === 'instant_password';
     const tempPass = isInstant
       ? `Nexus#${Math.floor(1000 + Math.random() * 9000)}`
@@ -208,7 +204,7 @@ export const CompanyUsersPage: React.FC = () => {
   const handleSaveEditUser = async () => {
     if (!editingUser) return;
 
-    const updatedRole = SYSTEM_ROLES[editRoleCode] || editingUser.role;
+    const updatedRole = assignableRoles.find(role => role.code === editRoleCode) || editingUser.role;
     const oldRole = editingUser.role;
 
     const updated: User = {
@@ -510,7 +506,7 @@ export const CompanyUsersPage: React.FC = () => {
           </h1>
           <p className="page-subtitle">
             {isJamin
-              ? `Manage operational team accounts, roles (Sales Managers & Sales Executives), and security credentials for ${tenant?.name || 'Jamin Bazaar'}.`
+              ? `Manage Company Admin and Sales Executive accounts for ${tenant?.name || 'Jamin Bazaar'}.`
               : `Manage operational team accounts, roles (Sales Managers, Sales Executives & IRMs), and security credentials for ${tenant?.name || 'GHL India Ventures'}.`}
           </p>
         </div>
@@ -577,10 +573,7 @@ export const CompanyUsersPage: React.FC = () => {
             onChange={e => setRoleFilter(e.target.value)}
           >
             <option value="all">All Roles</option>
-            <option value="sales_manager">Sales Manager</option>
-            <option value="sales_executive">Sales Executive</option>
-            {!isJamin && <option value="irm">Institutional Relationship Manager (IRM)</option>}
-            <option value="company_admin">Company Admin</option>
+            {roleOptions.map(role => <option key={role.code} value={role.code}>{role.name}</option>)}
           </select>
         </div>
 
@@ -637,7 +630,7 @@ export const CompanyUsersPage: React.FC = () => {
           <div>
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
               The account for <strong>{inviteName}</strong> ({inviteEmail}) has been created with role{' '}
-              <strong>{SYSTEM_ROLES[inviteRole]?.name}</strong>.
+              <strong>{assignableRoles.find(role => role.code === inviteRole)?.name || inviteRole}</strong>.
             </p>
 
             <div className="company-temp-password-box">

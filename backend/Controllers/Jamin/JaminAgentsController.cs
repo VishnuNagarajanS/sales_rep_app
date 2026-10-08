@@ -29,7 +29,7 @@ public class JaminAgentsController : JaminTenantControllerBase
     }
 
     /// <summary>
-    /// Returns all active sales persons/agents belonging strictly to the Jamin Bazaar tenant (CompanyId = 2).
+    /// Returns assignable sales users for the authenticated Jamin company.
     /// </summary>
     [HttpGet]
     [Authorize]
@@ -37,9 +37,9 @@ public class JaminAgentsController : JaminTenantControllerBase
     {
         var agents = await _context.Users
             .Include(u => u.Role)
-            .Where(u => u.CompanyId == JaminCompanyId 
-                     && u.Status == UserStatus.Active 
-                     && (u.Role.Code == "sales_executive" || u.Role.Code == "sales_manager"))
+            .Where(u => u.CompanyId == JaminCompanyId
+                     && u.Status != UserStatus.Disabled
+                     && u.Role.Code == "sales_executive")
             .OrderBy(u => u.Name)
             .Select(u => new JaminAgentDto
             {

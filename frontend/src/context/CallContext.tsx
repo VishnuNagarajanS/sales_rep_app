@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { CallDisposition, CallRecord, Lead, Customer, Deal, Followup } from '../types';
 import {
+  getFollowups,
   logCall as apiLogCall,
   saveLead as apiSaveLead,
   saveCustomer as apiSaveCustomer,
@@ -313,7 +314,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Complete source follow-up or matching pending follow-up for this contact upon call completion
       try {
         const targetFollowupId = lastCallRecord.sourceFollowupId;
-        const allFollowups = storageService.getFollowups(tenant?.id) || [];
+        const allFollowups = await getFollowups(tenant?.id);
         let followupToComplete = targetFollowupId
           ? allFollowups.find(f => f.id === targetFollowupId)
           : null;
@@ -333,8 +334,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             completedAt: new Date().toISOString(),
             notes: `${followupToComplete.notes ? followupToComplete.notes + ' | ' : ''}Call Completed (${disposition})${notes ? `: ${notes}` : ''}`,
           };
-          storageService.saveFollowup(completedF);
-          apiSaveFollowup(completedF).catch(console.error);
+          await apiSaveFollowup(completedF);
           const isJaminTenant =
             tenant?.slug === 'jamin' ||
             tenant?.id === 't-jamin-02' ||

@@ -18,14 +18,19 @@ import { Modal } from '../../components/common/Modal';
 import { StatusChip } from '../../components/common/StatusChip';
 import { apiClient } from '../../services/apiClient';
 import { adminUserService } from '../../services/adminUserService';
+import { getLeads as getBackendLeads } from '../../services/ghlApiService';
 import './AssignedLeadsPage.css';
 
 export const AssignedLeadsPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
   const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2' || user?.companySlug === 'jamin';
+  const roleCode = String(user?.role?.code || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const canManageAssignments = ['company_admin', 'admin', 'super_admin', 'sales_manager', 'manager'].includes(roleCode);
+  const isSalesAgent = ['sales_executive', 'irm'].includes(roleCode);
 
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
@@ -117,45 +122,29 @@ export const AssignedLeadsPage: React.FC = () => {
   };
 
   const loadData = async () => {
+    setIsLoading(true);
     let allLeads: Lead[] = [];
     try {
       if (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2') {
         allLeads = await jaminApiService.getLeads(true);
       } else {
-        allLeads = storageService.getLeads(tenant?.id);
+        allLeads = await getBackendLeads(tenant?.id);
       }
     } catch {
-      allLeads = storageService.getLeads(tenant?.id);
+      allLeads = [];
     }
 
-    // Merge any mock assignments from session storage if present
-    let sessionAssignments: Array<{ leadId: string; agentId: number; agentName: string }> = [];
-    try {
-      const raw = sessionStorage.getItem('ghl_mock_agent_assignments');
-      if (raw) sessionAssignments = JSON.parse(raw);
-    } catch { }
-
     const assigned = allLeads
-      .map(lead => {
-        const sessionAssigned = sessionAssignments.find(a => a.leadId === lead.id);
-        if (sessionAssigned) {
-          return {
-            ...lead,
-            assignedAgentId: String(sessionAssigned.agentId),
-            assignedAgentName: sessionAssigned.agentName,
-          };
-        }
-        return lead;
-      })
       .filter(lead => {
         const agentId = String(lead.assignedAgentId || '').trim();
         const name = (lead.assignedAgentName || '').trim();
-        const nameLower = name.toLowerCase();
 
         // Must have some agent info
         if (!agentId && !name) return false;
         // Exclude placeholder names
         if (name === 'Agent' || name === 'Unassigned') return false;
+
+        if (isSalesAgent && String(lead.assignedAgentId || '') !== String(user?.id || '')) return false;
 
         return true;
       });
@@ -165,6 +154,7 @@ export const AssignedLeadsPage: React.FC = () => {
       if (!prev) return null;
       return assigned.find(l => l.id === prev.id) || null;
     });
+    setIsLoading(false);
   };
 
   useEffect(() => {
@@ -172,7 +162,7 @@ export const AssignedLeadsPage: React.FC = () => {
     const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
-  }, [tenant?.id]);
+  }, [tenant?.id, tenant?.slug, user?.id, isSalesAgent]);
 
   const handleOpenEdit = (lead: Lead) => {
     setFormData({ ...lead });
@@ -195,7 +185,10 @@ export const AssignedLeadsPage: React.FC = () => {
         if (users && users.length > 0) {
           setDynamicAgents(
             users
-              .filter(u => u.role?.code === 'sales_executive' || u.role?.code === 'sales_manager' || u.role?.code === 'irm')
+              .filter(u => {
+                const code = String(u.role?.code || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+                return u.status !== 'Disabled' && ['sales_executive', 'sales_manager', 'irm'].includes(code);
+              })
               .map(u => ({ id: u.id, name: u.name }))
           );
         }
@@ -460,13 +453,6 @@ export const AssignedLeadsPage: React.FC = () => {
     },
   ];
 
-  // Unique agent names for the filter dropdown
-  const uniqueAgents = useMemo(() => {
-    return dynamicAgents
-      .map(a => a.name)
-      .sort();
-  }, [dynamicAgents]);
-
   // Unique source options for the filter dropdown
   const uniqueSources = useMemo(() => {
     const sources = leads
@@ -535,6 +521,7 @@ export const AssignedLeadsPage: React.FC = () => {
       <DataTable
         columns={columns}
         data={filteredLeads}
+        loading={isLoading}
         keyExtractor={l => l.id}
         rowActions={rowActions}
         onRowClick={l => {
@@ -599,15 +586,15 @@ export const AssignedLeadsPage: React.FC = () => {
                 onChange: setSourceFilter,
                 options: uniqueSources.map(s => ({ value: s, label: s })),
               },
-              {
+              ...(canManageAssignments ? [{
                 key: 'assignedAgent',
                 label: 'Assigned Agent',
                 allLabel: isJamin ? 'All Agents' : 'All',
                 value: agentFilter,
                 onChange: setAgentFilter,
                 placeholder: 'Select an agent',
-                options: uniqueAgents.map(name => ({ value: name, label: name })),
-              },
+                options: dynamicAgents.map(agent => ({ value: agent.name, label: agent.name })),
+              }] : []),
             ]}
             dateRange={{
               preset: datePreset,
@@ -864,18 +851,20 @@ export const AssignedLeadsPage: React.FC = () => {
 
           <div className="form-group">
             <label className="form-label">Assigned Agent</label>
-            <select
-              className="form-select"
-              value={formData.assignedAgentName || ''}
-              onChange={handleAgentChange}
-            >
-              {!formData.assignedAgentName && <option value="">Select Agent</option>}
-              {agentOptions.map(agent => (
-                <option key={agent.id} value={agent.name}>
-                  {agent.name}
-                </option>
-              ))}
-            </select>
+            {canManageAssignments ? (
+              <select
+                className="form-select"
+                value={formData.assignedAgentName || ''}
+                onChange={handleAgentChange}
+              >
+                {!formData.assignedAgentName && <option value="">Select Agent</option>}
+                {agentOptions.map(agent => (
+                  <option key={agent.id} value={agent.name}>{agent.name}</option>
+                ))}
+              </select>
+            ) : (
+              <input className="form-input" value={formData.assignedAgentName || user?.name || ''} disabled />
+            )}
           </div>
 
           <div className="form-group">

@@ -15,9 +15,10 @@ import {
   User,
   MapPin,
 } from 'lucide-react';
-import { CallDisposition, Consultation, SiteVisit, Followup } from '../../types';
+import { AuditLog, CallDisposition, Consultation, SiteVisit, Followup } from '../../types';
 import { storageService } from '../../services/storageService';
 import { jaminApiService } from '../../services/jaminApiService';
+import { getAuditLogs, getFollowups } from '../../services/ghlApiService';
 import { useAuth } from '../../context/AuthContext';
 import { StatusChip } from './StatusChip';
 
@@ -78,6 +79,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   const [, setSiteVisitsVersion] = useState(0);
   const [apiSiteVisits, setApiSiteVisits] = useState<SiteVisit[]>([]);
   const [apiFollowups, setApiFollowups] = useState<Followup[]>([]);
+  const [apiAuditLogs, setApiAuditLogs] = useState<AuditLog[]>([]);
 
   useEffect(() => {
     setCallTab('agent');
@@ -86,15 +88,30 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   useEffect(() => {
     let isMounted = true;
     jaminApiService.getSiteVisits(true).then(visits => {
-      if (isMounted && visits && visits.length > 0) {
-        setApiSiteVisits(visits);
-      }
-    }).catch(() => {});
-    jaminApiService.getFollowups(true).then(followupItems => {
+      if (isMounted) setApiSiteVisits(visits || []);
+    }).catch(() => { if (isMounted) setApiSiteVisits([]); });
+    getFollowups(tenantId || tenant?.id).then(followupItems => {
       if (isMounted && followupItems) setApiFollowups(followupItems);
-    }).catch(() => {});
+    }).catch(() => { if (isMounted) setApiFollowups([]); });
     return () => { isMounted = false; };
-  }, [contactPhone, contactId]);
+  }, [contactPhone, contactId, tenantId, tenant?.id]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const parsedId = Number(String(contactId || '').replace(/^(db-|lead-|customer-)/i, ''));
+    if (!Number.isInteger(parsedId) || parsedId <= 0) {
+      setApiAuditLogs([]);
+      return () => { isMounted = false; };
+    }
+    const filter = contactType === 'customer' ? { customerId: parsedId } : { leadId: parsedId };
+    getAuditLogs(tenantId || tenant?.id, filter)
+      .then(logs => { if (isMounted) setApiAuditLogs(logs); })
+      .catch(err => {
+        console.warn('Failed to load lead activity logs from backend:', err);
+        if (isMounted) setApiAuditLogs([]);
+      });
+    return () => { isMounted = false; };
+  }, [contactId, contactType, tenantId, tenant?.id]);
 
   // ── Lead record lookup ───────────────────────────────────────────────────────
   const selectedLead = (() => {
@@ -114,12 +131,15 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
     const phoneDigits = (selectedLead?.phone || contactPhone || '').replace(/\D/g, '').slice(-10);
     const targetName = (selectedLead?.name || contactName || '').toLowerCase();
 
-    return allLogs.filter(l => {
+    const localMatches = allLogs.filter(l => {
       if (targetLeadId && (l.entityId === targetLeadId || l.entityId === String(targetLeadId))) return true;
       if (l.details && phoneDigits && l.details.includes(phoneDigits)) return true;
       if (l.details && targetName && l.details.toLowerCase().includes(targetName)) return true;
       return false;
     });
+    const combined = new Map<string, AuditLog>();
+    [...apiAuditLogs, ...localMatches].forEach(log => combined.set(String(log.id), log));
+    return [...combined.values()];
   })();
 
   // ── Site Visits lookup (Jamin Bazaar) ──────────────────────────────────────
@@ -165,10 +185,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   const tabCalls = isGhl ? (callTab === 'agent' ? agentCalls : irmCalls) : selectedCalls;
 
   // ── Active follow-up count ───────────────────────────────────────────────────
-  const followupMap = new Map<string, Followup>();
-  (storageService.getFollowups(tenantId) || []).forEach(f => followupMap.set(String(f.id), f));
-  apiFollowups.forEach(f => followupMap.set(String(f.id), f));
-  const followups = Array.from(followupMap.values());
+  const followups = apiFollowups;
   const activeFollowupCount = followups.filter(f => {
     return f.status === 'Pending' && f.contactType === contactType &&
       Boolean(contactId && contactId !== 'contact-new' && String(f.contactId) === String(contactId));
@@ -1048,10 +1065,17 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                 </div>
               ) : (
                 <div
+                  role="region"
+                  aria-label="Lead activity and audit history"
+                  tabIndex={0}
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
                     position: 'relative',
+                    maxHeight: 460,
+                    overflowY: 'auto',
+                    overscrollBehavior: 'contain',
+                    padding: '2px 10px 2px 0',
                     paddingLeft: 18,
                     borderLeft: '2px solid var(--border-base)',
                     gap: 14,

@@ -64,14 +64,15 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2' || !tenant;
   const isJaminUser = isJamin;
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [isLeadsLoading, setIsLeadsLoading] = useState(true);
 
   // Role-based scoping: Sales Executives and IRMs see their assigned leads.
   // Managers / Admins / Super Admins see the full company lead list.
-  const roleCode = user?.role?.code;
+  const roleCode = String(user?.role?.code || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
   const isAdmin = roleCode === 'company_admin' || roleCode === 'super_admin' || (roleCode as string) === 'admin';
   const isExec = roleCode === 'sales_executive';
   const isLeadScopedUser = roleCode === 'sales_executive' || roleCode === 'irm';
-  const isIrm = roleCode === 'irm';
+  const isIrm = roleCode === 'irm' && !isJamin && (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01');
   const scopedLeads = isLeadScopedUser
     ? leads.filter(l =>
       (l.assignedAgentId && (l.assignedAgentId === user?.id || String(l.assignedAgentId) === String(user?.id))) ||
@@ -366,6 +367,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   };
 
   const loadData = async () => {
+    setIsLeadsLoading(true);
     let updated: Lead[] = [];
     const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2';
     const effectiveCompanyId = isJamin ? 2 : 1;
@@ -463,6 +465,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       }
       return found;
     });
+    setIsLeadsLoading(false);
   };
 
   useEffect(() => {
@@ -475,7 +478,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
   const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
   const ghlPendingFollowups = isGhlSalesExec
-    ? (storageService.getFollowups(tenant?.id) || []).filter(f => f.status === 'Pending')
+    ? apiFollowups.filter(f => f.status === 'Pending')
     : [];
 
   const matchCapacity = (lead: Lead, filterRange: string): boolean => {
@@ -743,7 +746,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     setScheduleTime('11:00');
     setScheduleType((lead.nextFollowupType as any) || 'call');
     setScheduleNotes('');
-    setScheduleAgentId(lead.assignedAgentId || (jaminAgents[0]?.id || ''));
+    setScheduleAgentId(canJaminAssign
+      ? lead.assignedAgentId || (jaminAgents[0]?.id || '')
+      : String(user?.id || lead.assignedAgentId || ''));
     setIsJaminScheduleModalOpen(true);
   };
 
@@ -860,13 +865,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
   const leadFollowups = useMemo(() => {
     if (!selectedLead) return [];
-    const followupMap = new Map<string, Followup>();
-    (apiFollowups || []).forEach(f => followupMap.set(String(f.id), f));
-    if (followupMap.size === 0) {
-      const local = storageService.getFollowups(tenant?.id) || [];
-      local.forEach(f => followupMap.set(String(f.id), f));
-    }
-    const all = Array.from(followupMap.values());
+    const all = apiFollowups;
 
     return all.filter(f => {
       if ((f.contactType || 'lead') !== 'lead') return false;
@@ -1172,8 +1171,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         id: existingMatch.id, // Preserve existing ID
         companyId: existingMatch.companyId || targetCompanyId,
         status: formData.status || existingMatch.status || 'New',
-        assignedAgentId: resolvedAgentId || existingMatch.assignedAgentId,
-        assignedAgentName: resolvedAgentName || existingMatch.assignedAgentName,
+        // An empty selection means explicitly unassigned. Do not silently retain the old agent.
+        assignedAgentId: resolvedAgentId,
+        assignedAgentName: resolvedAgentId ? resolvedAgentName : 'Unassigned',
         customFields: {
           ...(existingMatch.customFields || {}),
           ...(formData.customFields || {}),
@@ -1220,7 +1220,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         // Update in backend
         const numericId = parseInt(String(leadToSave.id).replace('db-', ''), 10);
         if (!isNaN(numericId)) {
-          await apiClient.put<any>(`/leads/${numericId}`, {
+          const response = await apiClient.put<any>(`/leads/${numericId}`, {
             name: leadToSave.name,
             phone: leadToSave.phone,
             companyId: effectiveCompanyId,
@@ -1237,10 +1237,17 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
             readyToRegister: leadToSave.customFields?.readyToRegister || (leadToSave as any).readyToRegister || '',
             investmentCapacity: leadToSave.customFields?.investmentCapacity || ''
           });
+          if (response && response.success === false) {
+            throw new Error(response.message || 'The backend rejected the lead update.');
+          }
+        } else {
+          throw new Error(`Lead ID "${leadToSave.id}" is not a valid backend ID.`);
         }
       }
     } catch (err) {
       console.error('Failed to save to backend DB', err);
+      showToast(err instanceof Error ? `Lead was not saved: ${err.message}` : 'Lead was not saved. Please try again.');
+      return;
     }
 
     storageService.saveLead(leadToSave);
@@ -1737,6 +1744,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       <DataTable
         columns={columns}
         data={filteredLeads}
+        loading={isLeadsLoading}
         keyExtractor={l => l.id}
         rowActions={rowActions}
         onRowClick={l => {
@@ -3697,7 +3705,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
           </div>
 
           {/* Assigned Executive */}
-          {jaminAgents.length > 0 && (
+          {canJaminAssign && jaminAgents.length > 0 && (
             <div className="form-group">
               <label className="form-label">Assigned Executive</label>
               <select
@@ -3814,7 +3822,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                 </select>
               </div>
             </div>
-            <div className="form-group">
+            {canJaminAssign && <div className="form-group">
               <label className="form-label">Host Escort Agent</label>
               <select
                 className="form-select"
@@ -3827,7 +3835,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                   </option>
                 ))}
               </select>
-            </div>
+            </div>}
 
             <div className="sitevisit-form-grid-2">
               <div className="form-group">

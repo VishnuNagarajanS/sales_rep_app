@@ -26,7 +26,6 @@ import {
   getCustomers,
   saveDeal as apiSaveDeal,
   saveLead as apiSaveLead,
-  isTenantMatch,
 } from '../../services/ghlApiService';
 import { jaminApiService } from '../../services/jaminApiService';
 import { apiClient } from '../../services/apiClient';
@@ -38,15 +37,19 @@ import { adminUserService } from '../../services/adminUserService';
 import { DateRangePreset } from '../../types/kanban';
 import './FollowupsPage.css';
 type FollowupRoleFilter = 'sales_executive' | 'irm' | 'all';
+type FollowupAssignedRole = 'sales_executive' | 'irm';
 
 export const FollowupsPage: React.FC = () => {
   const { tenant, user } = useAuth();
+  const normalizedRoleCode = String(user?.role?.code || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
   const { initiateCall } = useCall();
 
   const [followups, setFollowups] = useState<Followup[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [followupLoadError, setFollowupLoadError] = useState('');
   const [callsList, setCallsList] = useState<CallRecord[]>([]);
   const [allLeads, setAllLeads] = useState<Lead[]>([]);
-  const [assignableAgents, setAssignableAgents] = useState<Array<{ id: string; name: string; email: string }>>([]);
+  const [assignableAgents, setAssignableAgents] = useState<Array<{ id: string; name: string; email: string; roleCode: FollowupAssignedRole }>>([]);
   const [activeTab, setActiveTab] = useState<'all' | 'due' | 'overdue' | 'completed'>('all');
   const [rescheduleItem, setRescheduleItem] = useState<Followup | null>(null);
   const [rescheduleDate, setRescheduleDate] = useState('');
@@ -174,7 +177,7 @@ export const FollowupsPage: React.FC = () => {
         followupType: createType,
         assignedAgentId: createAgentId || (user?.id ? String(user.id) : '1'),
         assignedAgentName: agentName,
-        assignedRole: user?.role?.code === 'irm' ? 'irm' : 'sales_executive',
+        assignedRole: agentObj?.roleCode || (!isJamin && user?.role?.code === 'irm' ? 'irm' : 'sales_executive'),
         notes: createNotes.trim(),
       };
 
@@ -197,23 +200,39 @@ export const FollowupsPage: React.FC = () => {
     if (isJamin) {
       jaminApiService.getAgents().then(data => {
         if (data && data.length > 0) {
-          setAssignableAgents(data.map(a => ({ id: String(a.id), name: a.name, email: a.email })));
+          setAssignableAgents(data.map(a => ({
+            id: String(a.id),
+            name: a.name,
+            email: a.email,
+            roleCode: 'sales_executive' as FollowupAssignedRole,
+          })));
         } else if (user) {
-          setAssignableAgents([{ id: String(user.id), name: user.name, email: user.email }]);
+          setAssignableAgents([{ id: String(user.id), name: user.name, email: user.email, roleCode: 'sales_executive' }]);
         }
       }).catch(() => {
-        if (user) setAssignableAgents([{ id: String(user.id), name: user.name, email: user.email }]);
+        if (user) {
+          setAssignableAgents([{ id: String(user.id), name: user.name, email: user.email, roleCode: 'sales_executive' }]);
+        }
       });
     } else {
       adminUserService.getUsers(tenant?.id || '1').then(users => {
         if (users && users.length > 0) {
-          const salesUsers = users.filter(u => u.role?.code === 'sales_executive' || u.role?.code === 'sales_manager' || u.role?.code === 'irm');
-          setAssignableAgents((salesUsers.length > 0 ? salesUsers : users).map(u => ({ id: String(u.id), name: u.name, email: u.email })));
+          const salesUsers = users.filter(u => {
+            const code = String(u.role?.code || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+            return code === 'sales_executive' || code === 'irm';
+          });
+          setAssignableAgents(salesUsers
+            .filter(u => u.status !== 'Disabled')
+            .map(u => ({ id: String(u.id), name: u.name, email: u.email, roleCode: (u.role?.code === 'irm' ? 'irm' : 'sales_executive') as FollowupAssignedRole })));
         } else if (user) {
-          setAssignableAgents([{ id: String(user.id), name: user.name, email: user.email }]);
+          const code = String(user.role?.code || '').toLowerCase().replace(/[\s-]+/g, '_');
+          setAssignableAgents([{ id: String(user.id), name: user.name, email: user.email, roleCode: code === 'irm' ? 'irm' : 'sales_executive' }]);
         }
       }).catch(() => {
-        if (user) setAssignableAgents([{ id: String(user.id), name: user.name, email: user.email }]);
+        if (user) {
+          const code = String(user.role?.code || '').toLowerCase().replace(/[\s-]+/g, '_');
+          setAssignableAgents([{ id: String(user.id), name: user.name, email: user.email, roleCode: code === 'irm' ? 'irm' : 'sales_executive' }]);
+        }
       });
     }
   }, [tenant?.slug, tenant?.id, user]);
@@ -270,11 +289,12 @@ export const FollowupsPage: React.FC = () => {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  const roleCode = user?.role?.code;
+  const roleCode = normalizedRoleCode;
   const isExec = roleCode === 'sales_executive';
   const isGhlAdmin =
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
     ((roleCode as string) === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
+  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2';
   const isAdmin =
     isGhlAdmin ||
     (roleCode as string) === 'company_admin' ||
@@ -282,14 +302,13 @@ export const FollowupsPage: React.FC = () => {
     roleCode === 'super_admin';
 
   const isGhlSalesExec = tenant?.slug === 'ghl' && isExec;
-  const isIrm = roleCode === 'irm';
-  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2';
+  const isIrm = roleCode === 'irm' && !isJamin && (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01');
   const canOpenDrawer = isGhlSalesExec || isAdmin || isIrm || isJamin;
 
   // ── Admin Filter States ──────────────────────────────────────────────────
-  const [selectedRole, setSelectedRole] = useState<FollowupRoleFilter>('sales_executive');
+  const [selectedRole, setSelectedRole] = useState<FollowupRoleFilter>('all');
   const [selectedPerson, setSelectedPerson] = useState<string>('All');
-  const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>('this_month');
+  const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>('all');
   const [customStartDate, setCustomStartDate] = useState<string>(() => {
     const d = new Date();
     d.setDate(1); // 1st of current month
@@ -298,33 +317,36 @@ export const FollowupsPage: React.FC = () => {
   const [customEndDate, setCustomEndDate] = useState<string>(() => {
     return new Date().toISOString().split('T')[0];
   });
+  useEffect(() => {
+    if (isJamin && selectedRole !== 'all') setSelectedRole('all');
+  }, [isJamin, selectedRole]);
   const handleRoleChange = (newRole: FollowupRoleFilter) => {
     setSelectedRole(newRole);
     setSelectedPerson('All');
   };
 
   const adminFilterPersonOptions = useMemo(() => {
-    return assignableAgents;
-  }, [assignableAgents]);
+    if (selectedRole === 'all') return assignableAgents;
+    return assignableAgents.filter(agent => agent.roleCode === selectedRole);
+  }, [assignableAgents, selectedRole]);
 
   const loadData = async () => {
+    setIsLoading(true);
     try {
-      const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02';
-      let apiFollowups: Followup[] = [];
+      let apiFollowups: Followup[];
       try {
         apiFollowups = await getFollowups(tenant?.id);
+        setFollowupLoadError('');
       } catch (err) {
         console.warn('[FollowupsPage] API getFollowups warning:', err);
+        apiFollowups = [];
+        setFollowupLoadError('Follow-ups could not be loaded from the server. Check your connection and retry.');
       }
 
-      const localFollowups = storageService.getFollowups(tenant?.id) || [];
-
-      // Merge API and local follow-ups by unique ID and content
-      const combinedMap = new Map<string, Followup>();
-      if (apiFollowups.length === 0) localFollowups.forEach(f => combinedMap.set(f.id, f));
-      (apiFollowups || []).forEach(f => combinedMap.set(f.id, f));
-
-      const finalFollowups = Array.from(combinedMap.values());
+      // Follow-up rows are always sourced from the backend; browser storage is not a fallback.
+      const finalFollowups = isJamin
+        ? apiFollowups.filter(f => f.contactType !== 'investor' && !f.investorId && f.assignedRole !== 'irm')
+        : apiFollowups;
 
       const calls = await getCalls(tenant?.id).catch(() => storageService.getCalls(tenant?.id));
 
@@ -396,14 +418,16 @@ export const FollowupsPage: React.FC = () => {
       });
       const finalCustomers = Array.from(custMap.values());
 
-      setFollowups(finalFollowups.length > 0 ? finalFollowups : localFollowups);
+      setFollowups(finalFollowups);
       setCallsList(calls || []);
       setAllLeads(finalLeads);
       setAllCustomers(finalCustomers);
     } catch (err) {
       console.error('Failed to load followups data', err);
-      setFollowups(storageService.getFollowups(tenant?.id) || []);
+      setFollowups([]);
+      setFollowupLoadError('Follow-ups could not be loaded from the server. Check your connection and retry.');
     }
+    setIsLoading(false);
   };
 
   useEffect(() => {
@@ -723,38 +747,37 @@ export const FollowupsPage: React.FC = () => {
     if (e) e.preventDefault();
     if (!rescheduleItem || !rescheduleDate) return;
 
-    const formattedFollowupString = new Date(`${rescheduleDate}T${rescheduleTime || '11:00 AM'}`).toISOString();
-
+    const [timePart, meridiem] = (rescheduleTime || '11:00 AM').split(' ');
+    let [hours, minutes] = timePart.split(':').map(Number);
+    if (meridiem?.toUpperCase() === 'PM' && hours < 12) hours += 12;
+    if (meridiem?.toUpperCase() === 'AM' && hours === 12) hours = 0;
+    const formattedFollowupString = new Date(
+      `${rescheduleDate}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`,
+    ).toISOString();
     const targetAgent = assignableAgentOptions.find((p: any) => p.id === rescheduleAgentId || p.name === rescheduleAgentId);
 
-    const newFollowup: Followup = {
-      id: `fup-${Date.now()}`,
-      companyId: rescheduleItem.companyId,
-      contactId: rescheduleItem.contactId,
-      contactName: rescheduleItem.contactName,
-      contactPhone: rescheduleItem.contactPhone,
-      contactType: rescheduleItem.contactType,
+    // Edit the CURRENT follow-up in-place rather than creating a duplicate
+    const updatedFollowup: Followup = {
+      ...rescheduleItem,
       scheduledAt: formattedFollowupString,
       scheduledDate: rescheduleDate,
       scheduledTime: rescheduleTime || '11:00 AM',
       priority: rescheduleItem.priority || 'Medium',
-      status: 'Pending',
+      status: 'Rescheduled',
       followupType: rescheduleType,
-      notes: rescheduleNotes || `${rescheduleType === 'whatsapp' ? 'WhatsApp' : rescheduleType === 'meeting' ? 'Meeting' : 'Phone call'} follow-up`,
-      assignedAgentId: rescheduleAgentId || rescheduleItem.assignedAgentId,
-      assignedAgentName: targetAgent?.name || rescheduleItem.assignedAgentName,
-      assignedRole: rescheduleItem.assignedRole,
-      createdBy: user?.name || 'Agent',
+      notes: rescheduleNotes.trim() ? rescheduleNotes.trim() : rescheduleItem.notes,
+      assignedAgentId: isAdmin ? (rescheduleAgentId || rescheduleItem.assignedAgentId) : rescheduleItem.assignedAgentId,
+      assignedAgentName: isAdmin ? (targetAgent?.name || rescheduleItem.assignedAgentName) : rescheduleItem.assignedAgentName,
+      assignedRole: isAdmin ? (targetAgent?.roleCode || rescheduleItem.assignedRole) : rescheduleItem.assignedRole,
     };
+
     try {
-      await apiSaveFollowup({ ...rescheduleItem, status: 'Rescheduled' });
-      const created = await apiSaveFollowup(newFollowup);
-      storageService.saveFollowup(created);
+      const saved = await apiSaveFollowup(updatedFollowup);
+      storageService.saveFollowup(saved || updatedFollowup);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Could not reschedule follow-up. Please retry.');
       return;
     }
-    storageService.saveFollowup({ ...rescheduleItem, status: 'Rescheduled' });
 
     // Also update lead record if matching
     const leads = storageService.getLeads(tenant?.id) || [];
@@ -850,26 +873,9 @@ export const FollowupsPage: React.FC = () => {
     showToast(`Follow-up with ${followup.contactName} moved back to Pending.`);
   };
 
-  // Helper to determine the assigned role of any followup
-  const getFollowupRole = (f: Followup): 'Sales Executive' | 'IRM' => {
-    if (f.assignedRole) {
-      if (f.assignedRole.toLowerCase().includes('irm')) return 'IRM';
-      return 'Sales Executive';
-    }
-    const irmsList = storageService.getIrms ? storageService.getIrms(tenant?.id) : [];
-    if (
-      irmsList.some(
-        (u: any) =>
-          u.name.toLowerCase() === (f.assignedAgentName || '').toLowerCase() ||
-          u.id === f.assignedAgentId
-      )
-    ) {
-      return 'IRM';
-    }
-    if (f.contactType === 'investor') {
-      return 'IRM';
-    }
-    return 'Sales Executive';
+  // Directly use the agent role from the database
+  const getFollowupRole = (f: Followup): string => {
+    return f.assignedRole || (isJamin ? 'Sales Executive' : 'Sales Executive');
   };
 
   // Helper to test if a followup date falls within date range filter
@@ -877,6 +883,8 @@ export const FollowupsPage: React.FC = () => {
     const schedStr = (f.scheduledAt || '').trim();
     const dateStr = (f.scheduledDate || '').trim();
     const now = new Date();
+
+    if (dateRangePreset === 'all') return true;
 
     const isToday = schedStr.toLowerCase().includes('today');
     const isYesterday = schedStr.toLowerCase().includes('yesterday');
@@ -943,10 +951,12 @@ export const FollowupsPage: React.FC = () => {
   let scopedFollowups: Followup[];
   if (isAdmin) {
     scopedFollowups = followups.filter(f => {
-      // 1. Role match
+      // Admins see all company follow-ups by default and may filter by role.
       const role = getFollowupRole(f);
-      const expectedRole = selectedRole === 'irm' ? 'IRM' : 'Sales Executive';
-      if (role !== expectedRole) return false;
+      if (selectedRole !== 'all') {
+        const expectedRole = selectedRole === 'irm' ? 'IRM' : 'Sales Executive';
+        if (role !== expectedRole) return false;
+      }
 
       // 2. Person match
       if (selectedPerson !== 'All') {
@@ -962,132 +972,40 @@ export const FollowupsPage: React.FC = () => {
       return true;
     });
   } else if (isExec) {
-    scopedFollowups = followups.filter(f => {
-      const uId = String(user?.id || '').toLowerCase();
-      const uName = (user?.name || '').toLowerCase();
-      const fAgentId = String(f.assignedAgentId || '').toLowerCase();
-      const fAgentName = (f.assignedAgentName || '').toLowerCase();
-      const fCreatedBy = (f.createdBy || '').toLowerCase();
-
-      if (fAgentId && (fAgentId === uId || fAgentId === '1' || uId === '1')) return true;
-      if (fAgentName && (fAgentName === uName || fAgentName.includes(uName) || uName.includes(fAgentName))) return true;
-      if (fCreatedBy && (fCreatedBy === uName || fCreatedBy.includes(uName))) return true;
-
-      // In Jamin, show sales executive follow-ups for the active company
-      if (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02') {
-        return true;
-      }
-      return false;
-    });
+    const currentAgentId = String(user?.id ?? '');
+    scopedFollowups = currentAgentId
+      ? followups.filter(f => String(f.assignedAgentId ?? '') === currentAgentId)
+      : [];
   } else if (isIrm) {
-    // IRM Follow-up Required: show ALL pending followups for this tenant
-    // Matches linked lead 'Follow-up Required' status, direct assignment, or tenant match
-    const leadMap = new Map<string, Lead>();
-    allLeads.forEach(l => leadMap.set(l.id, l));
-    scopedFollowups = followups.filter(f => {
-      if (f.companyId && tenant?.id && !isTenantMatch(f.companyId, tenant.id)) return false;
-      // Directly assigned to IRM agent
-      if ((f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
-        (f.assignedAgentName && f.assignedAgentName === user?.name)) {
-        return true;
-      }
-      // Linked lead has Follow-up Required status
-      if (f.contactId) {
-        const linked = leadMap.get(f.contactId);
-        if (linked && linked.status === 'Follow-up Required') return true;
-      }
-      // Phone match fallback
-      const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-      if (fPhone) {
-        const matched = allLeads.find(l => {
-          const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
-          return lPhone === fPhone && l.status === 'Follow-up Required';
-        });
-        if (matched) return true;
-      }
-      return true;
-    });
+    const currentIrmId = String(user?.id ?? '');
+    scopedFollowups = currentIrmId
+      ? followups.filter(f => String(f.assignedAgentId ?? '') === currentIrmId)
+      : [];
   } else {
     scopedFollowups = followups;
   }
 
-  // Safely deduplicate display rows
-  let processedFollowups = scopedFollowups;
-  if (isGhlSalesExec || isAdmin) {
-    try {
-      const seen = new Map<string, Followup>();
-      const deduped: Followup[] = [];
-
-      for (const f of scopedFollowups) {
-        if (f.status !== 'Pending') {
-          deduped.push(f);
-          continue;
-        }
-        const phoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-        const key =
-          f.contactId && f.contactId !== 'contact-new'
-            ? `id:${f.contactId}`
-            : phoneDigits
-              ? `phone:${phoneDigits}`
-              : `raw:${f.id}`;
-
-        if (!seen.has(key)) {
-          seen.set(key, f);
-          deduped.push(f);
-        }
-      }
-      processedFollowups = deduped;
-    } catch (err) {
-      console.error('Error deduping followups list:', err);
-      processedFollowups = scopedFollowups;
-    }
-  }
+  // Preserve every backend row; multiple pending follow-ups for one contact are valid.
+  const processedFollowups = scopedFollowups;
 
   const getCallCountForFollowup = (f: Followup): number => {
-    const fPhoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
     return callsList.filter((c: CallRecord) => {
-      if (
-        f.contactId &&
-        f.contactId !== 'contact-new' &&
-        (c.leadId === f.contactId || (c as any).contactId === f.contactId)
-      ) {
+      if (f.leadId && c.leadId && String(c.leadId) === String(f.leadId)) return true;
+      if (f.customerId && c.customerId && String(c.customerId) === String(f.customerId)) return true;
+      if (f.contactId && f.contactId !== 'contact-new' && (String(c.leadId) === String(f.contactId) || (c as any).contactId === String(f.contactId))) return true;
+
+      const fPhoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+      const cPhoneDigits = (c.contactPhone || '').replace(/\D/g, '').slice(-10);
+      if (fPhoneDigits && cPhoneDigits && fPhoneDigits === cPhoneDigits && !f.leadId && !f.customerId && fPhoneDigits !== '1234567890') {
         return true;
       }
-      const cPhoneDigits = (c.contactPhone || '').replace(/\D/g, '').slice(-10);
-      return cPhoneDigits && fPhoneDigits && cPhoneDigits === fPhoneDigits;
+      return false;
     }).length;
   };
 
   // ── GHL cross-reference safety filter ─────────────────────────────────────
-  if (isGhlSalesExec || isGhlAdmin) {
-    try {
-      const niJunkLeadIds = new Set<string>(
-        allLeads
-          .filter((l: Lead) => l.status === 'Not Interested' || l.status === 'Junk')
-          .map((l: Lead) => l.id)
-      );
-      const niJunkPhones = new Set<string>(
-        allLeads
-          .filter((l: Lead) => l.status === 'Not Interested' || l.status === 'Junk')
-          .map((l: Lead) => (l.phone || '').replace(/\D/g, '').slice(-10))
-          .filter(Boolean)
-      );
-
-      processedFollowups = processedFollowups.filter(f => {
-        if (f.status !== 'Pending') return true;
-        if (f.contactId && f.contactId !== 'contact-new' && niJunkLeadIds.has(f.contactId))
-          return false;
-        const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-        if (fPhone && niJunkPhones.has(fPhone)) return false;
-        return true;
-      });
-    } catch (err) {
-      console.error('Error in GHL NI/Junk cross-reference filter:', err);
-    }
-  }
-
   const isFollowupDueToday = (f: Followup): boolean => {
-    if (f.status !== 'Pending') return false;
+    if (f.status !== 'Pending' && f.status !== 'Rescheduled') return false;
     const sched = (f.scheduledAt || '').toLowerCase();
     if (sched.includes('today')) return true;
     const dateStr = f.scheduledDate || f.scheduledAt;
@@ -1103,7 +1021,7 @@ export const FollowupsPage: React.FC = () => {
   };
 
   const isFollowupOverdue = (f: Followup): boolean => {
-    if (f.status !== 'Pending') return false;
+    if (f.status !== 'Pending' && f.status !== 'Rescheduled') return false;
     const sched = (f.scheduledAt || '').toLowerCase();
     if (sched.includes('yesterday') || sched.includes('overdue')) return true;
     const dateStr = f.scheduledDate || f.scheduledAt;
@@ -1116,7 +1034,7 @@ export const FollowupsPage: React.FC = () => {
   };
 
   // Count badges
-  const activePendingFollowups = processedFollowups.filter(f => f.status === 'Pending');
+  const activePendingFollowups = processedFollowups.filter(f => f.status === 'Pending' || f.status === 'Rescheduled');
   const completedFollowups = processedFollowups.filter(f => f.status === 'Completed');
   const dueTodayFollowups = activePendingFollowups.filter(isFollowupDueToday);
   const overdueFollowups = activePendingFollowups.filter(isFollowupOverdue);
@@ -1131,7 +1049,7 @@ export const FollowupsPage: React.FC = () => {
     if (activeTab === 'overdue') {
       return isFollowupOverdue(f);
     }
-    return f.status === 'Pending';
+    return f.status === 'Pending' || f.status === 'Rescheduled';
   });
 
   const drawerFollowupRole = drawerFollowup ? getFollowupRole(drawerFollowup) : '';
@@ -1161,27 +1079,30 @@ export const FollowupsPage: React.FC = () => {
       {isAdmin && (
         <div className="admin-followup-filterbar">
           <div className="admin-followup-filter-group">
-            {/* 1. Role Filter */}
-            <div className="followup-filter-item">
-              <span className="followup-filter-label">
-                <Briefcase size={14} color="var(--primary-600)" />
-                Role:
-              </span>
-              <select
-                className="followup-filter-select"
-                value={selectedRole}
-                onChange={e => handleRoleChange(e.target.value as FollowupRoleFilter)}
-              >
-                <option value="sales_executive">Sales Executive</option>
-                <option value="irm">IRM (Investor Relations)</option>
-              </select>
-            </div>
+            {/* 1. Role Filter (Hidden for Jamin because all Jamin agents are Sales Executives) */}
+            {!isJamin && (
+              <div className="followup-filter-item">
+                <span className="followup-filter-label">
+                  <Briefcase size={14} color="var(--primary-600)" />
+                  Role:
+                </span>
+                <select
+                  className="followup-filter-select"
+                  value={selectedRole}
+                  onChange={e => handleRoleChange(e.target.value as FollowupRoleFilter)}
+                >
+                  <option value="all">All Roles</option>
+                  <option value="sales_executive">Sales Executive</option>
+                  <option value="irm">IRM (Investor Relations)</option>
+                </select>
+              </div>
+            )}
 
             {/* 2. Person Filter (Dynamic based on Role) */}
             <div className="followup-filter-item">
               <span className="followup-filter-label">
                 <User size={14} color="var(--text-muted)" />
-                Person:
+                {isJamin ? 'Sales Executive:' : 'Person:'}
               </span>
               <select
                 className="followup-filter-select"
@@ -1189,10 +1110,16 @@ export const FollowupsPage: React.FC = () => {
                 onChange={e => setSelectedPerson(e.target.value)}
               >
                 <option value="All">
-                  {selectedRole === 'sales_executive' ? 'All Sales Executives' : 'All IRMs'}
+                  {isJamin
+                    ? 'All Sales Executives'
+                    : selectedRole === 'all'
+                      ? 'All Agents'
+                      : selectedRole === 'sales_executive'
+                        ? 'All Sales Executives'
+                        : 'All IRMs'}
                 </option>
                 {(adminFilterPersonOptions || []).map((p: any) => (
-                  <option key={p.id} value={p.name}>
+                  <option key={p.id} value={p.id}>
                     {p.name}
                   </option>
                 ))}
@@ -1210,6 +1137,7 @@ export const FollowupsPage: React.FC = () => {
                 value={dateRangePreset}
                 onChange={e => setDateRangePreset(e.target.value as DateRangePreset)}
               >
+                <option value="all">All Time</option>
                 <option value="today">Today</option>
                 <option value="this_week">This Week</option>
                 <option value="this_month">This Month</option>
@@ -1242,16 +1170,16 @@ export const FollowupsPage: React.FC = () => {
           {/* Right Section: Role Mode Tag & Total Count */}
           <div className="admin-followup-meta-group">
             <span
-              className={`followup-role-tag ${selectedRole === 'sales_executive' ? 'tag-sales-exec' : 'tag-irm'
+              className={`followup-role-tag ${!isJamin && selectedRole === 'irm' ? 'tag-irm' : 'tag-sales-exec'
                 }`}
             >
-              {selectedRole === 'sales_executive' ? (
+              {!isJamin && selectedRole === 'irm' ? (
                 <>
-                  <Briefcase size={13} /> Sales Executive Follow-ups
+                  <Sparkles size={13} /> IRM Investor Follow-ups
                 </>
               ) : (
                 <>
-                  <Sparkles size={13} /> IRM Investor Follow-ups
+                  <Briefcase size={13} /> Sales Executive Follow-ups
                 </>
               )}
             </span>
@@ -1312,14 +1240,19 @@ export const FollowupsPage: React.FC = () => {
 
       {/* Follow-ups List Cards */}
       <div className="followups-list">
-        {filteredFollowups.length === 0 ? (
+        {isLoading ? (
+          <div className="card text-center followups-empty-card" role="status">Loading follow-ups...</div>
+        ) : followupLoadError ? (
+          <div className="card text-center followups-empty-card" role="alert">
+            {followupLoadError}
+          </div>
+        ) : filteredFollowups.length === 0 ? (
           <div className="card text-center followups-empty-card">
             No tasks in this category. You're all caught up!
           </div>
         ) : (
           filteredFollowups.map(f => {
-            const isOverdue =
-              f.status === 'Pending' && isFollowupOverdue(f);
+            const isOverdue = isFollowupOverdue(f);
             const callCount = getCallCountForFollowup(f);
             const fRole = getFollowupRole(f);
 
@@ -1366,6 +1299,10 @@ export const FollowupsPage: React.FC = () => {
                       {f.status === 'Completed' ? (
                         <span className="badge-completed-pill">
                           <CheckCircle size={11} /> Completed
+                        </span>
+                      ) : f.status === 'Rescheduled' ? (
+                        <span className="badge-completed-pill" style={{ color: '#7c3aed', background: '#f3e8ff' }}>
+                          Rescheduled
                         </span>
                       ) : (
                         <StatusChip status={f.priority} size="sm" />
@@ -1551,9 +1488,9 @@ export const FollowupsPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Assigned Executive */}
-          <div className="form-group">
-            <label className="form-label">Assigned Executive</label>
+          {/* Assigned team member */}
+          {isAdmin && <div className="form-group">
+            <label className="form-label">Assigned Team Member</label>
             <select
               className="form-select"
               value={rescheduleAgentId}
@@ -1561,11 +1498,11 @@ export const FollowupsPage: React.FC = () => {
             >
               {(assignableAgentOptions || []).map((p: any) => (
                 <option key={p.id} value={p.id}>
-                  {p.name} {p.email ? `(${p.email})` : ''}
+                  {p.name} {isJamin ? '(Sales Executive)' : `(${p.roleCode === 'irm' ? 'IRM' : 'Sales Executive'})`} {p.email ? `(${p.email})` : ''}
                 </option>
               ))}
             </select>
-          </div>
+          </div>}
 
           {/* Notes */}
           <div className="form-group">
@@ -1780,18 +1717,20 @@ export const FollowupsPage: React.FC = () => {
                 <option value="Low">🟢 Low</option>
               </select>
             </div>
-            <div className="form-group">
-              <label className="form-label">Assigned Executive</label>
+            {isAdmin && <div className="form-group">
+              <label className="form-label">Assigned Team Member</label>
               <select
                 className="form-input"
                 value={createAgentId}
                 onChange={e => setCreateAgentId(e.target.value)}
               >
                 {assignableAgents.map(a => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
+                  <option key={a.id} value={a.id}>
+                    {a.name} {isJamin ? '(Sales Executive)' : `(${a.roleCode === 'irm' ? 'IRM' : 'Sales Executive'})`}
+                  </option>
                 ))}
               </select>
-            </div>
+            </div>}
           </div>
 
           {/* Notes / Agenda */}

@@ -30,10 +30,11 @@ export const ReportsPage: React.FC = () => {
   const loadData = async () => {
     if (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2') {
       try {
-        const [liveLeads, liveVisits, liveBookings] = await Promise.all([
+        const [liveLeads, liveVisits, liveBookings, liveFollowups] = await Promise.all([
           jaminApiService.getLeads(true),
           jaminApiService.getSiteVisits(),
           jaminApiService.getBookings(),
+          getFollowups(tenant?.id),
         ]);
         setLeads(liveLeads || []);
         setSiteVisits(liveVisits || []);
@@ -43,12 +44,12 @@ export const ReportsPage: React.FC = () => {
         setOpportunities([]);
         const allCalls: CallRecord[] = storageService.getCalls ? storageService.getCalls(tenant?.id) : [];
         setCalls(allCalls.filter(c => isTenantMatch(c.companyId || (c as any).tenantId, tenant?.id)));
-        const allFlw: Followup[] = storageService.getFollowups ? storageService.getFollowups(tenant?.id) : [];
-        setFollowups(allFlw.filter(f => isTenantMatch(f.companyId, tenant?.id)));
+        setFollowups(liveFollowups || []);
         const allCust: Customer[] = storageService.getCustomers ? storageService.getCustomers(tenant?.id) : [];
         setCustomers(allCust.filter(c => isTenantMatch(c.companyId, tenant?.id)));
       } catch (err) {
         console.error('Failed to load Jamin report data', err);
+        setFollowups([]);
       }
     } else if (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') {
       try {
@@ -68,17 +69,19 @@ export const ReportsPage: React.FC = () => {
         setOpportunities(opp || []);
         setFollowups(flw || []);
         setCustomers(cust || []);
-      } catch {}
+      } catch {
+        setFollowups([]);
+      }
     } else {
       try {
+        setFollowups(await getFollowups(tenant?.id));
         setLeads(storageService.getLeads ? storageService.getLeads(tenant?.id) : []);
         setDeals(storageService.getDeals ? storageService.getDeals(tenant?.id) : []);
         setCalls(storageService.getCalls ? storageService.getCalls(tenant?.id) : []);
-        setSiteVisits(storageService.getSiteVisits ? storageService.getSiteVisits(tenant?.id) : []);
+        setSiteVisits([]);
         setBookings(storageService.getBookings ? storageService.getBookings(tenant?.id) : []);
         setConsultations(storageService.getConsultations ? storageService.getConsultations(tenant?.id) : []);
         setOpportunities(storageService.getOpportunities ? storageService.getOpportunities(tenant?.id) : []);
-        setFollowups(storageService.getFollowups ? storageService.getFollowups(tenant?.id) : []);
         setCustomers(storageService.getCustomers ? storageService.getCustomers(tenant?.id) : []);
       } catch {}
     }

@@ -259,7 +259,8 @@ export const InCallBar: React.FC = () => {
   const irmPortalRef = useRef<HTMLDivElement>(null);
   const irmButtonRef = useRef<HTMLButtonElement>(null);
 
-  const isIrm = user?.role?.code === 'irm';
+  const isGhlTenant = tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01';
+  const isIrm = isGhlTenant && user?.role?.code === 'irm';
 
   // Look up the full lead record to find who previously handled this contact
   const matchedLead = activeCall?.matchedRecord?.type === 'lead'
@@ -701,7 +702,8 @@ export const InCallBar: React.FC = () => {
               <ExternalLink size={13} /> Meet
             </button>
 
-            {/* Connect IRM / Connect Agent */}
+            {isGhlTenant && <>
+            {/* Connect IRM / Connect Agent (GHL only) */}
             <button
               ref={irmButtonRef}
               className="btn btn-sm incall-btn-action incall-btn-irm"
@@ -906,6 +908,7 @@ export const InCallBar: React.FC = () => {
               </div>,
               document.body
             )}
+            </>}
 
             {/* Spacer */}
             <div style={{ flex: 1 }} />
@@ -1077,7 +1080,8 @@ export const DispositionModal: React.FC = () => {
     d.setDate(d.getDate() + 1);
     const freshTomorrow = d.toISOString().slice(0, 10);
     const isFollowup = !!lastCallRecord.sourceFollowupId;
-    const isIrmLead = user?.role?.code === 'irm' && lastCallRecord.matchedRecord?.type === 'lead';
+    const isGhlTenant = tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01';
+    const isIrmLead = isGhlTenant && user?.role?.code === 'irm' && lastCallRecord.matchedRecord?.type === 'lead';
     const defaultDispo: CallDisposition = isIrmLead && !isFollowup ? 'Follow-up Required' : 'Interested';
     setDisposition(defaultDispo);
     setNotes('');
@@ -1093,7 +1097,7 @@ export const DispositionModal: React.FC = () => {
   const isGhlSalesExec = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') && user?.role?.code === 'sales_executive';
   // This call was launched from the Follow-ups page (a previously scheduled follow-up task).
   const isFollowupCall = !!lastCallRecord.sourceFollowupId;
-  const isIrm = user?.role?.code === 'irm';
+  const isIrm = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') && user?.role?.code === 'irm';
   const isIrmLeadCall = isIrm && lastCallRecord.matchedRecord?.type === 'lead';
 
   const allDispositions: CallDisposition[] = [

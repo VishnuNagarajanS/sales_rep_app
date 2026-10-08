@@ -72,13 +72,14 @@ export const CustomersPage: React.FC = () => {
   const { initiateCall } = useCall();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [availableAgents, setAvailableAgents] = useState<Array<{ id: string; name: string; roleName?: string }>>([]);
   const irms = useMemo(() => storageService.getIrms(tenant?.id), [tenant?.id]);
 
   // Role-based scoping: Sales Executives see only their own customers.
   // Role-based scoping: Admin / Managers see the full company customer list.
   // Others (Sales Executives, etc.) see only their assigned customers.
-  const roleCode = user?.role?.code;
+  const roleCode = String(user?.role?.code || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
   const isAdmin = roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin' || roleCode === 'sales_manager';
   const isExec = roleCode === 'sales_executive';
 
@@ -88,7 +89,7 @@ export const CustomersPage: React.FC = () => {
   const canAssignToIRM = Boolean(isGhlTenant && isSalesExecutive);
 
   const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2' || user?.companySlug === 'jamin';
-  const canManageAgentAssignments = roleCode === 'company_admin' || roleCode === 'super_admin' || (roleCode === 'sales_manager' && isJamin);
+  const canManageAgentAssignments = ['company_admin', 'admin', 'super_admin', 'sales_manager', 'manager'].includes(roleCode);
 
   useEffect(() => {
     let cancelled = false;
@@ -105,8 +106,8 @@ export const CustomersPage: React.FC = () => {
           const response = await apiClient.get<any>('/adminusers');
           const users = Array.isArray(response?.data) ? response.data : [];
           const options = users
-            .filter((a: any) => !a.status || ['active', '0'].includes(String(a.status).toLowerCase()))
-            .filter((a: any) => ['sales executive', 'sales manager', 'sales_executive', 'sales_manager'].includes(String(a.roleName || '').toLowerCase()))
+            .filter((a: any) => String(a.status).toLowerCase() !== 'disabled' && String(a.status) !== '2')
+            .filter((a: any) => /sales|manager/i.test(String(a.roleName || '')))
             .map((a: any) => ({ id: String(a.id), name: a.name, roleName: a.roleName }));
           if (!cancelled) {
             setAvailableAgents(options);
@@ -259,6 +260,7 @@ export const CustomersPage: React.FC = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
 
   const loadData = async () => {
+    setIsLoading(true);
     try {
       // Fetch customers directly from database API
       const [apiCusts, cCalls, cFollowups, cDeals, cLeads] = await Promise.all([
@@ -292,6 +294,8 @@ export const CustomersPage: React.FC = () => {
       }
     } catch (err) {
       console.error('Failed to load customers page data', err);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -1076,7 +1080,11 @@ export const CustomersPage: React.FC = () => {
               )}
             </div>
             <div className="customers-list">
-              {filteredCustomers.map(c => {
+              {isLoading && customers.length === 0 ? (
+                <div role="status" className="customer-list-item">Loading customers...</div>
+              ) : filteredCustomers.length === 0 ? (
+                <div className="customer-list-item">No customers found.</div>
+              ) : filteredCustomers.map(c => {
                 const isSelected = selectedCustomer?.id === c.id;
                 const isEligible = isCustomerEligibleForIrm(c);
 

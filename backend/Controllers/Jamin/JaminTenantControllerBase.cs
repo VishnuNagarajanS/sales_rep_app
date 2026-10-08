@@ -27,7 +27,7 @@ public class JaminTenantFilterAttribute : ActionFilterAttribute
                         ?? user.FindFirst("companyId")?.Value
                         ?? user.FindFirst("tenant_id")?.Value;
 
-        if (!isSuperAdmin && int.TryParse(companyClaim, out var companyId) && companyId != 2 && companyId != 0)
+        if (!isSuperAdmin && (!int.TryParse(companyClaim, out var companyId) || companyId != 2))
         {
             context.Result = new ForbidResult();
             return;
