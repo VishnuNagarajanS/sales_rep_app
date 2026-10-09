@@ -35,6 +35,7 @@ import {
 } from '../../../services/ghlApiService';
 import { apiUrl } from '../../../utils/apiUrl';
 import { getAuthHeaders } from '../../../utils/authHeaders';
+import { formatSmartScheduleDate } from '../../../utils/dateUtils';
 import {
   Lead,
   Deal,
@@ -288,16 +289,26 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
 
   const overdueFollowups = useMemo(() => {
     return pendingFollowups.filter(f => {
-      const sch = (f.scheduledAt || '').toLowerCase();
-      return sch.includes('yesterday') || sch.includes('overdue');
+      if (!f.scheduledAt) return false;
+      const d = new Date(f.scheduledAt);
+      if (isNaN(d.getTime())) {
+        const sch = (f.scheduledAt || '').toLowerCase();
+        return sch.includes('yesterday') || sch.includes('overdue');
+      }
+      return d.getTime() < Date.now();
     });
   }, [pendingFollowups]);
 
   // Today's Follow-ups
   const todaysFollowups = useMemo(() => {
     return pendingFollowups.filter(f => {
-      const sch = (f.scheduledAt || '').toLowerCase();
-      return sch.includes('today') || !sch.includes('yesterday');
+      if (!f.scheduledAt) return false;
+      const d = new Date(f.scheduledAt);
+      if (isNaN(d.getTime())) {
+        const sch = (f.scheduledAt || '').toLowerCase();
+        return sch.includes('today') || !sch.includes('yesterday');
+      }
+      return isDateToday(d);
     });
   }, [pendingFollowups]);
 
@@ -648,7 +659,7 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
                     </div>
                     <p className="irm-followup-notes">{f.notes || 'Scheduled touchpoint'}</p>
                     <div className="irm-followup-due">
-                      ⏰ Due: <strong>{f.scheduledAt}</strong>
+                      ⏰ Due: <strong>{formatSmartScheduleDate(f.scheduledAt)}</strong>
                     </div>
                   </div>
                   <button
@@ -683,7 +694,7 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
                     </div>
                     <p className="irm-followup-notes">{c.agenda || 'Advisory session'}</p>
                     <div className="irm-followup-due">
-                      📅 Scheduled: <strong>{c.scheduledAt}</strong>
+                      📅 Scheduled: <strong>{formatSmartScheduleDate(c.scheduledAt)}</strong>
                     </div>
                   </div>
                   <button

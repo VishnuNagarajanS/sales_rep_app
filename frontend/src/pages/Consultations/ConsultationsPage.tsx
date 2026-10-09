@@ -18,6 +18,7 @@ import { FilterBar } from '../../components/common/FilterBar';
 import { Modal } from '../../components/common/Modal';
 import { Drawer } from '../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
+import { formatSmartScheduleDate } from '../../utils/dateUtils';
 import './ConsultationsPage.css';
 
 // ─── Status Options (kept for the create/reschedule form only) ───────────────
@@ -304,7 +305,7 @@ export const ConsultationsPage: React.FC = () => {
       width: '16%',
       render: c => (
         <div>
-          <div className="consultation-slot-title">{c.scheduledAt}</div>
+          <div className="consultation-slot-title">{formatSmartScheduleDate(c.scheduledAt)}</div>
           <div className="consultation-slot-id">ID: {c.id}</div>
         </div>
       ),

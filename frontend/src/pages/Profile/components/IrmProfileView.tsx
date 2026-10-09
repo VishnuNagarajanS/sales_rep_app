@@ -52,6 +52,7 @@ import { getAuthHeaders } from '../../../utils/authHeaders';
 import { Drawer } from '../../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../../components/common/LeadDetailDrawerContent';
 import { CallRecord, Lead, Followup, Consultation, InvestmentOpportunity, Investor, Deal, IrmOtherRecord } from '../../../types';
+import { formatSmartScheduleDate } from '../../../utils/dateUtils';
 import './IrmProfileView.css';
 
 // ── Persistence helper ─────────────────────────────────────────────────────────
@@ -529,7 +530,7 @@ export const IrmProfileView: React.FC = () => {
         name: f.contactName,
         phone: f.contactPhone,
         contactId: f.contactId,
-        subtext: `Due: ${f.scheduledAt} · Notes: ${f.notes || '—'}`,
+        subtext: `Due: ${formatSmartScheduleDate(f.scheduledAt)} · Notes: ${f.notes || '—'}`,
         badge: f.status,
         badgeColor: f.status === 'Completed' ? '#10b981' : '#f59e0b',
       }));

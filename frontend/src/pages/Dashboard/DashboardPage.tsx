@@ -37,6 +37,7 @@ import {
 import { StatusChip } from '../../components/common/StatusChip';
 import { FEATURES } from '../../constants/features';
 import { IrmDashboardView } from './components/IrmDashboardView';
+import { formatSmartScheduleDate } from '../../utils/dateUtils';
 import './DashboardPage.css';
 
 const getStoredPlots = (): Plot[] => {
@@ -707,7 +708,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                       {c.agenda}
                     </p>
                     <div className="dashboard-followup-schedule">
-                      ⏰ {c.scheduledAt} • Advisor: {c.consultantName}
+                      ⏰ {formatSmartScheduleDate(c.scheduledAt)} • Advisor: {c.consultantName}
                     </div>
                   </div>
 
@@ -751,7 +752,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                       {f.notes}
                     </p>
                     <div className="dashboard-followup-schedule">
-                      ⏰ {f.scheduledAt} • Assignee: {f.assignedAgentName}
+                      ⏰ {formatSmartScheduleDate(f.scheduledAt)} • Assignee: {f.assignedAgentName}
                     </div>
                   </div>
 

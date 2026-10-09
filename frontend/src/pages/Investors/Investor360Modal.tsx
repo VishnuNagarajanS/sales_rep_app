@@ -38,6 +38,7 @@ import { DocumentList } from '../../components/common/DocumentList';
 import { useTheme } from '../../context/ThemeContext';
 import { getAuthHeaders } from '../../utils/authHeaders';
 import { apiUrl } from '../../utils/apiUrl';
+import { formatSmartScheduleDate } from '../../utils/dateUtils';
 import './Investor360Modal.css';
 
 interface Investor360ModalProps {
@@ -913,7 +914,7 @@ export const Investor360Modal: React.FC<Investor360ModalProps> = ({
                         </div>
                       </div>
                       <span className="iv-v-sub" style={{ whiteSpace: 'nowrap', fontWeight: 550 }}>
-                        {formatDate(con.scheduledAt)}
+                        {formatSmartScheduleDate(con.scheduledAt)}
                       </span>
                     </div>
                   ))
@@ -947,7 +948,7 @@ export const Investor360Modal: React.FC<Investor360ModalProps> = ({
                           {f.status}
                         </span>
                         <span className="iv-v-sub" style={{ whiteSpace: 'nowrap' }}>
-                          {formatDate(f.scheduledAt)}
+                          {formatSmartScheduleDate(f.scheduledAt)}
                         </span>
                       </div>
                     </div>

@@ -42,6 +42,7 @@ import { DocumentUploader } from '../../components/common/DocumentUploader';
 import { DocumentList } from '../../components/common/DocumentList';
 import { Modal } from '../../components/common/Modal';
 import { Timeline, TimelineEvent } from '../../components/common/Timeline';
+import { formatSmartScheduleDate } from '../../utils/dateUtils';
 
 import './CustomersPage.css';
 
@@ -1712,7 +1713,7 @@ export const CustomersPage: React.FC = () => {
                             <StatusChip status={f.priority} size="sm" />
                           </div>
                           <div className="customer-followup-due">
-                            ⏰ Due: {f.scheduledAt} • Assignee: {f.assignedAgentName}
+                            ⏰ Due: {formatSmartScheduleDate(f.scheduledAt)} • Assignee: {f.assignedAgentName}
                           </div>
                         </div>
 

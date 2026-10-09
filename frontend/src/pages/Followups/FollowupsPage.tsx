@@ -38,6 +38,7 @@ import { adminUserService } from '../../services/adminUserService';
 import { fetchIrmAllLeads, IrmAllLeadsSummary } from '../../services/irmAllLeadsService';
 import { User as UserModel } from '../../types';
 import { getAgentRoleInfo, getAssigningSalesAgentInfo } from '../../utils/agentRoleUtils';
+import { formatSmartScheduleDate } from '../../utils/dateUtils';
 import './FollowupsPage.css';
 import '../Leads/LeadsPage.css';
 
@@ -1494,7 +1495,7 @@ export const FollowupsPage: React.FC = () => {
 
                     <div className="followup-meta-row">
                       <span className={`followup-schedule-time ${isOverdue ? 'overdue' : ''}`}>
-                        ⏰ {f.scheduledAt}
+                        ⏰ {formatSmartScheduleDate(f.scheduledAt)}
                       </span>
                       <span className="followup-assignee">• {agentInfo.label}: {agentInfo.name}</span>
                       <span className={`badge-role-inline ${agentInfo.badgeClass}`}>
@@ -1761,7 +1762,7 @@ export const FollowupsPage: React.FC = () => {
                     <div className="admin-owner-meta-grid">
                       <div className="admin-owner-meta-cell">
                         <span className="cell-lbl">Scheduled Slot</span>
-                        <span className="cell-val">⏰ {drawerFollowup.scheduledAt}</span>
+                        <span className="cell-val">⏰ {formatSmartScheduleDate(drawerFollowup.scheduledAt)}</span>
                       </div>
                       <div className="admin-owner-meta-cell">
                         <span className="cell-lbl">Priority Level</span>
@@ -1826,7 +1827,7 @@ export const FollowupsPage: React.FC = () => {
                     <div>
                       <span className="lead-detail-label">Follow-up:</span>
                       <div className="lead-detail-value lead-followup-text has-date">
-                        {drawerFollowup.scheduledAt || matchingLead?.nextFollowupDate || 'Not scheduled'}
+                        {formatSmartScheduleDate(drawerFollowup.scheduledAt) || formatSmartScheduleDate(matchingLead?.nextFollowupDate) || 'Not scheduled'}
                       </div>
                     </div>
                   </div>
