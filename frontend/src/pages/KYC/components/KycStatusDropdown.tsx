@@ -48,6 +48,8 @@ interface Props {
   showAttribution?: boolean;
   /** Hide the small chevron on the badge (the badge stays clickable). */
   hideArrow?: boolean;
+  /** If true, do not pop up the verification details modal when selecting Verified */
+  disablePopup?: boolean;
 }
 
 const SECTION_OPTIONS = [
@@ -65,6 +67,7 @@ export const KycStatusDropdown: React.FC<Props> = ({
   onShowToast,
   showAttribution = true,
   hideArrow = false,
+  disablePopup = false,
 }) => {
   const { permissions, user } = useAuth();
   const canVerify =
@@ -195,6 +198,21 @@ export const KycStatusDropdown: React.FC<Props> = ({
       return;
     }
     setIsOpen(false);
+
+    if (disablePopup) {
+      if (status === 'Verified') {
+        if (isDraftOnly) {
+          triggerToast('Cannot verify: Assisted KYC is currently an incomplete draft and has not been submitted yet.', 'error');
+          return;
+        }
+        if (!canVerifyCustomer) {
+          triggerToast('Customer has not submitted KYC details yet.', 'error');
+          return;
+        }
+      }
+      executeChange(status);
+      return;
+    }
 
     if (status === 'Verified') {
       if (isDraftOnly) {

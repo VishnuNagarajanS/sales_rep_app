@@ -802,7 +802,7 @@ const GhlIrmKycView: React.FC = () => {
     dbKyc: any,
     matchingLead?: any,
     matchingCustomer?: any
-  ): Partial<KYCFormData> => {
+  ): Partial<KYCFormData> & Record<string, any> => {
     const savedKycKey = `nexus_kyc_data_${deal.id}`;
     let saved: Partial<KYCFormData> | null = null;
     try {
@@ -885,6 +885,9 @@ const GhlIrmKycView: React.FC = () => {
       panDoc: docFrom(dbKyc?.panDocumentUrl, 'PAN (uploaded)') || savedNonEmpty.panDoc || null,
       bankProofDoc: docFrom(dbKyc?.bankChequeUrl, 'Bank proof (uploaded)') || savedNonEmpty.bankProofDoc || null,
       dematDoc: docFrom(dbKyc?.dematDocumentUrl, 'Demat proof (uploaded)') || savedNonEmpty.dematDoc || null,
+      photoUrl: dbKyc?.photoUrl || savedNonEmpty.photoUrl || null,
+      submittedAt: dbKyc?.submittedAt || savedNonEmpty.submittedAt || null,
+      customerConsentTimestamp: dbKyc?.customerConsentTimestamp || savedNonEmpty.customerConsentTimestamp || null,
     };
   };
 
@@ -2247,7 +2250,14 @@ const GhlIrmKycView: React.FC = () => {
         return (
           <KycRowActionsMenu
             deal={deal}
-            onOpenReview={d => setReviewDeal(d)}
+            onOpenReview={d => {
+              const fDigits = (d.phone || '').replace(/\D/g, '').slice(-10);
+              const matchLead = leads.find(l => (d.customerId && l.id === d.customerId) || (l.phone && l.phone.replace(/\D/g, '').slice(-10) === fDigits));
+              const matchCust = customers.find(c => (d.customerId && c.id === d.customerId) || (c.phone && c.phone.replace(/\D/g, '').slice(-10) === fDigits));
+              const backendKyc = findBackendKyc(d, dbKycs, tenant?.id);
+              setProfileKycData(buildMergedProfileData(d, backendKyc, matchLead, matchCust));
+              setVerifyModalDeal(d);
+            }}
             onShowToast={msg => showToast(msg)}
             onViewProfile={d => handleOpenCustomerProfile(d)}
             onEditKyc={d => startKycFlow(d)}
@@ -2372,6 +2382,7 @@ const GhlIrmKycView: React.FC = () => {
                       <KycStatusDropdown
                         deal={deal}
                         customerKycStatus={resolveCustomerKycStatus(deal)}
+                        disablePopup={true}
                         onChange={(status, comment, flaggedSections, checklist) =>
                           handleStatusChange(deal, status, comment, flaggedSections, checklist)
                         }
