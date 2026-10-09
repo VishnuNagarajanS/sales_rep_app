@@ -655,16 +655,22 @@
 }
 
 .kyc-profile-hero-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-base);
-  border-radius: 12px;
+  background: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-base, #e2e8f0);
+  border-radius: 14px;
   padding: 20px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 24px;
   flex-wrap: wrap;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+}
+
+:is(.admin-theme, .dark-theme) .kyc-profile-hero-card {
+  background: linear-gradient(180deg, #121420 0%, #0e111a 100%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 6px 20px -2px rgba(0, 0, 0, 0.4);
 }
 
 .kyc-profile-hero-left {
@@ -741,15 +747,19 @@
 }
 
 .kyc-profile-hero-metric-label {
-  font-size: 10.5px;
-  font-weight: 600;
+  font-size: 11px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  color: #7c3aed;
+}
+
+:is(.admin-theme, .dark-theme) .kyc-profile-hero-metric-label {
+  color: #8b5cf6;
 }
 
 .kyc-profile-hero-metric-val {
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -817,17 +827,26 @@
 }
 
 .kyc-profile-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-base);
-  border-radius: 12px;
-  padding: 20px 24px;
+  background: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-base, #e2e8f0);
+  border-radius: 14px;
+  padding: 22px 26px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+:is(.admin-theme, .dark-theme) .kyc-profile-card {
+  background: linear-gradient(180deg, #121420 0%, #0e111a 100%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 6px 22px -2px rgba(0, 0, 0, 0.38);
 }
 
 .kyc-profile-card-title {
-  font-size: 14px;
+  font-size: 14.5px;
   font-weight: 700;
   color: var(--text-primary);
-  margin: 0 0 16px 0;
+  margin: 0 0 18px 0;
+  letter-spacing: -0.01em;
 }
 
 .kyc-profile-fields-grid {
@@ -844,17 +863,26 @@
 }
 
 .kyc-profile-label {
-  font-size: 10.5px;
-  font-weight: 600;
+  font-size: 11px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  color: #7c3aed;
+}
+
+:is(.admin-theme, .dark-theme) .kyc-profile-label {
+  color: #8b5cf6;
 }
 
 .kyc-profile-value {
-  font-size: 13px;
-  color: var(--text-primary);
+  font-size: 13.5px;
+  color: var(--text-primary, #0f172a);
   font-weight: 500;
+  line-height: 1.4;
+}
+
+:is(.admin-theme, .dark-theme) .kyc-profile-value {
+  color: #f8fafc;
 }
 
 .kyc-profile-value.not-provided {

@@ -166,8 +166,15 @@
 }
 
 .kvm-detail-label {
-  color: var(--text-muted);
-  font-weight: 600;
+  color: #7c3aed;
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+:is(.admin-theme, .dark-theme) .kvm-detail-label {
+  color: #8b5cf6;
 }
 
 .kvm-detail-val {
