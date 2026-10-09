@@ -51,3 +51,16 @@ export function formatSmartScheduleDate(dateVal?: string | Date | null): string 
 
   return `${dateStr} • ${timeStr}`;
 }
+
+export function isDateToday(dateVal?: string | Date | null): boolean {
+  if (!dateVal) return false;
+  const d = typeof dateVal === 'string' ? new Date(dateVal) : dateVal;
+  if (isNaN(d.getTime())) return false;
+  const now = new Date();
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+}
+

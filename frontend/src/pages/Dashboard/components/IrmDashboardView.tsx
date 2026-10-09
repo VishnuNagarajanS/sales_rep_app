@@ -35,7 +35,7 @@ import {
 } from '../../../services/ghlApiService';
 import { apiUrl } from '../../../utils/apiUrl';
 import { getAuthHeaders } from '../../../utils/authHeaders';
-import { formatSmartScheduleDate } from '../../../utils/dateUtils';
+import { formatSmartScheduleDate, isDateToday } from '../../../utils/dateUtils';
 import {
   Lead,
   Deal,
@@ -331,17 +331,6 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
   }, [scopedInvestors, sevenDaysAgo]);
 
   // ── Today's Assigned Leads for this IRM (Present Day only) ──────────────────
-  const isDateToday = (dateVal?: string | Date) => {
-    if (!dateVal) return false;
-    const d = new Date(dateVal);
-    if (isNaN(d.getTime())) return false;
-    const now = new Date();
-    return (
-      d.getFullYear() === now.getFullYear() &&
-      d.getMonth() === now.getMonth() &&
-      d.getDate() === now.getDate()
-    );
-  };
 
   const todayLeads = useMemo(() => {
     return scopedLeads.filter(l => {
