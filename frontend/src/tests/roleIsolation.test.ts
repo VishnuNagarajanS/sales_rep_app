@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { CallDisposition } from '../types';
-import { getAgentRoleInfo } from '../utils/agentRoleUtils';
+import { getAgentRoleInfo, getAssigningSalesAgentInfo } from '../utils/agentRoleUtils';
 
 describe('Role Feature Isolation & Boundary Enforcement', () => {
   // Navigation section models
@@ -209,5 +209,74 @@ describe('Role Feature Isolation & Boundary Enforcement', () => {
     // Protection test: even if a lead had fallbackRole IRM, Naveen is strictly a Sales Executive
     const protectedNaveen = getAgentRoleInfo('Naveen', '3', 'IRM');
     expect(protectedNaveen.role).toBe('Sales Executive');
+
+    // Dhinakaran must NEVER be returned as Sales Executive even if someone passed sales fallback
+    const protectedDhina = getAgentRoleInfo('Dhinakaran', '5', 'Sales Executive');
+    expect(protectedDhina.role).toBe('IRM');
+    expect(protectedDhina.badgeClass).toBe('badge-role-irm');
+
+    // Spelling variation "Dhinkaran" from prompt must also resolve to IRM
+    const dhinkaranVariant = getAgentRoleInfo('Dhinkaran', '5');
+    expect(dhinkaranVariant.role).toBe('IRM');
+    expect(dhinkaranVariant.badgeClass).toBe('badge-role-irm');
+  });
+
+  it('correctly attributes the assigning sales agent when leads arrive in IRM view', () => {
+    // 1. Lead assigned to IRM by Naveen (Sales Executive)
+    const leadFromNaveen = {
+      assignedAgentName: 'Dhinakaran',
+      assignedAgentId: '5',
+      assignedIrmName: 'Dhinakaran',
+      assignedIrmId: '5',
+      assignedByName: 'Naveen',
+      assignedById: '3',
+      notes: '[9/10/2026] Assigned to IRM: Dhinakaran by Naveen',
+    };
+    const info1 = getAssigningSalesAgentInfo(leadFromNaveen);
+    expect(info1.name).toBe('Naveen');
+    expect(info1.role).toBe('Sales Executive');
+    expect(info1.badgeClass).toBe('badge-role-sales');
+
+    // 2. Lead assigned to IRM by Vishnu (GHL Admin)
+    const leadFromVishnu = {
+      assignedAgentName: 'Dhinakaran',
+      assignedAgentId: '5',
+      assignedIrmName: 'Dhinakaran',
+      assignedIrmId: '5',
+      assignedByName: 'Vishnu',
+      assignedById: '2',
+      notes: '[9/10/2026] Assigned to IRM: Dhinakaran by Vishnu',
+    };
+    const info2 = getAssigningSalesAgentInfo(leadFromVishnu);
+    expect(info2.name).toBe('Vishnu');
+    expect(info2.role).toBe('GHL Admin');
+    expect(info2.badgeClass).toBe('badge-role-admin');
+
+    // 3. Follow-up for lead (e.g., Thirupachi) called by Dhinakaran
+    // Even though followup assignedAgent is Dhinakaran, the assigning sales person is Naveen
+    const followupCalledByDhina = {
+      assignedAgentName: 'Dhinakaran',
+      assignedAgentId: '5',
+      assignedByName: 'Naveen',
+      assignedById: '3',
+      notes: 'Follow-up from call with Thirupachi: [Twilio Voice: Call Not Answered (0s)]',
+    };
+    const info3 = getAssigningSalesAgentInfo(leadFromNaveen, followupCalledByDhina);
+    expect(info3.name).toBe('Naveen');
+    expect(info3.role).toBe('Sales Executive');
+    expect(info3.badgeClass).toBe('badge-role-sales');
+
+    // 4. Pure IRM lead created directly by Dhinakaran without sales handover
+    const pureIrmLead = {
+      assignedAgentName: 'Dhinakaran',
+      assignedAgentId: '5',
+      assignedByName: 'Created by IRM',
+      createdBy: 'Dhinakaran',
+    };
+    const info4 = getAssigningSalesAgentInfo(pureIrmLead);
+    expect(info4.name).toBe('Dhinakaran');
+    expect(info4.role).toBe('IRM');
+    expect(info4.badgeClass).toBe('badge-role-irm');
   });
 });
+

@@ -43,7 +43,7 @@ import { FilterBar } from '../../components/common/FilterBar';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
-import { getAgentRoleInfo } from '../../utils/agentRoleUtils';
+import { getAgentRoleInfo, getAssigningSalesAgentInfo } from '../../utils/agentRoleUtils';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
 import './LeadsPage.css';
 
@@ -653,17 +653,25 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     if (!chosenIrm) return;
 
     const nowIso = new Date().toISOString();
+    const assigningSalesPerson = user?.name || leadToAssignIrm.assignedByName || leadToAssignIrm.assignedAgentName || 'Naveen';
+    const assigningSalesId = user?.id || leadToAssignIrm.assignedById || leadToAssignIrm.assignedAgentId || '3';
+
     const updatedLead: Lead = {
       ...leadToAssignIrm,
       assignedIrmId: String(chosenIrm.id),
       assignedIrmName: chosenIrm.name,
       assignedIrmAt: nowIso,
-      notes: `${leadToAssignIrm.notes ? leadToAssignIrm.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Assigned to IRM: ${chosenIrm.name} by ${user?.name || 'Sales Executive'}`,
+      assignedById: assigningSalesId,
+      assignedByName: assigningSalesPerson,
+      notes: `${leadToAssignIrm.notes ? leadToAssignIrm.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Assigned to IRM: ${chosenIrm.name} by ${assigningSalesPerson}`,
       customFields: {
         ...leadToAssignIrm.customFields,
         assignedIrmId: String(chosenIrm.id),
         assignedIrmName: chosenIrm.name,
         assignedIrmAt: nowIso,
+        qualifiedByAgentName: assigningSalesPerson,
+        assignedByAgentName: assigningSalesPerson,
+        salesAgentName: assigningSalesPerson,
       }
     };
 
@@ -1435,23 +1443,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   };
 
   const getLeadDisplayAgent = (l: Lead) => {
-    const isDhinaOrIrmAgent =
-      (l.assignedAgentName && l.assignedAgentName.toLowerCase().includes('dhina')) ||
-      (l.assignedByName && l.assignedByName.toLowerCase().includes('dhina')) ||
-      String(l.assignedAgentId) === '5' ||
-      String(l.assignedById) === '5';
-
-    // When IRM user is viewing or lead is explicitly assigned to Dhinakaran
-    if (isIrm || (isDhinaOrIrmAgent && !l.assignedAgentName?.toLowerCase().includes('naveen') && String(l.assignedAgentId) !== '3')) {
-      const isLeadCreatedByIrm =
-        isIrm && (
-          (l.assignedById && user?.id && String(l.assignedById) === String(user.id)) ||
-          l.createdBy === user?.name ||
-          l.assignedByName === 'Created by IRM'
-        );
-      if (isLeadCreatedByIrm || isDhinaOrIrmAgent) {
-        return getAgentRoleInfo(l.assignedAgentName || l.assignedByName || (isIrm ? user?.name : 'Dhinakaran') || 'Dhinakaran', l.assignedAgentId || l.assignedById, 'IRM');
-      }
+    // When IRM user is viewing IRM My Leads, display the Sales Agent who qualified/handed over the lead
+    if (isIrm) {
+      return getAssigningSalesAgentInfo(l);
     }
 
     const assignedName =
@@ -1470,7 +1464,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
   const assignedAgentColumn: Column<Lead> = {
     key: 'assignedAgentName',
-    header: 'Assigned Agent',
+    header: isIrm ? 'Assigned Sales Agent' : 'Assigned Agent',
     sortable: true,
     width: '18%',
     render: l => {
@@ -1831,7 +1825,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                 {/* ── Quick Info Banner (Assigned Agent) ── */}
                 <div className="lead-quick-banner">
                   <div className="lead-assigned-note" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    Assigned : <strong>{getLeadDisplayAgent(selectedLead).name}</strong>
+                    {isIrm ? 'Assigned Sales Agent' : 'Assigned'} : <strong>{getLeadDisplayAgent(selectedLead).name}</strong>
                     <span className={`badge-role-inline ${getLeadDisplayAgent(selectedLead).badgeClass}`}>
                       {getLeadDisplayAgent(selectedLead).role}
                     </span>

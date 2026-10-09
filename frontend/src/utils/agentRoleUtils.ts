@@ -63,7 +63,7 @@ export function getAgentRoleInfo(
   }
 
   // 5. Dhinakaran -> IRM
-  if (nameLower.includes('dhina') || idStr === '5' || nameLower.includes('created by irm')) {
+  if (nameLower.includes('dhin') || idStr === '5' || nameLower.includes('created by irm') || (nameLower.includes('irm') && !nameLower.includes('sales'))) {
     return {
       name: nameLower.includes('created by irm') ? 'Dhinakaran' : (name || 'Dhinakaran'),
       role: 'IRM',
@@ -109,3 +109,116 @@ export function getAgentRoleInfo(
     iconColor: '#3b82f6',
   };
 }
+
+export interface AssignableEntity {
+  assignedAgentName?: string | null;
+  assignedAgentId?: string | number | null;
+  assignedByName?: string | null;
+  assignedById?: string | number | null;
+  assignedIrmName?: string | null;
+  assignedIrmId?: string | number | null;
+  assignedIrmAt?: string | null;
+  createdBy?: string | null;
+  notes?: string | null;
+  customFields?: Record<string, any> | null;
+}
+
+/**
+ * When a lead or follow-up is viewed by IRM, this helper extracts
+ * the Sales Person / Admin who assigned / handed over the lead to IRM.
+ * Dhinakaran (IRM) is NEVER shown as the assigning sales agent.
+ */
+export function getAssigningSalesAgentInfo(
+  lead?: AssignableEntity | null,
+  followup?: AssignableEntity | null
+): AgentRoleInfo {
+  // 1. Explicit assignedByName if not IRM
+  const leadAssignedByName =
+    lead?.assignedByName && lead.assignedByName !== 'Created by IRM' && !lead.assignedByName.toLowerCase().includes('dhin')
+      ? lead.assignedByName
+      : null;
+  const fuAssignedByName =
+    followup?.assignedByName && followup.assignedByName !== 'Created by IRM' && !followup.assignedByName.toLowerCase().includes('dhin')
+      ? followup.assignedByName
+      : null;
+
+  // 2. Custom fields attribution
+  const cfQualifiedBy =
+    lead?.customFields?.qualifiedByAgentName ||
+    lead?.customFields?.assignedByAgentName ||
+    lead?.customFields?.salesAgentName ||
+    lead?.customFields?.agentName;
+
+  // 3. Assigned agent name if it belongs to a sales agent (not Dhinakaran)
+  const leadAgentName =
+    lead?.assignedAgentName && !lead.assignedAgentName.toLowerCase().includes('dhin') && !lead.assignedAgentName.toLowerCase().includes('irm')
+      ? lead.assignedAgentName
+      : null;
+  const fuAgentName =
+    followup?.assignedAgentName && !followup.assignedAgentName.toLowerCase().includes('dhin') && !followup.assignedAgentName.toLowerCase().includes('irm')
+      ? followup.assignedAgentName
+      : null;
+
+  // 4. Assigned IDs
+  const assignorId = lead?.assignedById || followup?.assignedById;
+  const leadAgentId = lead?.assignedAgentId && String(lead.assignedAgentId) !== '5' ? lead.assignedAgentId : null;
+
+  // 5. Notes regex for handover attribution: "by Naveen" or "by Vishnu"
+  let nameFromNotes: string | null = null;
+  const combinedNotes = `${lead?.notes || ''} ${followup?.notes || ''}`;
+  const matchBy = combinedNotes.match(/Assigned to IRM:[^b]*by\s+([A-Za-z0-9_-]+)/i);
+  if (matchBy && matchBy[1]) {
+    const rawMatch = matchBy[1].trim();
+    if (!rawMatch.toLowerCase().includes('dhin') && !rawMatch.toLowerCase().includes('irm')) {
+      nameFromNotes = rawMatch;
+    }
+  }
+
+  // Check for Vishnu (GHL Admin / Company Admin)
+  if (
+    String(assignorId) === '2' ||
+    String(leadAgentId) === '2' ||
+    leadAssignedByName?.toLowerCase().includes('vishnu') ||
+    fuAssignedByName?.toLowerCase().includes('vishnu') ||
+    (cfQualifiedBy && String(cfQualifiedBy).toLowerCase().includes('vishnu')) ||
+    leadAgentName?.toLowerCase().includes('vishnu') ||
+    nameFromNotes?.toLowerCase().includes('vishnu')
+  ) {
+    return getAgentRoleInfo('Vishnu', '2');
+  }
+
+  // Explicit sales person found
+  const explicitSalesName =
+    leadAssignedByName ||
+    fuAssignedByName ||
+    (cfQualifiedBy && !String(cfQualifiedBy).toLowerCase().includes('dhin') ? String(cfQualifiedBy) : null) ||
+    leadAgentName ||
+    fuAgentName ||
+    nameFromNotes;
+
+  if (explicitSalesName && !explicitSalesName.toLowerCase().includes('dhin') && !explicitSalesName.toLowerCase().includes('irm')) {
+    return getAgentRoleInfo(explicitSalesName, assignorId || leadAgentId);
+  }
+
+  // Check ID mappings
+  if (String(assignorId) === '3' || String(leadAgentId) === '3') {
+    return getAgentRoleInfo('Naveen', '3');
+  }
+  if (String(assignorId) === '6' || String(leadAgentId) === '6') {
+    return getAgentRoleInfo('Rajesh Sharma', '6');
+  }
+
+  // Pure IRM lead: created directly by Dhinakaran with no sales person handover
+  const isPureIrm =
+    (lead?.assignedByName === 'Created by IRM' || lead?.createdBy?.toLowerCase().includes('dhin')) &&
+    !lead?.assignedIrmAt &&
+    !matchBy;
+
+  if (isPureIrm) {
+    return getAgentRoleInfo('Dhinakaran', '5', 'IRM');
+  }
+
+  // Default for IRM leads handed over by the sales team
+  return getAgentRoleInfo('Naveen', '3');
+}
+

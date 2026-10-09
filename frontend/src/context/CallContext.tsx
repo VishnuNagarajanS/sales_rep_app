@@ -741,8 +741,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: scheduleFollowup.notes || (notes ? `Callback reminder: ${notes}` : `Callback reminder for ${lastCallRecord.contactName}`),
             assignedAgentId: user.id,
             assignedAgentName: user.name,
-            assignedById: matchedLead?.assignedById,
-            assignedByName: matchedLead?.assignedByName,
+            assignedById: matchedLead?.assignedById || (String(matchedLead?.assignedAgentId) !== '5' ? matchedLead?.assignedAgentId : undefined),
+            assignedByName: matchedLead?.assignedByName || (matchedLead?.assignedAgentName && !matchedLead.assignedAgentName.toLowerCase().includes('dhina') ? matchedLead.assignedAgentName : undefined),
           });
         }
       }
@@ -848,8 +848,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: scheduleFollowup.notes || (notes ? `Follow-up from No Response: ${notes}` : `Follow-up required for ${lastCallRecord.contactName}`),
             assignedAgentId: user.id,
             assignedAgentName: user.name,
-            assignedById: matchedLead?.assignedById,
-            assignedByName: matchedLead?.assignedByName,
+            assignedById: matchedLead?.assignedById || (String(matchedLead?.assignedAgentId) !== '5' ? matchedLead?.assignedAgentId : undefined),
+            assignedByName: matchedLead?.assignedByName || (matchedLead?.assignedAgentName && !matchedLead.assignedAgentName.toLowerCase().includes('dhina') ? matchedLead.assignedAgentName : undefined),
           });
         }
       }

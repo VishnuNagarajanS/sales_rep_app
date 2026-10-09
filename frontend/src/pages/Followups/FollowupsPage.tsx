@@ -37,7 +37,7 @@ import { DateRangePreset } from '../../types/kanban';
 import { adminUserService } from '../../services/adminUserService';
 import { fetchIrmAllLeads, IrmAllLeadsSummary } from '../../services/irmAllLeadsService';
 import { User as UserModel } from '../../types';
-import { getAgentRoleInfo } from '../../utils/agentRoleUtils';
+import { getAgentRoleInfo, getAssigningSalesAgentInfo } from '../../utils/agentRoleUtils';
 import './FollowupsPage.css';
 import '../Leads/LeadsPage.css';
 
@@ -708,34 +708,15 @@ export const FollowupsPage: React.FC = () => {
       return idMatch || Boolean(fPhone && lPhone && fPhone === lPhone);
     });
 
-    const isDhinaOrIrmAgent =
-      (f.assignedByName && f.assignedByName.toLowerCase().includes('dhina')) ||
-      (matchingLead?.assignedByName && matchingLead.assignedByName.toLowerCase().includes('dhina')) ||
-      (f.assignedAgentName && f.assignedAgentName.toLowerCase().includes('dhina')) ||
-      (matchingLead?.assignedAgentName && matchingLead.assignedAgentName.toLowerCase().includes('dhina')) ||
-      String(f.assignedById) === '5' ||
-      String(matchingLead?.assignedById) === '5';
-
-    if (isIrm || (isDhinaOrIrmAgent && !f.assignedAgentName?.toLowerCase().includes('naveen') && String(f.assignedById) !== '3')) {
-      const isCreatedByIrm =
-        isIrm && (
-          (matchingLead?.assignedById && user?.id && String(matchingLead.assignedById) === String(user.id)) ||
-          (f.assignedById && user?.id && String(f.assignedById) === String(user.id)) ||
-          matchingLead?.createdBy === user?.name ||
-          f.createdBy === user?.name ||
-          f.assignedByName === 'Created by IRM' ||
-          matchingLead?.assignedByName === 'Created by IRM'
-        );
-
-      if (isCreatedByIrm || isDhinaOrIrmAgent) {
-        const info = getAgentRoleInfo(f.assignedAgentName || matchingLead?.assignedAgentName || (isIrm ? user?.name : 'Dhinakaran') || 'Dhinakaran', f.assignedById || matchingLead?.assignedById, 'IRM');
-        return {
-          label: isIrm ? 'Assigned Agent' : 'Assignee',
-          name: info.name,
-          role: info.role,
-          badgeClass: info.badgeClass,
-        };
-      }
+    if (isIrm) {
+      // When IRM user is viewing follow-ups, display the Sales Agent who assigned/qualified the lead
+      const salesInfo = getAssigningSalesAgentInfo(matchingLead, f);
+      return {
+        label: 'Assigned Agent',
+        name: salesInfo.name,
+        role: salesInfo.role,
+        badgeClass: salesInfo.badgeClass,
+      };
     }
 
     const salesAgentName =

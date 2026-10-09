@@ -19,7 +19,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { DataTable, Column } from '../../components/common/DataTable';
 import { fetchIrmAllLeads, IrmAllLeadItem, IrmAllLeadsSummary } from '../../services/irmAllLeadsService';
-import { getAgentRoleInfo } from '../../utils/agentRoleUtils';
+import { getAgentRoleInfo, getAssigningSalesAgentInfo } from '../../utils/agentRoleUtils';
 import './AllLeadsPage.css';
 
 interface AllLeadsPageProps {
@@ -91,18 +91,9 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
   const agentOptions = useMemo(() => {
     const set = new Set<string>();
     scopedLeads.forEach(l => {
-      const isExplicitNonIrm =
-        l.assignedByName &&
-        (l.assignedByName.toLowerCase().includes('vishnu') || l.assignedByName.toLowerCase().includes('naveen'));
-      const isIrm = !isExplicitNonIrm && (
-        !l.assignedByName ||
-        l.assignedByName === 'Created by IRM' ||
-        !l.assignedById ||
-        l.assignedById === l.assignedAgentId
-      );
-      const name = isIrm ? (user?.name || 'Dhinakaran') : (l.assignedByName || 'Sales Agent');
-      if (name) {
-        set.add(name);
+      const agentInfo = getAssigningSalesAgentInfo(l as any);
+      if (agentInfo.name) {
+        set.add(agentInfo.name);
       }
     });
     return Array.from(set).sort((a, b) => {
@@ -117,19 +108,10 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
   const agentFilteredLeads = useMemo(() => {
     if (selectedAgentFilter === 'all') return scopedLeads;
     return scopedLeads.filter(l => {
-      const isExplicitNonIrm =
-        l.assignedByName &&
-        (l.assignedByName.toLowerCase().includes('vishnu') || l.assignedByName.toLowerCase().includes('naveen'));
-      const isIrm = !isExplicitNonIrm && (
-        !l.assignedByName ||
-        l.assignedByName === 'Created by IRM' ||
-        !l.assignedById ||
-        l.assignedById === l.assignedAgentId
-      );
-      const name = isIrm ? (user?.name || 'Dhinakaran') : (l.assignedByName || 'Sales Agent');
-      return name === selectedAgentFilter;
+      const agentInfo = getAssigningSalesAgentInfo(l as any);
+      return agentInfo.name === selectedAgentFilter;
     });
-  }, [scopedLeads, selectedAgentFilter, user?.name]);
+  }, [scopedLeads, selectedAgentFilter]);
 
   // Stage counts dynamically updated based on active agent filter
   const stageCounts = useMemo(() => {
@@ -267,17 +249,7 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
       header: 'ASSIGNED INFO',
       sortable: true,
       render: lead => {
-        const isExplicitNonIrm =
-          lead.assignedByName &&
-          (lead.assignedByName.toLowerCase().includes('vishnu') || lead.assignedByName.toLowerCase().includes('naveen'));
-        const isIrm = !isExplicitNonIrm && (
-          !lead.assignedByName ||
-          lead.assignedByName === 'Created by IRM' ||
-          !lead.assignedById ||
-          lead.assignedById === lead.assignedAgentId
-        );
-        const displayName = isIrm ? (user?.name || 'Dhinakaran') : (lead.assignedByName || 'Sales Agent');
-        const agentInfo = getAgentRoleInfo(displayName, lead.assignedById, isIrm ? 'IRM' : undefined);
+        const agentInfo = getAssigningSalesAgentInfo(lead as any);
         return (
           <div>
             <div className="all-leads-assigned-name" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
