@@ -150,18 +150,28 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk'];
 
   const pendingFollowupContactIds = useMemo(() => {
-    return new Set((allFollowups || []).map((f: any) => String(f.contactId || '')));
+    return new Set(
+      (allFollowups || [])
+        .filter((f: any) => f.status === 'Pending')
+        .map((f: any) => String(f.contactId || ''))
+        .filter(Boolean)
+    );
   }, [allFollowups]);
 
   const pendingFollowupPhones = useMemo(() => {
     return new Set(
       (allFollowups || [])
+        .filter((f: any) => f.status === 'Pending')
         .map((f: any) => (f.contactPhone || '').replace(/\D/g, '').slice(-10))
         .filter(Boolean)
     );
   }, [allFollowups]);
 
   const isLeadInFollowupOrMoved = (l: Lead) => {
+    // Leads with status 'Callback', 'No Response', 'New', or 'Contacted' strictly belong in My Leads!
+    if (l.status === 'Callback' || l.status === 'No Response' || l.status === 'New' || l.status === 'Contacted') {
+      return false;
+    }
     if (MOVED_LEAD_STATUSES.includes(l.status)) return true;
     if (pendingFollowupContactIds.has(String(l.id))) return true;
     const phoneDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
@@ -1579,7 +1589,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
             aria-label={`Call ${l.name}`}
             onClick={e => {
               e.stopPropagation();
-              initiateCall(l.name, l.phone, 'lead', l.id, undefined, isIrm ? 'my_leads' : undefined);
+              initiateCall(l.name, l.phone, 'lead', l.id, undefined, 'my_leads');
             }}
           >
             <Phone size={12} color="#ffffff" />
@@ -1789,7 +1799,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
             <button
               className="btn btn-call"
               onClick={() => {
-                if (selectedLead) initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, isIrm ? 'my_leads' : undefined);
+                if (selectedLead) initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, 'my_leads');
               }}
             >
               <Phone size={14} /> Call Lead
@@ -1880,39 +1890,26 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
                       {/* Only show Preferred Asset Class & Horizon if set & confirmed by IRM */}
                       {Boolean(
-                        selectedLead.customFields?.irmPreferencesConfirmed ||
-                        (() => {
-                          try {
-                            const raw = localStorage.getItem(`nexus_irm_pref_${selectedLead.id}`) ||
-                              localStorage.getItem(`nexus_irm_pref_${(selectedLead.phone || '').replace(/\D/g, '').slice(-10)}`);
-                            if (raw) return JSON.parse(raw)?.confirmed === true;
-                          } catch {}
-                          return false;
-                        })()
-                      ) && (() => {
-                        const localData = (() => {
-                          try {
-                            const raw = localStorage.getItem(`nexus_irm_pref_${selectedLead.id}`) ||
-                              localStorage.getItem(`nexus_irm_pref_${(selectedLead.phone || '').replace(/\D/g, '').slice(-10)}`);
-                            if (raw) return JSON.parse(raw);
-                          } catch {}
-                          return null;
-                        })();
-                        const assetClass = selectedLead.customFields?.preferredAssetClass || localData?.preferredAssetClass || '—';
-                        const horizon = selectedLead.customFields?.horizon || selectedLead.customFields?.investmentHorizon || localData?.horizon || '—';
-
-                        return (
-                          <div className="lead-detail-grid" style={{ marginTop: 4, paddingTop: 10, borderTop: '1px solid var(--border-base)' }}>
-                            <div>
-                              <span className="lead-detail-label">Preferred Asset Class:</span>
-                              <div className="lead-detail-value">{assetClass}</div>
-                            </div>
-                            <div>
-                              <span className="lead-detail-label">Investment Horizon:</span>
-                              <div className="lead-detail-value">{horizon}</div>
-                            </div>
+                        selectedLead.customFields?.irmPreferencesConfirmed &&
+                        selectedLead.customFields?.preferredAssetClass
+                      ) ? (
+                        <div className="lead-detail-grid" style={{ marginTop: 4, paddingTop: 10, borderTop: '1px solid var(--border-base)' }}>
+                          <div>
+                            <span className="lead-detail-label">Preferred Asset Class:</span>
+                            <div className="lead-detail-value">{selectedLead.customFields?.preferredAssetClass}</div>
                           </div>
-                        );
+                          <div>
+                            <span className="lead-detail-label">Investment Horizon:</span>
+                            <div className="lead-detail-value">{selectedLead.customFields?.horizon || selectedLead.customFields?.investmentHorizon || '—'}</div>
+                          </div>
+                        </div>
+                      ) : (() => {
+                        try {
+                          localStorage.removeItem(`nexus_irm_pref_${selectedLead.id}`);
+                          const fDigits = (selectedLead.phone || '').replace(/\D/g, '').slice(-10);
+                          if (fDigits) localStorage.removeItem(`nexus_irm_pref_${fDigits}`);
+                        } catch { }
+                        return null;
                       })()}
                     </div>
                   </div>
@@ -1968,7 +1965,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                   contactType="lead"
                   tenantId={tenant?.id}
                   tenantName={tenant?.name}
-                  onCall={() => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, isIrm ? 'my_leads' : undefined)}
+                  onCall={() => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, 'my_leads')}
                   sectionsOnly={['callRecordings']}
                 />
               </>

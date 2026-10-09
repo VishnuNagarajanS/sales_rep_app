@@ -167,6 +167,38 @@ class StorageService {
           }
         }
       }
+
+      // 8. Purge rogue/stale IRM preference keys from testing/previous sessions
+      const PREF_PURGE_KEY = 'nexus_irm_pref_purged_v2';
+      if (!localStorage.getItem(PREF_PURGE_KEY)) {
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith('nexus_irm_pref_')) {
+            localStorage.removeItem(k);
+          }
+        }
+        localStorage.setItem(PREF_PURGE_KEY, 'true');
+      }
+
+      // Continuously ensure any malformed/unconfirmed preference caches are removed
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('nexus_irm_pref_')) {
+          try {
+            const raw = localStorage.getItem(k);
+            if (!raw) {
+              localStorage.removeItem(k);
+              continue;
+            }
+            const parsed = JSON.parse(raw);
+            if (!parsed?.confirmed || !parsed?.preferredAssetClass) {
+              localStorage.removeItem(k);
+            }
+          } catch {
+            localStorage.removeItem(k);
+          }
+        }
+      }
     } catch (e) {
       console.error('Error in cleanupFakeRuntimeData:', e);
     }

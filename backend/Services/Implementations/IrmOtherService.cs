@@ -22,7 +22,8 @@ public class IrmOtherService : IIrmOtherService
         ["follow_up"] = new() { "Follow-up Required", "Other", "No Response", "Call Back", "Ready for KYC" },
         ["kyc"] = new() { "Contacted", "Other", "No Response", "Call Back" },
         ["opportunities"] = new() { "Contacted", "Other", "No Response", "Call Back" },
-        ["investor_360"] = new() { "Contacted", "Other", "No Response", "Call Back" }
+        ["investor_360"] = new() { "Contacted", "Other", "No Response", "Call Back" },
+        ["all_leads"] = new() { "Follow-up Required", "Call Back", "Ready for KYC", "Other", "No Response", "Contacted" }
     };
 
     public ApiResponse<Dictionary<string, List<string>>> GetCallOutcomes()
@@ -35,6 +36,7 @@ public class IrmOtherService : IIrmOtherService
         if (string.IsNullOrWhiteSpace(module)) return null;
         var clean = module.Trim().ToLowerInvariant().Replace("-", "_").Replace(" ", "_");
         if (clean == "myleads" || clean == "leads") return "my_leads";
+        if (clean == "allleads" || clean == "all_leads") return "all_leads";
         if (clean == "followup" || clean == "followups") return "follow_up";
         if (clean == "investor360" || clean == "investors" || clean == "investor") return "investor_360";
         if (clean == "opportunity" || clean == "opps") return "opportunities";

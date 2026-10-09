@@ -611,6 +611,22 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
+      // Detect whether this call originated from Follow-ups or has a source follow-up
+      const isCallFromFollowup =
+        lastCallRecord.callModule === 'follow_up' ||
+        Boolean(lastCallRecord.sourceFollowupId);
+
+      // Locate existing follow-up for this contact if any exists
+      const followupsList = await apiGetFollowups(tenant.id).catch(() => storageService.getFollowups(tenant.id) || []);
+      const existingFollowup =
+        (lastCallRecord.sourceFollowupId ? followupsList.find(f => f.id === lastCallRecord.sourceFollowupId) : undefined) ||
+        followupsList.find(f =>
+          f.status === 'Pending' && (
+            (f.contactId && (f.contactId === matchedLead?.id || f.contactId === lastCallRecord.matchedRecord?.id)) ||
+            (callPhoneDigits && f.contactPhone && normalize(f.contactPhone) === callPhoneDigits)
+          )
+        );
+
       // 1. Interested -> Mark lead as Interested for IRM pickup.
       // NOTE: The backend status update is already handled by apiLogCall() above — the LogCall
       // endpoint updates lead.Status = 'Interested' using only CompanyId (no AssignedAgentId
@@ -643,18 +659,29 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           }
         }
-        // No matchedLead case: apiLogCall already resolved and updated the lead by phone/ID.
+
+        // If this call was associated with an existing follow-up, mark it completed!
+        if (existingFollowup) {
+          try {
+            await apiSaveFollowup({
+              ...existingFollowup,
+              status: 'Completed',
+              notes: `${existingFollowup.notes ? existingFollowup.notes + ' | ' : ''}Interested - Handed over to IRM`,
+            });
+          } catch (e) {
+            console.warn('[CallContext] Failed to complete follow-up on Interested:', e);
+          }
+        }
       }
 
-      // 2. Follow-up Required -> Create or reuse follow-up record; move lead status to 'Follow-up Required'
+      // 2. Follow-up Required -> Move lead status to 'Follow-up Required'; update existing follow-up or create single new one
       else if (disposition === 'Follow-up Required') {
         const followupScheduledAt = scheduleFollowup?.scheduledAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         const followupPriority = scheduleFollowup?.priority || 'High';
         const followupNotes = scheduleFollowup?.notes || (notes ? `Follow-up required: ${notes}` : `Follow-up required from call with ${lastCallRecord.contactName}`);
 
         if (matchedLead) {
-          // Setting status to 'Follow-up Required' reliably moves it out of My Leads (Interested only) to Follow-up
-          // while preserving the row in the shared database leads table.
+          // Setting status to 'Follow-up Required' reliably moves it out of My Leads to Follow-up
           matchedLead.status = 'Follow-up Required';
           matchedLead.nextFollowupDate = followupScheduledAt;
           if (notes) {
@@ -677,83 +704,117 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
 
-        await apiSaveFollowup({
-          id: `flw-${Date.now()}`,
-          companyId: tenant.id,
-          contactId: matchedLead?.id || lastCallRecord.matchedRecord?.id || `contact-${Date.now()}`,
-          contactName: lastCallRecord.contactName,
-          contactPhone: lastCallRecord.contactPhone,
-          contactEmail: (matchedLead as any)?.email || (lastCallRecord.matchedRecord as any)?.email || undefined,
-          contactType: 'lead',
-          scheduledAt: followupScheduledAt,
-          priority: followupPriority,
-          status: 'Pending',
-          notes: followupNotes,
-          assignedAgentId: matchedLead?.assignedAgentId || user.id,
-          assignedAgentName: matchedLead?.assignedAgentName || user.name,
-          assignedById: matchedLead?.assignedById,
-          assignedByName: matchedLead?.assignedByName,
-        });
-      }
-
-      // 3. Call Back -> Keep in Leads section, update status to Callback
-      else if (disposition === 'Call Back') {
-        if (matchedLead) {
-          matchedLead.status = 'Callback';
-          if (scheduleFollowup?.scheduledAt) {
-            matchedLead.nextFollowupDate = scheduleFollowup.scheduledAt;
-          }
-          if (notes) {
-            matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Call Back: ${notes}`;
-          }
-          await apiSaveLead(matchedLead);
+        // In-place update if existing follow-up found; otherwise create a single new follow-up
+        if (existingFollowup) {
+          await apiSaveFollowup({
+            ...existingFollowup,
+            scheduledAt: followupScheduledAt,
+            priority: followupPriority,
+            status: 'Pending',
+            notes: followupNotes,
+          });
         } else {
-          const newLead: Lead = {
-            id: `lead-${Date.now()}`,
-            companyId: tenant.id,
-            name: lastCallRecord.contactName || 'Unknown Caller',
-            phone: lastCallRecord.contactPhone,
-            email: '',
-            location: '',
-            source: 'Inbound Call',
-            status: 'Callback',
-            priority: 'Medium',
-            assignedAgentId: user.id,
-            assignedAgentName: user.name,
-            createdAt: new Date().toISOString().split('T')[0],
-            notes: notes || '',
-            customFields: {},
-          };
-          await apiSaveLead(newLead);
-        }
-
-        if (scheduleFollowup) {
           await apiSaveFollowup({
             id: `flw-${Date.now()}`,
             companyId: tenant.id,
-            contactId: matchedLead?.id || lastCallRecord.matchedRecord?.id || 'contact-new',
+            contactId: matchedLead?.id || lastCallRecord.matchedRecord?.id || `contact-${Date.now()}`,
             contactName: lastCallRecord.contactName,
             contactPhone: lastCallRecord.contactPhone,
-            contactType: 'lead',
-            scheduledAt: scheduleFollowup.scheduledAt,
-            priority: scheduleFollowup.priority,
+            contactEmail: (matchedLead as any)?.email || (lastCallRecord.matchedRecord as any)?.email || undefined,
+            contactType: lastCallRecord.matchedRecord?.type === 'customer' ? 'customer' : 'lead',
+            scheduledAt: followupScheduledAt,
+            priority: followupPriority,
             status: 'Pending',
-            notes: scheduleFollowup.notes || (notes ? `Callback reminder: ${notes}` : `Callback reminder for ${lastCallRecord.contactName}`),
-            assignedAgentId: user.id,
-            assignedAgentName: user.name,
-            assignedById: matchedLead?.assignedById || (String(matchedLead?.assignedAgentId) !== '5' ? matchedLead?.assignedAgentId : undefined),
-            assignedByName: matchedLead?.assignedByName || (matchedLead?.assignedAgentName && !matchedLead.assignedAgentName.toLowerCase().includes('dhina') ? matchedLead.assignedAgentName : undefined),
+            notes: followupNotes,
+            assignedAgentId: matchedLead?.assignedAgentId || user.id,
+            assignedAgentName: matchedLead?.assignedAgentName || user.name,
+            assignedById: matchedLead?.assignedById,
+            assignedByName: matchedLead?.assignedByName,
           });
         }
       }
 
-      // 4. Not Interested -> Remove from Leads, move to Not Interested section
+      // 3. Call Back ->
+      // If from Follow-ups: STAY in Follow-ups, reschedule existing follow-up in place (no duplicate!)
+      // If from My Leads: STAY in My Leads, update lead status to Callback (no followup record created!)
+      else if (disposition === 'Call Back') {
+        const followupScheduledAt = scheduleFollowup?.scheduledAt || new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString();
+        const followupPriority = scheduleFollowup?.priority || 'Medium';
+
+        if (isCallFromFollowup) {
+          // Stay in Follow-ups: update existing follow-up in place
+          if (existingFollowup) {
+            const cbNotes = scheduleFollowup?.notes || (notes ? `Call Back: ${notes}` : existingFollowup.notes || `Callback scheduled for ${lastCallRecord.contactName}`);
+            await apiSaveFollowup({
+              ...existingFollowup,
+              scheduledAt: followupScheduledAt,
+              priority: followupPriority,
+              status: 'Pending',
+              notes: cbNotes,
+            });
+          }
+
+          if (matchedLead) {
+            matchedLead.nextFollowupDate = followupScheduledAt;
+            if (notes) {
+              matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Call Back: ${notes}`;
+            }
+            await apiSaveLead(matchedLead);
+            storageService.saveLead(matchedLead);
+          }
+        } else {
+          // Stay in My Leads: update lead only, DO NOT create any follow-up row
+          if (matchedLead) {
+            matchedLead.status = 'Callback';
+            matchedLead.nextFollowupDate = followupScheduledAt;
+            if (notes) {
+              matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Call Back: ${notes}`;
+            }
+            await apiSaveLead(matchedLead);
+            storageService.saveLead(matchedLead);
+          } else {
+            const newLead: Lead = {
+              id: `lead-${Date.now()}`,
+              companyId: tenant.id,
+              name: lastCallRecord.contactName || 'Unknown Caller',
+              phone: lastCallRecord.contactPhone,
+              email: '',
+              location: '',
+              source: 'Inbound Call',
+              status: 'Callback',
+              priority: 'Medium',
+              assignedAgentId: user.id,
+              assignedAgentName: user.name,
+              createdAt: new Date().toISOString().split('T')[0],
+              nextFollowupDate: followupScheduledAt,
+              notes: notes || '',
+              customFields: {},
+            };
+            await apiSaveLead(newLead);
+            storageService.saveLead(newLead);
+          }
+
+          // If an accidental pending follow-up existed previously for this lead, complete it so the lead stays in My Leads
+          if (existingFollowup) {
+            try {
+              await apiSaveFollowup({
+                ...existingFollowup,
+                status: 'Completed',
+                notes: `${existingFollowup.notes ? existingFollowup.notes + ' | ' : ''}Lead remains in My Leads (Callback)`,
+              });
+            } catch {}
+          }
+        }
+      }
+
+      // 4. Not Interested -> Remove from active queue, move to Not Interested section
       else if (disposition === 'Not Interested') {
         const reasonText = reason || notes || 'Not Interested';
         if (matchedLead) {
           matchedLead.status = 'Not Interested';
           matchedLead.customFields = { ...matchedLead.customFields, dispositionReason: reasonText };
           await apiSaveLead(matchedLead);
+          storageService.saveLead(matchedLead);
         } else {
           const newLead: Lead = {
             id: `lead-${Date.now()}`,
@@ -772,16 +833,28 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             customFields: { dispositionReason: reasonText },
           };
           await apiSaveLead(newLead);
+          storageService.saveLead(newLead);
+        }
+
+        if (existingFollowup) {
+          try {
+            await apiSaveFollowup({
+              ...existingFollowup,
+              status: 'Completed',
+              notes: `${existingFollowup.notes ? existingFollowup.notes + ' | ' : ''}Not Interested: ${reasonText}`,
+            });
+          } catch {}
         }
       }
 
-      // 5. Wrong Number -> Remove from Leads, move to Junk section
+      // 5. Wrong Number -> Remove from active queue, move to Junk section
       else if (disposition === 'Wrong Number') {
         const reasonText = reason || notes || 'Wrong Number';
         if (matchedLead) {
           matchedLead.status = 'Junk';
           matchedLead.customFields = { ...matchedLead.customFields, dispositionReason: reasonText };
           await apiSaveLead(matchedLead);
+          storageService.saveLead(matchedLead);
         } else {
           const newLead: Lead = {
             id: `lead-${Date.now()}`,
@@ -800,57 +873,90 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             customFields: { dispositionReason: reasonText },
           };
           await apiSaveLead(newLead);
+          storageService.saveLead(newLead);
+        }
+
+        if (existingFollowup) {
+          try {
+            await apiSaveFollowup({
+              ...existingFollowup,
+              status: 'Completed',
+              notes: `${existingFollowup.notes ? existingFollowup.notes + ' | ' : ''}Wrong Number: ${reasonText}`,
+            });
+          } catch {}
         }
       }
 
-      // 6. No Response -> Keep in Leads section, update status to No Response, create scheduled follow-up
+      // 6. No Response ->
+      // If from Follow-ups: STAY in Follow-ups, reschedule existing follow-up in place (no duplicate!)
+      // If from My Leads: STAY in My Leads, update lead status to No Response (no followup record created!)
       else if (disposition === 'No Response') {
-        if (matchedLead) {
-          matchedLead.status = 'No Response';
-          if (scheduleFollowup?.scheduledAt) {
-            matchedLead.nextFollowupDate = scheduleFollowup.scheduledAt;
-          }
-          if (notes) {
-            matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] No Response: ${notes}`;
-          }
-          await apiSaveLead(matchedLead);
-        } else {
-          const newLead: Lead = {
-            id: `lead-${Date.now()}`,
-            companyId: tenant.id,
-            name: lastCallRecord.contactName || 'Unknown Caller',
-            phone: lastCallRecord.contactPhone,
-            email: '',
-            location: '',
-            source: 'Inbound Call',
-            status: 'No Response',
-            priority: 'Low',
-            assignedAgentId: user.id,
-            assignedAgentName: user.name,
-            createdAt: new Date().toISOString().split('T')[0],
-            notes: notes || '',
-            customFields: {},
-          };
-          await apiSaveLead(newLead);
-        }
+        const followupScheduledAt = scheduleFollowup?.scheduledAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        const followupPriority = scheduleFollowup?.priority || 'Low';
 
-        if (scheduleFollowup) {
-          await apiSaveFollowup({
-            id: `flw-${Date.now()}`,
-            companyId: tenant.id,
-            contactId: matchedLead?.id || lastCallRecord.matchedRecord?.id || 'contact-new',
-            contactName: lastCallRecord.contactName,
-            contactPhone: lastCallRecord.contactPhone,
-            contactType: lastCallRecord.matchedRecord?.type === 'customer' ? 'customer' : 'lead',
-            scheduledAt: scheduleFollowup.scheduledAt,
-            priority: scheduleFollowup.priority,
-            status: 'Pending',
-            notes: scheduleFollowup.notes || (notes ? `Follow-up from No Response: ${notes}` : `Follow-up required for ${lastCallRecord.contactName}`),
-            assignedAgentId: user.id,
-            assignedAgentName: user.name,
-            assignedById: matchedLead?.assignedById || (String(matchedLead?.assignedAgentId) !== '5' ? matchedLead?.assignedAgentId : undefined),
-            assignedByName: matchedLead?.assignedByName || (matchedLead?.assignedAgentName && !matchedLead.assignedAgentName.toLowerCase().includes('dhina') ? matchedLead.assignedAgentName : undefined),
-          });
+        if (isCallFromFollowup) {
+          // Stay in Follow-ups: reschedule existing follow-up in place
+          if (existingFollowup) {
+            const nrNotes = scheduleFollowup?.notes || (notes ? `No Response: ${notes}` : existingFollowup.notes || `No response follow-up scheduled for ${lastCallRecord.contactName}`);
+            await apiSaveFollowup({
+              ...existingFollowup,
+              scheduledAt: followupScheduledAt,
+              priority: followupPriority,
+              status: 'Pending',
+              notes: nrNotes,
+            });
+          }
+
+          if (matchedLead) {
+            matchedLead.nextFollowupDate = followupScheduledAt;
+            if (notes) {
+              matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] No Response: ${notes}`;
+            }
+            await apiSaveLead(matchedLead);
+            storageService.saveLead(matchedLead);
+          }
+        } else {
+          // Stay in My Leads: update lead only, DO NOT create any follow-up row
+          if (matchedLead) {
+            matchedLead.status = 'No Response';
+            matchedLead.nextFollowupDate = followupScheduledAt;
+            if (notes) {
+              matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] No Response: ${notes}`;
+            }
+            await apiSaveLead(matchedLead);
+            storageService.saveLead(matchedLead);
+          } else {
+            const newLead: Lead = {
+              id: `lead-${Date.now()}`,
+              companyId: tenant.id,
+              name: lastCallRecord.contactName || 'Unknown Caller',
+              phone: lastCallRecord.contactPhone,
+              email: '',
+              location: '',
+              source: 'Inbound Call',
+              status: 'No Response',
+              priority: 'Low',
+              assignedAgentId: user.id,
+              assignedAgentName: user.name,
+              createdAt: new Date().toISOString().split('T')[0],
+              nextFollowupDate: followupScheduledAt,
+              notes: notes || '',
+              customFields: {},
+            };
+            await apiSaveLead(newLead);
+            storageService.saveLead(newLead);
+          }
+
+          // If an accidental pending follow-up existed previously for this lead, complete it so the lead stays in My Leads
+          if (existingFollowup) {
+            try {
+              await apiSaveFollowup({
+                ...existingFollowup,
+                status: 'Completed',
+                notes: `${existingFollowup.notes ? existingFollowup.notes + ' | ' : ''}Lead remains in My Leads (No Response)`,
+              });
+            } catch {}
+          }
         }
       }
 
@@ -901,17 +1007,45 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Converted: ${notes}`;
           }
           await apiSaveLead(matchedLead);
+          storageService.saveLead(matchedLead);
+        }
+
+        if (existingFollowup) {
+          try {
+            await apiSaveFollowup({
+              ...existingFollowup,
+              status: 'Completed',
+              notes: `${existingFollowup.notes ? existingFollowup.notes + ' | ' : ''}Lead Converted to Customer`,
+            });
+          } catch {}
         }
       }
 
-      // 8. Ready for KYC -> Transition contact to KYC module and mark follow-up completed
+      // 8. Contacted (IRM Modules)
+      else if (disposition === 'Contacted') {
+        if (existingFollowup) {
+          await apiSaveFollowup({
+            ...existingFollowup,
+            notes: `${existingFollowup.notes ? existingFollowup.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Contacted: ${notes || ''}`,
+          });
+        }
+        if (matchedLead) {
+          if (notes) {
+            matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Contacted: ${notes}`;
+          }
+          await apiSaveLead(matchedLead);
+          storageService.saveLead(matchedLead);
+        }
+      }
+
+      // 9. Ready for KYC -> Transition contact to KYC module and mark follow-up completed
       else if (disposition === 'Ready for KYC') {
         try {
           await transitionFollowupToKyc({
             contactName: lastCallRecord.contactName,
             contactPhone: lastCallRecord.contactPhone,
             contactId: lastCallRecord.matchedRecord?.id,
-            followupId: lastCallRecord.sourceFollowupId,
+            followupId: lastCallRecord.sourceFollowupId || existingFollowup?.id,
             followupNotes: notes,
             assignedAgentId: user.id,
             assignedAgentName: user.name,
@@ -925,19 +1059,15 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      // 9. Other -> If originated from a follow-up, mark the source follow-up as completed
+      // 10. Other -> If originated from a follow-up, mark the source follow-up as completed
       else if (disposition === 'Other') {
-        if (lastCallRecord.sourceFollowupId) {
+        if (existingFollowup) {
           try {
-            const followups = await apiGetFollowups(tenant.id).catch(() => []);
-            const match = followups.find(f => f.id === lastCallRecord.sourceFollowupId);
-            if (match) {
-              await apiSaveFollowup({
-                ...match,
-                status: 'Completed',
-                notes: `${match.notes ? match.notes + ' | ' : ''}Reclassified to Other: ${reason || notes || ''}`,
-              });
-            }
+            await apiSaveFollowup({
+              ...existingFollowup,
+              status: 'Completed',
+              notes: `${existingFollowup.notes ? existingFollowup.notes + ' | ' : ''}Reclassified to Other: ${reason || notes || ''}`,
+            });
           } catch (err) {
             console.error('[CallContext] Failed to mark source follow-up completed on Other:', err);
           }

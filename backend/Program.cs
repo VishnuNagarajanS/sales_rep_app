@@ -424,6 +424,67 @@ using (var scope = app.Services.CreateScope())
             Console.WriteLine($"[Role Permissions Patch Warning] {ex.Message}");
         }
 
+        // Startup deduplication & cleanup for followups table
+        try
+        {
+            // 1. Remove all old superseded placeholder rows created by superseded loops
+            var supersededFollowups = db.Followups.Where(f => f.Notes != null && f.Notes.Contains("Superseded by follow-up scheduled for")).ToList();
+            if (supersededFollowups.Any())
+            {
+                db.Followups.RemoveRange(supersededFollowups);
+                db.SaveChanges();
+                Console.WriteLine($"[Followup Cleanup] Removed {supersededFollowups.Count} superseded placeholder follow-up rows.");
+            }
+
+            // 2. Deduplicate pending followups per company & contact/phone
+            var allPendingFollowups = db.Followups.Where(f => f.Status == backend.Models.Enums.FollowupStatus.Pending).ToList();
+            var groupedPending = allPendingFollowups
+                .GroupBy(f => new
+                {
+                    f.CompanyId,
+                    Key = !string.IsNullOrWhiteSpace(f.ContactId) && f.ContactId != "contact-new" ? f.ContactId.Trim() : (f.ContactPhone != null && f.ContactPhone.Length >= 10 ? f.ContactPhone[^10..] : (f.ContactPhone ?? string.Empty))
+                })
+                .Where(g => !string.IsNullOrEmpty(g.Key.Key) && g.Count() > 1);
+
+            bool dupsCleaned = false;
+            foreach (var group in groupedPending)
+            {
+                var sorted = group.OrderByDescending(f => f.UpdatedAt ?? f.CreatedAt).ThenByDescending(f => f.Id).ToList();
+                var toRemove = sorted.Skip(1).ToList();
+                db.Followups.RemoveRange(toRemove);
+                dupsCleaned = true;
+            }
+            if (dupsCleaned)
+            {
+                db.SaveChanges();
+                Console.WriteLine("[Followup Cleanup] Deduplicated multiple pending follow-up records.");
+            }
+
+            // 3. For any lead that is currently in 'Callback' or 'No Response' or 'New' or 'Contacted',
+            // remove any followup record mistakenly created for it so the lead stays strictly in My Leads.
+            var myLeadsStatuses = new[] { "Callback", "No Response", "New", "Contacted" };
+            var activeMyLeads = db.Leads.Where(l => myLeadsStatuses.Contains(l.Status)).ToList();
+            var activeMyLeadPhones = activeMyLeads.Select(l => l.Phone?.Length >= 10 ? l.Phone[^10..] : l.Phone ?? "").Where(p => !string.IsNullOrEmpty(p)).ToHashSet();
+            var activeMyLeadIds = activeMyLeads.Select(l => l.Id.ToString()).ToHashSet();
+
+            var strayFollowups = db.Followups
+                .Where(f =>
+                    (f.ContactId != null && activeMyLeadIds.Contains(f.ContactId)) ||
+                    (f.ContactPhone != null && activeMyLeadPhones.Contains(f.ContactPhone.Length >= 10 ? f.ContactPhone.Substring(f.ContactPhone.Length - 10) : f.ContactPhone)))
+                .ToList();
+
+            if (strayFollowups.Any())
+            {
+                db.Followups.RemoveRange(strayFollowups);
+                db.SaveChanges();
+                Console.WriteLine($"[Followup Cleanup] Removed {strayFollowups.Count} stray follow-up records for leads that belong in My Leads.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Followup Cleanup Warning] {ex.Message}");
+        }
+
         try
         {
             var pendingMigrations = db.Database.GetPendingMigrations().ToList();

@@ -8,11 +8,11 @@ import { storageService } from '../../services/storageService';
 import { getInvestors, saveInvestor as apiSaveInvestor, deleteInvestor as apiDeleteInvestor, getDeals, getCalls, getConsultations, getOpportunities, getFollowups } from '../../services/ghlApiService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
-import { Drawer } from '../../components/common/Drawer';
 import { FilterBar } from '../../components/common/FilterBar';
 import { Modal } from '../../components/common/Modal';
 import { DocumentUploader } from '../../components/common/DocumentUploader';
 import { DocumentList } from '../../components/common/DocumentList';
+import { Investor360Modal } from './Investor360Modal';
 import './InvestorsPage.css';
 
 // ─── Form state shape ────────────────────────────────────────────────────────
@@ -532,156 +532,26 @@ export const InvestorsPage: React.FC = () => {
         }
       />
 
-      {/* ── Investor 360 Drawer ──────────────────────────────────────────── */}
-      <Drawer
+      {/* ── Investor 360 Modal ───────────────────────────────────────────── */}
+      <Investor360Modal
         isOpen={!!selectedInvestor}
         onClose={() => setSelectedInvestor(null)}
-        title={selectedInvestor?.name || 'Investor Overview'}
-        subtitle={isExec ? undefined : (selectedInvestor?.preferredAssetClass ? `Mandate: ${selectedInvestor.preferredAssetClass}` : undefined)}
-        width={720}
-      >
-        {selectedInvestor && (
-          <div className="investor-drawer-body">
-            <div className="investor-quick-card">
-              <div>
-                <StatusChip status={selectedInvestor.status} />
-                <div className="investor-partner-label">
-                  Lead Wealth Partner: <strong>{selectedInvestor.assignedAgentName}</strong>
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, fontFamily: 'monospace' }}>
-                  ID: #{selectedInvestor.id}
-                </div>
-              </div>
-
-              <button
-                className="btn btn-primary btn-sm investor-call-btn-blue"
-                onClick={() => initiateCall(selectedInvestor.name, selectedInvestor.phone, 'customer', selectedInvestor.id, undefined, 'investor_360')}
-              >
-                <Phone size={13} /> Call Customer
-              </button>
-            </div>
-
-            <div className="card investor-info-card">
-              <h4 className="investor-info-title">
-                Investment Allocation & Capacity
-              </h4>
-              <div className="investor-details-grid">
-                <div>
-                  <span style={{ color: 'var(--text-secondary)' }}>Capital Ticket:</span>
-                  <div className="investor-ticket-val">
-                    {selectedInvestor.investmentCapacity || '—'}
-                  </div>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-secondary)' }}>Preferred Asset Class:</span>
-                  <div style={{ fontWeight: 600, marginTop: 4, fontSize: 14 }}>
-                    {selectedInvestor.preferredAssetClass || '—'}
-                  </div>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-secondary)' }}>Investment Mandate:</span>
-                  <div style={{ fontWeight: 600, marginTop: 4, fontSize: 14 }}>
-                    {selectedInvestor.investmentMandate || '—'}
-                  </div>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-secondary)' }}>Risk Tolerance:</span>
-                  <div style={{ fontWeight: 600, marginTop: 4, fontSize: 14 }}>
-                    {selectedInvestor.riskTolerance || '—'}
-                  </div>
-                </div>
-                {(() => {
-                  const matchingDeal = deals.find(d => d.customerId === selectedInvestor.id || (d.phone && selectedInvestor.phone && d.phone.replace(/\D/g, '').slice(-10) === selectedInvestor.phone.replace(/\D/g, '').slice(-10)) || d.customerName.toLowerCase() === selectedInvestor.name.toLowerCase());
-                  const amt = matchingDeal?.value || (selectedInvestor.committedAUM && !isNaN(Number(selectedInvestor.committedAUM)) && Number(selectedInvestor.committedAUM) > 0 ? Number(selectedInvestor.committedAUM) : null);
-                  return (
-                    <div>
-                      <span style={{ color: 'var(--text-secondary)' }}>Investment Amount:</span>
-                      <div style={{ fontWeight: 800, color: amt ? '#059669' : 'var(--text-muted)', marginTop: 4, fontSize: 15 }}>
-                        {amt ? `₹${amt.toLocaleString('en-IN')}` : '—'}
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-
-            <div className="card investor-info-card">
-              <h4 className="investor-info-title">
-                Advisory Portfolio Notes
-              </h4>
-              <p className="investor-notes-text">
-                {selectedInvestor.notes || '—'}
-              </p>
-            </div>
-
-            {/* Documents */}
-            <div className="card investor-info-card" style={{ padding: 0, overflow: 'hidden' }}>
-              <div className="incall-docs-tabs-bar" style={{ borderBottom: '1px solid var(--border-light)' }}>
-                {[
-                  { id: 'investor' as const, label: 'Investor Documents' },
-                  { id: 'company' as const, label: 'Company Resources' },
-                ].map(tab => (
-                  <button
-                    key={tab.id}
-                    className="btn btn-ghost incall-docs-tab-btn"
-                    style={{
-                      borderBottom: docsTab === tab.id ? '2px solid var(--primary-600)' : '2px solid transparent',
-                      color: docsTab === tab.id ? 'var(--primary-600)' : 'var(--text-secondary)',
-                      fontWeight: docsTab === tab.id ? 700 : 500,
-                      borderRadius: 0,
-                      padding: '12px 16px',
-                    }}
-                    onClick={() => setDocsTab(tab.id)}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-
-              <div style={{ padding: 20 }}>
-                {docsTab === 'investor' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    {!isGhlAdmin && (
-                      <DocumentUploader
-                        entityType="investor"
-                        entityId={selectedInvestor.id}
-                        allowedCategories={[
-                          'KYC',
-                          'Mandate Agreement',
-                          'Term Sheet',
-                          'PAN / Aadhar',
-                          'Other',
-                        ]}
-                      />
-                    )}
-                    <DocumentList
-                      entityType="investor"
-                      entityId={selectedInvestor.id}
-                      canDelete={!isGhlAdmin}
-                    />
-                  </div>
-                )}
-                {docsTab === 'company' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    {isGhlAdmin && (
-                      <DocumentUploader
-                        entityType="company"
-                        entityId={tenant?.id || tenant?.slug || '1'}
-                        allowedCategories={['Brochure', 'Price List', 'Terms & Conditions', 'Policy Document', 'Other']}
-                      />
-                    )}
-                    <DocumentList
-                      entityType="company"
-                      entityId={tenant?.id || tenant?.slug || '1'}
-                      canDelete={isGhlAdmin}
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-      </Drawer>
+        investor={selectedInvestor}
+        deals={deals}
+        calls={allCalls}
+        consultations={allConsultations}
+        opportunities={allOpportunities}
+        followups={allFollowups}
+        tenant={tenant}
+        isGhlAdmin={isGhlAdmin}
+        onEditInvestor={inv => {
+          setSelectedInvestor(null);
+          openEditModal(inv);
+        }}
+        onCallCustomer={(name, phone, entityId) => {
+          initiateCall(name, phone, 'customer', entityId, undefined, 'investor_360');
+        }}
+      />
 
       {/* ── Edit Investor Modal ─────────────────────────────────────────── */}
       <Modal

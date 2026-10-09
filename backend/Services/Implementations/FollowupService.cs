@@ -441,24 +441,46 @@ public class FollowupService : IFollowupService
             CreatedAt = DateTime.UtcNow
         };
 
-        // Supersede any existing open pending follow-ups for this contact so only one active pending reminder exists per contact
+        // Deduplicate: If an active pending follow-up already exists for this contact, update it in place instead of creating a duplicate row!
         var cleanPhone10 = dto.ContactPhone?.Length >= 10 ? dto.ContactPhone[^10..] : dto.ContactPhone ?? string.Empty;
         var existingOldPending = await _context.Followups
             .Where(f =>
                 f.CompanyId == companyId.Value &&
                 f.Status == FollowupStatus.Pending &&
-                ((f.ContactId != null && f.ContactId != "" && f.ContactId == cleanContactId) ||
+                ((f.ContactId != null && f.ContactId != "" && f.ContactId != "contact-new" && f.ContactId == cleanContactId) ||
                  (cleanPhone10 != "" && f.ContactPhone != null && f.ContactPhone.Contains(cleanPhone10))))
             .ToListAsync(ct);
 
-        foreach (var oldF in existingOldPending)
+        if (existingOldPending.Count > 0)
         {
-            oldF.Status = FollowupStatus.Completed;
-            oldF.CompletedAt = DateTime.UtcNow;
-            if (!string.IsNullOrWhiteSpace(oldF.Notes) && !oldF.Notes.Contains("Superseded"))
+            var primaryFollowup = existingOldPending.First();
+            primaryFollowup.ScheduledAt = dto.ScheduledAt;
+            if (!string.IsNullOrWhiteSpace(dto.Priority)) primaryFollowup.Priority = dto.Priority.Trim();
+            if (!string.IsNullOrWhiteSpace(dto.Notes)) primaryFollowup.Notes = dto.Notes.Trim();
+            if (!string.IsNullOrWhiteSpace(resolvedEmail)) primaryFollowup.ContactEmail = resolvedEmail;
+            primaryFollowup.AssignedAgentId = targetAgentId;
+            primaryFollowup.AssignedToRole = targetRole;
+            primaryFollowup.AssignedToName = targetName;
+            primaryFollowup.UpdatedAt = DateTime.UtcNow;
+
+            // Remove any other extra pending duplicate rows that may exist for this contact
+            if (existingOldPending.Count > 1)
             {
-                oldF.Notes += $" | Superseded by follow-up scheduled for {dto.ScheduledAt:yyyy-MM-dd HH:mm}";
+                for (int i = 1; i < existingOldPending.Count; i++)
+                {
+                    _context.Followups.Remove(existingOldPending[i]);
+                }
             }
+
+            if (targetLead != null)
+            {
+                targetLead.NextFollowupDate = primaryFollowup.ScheduledAt;
+                targetLead.UpdatedAt = DateTime.UtcNow;
+            }
+
+            await _context.SaveChangesAsync(ct);
+            await _context.Entry(primaryFollowup).Reference(f => f.AssignedAgent).LoadAsync(ct);
+            return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(primaryFollowup, targetLead), "Follow-up rescheduled successfully.");
         }
 
         _context.Followups.Add(followup);

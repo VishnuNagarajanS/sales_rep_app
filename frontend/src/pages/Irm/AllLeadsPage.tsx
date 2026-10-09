@@ -140,6 +140,23 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
     );
   }, [agentFilteredLeads, selectedStageTab]);
 
+  const getLeadCallModule = (stage: string): string => {
+    const norm = (stage || '').toLowerCase().trim();
+    if (norm === 'follow-up' || norm === 'followup' || norm === 'follow_up' || norm === 'followups') {
+      return 'follow_up';
+    }
+    if (norm === 'kyc') {
+      return 'kyc';
+    }
+    if (norm === 'opportunities' || norm === 'opportunity' || norm === 'opps') {
+      return 'opportunities';
+    }
+    if (norm === 'converted' || norm === 'investor' || norm === 'investors' || norm === 'investor 360' || norm === 'investor_360') {
+      return 'investor_360';
+    }
+    return 'my_leads';
+  };
+
   const handleStageNavigation = (stage: string) => {
     if (!onNavigate) return;
     switch (stage.toLowerCase()) {
@@ -299,8 +316,8 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
         <div className="all-leads-action-group">
           {/* Direct Twilio Call */}
           <button
-            onClick={() => initiateCall(lead.name, lead.phone, 'lead', String(lead.id), undefined, 'all_leads')}
-            title="Call Investor via Twilio"
+            onClick={() => initiateCall(lead.name, lead.phone, 'lead', String(lead.id), undefined, getLeadCallModule(lead.currentStage))}
+            title={`Call Investor (${lead.currentStage})`}
             className="all-leads-call-action-btn"
           >
             <Phone size={14} />

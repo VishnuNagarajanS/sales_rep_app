@@ -297,25 +297,32 @@ export const FollowupsPage: React.FC = () => {
       } catch { }
     }
 
-    const isConfirmed =
-      savedLocal?.confirmed === true ||
+    const isLeadOrCustConfirmed =
       l?.customFields?.irmPreferencesConfirmed === true ||
-      c?.customFields?.irmPreferencesConfirmed === true ||
-      false;
+      c?.customFields?.irmPreferencesConfirmed === true;
 
-    const savedAssetClass =
-      (isConfirmed && savedLocal?.preferredAssetClass) ||
-      (l?.customFields?.irmPreferencesConfirmed && l?.customFields?.preferredAssetClass) ||
-      (c?.customFields?.irmPreferencesConfirmed && c?.customFields?.preferredAssetClass) ||
-      (isConfirmed ? (l?.customFields?.preferredAssetClass || c?.customFields?.preferredAssetClass) : null) ||
-      '';
+    // If lead or customer exists and is NOT confirmed, discard and purge any stale local cache
+    if ((l || c) && !isLeadOrCustConfirmed && savedLocal?.confirmed) {
+      if (contactKey) localStorage.removeItem(`nexus_irm_pref_${contactKey}`);
+      if (fDigits) localStorage.removeItem(`nexus_irm_pref_${fDigits}`);
+      savedLocal = null;
+    }
 
-    const savedHorizon =
-      (isConfirmed && savedLocal?.horizon) ||
-      (l?.customFields?.irmPreferencesConfirmed && (l?.customFields?.horizon || l?.customFields?.investmentHorizon)) ||
-      (c?.customFields?.irmPreferencesConfirmed && (c?.customFields?.horizon || c?.customFields?.investmentHorizon)) ||
-      (isConfirmed ? (l?.customFields?.horizon || l?.customFields?.investmentHorizon || c?.customFields?.horizon || c?.customFields?.investmentHorizon) : null) ||
-      '';
+    const isConfirmed = isLeadOrCustConfirmed || Boolean(!l && !c && savedLocal?.confirmed === true);
+
+    const savedAssetClass = isConfirmed
+      ? (l?.customFields?.irmPreferencesConfirmed && l?.customFields?.preferredAssetClass) ||
+        (c?.customFields?.irmPreferencesConfirmed && c?.customFields?.preferredAssetClass) ||
+        savedLocal?.preferredAssetClass ||
+        ''
+      : '';
+
+    const savedHorizon = isConfirmed
+      ? (l?.customFields?.irmPreferencesConfirmed && (l?.customFields?.horizon || l?.customFields?.investmentHorizon)) ||
+        (c?.customFields?.irmPreferencesConfirmed && (c?.customFields?.horizon || c?.customFields?.investmentHorizon)) ||
+        savedLocal?.horizon ||
+        ''
+      : '';
 
     setPrefAssetClass(savedAssetClass);
     setPrefHorizon(savedHorizon);
@@ -389,14 +396,10 @@ export const FollowupsPage: React.FC = () => {
       }
 
       if (contactKey) {
-        localStorage.setItem(
-          `nexus_irm_pref_${contactKey}`,
-          JSON.stringify({
-            preferredAssetClass: '',
-            horizon: '',
-            confirmed: false,
-          })
-        );
+        localStorage.removeItem(`nexus_irm_pref_${contactKey}`);
+      }
+      if (fDigits) {
+        localStorage.removeItem(`nexus_irm_pref_${fDigits}`);
       }
 
       window.dispatchEvent(new Event('nexus_storage_updated'));
@@ -616,8 +619,8 @@ export const FollowupsPage: React.FC = () => {
         followupNotes: drawerFollowup.notes,
         followupPriority: drawerFollowup.priority || 'High',
         investmentAmount: investmentAmountValue,
-        preferredAssetClass: prefAssetClass,
-        investmentHorizon: prefHorizon,
+        preferredAssetClass: isPrefConfirmed ? prefAssetClass : '',
+        investmentHorizon: isPrefConfirmed ? prefHorizon : '',
         isPrefConfirmed: Boolean(isPrefConfirmed),
         assignedAgentId: user?.id || drawerFollowup.assignedAgentId || '',
         assignedAgentName: user?.name || drawerFollowup.assignedAgentName || '',
@@ -1523,7 +1526,7 @@ export const FollowupsPage: React.FC = () => {
                         f.contactType as any,
                         f.contactId,
                         f.id,
-                        isIrm ? 'follow_up' : undefined
+                        'follow_up'
                       );
                     }}
                   >
@@ -1629,7 +1632,7 @@ export const FollowupsPage: React.FC = () => {
                         (drawerFollowup.contactType as any) || 'lead',
                         drawerFollowup.contactId,
                         drawerFollowup.id,
-                        isIrm ? 'follow_up' : undefined
+                        'follow_up'
                       );
                     }}
                   >
@@ -2145,7 +2148,7 @@ export const FollowupsPage: React.FC = () => {
                       resolvedContactType as any,
                       resolvedContactId,
                       drawerFollowup.id,
-                      isIrm ? 'follow_up' : undefined
+                      'follow_up'
                     )
                   }
                   sectionsOnly={['callRecordings']}

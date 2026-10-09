@@ -244,6 +244,21 @@ const KYCUploadCard: React.FC<KYCUploadProps> = ({
 // ==============================================================================
 const resolvePreferredAssetClass = (deal: Deal, leadsList: Lead[] = [], customersList: Customer[] = []) => {
   const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+
+  const matchingLead = leadsList.find(l => {
+    if (deal.customerId && (l.id === deal.customerId || String(l.id) === String(deal.customerId))) return true;
+    const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+    return Boolean(lDigits && fDigits && lDigits === fDigits);
+  });
+  const matchingCustomer = customersList.find(c => {
+    if (deal.customerId && (c.id === deal.customerId || String(c.id) === String(deal.customerId))) return true;
+    const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
+    return Boolean(cDigits && fDigits && cDigits === fDigits);
+  });
+
+  const leadConfirmed = matchingLead?.customFields?.irmPreferencesConfirmed === true;
+  const custConfirmed = matchingCustomer?.customFields?.irmPreferencesConfirmed === true;
+
   let savedLocal: any = null;
   try {
     const raw =
@@ -253,27 +268,41 @@ const resolvePreferredAssetClass = (deal: Deal, leadsList: Lead[] = [], customer
     if (raw) savedLocal = JSON.parse(raw);
   } catch { }
 
-  const matchingLead = leadsList.find(l => {
-    if (deal.customerId && l.id === deal.customerId) return true;
-    const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
-    return Boolean(lDigits && fDigits && lDigits === fDigits);
-  });
-  const matchingCustomer = customersList.find(c => {
-    if (deal.customerId && c.id === deal.customerId) return true;
-    const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
-    return Boolean(cDigits && fDigits && cDigits === fDigits);
-  });
+  // If a lead or customer is identified and preferences are NOT confirmed,
+  // purge any stale / rogue localStorage entries claiming confirmation.
+  if ((matchingLead && !leadConfirmed) || (matchingCustomer && !custConfirmed)) {
+    if (savedLocal?.confirmed) {
+      try {
+        if (deal.customerId) localStorage.removeItem(`nexus_irm_pref_${deal.customerId}`);
+        if (fDigits) localStorage.removeItem(`nexus_irm_pref_${fDigits}`);
+        localStorage.removeItem(`nexus_irm_pref_${deal.id}`);
+      } catch { }
+      savedLocal = null;
+    }
+  }
 
-  const isConfirmed =
-    savedLocal?.confirmed === true ||
-    matchingLead?.customFields?.irmPreferencesConfirmed === true ||
-    matchingCustomer?.customFields?.irmPreferencesConfirmed === true;
+  // 1. Confirmed lead custom fields
+  if (leadConfirmed && matchingLead?.customFields?.preferredAssetClass) {
+    return matchingLead.customFields.preferredAssetClass;
+  }
 
-  if (savedLocal?.preferredAssetClass && savedLocal.confirmed) return savedLocal.preferredAssetClass;
-  if (matchingLead?.customFields?.preferredAssetClass && isConfirmed) return matchingLead.customFields.preferredAssetClass;
-  if (matchingCustomer?.customFields?.preferredAssetClass && isConfirmed) return matchingCustomer.customFields.preferredAssetClass;
-  // NOTE: deal.preferredAssetClass is intentionally NOT used as a fallback here.
-  // Only values the IRM has explicitly confirmed (see isConfirmed above) are shown.
+  // 2. Confirmed customer custom fields
+  if (custConfirmed && matchingCustomer?.customFields?.preferredAssetClass) {
+    return matchingCustomer.customFields.preferredAssetClass;
+  }
+
+  // 3. Explicitly confirmed deal
+  if (deal.preferredAssetClass && deal.preferredAssetClass !== '—' && deal.preferredAssetClass.trim() !== '') {
+    if (leadConfirmed || custConfirmed || (!matchingLead && !matchingCustomer && savedLocal?.confirmed === true)) {
+      return deal.preferredAssetClass;
+    }
+  }
+
+  // 4. Stored local preference (only if explicitly confirmed and not refuted by unconfirmed lead/customer)
+  if (!matchingLead && !matchingCustomer && savedLocal?.confirmed === true && savedLocal?.preferredAssetClass) {
+    return savedLocal.preferredAssetClass;
+  }
+
   return '—';
 };
 
@@ -1388,23 +1417,34 @@ const GhlIrmKycView: React.FC = () => {
       dealChanged = true;
     }
 
+    // Save preferred asset class if changed
+    if (editingSection === 'personal') {
+      const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+      const isConfirmed = Boolean(sectionFormData.preferredAssetClass?.trim()) && sectionFormData.preferredAssetClassConfirmed === true;
+      const val = isConfirmed ? (sectionFormData.preferredAssetClass?.trim() || '') : '';
+      if (updatedDeal.preferredAssetClass !== (val || undefined)) {
+        updatedDeal.preferredAssetClass = val || undefined;
+        dealChanged = true;
+      }
+      const prefObj = {
+        preferredAssetClass: val,
+        confirmed: isConfirmed,
+      };
+      if (isConfirmed) {
+        if (deal.customerId) localStorage.setItem(`nexus_irm_pref_${deal.customerId}`, JSON.stringify(prefObj));
+        if (fDigits) localStorage.setItem(`nexus_irm_pref_${fDigits}`, JSON.stringify(prefObj));
+        localStorage.setItem(`nexus_irm_pref_${deal.id}`, JSON.stringify(prefObj));
+      } else {
+        if (deal.customerId) localStorage.removeItem(`nexus_irm_pref_${deal.customerId}`);
+        if (fDigits) localStorage.removeItem(`nexus_irm_pref_${fDigits}`);
+        localStorage.removeItem(`nexus_irm_pref_${deal.id}`);
+      }
+    }
+
     if (dealChanged) {
       persistDeal(updatedDeal).catch(e => showToast("Error saving deal:"));
       setSelectedCustomerDeal(updatedDeal);
       loadData();
-    }
-
-    // Save preferred asset class if changed
-    if (editingSection === 'personal') {
-      const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
-      const val = sectionFormData.preferredAssetClass?.trim() || '';
-      const prefObj = {
-        preferredAssetClass: val,
-        confirmed: Boolean(val) && sectionFormData.preferredAssetClassConfirmed === true,
-      };
-      if (deal.customerId) localStorage.setItem(`nexus_irm_pref_${deal.customerId}`, JSON.stringify(prefObj));
-      if (fDigits) localStorage.setItem(`nexus_irm_pref_${fDigits}`, JSON.stringify(prefObj));
-      localStorage.setItem(`nexus_irm_pref_${deal.id}`, JSON.stringify(prefObj));
     }
 
     const currentStatus = localStorage.getItem(`nexus_kyc_status_${dealId}`);
@@ -4324,7 +4364,7 @@ const OriginalKYCView: React.FC = () => {
       header: 'Preferred Asset Class',
       render: deal => (
         <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-          {resolvePreferredAssetClass(deal)}
+          {resolvePreferredAssetClass(deal, storageService.getLeads(tenant?.id), storageService.getCustomers(tenant?.id))}
         </span>
       ),
     },
