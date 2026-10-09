@@ -595,11 +595,19 @@ export const OpportunitiesPage: React.FC = () => {
       key: 'investmentRange',
       header: 'Investment Capacity',
       sortable: true,
-      render: deal => (
-        <span style={{ color: '#10b981', fontWeight: 800, fontSize: 13 }}>
-          {deal.investmentRange || '—'}
-        </span>
-      ),
+      render: deal => {
+        const cap = deal.investmentRange;
+        const hasCap = cap && cap !== '—' && cap.trim() !== '' && cap.toLowerCase() !== 'not specified';
+        return hasCap ? (
+          <span style={{ color: '#10b981', fontWeight: 800, fontSize: 13 }}>
+            {cap}
+          </span>
+        ) : (
+          <span className="not-specified-badge">
+            Not Specified
+          </span>
+        );
+      },
     },
     {
       key: 'value',
@@ -612,8 +620,8 @@ export const OpportunitiesPage: React.FC = () => {
             {formatCurrency(Number(val))}
           </span>
         ) : (
-          <span style={{ color: 'var(--text-muted, #94a3b8)', fontWeight: 600, fontSize: 13 }}>
-            —
+          <span className="not-specified-badge">
+            Not Specified
           </span>
         );
       },
@@ -621,11 +629,19 @@ export const OpportunitiesPage: React.FC = () => {
     {
       key: 'preferredAssetClass',
       header: 'Preferred Asset Class',
-      render: deal => (
-        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-          {deal.preferredAssetClass || '—'}
-        </span>
-      ),
+      render: deal => {
+        const pref = deal.preferredAssetClass;
+        const hasPref = pref && pref !== '—' && pref.trim() !== '' && pref.toLowerCase() !== 'not specified';
+        return hasPref ? (
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+            {pref}
+          </span>
+        ) : (
+          <span className="not-specified-badge">
+            Not Specified
+          </span>
+        );
+      },
     },
     {
       key: 'assignedAgentName',
@@ -1116,7 +1132,11 @@ export const OpportunitiesPage: React.FC = () => {
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <span style={{ color: 'var(--text-muted)' }}>Preferred Asset Class:</span>
-                        <strong style={{ color: 'var(--text-primary)' }}>{detailDeal.preferredAssetClass || '—'}</strong>
+                        {detailDeal.preferredAssetClass && detailDeal.preferredAssetClass !== '—' ? (
+                          <strong style={{ color: 'var(--text-primary)' }}>{detailDeal.preferredAssetClass}</strong>
+                        ) : (
+                          <span className="not-specified-badge">Not Specified</span>
+                        )}
                       </div>
                       {detailDeal.customerId && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

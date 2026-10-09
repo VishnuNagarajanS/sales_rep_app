@@ -472,7 +472,7 @@ export const IrmProfileView: React.FC = () => {
         name: i.name,
         phone: i.phone,
         contactId: i.id,
-        subtext: `Capacity: ${i.investmentCapacity || '—'} · Asset Class: ${i.preferredAssetClass || '—'}`,
+        subtext: `Capacity: ${i.investmentCapacity && i.investmentCapacity !== '—' ? i.investmentCapacity : 'Not Specified'} · Asset Class: ${i.preferredAssetClass && i.preferredAssetClass !== '—' ? i.preferredAssetClass : 'Not Specified'}`,
         badge: i.status,
         badgeColor: i.status.includes('HNW') ? '#10b981' : '#3b82f6',
       }));
@@ -482,7 +482,7 @@ export const IrmProfileView: React.FC = () => {
       return myOpportunities.map(o => ({
         key: o.id,
         name: o.investorName,
-        phone: (allInvestors.find(i => String(i.id) === String(o.investorId))?.phone) || '—',
+        phone: (allInvestors.find(i => String(i.id) === String(o.investorId))?.phone) || 'Not specified',
         contactId: o.investorId,
         subtext: `${o.title} · Target: ${formatCurrency(o.targetAmount)} · Committed: ${formatCurrency(o.committedAmount || 0)}`,
         badge: o.stage,
@@ -494,7 +494,7 @@ export const IrmProfileView: React.FC = () => {
       return myKycs.map(k => ({
         key: String(k.id || k.investorId),
         name: k.investorName || k.name || 'Investor',
-        phone: k.phone || '—',
+        phone: k.phone || 'Not specified',
         contactId: String(k.investorId || k.id),
         subtext: `PAN: ${k.panNumber || 'Pending'} · Submitted: ${k.submittedAt || 'Recent'}`,
         badge: k.status || 'Initiated',
@@ -530,7 +530,7 @@ export const IrmProfileView: React.FC = () => {
         name: f.contactName,
         phone: f.contactPhone,
         contactId: f.contactId,
-        subtext: `Due: ${formatSmartScheduleDate(f.scheduledAt)} · Notes: ${f.notes || '—'}`,
+        subtext: `Due: ${formatSmartScheduleDate(f.scheduledAt)} · Notes: ${f.notes && f.notes !== '—' ? f.notes : 'No notes'}`,
         badge: f.status,
         badgeColor: f.status === 'Completed' ? '#10b981' : '#f59e0b',
       }));

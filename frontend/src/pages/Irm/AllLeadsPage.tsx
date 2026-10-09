@@ -241,10 +241,15 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
         <div className="all-leads-contact-cell">
           <div className="all-leads-name-row">
             <span className="all-leads-investor-name">{lead.name}</span>
-            {lead.location && (
+            {lead.location && lead.location !== '—' ? (
               <span className="all-leads-location-badge">
                 <MapPin size={11} />
                 <span>{lead.location}</span>
+              </span>
+            ) : (
+              <span className="all-leads-location-badge" style={{ opacity: 0.7, background: 'rgba(255, 255, 255, 0.04)', color: 'var(--text-muted)', borderColor: 'rgba(255, 255, 255, 0.08)' }}>
+                <MapPin size={11} />
+                <span>Not Specified</span>
               </span>
             )}
           </div>
@@ -302,7 +307,7 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
       render: lead => (
         <div>
           <div style={{ color: 'var(--text-primary)', fontSize: 13, fontWeight: 500 }}>
-            {lead.stageDetails || '—'}
+            {lead.stageDetails && lead.stageDetails !== '—' ? lead.stageDetails : <span className="not-specified-badge">Not Specified</span>}
           </div>
           {lead.investmentCapacity && (
             <div style={{ color: 'var(--success)', fontSize: 11, fontWeight: 600, marginTop: 2 }}>

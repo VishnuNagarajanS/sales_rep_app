@@ -355,15 +355,29 @@ export const InvestorsPage: React.FC = () => {
       key: 'investmentCapacity',
       header: 'Capital Capacity',
       sortable: true,
-      render: inv => (
-        <span className="investor-capacity-badge">{inv.investmentCapacity}</span>
-      ),
+      render: inv => {
+        const cap = inv.investmentCapacity;
+        const hasCap = cap && cap !== '—' && cap.trim() !== '' && cap.toLowerCase() !== 'not specified';
+        return hasCap ? (
+          <span className="investor-capacity-badge">{cap}</span>
+        ) : (
+          <span className="not-specified-badge">Not Specified</span>
+        );
+      },
     },
     ...(isExec ? [] : [{
       key: 'preferredAssetClass',
       header: 'Preferred Asset Class',
       sortable: true,
-      render: (inv: Investor) => <span style={{ fontSize: 12 }}>{inv.preferredAssetClass || '—'}</span>,
+      render: (inv: Investor) => {
+        const pref = inv.preferredAssetClass;
+        const hasPref = pref && pref !== '—' && pref.trim() !== '' && pref.toLowerCase() !== 'not specified';
+        return hasPref ? (
+          <span style={{ fontSize: 12 }}>{pref}</span>
+        ) : (
+          <span className="not-specified-badge">Not Specified</span>
+        );
+      },
     } as Column<Investor>]),
     ...(isGhlIrm ? [{
       key: 'investmentAmount' as any,
@@ -372,10 +386,12 @@ export const InvestorsPage: React.FC = () => {
       render: (inv: Investor) => {
         const matchingDeal = getMatchingDeal(inv);
         const amt = matchingDeal?.value || (inv.committedAUM && !isNaN(Number(inv.committedAUM)) && Number(inv.committedAUM) > 0 ? Number(inv.committedAUM) : null);
-        return (
-          <span style={{ fontWeight: 700, color: amt ? '#059669' : 'var(--text-muted)', fontSize: 13 }}>
-            {amt ? `₹${amt.toLocaleString('en-IN')}` : '—'}
+        return amt ? (
+          <span style={{ fontWeight: 700, color: '#059669', fontSize: 13 }}>
+            {`₹${amt.toLocaleString('en-IN')}`}
           </span>
+        ) : (
+          <span className="not-specified-badge">Not Specified</span>
         );
       },
     } as Column<Investor>] : []),

@@ -1895,13 +1895,17 @@ export const FollowupsPage: React.FC = () => {
                           className="lead-detail-value"
                           style={{
                             marginTop: 4,
-                            fontSize: 16,
+                            fontSize: (capacityValue || investmentCapacity) && (capacityValue || investmentCapacity) !== '—' ? 16 : 13,
                             fontWeight: 700,
                             color: '#10b981',
                             letterSpacing: '0.01em',
                           }}
                         >
-                          {capacityValue || investmentCapacity || '—'}
+                          {(capacityValue || investmentCapacity) && (capacityValue || investmentCapacity) !== '—' ? (
+                            capacityValue || investmentCapacity
+                          ) : (
+                            <span className="not-specified-badge">Not Specified</span>
+                          )}
                         </div>
                       )}
                     </div>
@@ -2070,7 +2074,11 @@ export const FollowupsPage: React.FC = () => {
                                 color: isPrefConfirmed && prefAssetClass ? 'var(--text-primary)' : 'var(--text-muted)',
                               }}
                             >
-                              {isPrefConfirmed && prefAssetClass ? prefAssetClass : '—'}
+                              {isPrefConfirmed && prefAssetClass && prefAssetClass !== '—' ? (
+                                prefAssetClass
+                              ) : (
+                                <span className="not-specified-badge">Not Specified</span>
+                              )}
                             </div>
                           </div>
                           <div>
@@ -2081,7 +2089,11 @@ export const FollowupsPage: React.FC = () => {
                                 color: isPrefConfirmed && prefHorizon ? 'var(--text-primary)' : 'var(--text-muted)',
                               }}
                             >
-                              {isPrefConfirmed && prefHorizon ? prefHorizon : '—'}
+                              {isPrefConfirmed && prefHorizon && prefHorizon !== '—' ? (
+                                prefHorizon
+                              ) : (
+                                <span className="not-specified-badge">Not Specified</span>
+                              )}
                             </div>
                           </div>
                         </div>

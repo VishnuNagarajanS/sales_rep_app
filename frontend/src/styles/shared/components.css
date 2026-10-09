@@ -273,3 +273,36 @@ h6 {
 .animate-slide-down {
   animation: slideDown var(--transition-normal) ease-out forwards;
 }
+
+/* ── Premium Not Specified Badges & Utilities ────────────────────────────── */
+.not-specified-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  color: var(--text-muted, #8b949e);
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.not-specified-badge:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--text-secondary, #cbd5e1);
+}
+
+.not-specified-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted, #8b949e);
+  font-style: normal;
+}
+

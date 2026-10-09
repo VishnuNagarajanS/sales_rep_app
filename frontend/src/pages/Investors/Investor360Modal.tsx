@@ -422,7 +422,7 @@ export const Investor360Modal: React.FC<Investor360ModalProps> = ({
               <UserCheck size={13} />
               <span>Wealth Consultant</span>
             </div>
-            <div className="iv-k-val">{investor.assignedAgentName || '—'}</div>
+            <div className="iv-k-val">{investor.assignedAgentName && investor.assignedAgentName !== '—' ? investor.assignedAgentName : <span className="not-specified-badge">Unassigned</span>}</div>
           </div>
 
           <div className="iv-k">
@@ -430,7 +430,7 @@ export const Investor360Modal: React.FC<Investor360ModalProps> = ({
               <Briefcase size={13} />
               <span>Capital Capacity</span>
             </div>
-            <div className="iv-k-val">{investor.investmentCapacity || '—'}</div>
+            <div className="iv-k-val">{investor.investmentCapacity && investor.investmentCapacity !== '—' ? investor.investmentCapacity : <span className="not-specified-badge">Not Specified</span>}</div>
           </div>
 
           <div className="iv-k">
@@ -439,7 +439,7 @@ export const Investor360Modal: React.FC<Investor360ModalProps> = ({
               <span>Investment Amount</span>
             </div>
             <div className={`iv-k-val ${displayInvestmentAmount ? 'emerald' : ''}`}>
-              {displayInvestmentAmount ? `₹${displayInvestmentAmount.toLocaleString('en-IN')}` : '—'}
+              {displayInvestmentAmount ? `₹${displayInvestmentAmount.toLocaleString('en-IN')}` : <span className="not-specified-badge">Not Specified</span>}
             </div>
           </div>
 
@@ -513,24 +513,24 @@ export const Investor360Modal: React.FC<Investor360ModalProps> = ({
                 <div className="iv-grid">
                   <div className="iv-grid-item">
                     <span>Capital Capacity</span>
-                    <b>{investor.investmentCapacity || '—'}</b>
+                    <b>{investor.investmentCapacity && investor.investmentCapacity !== '—' ? investor.investmentCapacity : <span className="not-specified-badge">Not Specified</span>}</b>
                   </div>
                   <div className="iv-grid-item">
                     <span>Preferred Asset Class</span>
-                    <b>{investor.preferredAssetClass || '—'}</b>
+                    <b>{investor.preferredAssetClass && investor.preferredAssetClass !== '—' ? investor.preferredAssetClass : <span className="not-specified-badge">Not Specified</span>}</b>
                   </div>
                   <div className="iv-grid-item">
                     <span>Investment Mandate</span>
-                    <b>{investor.investmentMandate || '—'}</b>
+                    <b>{investor.investmentMandate && investor.investmentMandate !== '—' ? investor.investmentMandate : <span className="not-specified-badge">Not Specified</span>}</b>
                   </div>
                   <div className="iv-grid-item">
                     <span>Risk Tolerance</span>
-                    <b>{investor.riskTolerance || '—'}</b>
+                    <b>{investor.riskTolerance ? investor.riskTolerance : <span className="not-specified-badge">Not Specified</span>}</b>
                   </div>
                   <div className="iv-grid-item">
                     <span>Committed AUM</span>
                     <b style={{ color: investor.committedAUM ? '#059669' : undefined }}>
-                      {investor.committedAUM ? `₹${Number(investor.committedAUM).toLocaleString('en-IN')}` : '—'}
+                      {investor.committedAUM ? `₹${Number(investor.committedAUM).toLocaleString('en-IN')}` : <span className="not-specified-badge">Not Specified</span>}
                     </b>
                   </div>
                   <div className="iv-grid-item">

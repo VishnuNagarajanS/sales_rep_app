@@ -852,17 +852,25 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                   <span className="irm-detail-grid-label">
                     <TrendingUp size={12} /> Investment Capacity / Size
                   </span>
-                  <span className="irm-detail-grid-value" style={{ color: '#10b981', fontWeight: 800 }}>
-                    {irmDetailDeal.investmentRange || (irmDetailDeal.value > 0 ? formatCurrency(irmDetailDeal.value) : '—')}
-                  </span>
+                  {irmDetailDeal.investmentRange || (irmDetailDeal.value > 0 ? formatCurrency(irmDetailDeal.value) : null) ? (
+                    <span className="irm-detail-grid-value" style={{ color: '#10b981', fontWeight: 800 }}>
+                      {irmDetailDeal.investmentRange || formatCurrency(irmDetailDeal.value)}
+                    </span>
+                  ) : (
+                    <span className="not-specified-badge">Not Specified</span>
+                  )}
                 </div>
                 <div className="irm-detail-grid-item">
                   <span className="irm-detail-grid-label">
                     Preferred Asset Class
                   </span>
-                  <span className="irm-detail-grid-value">
-                    {irmDetailDeal.preferredAssetClass || '—'}
-                  </span>
+                  {irmDetailDeal.preferredAssetClass && irmDetailDeal.preferredAssetClass !== '—' ? (
+                    <span className="irm-detail-grid-value">
+                      {irmDetailDeal.preferredAssetClass}
+                    </span>
+                  ) : (
+                    <span className="not-specified-badge">Not Specified</span>
+                  )}
                 </div>
                 {irmDetailDeal.customerId && (
                   <div className="irm-detail-grid-item">
