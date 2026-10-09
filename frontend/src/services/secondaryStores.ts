@@ -232,6 +232,18 @@ let usersMemory: User[] = [
     status: 'Active',
     lastLogin: 'Today',
   },
+  {
+    id: '5',
+    name: 'Dhinakaran',
+    email: 'dhinakaran@ghlindiaventures.com',
+    phone: '+91 98110 77889',
+    companyId: 't-ghl-01',
+    companySlug: 'ghl',
+    companyName: 'GHL India Ventures',
+    role: { id: 'r-irm', name: 'IRM', code: 'irm', permissions: [] },
+    status: 'Active',
+    lastLogin: 'Just now',
+  },
 ];
 
 export const userStore = {

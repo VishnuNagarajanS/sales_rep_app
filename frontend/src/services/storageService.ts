@@ -215,6 +215,80 @@ class StorageService {
         if (raw) users = JSON.parse(raw);
       } catch {}
     }
+    if (!users || users.length === 0) {
+      // Default fallback users corresponding to the database seeds
+      users = [
+        {
+          id: '1',
+          name: 'Yanosh',
+          email: 'yanosh@ghlindiaventures.com',
+          phone: '+91 98800 11000',
+          role: { id: '1', name: 'Super Admin', code: 'super_admin', permissions: [] },
+          status: 'Active',
+          lastLogin: 'Today',
+        },
+        {
+          id: '2',
+          name: 'Vishnu',
+          email: 'vishnu@ghlindiaventures.com',
+          phone: '+91 98450 11223',
+          companyId: '1',
+          companySlug: 'ghl',
+          companyName: 'GHL India Ventures',
+          role: { id: '2', name: 'Company Admin', code: 'company_admin', permissions: [] },
+          status: 'Active',
+          lastLogin: 'Today',
+        },
+        {
+          id: '3',
+          name: 'Naveen',
+          email: 'naveen@ghlindiaventures.com',
+          phone: '+91 98450 22334',
+          companyId: '1',
+          companySlug: 'ghl',
+          companyName: 'GHL India Ventures',
+          role: { id: '3', name: 'Sales Executive', code: 'sales_executive', permissions: [] },
+          status: 'Active',
+          lastLogin: 'Just now',
+        },
+        {
+          id: '4',
+          name: 'Mani',
+          email: 'mani@ghlindiaventures.com',
+          phone: '+91 98450 33445',
+          companyId: '2',
+          companySlug: 'jamin',
+          companyName: 'Jamin Bazaar',
+          role: { id: '2', name: 'Company Admin', code: 'company_admin', permissions: [] },
+          status: 'Active',
+          lastLogin: 'Today',
+        },
+        {
+          id: '5',
+          name: 'Dhinakaran',
+          email: 'dhinakaran@ghlindiaventures.com',
+          phone: '+91 98110 77889',
+          companyId: '1',
+          companySlug: 'ghl',
+          companyName: 'GHL India Ventures',
+          role: { id: '4', name: 'IRM', code: 'irm', permissions: [] },
+          status: 'Active',
+          lastLogin: 'Today',
+        },
+        {
+          id: '6',
+          name: 'Rajesh Sharma',
+          email: 'rajesh@jaminbazaar.com',
+          phone: '+91 98450 44556',
+          companyId: '2',
+          companySlug: 'jamin',
+          companyName: 'Jamin Bazaar',
+          role: { id: '3', name: 'Sales Executive', code: 'sales_executive', permissions: [] },
+          status: 'Active',
+          lastLogin: 'Today',
+        },
+      ];
+    }
     // Sanitize: strictly map any legacy sales_manager to sales_executive
     users = (users || []).map(u => {
       if ((u.role?.code as string) === 'sales_manager' || (u.role?.name && u.role.name.toLowerCase().includes('manager') && !u.role.name.toLowerCase().includes('irm') && !u.role.name.toLowerCase().includes('investor'))) {
@@ -229,7 +303,20 @@ class StorageService {
       }
       return u;
     });
-    return companySlug ? users.filter(u => u.companySlug === companySlug || (u as any).companyId === companySlug) : users;
+
+    if (!companySlug || companySlug === 'all') return users;
+
+    const isGhlTarget = companySlug === '1' || companySlug === 't-ghl-01' || companySlug.toLowerCase() === 'ghl';
+    const isJaminTarget = companySlug === '2' || companySlug === 't-jamin-02' || companySlug.toLowerCase() === 'jamin';
+
+    return users.filter(u => {
+      const isGhlUser = String(u.companyId) === '1' || u.companyId === 't-ghl-01' || u.companySlug === 'ghl' || (u.companyName && u.companyName.toLowerCase().includes('ghl'));
+      const isJaminUser = String(u.companyId) === '2' || u.companyId === 't-jamin-02' || u.companySlug === 'jamin' || (u.companyName && u.companyName.toLowerCase().includes('jamin'));
+
+      if (isGhlTarget) return isGhlUser;
+      if (isJaminTarget) return isJaminUser;
+      return u.companySlug === companySlug || String(u.companyId) === companySlug;
+    });
   }
 
   setUsers(users: User[]): void {
@@ -1048,10 +1135,10 @@ class StorageService {
 
   getIrms(companyId?: string): IrmProfile[] {
     const users = this.getUsers(companyId);
-    const irms = users
+    const irms: IrmProfile[] = users
       .filter(u => !u.isCovered && (u.role?.code === 'irm' || u.role?.name?.toLowerCase().includes('irm') || u.role?.name?.toLowerCase().includes('investor')))
       .map(u => ({
-        id: u.id,
+        id: String(u.id),
         name: u.name,
         email: u.email,
         phone: u.phone,
@@ -1061,7 +1148,26 @@ class StorageService {
         performance: 95,
         status: 'Available' as const,
       }));
-    return irms;
+
+    if (irms.length > 0) return irms;
+
+    // Safety fallback for GHL India Ventures
+    const isJamin = companyId === '2' || companyId === 't-jamin-02' || companyId === 'jamin';
+    if (isJamin) return [];
+
+    return [
+      {
+        id: '5',
+        name: 'Dhinakaran',
+        email: 'dhinakaran@ghlindiaventures.com',
+        phone: '+91 98110 77889',
+        experience: '5 Years',
+        experienceYears: 5,
+        experienceLevel: 'Experienced' as const,
+        performance: 95,
+        status: 'Available' as const,
+      },
+    ];
   }
 
   getInitialCustomers(): Customer[] {

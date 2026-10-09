@@ -25,6 +25,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { useUnsavedChanges } from '../../context/NavigationGuardContext';
 import { storageService } from '../../services/storageService';
+import { adminUserService } from '../../services/adminUserService';
 import { isMockMode } from '../../config/environment';
 import {
   getCustomers,
@@ -102,7 +103,11 @@ export const CustomersPage: React.FC = () => {
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
-  const irms = useMemo(() => storageService.getIrms(tenant?.id), [tenant?.id]);
+  const [dbIrms, setDbIrms] = useState<IrmProfile[]>(() => storageService.getIrms(tenant?.id || tenant?.slug));
+  const irms = useMemo<IrmProfile[]>(() => {
+    if (dbIrms && dbIrms.length > 0) return dbIrms;
+    return storageService.getIrms(tenant?.id || tenant?.slug);
+  }, [dbIrms, tenant?.id, tenant?.slug]);
 
   // Role-based scoping: Sales Executives see only their own customers.
   // Managers / Admins / Super Admins see the full company customer list (no filter).
@@ -237,6 +242,33 @@ export const CustomersPage: React.FC = () => {
       setDeals(cDeals);
       setLeads(cLeads);
 
+      // Load real IRM users from database / adminUserService
+      try {
+        const fetchedUsers = await adminUserService.getUsers(tenant?.id || tenant?.slug || '1');
+        const apiIrms: IrmProfile[] = (fetchedUsers || [])
+          .filter(u => !u.isCovered && (u.role?.code === 'irm' || u.role?.name?.toLowerCase().includes('irm') || u.role?.name?.toLowerCase().includes('investor')))
+          .map(u => ({
+            id: String(u.id),
+            name: u.name,
+            email: u.email,
+            phone: u.phone,
+            experience: '5 Years',
+            experienceYears: 5,
+            experienceLevel: 'Experienced' as const,
+            performance: 95,
+            status: 'Available' as const,
+          }));
+        if (apiIrms.length > 0) {
+          setDbIrms(apiIrms);
+        }
+      } catch (userErr) {
+        console.warn('Could not load users via adminUserService, using storage IRMs', userErr);
+        const fallback = storageService.getIrms(tenant?.id || tenant?.slug);
+        if (fallback.length > 0) {
+          setDbIrms(fallback);
+        }
+      }
+
       const firstVisible = isExec
         ? custs.filter(c =>
           (c.assignedAgentId && c.assignedAgentId === user?.id) ||
@@ -259,14 +291,20 @@ export const CustomersPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
+    const handleUpdate = () => {
+      loadData();
+      const current = storageService.getIrms(tenant?.id || tenant?.slug);
+      if (current && current.length > 0) {
+        setDbIrms(current);
+      }
+    };
     window.addEventListener('nexus_storage_updated', handleUpdate);
     window.addEventListener('nexus_handover_updated', handleUpdate);
     return () => {
       window.removeEventListener('nexus_storage_updated', handleUpdate);
       window.removeEventListener('nexus_handover_updated', handleUpdate);
     };
-  }, [tenant?.id]);
+  }, [tenant?.id, tenant?.slug]);
 
   // If nothing is selected yet (e.g. the user only has Interested leads), select the first visible entry.
   useEffect(() => {
@@ -274,6 +312,12 @@ export const CustomersPage: React.FC = () => {
       setSelectedCustomer(scopedCustomers[0]);
     }
   }, [scopedCustomers, selectedCustomer]);
+
+  useEffect(() => {
+    if (isManualModalOpen && irms.length > 0 && (!selectedIrmId || !irms.some(i => i.id === selectedIrmId))) {
+      setSelectedIrmId(irms[0].id);
+    }
+  }, [isManualModalOpen, irms, selectedIrmId]);
 
   const agentOptions = Array.from(new Set(scopedCustomers.map(c => c.assignedAgentName)))
     .filter(Boolean)
@@ -469,7 +513,11 @@ export const CustomersPage: React.FC = () => {
       const selectedCusts = scopedCustomers.filter(c => selectedCustomerIds.has(c.id) && isCustomerEligibleForIrm(c));
       if (selectedCusts.length === 0) return;
 
-      setSelectedIrmId(irms[0]?.id || '');
+      const availableIrms = irms.length > 0 ? irms : storageService.getIrms(tenant?.id || tenant?.slug);
+      if (availableIrms.length > 0 && (!dbIrms || dbIrms.length === 0)) {
+        setDbIrms(availableIrms);
+      }
+      setSelectedIrmId(selectedIrmId || availableIrms[0]?.id || '');
       setIsManualModalOpen(true);
     } else {
       if (eligibleUnassignedCustomers.length === 0) return;
@@ -1923,7 +1971,25 @@ export const CustomersPage: React.FC = () => {
           }
         >
           <div className="irm-selection-list">
-            {irms.map((irm: IrmProfile) => {
+            {irms.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--text-muted)' }}>
+                <p style={{ fontSize: 14, marginBottom: 12 }}>No IRM representatives currently found for this company.</p>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    const fallback = storageService.getIrms(tenant?.id || tenant?.slug);
+                    if (fallback.length > 0) {
+                      setDbIrms(fallback);
+                      setSelectedIrmId(fallback[0].id);
+                    }
+                  }}
+                >
+                  Reload IRM List
+                </button>
+              </div>
+            ) : (
+              irms.map((irm: IrmProfile) => {
               const currentCount = allCustomers.filter(c => c.assignedIrmName === irm.name || c.assignedIrmId === irm.id).length;
               const workload = currentCount <= 2 ? 'Low' : currentCount <= 5 ? 'Medium' : 'High';
               const isSelected = selectedIrmId === irm.id;
@@ -1970,7 +2036,7 @@ export const CustomersPage: React.FC = () => {
                   </div>
                 </div>
               );
-            })}
+            }))}
           </div>
         </Modal>
       )}
