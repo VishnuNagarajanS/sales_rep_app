@@ -178,9 +178,11 @@ describe('Role Feature Isolation & Boundary Enforcement', () => {
       expect(outcomes).not.toContain('Wrong Number');
     });
 
-    // Skip for Now is enabled for Sales Executive, disabled for IRM
-    const isSkipAllowedForRole = (role: string) => role === 'sales_executive';
-    expect(isSkipAllowedForRole('sales_executive')).toBe(true);
-    expect(isSkipAllowedForRole('irm')).toBe(false);
+    // Interested must always be the leading outcome for Sales Executive
+    expect(SALES_EXEC_OUTCOMES[0]).toBe('Interested');
+
+    // Skip for Now is removed across the app
+    const isSkipAllowed = false;
+    expect(isSkipAllowed).toBe(false);
   });
 });
