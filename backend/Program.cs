@@ -11,6 +11,13 @@ using Microsoft.OpenApi.Models;
 // The file is optional; if missing, standard env vars / appsettings.json apply.
 DotNetEnv.Env.TraversePath().Load();
 
+// Ensure wwwroot directory exists to avoid PhysicalFileProvider DirectoryNotFoundException
+var wwwrootDirectory = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+if (!Directory.Exists(wwwrootDirectory))
+{
+    Directory.CreateDirectory(wwwrootDirectory);
+}
+
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddUserSecrets<Program>(optional: true);
 
