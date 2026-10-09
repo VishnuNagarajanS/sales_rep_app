@@ -2357,145 +2357,148 @@ const GhlIrmKycView: React.FC = () => {
               </div>
             </div>
 
-            {/* Main Layout: Left Sidebar + Right Stacked Cards */}
+            {/* Main Layout: Executive Profile Header + Balanced Details Grid */}
             <div className="kyc-profile-layout">
-              {/* Left Sidebar Card */}
-              <div className="kyc-profile-sidebar">
-                <div className="kyc-profile-avatar">
-                  {initial}
-                  <span className="kyc-profile-avatar-badge">CE</span>
-                </div>
-                <div className="kyc-profile-sidebar-name">{deal.customerName}</div>
-                <div className="kyc-profile-sidebar-email">{data.email || deal.email || '—'}</div>
-
-                {/* Status Dropdown on Profile Sidebar */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 12 }}>
-                  <KycStatusDropdown
-                    deal={deal}
-                    customerKycStatus={resolveCustomerKycStatus(deal)}
-                    onChange={(status, comment, flaggedSections, checklist) =>
-                      handleStatusChange(deal, status, comment, flaggedSections, checklist)
-                    }
-                    onShowToast={showToast}
-                  />
-                  {deal.kycStatus === 'Verified' && (deal.verifiedBy || deal.verifiedAt) && (
-                    <span style={{ fontSize: 11, color: '#059669', marginTop: 5, fontWeight: 600, textAlign: 'center' }}>
-                      Verified by {deal.verifiedBy ? deal.verifiedBy.split('@')[0] : 'IRM'}
-                      {deal.verifiedAt ? ' on ' + new Date(deal.verifiedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
-                    </span>
-                  )}
-                </div>
-
-                {/* Meta Details Table */}
-                <div className="kyc-profile-meta-table">
-                  <div className="kyc-profile-meta-row">
-                    <span className="kyc-profile-meta-key">GHL ID</span>
-                    <span className="kyc-profile-meta-val">{getGhlId(deal)}</span>
+              {/* Executive Top Profile Header Card */}
+              <div className="kyc-profile-hero-card">
+                <div className="kyc-profile-hero-left">
+                  <div className="kyc-profile-avatar">
+                    {initial}
                   </div>
-                  <div className="kyc-profile-meta-row">
-                    <span className="kyc-profile-meta-key">PAN</span>
-                    <span className="kyc-profile-meta-val">{data.panNumber || 'Not provided'}</span>
-                  </div>
-                  <div className="kyc-profile-meta-row">
-                    <span className="kyc-profile-meta-key">Mobile</span>
-                    <span className="kyc-profile-meta-val">{data.phone || deal.phone || 'Not provided'}</span>
-                  </div>
-                  <div className="kyc-profile-meta-row">
-                    <span className="kyc-profile-meta-key">Joined</span>
-                    <span className="kyc-profile-meta-val">{getJoinedDate(deal)}</span>
+                  <div className="kyc-profile-hero-user">
+                    <div className="kyc-profile-hero-name">{deal.customerName}</div>
+                    <div className="kyc-profile-hero-email">{data.email || deal.email || '—'}</div>
+                    <div className="kyc-profile-hero-status-row">
+                      <KycStatusDropdown
+                        deal={deal}
+                        customerKycStatus={resolveCustomerKycStatus(deal)}
+                        onChange={(status, comment, flaggedSections, checklist) =>
+                          handleStatusChange(deal, status, comment, flaggedSections, checklist)
+                        }
+                        onShowToast={showToast}
+                      />
+                      {deal.kycStatus === 'Verified' && (deal.verifiedBy || deal.verifiedAt) && (
+                        <span className="kyc-profile-verified-by">
+                          Verified by {deal.verifiedBy ? deal.verifiedBy.split('@')[0] : 'IRM'}
+                          {deal.verifiedAt ? ' on ' + new Date(deal.verifiedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
-                {/* Verify KYC Button */}
-                {(() => {
-                  const normalizedStatus = normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy);
-                  const custStatus = resolveCustomerKycStatus(deal);
-                  const backendKyc = findBackendKyc(deal, dbKycs, tenant?.id);
+                <div className="kyc-profile-hero-meta-divider"></div>
 
-                  // Backend confirmed submission: record has submittedAt and is awaiting review or approved
-                  const backendSubmitted = Boolean(
-                    backendKyc && (
-                      (backendKyc.submittedAt && (backendKyc.status || '').toLowerCase() === 'pendingreview') ||
-                      (backendKyc.submittedAt && (backendKyc.status || '').toLowerCase() === 'approved') ||
-                      (backendKyc.isAssisted && backendKyc.customerConsentObtained && backendKyc.submittedAt)
-                    )
-                  );
+                <div className="kyc-profile-hero-metrics">
+                  <div className="kyc-profile-hero-metric-item">
+                    <span className="kyc-profile-hero-metric-label">GHL ID</span>
+                    <span className="kyc-profile-hero-metric-val">{getGhlId(deal)}</span>
+                  </div>
+                  <div className="kyc-profile-hero-metric-item">
+                    <span className="kyc-profile-hero-metric-label">PAN</span>
+                    <span className="kyc-profile-hero-metric-val">{data.panNumber || 'Not provided'}</span>
+                  </div>
+                  <div className="kyc-profile-hero-metric-item">
+                    <span className="kyc-profile-hero-metric-label">Mobile</span>
+                    <span className="kyc-profile-hero-metric-val font-mono">{data.phone || deal.phone || 'Not provided'}</span>
+                  </div>
+                  <div className="kyc-profile-hero-metric-item">
+                    <span className="kyc-profile-hero-metric-label">Joined</span>
+                    <span className="kyc-profile-hero-metric-val">{getJoinedDate(deal)}</span>
+                  </div>
+                </div>
 
-                  // Distinguish draft-only records from submitted records
-                  const isBackendDraft = Boolean(
-                    backendKyc &&
-                    (backendKyc.status || '').toLowerCase() === 'draft' &&
-                    !backendKyc.submittedAt
-                  );
+                <div className="kyc-profile-hero-action">
+                  {(() => {
+                    const normalizedStatus = normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy);
+                    const custStatus = resolveCustomerKycStatus(deal);
+                    const backendKyc = findBackendKyc(deal, dbKycs, tenant?.id);
 
-                  const isAssistedSubmitted =
-                    custStatus === 'Assisted KYC – Submitted for Verification' ||
-                    (deal as any).customerKycStatus === 'Assisted KYC – Submitted for Verification' ||
-                    Boolean(backendKyc?.isAssisted && backendSubmitted);
-
-                  const isDraftOnly =
-                    custStatus === 'Assisted Draft' ||
-                    (deal as any).customerKycStatus === 'Assisted Draft' ||
-                    isBackendDraft;
-
-                  const customerSubmitted =
-                    !isDraftOnly && (
-                      backendSubmitted ||
-                      isAssistedSubmitted ||
-                      custStatus === 'Completed' ||
-                      custStatus === 'Submitted' ||
-                      custStatus === 'Under Verification' ||
-                      custStatus === 'Verified'
+                    // Backend confirmed submission: record has submittedAt and is awaiting review or approved
+                    const backendSubmitted = Boolean(
+                      backendKyc && (
+                        (backendKyc.submittedAt && (backendKyc.status || '').toLowerCase() === 'pendingreview') ||
+                        (backendKyc.submittedAt && (backendKyc.status || '').toLowerCase() === 'approved') ||
+                        (backendKyc.isAssisted && backendKyc.customerConsentObtained && backendKyc.submittedAt)
+                      )
                     );
 
-                  const canVerify =
-                    permissions.includes(PERMISSIONS.KYC_VERIFY) ||
-                    user?.role?.code === 'irm' ||
-                    user?.role?.code === 'company_admin' ||
-                    user?.role?.code === 'super_admin' ||
-                    user?.role?.code === 'sales_executive' ||
-                    !permissions ||
-                    permissions.length === 0;
+                    // Distinguish draft-only records from submitted records
+                    const isBackendDraft = Boolean(
+                      backendKyc &&
+                      (backendKyc.status || '').toLowerCase() === 'draft' &&
+                      !backendKyc.submittedAt
+                    );
 
-                  const isBtnDisabled = !canVerify || !customerSubmitted;
-                  const tooltipText = !canVerify
-                    ? 'You do not have permission to verify KYC'
-                    : isDraftOnly
-                      ? 'Assisted KYC is currently an incomplete draft and has not been submitted yet'
-                      : !customerSubmitted
-                        ? 'Customer has not submitted KYC yet'
-                        : undefined;
+                    const isAssistedSubmitted =
+                      custStatus === 'Assisted KYC – Submitted for Verification' ||
+                      (deal as any).customerKycStatus === 'Assisted KYC – Submitted for Verification' ||
+                      Boolean(backendKyc?.isAssisted && backendSubmitted);
 
-                  return (
-                    <button
-                      type="button"
-                      className="btn-complete-kyc"
-                      disabled={isBtnDisabled}
-                      title={tooltipText}
-                      style={{
-                        backgroundColor: normalizedStatus === 'Verified' ? '#059669' : '#2563eb',
-                        borderColor: normalizedStatus === 'Verified' ? '#059669' : '#2563eb',
-                        cursor: isBtnDisabled ? 'not-allowed' : 'pointer',
-                        opacity: isBtnDisabled ? 0.6 : 1,
-                      }}
-                      onClick={() => {
-                        if (!profileKycData) {
-                          const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
-                          const matchLead = leads.find(l => (deal.customerId && l.id === deal.customerId) || (l.phone && l.phone.replace(/\D/g, '').slice(-10) === fDigits));
-                          const matchCust = customers.find(c => (deal.customerId && c.id === deal.customerId) || (c.phone && c.phone.replace(/\D/g, '').slice(-10) === fDigits));
-                          setProfileKycData(buildMergedProfileData(deal, backendKyc, matchLead, matchCust));
-                        }
-                        setVerifyModalDeal(deal);
-                      }}
-                    >
-                      <ShieldCheck size={14} />
-                      {normalizedStatus === 'Verified' ? 'Re-verify KYC' : 'Verify KYC'}
-                    </button>
-                  );
-                })()}
+                    const isDraftOnly =
+                      custStatus === 'Assisted Draft' ||
+                      (deal as any).customerKycStatus === 'Assisted Draft' ||
+                      isBackendDraft;
+
+                    const customerSubmitted =
+                      !isDraftOnly && (
+                        backendSubmitted ||
+                        isAssistedSubmitted ||
+                        custStatus === 'Completed' ||
+                        custStatus === 'Submitted' ||
+                        custStatus === 'Under Verification' ||
+                        custStatus === 'Verified'
+                      );
+
+                    const canVerify =
+                      permissions.includes(PERMISSIONS.KYC_VERIFY) ||
+                      user?.role?.code === 'irm' ||
+                      user?.role?.code === 'company_admin' ||
+                      user?.role?.code === 'super_admin' ||
+                      user?.role?.code === 'sales_executive' ||
+                      !permissions ||
+                      permissions.length === 0;
+
+                    const isBtnDisabled = !canVerify || !customerSubmitted;
+                    const tooltipText = !canVerify
+                      ? 'You do not have permission to verify KYC'
+                      : isDraftOnly
+                        ? 'Assisted KYC is currently an incomplete draft and has not been submitted yet'
+                        : !customerSubmitted
+                          ? 'Customer has not submitted KYC yet'
+                          : undefined;
+
+                    return (
+                      <button
+                        type="button"
+                        className="btn-complete-kyc"
+                        disabled={isBtnDisabled}
+                        title={tooltipText}
+                        style={{
+                          backgroundColor: normalizedStatus === 'Verified' ? '#059669' : '#2563eb',
+                          borderColor: normalizedStatus === 'Verified' ? '#059669' : '#2563eb',
+                          cursor: isBtnDisabled ? 'not-allowed' : 'pointer',
+                          opacity: isBtnDisabled ? 0.6 : 1,
+                        }}
+                        onClick={() => {
+                          if (!profileKycData) {
+                            const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+                            const matchLead = leads.find(l => (deal.customerId && l.id === deal.customerId) || (l.phone && l.phone.replace(/\D/g, '').slice(-10) === fDigits));
+                            const matchCust = customers.find(c => (deal.customerId && c.id === deal.customerId) || (c.phone && c.phone.replace(/\D/g, '').slice(-10) === fDigits));
+                            setProfileKycData(buildMergedProfileData(deal, backendKyc, matchLead, matchCust));
+                          }
+                          setVerifyModalDeal(deal);
+                        }}
+                      >
+                        <ShieldCheck size={14} />
+                        {normalizedStatus === 'Verified' ? 'Re-verify KYC' : 'Verify KYC'}
+                      </button>
+                    );
+                  })()}
+                </div>
               </div>
 
-              {/* Right Stacked Cards */}
+              {/* Balanced Multi-Column Detail Cards Grid */}
               <div className="kyc-profile-main-cards">
                 {/* 1. Personal Details */}
                 <div className="kyc-profile-card">

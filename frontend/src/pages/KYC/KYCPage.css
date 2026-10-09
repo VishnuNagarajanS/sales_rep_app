@@ -648,104 +648,131 @@
 }
 
 .kyc-profile-layout {
-  display: grid;
-  grid-template-columns: 320px 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 20px;
-  align-items: start;
+  width: 100%;
 }
 
-.kyc-profile-sidebar {
+.kyc-profile-hero-card {
   background: var(--bg-surface);
   border: 1px solid var(--border-base);
   border-radius: 12px;
-  padding: 24px;
+  padding: 20px 24px;
   display: flex;
-  flex-direction: column;
   align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+}
+
+.kyc-profile-hero-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 240px;
 }
 
 .kyc-profile-avatar {
-  width: 76px;
-  height: 76px;
+  width: 62px;
+  height: 62px;
   border-radius: 50%;
   background: #991b1b;
   color: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 30px;
+  font-size: 26px;
   font-weight: 700;
-  position: relative;
-  box-shadow: 0 4px 10px rgba(153, 27, 27, 0.3);
+  box-shadow: 0 4px 12px rgba(153, 27, 27, 0.35);
+  flex-shrink: 0;
 }
 
-.kyc-profile-avatar-badge {
-  position: absolute;
-  bottom: 0;
-  right: 0;
-  background: #1e293b;
-  color: #cbd5e1;
-  border: 2px solid var(--bg-surface);
-  border-radius: 50%;
-  width: 22px;
-  height: 22px;
-  font-size: 9px;
+.kyc-profile-hero-user {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
+  flex-direction: column;
+  gap: 3px;
 }
 
-.kyc-profile-sidebar-name {
+.kyc-profile-hero-name {
   font-size: 18px;
   font-weight: 700;
   color: var(--text-primary);
-  margin-top: 14px;
-  text-align: center;
+  line-height: 1.2;
 }
 
-.kyc-profile-sidebar-email {
+.kyc-profile-hero-email {
   font-size: 12px;
   color: var(--text-muted);
-  margin-top: 2px;
-  text-align: center;
 }
 
-.kyc-profile-meta-table {
-  width: 100%;
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border-base);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.kyc-profile-meta-row {
+.kyc-profile-hero-status-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  font-size: 12px;
+  gap: 10px;
+  margin-top: 6px;
+  flex-wrap: wrap;
 }
 
-.kyc-profile-meta-key {
-  color: var(--text-muted);
-  font-weight: 500;
-}
-
-.kyc-profile-meta-val {
-  color: var(--text-primary);
+.kyc-profile-verified-by {
+  font-size: 11px;
+  color: #059669;
   font-weight: 600;
 }
 
+.kyc-profile-hero-meta-divider {
+  width: 1px;
+  height: 48px;
+  background: var(--border-base);
+}
+
+.kyc-profile-hero-metrics {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  flex-wrap: wrap;
+}
+
+.kyc-profile-hero-metric-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.kyc-profile-hero-metric-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.kyc-profile-hero-metric-val {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.kyc-profile-hero-action {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+}
+
+.kyc-profile-hero-action .btn-complete-kyc {
+  margin-top: 0 !important;
+  width: auto !important;
+  padding: 10px 22px !important;
+  white-space: nowrap;
+}
+
 .btn-complete-kyc {
-  width: 100%;
-  margin-top: 24px;
   background-color: #991b1b !important;
   color: #ffffff !important;
   border: 1px solid #991b1b !important;
   border-radius: 8px !important;
-  padding: 10px !important;
+  padding: 10px 18px !important;
   font-size: 13px !important;
   font-weight: 700 !important;
   cursor: pointer;
@@ -761,9 +788,32 @@
 }
 
 .kyc-profile-main-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  width: 100%;
+}
+
+@media (min-width: 1101px) {
+  .kyc-profile-main-cards > .kyc-profile-card:last-child {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 1100px) {
+  .kyc-profile-hero-meta-divider {
+    display: none;
+  }
+  .kyc-profile-hero-action {
+    margin-left: 0;
+    width: 100%;
+  }
+  .kyc-profile-hero-action .btn-complete-kyc {
+    width: 100% !important;
+  }
+  .kyc-profile-main-cards {
+    grid-template-columns: 1fr;
+  }
 }
 
 .kyc-profile-card {
