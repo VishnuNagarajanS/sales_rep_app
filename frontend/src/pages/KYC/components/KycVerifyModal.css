@@ -166,7 +166,7 @@
 }
 
 .kvm-detail-label {
-  color: #7c3aed;
+  color: #92400e;
   font-weight: 700;
   font-size: 11px;
   text-transform: uppercase;
@@ -174,7 +174,7 @@
 }
 
 :is(.admin-theme, .dark-theme) .kvm-detail-label {
-  color: #8b5cf6;
+  color: #e2c99b;
 }
 
 .kvm-detail-val {

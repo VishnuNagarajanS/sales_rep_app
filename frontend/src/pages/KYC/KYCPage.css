@@ -751,11 +751,11 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #7c3aed;
+  color: #92400e;
 }
 
 :is(.admin-theme, .dark-theme) .kyc-profile-hero-metric-label {
-  color: #8b5cf6;
+  color: #e2c99b;
 }
 
 .kyc-profile-hero-metric-val {
@@ -867,11 +867,11 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #7c3aed;
+  color: #92400e;
 }
 
 :is(.admin-theme, .dark-theme) .kyc-profile-label {
-  color: #8b5cf6;
+  color: #e2c99b;
 }
 
 .kyc-profile-value {
