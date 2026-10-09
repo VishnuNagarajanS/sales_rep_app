@@ -1080,3 +1080,164 @@
   font-size: 11px;
   font-weight: 700;
 }
+
+/* ── KYC Executive KPI Metric Cards ── */
+.kyc-kpi-container {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+@media (max-width: 1024px) {
+  .kyc-kpi-container {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .kyc-kpi-container {
+    grid-template-columns: 1fr;
+  }
+}
+
+.kyc-metric-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 18px 20px;
+  box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.05);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+:is(.admin-theme, .dark-theme) .kyc-metric-card {
+  background: linear-gradient(180deg, #131c31 0%, #0d1527 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.35);
+}
+
+.kyc-metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px -2px rgba(0, 0, 0, 0.12);
+}
+
+:is(.admin-theme, .dark-theme) .kyc-metric-card:hover {
+  box-shadow: 0 12px 30px -4px rgba(0, 0, 0, 0.55);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.kyc-metric-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.kyc-metric-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #92400e;
+}
+
+:is(.admin-theme, .dark-theme) .kyc-metric-label {
+  color: #e2c99b;
+}
+
+.kyc-metric-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.kyc-metric-icon--blue {
+  background: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.kyc-metric-icon--amber {
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.kyc-metric-icon--purple {
+  background: rgba(139, 92, 246, 0.12);
+  color: #a78bfa;
+  border: 1px solid rgba(139, 92, 246, 0.25);
+}
+
+.kyc-metric-icon--green {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.kyc-metric-val {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--text-primary);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.kyc-metric-subtext {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  font-weight: 500;
+}
+
+/* ── Table Row Avatar & Polish ── */
+.kyc-row-avatar {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  flex-shrink: 0;
+}
+
+/* Institutional Table Polish */
+.kyc-page-container .data-table-container {
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.05);
+  background: #ffffff;
+  overflow: hidden;
+}
+
+:is(.admin-theme, .dark-theme) .kyc-page-container .data-table-container {
+  background: linear-gradient(180deg, #131c31 0%, #0d1527 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.4);
+}
+
+.kyc-page-container .data-table tr {
+  transition: background-color 0.15s ease;
+}
+
+:is(.admin-theme, .dark-theme) .kyc-page-container .data-table tbody tr:hover {
+  background-color: rgba(255, 255, 255, 0.035) !important;
+}
+

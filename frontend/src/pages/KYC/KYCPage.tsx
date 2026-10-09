@@ -1930,6 +1930,44 @@ const GhlIrmKycView: React.FC = () => {
 
   const filteredDeals = deals;
 
+  const totalKycInvestors = filteredDeals.length;
+
+  const awaitingVerificationCount = useMemo(() => {
+    return filteredDeals.filter(d => {
+      const norm = normalizeLegacyKycStatus(d.kycStatus, d.verifiedBy);
+      if (norm === 'Verified') return false;
+      const cStatus = resolveCustomerKycStatus(d);
+      return (
+        cStatus === 'Submitted' ||
+        cStatus === 'Under Verification' ||
+        cStatus === 'Completed' ||
+        cStatus === 'Assisted KYC – Submitted for Verification' ||
+        (d as any).customerKycStatus === 'Assisted KYC – Submitted for Verification'
+      );
+    }).length;
+  }, [filteredDeals, dbKycs]);
+
+  const pendingSubmissionCount = useMemo(() => {
+    return filteredDeals.filter(d => {
+      const norm = normalizeLegacyKycStatus(d.kycStatus, d.verifiedBy);
+      if (norm === 'Verified') return false;
+      const cStatus = resolveCustomerKycStatus(d);
+      return !(
+        cStatus === 'Submitted' ||
+        cStatus === 'Under Verification' ||
+        cStatus === 'Completed' ||
+        cStatus === 'Assisted KYC – Submitted for Verification' ||
+        (d as any).customerKycStatus === 'Assisted KYC – Submitted for Verification'
+      );
+    }).length;
+  }, [filteredDeals, dbKycs]);
+
+  const verifiedCount = useMemo(() => {
+    return filteredDeals.filter(d => {
+      return normalizeLegacyKycStatus(d.kycStatus, d.verifiedBy) === 'Verified';
+    }).length;
+  }, [filteredDeals]);
+
   const getDealKycStatus = (deal: Deal) => {
     const status = getDynamicKycStatus(deal);
     if (status === 'completed') {
@@ -1957,39 +1995,45 @@ const GhlIrmKycView: React.FC = () => {
     {
       key: 'customerName',
       header: 'Name & Contact',
-      width: '210px',
+      width: '240px',
       sortable: true,
-      render: deal => (
-        <div>
-          <div
-            className="kyc-customer-name"
-            style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)', cursor: 'pointer' }}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleOpenCustomerProfile(deal);
-            }}
-            title="Click to view KYC profile"
-          >
-            {deal.customerName}
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
-            {deal.phone && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)' }}>
-                <Phone size={11} color="var(--text-muted)" />
-                <span>{deal.phone}</span>
+      render: deal => {
+        const initial = (deal.customerName || 'U').trim().charAt(0).toUpperCase();
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div className="kyc-row-avatar">{initial}</div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div
+                className="kyc-customer-name"
+                style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)', cursor: 'pointer' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleOpenCustomerProfile(deal);
+                }}
+                title="Click to view KYC profile"
+              >
+                {deal.customerName}
               </div>
-            )}
-            {deal.email && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)' }}>
-                <Mail size={11} color="var(--text-muted)" />
-                <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {deal.email}
-                </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
+                {deal.phone && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)' }}>
+                    <Phone size={11} color="var(--text-muted)" />
+                    <span>{deal.phone}</span>
+                  </div>
+                )}
+                {deal.email && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)' }}>
+                    <Mail size={11} color="var(--text-muted)" />
+                    <span style={{ maxWidth: 170, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {deal.email}
+                    </span>
+                  </div>
+                )}
               </div>
-            )}
+            </div>
           </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       key: 'location',
@@ -2595,13 +2639,59 @@ const GhlIrmKycView: React.FC = () => {
           <div className="page-header" style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <h1 className="page-title">
-                <FileCheck size={24} color="#06b6d4" /> Qualified Investor & KYC Verification
+                <FileCheck size={24} color="#06b6d4" /> Qualified Investor &amp; KYC Verification
               </h1>
               <p className="page-subtitle">
                 SEBI compliance checked, ticket size verified, KYC validated investors ready for investment opportunities.
               </p>
             </div>
+          </div>
 
+          {/* Executive KPI Metric Cards */}
+          <div className="kyc-kpi-container">
+            <div className="kyc-metric-card">
+              <div className="kyc-metric-header">
+                <span className="kyc-metric-label">Total in KYC</span>
+                <div className="kyc-metric-icon kyc-metric-icon--blue">
+                  <Users size={16} />
+                </div>
+              </div>
+              <div className="kyc-metric-val">{totalKycInvestors}</div>
+              <div className="kyc-metric-subtext">Active investors in pipeline</div>
+            </div>
+
+            <div className="kyc-metric-card">
+              <div className="kyc-metric-header">
+                <span className="kyc-metric-label">Awaiting Verification</span>
+                <div className="kyc-metric-icon kyc-metric-icon--amber">
+                  <Clock size={16} />
+                </div>
+              </div>
+              <div className="kyc-metric-val">{awaitingVerificationCount}</div>
+              <div className="kyc-metric-subtext">Ready for compliance review</div>
+            </div>
+
+            <div className="kyc-metric-card">
+              <div className="kyc-metric-header">
+                <span className="kyc-metric-label">Pending Submission</span>
+                <div className="kyc-metric-icon kyc-metric-icon--purple">
+                  <Send size={16} />
+                </div>
+              </div>
+              <div className="kyc-metric-val">{pendingSubmissionCount}</div>
+              <div className="kyc-metric-subtext">Link sent or draft in progress</div>
+            </div>
+
+            <div className="kyc-metric-card">
+              <div className="kyc-metric-header">
+                <span className="kyc-metric-label">Verified &amp; Qualified</span>
+                <div className="kyc-metric-icon kyc-metric-icon--green">
+                  <CheckCircle size={16} />
+                </div>
+              </div>
+              <div className="kyc-metric-val">{verifiedCount}</div>
+              <div className="kyc-metric-subtext">SEBI verified &amp; cleared</div>
+            </div>
           </div>
 
           {/* Inline Error Banner */}
