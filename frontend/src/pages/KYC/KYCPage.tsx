@@ -2009,9 +2009,14 @@ const GhlIrmKycView: React.FC = () => {
       sortable: true,
       render: deal => {
         const capacity = getCustomerFilledCapacity(deal);
-        return (
-          <span style={{ color: '#10b981', fontWeight: 800, fontSize: 13 }}>
+        const isSpecified = capacity && capacity !== '—' && capacity.trim() !== '' && capacity.toLowerCase() !== 'not specified';
+        return isSpecified ? (
+          <span className="kyc-capacity-badge">
             {capacity}
+          </span>
+        ) : (
+          <span className="kyc-not-specified-badge">
+            Not Specified
           </span>
         );
       },
@@ -2022,15 +2027,14 @@ const GhlIrmKycView: React.FC = () => {
       width: '150px',
       render: deal => {
         const pref = getIrmPreferredAssetClass(deal);
-        return (
-          <span
-            style={{
-              fontSize: 12,
-              fontWeight: 600,
-              color: pref !== '—' ? 'var(--text-primary)' : 'var(--text-muted)',
-            }}
-          >
+        const isSpecified = pref && pref !== '—' && pref.trim() !== '' && pref.toLowerCase() !== 'not specified';
+        return isSpecified ? (
+          <span className="kyc-pref-badge">
             {pref}
+          </span>
+        ) : (
+          <span className="kyc-not-specified-badge">
+            Not Specified
           </span>
         );
       },
@@ -2300,16 +2304,20 @@ const GhlIrmKycView: React.FC = () => {
         const isContinue = status === 'continue';
         const initial = (deal.customerName || 'U').trim().charAt(0).toUpperCase();
 
-        const renderField = (label: string, value?: string | number | null) => (
-          <div className="kyc-profile-field">
-            <span className="kyc-profile-label">{label}</span>
-            {value && String(value).trim() && String(value).trim() !== 'Not provided' ? (
-              <span className="kyc-profile-value">{String(value)}</span>
-            ) : (
-              <span className="kyc-profile-value not-provided">Not provided</span>
-            )}
-          </div>
-        );
+        const renderField = (label: string, value?: string | number | null) => {
+          const valStr = value ? String(value).trim() : '';
+          const hasVal = valStr && valStr !== '—' && valStr.toLowerCase() !== 'not provided' && valStr.toLowerCase() !== 'not specified';
+          return (
+            <div className="kyc-profile-field">
+              <span className="kyc-profile-label">{label}</span>
+              {hasVal ? (
+                <span className="kyc-profile-value">{valStr}</span>
+              ) : (
+                <span className="kyc-profile-value not-provided">Not specified</span>
+              )}
+            </div>
+          );
+        };
 
         return (
           <div className="kyc-profile-container">
@@ -4353,20 +4361,36 @@ const OriginalKYCView: React.FC = () => {
       key: 'investmentRange',
       header: 'Investment Capacity',
       sortable: true,
-      render: deal => (
-        <span style={{ color: '#10b981', fontWeight: 800, fontSize: 13 }}>
-          {deal.investmentRange || (deal.value > 0 ? formatCurrency(deal.value) : '—')}
-        </span>
-      ),
+      render: deal => {
+        const val = deal.investmentRange || (deal.value > 0 ? formatCurrency(deal.value) : null);
+        const isSpecified = val && val !== '—' && val.trim() !== '' && val.toLowerCase() !== 'not specified';
+        return isSpecified ? (
+          <span className="kyc-capacity-badge">
+            {val}
+          </span>
+        ) : (
+          <span className="kyc-not-specified-badge">
+            Not Specified
+          </span>
+        );
+      },
     },
     {
       key: 'preferredAssetClass',
       header: 'Preferred Asset Class',
-      render: deal => (
-        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-          {resolvePreferredAssetClass(deal, storageService.getLeads(tenant?.id), storageService.getCustomers(tenant?.id))}
-        </span>
-      ),
+      render: deal => {
+        const pref = resolvePreferredAssetClass(deal, storageService.getLeads(tenant?.id), storageService.getCustomers(tenant?.id));
+        const isSpecified = pref && pref !== '—' && pref.trim() !== '' && pref.toLowerCase() !== 'not specified';
+        return isSpecified ? (
+          <span className="kyc-pref-badge">
+            {pref}
+          </span>
+        ) : (
+          <span className="kyc-not-specified-badge">
+            Not Specified
+          </span>
+        );
+      },
     },
     {
       key: 'kycStatus',
