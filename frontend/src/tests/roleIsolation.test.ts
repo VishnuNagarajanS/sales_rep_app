@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { CallDisposition } from '../types';
+import { getAgentRoleInfo } from '../utils/agentRoleUtils';
 
 describe('Role Feature Isolation & Boundary Enforcement', () => {
   // Navigation section models
@@ -184,5 +185,29 @@ describe('Role Feature Isolation & Boundary Enforcement', () => {
     // Skip for Now is removed across the app
     const isSkipAllowed = false;
     expect(isSkipAllowed).toBe(false);
+  });
+
+  it('correctly maps agent display roles: Vishnu as GHL Admin, Naveen as Sales Executive, Dhinakaran as IRM', () => {
+    // Vishnu must ALWAYS be GHL Admin
+    const vishnuInfo = getAgentRoleInfo('Vishnu', '2');
+    expect(vishnuInfo.name).toBe('Vishnu');
+    expect(vishnuInfo.role).toBe('GHL Admin');
+    expect(vishnuInfo.badgeClass).toBe('badge-role-admin');
+
+    // Naveen must ALWAYS be Sales Executive (never IRM)
+    const naveenInfo = getAgentRoleInfo('Naveen', '3');
+    expect(naveenInfo.name).toBe('Naveen');
+    expect(naveenInfo.role).toBe('Sales Executive');
+    expect(naveenInfo.badgeClass).toBe('badge-role-sales');
+
+    // Dhinakaran must ALWAYS be IRM
+    const dhinaInfo = getAgentRoleInfo('Dhinakaran', '5');
+    expect(dhinaInfo.name).toBe('Dhinakaran');
+    expect(dhinaInfo.role).toBe('IRM');
+    expect(dhinaInfo.badgeClass).toBe('badge-role-irm');
+
+    // Protection test: even if a lead had fallbackRole IRM, Naveen is strictly a Sales Executive
+    const protectedNaveen = getAgentRoleInfo('Naveen', '3', 'IRM');
+    expect(protectedNaveen.role).toBe('Sales Executive');
   });
 });

@@ -43,6 +43,7 @@ import { FilterBar } from '../../components/common/FilterBar';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
+import { getAgentRoleInfo } from '../../utils/agentRoleUtils';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
 import './LeadsPage.css';
 
@@ -1434,31 +1435,37 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   };
 
   const getLeadDisplayAgent = (l: Lead) => {
-    const isCreatedByIrm =
-      l.assignedByName === 'Created by IRM' ||
-      (l.assignedById && user?.id && String(l.assignedById) === String(user.id)) ||
-      l.createdBy === user?.name;
+    const isDhinaOrIrmAgent =
+      (l.assignedAgentName && l.assignedAgentName.toLowerCase().includes('dhina')) ||
+      (l.assignedByName && l.assignedByName.toLowerCase().includes('dhina')) ||
+      String(l.assignedAgentId) === '5' ||
+      String(l.assignedById) === '5';
 
-    if (isCreatedByIrm) {
-      return {
-        name: user?.name || l.assignedAgentName || 'Dhinakaran',
-        role: 'IRM' as const,
-      };
+    // When IRM user is viewing or lead is explicitly assigned to Dhinakaran
+    if (isIrm || (isDhinaOrIrmAgent && !l.assignedAgentName?.toLowerCase().includes('naveen') && String(l.assignedAgentId) !== '3')) {
+      const isLeadCreatedByIrm =
+        isIrm && (
+          (l.assignedById && user?.id && String(l.assignedById) === String(user.id)) ||
+          l.createdBy === user?.name ||
+          l.assignedByName === 'Created by IRM'
+        );
+      if (isLeadCreatedByIrm || isDhinaOrIrmAgent) {
+        return getAgentRoleInfo(l.assignedAgentName || l.assignedByName || (isIrm ? user?.name : 'Dhinakaran') || 'Dhinakaran', l.assignedAgentId || l.assignedById, 'IRM');
+      }
     }
 
-    const salesAgentName =
+    const assignedName =
+      (l.assignedAgentName && l.assignedAgentName !== 'Created by IRM' ? l.assignedAgentName : null) ||
       (l.assignedByName && l.assignedByName !== 'Created by IRM' ? l.assignedByName : null) ||
       l.customFields?.qualifiedByAgentName ||
       l.customFields?.assignedByAgentName ||
       l.customFields?.agentName ||
-      (l.assignedById === '3' || l.assignedById === 3 ? 'Naveen' : null) ||
-      (l.assignedById === '2' || l.assignedById === 2 ? 'Vishnu' : null) ||
+      (String(l.assignedAgentId) === '3' || String(l.assignedById) === '3' ? 'Naveen' : null) ||
+      (String(l.assignedAgentId) === '2' || String(l.assignedById) === '2' ? 'Vishnu' : null) ||
+      (user?.role?.code === 'sales_executive' ? user?.name : 'Naveen') ||
       'Naveen';
 
-    return {
-      name: salesAgentName,
-      role: 'Sales Executive' as const,
-    };
+    return getAgentRoleInfo(assignedName, l.assignedAgentId || l.assignedById);
   };
 
   const assignedAgentColumn: Column<Lead> = {
@@ -1471,7 +1478,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       return (
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{agentInfo.name}</span>
-          <span className={`badge-role-inline ${agentInfo.role === 'IRM' ? 'badge-role-irm' : 'badge-role-sales'}`}>
+          <span className={`badge-role-inline ${agentInfo.badgeClass}`}>
             {agentInfo.role}
           </span>
         </div>
@@ -1825,7 +1832,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                 <div className="lead-quick-banner">
                   <div className="lead-assigned-note" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     Assigned : <strong>{getLeadDisplayAgent(selectedLead).name}</strong>
-                    <span className={`badge-role-inline ${getLeadDisplayAgent(selectedLead).role === 'IRM' ? 'badge-role-irm' : 'badge-role-sales'}`}>
+                    <span className={`badge-role-inline ${getLeadDisplayAgent(selectedLead).badgeClass}`}>
                       {getLeadDisplayAgent(selectedLead).role}
                     </span>
                   </div>

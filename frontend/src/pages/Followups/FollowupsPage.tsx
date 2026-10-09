@@ -37,6 +37,7 @@ import { DateRangePreset } from '../../types/kanban';
 import { adminUserService } from '../../services/adminUserService';
 import { fetchIrmAllLeads, IrmAllLeadsSummary } from '../../services/irmAllLeadsService';
 import { User as UserModel } from '../../types';
+import { getAgentRoleInfo } from '../../utils/agentRoleUtils';
 import './FollowupsPage.css';
 import '../Leads/LeadsPage.css';
 
@@ -699,7 +700,7 @@ export const FollowupsPage: React.FC = () => {
   };
 
   // Helper to determine the display agent and role for a followup card or drawer
-  const getFollowupDisplayAgent = (f: Followup): { label: string; name: string; role: 'Sales Executive' | 'IRM' } => {
+  const getFollowupDisplayAgent = (f: Followup): { label: string; name: string; role: string; badgeClass: string } => {
     const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
     const matchingLead = allLeads.find(l => {
       const idMatch = f.contactId && String(f.contactId) === String(l.id);
@@ -707,20 +708,34 @@ export const FollowupsPage: React.FC = () => {
       return idMatch || Boolean(fPhone && lPhone && fPhone === lPhone);
     });
 
-    const isCreatedByIrm =
-      f.assignedByName === 'Created by IRM' ||
-      matchingLead?.assignedByName === 'Created by IRM' ||
-      (matchingLead?.assignedById && user?.id && String(matchingLead.assignedById) === String(user.id)) ||
-      (f.assignedById && user?.id && String(f.assignedById) === String(user.id)) ||
-      matchingLead?.createdBy === user?.name ||
-      f.createdBy === user?.name;
+    const isDhinaOrIrmAgent =
+      (f.assignedByName && f.assignedByName.toLowerCase().includes('dhina')) ||
+      (matchingLead?.assignedByName && matchingLead.assignedByName.toLowerCase().includes('dhina')) ||
+      (f.assignedAgentName && f.assignedAgentName.toLowerCase().includes('dhina')) ||
+      (matchingLead?.assignedAgentName && matchingLead.assignedAgentName.toLowerCase().includes('dhina')) ||
+      String(f.assignedById) === '5' ||
+      String(matchingLead?.assignedById) === '5';
 
-    if (isCreatedByIrm) {
-      return {
-        label: isIrm ? 'Assigned Agent' : 'Assignee',
-        name: user?.name || f.assignedAgentName || 'IRM',
-        role: 'IRM',
-      };
+    if (isIrm || (isDhinaOrIrmAgent && !f.assignedAgentName?.toLowerCase().includes('naveen') && String(f.assignedById) !== '3')) {
+      const isCreatedByIrm =
+        isIrm && (
+          (matchingLead?.assignedById && user?.id && String(matchingLead.assignedById) === String(user.id)) ||
+          (f.assignedById && user?.id && String(f.assignedById) === String(user.id)) ||
+          matchingLead?.createdBy === user?.name ||
+          f.createdBy === user?.name ||
+          f.assignedByName === 'Created by IRM' ||
+          matchingLead?.assignedByName === 'Created by IRM'
+        );
+
+      if (isCreatedByIrm || isDhinaOrIrmAgent) {
+        const info = getAgentRoleInfo(f.assignedAgentName || matchingLead?.assignedAgentName || (isIrm ? user?.name : 'Dhinakaran') || 'Dhinakaran', f.assignedById || matchingLead?.assignedById, 'IRM');
+        return {
+          label: isIrm ? 'Assigned Agent' : 'Assignee',
+          name: info.name,
+          role: info.role,
+          badgeClass: info.badgeClass,
+        };
+      }
     }
 
     const salesAgentName =
@@ -729,32 +744,19 @@ export const FollowupsPage: React.FC = () => {
       matchingLead?.customFields?.qualifiedByAgentName ||
       matchingLead?.customFields?.assignedByAgentName ||
       matchingLead?.customFields?.agentName ||
-      (matchingLead?.assignedById && users.find(u => String(u.id) === String(matchingLead.assignedById))?.name) ||
+      f.assignedAgentName ||
+      matchingLead?.assignedAgentName ||
       (String(matchingLead?.assignedById) === '3' || String(f.assignedById) === '3' ? 'Naveen' : null) ||
       (String(matchingLead?.assignedById) === '2' || String(f.assignedById) === '2' ? 'Vishnu' : null) ||
-      null;
+      (user?.role?.code === 'sales_executive' ? user?.name : 'Naveen') ||
+      'Naveen';
 
-    if (salesAgentName) {
-      return {
-        label: 'Assigned Agent',
-        name: salesAgentName,
-        role: 'Sales Executive',
-      };
-    }
-
-    if (isIrm) {
-      return {
-        label: 'Assigned Agent',
-        name: 'Naveen',
-        role: 'Sales Executive',
-      };
-    }
-
-    const role = getFollowupRole(f);
+    const info = getAgentRoleInfo(salesAgentName, f.assignedById || matchingLead?.assignedById);
     return {
-      label: 'Assignee',
-      name: f.assignedAgentName || user?.name || 'Agent',
-      role,
+      label: 'Assigned Agent',
+      name: info.name,
+      role: info.role,
+      badgeClass: info.badgeClass,
     };
   };
 
@@ -1511,10 +1513,7 @@ export const FollowupsPage: React.FC = () => {
                         ⏰ {f.scheduledAt}
                       </span>
                       <span className="followup-assignee">• {agentInfo.label}: {agentInfo.name}</span>
-                      <span
-                        className={`badge-role-inline ${agentInfo.role === 'IRM' ? 'badge-role-irm' : 'badge-role-sales'
-                          }`}
-                      >
+                      <span className={`badge-role-inline ${agentInfo.badgeClass}`}>
                         {agentInfo.role}
                       </span>
                     </div>

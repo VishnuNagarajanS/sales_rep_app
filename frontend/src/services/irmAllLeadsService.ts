@@ -196,7 +196,7 @@ export async function fetchIrmAllLeads(
       notes: l.notes,
       assignedAgentId: l.assignedAgentId ? Number(l.assignedAgentId) : undefined,
       assignedAgentName: l.assignedAgentName || currentUserName || 'Assigned IRM',
-      assignedByName: l.assignedByName || (l.assignedById && String(l.assignedById) !== String(l.assignedAgentId) ? 'Sales Agent' : 'Created by IRM'),
+      assignedByName: l.assignedByName || (String(l.assignedById) === '2' ? 'Vishnu' : String(l.assignedById) === '3' ? 'Naveen' : (l.assignedById && String(l.assignedById) !== String(l.assignedAgentId) ? 'Sales Agent' : 'Created by IRM')),
       assignedAt: l.assignedAt || l.createdAt,
       createdAt: l.createdAt,
       updatedAt: (l as any).updatedAt || l.createdAt,

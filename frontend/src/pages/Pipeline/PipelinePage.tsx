@@ -164,11 +164,13 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   const leadToPipelineCard = (lead: Lead): Deal => {
     const isLeadCreatedByIrm =
       lead.assignedByName === 'Created by IRM' ||
-      (lead.assignedById && user?.id && String(lead.assignedById) === String(user.id)) ||
-      lead.createdBy === user?.name;
+      (isIrm && (
+        (lead.assignedById && user?.id && String(lead.assignedById) === String(user.id)) ||
+        lead.createdBy === user?.name
+      ));
     const dealAgentName = isIrm
       ? (isLeadCreatedByIrm ? (user?.name || 'Dhinakaran') : (lead.assignedByName || 'Naveen'))
-      : (lead.assignedAgentName || user?.name || '');
+      : (lead.assignedAgentName || user?.name || 'Naveen');
 
     return {
       id: lead.id,
@@ -202,11 +204,13 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   const followupToPipelineCard = (followup: Followup): Deal => {
     const isFuCreatedByIrm =
       followup.assignedByName === 'Created by IRM' ||
-      (followup.assignedById && user?.id && String(followup.assignedById) === String(user.id)) ||
-      followup.createdBy === user?.name;
+      (isIrm && (
+        (followup.assignedById && user?.id && String(followup.assignedById) === String(user.id)) ||
+        followup.createdBy === user?.name
+      ));
     const dealAgentName = isIrm
       ? (isFuCreatedByIrm ? (user?.name || 'Dhinakaran') : (followup.assignedByName || 'Naveen'))
-      : (followup.assignedAgentName || user?.name || '');
+      : (followup.assignedAgentName || user?.name || 'Naveen');
 
     return {
       id: followup.id,

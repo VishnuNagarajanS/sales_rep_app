@@ -19,6 +19,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { DataTable, Column } from '../../components/common/DataTable';
 import { fetchIrmAllLeads, IrmAllLeadItem, IrmAllLeadsSummary } from '../../services/irmAllLeadsService';
+import { getAgentRoleInfo } from '../../utils/agentRoleUtils';
 import './AllLeadsPage.css';
 
 interface AllLeadsPageProps {
@@ -90,11 +91,15 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
   const agentOptions = useMemo(() => {
     const set = new Set<string>();
     scopedLeads.forEach(l => {
-      const isIrm =
+      const isExplicitNonIrm =
+        l.assignedByName &&
+        (l.assignedByName.toLowerCase().includes('vishnu') || l.assignedByName.toLowerCase().includes('naveen'));
+      const isIrm = !isExplicitNonIrm && (
         !l.assignedByName ||
         l.assignedByName === 'Created by IRM' ||
         !l.assignedById ||
-        l.assignedById === l.assignedAgentId;
+        l.assignedById === l.assignedAgentId
+      );
       const name = isIrm ? (user?.name || 'Dhinakaran') : (l.assignedByName || 'Sales Agent');
       if (name) {
         set.add(name);
@@ -112,11 +117,15 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
   const agentFilteredLeads = useMemo(() => {
     if (selectedAgentFilter === 'all') return scopedLeads;
     return scopedLeads.filter(l => {
-      const isIrm =
+      const isExplicitNonIrm =
+        l.assignedByName &&
+        (l.assignedByName.toLowerCase().includes('vishnu') || l.assignedByName.toLowerCase().includes('naveen'));
+      const isIrm = !isExplicitNonIrm && (
         !l.assignedByName ||
         l.assignedByName === 'Created by IRM' ||
         !l.assignedById ||
-        l.assignedById === l.assignedAgentId;
+        l.assignedById === l.assignedAgentId
+      );
       const name = isIrm ? (user?.name || 'Dhinakaran') : (l.assignedByName || 'Sales Agent');
       return name === selectedAgentFilter;
     });
@@ -258,21 +267,26 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
       header: 'ASSIGNED INFO',
       sortable: true,
       render: lead => {
-        const isIrm =
+        const isExplicitNonIrm =
+          lead.assignedByName &&
+          (lead.assignedByName.toLowerCase().includes('vishnu') || lead.assignedByName.toLowerCase().includes('naveen'));
+        const isIrm = !isExplicitNonIrm && (
           !lead.assignedByName ||
           lead.assignedByName === 'Created by IRM' ||
           !lead.assignedById ||
-          lead.assignedById === lead.assignedAgentId;
+          lead.assignedById === lead.assignedAgentId
+        );
         const displayName = isIrm ? (user?.name || 'Dhinakaran') : (lead.assignedByName || 'Sales Agent');
+        const agentInfo = getAgentRoleInfo(displayName, lead.assignedById, isIrm ? 'IRM' : undefined);
         return (
           <div>
             <div className="all-leads-assigned-name" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <User size={12} color={isIrm ? '#8b5cf6' : '#3b82f6'} />
-              <span style={{ fontWeight: 600, color: isIrm ? '#c084fc' : 'var(--text-primary)' }}>
-                {displayName}
+              <User size={12} color={agentInfo.iconColor} />
+              <span style={{ fontWeight: 600, color: agentInfo.badgeClass === 'badge-role-admin' ? '#ef4444' : (agentInfo.badgeClass === 'badge-role-irm' ? '#c084fc' : 'var(--text-primary)') }}>
+                {agentInfo.name}
               </span>
-              <span className={`badge-role-inline ${isIrm ? 'badge-role-irm' : 'badge-role-sales'}`}>
-                {isIrm ? 'IRM' : 'Sales Executive'}
+              <span className={`badge-role-inline ${agentInfo.badgeClass}`}>
+                {agentInfo.role}
               </span>
             </div>
             <div className="all-leads-assigned-date">
