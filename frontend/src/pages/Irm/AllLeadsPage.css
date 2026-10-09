@@ -270,10 +270,43 @@
 }
 
 /* Table Row Elements */
+.all-leads-contact-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.all-leads-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .all-leads-investor-name {
   font-size: 14px;
   font-weight: 700;
   color: var(--text-primary);
+}
+
+.all-leads-location-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1.5px 7px;
+  border-radius: 12px;
+  background: rgba(14, 165, 233, 0.12);
+  color: #0284c7;
+  border: 1px solid rgba(14, 165, 233, 0.25);
+  text-transform: capitalize;
+}
+
+.dark-theme .all-leads-location-badge {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.3);
 }
 
 .all-leads-investor-meta {
@@ -281,7 +314,6 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 12px;
-  margin-top: 4px;
   font-size: 12px;
   color: var(--text-muted);
 }
@@ -290,6 +322,27 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+.all-leads-assigned-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.all-leads-assigned-agent {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.all-leads-assigned-role-row {
+  display: flex;
+  align-items: center;
+  margin-top: 1px;
 }
 
 .all-leads-assigned-name {
@@ -307,7 +360,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin-top: 3px;
+  margin-top: 2px;
 }
 
 /* Stage Badges */
@@ -421,9 +474,9 @@
   align-items: center;
   font-size: 11px;
   font-weight: 600;
-  padding: 2px 7px;
+  padding: 2px 8px;
   border-radius: 12px;
-  margin-left: 2px;
+  margin-left: 0;
 }
 
 .badge-role-sales {

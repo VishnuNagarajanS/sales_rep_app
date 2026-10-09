@@ -238,19 +238,21 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
       header: 'NAME & CONTACT',
       sortable: true,
       render: lead => (
-        <div>
-          <div className="all-leads-investor-name">{lead.name}</div>
+        <div className="all-leads-contact-cell">
+          <div className="all-leads-name-row">
+            <span className="all-leads-investor-name">{lead.name}</span>
+            {lead.location && (
+              <span className="all-leads-location-badge">
+                <MapPin size={11} />
+                <span>{lead.location}</span>
+              </span>
+            )}
+          </div>
           <div className="all-leads-investor-meta">
             <span className="all-leads-meta-span font-mono">
               <Phone size={11} />
               {lead.phone}
             </span>
-            {lead.location && (
-              <span className="all-leads-meta-span">
-                <MapPin size={11} />
-                {lead.location}
-              </span>
-            )}
             {lead.email && (
               <span className="all-leads-meta-span">
                 <Mail size={11} />
@@ -268,12 +270,14 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
       render: lead => {
         const agentInfo = getAssigningSalesAgentInfo(lead as any);
         return (
-          <div>
-            <div className="all-leads-assigned-name" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <div className="all-leads-assigned-cell">
+            <div className="all-leads-assigned-agent">
               <User size={12} color={agentInfo.iconColor} />
               <span style={{ fontWeight: 600, color: agentInfo.badgeClass === 'badge-role-admin' ? '#ef4444' : (agentInfo.badgeClass === 'badge-role-irm' ? '#c084fc' : 'var(--text-primary)') }}>
                 {agentInfo.name}
               </span>
+            </div>
+            <div className="all-leads-assigned-role-row">
               <span className={`badge-role-inline ${agentInfo.badgeClass}`}>
                 {agentInfo.role}
               </span>
