@@ -1928,12 +1928,12 @@ const GhlIrmKycView: React.FC = () => {
     });
   };
 
-  const filteredDeals = deals;
+  const [activeKpiFilter, setActiveKpiFilter] = useState<'all' | 'awaiting' | 'pending' | 'verified'>('all');
 
-  const totalKycInvestors = filteredDeals.length;
+  const totalKycInvestors = deals.length;
 
   const awaitingVerificationCount = useMemo(() => {
-    return filteredDeals.filter(d => {
+    return deals.filter(d => {
       const norm = normalizeLegacyKycStatus(d.kycStatus, d.verifiedBy);
       if (norm === 'Verified') return false;
       const cStatus = resolveCustomerKycStatus(d);
@@ -1945,10 +1945,10 @@ const GhlIrmKycView: React.FC = () => {
         (d as any).customerKycStatus === 'Assisted KYC – Submitted for Verification'
       );
     }).length;
-  }, [filteredDeals, dbKycs]);
+  }, [deals, dbKycs]);
 
   const pendingSubmissionCount = useMemo(() => {
-    return filteredDeals.filter(d => {
+    return deals.filter(d => {
       const norm = normalizeLegacyKycStatus(d.kycStatus, d.verifiedBy);
       if (norm === 'Verified') return false;
       const cStatus = resolveCustomerKycStatus(d);
@@ -1960,13 +1960,49 @@ const GhlIrmKycView: React.FC = () => {
         (d as any).customerKycStatus === 'Assisted KYC – Submitted for Verification'
       );
     }).length;
-  }, [filteredDeals, dbKycs]);
+  }, [deals, dbKycs]);
 
   const verifiedCount = useMemo(() => {
-    return filteredDeals.filter(d => {
+    return deals.filter(d => {
       return normalizeLegacyKycStatus(d.kycStatus, d.verifiedBy) === 'Verified';
     }).length;
-  }, [filteredDeals]);
+  }, [deals]);
+
+  const filteredDeals = useMemo(() => {
+    if (activeKpiFilter === 'all') return deals;
+    if (activeKpiFilter === 'awaiting') {
+      return deals.filter(d => {
+        const norm = normalizeLegacyKycStatus(d.kycStatus, d.verifiedBy);
+        if (norm === 'Verified') return false;
+        const cStatus = resolveCustomerKycStatus(d);
+        return (
+          cStatus === 'Submitted' ||
+          cStatus === 'Under Verification' ||
+          cStatus === 'Completed' ||
+          cStatus === 'Assisted KYC – Submitted for Verification' ||
+          (d as any).customerKycStatus === 'Assisted KYC – Submitted for Verification'
+        );
+      });
+    }
+    if (activeKpiFilter === 'pending') {
+      return deals.filter(d => {
+        const norm = normalizeLegacyKycStatus(d.kycStatus, d.verifiedBy);
+        if (norm === 'Verified') return false;
+        const cStatus = resolveCustomerKycStatus(d);
+        return !(
+          cStatus === 'Submitted' ||
+          cStatus === 'Under Verification' ||
+          cStatus === 'Completed' ||
+          cStatus === 'Assisted KYC – Submitted for Verification' ||
+          (d as any).customerKycStatus === 'Assisted KYC – Submitted for Verification'
+        );
+      });
+    }
+    if (activeKpiFilter === 'verified') {
+      return deals.filter(d => normalizeLegacyKycStatus(d.kycStatus, d.verifiedBy) === 'Verified');
+    }
+    return deals;
+  }, [deals, activeKpiFilter, dbKycs]);
 
   const getDealKycStatus = (deal: Deal) => {
     const status = getDynamicKycStatus(deal);
@@ -2649,7 +2685,13 @@ const GhlIrmKycView: React.FC = () => {
 
           {/* Executive KPI Metric Cards */}
           <div className="kyc-kpi-container">
-            <div className="kyc-metric-card">
+            <div
+              className={`kyc-metric-card ${activeKpiFilter === 'all' ? 'active' : ''}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => setActiveKpiFilter('all')}
+              title={activeKpiFilter === 'all' ? 'Showing all investors' : 'Click to show all investors'}
+            >
               <div className="kyc-metric-header">
                 <span className="kyc-metric-label">Total in KYC</span>
                 <div className="kyc-metric-icon kyc-metric-icon--blue">
@@ -2657,10 +2699,18 @@ const GhlIrmKycView: React.FC = () => {
                 </div>
               </div>
               <div className="kyc-metric-val">{totalKycInvestors}</div>
-              <div className="kyc-metric-subtext">Active investors in pipeline</div>
+              <div className="kyc-metric-subtext">
+                {activeKpiFilter === 'all' ? 'Showing all investors' : 'Click to view all'}
+              </div>
             </div>
 
-            <div className="kyc-metric-card">
+            <div
+              className={`kyc-metric-card ${activeKpiFilter === 'awaiting' ? 'active' : ''}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => setActiveKpiFilter(prev => prev === 'awaiting' ? 'all' : 'awaiting')}
+              title={activeKpiFilter === 'awaiting' ? 'Click to reset filter' : 'Click to filter awaiting verification'}
+            >
               <div className="kyc-metric-header">
                 <span className="kyc-metric-label">Awaiting Verification</span>
                 <div className="kyc-metric-icon kyc-metric-icon--amber">
@@ -2668,10 +2718,18 @@ const GhlIrmKycView: React.FC = () => {
                 </div>
               </div>
               <div className="kyc-metric-val">{awaitingVerificationCount}</div>
-              <div className="kyc-metric-subtext">Ready for compliance review</div>
+              <div className="kyc-metric-subtext">
+                {activeKpiFilter === 'awaiting' ? '● Filter active (Click to reset)' : 'Ready for compliance review'}
+              </div>
             </div>
 
-            <div className="kyc-metric-card">
+            <div
+              className={`kyc-metric-card ${activeKpiFilter === 'pending' ? 'active' : ''}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => setActiveKpiFilter(prev => prev === 'pending' ? 'all' : 'pending')}
+              title={activeKpiFilter === 'pending' ? 'Click to reset filter' : 'Click to filter pending submission'}
+            >
               <div className="kyc-metric-header">
                 <span className="kyc-metric-label">Pending Submission</span>
                 <div className="kyc-metric-icon kyc-metric-icon--purple">
@@ -2679,10 +2737,18 @@ const GhlIrmKycView: React.FC = () => {
                 </div>
               </div>
               <div className="kyc-metric-val">{pendingSubmissionCount}</div>
-              <div className="kyc-metric-subtext">Link sent or draft in progress</div>
+              <div className="kyc-metric-subtext">
+                {activeKpiFilter === 'pending' ? '● Filter active (Click to reset)' : 'Link sent or draft in progress'}
+              </div>
             </div>
 
-            <div className="kyc-metric-card">
+            <div
+              className={`kyc-metric-card ${activeKpiFilter === 'verified' ? 'active' : ''}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => setActiveKpiFilter(prev => prev === 'verified' ? 'all' : 'verified')}
+              title={activeKpiFilter === 'verified' ? 'Click to reset filter' : 'Click to filter verified & qualified'}
+            >
               <div className="kyc-metric-header">
                 <span className="kyc-metric-label">Verified &amp; Qualified</span>
                 <div className="kyc-metric-icon kyc-metric-icon--green">
@@ -2690,7 +2756,9 @@ const GhlIrmKycView: React.FC = () => {
                 </div>
               </div>
               <div className="kyc-metric-val">{verifiedCount}</div>
-              <div className="kyc-metric-subtext">SEBI verified &amp; cleared</div>
+              <div className="kyc-metric-subtext">
+                {activeKpiFilter === 'verified' ? '● Filter active (Click to reset)' : 'SEBI verified & cleared'}
+              </div>
             </div>
           </div>
 
