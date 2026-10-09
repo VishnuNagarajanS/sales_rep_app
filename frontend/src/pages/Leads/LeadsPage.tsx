@@ -356,7 +356,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
   // GHL Admin assign-mode state
   const isGhlAdmin =
-    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1' || tenant?.name?.toLowerCase().includes('ghl') || user?.companySlug === 'ghl') &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
   const [assignMode, setAssignMode] = useState<'manual' | 'auto'>('manual');
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
@@ -515,7 +515,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     };
   }, [tenant?.id, isGhlAdmin]);
 
-  const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
+  const isGhlSalesExec =
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1' || tenant?.name?.toLowerCase().includes('ghl') || user?.companySlug === 'ghl') &&
+    user?.role?.code === 'sales_executive';
   const ghlPendingFollowups = isGhlSalesExec
     ? (storageService.getFollowups(tenant?.id) || []).filter(f => f.status === 'Pending')
     : [];
@@ -1576,7 +1578,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
             aria-label={`Call ${l.name}`}
             onClick={e => {
               e.stopPropagation();
-              initiateCall(l.name, l.phone, 'lead', l.id, undefined, 'my_leads');
+              initiateCall(l.name, l.phone, 'lead', l.id, undefined, isIrm ? 'my_leads' : undefined);
             }}
           >
             <Phone size={12} color="#ffffff" />
@@ -1786,7 +1788,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
             <button
               className="btn btn-call"
               onClick={() => {
-                if (selectedLead) initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, 'my_leads');
+                if (selectedLead) initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, isIrm ? 'my_leads' : undefined);
               }}
             >
               <Phone size={14} /> Call Lead
@@ -1965,7 +1967,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                   contactType="lead"
                   tenantId={tenant?.id}
                   tenantName={tenant?.name}
-                  onCall={() => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, 'my_leads')}
+                  onCall={() => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, isIrm ? 'my_leads' : undefined)}
                   sectionsOnly={['callRecordings']}
                 />
               </>

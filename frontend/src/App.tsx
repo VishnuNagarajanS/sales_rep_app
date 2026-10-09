@@ -201,7 +201,7 @@ export const App: React.FC = () => {
 
   const roleCode = user?.role?.code;
   const isGhlAdmin =
-    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1' || tenant?.name?.toLowerCase().includes('ghl') || user?.companySlug === 'ghl') &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
 
   // Set default route for IRM user
@@ -212,7 +212,7 @@ export const App: React.FC = () => {
         setCurrentRoute('dashboard');
         sessionStorage.setItem('nexus_current_route', 'dashboard');
       }
-    } else if (user?.role?.code === 'sales_executive' && currentRoute === 'kyc') {
+    } else if (user?.role?.code === 'sales_executive' && (currentRoute === 'kyc' || currentRoute === 'all-leads' || currentRoute === 'irm-other' || currentRoute === 'other' || currentRoute === 'investors' || currentRoute === 'opportunities')) {
       setCurrentRoute('dashboard');
       sessionStorage.setItem('nexus_current_route', 'dashboard');
     }
@@ -798,25 +798,41 @@ export const App: React.FC = () => {
           </ProtectedRoute>
         )
       ) : currentRoute === 'investors' ? (
-        <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
-          <InvestorsPage />
-        </ProtectedRoute>
+        user?.role?.code === 'sales_executive' ? (
+          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+        ) : (
+          <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
+            <InvestorsPage />
+          </ProtectedRoute>
+        )
       ) : currentRoute === 'consultations' ? (
         <ProtectedRoute permission={PERMISSIONS.CONSULTATIONS_VIEW}>
           <ConsultationsPage />
         </ProtectedRoute>
       ) : currentRoute === 'opportunities' ? (
-        <ProtectedRoute permission={PERMISSIONS.OPPORTUNITIES_VIEW}>
-          <OpportunitiesPage />
-        </ProtectedRoute>
+        user?.role?.code === 'sales_executive' ? (
+          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+        ) : (
+          <ProtectedRoute permission={PERMISSIONS.OPPORTUNITIES_VIEW}>
+            <OpportunitiesPage />
+          </ProtectedRoute>
+        )
       ) : currentRoute === 'not-interested' ? (
-        <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
-          <NotInterestedPage />
-        </ProtectedRoute>
+        user?.role?.code === 'irm' ? (
+          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+        ) : (
+          <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
+            <NotInterestedPage />
+          </ProtectedRoute>
+        )
       ) : currentRoute === 'junk' ? (
-        <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
-          <JunkPage />
-        </ProtectedRoute>
+        user?.role?.code === 'irm' ? (
+          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+        ) : (
+          <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
+            <JunkPage />
+          </ProtectedRoute>
+        )
       ) : currentRoute === 'chat' ? (
         <ChatPage onNavigate={navigate} />
       ) : currentRoute === 'smarty-ai' ? (
@@ -837,7 +853,11 @@ export const App: React.FC = () => {
         <LeaveRequestsPage onNavigate={navigate} />
       ) : currentRoute === 'work-handover' ? (
         <ProtectedRoute permission={PERMISSIONS.USERS_VIEW}>
-          <WorkHandoverPage initialParams={navExtraState} onNavigate={navigate} />
+          {isGhlAdmin ? (
+            <WorkHandoverPage initialParams={navExtraState} onNavigate={navigate} />
+          ) : (
+            <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+          )}
         </ProtectedRoute>
       ) : currentRoute === 'company-settings' ? (
         <ProtectedRoute permission={PERMISSIONS.SETTINGS_VIEW}>
@@ -848,7 +868,11 @@ export const App: React.FC = () => {
           <CompanyAuditPage />
         </ProtectedRoute>
       ) : currentRoute === 'irm-other' || currentRoute === 'other' ? (
-        <IrmOtherPage />
+        user?.role?.code !== 'irm' && !isGhlAdmin && !isSuperAdmin ? (
+          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+        ) : (
+          <IrmOtherPage />
+        )
       ) : (
         <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
       )}

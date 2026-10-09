@@ -65,17 +65,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
   const [isCollapseHovered, setIsCollapseHovered] = useState(false);
 
   const roleCode = user?.role?.code;
+  const isSuperAdminUser = isSuperAdmin || roleCode === 'super_admin';
+  const isIrm = roleCode === 'irm';
+  const isGhlIrm = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1' || tenant?.name?.toLowerCase().includes('ghl') || user?.companySlug === 'ghl' || user?.companyName?.toLowerCase().includes('ghl')) && isIrm;
+  const isSalesExec = roleCode === 'sales_executive';
   const isGhlAdmin =
-    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1' || tenant?.name?.toLowerCase().includes('ghl') || user?.companySlug === 'ghl' || user?.companyName?.toLowerCase().includes('ghl')) &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
-  const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
-  const isIrm = user?.role?.code === 'irm';
-  const isGhlIrm = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.name === 'GHL India Ventures' || user?.companySlug === 'ghl' || user?.companyName === 'GHL India Ventures') && isIrm;
 
   const [pendingFollowupsCount, setPendingFollowupsCount] = useState(0);
 
   useEffect(() => {
-    if (!isGhlSalesExec || !tenant?.id) {
+    if (!isSalesExec || !tenant?.id) {
       setPendingFollowupsCount(0);
       return;
     }
@@ -106,7 +107,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
       clearTimeout(timeoutId);
       window.removeEventListener('nexus_storage_updated', handleDebouncedUpdate);
     };
-  }, [tenant?.id, isGhlSalesExec, user?.id, user?.name]);
+  }, [tenant?.id, isSalesExec, user?.id, user?.name]);
 
   const companyId = (user?.companyId as string | undefined) ?? tenant?.id ?? '';
   const [unreadChatCount, setUnreadChatCount] = useState(0);
@@ -242,8 +243,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
       header: 'Sales',
       items: [
         { id: 'leads', label: 'Leads', icon: <Users size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
-        ...(isGhlAdmin ? [{ id: 'assigned-leads', label: 'Assigned Leads', icon: <UserCheck size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW }] : []),
-        { id: 'followups', label: 'Follow-ups', icon: <CalendarCheck size={18} />, feature: FEATURES.FOLLOWUPS, permission: PERMISSIONS.FOLLOWUPS_VIEW },
+        { id: 'followups', label: 'Follow-ups', icon: <CalendarCheck size={18} />, feature: FEATURES.FOLLOWUPS, permission: PERMISSIONS.FOLLOWUPS_VIEW, badge: pendingFollowupsCount > 0 ? pendingFollowupsCount : undefined },
         { id: 'consultations', label: 'Consultations', icon: <Calendar size={18} />, feature: FEATURES.CONSULTATIONS, permission: PERMISSIONS.CONSULTATIONS_VIEW },
         { id: 'customers', label: 'Customers 360', icon: <Building2 size={18} />, feature: FEATURES.CUSTOMERS, permission: PERMISSIONS.CUSTOMERS_VIEW },
         { id: 'not-interested', label: 'Not - Interested', icon: <XCircle size={18} /> },
@@ -346,11 +346,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
     });
   };
 
-  const sectionsToRender = isSuperAdmin
+  const sectionsToRender = isSuperAdminUser
     ? superAdminSections
     : isIrm
       ? irmSections
-      : isGhlSalesExec
+      : isSalesExec
         ? ghlSalesExecSections
         : companySections;
 

@@ -95,9 +95,11 @@ export const FollowupsPage: React.FC = () => {
     (roleCode as string) === 'company_admin' ||
     (roleCode as string) === 'admin' ||
     roleCode === 'super_admin';
-  const isGhlSalesExec = tenant?.slug === 'ghl' && isExec;
+  const isGhlSalesExec =
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1' || tenant?.name?.toLowerCase().includes('ghl') || user?.companySlug === 'ghl') &&
+    isExec;
   const isIrm = roleCode === 'irm';
-  const canOpenDrawer = isGhlSalesExec || isAdmin || isIrm;
+  const canOpenDrawer = isGhlSalesExec || isExec || isAdmin || isIrm;
 
   // ── Admin Filter States ──────────────────────────────────────────────────
   const [selectedRole, setSelectedRole] = useState<FollowupRoleFilter>('sales_executive');
@@ -1541,7 +1543,7 @@ export const FollowupsPage: React.FC = () => {
                         f.contactType as any,
                         f.contactId,
                         f.id,
-                        'follow_up'
+                        isIrm ? 'follow_up' : undefined
                       );
                     }}
                   >
@@ -1647,7 +1649,7 @@ export const FollowupsPage: React.FC = () => {
                         (drawerFollowup.contactType as any) || 'lead',
                         drawerFollowup.contactId,
                         drawerFollowup.id,
-                        'follow_up'
+                        isIrm ? 'follow_up' : undefined
                       );
                     }}
                   >
@@ -2163,7 +2165,7 @@ export const FollowupsPage: React.FC = () => {
                       resolvedContactType as any,
                       resolvedContactId,
                       drawerFollowup.id,
-                      'follow_up'
+                      isIrm ? 'follow_up' : undefined
                     )
                   }
                   sectionsOnly={['callRecordings']}

@@ -1124,7 +1124,7 @@ export const InCallBar: React.FC = () => {
 
 // --- Mandatory Post-Call Disposition Modal ---
 export const DispositionModal: React.FC = () => {
-  const { showDispositionModal, lastCallRecord, saveDisposition } = useCall();
+  const { showDispositionModal, lastCallRecord, saveDisposition, skipDispositionWithReason } = useCall();
   const { tenant, user } = useAuth();
 
   const [disposition, setDisposition] = useState<CallDisposition>('Interested');
@@ -1134,8 +1134,20 @@ export const DispositionModal: React.FC = () => {
   const [followupDate, setFollowupDate] = useState('');
   const [followupTime, setFollowupTime] = useState('');
   const [followupPriority, setFollowupPriority] = useState<'Low' | 'Medium' | 'High'>('High');
+  const [isSkipping, setIsSkipping] = useState(false);
+  const [skipReason, setSkipReason] = useState('');
+  const [skipError, setSkipError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
+
+  const QUICK_SKIP_REASONS = [
+    'Customer disconnected abruptly',
+    'Customer requested callback later',
+    'Customer busy / in a meeting',
+    'Wrong contact / invalid number',
+    'Requires manager consultation',
+    'Network / audio issues during call',
+  ];
 
   // No Response customized customer message state
   const [customerMessage, setCustomerMessage] = useState('');
@@ -1205,6 +1217,9 @@ export const DispositionModal: React.FC = () => {
     setFollowupDate(freshTomorrow);
     setFollowupTime(getCallPreferences().defaultFollowupTime);
     setFollowupPriority('High');
+    setIsSkipping(false);
+    setSkipReason('');
+    setSkipError('');
     setFormError('');
     setIsSubmitting(false);
 
@@ -1234,7 +1249,7 @@ export const DispositionModal: React.FC = () => {
 
   if (!showDispositionModal || !lastCallRecord) return null;
 
-  const isGhlSalesExec = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') && user?.role?.code === 'sales_executive';
+  const isGhlSalesExec = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1' || tenant?.name?.toLowerCase().includes('ghl') || user?.companySlug === 'ghl') && user?.role?.code === 'sales_executive';
   const isFollowupCall = !!lastCallRecord.sourceFollowupId;
   const isIrm = user?.role?.code === 'irm';
   const isIrmLeadCall = isIrm && lastCallRecord.matchedRecord?.type === 'lead';
@@ -1279,7 +1294,7 @@ export const DispositionModal: React.FC = () => {
               ? FOLLOWUP_CALL_OUTCOMES
               : isIrmLeadCall
                 ? IRM_LEAD_OUTCOMES
-                : isGhlSalesExec
+                : (isGhlSalesExec || tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1')
                   ? allDispositions.filter(d => d !== 'Converted')
                   : allDispositions));
 
@@ -1404,32 +1419,151 @@ export const DispositionModal: React.FC = () => {
     }
   };
 
+  const handleConfirmSkip = async () => {
+    if (isSubmitting) return;
+
+    if (!skipReason.trim()) {
+      setSkipError('Please provide a reason before skipping wrap-up.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await skipDispositionWithReason(skipReason.trim(), notes.trim());
+    } catch (err: any) {
+      setSkipError(err.message || 'Failed to save skip reason. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <Modal
       isOpen={showDispositionModal}
       onClose={() => {
-        // Modal must not close until disposition is saved
+        // Modal must not close until disposition is saved or skipped with reason
       }}
       closeOnBackdrop={false}
       closeOnEscape={false}
       hideCloseButton={true}
-      title="Call Wrap-up & Disposition"
+      title={isSkipping ? "Skip Call Wrap-up" : "Call Wrap-up & Disposition"}
       subtitle={`Call with ${lastCallRecord.contactName} (${lastCallRecord.contactPhone}) • Duration: ${isSimulated ? '0s (Not Connected)' : `${Math.floor(lastCallRecord.duration / 60)}m ${lastCallRecord.duration % 60}s`}`}
       maxWidth={580}
       footer={
-        <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%' }}>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={handleSave}
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? 'Saving...' : 'Save Disposition & Wrap Up'}
-          </button>
-        </div>
+        isSkipping ? (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, width: '100%' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setIsSkipping(false);
+                setSkipError('');
+              }}
+              disabled={isSubmitting}
+            >
+              Back to Wrap-up
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleConfirmSkip}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Saving...' : 'Save Reason & Skip'}
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', justifyContent: isIrm ? 'flex-end' : 'space-between', width: '100%', alignItems: 'center' }}>
+            {!isIrm && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  setIsSkipping(true);
+                  setSkipError('');
+                }}
+                disabled={isSubmitting}
+              >
+                Skip for Now
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleSave}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Saving...' : 'Save Disposition & Wrap Up'}
+            </button>
+          </div>
+        )
       }
     >
-      <div className="disposition-form-container">
+      {isSkipping ? (
+        <div className="disposition-form-container">
+          <div className="disposition-skip-banner">
+            <AlertCircle size={18} className="disposition-skip-banner-icon" />
+            <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+              <strong>Reason Required to Skip Wrap-up</strong>
+              <div style={{ color: 'var(--text-secondary)', marginTop: 2 }}>
+                Please specify why this call wrap-up is being skipped. The reason will be permanently recorded in Call Details.
+              </div>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Select a Common Reason</label>
+            <div className="disposition-skip-chips">
+              {QUICK_SKIP_REASONS.map(r => (
+                <button
+                  key={r}
+                  type="button"
+                  className={`disposition-skip-chip ${skipReason === r ? 'disposition-skip-chip-active' : ''}`}
+                  onClick={() => {
+                    setSkipReason(r);
+                    setSkipError('');
+                  }}
+                >
+                  {skipReason === r && <CheckCircle2 size={12} style={{ marginRight: 4 }} />}
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">
+              Reason for Skipping <span style={{ color: '#ef4444' }}>*</span>
+            </label>
+            <textarea
+              className="form-textarea"
+              rows={3}
+              placeholder="Explain why wrap-up is skipped (e.g. customer dropped, will re-dial in 10 mins)..."
+              value={skipReason}
+              onChange={e => {
+                setSkipReason(e.target.value);
+                if (skipError) setSkipError('');
+              }}
+              autoFocus
+            />
+            {skipError && (
+              <p style={{ color: '#ef4444', fontSize: 12, marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <AlertCircle size={13} /> {skipError}
+              </p>
+            )}
+          </div>
+
+          {notes && (
+            <div className="form-group" style={{ opacity: 0.85 }}>
+              <label className="form-label" style={{ fontSize: 12 }}>Notes from call</label>
+              <div style={{ fontSize: 12, padding: '8px 12px', background: 'var(--bg-surface-hover)', borderRadius: 'var(--radius-sm)', color: 'var(--text-secondary)' }}>
+                {notes}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="disposition-form-container">
           {isSimulated && (
             <div
               style={{
@@ -1682,8 +1816,8 @@ export const DispositionModal: React.FC = () => {
             </div>
           )}
 
-          {/* Reason Box for Other */}
-          {disposition === 'Other' && (
+          {/* Reason Box for Other (IRM only) */}
+          {isIrm && disposition === 'Other' && (
             <div className="form-group">
               <label className="form-label">
                 Reason <span style={{ color: '#ef4444' }}>*</span>
@@ -1699,8 +1833,8 @@ export const DispositionModal: React.FC = () => {
             </div>
           )}
 
-          {/* Reason Box for Contacted */}
-          {disposition === 'Contacted' && (
+          {/* Reason Box for Contacted (IRM only) */}
+          {isIrm && disposition === 'Contacted' && (
             <div className="form-group">
               <label className="form-label">Reason / Feedback (Optional)</label>
               <textarea
@@ -1713,8 +1847,8 @@ export const DispositionModal: React.FC = () => {
             </div>
           )}
 
-          {/* Reason Box for Not Interested / Wrong Number */}
-          {(disposition === 'Not Interested' || disposition === 'Wrong Number') && (
+          {/* Reason Box for Not Interested / Wrong Number (Sales / Non-IRM) */}
+          {!isIrm && (disposition === 'Not Interested' || disposition === 'Wrong Number') && (
             <div className="form-group">
               <label className="form-label">Reason *</label>
               <textarea
@@ -1802,6 +1936,7 @@ export const DispositionModal: React.FC = () => {
             </div>
           )}
         </div>
+      )}
     </Modal>
   );
 };
