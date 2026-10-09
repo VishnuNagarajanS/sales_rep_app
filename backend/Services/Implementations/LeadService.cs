@@ -33,6 +33,14 @@ public class LeadService : ILeadService
         _otherService = otherService ?? new IrmOtherService(context);
     }
 
+    public LeadService(
+        ApplicationDbContext context, 
+        ICurrentUserService currentUser, 
+        IIrmOtherService? otherService = null)
+        : this(context, currentUser, new backend.Services.Implementations.CompanyClock(), otherService)
+    {
+    }
+
     private static readonly string[] ExcludedStatuses = { "Not Interested", "Junk", "Converted" };
 
     public static string? NormalizePhone(string? phone)

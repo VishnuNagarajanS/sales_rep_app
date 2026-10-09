@@ -13,7 +13,6 @@ import {
   DispositionModal,
 } from '../components/calling/CallCenterComponents';
 
-import { useAuth } from '../context/AuthContext';
 import { workHandoverService, WorkHandoverDto } from '../services/workHandoverService';
 import { Modal } from '../components/common/Modal';
 import { AiAssistant } from '../components/ai/AiAssistant';

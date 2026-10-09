@@ -20,6 +20,7 @@
 
 import { apiClient } from './apiClient';
 import { storageService } from './storageService';
+import { isMockMode } from '../config/environment';
 import type {
   Deal,
   DealActivity,

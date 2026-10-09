@@ -193,8 +193,6 @@ public class IrmOtherService : IIrmOtherService
         CancellationToken ct = default)
     {
         var allCalls = await _context.CallRecords.AsNoTracking()
-            .Include(c => c.Company)
-            .Include(c => c.Agent)
             .Where(c => c.CompanyId == companyId)
             .OrderByDescending(c => c.Timestamp)
             .ToListAsync(ct);

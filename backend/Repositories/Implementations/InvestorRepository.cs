@@ -34,7 +34,6 @@ public class InvestorRepository : IInvestorRepository
         => await _db.Investors
             .Include(i => i.Consultations)
             .Include(i => i.Followups)
-            .Include(i => i.Calls)
             .Include(i => i.OriginalOwner)
             .Include(i => i.Handover)
             .FirstOrDefaultAsync(i => i.Id == id && i.CompanyId == companyId, ct);

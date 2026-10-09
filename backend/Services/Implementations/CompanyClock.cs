@@ -8,19 +8,23 @@ namespace backend.Services.Implementations;
 
 public class CompanyClock : ICompanyClock
 {
-    private readonly ApplicationDbContext _db;
+    private readonly ApplicationDbContext? _db;
     private readonly AiSettings _aiSettings;
 
-    public CompanyClock(ApplicationDbContext db, IOptionsSnapshot<AiSettings> aiSettings)
+    public CompanyClock(ApplicationDbContext? db = null, IOptionsSnapshot<AiSettings>? aiSettings = null)
     {
         _db = db;
-        _aiSettings = aiSettings.Value;
+        _aiSettings = aiSettings?.Value ?? new AiSettings();
     }
 
     public async Task<TimeZoneInfo> GetTimeZoneAsync(int companyId, CancellationToken ct = default)
     {
-        var tenant = await _db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Id == companyId, ct);
-        string tzStr = tenant?.Timezone ?? _aiSettings.TimeZone;
+        string tzStr = _aiSettings.TimeZone;
+        if (_db != null)
+        {
+            var tenant = await _db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Id == companyId, ct);
+            tzStr = tenant?.Timezone ?? _aiSettings.TimeZone;
+        }
 
         // Clean up descriptive strings like "Asia/Kolkata (IST)" -> "Asia/Kolkata"
         if (tzStr.Contains(" ("))

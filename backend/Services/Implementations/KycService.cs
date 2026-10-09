@@ -29,7 +29,7 @@ public class KycService : IKycService
         IOtpService otpService,
         ApplicationDbContext db,
         ILogger<KycService> logger,
-        IConfiguration config,
+        IConfiguration? config = null,
         IIrmOtherService? otherService = null)
     {
         _kycRepo = kycRepo;

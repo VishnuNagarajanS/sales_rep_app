@@ -61,8 +61,10 @@ namespace backend.Controllers
 
             if (request.History != null)
             {
-                // Take only the last 4 items instead of failing
-                request.History = request.History.TakeLast(4).ToList();
+                if (request.History.Count > 4)
+                {
+                    return BadRequest(new ApiResponse<AiChatResponseDto> { Success = false, Message = "History exceeds 4 items." });
+                }
                 
                 foreach (var h in request.History)
                 {

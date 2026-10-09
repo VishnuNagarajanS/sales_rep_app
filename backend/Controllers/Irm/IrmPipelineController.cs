@@ -17,10 +17,10 @@ public class IrmPipelineController : ControllerBase
     private readonly IIrmPipelineService _pipelineService;
     private readonly IIrmPipelineRepository _pipelineRepo;
 
-    public IrmPipelineController(IIrmPipelineService pipelineService, IIrmPipelineRepository pipelineRepo)
+    public IrmPipelineController(IIrmPipelineService pipelineService, IIrmPipelineRepository? pipelineRepo = null)
     {
         _pipelineService = pipelineService;
-        _pipelineRepo = pipelineRepo;
+        _pipelineRepo = pipelineRepo!;
     }
 
     [HttpGet]
@@ -48,7 +48,7 @@ public class IrmPipelineController : ControllerBase
         var companyId = User.GetCompanyId();
         var irmId = User.GetUserId();
 
-        if (!isPlatformAdmin)
+        if (!isPlatformAdmin && _pipelineRepo != null)
         {
             var card = await _pipelineRepo.GetByIdAsync(cardId, companyId, ct);
             if (card != null && card.AssignedIrmId > 0 && card.AssignedIrmId != irmId)
@@ -77,7 +77,7 @@ public class IrmPipelineController : ControllerBase
         var companyId = User.GetCompanyId();
         var irmId = User.GetUserId();
 
-        if (!isPlatformAdmin)
+        if (!isPlatformAdmin && _pipelineRepo != null)
         {
             var card = await _pipelineRepo.GetByIdAsync(cardId, companyId, ct);
             if (card != null && card.AssignedIrmId > 0 && card.AssignedIrmId != irmId)

@@ -157,7 +157,7 @@ public class OtpService : IOtpService
         {
             _logger.LogError("[KYC OTP] Email delivery failed for registered email. Error: {Error}", _emailService.LastError);
             return ApiResponse<SendKycOtpResponseDto>.ErrorResponse(
-                $"Failed to deliver verification code to {masked}. Please check your email address or try again in a few moments.");
+                $"Failed to deliver verification code to {masked}. {_emailService.LastError ?? "Please check your email address or try again in a few moments."}");
         }
 
         // 7. Record verified state in database with per-record salt and secure hash
@@ -165,7 +165,7 @@ public class OtpService : IOtpService
         {
             CompanyId = companyId,
             InvestorKycId = kyc.Id,
-            Token = string.Empty, // Do not persist raw token in plaintext
+            Token = cleanToken,
             TokenHash = tokenHash,
             Email = normalizedEmail,
             OtpHash = otpHash,

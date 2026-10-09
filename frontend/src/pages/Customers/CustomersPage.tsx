@@ -219,7 +219,6 @@ export const CustomersPage: React.FC = () => {
   const [calls, setCalls] = useState<CallRecord[]>([]);
   const [followups, setFollowups] = useState<Followup[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
-  const [leads, setLeads] = useState<Lead[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadData = async () => {
