@@ -54,6 +54,10 @@ public class ApplicationDbContext : DbContext
     public DbSet<InvestmentOpportunity> InvestmentOpportunities => Set<InvestmentOpportunity>();
     public DbSet<KycOtpVerification> KycOtpVerifications => Set<KycOtpVerification>();
     public DbSet<IrmCoverageAssignment> IrmCoverageAssignments => Set<IrmCoverageAssignment>();
+    public DbSet<GhlInvestor> GhlInvestors => Set<GhlInvestor>();
+    public DbSet<OpportunityPitch> OpportunityPitches => Set<OpportunityPitch>();
+    public DbSet<InvestorCall> InvestorCalls => Set<InvestorCall>();
+    public DbSet<IrmPipelineCard> IrmPipelineCards => Set<IrmPipelineCard>();
     public DbSet<WorkHandover> WorkHandovers => Set<WorkHandover>();
     public DbSet<WorkHandoverItem> WorkHandoverItems => Set<WorkHandoverItem>();
     public DbSet<LeaveRequest> LeaveRequests => Set<LeaveRequest>();

@@ -3161,10 +3161,6 @@ namespace backend.Migrations
                 });
 
             modelBuilder.Entity("backend.Models.Entities.WorkHandoverItem", b =>
-            modelBuilder.Entity("backend.Models.Entities.UserSession", b =>
-                {
-            modelBuilder.Entity("backend.Models.Entities.UserSession", b =>
-                });
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -3207,6 +3203,71 @@ namespace backend.Migrations
                     b.HasIndex("HandoverId", "EntityType", "EntityId");
 
                     b.ToTable("work_handover_items", (string)null);
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.UserSession", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<string>("Device")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("IpAddress")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<DateTime>("LastActivityAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Location")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RevokedReason")
+                        .HasColumnType("text");
+
+                    b.Property<string>("TokenId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("UserAgent")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenId")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "IsActive");
+
+                    b.ToTable("user_sessions", (string)null);
                 });
 
             modelBuilder.Entity("backend.Models.Entities.AiChatLog", b =>
@@ -3476,25 +3537,6 @@ namespace backend.Migrations
                     b.Navigation("AssignedAgent");
 
                     b.Navigation("Company");
-
-                    b.Navigation("Investor");
-
-                    b.Navigation("OriginalOwner");
-                        .WithMany()
-                        .HasForeignKey("InvestorId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.User", "OriginalOwner")
-                        .WithMany()
-                        .HasForeignKey("OriginalOwnerId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("AssignedAgent");
-
-                    b.Navigation("Company");
-
-                    b.Navigation("Handover");
 
                     b.Navigation("Investor");
 
