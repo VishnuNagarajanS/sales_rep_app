@@ -88,6 +88,6 @@ backend/uploads/*
 backend/wwwroot/uploads/*
 !backend/wwwroot/uploads/.gitkeep
 
-# Archives
+# Archives & Docs
 *.zip
-
+GHL details/

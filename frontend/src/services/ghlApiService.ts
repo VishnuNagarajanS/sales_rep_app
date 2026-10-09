@@ -32,6 +32,7 @@ import type {
   Consultation,
   AuditLog,
   IrmOtherRecord,
+  IrmProfile,
 } from '../types';
 
 // ── ID type helpers ───────────────────────────────────────────────────────────
@@ -534,6 +535,9 @@ function mapFollowup(f: Record<string, any>): Followup {
 }
 
 export async function getFollowups(companyId?: string): Promise<Followup[]> {
+  if (isMockMode()) {
+    return storageService.getFollowups(companyId);
+  }
   const raw = await fetchAll<any>('/sales-executive/followups');
   return raw.map(mapFollowup);
 }
@@ -742,6 +746,9 @@ function mapCallRecord(c: Record<string, any>): CallRecord {
 }
 
 export async function getCalls(companyId?: string): Promise<CallRecord[]> {
+  if (isMockMode()) {
+    return storageService.getCalls(companyId);
+  }
   const raw = await fetchAll<any>('/sales-executive/calls');
   return raw.map(mapCallRecord);
 }
@@ -1141,5 +1148,28 @@ export async function moveIrmPipelineCard(cardId: number, targetStageId: string)
   } catch (err) {
     console.warn('[ghlApiService] moveIrmPipelineCard failed:', err);
     return false;
+  }
+}
+
+export async function getCompanyIrms(companyId?: string): Promise<IrmProfile[]> {
+  try {
+    const res = await apiClient.get<ApiResponse<any[]>>('/sales-executive/consultations/irms');
+    if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+      return res.data.map(u => ({
+        id: String(u.id),
+        name: u.name,
+        email: u.email || '',
+        phone: u.phone || '',
+        status: (u.status === 'Busy' ? 'Busy' : 'Available') as 'Available' | 'Busy',
+        experience: u.specialization || 'Private Wealth & Advisory',
+        experienceYears: 5,
+        experienceLevel: 'Experienced' as const,
+        performance: 95,
+      }));
+    }
+    return [];
+  } catch (err) {
+    console.warn('[ghlApiService] getCompanyIrms failed:', err);
+    return [];
   }
 }

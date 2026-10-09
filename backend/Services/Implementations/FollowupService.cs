@@ -28,7 +28,11 @@ public class FollowupService : IFollowupService
         var agentId = _currentUser.UserId;
         var companyId = _currentUser.CompanyId;
 
-        var query = _context.Followups.AsNoTracking().Include(f => f.AssignedAgent).AsQueryable();
+        var query = _context.Followups.AsNoTracking()
+            .Include(f => f.AssignedAgent)
+            .Include(f => f.OriginalOwner)
+            .Include(f => f.Handover)
+            .AsQueryable();
 
         if (role == "super_admin")
         {
@@ -88,6 +92,8 @@ public class FollowupService : IFollowupService
         var query = _context.Followups
             .Include(f => f.AssignedAgent)
             .ThenInclude(a => a.Role)
+            .Include(f => f.OriginalOwner)
+            .Include(f => f.Handover)
             .Where(f => f.Id == id);
 
         if (role == "super_admin")
@@ -394,6 +400,7 @@ public class FollowupService : IFollowupService
                 if (targetLead.Status == "New" || targetLead.Status == "Contacted" || targetLead.Status == "Callback" || targetLead.Status == "Interested")
                 {
                     targetLead.Status = "Follow-up Required";
+                    targetLead.UpdatedAt = DateTime.UtcNow;
                 }
             }
 
@@ -456,6 +463,10 @@ public class FollowupService : IFollowupService
 
         _context.Followups.Add(followup);
 
+        // If this is for a Lead or Customer, check if parent is handed over
+        int? inheritedHandoverId = targetLead?.HandoverId;
+        int? inheritedOriginalOwnerId = targetLead?.OriginalOwnerId;
+
         if (targetLead != null)
         {
             targetLead.NextFollowupDate = followup.ScheduledAt;
@@ -465,10 +476,40 @@ public class FollowupService : IFollowupService
                 targetLead.UpdatedAt = DateTime.UtcNow;
             }
         }
+        else if (int.TryParse(followup.ContactId, out var custId))
+        {
+            var cust = await _context.Customers.FirstOrDefaultAsync(c => c.Id == custId && c.CompanyId == companyId.Value, ct);
+            if (cust != null)
+            {
+                inheritedHandoverId = cust.HandoverId;
+                inheritedOriginalOwnerId = cust.OriginalOwnerId;
+            }
+        }
+
+        followup.HandoverId = inheritedHandoverId;
+        followup.OriginalOwnerId = inheritedOriginalOwnerId;
 
         await _context.SaveChangesAsync(ct);
 
+        if (inheritedHandoverId.HasValue)
+        {
+            _context.WorkHandoverItems.Add(new WorkHandoverItem
+            {
+                HandoverId = inheritedHandoverId.Value,
+                EntityType = "Followup",
+                EntityId = followup.Id,
+                Origin = "created_during_coverage",
+                CreatedAt = DateTime.UtcNow
+            });
+            await _context.SaveChangesAsync(ct);
+        }
+
         await _context.Entry(followup).Reference(f => f.AssignedAgent).LoadAsync(ct);
+        if (inheritedHandoverId.HasValue)
+        {
+            await _context.Entry(followup).Reference(f => f.OriginalOwner).LoadAsync(ct);
+            await _context.Entry(followup).Reference(f => f.Handover).LoadAsync(ct);
+        }
 
         return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(followup, targetLead), "Follow-up scheduled successfully.");
     }
@@ -666,7 +707,11 @@ public class FollowupService : IFollowupService
             Notes = f.Notes,
             CompletedAt = f.CompletedAt,
             CreatedAt = f.CreatedAt,
-            UpdatedAt = f.UpdatedAt
+            UpdatedAt = f.UpdatedAt,
+            HandoverId = f.HandoverId,
+            HandedOverFromName = f.OriginalOwner?.Name,
+            HandoverPlannedEnd = f.Handover?.PlannedEndAt,
+            OriginalOwnerId = f.OriginalOwnerId
         };
     }
 }

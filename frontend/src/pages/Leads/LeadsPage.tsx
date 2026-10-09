@@ -15,7 +15,7 @@ import {
   ArrowRight,
   UserCheck,
 } from 'lucide-react';
-import { Lead, Customer, Deal, Followup } from '../../types';
+import { Lead, Customer, Deal, Followup, IrmProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { apiClient } from '../../services/apiClient';
@@ -36,6 +36,7 @@ import {
   getCustomers,
   saveFollowup as apiSaveFollowup,
   isTenantMatch,
+  getCompanyIrms,
 } from '../../services/ghlApiService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
@@ -138,13 +139,38 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   const [duplicateCustomerModal, setDuplicateCustomerModal] = useState<DuplicateCustomerModalData | null>(null);
   const [formErrorMessage, setFormErrorMessage] = useState<string | null>(null);
 
+  const [companyIrms, setCompanyIrms] = useState<IrmProfile[]>([]);
+  const [isAssignIrmModalOpen, setIsAssignIrmModalOpen] = useState(false);
+  const [leadToAssignIrm, setLeadToAssignIrm] = useState<Lead | null>(null);
+  const [selectedIrmForLead, setSelectedIrmForLead] = useState<string>('');
+
   const agentsList = useMemo(() => storageService.getAgents(tenant?.id), [tenant?.id]);
 
   const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk'];
 
+  const pendingFollowupContactIds = useMemo(() => {
+    return new Set((allFollowups || []).map((f: any) => String(f.contactId || '')));
+  }, [allFollowups]);
+
+  const pendingFollowupPhones = useMemo(() => {
+    return new Set(
+      (allFollowups || [])
+        .map((f: any) => (f.contactPhone || '').replace(/\D/g, '').slice(-10))
+        .filter(Boolean)
+    );
+  }, [allFollowups]);
+
+  const isLeadInFollowupOrMoved = (l: Lead) => {
+    if (MOVED_LEAD_STATUSES.includes(l.status)) return true;
+    if (pendingFollowupContactIds.has(String(l.id))) return true;
+    const phoneDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+    if (phoneDigits && pendingFollowupPhones.has(phoneDigits)) return true;
+    return false;
+  };
+
   // Role-based scoping: Sales Executives and IRMs see only their own leads.
   // Managers / Admins / Super Admins see the full company lead list (no filter).
-  // Inactive / moved leads (Interested, Follow-up Required, Not Interested, Junk, Converted) are excluded from active Leads.
+  // Inactive / moved leads (Interested, Follow-up Required, Not Interested, Junk, Converted, and those in follow-up stage) are excluded from active Leads.
   const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
   const isLeadScopedUser = roleCode === 'sales_executive' || roleCode === 'irm';
@@ -155,11 +181,20 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   const scopedLeads = useMemo(() => {
     if (isExec) {
       return tenantLeads
-        .filter(l =>
-          (l.assignedAgentId && String(l.assignedAgentId) === String(user?.id)) ||
-          (l.assignedAgentName && l.assignedAgentName === user?.name)
-        )
-        .filter(l => !MOVED_LEAD_STATUSES.includes(l.status));
+        .filter(l => {
+          const hasIrm = Boolean(
+            l.assignedIrmId ||
+            l.assignedIrmName ||
+            l.customFields?.assignedIrmId ||
+            l.customFields?.assignedIrmName
+          );
+          if (hasIrm) return false;
+          return (
+            (l.assignedAgentId && String(l.assignedAgentId) === String(user?.id)) ||
+            (l.assignedAgentName && l.assignedAgentName === user?.name)
+          );
+        })
+        .filter(l => !isLeadInFollowupOrMoved(l));
     }
 
     if (isIrm) {
@@ -168,6 +203,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       // Leads of other IRMs, or still owned by a Sales Executive, are never shown.
       // Also exclude any lead that already has a real, persisted pending follow-up record —
       // those contacts belong in the Follow-ups screen only, not here.
+      const uId = String(user?.id);
+      const uName = (user?.name || '').trim().toLowerCase();
+
       const pendingFollowupContactIds = new Set<string>(
         (allFollowups || [])
           .filter(f => f.status === 'Pending')
@@ -183,18 +221,24 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
       const raw = tenantLeads.filter(l => {
         if (l.status !== 'Interested') return false;
-        if (l.assignedAgentId) {
-          if (String(l.assignedAgentId) !== String(user?.id)) return false;
-        } else {
-          // Legacy rows without an agent id: fall back to the exact name
-          if (!l.assignedAgentName || l.assignedAgentName !== user?.name) return false;
-        }
+
+        const isAssignedToThisIrm =
+          (l.assignedIrmId && String(l.assignedIrmId) === uId) ||
+          (l.assignedIrmName && l.assignedIrmName.trim().toLowerCase() === uName) ||
+          (l.customFields?.assignedIrmId && String(l.customFields.assignedIrmId) === uId) ||
+          (l.customFields?.assignedIrmName && String(l.customFields.assignedIrmName).trim().toLowerCase() === uName) ||
+          (l.assignedAgentId && String(l.assignedAgentId) === uId) ||
+          (!!l.assignedAgentName && l.assignedAgentName.trim().toLowerCase() === uName);
+
+        if (!isAssignedToThisIrm) return false;
+
         // Exclude if a real pending followup already exists for this contact
         if (pendingFollowupContactIds.has(String(l.id))) return false;
         const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
         if (lPhone && pendingFollowupPhones.has(lPhone)) return false;
         return true;
       });
+
       // Deduplicate by phone to prevent double-entries from different IDs
       const seen = new Set<string>();
       return raw.filter(l => {
@@ -206,8 +250,8 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       });
     }
 
-    return tenantLeads.filter(l => !MOVED_LEAD_STATUSES.includes(l.status));
-  }, [tenantLeads, isExec, isIrm, user?.id, user?.name, allFollowups]);
+    return tenantLeads.filter(l => !isLeadInFollowupOrMoved(l));
+  }, [tenantLeads, isExec, isIrm, user?.id, user?.name, pendingFollowupContactIds, pendingFollowupPhones, allFollowups]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
@@ -227,9 +271,19 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   const [statusFilter, setStatusFilter] = useState('All');
   const [capacityFilter, setCapacityFilter] = useState('All');
   const [agentFilter, setAgentFilter] = useState('All');
+  const [handoverFilter, setHandoverFilter] = useState('Mine');
   const [datePreset, setDatePreset] = useState<string>('all');
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
+
+  const handoverOptions = useMemo(() => {
+    const names = Array.from(new Set(scopedLeads.map(l => l.handedOverFromName).filter(Boolean)));
+    if (names.length === 0) return [];
+    return [
+      { value: 'Mine', label: 'Mine' },
+      ...names.map(name => ({ value: `Handover_${name}`, label: `Handed over from ${name}` }))
+    ];
+  }, [scopedLeads]);
 
   const agentOptions = useMemo(() => {
     return Array.from(
@@ -333,7 +387,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   );
 
   useEffect(() => {
-    if (!isGhlAdmin) return;
+    if (isLeadScopedUser) return;
     let cancelled = false;
     loadAgentDirectory(tenant?.id, user?.id).then(dir => {
       if (cancelled) return;
@@ -342,7 +396,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       setAgentsFromApi(dir.fromApi);
     });
     return () => { cancelled = true; };
-  }, [tenant?.id, user?.id, isGhlAdmin]);
+  }, [tenant?.id, user?.id, isLeadScopedUser]);
 
   // Form state
   const [formData, setFormData] = useState<Partial<Lead>>({});
@@ -376,7 +430,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       setSelectedLead(prev => {
         if (!prev) return null;
         const found = updated.find(l => l.id === prev.id);
-        if (!found || (isExec && MOVED_LEAD_STATUSES.includes(found.status)) || found.status === 'Junk') {
+        if (!found || MOVED_LEAD_STATUSES.includes(found.status) || isLeadInFollowupOrMoved(found) || found.status === 'Junk') {
           setIsDetailDrawerOpen(false);
           setIsEditDrawerOpen(false);
           return null;
@@ -388,15 +442,17 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
     try {
       setLoadError(null);
-      const [updatedFollowups, updatedCustomers, updatedDeals] = await Promise.all([
+      const [updatedFollowups, updatedCustomers, updatedDeals, irmsList] = await Promise.all([
         getFollowups(tenant?.id).catch(() => []),
         getCustomers(tenant?.id).catch(() => []),
         getDeals(tenant?.id).catch(() => []),
+        getCompanyIrms(tenant?.id).catch(() => []),
       ]);
       const pendingFus = (updatedFollowups || []).filter((f: any) => f.status === 'Pending');
       setAllFollowups(pendingFus);
       setCustomers(updatedCustomers || []);
       setDeals(updatedDeals || []);
+      setCompanyIrms(irmsList || []);
 
       let loadedLeads: Lead[] = [];
       if (isGhlAdmin) {
@@ -418,7 +474,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       setSelectedLead(prev => {
         if (!prev) return null;
         const found = loadedLeads.find((l: any) => l.id === prev.id);
-        if (!found || (isExec && MOVED_LEAD_STATUSES.includes(found.status)) || found.status === 'Junk') {
+        if (!found || MOVED_LEAD_STATUSES.includes(found.status) || isLeadInFollowupOrMoved(found) || found.status === 'Junk') {
           setIsDetailDrawerOpen(false);
           setIsEditDrawerOpen(false);
           return null;
@@ -437,6 +493,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     loadData();
     const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
+    window.addEventListener('nexus_handover_updated', handleUpdate);
     
     // Polling every 15 seconds while visible
     const interval = setInterval(() => {
@@ -452,6 +509,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
     return () => {
       window.removeEventListener('nexus_storage_updated', handleUpdate);
+      window.removeEventListener('nexus_handover_updated', handleUpdate);
       window.removeEventListener('focus', handleFocus);
       clearInterval(interval);
     };
@@ -553,6 +611,14 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       if (dateTo && dateStr > dateTo) return false;
     }
 
+    if (handoverOptions.length > 0) {
+      if (handoverFilter === 'Mine' && lead.handoverId) return false;
+      if (handoverFilter !== 'Mine' && handoverFilter !== 'All') {
+        const name = handoverFilter.replace('Handover_', '');
+        if (lead.handedOverFromName !== name) return false;
+      }
+    }
+
     return true;
   });
 
@@ -570,6 +636,53 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       alert(`${failed.length} lead(s) could not be assigned: ${failed[0].reason?.message || 'Unknown error'}`);
     }
     return results.length - failed.length;
+  };
+
+  const handleOpenAssignIrm = (lead: Lead) => {
+    setLeadToAssignIrm(lead);
+    setSelectedIrmForLead(lead.assignedIrmId || companyIrms[0]?.id || '');
+    setIsAssignIrmModalOpen(true);
+  };
+
+  const handleConfirmAssignIrm = async () => {
+    if (!leadToAssignIrm || !selectedIrmForLead) return;
+    const chosenIrm = companyIrms.find(i => String(i.id) === String(selectedIrmForLead));
+    if (!chosenIrm) return;
+
+    const nowIso = new Date().toISOString();
+    const updatedLead: Lead = {
+      ...leadToAssignIrm,
+      assignedIrmId: String(chosenIrm.id),
+      assignedIrmName: chosenIrm.name,
+      assignedIrmAt: nowIso,
+      notes: `${leadToAssignIrm.notes ? leadToAssignIrm.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Assigned to IRM: ${chosenIrm.name} by ${user?.name || 'Sales Executive'}`,
+      customFields: {
+        ...leadToAssignIrm.customFields,
+        assignedIrmId: String(chosenIrm.id),
+        assignedIrmName: chosenIrm.name,
+        assignedIrmAt: nowIso,
+      }
+    };
+
+    try {
+      await apiSaveLead(updatedLead);
+    } catch (err) {
+      console.warn('[LeadsPage] Failed to save IRM assigned lead to API:', err);
+      storageService.saveLead(updatedLead);
+    }
+
+    setIsAssignIrmModalOpen(false);
+    setLeadToAssignIrm(null);
+    if (selectedLead?.id === leadToAssignIrm.id) {
+      setSelectedLead(updatedLead);
+    }
+    await loadData();
+    
+    const toast = document.createElement('div');
+    toast.className = 'nexus-toast success';
+    toast.textContent = `✓ Lead "${updatedLead.name}" successfully assigned to IRM ${chosenIrm.name}!`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
   };
 
   const handleManualAssignConfirm = async () => {
@@ -686,8 +799,8 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       console.warn('[LeadsPage] Cannot create lead: user session is not yet loaded.');
       return;
     }
-    const defaultAgentId = user.id || (tenant?.slug === 'jamin' ? 'usr-jamin-exec' : 'usr-ghl-exec');
-    const defaultAgentName = user.name || (tenant?.slug === 'jamin' ? 'Pooja Hegde' : 'Ananya Iyer');
+    const defaultAgentId = isLeadScopedUser ? user.id : undefined;
+    const defaultAgentName = isLeadScopedUser ? user.name : undefined;
 
     setFormData({
       id: `lead-${Date.now()}`,
@@ -774,10 +887,14 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     // Pull real agent ID and name at save-time to prevent stale/fallback placeholder IDs from leaking
     const resolvedAgentId = (isLeadScopedUser && user?.id)
       ? user.id
-      : (formData.assignedAgentId && formData.assignedAgentId !== 'usr-exec' ? formData.assignedAgentId : (user?.id || 'usr-exec'));
+      : (formData.assignedAgentId && formData.assignedAgentId !== 'usr-exec' && formData.assignedAgentId !== 'unassigned'
+          ? formData.assignedAgentId
+          : undefined);
     const resolvedAgentName = (isLeadScopedUser && user?.name)
       ? user.name
-      : (formData.assignedAgentName && formData.assignedAgentName !== 'Agent' ? formData.assignedAgentName : (user?.name || 'Agent'));
+      : (formData.assignedAgentName && formData.assignedAgentName !== 'Agent' && formData.assignedAgentName !== 'Unassigned'
+          ? formData.assignedAgentName
+          : undefined);
 
     const isExistingById = leads.some(l => l.id === formData.id);
     const targetCompanyId = formData.companyId || tenant?.id || 't-ghl-01';
@@ -969,7 +1086,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       storageService.addAuditLog({
         id: `aud-${Date.now()}`,
         timestamp: 'Just now',
-        actorName: user?.name || resolvedAgentName,
+        actorName: user?.name || resolvedAgentName || 'Admin',
         actorEmail: user?.email || 'agent@nexus.io',
         action: isUpdated ? 'LEAD_UPDATED' : 'LEAD_CREATED',
         entityType: 'Lead',
@@ -1398,7 +1515,25 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       sortable: true,
       render: l => (
         <div>
-          <div className="lead-name-primary">{l.name}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span className="lead-name-primary">{l.name}</span>
+            {l.handedOverFromName && (
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  padding: '2px 6px',
+                  borderRadius: 6,
+                  background: 'rgba(99, 102, 241, 0.15)',
+                  color: '#818cf8',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                }}
+                title={`Handed over from ${l.handedOverFromName}${l.handoverPlannedEnd ? ` until ${new Date(l.handoverPlannedEnd).toLocaleDateString()}` : ''}`}
+              >
+                Covering for {l.handedOverFromName}
+              </span>
+            )}
+          </div>
           <div className="lead-name-sub">{l.phone}</div>
         </div>
       ),
@@ -1465,6 +1600,11 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       icon: <Edit size={14} className="leads-action-icon" />,
       onClick: l => handleOpenEdit(l),
     },
+    ...(isExec ? [{
+      label: 'Assign to IRM',
+      icon: <UserCheck size={14} className="leads-action-icon" />,
+      onClick: (l: Lead) => handleOpenAssignIrm(l),
+    }] : []),
     {
       label: 'Delete Lead',
       icon: <Trash2 size={14} color="#ef4444" className="leads-action-icon" />,
@@ -1537,6 +1677,13 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
           <div className="leads-toolbar">
             <FilterBar
               filters={[
+                ...(handoverOptions.length > 0 ? [{
+                  key: 'handover',
+                  label: 'View',
+                  value: handoverFilter,
+                  onChange: setHandoverFilter,
+                  options: handoverOptions
+                }] : []),
                 ...(isGhlAdmin ? [] : [{
                   key: 'status',
                   label: 'Status',
@@ -1575,6 +1722,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                 setStatusFilter('All');
                 setAgentFilter('All');
                 setCapacityFilter('All');
+                setHandoverFilter('Mine');
                 setDatePreset('all');
                 setDateFrom('');
                 setDateTo('');
@@ -1844,7 +1992,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
               name="fld-fullname-nexus"
               value={formData.name || ''}
               onChange={e => setFormData({ ...formData, name: e.target.value })}
-              placeholder="e.g. Ramesh Chandra"
+              placeholder="e.g. Agent One"
             />
           </div>
 
@@ -1871,7 +2019,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                 name="fld-email-nexus"
                 value={formData.email || ''}
                 onChange={e => setFormData({ ...formData, email: e.target.value })}
-                placeholder="ramesh@example.com"
+                placeholder="agent1@example.com"
               />
             </div>
           </div>
@@ -1904,6 +2052,32 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
               </select>
             </div>
           </div>
+
+          {!isLeadScopedUser && (
+            <div className="form-group">
+              <label className="form-label">Assigned Sales Agent</label>
+              <select
+                className="form-select"
+                value={formData.assignedAgentId || ''}
+                onChange={e => {
+                  const val = e.target.value;
+                  const agentObj = agents.find(a => String(a.id) === String(val) || String(a.dbId) === String(val));
+                  setFormData(prev => ({
+                    ...prev,
+                    assignedAgentId: val || undefined,
+                    assignedAgentName: agentObj ? agentObj.name : undefined,
+                  }));
+                }}
+              >
+                <option value="">Unassigned (Queue for manual / auto distribution)</option>
+                {agents.map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* DYNAMIC TENANT CUSTOM FIELDS (Blueprint Section 7.3) */}
           <div className="lead-custom-schema-box">
@@ -2772,6 +2946,67 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
           </div>
         </Modal>
       )}
+
+      {/* ── Assign IRM Modal ── */}
+      <Modal
+        isOpen={isAssignIrmModalOpen && !!leadToAssignIrm}
+        onClose={() => setIsAssignIrmModalOpen(false)}
+        title="Assign Lead to IRM"
+        subtitle={`Assigning ${leadToAssignIrm?.name} to an Investment Relationship Manager`}
+        footer={
+          <>
+            <button className="btn btn-secondary" onClick={() => setIsAssignIrmModalOpen(false)}>
+              Cancel
+            </button>
+            <button
+              className="btn btn-primary"
+              disabled={!selectedIrmForLead}
+              onClick={handleConfirmAssignIrm}
+            >
+              Confirm IRM Assignment
+            </button>
+          </>
+        }
+      >
+        <div className="lead-modal-content">
+          <p className="lead-irm-modal-desc">
+            Select an active IRM from the company database. Once assigned, this lead will be routed directly to the IRM&apos;s portal and consultations dashboard.
+          </p>
+
+          {companyIrms.length === 0 ? (
+            <div className="lead-irm-empty" style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>
+              No active IRMs found for this organization.
+            </div>
+          ) : (
+            <div className="lead-irm-agent-list">
+              {companyIrms.map(irm => {
+                const isSelected = String(selectedIrmForLead) === String(irm.id);
+                return (
+                  <div
+                    key={irm.id}
+                    className={`lead-irm-agent-row ${isSelected ? 'selected' : ''}`}
+                    onClick={() => setSelectedIrmForLead(String(irm.id))}
+                  >
+                    <input
+                      type="radio"
+                      name="selectedLeadIrm"
+                      checked={isSelected}
+                      onChange={() => setSelectedIrmForLead(String(irm.id))}
+                    />
+                    <div className="lead-irm-agent-avatar">
+                      {irm.name[0]?.toUpperCase()}
+                    </div>
+                    <div className="lead-irm-agent-details">
+                      <div className="lead-irm-agent-name">{irm.name}</div>
+                      <div className="lead-irm-agent-email">{irm.email}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </Modal>
 
       {/* ── Toast notification ───────────────────────────────────────────── */}
       {toast && (

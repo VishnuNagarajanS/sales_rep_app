@@ -41,7 +41,11 @@ public class ConsultationService : IConsultationService
         var consultantId = _currentUser.UserId;
         var companyId = _currentUser.CompanyId;
 
-        var query = _context.Consultations.AsNoTracking().Include(c => c.Consultant).AsQueryable();
+        var query = _context.Consultations.AsNoTracking()
+            .Include(c => c.Consultant)
+            .Include(c => c.OriginalOwner)
+            .Include(c => c.Handover)
+            .AsQueryable();
 
         if (role == "super_admin")
         {
@@ -228,10 +232,26 @@ public class ConsultationService : IConsultationService
             Status = ConsultationStatus.Scheduled,
             Agenda = dto.Agenda,
             ReferredByAgentName = dto.ReferredByAgentName,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            HandoverId = investor?.HandoverId,
+            OriginalOwnerId = investor?.OriginalOwnerId
         };
 
         var created = await _consultationRepo.CreateAsync(consultation, ct);
+
+        if (investor?.HandoverId != null)
+        {
+            _context.WorkHandoverItems.Add(new WorkHandoverItem
+            {
+                HandoverId = investor.HandoverId.Value,
+                EntityType = "Consultation",
+                EntityId = created.Id,
+                Origin = "created_during_coverage",
+                CreatedAt = DateTime.UtcNow
+            });
+            await _context.SaveChangesAsync(ct);
+        }
+
         return ApiResponse<ConsultationDto>.SuccessResponse(MapToIrmDto(created), "Consultation scheduled successfully");
     }
 
@@ -309,7 +329,11 @@ public class ConsultationService : IConsultationService
             Agenda = c.Agenda,
             OutcomeNotes = c.OutcomeNotes ?? string.Empty,
             CreatedAt = c.CreatedAt,
-            UpdatedAt = c.UpdatedAt
+            UpdatedAt = c.UpdatedAt,
+            HandoverId = c.HandoverId,
+            HandedOverFromName = c.OriginalOwner?.Name,
+            HandoverPlannedEnd = c.Handover?.PlannedEndAt,
+            OriginalOwnerId = c.OriginalOwnerId
         };
     }
 
@@ -328,6 +352,51 @@ public class ConsultationService : IConsultationService
         OutcomeNotes = c.OutcomeNotes,
         ReferredByAgentName = c.ReferredByAgentName,
         CreatedAt = c.CreatedAt,
-        UpdatedAt = c.UpdatedAt
+        UpdatedAt = c.UpdatedAt,
+        HandoverId = c.HandoverId,
+        HandedOverFromName = c.OriginalOwner?.Name,
+        HandoverPlannedEnd = c.Handover?.PlannedEndAt,
+        OriginalOwnerId = c.OriginalOwnerId
     };
+
+    public async Task<ApiResponse<List<IrmUserDto>>> GetCompanyIrmsAsync(CancellationToken ct = default)
+    {
+        var companyId = _currentUser.CompanyId ?? 1;
+
+        var query = _context.Users
+            .AsNoTracking()
+            .Include(u => u.Role)
+            .Where(u => u.Role != null && (u.Role.Code == "irm" || u.Role.Name.ToLower().Contains("irm") || u.Role.Name.ToLower().Contains("investor relationship")))
+            .Where(u => u.Status == UserStatus.Active);
+
+        var companyIrms = await query
+            .Where(u => u.CompanyId == companyId)
+            .Select(u => new IrmUserDto
+            {
+                Id = u.Id,
+                Name = u.Name,
+                Email = u.Email,
+                Phone = u.Phone,
+                Status = "Available",
+                Specialization = "Wealth & Private Advisory"
+            })
+            .ToListAsync(ct);
+
+        if (companyIrms.Count == 0)
+        {
+            companyIrms = await query
+                .Select(u => new IrmUserDto
+                {
+                    Id = u.Id,
+                    Name = u.Name,
+                    Email = u.Email,
+                    Phone = u.Phone,
+                    Status = "Available",
+                    Specialization = "Wealth & Private Advisory"
+                })
+                .ToListAsync(ct);
+        }
+
+        return ApiResponse<List<IrmUserDto>>.SuccessResult(companyIrms, "Active IRMs retrieved successfully.");
+    }
 }

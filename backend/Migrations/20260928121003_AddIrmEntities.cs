@@ -456,7 +456,7 @@ namespace backend.Migrations
             //     values: new object[,]
             //     {
             //         { 5, null, 1, new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc), "rohan.varma@ghlindiatrust.com", null, "Rohan Varma", "$2a$11$z2c3Nc1pe7Tqmxj6Rm15NOt8vuAyyKfqzGtBKpiFU2NcPZxsjt5p.", "+91 98110 77889", 5, null },
-            //         { 6, null, 1, new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc), "priya.irm@ghlindiatrust.com", null, "Priya Sharma", "$2a$11$z2c3Nc1pe7Tqmxj6Rm15NOt8vuAyyKfqzGtBKpiFU2NcPZxsjt5p.", "+91 98450 66778", 5, null }
+            //         { 6, null, 1, new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc), "agent2@example.com", null, "Agent Two", "$2a$11$z2c3Nc1pe7Tqmxj6Rm15NOt8vuAyyKfqzGtBKpiFU2NcPZxsjt5p.", "+91 98450 66778", 5, null }
             //     });
 
             migrationBuilder.CreateIndex(

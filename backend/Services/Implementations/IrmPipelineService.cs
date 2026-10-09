@@ -145,6 +145,10 @@ public class IrmPipelineService : IIrmPipelineService
         InvestmentAmount = c.InvestmentAmount,
         PreferredAssetClass = c.PreferredAssetClass,
         ActivityLogsJson = c.ActivityLogsJson,
-        CreatedAt = c.CreatedAt
+        CreatedAt = c.CreatedAt,
+        HandoverId = c.HandoverId,
+        HandedOverFromName = c.OriginalOwner?.Name,
+        HandoverPlannedEnd = c.Handover?.PlannedEndAt,
+        OriginalOwnerId = c.OriginalOwnerId
     };
 }

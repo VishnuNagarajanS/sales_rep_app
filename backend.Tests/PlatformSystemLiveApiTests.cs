@@ -102,7 +102,7 @@ public class PlatformSystemLiveApiTests
     [Fact]
     public async Task GetDiagnostics_ReturnsRealMetrics()
     {
-        var (controller, db) = CreateController();
+        var (controller, _) = CreateController();
         var actionResult = await controller.GetSystemDiagnostics();
 
         var okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
@@ -121,7 +121,7 @@ public class PlatformSystemLiveApiTests
     [Fact]
     public async Task GetHealthChecks_ReturnsComprehensiveChecks()
     {
-        var (controller, db) = CreateController();
+        var (controller, _) = CreateController();
         var actionResult = await controller.GetHealthChecks();
 
         var okResult = Assert.IsType<OkObjectResult>(actionResult.Result);

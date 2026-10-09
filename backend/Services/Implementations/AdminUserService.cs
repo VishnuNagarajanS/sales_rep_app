@@ -12,11 +12,13 @@ public class AdminUserService : IAdminUserService
 {
     private readonly ApplicationDbContext _context;
     private readonly backend.Services.Email.IEmailService _emailService;
+    private readonly backend.Services.Interfaces.ICompanyClock _clock;
 
-    public AdminUserService(ApplicationDbContext context, backend.Services.Email.IEmailService emailService)
+    public AdminUserService(ApplicationDbContext context, backend.Services.Email.IEmailService emailService, backend.Services.Interfaces.ICompanyClock clock)
     {
         _context = context;
         _emailService = emailService;
+        _clock = clock;
     }
 
     public async Task<ApiResponse<List<AdminUserDto>>> GetUsersByCompanyAsync(int companyId, CancellationToken cancellationToken = default)
@@ -24,7 +26,25 @@ public class AdminUserService : IAdminUserService
         var users = await _context.Users
             .Include(u => u.Role)
             .Where(u => u.CompanyId == companyId)
-            .Select(u => new AdminUserDto
+            .ToListAsync(cancellationToken);
+
+        var today = await _clock.GetCompanyTodayAsync(companyId, cancellationToken);
+
+        var activeHandovers = await _context.WorkHandovers
+            .Include(wh => wh.CoveringUser)
+            .Where(wh => wh.CompanyId == companyId && wh.Status == "active")
+            .ToListAsync(cancellationToken);
+
+        var approvedLeaves = await _context.LeaveRequests
+            .Where(lr => lr.CompanyId == companyId && lr.Status == "Approved" && lr.StartDate <= today && today <= lr.EndDate)
+            .ToListAsync(cancellationToken);
+
+        var dtos = users.Select(u =>
+        {
+            var handover = activeHandovers.FirstOrDefault(wh => wh.OriginalUserId == u.Id);
+            var leave = approvedLeaves.FirstOrDefault(lr => lr.UserId == u.Id);
+
+            return new AdminUserDto
             {
                 Id = u.Id,
                 Name = u.Name,
@@ -36,11 +56,15 @@ public class AdminUserService : IAdminUserService
                 Status = u.Status,
                 LastLoginAt = u.LastLoginAt,
                 AvatarUrl = u.AvatarUrl,
-                CreatedAt = u.CreatedAt
-            })
-            .ToListAsync(cancellationToken);
+                CreatedAt = u.CreatedAt,
+                IsCovered = handover != null,
+                CoveredBy = handover?.CoveringUser?.Name,
+                OnLeave = leave != null,
+                LeaveUntil = leave?.EndDate
+            };
+        }).ToList();
 
-        return ApiResponse<List<AdminUserDto>>.SuccessResult(users);
+        return ApiResponse<List<AdminUserDto>>.SuccessResult(dtos);
     }
 
     public async Task<ApiResponse<AdminUserDto>> GetUserByIdAsync(int companyId, int userId, CancellationToken cancellationToken = default)
@@ -60,7 +84,8 @@ public class AdminUserService : IAdminUserService
                 Status = u.Status,
                 LastLoginAt = u.LastLoginAt,
                 AvatarUrl = u.AvatarUrl,
-                CreatedAt = u.CreatedAt
+                CreatedAt = u.CreatedAt,
+                IsCovered = _context.WorkHandovers.Any(wh => wh.OriginalUserId == u.Id && wh.Status == "active")
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -85,32 +110,48 @@ public class AdminUserService : IAdminUserService
             return ApiResponse<AdminUserDto>.FailureResult("Invalid Role ID.");
         }
 
+        var passwordToHash = !string.IsNullOrWhiteSpace(request.Password) ? request.Password : "Password@123";
+
         var newUser = new User
         {
-            Name = request.Name,
-            Email = request.Email,
-            Phone = request.Phone,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
+            Name = request.Name.Trim(),
+            Email = request.Email.Trim().ToLower(),
+            Phone = request.Phone?.Trim() ?? string.Empty,
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(passwordToHash),
             RoleId = request.RoleId,
             CompanyId = companyId,
             Status = request.Status,
             CreatedAt = DateTime.UtcNow
         };
 
-        if (request.Status == backend.Models.Enums.UserStatus.Invited)
-        {
-            var loginUrl = "http://localhost:5173/auth/login";
-            var emailBody = $@"
-                <h3>Welcome to GHL India Ventures, {request.Name}!</h3>
-                <p>You have been invited to join the platform as a <b>{role.Name}</b>.</p>
-                <p>Your temporary password is: <strong>{request.Password}</strong></p>
-                <p>Please login at <a href='{loginUrl}'>{loginUrl}</a> and change your password.</p>";
-                
-            await _emailService.SendEmailAsync(request.Email, "Invitation to GHL India Ventures", emailBody);
-        }
-
         _context.Users.Add(newUser);
         await _context.SaveChangesAsync(cancellationToken);
+
+        bool emailSent = request.Status != backend.Models.Enums.UserStatus.Invited;
+        string? emailError = null;
+
+        if (request.Status == backend.Models.Enums.UserStatus.Invited)
+        {
+            try
+            {
+                var loginUrl = "http://localhost:5173/auth/login";
+                var emailBody = $@"
+                    <h3>Welcome to GHL India Ventures, {request.Name}!</h3>
+                    <p>You have been invited to join the platform as a <b>{role.Name}</b>.</p>
+                    <p>Your temporary password is: <strong>{passwordToHash}</strong></p>
+                    <p>Please login at <a href='{loginUrl}'>{loginUrl}</a> and change your password.</p>";
+                    
+                await _emailService.SendEmailAsync(request.Email, "Invitation to GHL India Ventures", emailBody);
+                emailSent = true;
+            }
+            catch (Exception ex)
+            {
+                emailError = ex.Message.Contains("Daily user sending limit exceeded")
+                    ? "Gmail daily sending limit exceeded for the sender email account."
+                    : ex.Message;
+                Console.WriteLine($"[AdminUserService] Warning: Email dispatch failed for {request.Email}: {ex.Message}");
+            }
+        }
 
         var dto = new AdminUserDto
         {
@@ -122,10 +163,17 @@ public class AdminUserService : IAdminUserService
             RoleName = role.Name,
             RoleCode = role.Code,
             Status = newUser.Status,
-            CreatedAt = newUser.CreatedAt
+            CreatedAt = newUser.CreatedAt,
+            EmailSent = emailSent,
+            EmailError = emailError,
+            TemporaryPassword = passwordToHash
         };
 
-        return ApiResponse<AdminUserDto>.SuccessResult(dto, "User created successfully.");
+        var message = emailSent
+            ? "User created successfully and invitation email sent."
+            : $"User created successfully. (Notice: Email delivery failed: {emailError})";
+
+        return ApiResponse<AdminUserDto>.SuccessResult(dto, message);
     }
 
     public async Task<ApiResponse<AdminUserDto>> UpdateUserAsync(int companyId, int userId, UpdateUserRequestDto request, CancellationToken cancellationToken = default)
@@ -148,6 +196,10 @@ public class AdminUserService : IAdminUserService
         user.Phone = request.Phone;
         user.RoleId = request.RoleId;
         user.Status = request.Status;
+        if (!string.IsNullOrWhiteSpace(request.Password))
+        {
+            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password);
+        }
         user.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -263,9 +315,59 @@ public class AdminUserService : IAdminUserService
         if (user == null)
             return ApiResponse<bool>.FailureResult("User not found.");
 
-        _context.Users.Remove(user);
-        await _context.SaveChangesAsync(cancellationToken);
+        using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            // 1. Reassign customers to active company admin/agent
+            var fallbackUser = await _context.Users
+                .Where(u => u.CompanyId == companyId && u.Id != userId && u.Status == backend.Models.Enums.UserStatus.Active)
+                .OrderBy(u => u.RoleId == 2 ? 0 : 1) // Prefer Company Admin
+                .FirstOrDefaultAsync(cancellationToken);
 
-        return ApiResponse<bool>.SuccessResult(true, "User deleted successfully.");
+            var customers = await _context.Customers
+                .Where(c => c.CompanyId == companyId && c.AssignedAgentId == userId)
+                .ToListAsync(cancellationToken);
+            if (fallbackUser != null)
+            {
+                foreach (var c in customers)
+                {
+                    c.AssignedAgentId = fallbackUser.Id;
+                }
+            }
+
+            // 2. Unlink assigned leads
+            var leads = await _context.Leads
+                .Where(l => l.CompanyId == companyId && l.AssignedAgentId == userId)
+                .ToListAsync(cancellationToken);
+            foreach (var l in leads)
+            {
+                l.AssignedAgentId = null;
+            }
+
+            // 3. Remove pending followups for this user
+            var followups = await _context.Followups
+                .Where(f => f.CompanyId == companyId && f.AssignedAgentId == userId)
+                .ToListAsync(cancellationToken);
+            _context.Followups.RemoveRange(followups);
+
+            // 4. Clean up lead assignment history references
+            var historyRecords = await _context.LeadAssignmentHistories
+                .Where(h => h.FromAgentId == userId || h.ToAgentId == userId || h.AssignedById == userId)
+                .ToListAsync(cancellationToken);
+            _context.LeadAssignmentHistories.RemoveRange(historyRecords);
+
+            // 5. Remove user
+            _context.Users.Remove(user);
+
+            await _context.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            return ApiResponse<bool>.SuccessResult(true, "User deleted successfully.");
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return ApiResponse<bool>.FailureResult($"Failed to delete user: {ex.Message}");
+        }
     }
 }

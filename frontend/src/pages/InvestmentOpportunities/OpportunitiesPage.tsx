@@ -210,7 +210,7 @@ export const OpportunitiesPage: React.FC = () => {
       stage: o.stage,
       targetAmount: String(o.targetAmount),
       committedAmount: String(o.committedAmount),
-      assignedAgentId: o.assignedAgentId,
+      assignedAgentId: o.assignedAgentId?.toString() || '',
       assignedAgentName: o.assignedAgentName,
       expectedCloseDate: o.expectedCloseDate,
       notes: o.notes,

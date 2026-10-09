@@ -19,7 +19,9 @@ public class SmtpEmailService : IEmailService
         var port = int.Parse(_configuration["SmtpSettings:Port"] ?? "587");
         var username = _configuration["SmtpSettings:Username"] ?? "";
         var password = _configuration["SmtpSettings:Password"] ?? "";
-        var fromEmail = _configuration["SmtpSettings:FromEmail"] ?? username;
+        var fromEmail = _configuration["SmtpSettings:FromEmail"]
+            ?? _configuration["SmtpSettings:SenderEmail"]
+            ?? username;
 
         if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
         {
@@ -27,21 +29,32 @@ public class SmtpEmailService : IEmailService
             return;
         }
 
-        using var client = new SmtpClient(host, port)
+        try
         {
-            Credentials = new NetworkCredential(username, password),
-            EnableSsl = true
-        };
+            using var client = new SmtpClient(host, port)
+            {
+                Credentials = new NetworkCredential(username, password),
+                EnableSsl = true,
+                Timeout = 10000 // 10 seconds timeout
+            };
 
-        var mailMessage = new MailMessage
+            var senderDisplayName = _configuration["SmtpSettings:SenderName"] ?? "GHL India Ventures";
+            var mailMessage = new MailMessage
+            {
+                From = new MailAddress(fromEmail, senderDisplayName),
+                Subject = subject,
+                Body = body,
+                IsBodyHtml = isHtml
+            };
+            mailMessage.To.Add(toEmail);
+
+            await client.SendMailAsync(mailMessage);
+            Console.WriteLine($"[SMTP] Successfully sent email to {toEmail}");
+        }
+        catch (Exception ex)
         {
-            From = new MailAddress(fromEmail),
-            Subject = subject,
-            Body = body,
-            IsBodyHtml = isHtml
-        };
-        mailMessage.To.Add(toEmail);
-
-        await client.SendMailAsync(mailMessage);
+            Console.WriteLine($"[SMTP] Error sending email to {toEmail}: {ex.Message}");
+            throw;
+        }
     }
 }

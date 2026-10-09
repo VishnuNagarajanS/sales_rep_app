@@ -16,7 +16,6 @@ interface DealsPageProps {
 export const DealsPage: React.FC<DealsPageProps> = ({ onNavigate }) => {
   const { tenant, user } = useAuth();
   const [deals, setDeals] = useState<Deal[]>([]);
-  const [stageFilter, setStageFilter] = useState('All');
   const [agentFilter, setAgentFilter] = useState('All');
 
   // Role-based scoping: Sales Executives see only their own deals.
@@ -58,7 +57,6 @@ export const DealsPage: React.FC<DealsPageProps> = ({ onNavigate }) => {
       : PIPELINE_STAGES.default;
 
   const filteredDeals = scopedDeals.filter(d => {
-    if (stageFilter !== 'All' && d.stage !== stageFilter) return false;
     if (agentFilter !== 'All' && d.assignedAgentName !== agentFilter) return false;
     return true;
   });
@@ -76,7 +74,25 @@ export const DealsPage: React.FC<DealsPageProps> = ({ onNavigate }) => {
       sortable: true,
       render: d => (
         <div>
-          <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{d.title}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{d.title}</span>
+            {d.handedOverFromName && (
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  padding: '2px 6px',
+                  borderRadius: 6,
+                  background: 'rgba(99, 102, 241, 0.15)',
+                  color: '#818cf8',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                }}
+                title={`Handed over from ${d.handedOverFromName}`}
+              >
+                Covering for {d.handedOverFromName}
+              </span>
+            )}
+          </div>
           <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{d.customerName}</div>
         </div>
       ),
@@ -130,13 +146,6 @@ export const DealsPage: React.FC<DealsPageProps> = ({ onNavigate }) => {
         filtersNode={
           <FilterBar
             filters={[
-              {
-                key: 'stage',
-                label: 'Stage',
-                value: stageFilter,
-                onChange: setStageFilter,
-                options: stages.map(s => ({ value: s.id, label: s.name })),
-              },
               ...(!isExec ? [{
                 key: 'agent',
                 label: 'Agent',
@@ -146,7 +155,6 @@ export const DealsPage: React.FC<DealsPageProps> = ({ onNavigate }) => {
               }] : []),
             ]}
             onClearAll={() => {
-              setStageFilter('All');
               setAgentFilter('All');
             }}
           />

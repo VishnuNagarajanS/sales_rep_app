@@ -4,6 +4,7 @@ using backend.Models.Entities;
 using backend.Models.Enums;
 using backend.Repositories.Interfaces;
 using backend.Services.Interfaces;
+using backend.Data;
 
 namespace backend.Services.Implementations;
 
@@ -12,13 +13,20 @@ public class IrmFollowupService : IIrmFollowupService
     private readonly IFollowupRepository _followupRepo;
     private readonly IInvestorRepository _investorRepo;
     private readonly IUserRepository _userRepo;
+    private readonly ApplicationDbContext _context;
     private readonly IIrmOtherService? _otherService;
 
-    public IrmFollowupService(IFollowupRepository followupRepo, IInvestorRepository investorRepo, IUserRepository userRepo, IIrmOtherService? otherService = null)
+    public IrmFollowupService(
+        IFollowupRepository followupRepo, 
+        IInvestorRepository investorRepo, 
+        IUserRepository userRepo, 
+        ApplicationDbContext context,
+        IIrmOtherService? otherService = null)
     {
         _followupRepo = followupRepo;
         _investorRepo = investorRepo;
         _userRepo = userRepo;
+        _context = context;
         _otherService = otherService;
     }
 
@@ -67,11 +75,20 @@ public class IrmFollowupService : IIrmFollowupService
 
         string? investorName = null;
         string? email = dto.ContactEmail?.Trim();
+        int? inheritedHandoverId = null;
+        int? inheritedOriginalOwnerId = null;
+
         if (dto.InvestorId.HasValue)
         {
             var investor = await _investorRepo.GetByIdAsync(dto.InvestorId.Value, companyId, ct);
             investorName = investor?.Name;
             if (string.IsNullOrEmpty(email)) email = investor?.Email;
+            
+            if (investor != null)
+            {
+                inheritedHandoverId = investor.HandoverId;
+                inheritedOriginalOwnerId = investor.OriginalOwnerId;
+            }
         }
 
         var followup = new Followup
@@ -89,10 +106,26 @@ public class IrmFollowupService : IIrmFollowupService
             ScheduledAt = dto.ScheduledAt,
             Status = FollowupStatus.Pending,
             Agenda = dto.Agenda,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            HandoverId = inheritedHandoverId,
+            OriginalOwnerId = inheritedOriginalOwnerId
         };
 
         var created = await _followupRepo.CreateAsync(followup, ct);
+
+        if (inheritedHandoverId.HasValue)
+        {
+            _context.WorkHandoverItems.Add(new WorkHandoverItem
+            {
+                HandoverId = inheritedHandoverId.Value,
+                EntityType = "Followup",
+                EntityId = created.Id,
+                Origin = "created_during_coverage",
+                CreatedAt = DateTime.UtcNow
+            });
+            await _context.SaveChangesAsync(ct);
+        }
+
         return ApiResponse<FollowupDto>.SuccessResponse(MapToDto(created), "Followup created successfully");
     }
 
@@ -147,6 +180,10 @@ public class IrmFollowupService : IIrmFollowupService
         OutcomeNotes = f.OutcomeNotes,
         CreatedAt = f.CreatedAt,
         CompletedAt = f.CompletedAt,
-        RescheduledTo = f.RescheduledTo
+        RescheduledTo = f.RescheduledTo,
+        HandoverId = f.HandoverId,
+        HandedOverFromName = f.OriginalOwner?.Name,
+        HandoverPlannedEnd = f.Handover?.PlannedEndAt,
+        OriginalOwnerId = f.OriginalOwnerId
     };
 }

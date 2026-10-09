@@ -31,6 +31,10 @@ export const routeToPath = (route: string, isSuperAdmin: boolean): string => {
         return '/dashboard';
       case 'company-users':
         return '/users';
+      case 'leave-requests':
+        return '/leave-requests';
+      case 'work-handover':
+        return '/handover';
       case 'company-settings':
         return '/settings';
       case 'company-audit':
@@ -76,6 +80,11 @@ export const pathToRoute = (pathname: string, isSuperAdmin: boolean): string => 
     switch (cleanPath) {
       case '/users':
         return 'company-users';
+      case '/leave-requests':
+        return 'leave-requests';
+      case '/handover':
+      case '/work-handover':
+        return 'work-handover';
       case '/settings':
         return 'company-settings';
       case '/audit':
@@ -130,14 +139,18 @@ import { ConsultationsPage } from './pages/Consultations/ConsultationsPage';
 import { OpportunitiesPage } from './pages/InvestmentOpportunities/OpportunitiesPage';
 import { AssignedLeadsPage } from './pages/AssignedLeads/AssignedLeadsPage';
 import { PendingLeadsPage } from './pages/PendingLeads/PendingLeadsPage';
+import { ArchivedLeadsPage } from './pages/ArchivedLeads/ArchivedLeadsPage';
 import { KYCPage } from './pages/KYC/KYCPage';
 import { IrmOtherPage } from './pages/IrmOther/IrmOtherPage';
 import { AllLeadsPage } from './pages/Irm/AllLeadsPage';
 
 // Company Admin
 import { CompanyUsersPage } from './pages/Company/CompanyUsersPage';
+import { LeaveRequestsPage } from './pages/Company/LeaveRequestsPage';
+import { WorkHandoverPage } from './pages/Company/WorkHandoverPage';
 import { CompanySettingsPage } from './pages/Company/CompanySettingsPage';
 import { CompanyAuditPage } from './pages/Company/CompanyAuditPage';
+import { SmartyAIPage } from './pages/AI/SmartyAIPage';
 
 // Super Admin Platform Pages
 import { PlatformDashboardPage } from './pages/Admin/Dashboard/PlatformDashboardPage';
@@ -713,7 +726,7 @@ export const App: React.FC = () => {
       ) : currentRoute === 'assigned-leads' ? (
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
           {isGhlAdmin ? (
-            <AssignedLeadsPage />
+            <AssignedLeadsPage onNavigate={navigate} />
           ) : (
             <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
           )}
@@ -722,6 +735,14 @@ export const App: React.FC = () => {
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
           {isGhlAdmin ? (
             <PendingLeadsPage />
+          ) : (
+            <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+          )}
+        </ProtectedRoute>
+      ) : currentRoute === 'archived-leads' ? (
+        <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
+          {isGhlAdmin ? (
+            <ArchivedLeadsPage />
           ) : (
             <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
           )}
@@ -799,7 +820,7 @@ export const App: React.FC = () => {
       ) : currentRoute === 'chat' ? (
         <ChatPage onNavigate={navigate} />
       ) : currentRoute === 'smarty-ai' ? (
-        <PlaceholderPage title="Smarty AI" />
+        <SmartyAIPage />
       ) : currentRoute === 'profile' ? (
         <ProfilePage />
       ) : currentRoute === 'reports' ? (
@@ -811,6 +832,12 @@ export const App: React.FC = () => {
       ) : currentRoute === 'company-users' ? (
         <ProtectedRoute permission={PERMISSIONS.USERS_VIEW}>
           <CompanyUsersPage />
+        </ProtectedRoute>
+      ) : currentRoute === 'leave-requests' ? (
+        <LeaveRequestsPage onNavigate={navigate} />
+      ) : currentRoute === 'work-handover' ? (
+        <ProtectedRoute permission={PERMISSIONS.USERS_VIEW}>
+          <WorkHandoverPage initialParams={navExtraState} onNavigate={navigate} />
         </ProtectedRoute>
       ) : currentRoute === 'company-settings' ? (
         <ProtectedRoute permission={PERMISSIONS.SETTINGS_VIEW}>
@@ -849,7 +876,7 @@ export const App: React.FC = () => {
                   required
                   value={quickName}
                   onChange={e => setQuickName(e.target.value)}
-                  placeholder="e.g. Ramesh Chandra"
+                  placeholder="e.g. Agent One"
                 />
               </div>
 
@@ -878,7 +905,7 @@ export const App: React.FC = () => {
                     className="form-input"
                     value={quickEmail}
                     onChange={e => setQuickEmail(e.target.value)}
-                    placeholder="ramesh@example.com"
+                    placeholder="agent1@example.com"
                   />
                 </div>
               </div>

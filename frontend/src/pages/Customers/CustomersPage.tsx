@@ -53,6 +53,38 @@ const getCustomFieldDefinitions = (tenantId?: string): CustomFieldDefinition[] =
     return [];
   }
 };
+const lastTenDigits = (p?: string): string => (p || '').replace(/\D/g, '').slice(-10);
+
+/** Build a Customer 360 entry from an 'Interested' lead. */
+const leadToCustomer = (l: Lead): Customer => {
+  const cf = (l.customFields || {}) as Record<string, any>;
+  return {
+    id: `lead-${l.id}`,
+    companyId: l.companyId,
+    name: l.name,
+    phone: l.phone,
+    email: l.email,
+    status: 'Interested',
+    assignedAgentId: l.assignedAgentId,
+    assignedAgentName: l.assignedAgentName,
+    location: l.location,
+    lastContacted: l.lastContactedAt || '—',
+    openDealsCount: 0,
+    totalValue: 0,
+    createdAt: l.createdAt,
+    notes: l.notes,
+    customFields: cf,
+    assignedIrmId: l.assignedIrmId || cf.assignedIrmId || undefined,
+    assignedIrmName: l.assignedIrmName || cf.assignedIrmName || undefined,
+    assignedIrmAt: l.assignedIrmAt || cf.assignedIrmAt || undefined,
+    handoverId: l.handoverId,
+    handedOverFromName: l.handedOverFromName,
+    handoverPlannedEnd: l.handoverPlannedEnd,
+    isLeadRecord: true,
+    sourceLeadId: l.id,
+  };
+};
+
 interface AutoRecommendation {
   customerId: string;
   customerName: string;
@@ -69,6 +101,7 @@ export const CustomersPage: React.FC = () => {
   const { initiateCall } = useCall();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
   const irms = useMemo(() => storageService.getIrms(tenant?.id), [tenant?.id]);
 
   // Role-based scoping: Sales Executives see only their own customers.
@@ -81,12 +114,48 @@ export const CustomersPage: React.FC = () => {
   const isSalesExecutive = isExec || user?.role?.name === 'Sales Executive';
   const canAssignToIRM = Boolean(isGhlTenant && isSalesExecutive);
 
+  // Leads marked "Interested" are shown in Customer 360 even before they are formally converted.
+  // They are virtual entries (id = `lead-<leadId>`) built from the Leads table, de-duplicated against
+  // real customers by phone / email. IRM users already see these in "My Leads", so they are skipped.
+  const interestedLeadCustomers = useMemo<Customer[]>(() => {
+    if (roleCode === 'irm') return [];
+    const customerPhones = new Set(customers.map(c => lastTenDigits(c.phone)).filter(Boolean));
+    const customerEmails = new Set(
+      customers.map(c => (c.email || '').trim().toLowerCase()).filter(Boolean)
+    );
+    return leads
+      .filter(l => l.status === 'Interested')
+      .filter(l => {
+        const ph = lastTenDigits(l.phone);
+        const em = (l.email || '').trim().toLowerCase();
+        if (ph && customerPhones.has(ph)) return false;
+        if (em && customerEmails.has(em)) return false;
+        return true;
+      })
+      .map(leadToCustomer);
+  }, [leads, customers, roleCode]);
+
+  const allCustomers = useMemo<Customer[]>(
+    () => [...interestedLeadCustomers, ...customers],
+    [interestedLeadCustomers, customers]
+  );
+
   const scopedCustomers = isExec
-    ? customers.filter(c =>
-      (c.assignedAgentId && c.assignedAgentId === user?.id) ||
-      (c.assignedAgentName && c.assignedAgentName === user?.name)
-    )
-    : customers;
+    ? allCustomers.filter(c => {
+        const hasIrm = Boolean(
+          c.assignedIrmId ||
+          c.assignedIrmName ||
+          c.customFields?.assignedIrmId ||
+          c.customFields?.assignedIrmName
+        );
+        if (hasIrm) return false;
+        
+        return (
+          (c.assignedAgentId && c.assignedAgentId === user?.id) ||
+          (c.assignedAgentName && c.assignedAgentName === user?.name)
+        );
+      })
+    : allCustomers;
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'calls' | 'followups' | 'timeline' | 'documents'>('overview');
   const [customerDocsTab, setCustomerDocsTab] = useState<'customer' | 'company'>('customer');
@@ -95,6 +164,16 @@ export const CustomersPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('All');
   const [agentFilter, setAgentFilter] = useState('All');
   const [assignmentFilter, setAssignmentFilter] = useState<'All' | 'Assigned' | 'Unassigned'>('All');
+  const [handoverFilter, setHandoverFilter] = useState('Mine');
+
+  const handoverOptions = useMemo(() => {
+    const names = Array.from(new Set(scopedCustomers.map(c => c.handedOverFromName).filter(Boolean)));
+    if (names.length === 0) return [];
+    return [
+      { value: 'Mine', label: 'Mine' },
+      ...names.map(name => ({ value: `Handover_${name}`, label: `Handed over from ${name}` }))
+    ];
+  }, [scopedCustomers]);
 
   // Assignment mode state (Sales Executive only)
   const [isAssignMode, setIsAssignMode] = useState(false);
@@ -183,8 +262,19 @@ export const CustomersPage: React.FC = () => {
     loadData();
     const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+    window.addEventListener('nexus_handover_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
+      window.removeEventListener('nexus_handover_updated', handleUpdate);
+    };
   }, [tenant?.id]);
+
+  // If nothing is selected yet (e.g. the user only has Interested leads), select the first visible entry.
+  useEffect(() => {
+    if (!selectedCustomer && scopedCustomers.length > 0) {
+      setSelectedCustomer(scopedCustomers[0]);
+    }
+  }, [scopedCustomers, selectedCustomer]);
 
   const agentOptions = Array.from(new Set(scopedCustomers.map(c => c.assignedAgentName)))
     .filter(Boolean)
@@ -196,6 +286,13 @@ export const CustomersPage: React.FC = () => {
     if (canAssignToIRM) {
       if (assignmentFilter === 'Assigned' && !(c.assignedIrmName || c.assignedIrmId)) return false;
       if (assignmentFilter === 'Unassigned' && (c.assignedIrmName || c.assignedIrmId)) return false;
+    }
+    if (handoverOptions.length > 0) {
+      if (handoverFilter === 'Mine' && c.handoverId) return false;
+      if (handoverFilter !== 'Mine' && handoverFilter !== 'All') {
+        const name = handoverFilter.replace('Handover_', '');
+        if (c.handedOverFromName !== name) return false;
+      }
     }
     return true;
   });
@@ -301,7 +398,7 @@ export const CustomersPage: React.FC = () => {
   const runAutoAssignmentAlgorithm = (custs: Customer[]): AutoRecommendation[] => {
     const liveCountMap: Record<string, number> = {};
     irms.forEach((irm: IrmProfile) => {
-      liveCountMap[irm.id] = customers.filter(c => c.assignedIrmName === irm.name || c.assignedIrmId === irm.id).length;
+      liveCountMap[irm.id] = allCustomers.filter(c => c.assignedIrmName === irm.name || c.assignedIrmId === irm.id).length;
     });
 
     const tierPriority = { Premium: 5, 'Very High': 4, High: 3, Medium: 2, Normal: 1 };
@@ -398,6 +495,7 @@ export const CustomersPage: React.FC = () => {
     }
     for (const { customer, irmId, irmName } of pairs) {
       const lead = allLeads.find(l =>
+        (customer.sourceLeadId && l.id === customer.sourceLeadId) ||
         (digits(l.phone) && digits(l.phone) === digits(customer.phone)) ||
         (!!l.email && !!customer.email && l.email.toLowerCase() === customer.email.toLowerCase())
       );
@@ -432,7 +530,7 @@ export const CustomersPage: React.FC = () => {
     const toHandover: { customer: Customer; irmId: string; irmName: string }[] = [];
 
     selectedCustomerIds.forEach(cid => {
-      const cust = allLatest.find((c: Customer) => c.id === cid) || customers.find((c: Customer) => c.id === cid);
+      const cust = allCustomers.find((c: Customer) => c.id === cid) || allLatest.find((c: Customer) => c.id === cid);
       if (cust && isCustomerEligibleForIrm(cust)) {
         const updated: Customer = {
           ...cust,
@@ -441,9 +539,11 @@ export const CustomersPage: React.FC = () => {
           assignedIrmAt: new Date().toISOString(),
           notes: `${cust.notes ? cust.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Assigned to IRM: ${selectedIrm.name} by ${user?.name || 'Sales Executive'}`,
         };
-        toUpdate.push(updated);
+        if (!updated.isLeadRecord) {
+          toUpdate.push(updated);
+          storageService.saveCustomer?.(updated);
+        }
         toHandover.push({ customer: updated, irmId: selectedIrm.id, irmName: selectedIrm.name });
-        storageService.saveCustomer?.(updated);
         assignedCount++;
       }
     });
@@ -469,7 +569,7 @@ export const CustomersPage: React.FC = () => {
     const toHandover: { customer: Customer; irmId: string; irmName: string }[] = [];
 
     autoRecommendations.forEach(rec => {
-      const cust = allLatest.find((c: Customer) => c.id === rec.customerId) || customers.find((c: Customer) => c.id === rec.customerId);
+      const cust = allCustomers.find((c: Customer) => c.id === rec.customerId) || allLatest.find((c: Customer) => c.id === rec.customerId);
       if (cust && isCustomerEligibleForIrm(cust)) {
         const updated: Customer = {
           ...cust,
@@ -478,9 +578,11 @@ export const CustomersPage: React.FC = () => {
           assignedIrmAt: new Date().toISOString(),
           notes: `${cust.notes ? cust.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Auto-assigned to IRM: ${rec.recommendedIrmName} (${rec.matchReason})`,
         };
-        toUpdate.push(updated);
+        if (!updated.isLeadRecord) {
+          toUpdate.push(updated);
+          storageService.saveCustomer?.(updated);
+        }
         toHandover.push({ customer: updated, irmId: rec.recommendedIrmId, irmName: rec.recommendedIrmName });
-        storageService.saveCustomer?.(updated);
         assignedCount++;
       }
     });
@@ -727,7 +829,7 @@ export const CustomersPage: React.FC = () => {
     rawEvents.push({
       id: `ev-create-${selectedCustomer.id}`,
       type: 'note',
-      title: 'Customer Account Created',
+      title: selectedCustomer.isLeadRecord ? 'Lead Marked Interested' : 'Customer Account Created',
       timestamp: selectedCustomer.createdAt,
       actorName: selectedCustomer.assignedAgentName,
     });
@@ -858,6 +960,25 @@ export const CustomersPage: React.FC = () => {
                 Filters:
               </span>
 
+              {/* Handover Filter */}
+              {handoverOptions.length > 0 && (
+                <div className="customers-filter-group">
+                  <label htmlFor="filter-customer-handover" className="customers-filter-tag">
+                    View:
+                  </label>
+                  <select
+                    id="filter-customer-handover"
+                    className={`form-select customers-filter-select ${handoverFilter !== 'Mine' ? 'is-filtered' : ''}`}
+                    value={handoverFilter}
+                    onChange={e => setHandoverFilter(e.target.value)}
+                  >
+                    {handoverOptions.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {/* Status Filter */}
               <div className="customers-filter-group">
                 <label
@@ -877,6 +998,7 @@ export const CustomersPage: React.FC = () => {
                   <option value="Active">Active</option>
                   <option value="VIP">VIP</option>
                   <option value="Inactive">Inactive</option>
+                  <option value="Interested">Interested</option>
                 </select>
               </div>
 
@@ -968,6 +1090,22 @@ export const CustomersPage: React.FC = () => {
                         <div className="customer-list-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {c.name}
                         </div>
+                        {c.handedOverFromName && (
+                          <span
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 600,
+                              padding: '2px 6px',
+                              borderRadius: 6,
+                              background: 'rgba(99, 102, 241, 0.15)',
+                              color: '#818cf8',
+                              border: '1px solid rgba(99, 102, 241, 0.3)',
+                            }}
+                            title={`Handed over from ${c.handedOverFromName}`}
+                          >
+                            Covering for {c.handedOverFromName}
+                          </span>
+                        )}
                       </div>
                       <StatusChip status={c.status} size="sm" />
                     </div>
@@ -998,7 +1136,8 @@ export const CustomersPage: React.FC = () => {
                         className="btn btn-call btn-sm btn-icon customer-list-call-btn"
                         onClick={e => {
                           e.stopPropagation();
-                          initiateCall(c.name, c.phone, 'customer', c.id);
+                          if (c.isLeadRecord) initiateCall(c.name, c.phone, 'lead', c.sourceLeadId);
+                          else initiateCall(c.name, c.phone, 'customer', c.id);
                         }}
                       >
                         <Phone size={12} />
@@ -1032,7 +1171,11 @@ export const CustomersPage: React.FC = () => {
               <div className="customer-cockpit-actions">
                 <button
                   className="btn btn-primary customer-call-btn"
-                  onClick={() => initiateCall(selectedCustomer.name, selectedCustomer.phone, 'customer', selectedCustomer.id)}
+                  onClick={() =>
+                    selectedCustomer.isLeadRecord
+                      ? initiateCall(selectedCustomer.name, selectedCustomer.phone, 'lead', selectedCustomer.sourceLeadId)
+                      : initiateCall(selectedCustomer.name, selectedCustomer.phone, 'customer', selectedCustomer.id)
+                  }
                 >
                   <Phone size={15} /> Click to Call
                 </button>
@@ -1086,7 +1229,9 @@ export const CustomersPage: React.FC = () => {
                         </div>
                       </div>
                       <div>
-                        <span className="customer-profile-label">Customer Since:</span>
+                        <span className="customer-profile-label">
+                          {selectedCustomer.isLeadRecord ? 'Interested Lead Since:' : 'Customer Since:'}
+                        </span>
                         <div className="customer-profile-val">{selectedCustomer.createdAt}</div>
                       </div>
                       <div>
@@ -1566,13 +1711,13 @@ export const CustomersPage: React.FC = () => {
                   {customerDocsTab === 'customer' && (
                     <>
                       <DocumentUploader
-                        entityType="customer"
-                        entityId={selectedCustomer.id}
+                        entityType={selectedCustomer.isLeadRecord ? 'lead' : 'customer'}
+                        entityId={selectedCustomer.isLeadRecord ? (selectedCustomer.sourceLeadId || selectedCustomer.id) : selectedCustomer.id}
                         allowedCategories={['KYC', 'Agreement', 'Payment Receipt', 'Identity Proof', 'Other']}
                       />
                       <DocumentList
-                        entityType="customer"
-                        entityId={selectedCustomer.id}
+                        entityType={selectedCustomer.isLeadRecord ? 'lead' : 'customer'}
+                        entityId={selectedCustomer.isLeadRecord ? (selectedCustomer.sourceLeadId || selectedCustomer.id) : selectedCustomer.id}
                         canDelete
                       />
                     </>
@@ -1633,7 +1778,7 @@ export const CustomersPage: React.FC = () => {
               name="name"
               autoComplete="name"
               className={`form-input${addErrors.name ? ' is-invalid' : ''}`}
-              placeholder="e.g. Priya Sharma"
+              placeholder="e.g. Agent Two"
               value={newName}
               onChange={e => { setNewName(e.target.value); if (addErrors.name) setAddErrors(p => ({ ...p, name: undefined })); }}
             />
@@ -1662,7 +1807,7 @@ export const CustomersPage: React.FC = () => {
               autoComplete="email"
               className="form-input"
               type="email"
-              placeholder="e.g. priya@example.com"
+              placeholder="e.g. agent2@example.com"
               value={newEmail}
               onChange={e => setNewEmail(e.target.value)}
             />
@@ -1780,7 +1925,7 @@ export const CustomersPage: React.FC = () => {
         >
           <div className="irm-selection-list">
             {irms.map((irm: IrmProfile) => {
-              const currentCount = customers.filter(c => c.assignedIrmName === irm.name || c.assignedIrmId === irm.id).length;
+              const currentCount = allCustomers.filter(c => c.assignedIrmName === irm.name || c.assignedIrmId === irm.id).length;
               const workload = currentCount <= 2 ? 'Low' : currentCount <= 5 ? 'Medium' : 'High';
               const isSelected = selectedIrmId === irm.id;
 

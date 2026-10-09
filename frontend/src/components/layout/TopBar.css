@@ -148,9 +148,10 @@
   color: #ffffff;
   font-size: 10px;
   font-weight: 700;
-  width: 16px;
+  min-width: 16px;
   height: 16px;
-  border-radius: 50%;
+  border-radius: 8px;
+  padding: 0 4px;
   display: flex;
   align-items: center;
   justify-content: center;

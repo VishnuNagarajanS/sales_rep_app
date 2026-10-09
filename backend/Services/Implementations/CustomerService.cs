@@ -28,7 +28,11 @@ public class CustomerService : ICustomerService
         var agentId = _currentUser.UserId;
         var companyId = _currentUser.CompanyId;
 
-        var query = _context.Customers.AsNoTracking().Include(c => c.AssignedAgent).AsQueryable();
+        var query = _context.Customers.AsNoTracking()
+            .Include(c => c.AssignedAgent)
+            .Include(c => c.OriginalOwner)
+            .Include(c => c.Handover)
+            .AsQueryable();
 
         if (role == "super_admin")
         {
@@ -56,7 +60,11 @@ public class CustomerService : ICustomerService
         var agentId = _currentUser.UserId;
         var companyId = _currentUser.CompanyId;
 
-        var query = _context.Customers.Include(c => c.AssignedAgent).Where(c => c.Id == id);
+        var query = _context.Customers
+            .Include(c => c.AssignedAgent)
+            .Include(c => c.OriginalOwner)
+            .Include(c => c.Handover)
+            .Where(c => c.Id == id);
 
         if (role == "super_admin")
         {
@@ -344,7 +352,11 @@ public class CustomerService : ICustomerService
             CustomFields = DeserializeCustomFields(c.CustomFieldsJson),
             LastContactedAt = c.LastContactedAt,
             CreatedAt = c.CreatedAt,
-            UpdatedAt = c.UpdatedAt
+            UpdatedAt = c.UpdatedAt,
+            HandoverId = c.HandoverId,
+            HandedOverFromName = c.OriginalOwner?.Name,
+            HandoverPlannedEnd = c.Handover?.PlannedEndAt,
+            OriginalOwnerId = c.OriginalOwnerId
         };
     }
 

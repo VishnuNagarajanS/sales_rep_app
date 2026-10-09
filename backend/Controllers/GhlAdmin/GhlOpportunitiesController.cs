@@ -38,6 +38,8 @@ public class GhlOpportunitiesController : ControllerBase
         var query = _db.GhlInvestmentOpportunities.AsNoTracking()
             .Include(o => o.AssignedAgent)
             .Include(o => o.Investor)
+            .Include(o => o.Handover)
+            .Include(o => o.OriginalOwner)
             .AsQueryable();
 
         var companyId = _currentUser.CompanyId;
@@ -136,12 +138,22 @@ public class GhlOpportunitiesController : ControllerBase
         if (!companyId.HasValue || companyId.Value <= 0)
             return Unauthorized(ApiResponse<GhlOpportunityResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
 
-        // Verify investor exists
-        var investorExists = await _db.Investors
-            .AnyAsync(i => i.Id == dto.InvestorId && i.CompanyId == companyId.Value, ct);
+        // Verify investor exists (support unified Investors table and fallback to GhlInvestors)
+        var investor = await _db.Investors
+            .FirstOrDefaultAsync(i => i.Id == dto.InvestorId && i.CompanyId == companyId.Value, ct);
 
-        if (!investorExists)
-            return BadRequest(ApiResponse<GhlOpportunityResponseDto>.FailureResult("Investor not found."));
+        int? handoverId = investor?.HandoverId;
+        int? originalOwnerId = investor?.OriginalOwnerId;
+
+        if (investor == null)
+        {
+            var ghlInv = await _db.GhlInvestors
+                .FirstOrDefaultAsync(i => i.Id == dto.InvestorId && i.CompanyId == companyId.Value, ct);
+            if (ghlInv == null)
+                return BadRequest(ApiResponse<GhlOpportunityResponseDto>.FailureResult("Investor not found."));
+            handoverId = ghlInv.HandoverId;
+            originalOwnerId = ghlInv.OriginalOwnerId;
+        }
 
         var opp = new GhlInvestmentOpportunity
         {
@@ -155,10 +167,25 @@ public class GhlOpportunitiesController : ControllerBase
             ExpectedCloseDate = dto.ExpectedCloseDate.Trim(),
             Notes = dto.Notes.Trim(),
             CreatedAt = DateTime.UtcNow,
+            HandoverId = handoverId,
+            OriginalOwnerId = originalOwnerId
         };
 
         _db.GhlInvestmentOpportunities.Add(opp);
         await _db.SaveChangesAsync(ct);
+
+        if (handoverId.HasValue)
+        {
+            _db.WorkHandoverItems.Add(new WorkHandoverItem
+            {
+                HandoverId = handoverId.Value,
+                EntityType = "GhlInvestmentOpportunity",
+                EntityId = opp.Id,
+                Origin = "created_during_coverage",
+                CreatedAt = DateTime.UtcNow
+            });
+            await _db.SaveChangesAsync(ct);
+        }
 
         await _db.Entry(opp).Reference(o => o.AssignedAgent).LoadAsync(ct);
         await _db.Entry(opp).Reference(o => o.Investor).LoadAsync(ct);
@@ -238,5 +265,9 @@ public class GhlOpportunitiesController : ControllerBase
         Notes = o.Notes,
         CreatedAt = o.CreatedAt,
         UpdatedAt = o.UpdatedAt,
+        HandoverId = o.HandoverId,
+        HandedOverFromName = o.OriginalOwner?.Name,
+        HandoverPlannedEnd = o.Handover?.PlannedEndAt,
+        OriginalOwnerId = o.OriginalOwnerId
     };
 }

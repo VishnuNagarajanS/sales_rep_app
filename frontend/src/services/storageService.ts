@@ -215,13 +215,40 @@ class StorageService {
         if (raw) users = JSON.parse(raw);
       } catch {}
     }
+    // Sanitize: strictly map any legacy sales_manager to sales_executive
+    users = (users || []).map(u => {
+      if ((u.role?.code as string) === 'sales_manager' || (u.role?.name && u.role.name.toLowerCase().includes('manager') && !u.role.name.toLowerCase().includes('irm') && !u.role.name.toLowerCase().includes('investor'))) {
+        return {
+          ...u,
+          role: {
+            ...u.role,
+            code: 'sales_executive' as const,
+            name: 'Sales Executive'
+          }
+        };
+      }
+      return u;
+    });
     return companySlug ? users.filter(u => u.companySlug === companySlug || (u as any).companyId === companySlug) : users;
   }
 
   setUsers(users: User[]): void {
-    this.set('users', users);
+    const sanitized = (users || []).map(u => {
+      if ((u.role?.code as string) === 'sales_manager' || (u.role?.name && u.role.name.toLowerCase().includes('manager') && !u.role.name.toLowerCase().includes('irm') && !u.role.name.toLowerCase().includes('investor'))) {
+        return {
+          ...u,
+          role: {
+            ...u.role,
+            code: 'sales_executive' as const,
+            name: 'Sales Executive'
+          }
+        };
+      }
+      return u;
+    });
+    this.set('users', sanitized);
     try {
-      localStorage.setItem('nexus_dev_users', JSON.stringify(users));
+      localStorage.setItem('nexus_dev_users', JSON.stringify(sanitized));
     } catch {}
     window.dispatchEvent(new Event('nexus_storage_updated'));
   }
@@ -1011,15 +1038,18 @@ class StorageService {
   getAgents(companyId?: string): Array<{ id: number | string; name: string; email?: string; role?: string }> {
     const users = this.getUsers(companyId);
     const agents = users
-      .filter(u => u.role?.code === 'sales_executive' || u.role?.name?.toLowerCase().includes('sales'))
+      .filter(u => !u.isCovered && (u.role?.code === 'sales_executive' || u.role?.name?.toLowerCase().includes('sales')))
       .map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role?.name || 'Sales Executive' }));
-    return agents;
+    if (agents.length > 0) return agents;
+    return [
+      { id: '3', name: 'Naveen', role: 'Sales Executive', email: 'naveen@ghlindiaventures.com' },
+    ];
   }
 
   getIrms(companyId?: string): IrmProfile[] {
     const users = this.getUsers(companyId);
     const irms = users
-      .filter(u => u.role?.code === 'irm' || u.role?.name?.toLowerCase().includes('irm') || u.role?.name?.toLowerCase().includes('investor'))
+      .filter(u => !u.isCovered && (u.role?.code === 'irm' || u.role?.name?.toLowerCase().includes('irm') || u.role?.name?.toLowerCase().includes('investor')))
       .map(u => ({
         id: u.id,
         name: u.name,

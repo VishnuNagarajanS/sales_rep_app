@@ -141,6 +141,10 @@ public class InvestorService : IInvestorService
         AssignedIrmName = i.AssignedIrmName,
         Notes = i.Notes,
         CreatedAt = i.CreatedAt,
-        UpdatedAt = i.UpdatedAt
+        UpdatedAt = i.UpdatedAt,
+        HandoverId = i.HandoverId,
+        HandedOverFromName = i.OriginalOwner?.Name,
+        HandoverPlannedEnd = i.Handover?.PlannedEndAt,
+        OriginalOwnerId = i.OriginalOwnerId
     };
 }

@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace backend.Models.Entities;
 
 /// <summary>
@@ -14,6 +16,13 @@ public class GhlInvestor
 
     public int AssignedAgentId { get; set; }
     public User? AssignedAgent { get; set; }
+
+    [NotMapped]
+    public int? HandoverId { get; set; }
+    [NotMapped]
+    public WorkHandover? Handover { get; set; }
+    public int? OriginalOwnerId { get; set; }
+    public User? OriginalOwner { get; set; }
 
     public string Name { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;

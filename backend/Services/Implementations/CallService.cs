@@ -108,14 +108,81 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
         record.Notes = request.Notes;
         if (!string.IsNullOrWhiteSpace(request.Reason)) record.Reason = request.Reason;
         if (!string.IsNullOrWhiteSpace(request.Module)) record.CallModule = request.Module;
-
+        Followup? newFollowup = null;
         if (request.LeadId.HasValue)
         {
-            var lead = await context.Set<Lead>().FirstOrDefaultAsync(x => x.Id == request.LeadId && x.CompanyId == currentUser.CompanyId.Value && x.AssignedAgentId == currentUser.UserId.Value, cancellationToken);
-            if (lead != null && request.Disposition is "Interested" or "Not Interested" or "Wrong Number" or "No Response") lead.Status = request.Disposition == "Wrong Number" ? "Junk" : request.Disposition;
-            if (lead != null && request.Disposition is "Follow-up Required" or "Call Back" or "No Response") context.Set<Followup>().Add(new Followup { CompanyId = currentUser.CompanyId.Value, AssignedAgentId = currentUser.UserId.Value, LeadId = lead.Id, ContactId = lead.Id.ToString(), ContactType = "lead", ContactName = lead.Name, ContactPhone = lead.Phone, ScheduledAt = request.FollowupAt ?? DateTime.UtcNow.AddDays(1), Notes = request.Notes ?? string.Empty });
+            var lead = await context.Set<Lead>().FirstOrDefaultAsync(x => x.Id == request.LeadId && x.CompanyId == currentUser.CompanyId.Value, cancellationToken);
+            if (lead != null)
+            {
+                if (request.Disposition is "Interested" or "Not Interested" or "Wrong Number")
+                {
+                    lead.Status = request.Disposition == "Wrong Number" ? "Junk" : request.Disposition;
+
+                    if (request.Disposition == "Interested")
+                    {
+                        // Qualified lead: close its pending sales follow-ups so they leave the Follow-ups page.
+                        var leadIdStr = lead.Id.ToString();
+                        var pendingFollowups = await context.Set<Followup>()
+                            .Where(f => f.CompanyId == lead.CompanyId &&
+                                        f.ContactType == "lead" &&
+                                        f.ContactId == leadIdStr &&
+                                        f.Status == backend.Models.Enums.FollowupStatus.Pending &&
+                                        f.AssignedToRole != "irm")
+                            .ToListAsync(cancellationToken);
+                        foreach (var pf in pendingFollowups)
+                        {
+                            pf.Status = backend.Models.Enums.FollowupStatus.Cancelled;
+                            pf.OutcomeNotes = "Auto-closed: lead marked Interested.";
+                            pf.UpdatedAt = DateTime.UtcNow;
+                        }
+                    }
+                }
+                else if (request.Disposition is "Follow-up Required" or "Follow Up Required")
+                {
+                    lead.Status = "Follow-up Required";
+                    if (request.FollowupAt.HasValue) lead.NextFollowupDate = request.FollowupAt.Value;
+                }
+                else if (request.Disposition is "Call Back")
+                {
+                    lead.Status = "Callback";
+                    if (request.FollowupAt.HasValue) lead.NextFollowupDate = request.FollowupAt.Value;
+                }
+                else if (request.Disposition is "No Response")
+                {
+                    lead.Status = "No Response";
+                    if (request.FollowupAt.HasValue) lead.NextFollowupDate = request.FollowupAt.Value;
+                }
+            }
+            if (lead != null && request.Disposition is "Follow-up Required" or "Follow Up Required" or "Call Back" or "No Response") 
+            {
+                newFollowup = new Followup { 
+                    CompanyId = currentUser.CompanyId.Value, 
+                    AssignedAgentId = currentUser.UserId.Value, 
+                    LeadId = lead.Id, 
+                    ContactId = lead.Id.ToString(), 
+                    ContactType = "lead", 
+                    ContactName = lead.Name, 
+                    ContactPhone = lead.Phone, 
+                    ScheduledAt = request.FollowupAt ?? DateTime.UtcNow.AddDays(1), 
+                    Notes = request.Notes ?? string.Empty,
+                    HandoverId = lead.HandoverId,
+                    OriginalOwnerId = lead.OriginalOwnerId
+                };
+                context.Set<Followup>().Add(newFollowup);
+            }
         }
         await context.SaveChangesAsync(cancellationToken);
+        if (newFollowup != null && newFollowup.HandoverId.HasValue)
+        {
+            context.Set<WorkHandoverItem>().Add(new WorkHandoverItem
+            {
+                HandoverId = newFollowup.HandoverId.Value,
+                EntityType = "Followup",
+                EntityId = newFollowup.Id,
+                Origin = "created_during_coverage"
+            });
+            await context.SaveChangesAsync(cancellationToken);
+        }
         return ApiResponse<CallRecordDto>.SuccessResult(Map(record), "Disposition processed");
     }
 

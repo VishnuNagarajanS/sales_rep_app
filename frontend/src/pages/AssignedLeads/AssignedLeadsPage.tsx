@@ -27,7 +27,11 @@ import { Modal } from '../../components/common/Modal';
 import { getAuthHeaders } from '../../utils/authHeaders';
 import './AssignedLeadsPage.css';
 
-export const AssignedLeadsPage: React.FC = () => {
+interface AssignedLeadsPageProps {
+  onNavigate?: (route: string) => void;
+}
+
+export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate }) => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
 
@@ -584,11 +588,15 @@ export const AssignedLeadsPage: React.FC = () => {
               className="btn btn-secondary"
               style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}
               onClick={() => {
-                setIsCoverageModalOpen(true);
-                loadActiveCoverages();
+                if (onNavigate) {
+                  onNavigate('work-handover');
+                } else {
+                  window.history.pushState({}, '', '/handover');
+                  window.dispatchEvent(new PopStateEvent('popstate'));
+                }
               }}
             >
-              <Users size={15} /> IRM Coverage &amp; Reassignment
+              <Users size={15} /> Work Handover (Coverage)
             </button>
           </div>
         )}
@@ -822,7 +830,7 @@ export const AssignedLeadsPage: React.FC = () => {
               className="form-input"
               value={formData.name || ''}
               onChange={e => setFormData({ ...formData, name: e.target.value })}
-              placeholder="e.g. Ramesh Kumar"
+              placeholder="e.g. Agent One"
             />
           </div>
 
@@ -851,7 +859,7 @@ export const AssignedLeadsPage: React.FC = () => {
                 className="form-input"
                 value={formData.email || ''}
                 onChange={e => setFormData({ ...formData, email: e.target.value })}
-                placeholder="ramesh@gmail.com"
+                placeholder="agent1@example.com"
               />
             </div>
           </div>

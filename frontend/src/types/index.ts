@@ -105,7 +105,13 @@ export interface User {
   joinedAt?: string;
   createdAt?: string;
   updatedAt?: string;
+  emailSent?: boolean;
+  emailError?: string;
+  temporaryPassword?: string;
+  isCovered?: boolean;
 }
+
+
 
 export interface Lead {
   id: string;
@@ -121,6 +127,9 @@ export interface Lead {
   assignedAgentName: string;
   assignedById?: string | number;
   assignedByName?: string;
+  assignedIrmId?: string;
+  assignedIrmName?: string;
+  assignedIrmAt?: string;
   nextFollowupDate?: string;
   createdAt: string;
   notes: string;
@@ -149,6 +158,12 @@ export interface Lead {
   slaStatus?: 'on_track' | 'at_risk' | 'breached';
   createdBy?: string;
   updatedBy?: string;
+  handoverId?: number;
+  handedOverFromName?: string;
+  handoverPlannedEnd?: string;
+  originalOwnerId?: number;
+  updatedAt?: string;
+  normalizedEmail?: string;
 }
 
 export interface Customer {
@@ -157,7 +172,7 @@ export interface Customer {
   name: string;
   phone: string;
   email: string;
-  status: 'Active' | 'VIP' | 'Inactive';
+  status: 'Active' | 'VIP' | 'Inactive' | 'Interested';
   assignedAgentId: string;
   assignedAgentName: string;
   location: string;
@@ -179,6 +194,13 @@ export interface Customer {
   assignedIrmId?: string;
   assignedIrmName?: string;
   assignedIrmAt?: string;
+  handoverId?: number;
+  handedOverFromName?: string;
+  handoverPlannedEnd?: string;
+  originalOwnerId?: number;
+  /** Set only for virtual Customer 360 entries built from an 'Interested' lead (not a row in the Customers table). */
+  isLeadRecord?: boolean;
+  sourceLeadId?: string;
 }
 
 export interface IrmProfile {
@@ -223,6 +245,10 @@ export interface Deal {
   verifiedAt?: string;
   remarks?: string;
   flaggedSections?: string[];
+  handoverId?: number;
+  handedOverFromName?: string;
+  handoverPlannedEnd?: string;
+  originalOwnerId?: number;
 }
 
 export interface DealActivity {
@@ -339,6 +365,10 @@ export interface Followup {
   completedAt?: string;
   relatedCallId?: string;
   statusReason?: string;
+  handoverId?: number;
+  handedOverFromName?: string;
+  handoverPlannedEnd?: string;
+  originalOwnerId?: number;
 }
 
 export interface PropertyProject {
@@ -422,6 +452,10 @@ export interface Investor {
   committedAUM?: string;
   investmentMandate?: string;
   riskTolerance?: 'Conservative' | 'Moderate' | 'Aggressive';
+  handoverId?: number;
+  handedOverFromName?: string;
+  handoverPlannedEnd?: string;
+  originalOwnerId?: number;
 }
 
 export interface Consultation {
@@ -437,6 +471,10 @@ export interface Consultation {
   agenda: string;
   outcomeNotes?: string;
   referredByAgentName?: string;
+  handoverId?: number;
+  handedOverFromName?: string;
+  handoverPlannedEnd?: string;
+  originalOwnerId?: number;
 }
 
 export interface InvestmentOpportunity {
@@ -448,10 +486,14 @@ export interface InvestmentOpportunity {
   stage: 'Enquiry' | 'Contacted' | 'Consultation' | 'Qualified' | 'Opportunity' | 'Committed' | 'Closed Won' | 'Closed Lost';
   targetAmount: number;
   committedAmount: number;
-  assignedAgentId: string;
   assignedAgentName: string;
+  assignedAgentId?: string | number;
   expectedCloseDate: string;
   notes: string;
+  handoverId?: number;
+  handedOverFromName?: string;
+  handoverPlannedEnd?: string;
+  originalOwnerId?: number;
 }
 
 export interface AuditLog {

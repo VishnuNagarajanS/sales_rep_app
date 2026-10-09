@@ -50,6 +50,16 @@ export const FollowupsPage: React.FC = () => {
   const [users, setUsers] = useState<UserModel[]>([]);
   const [irmSummaryData, setIrmSummaryData] = useState<IrmAllLeadsSummary | null>(null);
   const [activeTab, setActiveTab] = useState<'all' | 'due' | 'overdue'>('all');
+  const [handoverFilter, setHandoverFilter] = useState('Mine');
+
+  const handoverOptions = useMemo(() => {
+    const names = Array.from(new Set(followups.map(f => f.handedOverFromName).filter(Boolean)));
+    if (names.length === 0) return [];
+    return [
+      { value: 'Mine', label: 'Mine' },
+      ...names.map(name => ({ value: `Handover_${name}`, label: `Handed over from ${name}` }))
+    ];
+  }, [followups]);
   const [rescheduleItem, setRescheduleItem] = useState<Followup | null>(null);
   const [newDate, setNewDate] = useState('');
 
@@ -149,9 +159,40 @@ export const FollowupsPage: React.FC = () => {
         isIrm ? fetchIrmAllLeads(user?.id, undefined, user?.name, tenant?.id).catch(() => null) : Promise.resolve(null),
       ]);
 
-      const followupsList = isMockMode()
+      const initialFollowups = isMockMode()
         ? ((data && data.length > 0) ? [...data] : (storageService.getFollowups(tenant?.id) || []))
-        : (data || []);
+        : (Array.isArray(data) ? [...data] : []);
+
+      let followupsList = [...initialFollowups];
+
+      // Also ensure any lead with status 'Follow-up Required' is represented in followups
+      const existingContactIds = new Set(followupsList.map(f => String(f.contactId || f.id)));
+      const existingPhones = new Set(followupsList.map(f => (f.contactPhone || '').replace(/\D/g, '').slice(-10)).filter(Boolean));
+
+      (leads || []).forEach(l => {
+        // Only synthesize a ghost followup if this lead is actually assigned to the current user.
+        // Without this guard, a covering agent would keep seeing a fake followup card even after
+        // the handover ends and the lead's assignedAgentId reverts to the original owner.
+        if (l.status === 'Follow-up Required' && (!isAdmin && !isIrm ? String(l.assignedAgentId) === String(user?.id) : true)) {
+          const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+          if (!existingContactIds.has(String(l.id)) && (!lPhone || !existingPhones.has(lPhone))) {
+            followupsList.push({
+              id: `flw-lead-${l.id}`,
+              companyId: l.companyId || tenant?.id || '1',
+              contactId: String(l.id),
+              contactName: l.name,
+              contactPhone: l.phone,
+              contactType: 'lead',
+              scheduledAt: l.createdAt || new Date().toISOString(),
+              priority: l.priority === 'Urgent' ? 'High' : (l.priority as any || 'Medium'),
+              status: 'Pending',
+              notes: l.notes || 'Lead marked Follow-up Required',
+              assignedAgentId: String(l.assignedAgentId || ''),
+              assignedAgentName: l.assignedAgentName || '',
+            });
+          }
+        }
+      });
 
       setFollowups(followupsList);
       setCallsList(calls || []);
@@ -219,7 +260,11 @@ export const FollowupsPage: React.FC = () => {
     loadData();
     const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+    window.addEventListener('nexus_handover_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
+      window.removeEventListener('nexus_handover_updated', handleUpdate);
+    };
   }, [tenant?.id]);
 
   // Sync IRM preference state when drawer opens for a contact
@@ -1067,6 +1112,34 @@ export const FollowupsPage: React.FC = () => {
     }
   }
 
+  // ── Interested leads leave the sales Follow-ups page ───────────────────────
+  // Once a lead is 'Interested' it is tracked in Customer 360, so any still-pending SALES follow-up
+  // for it is hidden. IRM follow-ups are kept: IRMs work Interested leads.
+  if (!isIrm) {
+    try {
+      const interestedLeads = allLeads.filter((l: Lead) => l.status === 'Interested');
+      const interestedLeadIds = new Set<string>(interestedLeads.map((l: Lead) => String(l.id)));
+      const interestedPhones = new Set<string>(
+        interestedLeads
+          .map((l: Lead) => (l.phone || '').replace(/\D/g, '').slice(-10))
+          .filter(Boolean)
+      );
+
+      processedFollowups = processedFollowups.filter(f => {
+        if (f.status !== 'Pending') return true;
+        if (f.contactType && f.contactType !== 'lead') return true;
+        if (getFollowupRole(f) === 'IRM') return true;
+        if (f.contactId && f.contactId !== 'contact-new' && interestedLeadIds.has(String(f.contactId)))
+          return false;
+        const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+        if (fPhone && interestedPhones.has(fPhone)) return false;
+        return true;
+      });
+    } catch (err) {
+      console.error('Error in Interested-lead followup filter:', err);
+    }
+  }
+
   // Count badges & filters
   const isFollowupToday = (f: Followup): boolean => {
     const schedStr = (f.scheduledAt || '').trim();
@@ -1088,10 +1161,27 @@ export const FollowupsPage: React.FC = () => {
     return parsedTime < todayStart;
   };
 
-  const activePendingFollowups = processedFollowups.filter(f => f.status === 'Pending');
+  const activePendingFollowups = processedFollowups.filter(f => {
+    if (f.status !== 'Pending') return false;
+    if (handoverOptions.length > 0) {
+      if (handoverFilter === 'Mine' && f.handoverId) return false;
+      if (handoverFilter !== 'Mine' && handoverFilter !== 'All') {
+        const name = handoverFilter.replace('Handover_', '');
+        if (f.handedOverFromName !== name) return false;
+      }
+    }
+    return true;
+  });
 
   const filteredFollowups = processedFollowups.filter(f => {
     if (f.status !== 'Pending') return false;
+    if (handoverOptions.length > 0) {
+      if (handoverFilter === 'Mine' && f.handoverId) return false;
+      if (handoverFilter !== 'Mine' && handoverFilter !== 'All') {
+        const name = handoverFilter.replace('Handover_', '');
+        if (f.handedOverFromName !== name) return false;
+      }
+    }
     if (activeTab === 'due') {
       return isFollowupToday(f);
     }
@@ -1256,8 +1346,9 @@ export const FollowupsPage: React.FC = () => {
       )}
 
       {/* Tabs */}
-      <div className="followups-tabs-container">
-        {[
+      <div className="followups-tabs-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {[
           { id: 'all', label: `All Tasks (${activePendingFollowups.length})` },
           {
             id: 'due',
@@ -1286,6 +1377,23 @@ export const FollowupsPage: React.FC = () => {
             {tab.label}
           </button>
         ))}
+        </div>
+
+        {handoverOptions.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)' }}>View:</span>
+            <select
+              className="form-select customers-filter-select"
+              style={{ width: 'auto', padding: '4px 28px 4px 10px', fontSize: 13 }}
+              value={handoverFilter}
+              onChange={e => setHandoverFilter(e.target.value)}
+            >
+              {handoverOptions.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Follow-ups List Cards */}
@@ -1325,6 +1433,22 @@ export const FollowupsPage: React.FC = () => {
                 onClick={canOpenDrawer ? () => setDrawerFollowup(f) : undefined}
                 style={canOpenDrawer ? { cursor: 'pointer' } : undefined}
               >
+                {f.handedOverFromName && (
+                  <div style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    padding: '2px 6px',
+                    borderRadius: 4,
+                    background: 'rgba(99, 102, 241, 0.15)',
+                    color: '#818cf8',
+                    border: '1px solid rgba(99, 102, 241, 0.3)',
+                    position: 'absolute',
+                    top: 12,
+                    right: 12
+                  }} title={`Handed over from ${f.handedOverFromName}`}>
+                    Covering for {f.handedOverFromName}
+                  </div>
+                )}
                 <div className="followup-item-left">
                   <div>
                     <div
@@ -1337,6 +1461,23 @@ export const FollowupsPage: React.FC = () => {
                       >
                         {f.contactName}
                       </span>
+
+                      {f.handedOverFromName && (
+                        <span
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 600,
+                            padding: '2px 6px',
+                            borderRadius: 6,
+                            background: 'rgba(99, 102, 241, 0.15)',
+                            color: '#818cf8',
+                            border: '1px solid rgba(99, 102, 241, 0.3)',
+                          }}
+                          title={`Handed over from ${f.handedOverFromName}`}
+                        >
+                          Covering for {f.handedOverFromName}
+                        </span>
+                      )}
 
                       <StatusChip status={f.priority} size="sm" />
 

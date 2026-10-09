@@ -54,6 +54,12 @@ public class ApplicationDbContext : DbContext
     public DbSet<InvestmentOpportunity> InvestmentOpportunities => Set<InvestmentOpportunity>();
     public DbSet<KycOtpVerification> KycOtpVerifications => Set<KycOtpVerification>();
     public DbSet<IrmCoverageAssignment> IrmCoverageAssignments => Set<IrmCoverageAssignment>();
+    public DbSet<WorkHandover> WorkHandovers => Set<WorkHandover>();
+    public DbSet<WorkHandoverItem> WorkHandoverItems => Set<WorkHandoverItem>();
+    public DbSet<LeaveRequest> LeaveRequests => Set<LeaveRequest>();
+    public DbSet<LeavePolicy> LeavePolicies => Set<LeavePolicy>();
+    public DbSet<LeaveRequestEvent> LeaveRequestEvents => Set<LeaveRequestEvent>();
+    public DbSet<AiChatLog> AiChatLogs => Set<AiChatLog>();
 
     public override int SaveChanges()
     {
@@ -92,8 +98,105 @@ public class ApplicationDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
+        modelBuilder.Entity<AiChatLog>()
+            .HasIndex(a => new { a.CompanyId, a.AskedAt });
+        modelBuilder.Entity<AiChatLog>()
+            .Property(a => a.Question)
+            .HasMaxLength(500);
+
         // Apply entity configurations
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
+
+        // Handover relationships on entities
+        modelBuilder.Entity<Lead>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<Customer>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<Followup>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<GhlDeal>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<GhlInvestor>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<GhlInvestmentOpportunity>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<Consultation>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<Investor>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<InvestorKyc>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<IrmPipelineCard>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<WorkHandover>(b =>
+        {
+            b.HasOne(x => x.LeaveRequest)
+             .WithMany()
+             .HasForeignKey(x => x.LeaveRequestId)
+             .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<LeaveRequest>(b =>
+        {
+            b.HasOne(x => x.WorkHandover)
+             .WithMany()
+             .HasForeignKey(x => x.WorkHandoverId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            b.HasOne(x => x.DecidedBy)
+             .WithMany()
+             .HasForeignKey(x => x.DecidedById)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            b.HasOne(x => x.CancelledBy)
+             .WithMany()
+             .HasForeignKey(x => x.CancelledById)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            b.HasMany(x => x.Events)
+             .WithOne(e => e.LeaveRequest)
+             .HasForeignKey(e => e.LeaveRequestId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<LeaveRequestEvent>(b =>
+        {
+            b.HasOne(e => e.Actor)
+             .WithMany()
+             .HasForeignKey(e => e.ActorId)
+             .OnDelete(DeleteBehavior.Restrict);
+        });
 
         // Seed initial roles, tenants, and demo users
         SeedData(modelBuilder);
@@ -107,7 +210,7 @@ public class ApplicationDbContext : DbContext
 
     private static void SeedData(ModelBuilder modelBuilder)
     {
-        // 1. Roles (Integer IDs 1, 2, 3, 4)
+        // 1. Roles (Integer IDs 1, 2, 3, 4 - Strictly 4 Roles)
         var superAdminRoleId = 1;
         var companyAdminRoleId = 2;
         var salesExecutiveRoleId = 3;

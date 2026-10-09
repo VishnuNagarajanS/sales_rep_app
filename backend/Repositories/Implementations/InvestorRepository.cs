@@ -14,6 +14,8 @@ public class InvestorRepository : IInvestorRepository
     public async Task<List<Investor>> GetAllAsync(int companyId, string? status, string? assetClass, int? irmId, CancellationToken ct = default)
     {
         var query = _db.Investors
+            .Include(i => i.OriginalOwner)
+            .Include(i => i.Handover)
             .Where(i => i.CompanyId == companyId);
 
         if (!string.IsNullOrEmpty(status))
@@ -32,6 +34,9 @@ public class InvestorRepository : IInvestorRepository
         => await _db.Investors
             .Include(i => i.Consultations)
             .Include(i => i.Followups)
+            .Include(i => i.Calls)
+            .Include(i => i.OriginalOwner)
+            .Include(i => i.Handover)
             .FirstOrDefaultAsync(i => i.Id == id && i.CompanyId == companyId, ct);
 
 

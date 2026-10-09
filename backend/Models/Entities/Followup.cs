@@ -13,6 +13,11 @@ public class Followup
     public int AssignedAgentId { get; set; }
     public User? AssignedAgent { get; set; }
 
+    public int? HandoverId { get; set; }
+    public WorkHandover? Handover { get; set; }
+    public int? OriginalOwnerId { get; set; }
+    public User? OriginalOwner { get; set; }
+
     [NotMapped]
     public int UserId
     {

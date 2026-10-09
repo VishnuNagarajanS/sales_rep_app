@@ -19,6 +19,11 @@ public class IrmPipelineCard
     public User AssignedIrm { get; set; } = null!;
     public string AssignedIrmName { get; set; } = string.Empty;
 
+    public int? HandoverId { get; set; }
+    public WorkHandover? Handover { get; set; }
+    public int? OriginalOwnerId { get; set; }
+    public User? OriginalOwner { get; set; }
+
     public string InvestorName { get; set; } = string.Empty;
     public string InvestorPhone { get; set; } = string.Empty;
     public string InvestorEmail { get; set; } = string.Empty;

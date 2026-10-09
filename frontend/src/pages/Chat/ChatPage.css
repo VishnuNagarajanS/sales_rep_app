@@ -520,7 +520,7 @@
 
 .chat-msg-bubble {
   display: inline-block;
-  max-width: 520px;
+  max-width: 85%;
   background: #ffffff;
   border: 1px solid rgba(0, 0, 0, 0.06);
   border-radius: 12px;
