@@ -1205,9 +1205,7 @@ export const DispositionModal: React.FC = () => {
         defaultDispo = allowed.includes('Follow-up Required') ? 'Follow-up Required' : (allowed.includes('Contacted') ? 'Contacted' : allowed[0]);
       }
     } else {
-      defaultDispo = (isSimulated || isNotConnected)
-        ? 'No Response'
-        : (isIrmLead && !isFollowup ? 'Follow-up Required' : 'Interested');
+      defaultDispo = (isSimulated || isNotConnected) ? 'No Response' : 'Interested';
     }
 
     setDisposition(defaultDispo);
@@ -1252,7 +1250,6 @@ export const DispositionModal: React.FC = () => {
   const isGhlSalesExec = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1' || tenant?.name?.toLowerCase().includes('ghl') || user?.companySlug === 'ghl') && user?.role?.code === 'sales_executive';
   const isFollowupCall = !!lastCallRecord.sourceFollowupId;
   const isIrm = user?.role?.code === 'irm';
-  const isIrmLeadCall = isIrm && lastCallRecord.matchedRecord?.type === 'lead';
   const isSimulated = !!lastCallRecord.isSimulated;
   const isNotConnected = !isSimulated && lastCallRecord.duration === 0;
 
@@ -1278,25 +1275,20 @@ export const DispositionModal: React.FC = () => {
   ];
 
   const FOLLOWUP_CALL_OUTCOMES: CallDisposition[] = ['Interested', 'Follow-up Required', 'Not Interested'];
-  const IRM_LEAD_OUTCOMES: CallDisposition[] = ['Follow-up Required', 'Converted', 'No Response'];
 
   const dispositions: CallDisposition[] = isIrm
     ? (IRM_MODULE_OUTCOMES[currentModule] || ['Contacted', 'Other', 'No Response', 'Call Back'])
     : (isSimulated
         ? (isFollowupCall
             ? ['No Response', 'Follow-up Required', 'Not Interested']
-            : (isIrmLeadCall
-                ? ['No Response', 'Follow-up Required']
-                : SIMULATED_OUTCOMES))
+            : SIMULATED_OUTCOMES)
         : isNotConnected
           ? ['No Response', 'Follow-up Required', 'Call Back', 'Not Interested', 'Wrong Number']
           : (isFollowupCall
               ? FOLLOWUP_CALL_OUTCOMES
-              : isIrmLeadCall
-                ? IRM_LEAD_OUTCOMES
-                : (isGhlSalesExec || tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1')
-                  ? allDispositions.filter(d => d !== 'Converted')
-                  : allDispositions));
+              : (isGhlSalesExec || tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1')
+                ? allDispositions.filter(d => d !== 'Converted')
+                : allDispositions));
 
   const handleSave = async () => {
     if (isSubmitting) return;
