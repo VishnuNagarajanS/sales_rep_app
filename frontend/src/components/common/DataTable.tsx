@@ -98,11 +98,18 @@ export function DataTable<T>({
     const rect = btn.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
     const spaceAbove = rect.top;
-    if (spaceBelow < 200 || spaceAbove >= 140) {
-      // Flip above the button
-      setMenuPos({ bottom: window.innerHeight - rect.top + 4, right: window.innerWidth - rect.right });
+    const estimatedMenuHeight = 210;
+    // Only flip upwards if there isn't enough space below AND there is more space above
+    if (spaceBelow < estimatedMenuHeight && spaceAbove > spaceBelow) {
+      setMenuPos({
+        bottom: window.innerHeight - rect.top + 4,
+        right: Math.max(8, window.innerWidth - rect.right),
+      });
     } else {
-      setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+      setMenuPos({
+        top: rect.bottom + 4,
+        right: Math.max(8, window.innerWidth - rect.right),
+      });
     }
     setActiveMenuKey(key);
   };
@@ -281,11 +288,11 @@ export function DataTable<T>({
           onAction={onEmptyAction}
         />
       ) : (
-        <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1, minHeight: 0, backgroundColor: 'var(--bg-surface)' }}>
+        <div style={{ overflowX: 'hidden', overflowY: 'auto', flex: 1, minHeight: 0, backgroundColor: 'var(--bg-surface)' }}>
           <table
             style={{
               width: '100%',
-              minWidth: '100%',
+              maxWidth: '100%',
               borderCollapse: 'collapse',
               textAlign: 'left',
               fontSize: 13,
@@ -338,7 +345,7 @@ export function DataTable<T>({
                       key={col.key}
                       className={col.className}
                       style={{
-                        padding: '12px 16px',
+                        padding: '12px 10px',
                         width: col.width,
                         textAlign: col.align || 'left',
                         cursor: col.sortable ? 'pointer' : 'default',
@@ -386,10 +393,12 @@ export function DataTable<T>({
                 {rowActions && rowActions.length > 0 && (
                   <th
                     style={{
-                      width: 80,
-                      minWidth: 80,
-                      padding: '12px 16px',
-                      textAlign: 'right',
+                      width: 50,
+                      minWidth: 50,
+                      maxWidth: 50,
+                      padding: '12px 4px',
+                      textAlign: 'center',
+                      fontSize: 11,
                       position: 'sticky',
                       top: 0,
                       right: 0,
@@ -459,7 +468,7 @@ export function DataTable<T>({
                           className={col.className}
                           data-sticky-action={isActionsCol ? 'true' : undefined}
                           style={{
-                            padding: '14px 16px',
+                            padding: '10px 10px',
                             textAlign: col.align || 'left',
                             verticalAlign: 'middle',
                             color: 'var(--text-primary)',
@@ -480,8 +489,11 @@ export function DataTable<T>({
                     {rowActions && rowActions.length > 0 && (
                       <td
                         style={{
-                          padding: '14px 16px',
-                          textAlign: 'right',
+                          width: 50,
+                          minWidth: 50,
+                          maxWidth: 50,
+                          padding: '6px 4px',
+                          textAlign: 'center',
                           position: 'sticky',
                           right: 0,
                           background: isSelected ? 'rgba(59, 130, 246, 0.04)' : 'var(--bg-surface)',
@@ -498,7 +510,7 @@ export function DataTable<T>({
                         <button
                           ref={el => { triggerRefs.current[rowKey] = el; }}
                           className="btn btn-ghost btn-icon btn-sm"
-                          style={{ width: 30, height: 30 }}
+                          style={{ width: 28, height: 28, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto' }}
                           onClick={() =>
                             activeMenuKey === rowKey ? setActiveMenuKey(null) : openMenu(rowKey)
                           }
@@ -524,21 +536,26 @@ export function DataTable<T>({
             onClick={() => setActiveMenuKey(null)}
           />
           <div
-            className="card animate-slide-down"
+            className="animate-slide-down"
             style={{
               position: 'fixed',
               top: menuPos.top,
               bottom: menuPos.bottom,
               right: menuPos.right,
               zIndex: 9999,
-              minWidth: 168,
+              minWidth: 160,
+              width: 'max-content',
+              maxWidth: 220,
               padding: '6px',
               backgroundColor: '#ffffff',
               color: '#0f172a',
               border: '1px solid #e2e8f0',
               borderRadius: 8,
-              boxShadow: '0 10px 24px rgba(15, 23, 42, 0.14)',
+              boxShadow: '0 10px 28px rgba(15, 23, 42, 0.16)',
               overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '2px',
             }}
           >
             {(() => {
@@ -553,13 +570,18 @@ export function DataTable<T>({
                     disabled={action.disabled ? action.disabled(item) : false}
                     style={{
                       width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
                       justifyContent: 'flex-start',
-                      color: action.danger ? 'var(--danger)' : 'var(--text-primary)',
-                      minHeight: 34,
-                      padding: '8px 10px',
+                      color: action.danger ? 'var(--danger, #dc2626)' : 'var(--text-primary, #0f172a)',
+                      minHeight: 32,
+                      padding: '7px 10px',
                       borderRadius: 6,
+                      fontSize: '13px',
+                      fontWeight: 500,
                       gap: 8,
-                      opacity: action.disabled && action.disabled(item) ? 0.5 : 1,
+                      whiteSpace: 'nowrap',
+                      opacity: action.disabled && action.disabled(item) ? 0.45 : 1,
                       cursor: action.disabled && action.disabled(item) ? 'not-allowed' : 'pointer',
                     }}
                     onClick={() => {
@@ -568,8 +590,10 @@ export function DataTable<T>({
                       action.onClick(item);
                     }}
                   >
-                    {action.icon}
-                    {action.label}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0, width: 16 }}>
+                      {action.icon || null}
+                    </span>
+                    <span style={{ whiteSpace: 'nowrap' }}>{action.label}</span>
                   </button>
                 ));
             })()}

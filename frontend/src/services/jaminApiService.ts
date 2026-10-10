@@ -2,7 +2,7 @@
 
 import { apiClient } from './apiClient';
 import { storageService } from './storageService';
-import type { Lead, SiteVisit, Followup } from '../types';
+import type { Lead, SiteVisit, Followup, Customer } from '../types';
 
 export interface JaminAgent {
   id: number;
@@ -103,8 +103,12 @@ export const jaminApiService = {
 
       const qs = params.toString();
       const res = await apiClient.get<any>(qs ? `${endpoint}?${qs}` : endpoint);
-      if (res && res.success && Array.isArray(res.data)) {
-        return res.data.map((l: any) => ({
+      const rawList = Array.isArray(res?.data)
+        ? res.data
+        : (Array.isArray(res?.data?.items) ? res.data.items : (Array.isArray(res?.items) ? res.items : []));
+
+      if (rawList.length > 0) {
+        return rawList.map((l: any) => ({
           id: String(l.id),
           companyId: 't-jamin-02',
           name: l.name,
@@ -135,7 +139,80 @@ export const jaminApiService = {
     } catch (err) {
       console.error('Failed to get leads from backend API', err);
     }
-    return [];
+    return storageService.getLeads('t-jamin-02') || [];
+  },
+
+  // ── 1B. CUSTOMERS (Live backend /sales-executive/customers + converted leads) ──
+  async getCustomers(): Promise<Customer[]> {
+    const customers: Customer[] = [];
+    const seenPhones = new Set<string>();
+
+    try {
+      const res = await apiClient.get<any>('/sales-executive/customers?page=1&pageSize=100&tenantId=2');
+      const rawList = Array.isArray(res?.data)
+        ? res.data
+        : (Array.isArray(res?.data?.items) ? res.data.items : (Array.isArray(res?.items) ? res.items : []));
+
+      if (rawList.length > 0) {
+        rawList.forEach((c: any) => {
+          const phoneKey = (c.phone || '').replace(/\D/g, '').slice(-10);
+          if (phoneKey) seenPhones.add(phoneKey);
+          customers.push({
+            id: String(c.id),
+            companyId: 't-jamin-02',
+            name: c.name || '',
+            phone: c.phone || '',
+            email: c.email || '',
+            status: c.status || 'Active',
+            assignedAgentId: c.assignedAgentId ? String(c.assignedAgentId) : '',
+            assignedAgentName: c.assignedAgentName || '',
+            location: c.location || '',
+            lastContacted: c.lastContactedAt || '',
+            openDealsCount: 0,
+            totalValue: c.totalValue ?? 0,
+            createdAt: c.createdAt || new Date().toISOString(),
+            notes: c.notes || '',
+            customFields: c.customFields || {},
+          });
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to fetch customers from /sales-executive/customers:', err);
+    }
+
+    // Include converted leads from database since they are fully registered customers
+    try {
+      const convRes = await apiClient.get<any>('/leads?tenantId=2&status=Converted');
+      const convList = Array.isArray(convRes?.data) ? convRes.data : [];
+      convList.forEach((l: any) => {
+        const phoneKey = (l.phone || '').replace(/\D/g, '').slice(-10);
+        if (phoneKey && seenPhones.has(phoneKey)) return;
+        if (phoneKey) seenPhones.add(phoneKey);
+        customers.push({
+          id: String(l.id),
+          companyId: 't-jamin-02',
+          name: l.name || '',
+          phone: l.phone || '',
+          email: l.email || '',
+          status: 'Active',
+          assignedAgentId: l.assignedAgentId ? String(l.assignedAgentId) : '',
+          assignedAgentName: l.assignedAgentName || '',
+          location: l.location || '',
+          lastContacted: l.createdAt || '',
+          openDealsCount: 0,
+          totalValue: 0,
+          createdAt: l.createdAt || new Date().toISOString(),
+          notes: l.notes || '',
+          customFields: l.customFields || {},
+        });
+      });
+    } catch { }
+
+    if (customers.length > 0) {
+      return customers;
+    }
+
+    return storageService.getCustomers('t-jamin-02') || [];
   },
 
   async getLeadDetail(id: string | number): Promise<{ lead: Lead; siteVisits: SiteVisit[]; followups: Followup[] } | null> {
@@ -335,10 +412,11 @@ export const jaminApiService = {
           outcomeNotes: sv.outcomeNotes,
         };
       }
+      throw new Error(res?.message || 'Failed to schedule site visit.');
     } catch (err) {
       console.error('Failed to schedule site visit on backend', err);
+      throw err;
     }
-    return null;
   },
 
   async confirmSiteVisit(id: string | number): Promise<boolean> {

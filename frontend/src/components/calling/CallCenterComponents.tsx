@@ -697,165 +697,48 @@ export const InCallBar: React.FC = () => {
             </button>
 
             {isGhlTenant && <>
-            {/* Connect IRM / Connect Agent (GHL only) */}
-            <button
-              ref={irmButtonRef}
-              className="btn btn-sm incall-btn-action incall-btn-irm"
-              title={isIrm ? 'Connect to an Agent' : 'Connect to an IRM'}
-              onClick={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                setIrmButtonRect(rect);
-                setIrmMenuOpen(prev => !prev);
-                setIrmSearchQuery('');
-              }}
-            >
-              <Users size={13} /> {isIrm ? 'Connect Agent' : 'Connect IRM'}
-            </button>
-
-            {irmMenuOpen && irmButtonRect && ReactDOM.createPortal(
-              <div
-                ref={irmPortalRef}
-                style={{
-                  position: 'fixed',
-                  top: irmButtonRect.bottom + 6,
-                  left: irmButtonRect.left,
-                  background: '#1e293b',
-                  border: '1px solid #334155',
-                  borderRadius: 8,
-                  padding: 6,
-                  minWidth: 200,
-                  zIndex: 9999,
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <input
-                  type="text"
-                  autoFocus
-                  placeholder={isIrm ? 'Search agent by name...' : 'Search IRM by name...'}
-                  value={irmSearchQuery}
-                  onChange={e => setIrmSearchQuery(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '6px 8px',
-                    marginBottom: 6,
-                    fontSize: 13,
-                    background: '#0f172a',
-                    border: '1px solid #334155',
-                    borderRadius: 6,
-                    color: '#e2e8f0',
-                    outline: 'none',
-                    boxSizing: 'border-box',
-                  }}
-                />
-
-                {filteredConnectOptions.length === 0 && (
-                  <div style={{ padding: '8px', fontSize: 12, color: '#64748b', textAlign: 'center' }}>
-                    {isIrm ? 'No agent found' : 'No IRM found'}
-                  </div>
-                )}
-
-                {filteredConnectOptions.map((o: any) => (
-                  <div
-                    key={o.name}
-                    onClick={() => {
-                      setPendingIrm(o);
-                      setIrmMenuOpen(false);
-                      setIrmSearchQuery('');
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '6px 8px',
-                      borderRadius: 6,
-                      cursor: 'pointer',
-                      fontSize: 13,
-                      color: '#e2e8f0',
-                    }}
-                    onMouseEnter={e => (e.currentTarget.style.background = '#334155')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                  >
-                    <span
-                      style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: '50%',
-                        background: o.status === 'Available' ? '#22c55e' : '#d97706',
-                      }}
-                    />
-                    {o.name}
-                    {isIrm && (o as any).isPrevious && (
-                      <span
-                        style={{
-                          marginLeft: 6,
-                          fontSize: 10,
-                          color: 'var(--primary-600, #38bdf8)',
-                          background: 'rgba(56, 189, 248, 0.12)',
-                          padding: '1px 5px',
-                          borderRadius: 4,
-                          fontWeight: 500,
-                        }}
-                      >
-                        Previously handled
-                      </span>
-                    )}
-                    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94a3b8' }}>{o.status}</span>
-                  </div>
-                ))}
-              </div>,
-              document.body
-            )}
-
-            {/* ── Reason for Consultation Modal ── */}
-            {pendingIrm && ReactDOM.createPortal(
-              <div
-                style={{
-                  position: 'fixed',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  zIndex: 10000,
-                  backdropFilter: 'blur(2px)',
-                }}
-                onClick={() => {
-                  setPendingIrm(null);
-                  setConsultationReason('');
+              {/* Connect IRM / Connect Agent (GHL only) */}
+              <button
+                ref={irmButtonRef}
+                className="btn btn-sm incall-btn-action incall-btn-irm"
+                title={isIrm ? 'Connect to an Agent' : 'Connect to an IRM'}
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  setIrmButtonRect(rect);
+                  setIrmMenuOpen(prev => !prev);
+                  setIrmSearchQuery('');
                 }}
               >
+                <Users size={13} /> {isIrm ? 'Connect Agent' : 'Connect IRM'}
+              </button>
+
+              {irmMenuOpen && irmButtonRect && ReactDOM.createPortal(
                 <div
+                  ref={irmPortalRef}
                   style={{
+                    position: 'fixed',
+                    top: irmButtonRect.bottom + 6,
+                    left: irmButtonRect.left,
                     background: '#1e293b',
                     border: '1px solid #334155',
-                    borderRadius: 10,
-                    padding: '18px 20px',
-                    width: '90%',
-                    maxWidth: 380,
-                    boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)',
-                    color: '#e2e8f0',
+                    borderRadius: 8,
+                    padding: 6,
+                    minWidth: 200,
+                    zIndex: 9999,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div style={{ fontSize: 15, fontWeight: 600, color: '#f8fafc', marginBottom: 12 }}>
-                    Connect {pendingIrm.name} to this call
-                  </div>
-                  <label style={{ display: 'block', fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>
-                    {isIrm ? 'Reason for Connecting Agent *' : 'Reason for Consultation *'}
-                  </label>
-                  <textarea
+                  <input
+                    type="text"
                     autoFocus
-                    rows={3}
-                    placeholder={isIrm ? 'Enter reason for connecting agent...' : 'Enter reason for consultation...'}
-                    value={consultationReason}
-                    onChange={e => setConsultationReason(e.target.value)}
+                    placeholder={isIrm ? 'Search agent by name...' : 'Search IRM by name...'}
+                    value={irmSearchQuery}
+                    onChange={e => setIrmSearchQuery(e.target.value)}
                     style={{
                       width: '100%',
-                      padding: '8px 10px',
+                      padding: '6px 8px',
+                      marginBottom: 6,
                       fontSize: 13,
                       background: '#0f172a',
                       border: '1px solid #334155',
@@ -863,45 +746,162 @@ export const InCallBar: React.FC = () => {
                       color: '#e2e8f0',
                       outline: 'none',
                       boxSizing: 'border-box',
-                      resize: 'none',
-                      marginBottom: 16,
                     }}
                   />
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
+
+                  {filteredConnectOptions.length === 0 && (
+                    <div style={{ padding: '8px', fontSize: 12, color: '#64748b', textAlign: 'center' }}>
+                      {isIrm ? 'No agent found' : 'No IRM found'}
+                    </div>
+                  )}
+
+                  {filteredConnectOptions.map((o: any) => (
+                    <div
+                      key={o.name}
                       onClick={() => {
-                        setPendingIrm(null);
-                        setConsultationReason('');
-                      }}
-                      style={{ padding: '6px 12px', fontSize: 12 }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      disabled={!consultationReason.trim() || !pendingIrm}
-                      onClick={() => {
-                        if (pendingIrm) {
-                          handleConnectIrm(pendingIrm, consultationReason.trim());
-                        }
+                        setPendingIrm(o);
+                        setIrmMenuOpen(false);
+                        setIrmSearchQuery('');
                       }}
                       style={{
-                        padding: '6px 14px',
-                        fontSize: 12,
-                        opacity: consultationReason.trim() && pendingIrm ? 1 : 0.5,
-                        cursor: consultationReason.trim() && pendingIrm ? 'pointer' : 'not-allowed',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '6px 8px',
+                        borderRadius: 6,
+                        cursor: 'pointer',
+                        fontSize: 13,
+                        color: '#e2e8f0',
                       }}
+                      onMouseEnter={e => (e.currentTarget.style.background = '#334155')}
+                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                     >
-                      Confirm & Connect
-                    </button>
+                      <span
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          background: o.status === 'Available' ? '#22c55e' : '#d97706',
+                        }}
+                      />
+                      {o.name}
+                      {isIrm && (o as any).isPrevious && (
+                        <span
+                          style={{
+                            marginLeft: 6,
+                            fontSize: 10,
+                            color: 'var(--primary-600, #38bdf8)',
+                            background: 'rgba(56, 189, 248, 0.12)',
+                            padding: '1px 5px',
+                            borderRadius: 4,
+                            fontWeight: 500,
+                          }}
+                        >
+                          Previously handled
+                        </span>
+                      )}
+                      <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94a3b8' }}>{o.status}</span>
+                    </div>
+                  ))}
+                </div>,
+                document.body
+              )}
+
+              {/* ── Reason for Consultation Modal ── */}
+              {pendingIrm && ReactDOM.createPortal(
+                <div
+                  style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 10000,
+                    backdropFilter: 'blur(2px)',
+                  }}
+                  onClick={() => {
+                    setPendingIrm(null);
+                    setConsultationReason('');
+                  }}
+                >
+                  <div
+                    style={{
+                      background: '#1e293b',
+                      border: '1px solid #334155',
+                      borderRadius: 10,
+                      padding: '18px 20px',
+                      width: '90%',
+                      maxWidth: 380,
+                      boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)',
+                      color: '#e2e8f0',
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div style={{ fontSize: 15, fontWeight: 600, color: '#f8fafc', marginBottom: 12 }}>
+                      Connect {pendingIrm.name} to this call
+                    </div>
+                    <label style={{ display: 'block', fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>
+                      {isIrm ? 'Reason for Connecting Agent *' : 'Reason for Consultation *'}
+                    </label>
+                    <textarea
+                      autoFocus
+                      rows={3}
+                      placeholder={isIrm ? 'Enter reason for connecting agent...' : 'Enter reason for consultation...'}
+                      value={consultationReason}
+                      onChange={e => setConsultationReason(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 10px',
+                        fontSize: 13,
+                        background: '#0f172a',
+                        border: '1px solid #334155',
+                        borderRadius: 6,
+                        color: '#e2e8f0',
+                        outline: 'none',
+                        boxSizing: 'border-box',
+                        resize: 'none',
+                        marginBottom: 16,
+                      }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => {
+                          setPendingIrm(null);
+                          setConsultationReason('');
+                        }}
+                        style={{ padding: '6px 12px', fontSize: 12 }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        disabled={!consultationReason.trim() || !pendingIrm}
+                        onClick={() => {
+                          if (pendingIrm) {
+                            handleConnectIrm(pendingIrm, consultationReason.trim());
+                          }
+                        }}
+                        style={{
+                          padding: '6px 14px',
+                          fontSize: 12,
+                          opacity: consultationReason.trim() && pendingIrm ? 1 : 0.5,
+                          cursor: consultationReason.trim() && pendingIrm ? 'pointer' : 'not-allowed',
+                        }}
+                      >
+                        Confirm & Connect
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </div>,
-              document.body
-            )}
+                </div>,
+                document.body
+              )}
             </>}
 
             {/* Spacer */}
@@ -1141,7 +1141,7 @@ export const DispositionModal: React.FC = () => {
         ? {
           scheduledAt: combinedDateTime,
           priority: followupPriority,
-          notes: notes ? `Follow-up required from call with ${lastCallRecord.contactName}: ${notes}` : `Follow-up required from call with ${lastCallRecord.contactName}`,
+          notes: notes ? ` ${lastCallRecord.contactName}: ${notes}` : `${lastCallRecord.contactName}`,
         }
         : undefined,
       (disposition === 'Not Interested' || disposition === 'Wrong Number') ? reason : undefined

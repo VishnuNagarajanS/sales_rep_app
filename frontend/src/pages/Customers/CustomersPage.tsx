@@ -21,6 +21,7 @@ import {
   ChevronUp,
   Info,
   FileText,
+  AlertCircle,
 } from 'lucide-react';
 import { Customer, CallRecord, Followup, Deal, Lead, IrmProfile, SiteVisit, CustomFieldDefinition, Booking } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -43,6 +44,7 @@ import { DocumentList } from '../../components/common/DocumentList';
 import { Modal } from '../../components/common/Modal';
 import { Timeline, TimelineEvent } from '../../components/common/Timeline';
 import { jaminApiService } from '../../services/jaminApiService';
+import { customersApi, Customer360Dto } from '../../services/crmApi';
 import './CustomersPage.css';
 
 const getCustomFieldDefinitions = (tenantId?: string): CustomFieldDefinition[] => {
@@ -89,12 +91,28 @@ export const CustomersPage: React.FC = () => {
   const isAdmin = roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin' || roleCode === 'sales_manager';
   const isExec = roleCode === 'sales_executive';
 
-  // Strict Tenant + Role isolation: IRM assignment is available ONLY in GHL India Ventures -> Sales Executive
-  const isGhlTenant = tenant?.slug === 'ghl' || tenant?.name === 'GHL India Ventures' || user?.companySlug === 'ghl' || user?.companyName === 'GHL India Ventures';
+  // Consistent multi-tenant detection: verify slug, name, companyId, and tenant ID
+  const isJamin = Boolean(
+    tenant?.slug?.toLowerCase() === 'jamin' ||
+    tenant?.id === 't-jamin-02' ||
+    tenant?.id === '2' ||
+    user?.companySlug?.toLowerCase() === 'jamin' ||
+    (user?.companyName && /jamin/i.test(user.companyName)) ||
+    user?.companyId === 2 ||
+    (user?.companyId as any) === '2'
+  );
+  const isGhlTenant = !isJamin && Boolean(
+    tenant?.slug?.toLowerCase() === 'ghl' ||
+    tenant?.id === 't-ghl-01' ||
+    tenant?.id === '1' ||
+    user?.companySlug?.toLowerCase() === 'ghl' ||
+    (user?.companyName && /ghl/i.test(user.companyName)) ||
+    user?.companyId === 1 ||
+    (user?.companyId as any) === '1' ||
+    true
+  );
   const isSalesExecutive = isExec || user?.role?.name === 'Sales Executive';
-  const canAssignToIRM = Boolean(isGhlTenant && isSalesExecutive);
-
-  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2' || user?.companySlug === 'jamin';
+  const canAssignToIRM = Boolean(!isJamin && isGhlTenant && isSalesExecutive);
   const canManageAgentAssignments = ['company_admin', 'admin', 'super_admin', 'sales_manager', 'manager'].includes(roleCode);
 
   useEffect(() => {
@@ -134,11 +152,13 @@ export const CustomersPage: React.FC = () => {
   const scopedCustomers = isAdmin
     ? customers
     : customers.filter(c =>
-        (c.assignedAgentId && (String(c.assignedAgentId) === String(user?.id) || c.assignedAgentId === user?.id)) ||
-        (c.assignedAgentName && user?.name && c.assignedAgentName.toLowerCase() === user.name.toLowerCase()) ||
-        (isExec && !c.assignedAgentId)
-      );
+      (c.assignedAgentId && (String(c.assignedAgentId) === String(user?.id) || c.assignedAgentId === user?.id)) ||
+      (c.assignedAgentName && user?.name && c.assignedAgentName.toLowerCase() === user.name.toLowerCase()) ||
+      (isExec && !c.assignedAgentId)
+    );
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [customer360Data, setCustomer360Data] = useState<Customer360Dto | null>(null);
+  const [isLoading360, setIsLoading360] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'bookings' | 'calls' | 'followups' | 'timeline' | 'documents' | 'site_visits'>('overview');
   const [statusFilter, setStatusFilter] = useState('All');
   const [agentFilter, setAgentFilter] = useState('All');
@@ -265,40 +285,84 @@ export const CustomersPage: React.FC = () => {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
+  const [apiSiteVisits, setApiSiteVisits] = useState<SiteVisit[]>([]);
+
+  const fetchCustomer360 = async (targetId?: string | number, preserveExistingOnFailure = true) => {
+    const rawId = targetId ?? selectedCustomer?.id;
+    if (!isJamin || !rawId) return;
+    const numericId = parseInt(String(rawId).replace(/\D/g, ''), 10);
+    if (isNaN(numericId) || numericId <= 0) return;
+
+    setIsLoading360(true);
+    try {
+      const data = await customersApi.getCustomer360(numericId);
+      if (data && data.customer) {
+        setCustomer360Data(data);
+      }
+    } catch (err) {
+      console.warn(`[Customer360] Failed to fetch 360 profile for customer #${numericId}:`, err);
+      // Ensure refreshes and failed requests do not silently replace valid data with empty arrays
+      if (!preserveExistingOnFailure) {
+        setCustomer360Data(null);
+      }
+    } finally {
+      setIsLoading360(false);
+    }
+  };
 
   const loadData = async () => {
     setIsLoading(true);
     try {
-      // Fetch customers directly from database API
-      const [apiCusts, cCalls, cFollowups, cDeals, cLeads, cBookings] = await Promise.all([
-        getCustomers(tenant?.id).catch(err => {
+      if (isJamin) {
+        // Jamin Mode: Load scoped customer list without downloading company-wide logs
+        const apiCusts = await getCustomers(tenant?.id).catch(err => {
           console.error('Failed to fetch customers from the database:', err);
-          return [];
-        }),
-        getCalls(tenant?.id).catch(() => []),
-        getFollowups(tenant?.id).catch(() => []),
-        getDeals(tenant?.id).catch(() => []),
-        getLeads(tenant?.id).catch(() => []),
-        jaminApiService.getBookings().catch(() => []),
-      ]);
+          return null;
+        });
 
-      const allCusts = apiCusts || [];
-      setCustomers(allCusts);
-      setCalls(cCalls);
-      setFollowups(cFollowups);
-      setDeals(cDeals);
-      setLeads(cLeads);
-      setBookings(cBookings || []);
+        if (apiCusts !== null) {
+          setCustomers(apiCusts);
+          const userVisibleCusts = isAdmin
+            ? apiCusts
+            : apiCusts.filter(c =>
+              (c.assignedAgentId && (String(c.assignedAgentId) === String(user?.id) || c.assignedAgentId === user?.id)) ||
+              (c.assignedAgentName && user?.name && c.assignedAgentName.toLowerCase() === user.name.toLowerCase())
+            );
+          const firstVisible = userVisibleCusts[0] || apiCusts[0];
+          if (firstVisible) {
+            setSelectedCustomer(prev => (prev && apiCusts.some(c => c.id === prev.id)) ? prev : firstVisible);
+          }
+        }
+      } else {
+        // GHL India Ventures Mode
+        const [apiCusts, cCalls, cFollowups, cDeals, cLeads] = await Promise.all([
+          getCustomers(tenant?.id).catch(err => {
+            console.error('Failed to fetch customers from the database:', err);
+            return null;
+          }),
+          getCalls(tenant?.id).catch(() => null),
+          getFollowups(tenant?.id).catch(() => null),
+          getDeals(tenant?.id).catch(() => null),
+          getLeads(tenant?.id).catch(() => null),
+        ]);
 
-      const userVisibleCusts = isAdmin
-        ? allCusts
-        : allCusts.filter(c =>
+        if (apiCusts !== null) setCustomers(apiCusts);
+        if (cCalls !== null) setCalls(cCalls);
+        if (cFollowups !== null) setFollowups(cFollowups);
+        if (cDeals !== null) setDeals(cDeals);
+        if (cLeads !== null) setLeads(cLeads);
+
+        const currentCusts = apiCusts ?? customers;
+        const userVisibleCusts = isAdmin
+          ? currentCusts
+          : currentCusts.filter(c =>
             (c.assignedAgentId && (String(c.assignedAgentId) === String(user?.id) || c.assignedAgentId === user?.id)) ||
             (c.assignedAgentName && user?.name && c.assignedAgentName.toLowerCase() === user.name.toLowerCase())
           );
-      const firstVisible = userVisibleCusts[0] || allCusts[0];
-      if (firstVisible) {
-        setSelectedCustomer(prev => (prev && allCusts.some(c => c.id === prev.id)) ? prev : firstVisible);
+        const firstVisible = userVisibleCusts[0] || currentCusts[0];
+        if (firstVisible) {
+          setSelectedCustomer(prev => (prev && currentCusts.some(c => c.id === prev.id)) ? prev : firstVisible);
+        }
       }
     } catch (err) {
       console.error('Failed to load customers page data', err);
@@ -307,12 +371,26 @@ export const CustomersPage: React.FC = () => {
     }
   };
 
+  // Synchronize Customer 360 when selected customer changes in Jamin mode
+  useEffect(() => {
+    if (isJamin && selectedCustomer?.id) {
+      void fetchCustomer360(selectedCustomer.id, false);
+    } else if (!isJamin) {
+      setCustomer360Data(null);
+    }
+  }, [isJamin, selectedCustomer?.id]);
+
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
+    const handleUpdate = () => {
+      loadData();
+      if (isJamin && selectedCustomer?.id) {
+        void fetchCustomer360(selectedCustomer.id, true);
+      }
+    };
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
-  }, [tenant?.id]);
+  }, [tenant?.id, isJamin, selectedCustomer?.id]);
 
   const agentOptions = Array.from(new Set(scopedCustomers.map(c => c.assignedAgentName)))
     .filter(Boolean)
@@ -597,25 +675,75 @@ export const CustomersPage: React.FC = () => {
     setEditingRecommendationCustomerId(null);
   };
 
-  // Filter linked records for selected customer by primary key and phone
+  // Filter linked records for selected customer by stable IDs with phone fallback
   const customerCalls = useMemo(() => {
+    if (isJamin && customer360Data?.calls) {
+      return customer360Data.calls.map(c => ({
+        id: String(c.id),
+        agentId: c.agentId ? String(c.agentId) : undefined,
+        agentName: c.agentName || 'Agent',
+        contactName: c.contactName,
+        contactPhone: c.contactPhone,
+        direction: (c.direction?.toLowerCase() === 'inbound' ? 'inbound' : 'outbound') as 'inbound' | 'outbound',
+        duration: c.duration || 0,
+        disposition: c.disposition || 'Completed',
+        transcription: c.notes || undefined,
+        notes: c.notes || '',
+        timestamp: c.timestamp ? new Date(c.timestamp).toLocaleString('en-IN') : '',
+        status: 'ended' as const,
+        leadId: c.leadId ? String(c.leadId) : undefined,
+        customerId: c.customerId ? String(c.customerId) : undefined,
+      }));
+    }
     if (!selectedCustomer) return [];
     const custIdClean = String(selectedCustomer.id || '').replace(/\D/g, '');
     const custPhone10 = (selectedCustomer.phone || '').replace(/\D/g, '').slice(-10);
 
     return calls.filter(c => {
-      const callCustIdClean = c.customerId ? String(c.customerId).replace(/\D/g, '') : '';
-      if (custIdClean && callCustIdClean && custIdClean === callCustIdClean) return true;
+      // 1. Primary linkage: CustomerId
+      if (c.customerId && String(c.customerId).replace(/\D/g, '') === custIdClean) return true;
+      // 2. Secondary fallback: Phone
       const callPhone10 = (c.contactPhone || '').replace(/\D/g, '').slice(-10);
       if (custPhone10 && callPhone10 && custPhone10 === callPhone10) return true;
       return false;
     });
-  }, [calls, selectedCustomer]);
+  }, [isJamin, customer360Data, calls, selectedCustomer]);
 
   const customerFollowups = useMemo(() => {
+    if (isJamin && customer360Data?.followups) {
+      return customer360Data.followups.map(f => ({
+        id: String(f.id),
+        companyId: String(f.companyId || '2'),
+        contactId: String(f.customerId || f.contactId || selectedCustomer?.id || ''),
+        contactName: f.contactName || selectedCustomer?.name || '',
+        contactPhone: f.contactPhone || selectedCustomer?.phone || '',
+        contactType: (f.contactType as any) || 'customer',
+        scheduledAt: f.scheduledAt ? new Date(f.scheduledAt).toISOString() : '',
+        scheduledDate: f.scheduledAt ? new Date(f.scheduledAt).toISOString().split('T')[0] : '',
+        scheduledTime: f.scheduledAt ? new Date(f.scheduledAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '',
+        priority: (f.priority as any) || 'Medium',
+        status: (f.status as any) || 'Pending',
+        followupType: 'call' as const,
+        notes: f.notes || '',
+        assignedAgentId: String(f.assignedAgentId || ''),
+        assignedAgentName: f.assignedAgentName || 'Agent',
+        completedAt: f.completedAt ? new Date(f.completedAt).toISOString() : undefined,
+      }));
+    }
     if (!selectedCustomer) return [];
-    return followups.filter(f => f.contactType === 'customer' && String(f.contactId) === String(selectedCustomer.id));
-  }, [followups, selectedCustomer]);
+    const custIdClean = String(selectedCustomer.id || '').replace(/\D/g, '');
+    const custPhone10 = (selectedCustomer.phone || '').replace(/\D/g, '').slice(-10);
+
+    return followups.filter(f => {
+      // 1. Primary linkage: CustomerId / ContactId
+      if (f.contactType === 'customer' && String(f.contactId) === String(selectedCustomer.id)) return true;
+      if (f.customerId && String(f.customerId).replace(/\D/g, '') === custIdClean) return true;
+      // 2. Secondary fallback: Phone
+      const fPhone10 = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+      if (custPhone10 && fPhone10 && custPhone10 === fPhone10) return true;
+      return false;
+    });
+  }, [isJamin, customer360Data, followups, selectedCustomer]);
 
   const customerDeals = useMemo(() => {
     if (!selectedCustomer) return [];
@@ -628,23 +756,22 @@ export const CustomersPage: React.FC = () => {
   }, [deals, selectedCustomer]);
 
   const customerBookings = useMemo(() => {
+    if (isJamin && customer360Data?.bookings) {
+      return customer360Data.bookings;
+    }
     if (!selectedCustomer) return [];
     const custIdClean = String(selectedCustomer.id || '').replace(/\D/g, '');
     const custPhone10 = (selectedCustomer.phone || '').replace(/\D/g, '').slice(-10);
     const custName = (selectedCustomer.name || '').trim().toLowerCase();
 
     return bookings.filter(b => {
-      // 1. Direct or clean customerId match
+      // 1. Primary: Direct or clean customerId match
       if (b.customerId) {
         if (String(b.customerId) === String(selectedCustomer.id)) return true;
         const bCustIdClean = String(b.customerId).replace(/\D/g, '');
         if (custIdClean && bCustIdClean && custIdClean === bCustIdClean) return true;
       }
-      // 2. Phone match (last 10 digits)
-      const bPhone10 = (b.customerPhone || b.phone || '').replace(/\D/g, '').slice(-10);
-      if (custPhone10 && bPhone10 && custPhone10 === bPhone10) return true;
-
-      // 3. Lead match if customer originated from an associated lead
+      // 2. Lead match if customer originated from an associated lead
       if (b.leadId) {
         const bLeadClean = String(b.leadId).replace(/\D/g, '');
         if (custPhone10 && leadsByPhone.has(custPhone10)) {
@@ -654,8 +781,11 @@ export const CustomersPage: React.FC = () => {
           }
         }
       }
+      // 3. Fallback: Phone match (last 10 digits)
+      const bPhone10 = (b.customerPhone || b.phone || '').replace(/\D/g, '').slice(-10);
+      if (custPhone10 && bPhone10 && custPhone10 === bPhone10) return true;
 
-      // 4. Exact customer name match
+      // 4. Fallback: Exact customer name match
       if (custName && b.customerName && b.customerName.trim().toLowerCase() === custName) {
         if (custPhone10 && bPhone10) {
           return custPhone10 === bPhone10;
@@ -665,10 +795,43 @@ export const CustomersPage: React.FC = () => {
 
       return false;
     });
-  }, [bookings, selectedCustomer, leadsByPhone]);
+  }, [isJamin, customer360Data, bookings, selectedCustomer, leadsByPhone]);
+
+  const customerSiteVisits = useMemo(() => {
+    if (isJamin && customer360Data?.siteVisits) {
+      return customer360Data.siteVisits;
+    }
+    if (!selectedCustomer || !isJamin) return [];
+    const custIdClean = String(selectedCustomer.id || '').replace(/\D/g, '');
+    const custPhone10 = (selectedCustomer.phone || '').replace(/\D/g, '').slice(-10);
+
+    return apiSiteVisits.filter(v => {
+      // 1. Primary: CustomerId
+      if (v.customerId && String(v.customerId).replace(/\D/g, '') === custIdClean) return true;
+      if (String(v.customerId || '') === String(selectedCustomer.id)) return true;
+      // 2. Fallback: phone
+      const vPhone10 = (v.customerPhone || '').replace(/\D/g, '').slice(-10);
+      if (custPhone10 && vPhone10 && custPhone10 === vPhone10) return true;
+      return false;
+    });
+  }, [isJamin, customer360Data, selectedCustomer, apiSiteVisits]);
 
   // Authoritative Customer 360 Financial Metrics derived from actual booking and payment records
+  // Maintains active contract value, verified receipts, refunds, net received, and outstanding balance distinct
   const selectedCustomerFinancials = useMemo(() => {
+    if (isJamin && customer360Data) {
+      const activeBookingsCount = (customer360Data.bookings || []).filter(b => b.status !== 'Cancelled' && b.status !== 'Voided').length;
+      return {
+        contractValue: customer360Data.totalContractValue ?? 0,
+        verifiedReceipts: customer360Data.totalVerifiedReceipts ?? 0,
+        totalRefunds: customer360Data.totalRefunds ?? 0,
+        netCashReceived: customer360Data.totalNetCashReceived ?? 0,
+        contractBalance: customer360Data.totalContractBalance ?? 0,
+        totalBookings: (customer360Data.bookings || []).length,
+        activeBookingsCount,
+      };
+    }
+
     const activeBookings = customerBookings.filter(b => b.status !== 'Cancelled' && b.status !== 'Voided');
     const contractValue = activeBookings.reduce((sum, b) => sum + (b.contractValue ?? b.totalPlotPrice ?? b.totalAmount ?? 0), 0);
     const verifiedReceipts = customerBookings.reduce((sum, b) => {
@@ -692,7 +855,7 @@ export const CustomersPage: React.FC = () => {
       totalBookings: customerBookings.length,
       activeBookingsCount: activeBookings.length,
     };
-  }, [customerBookings]);
+  }, [isJamin, customer360Data, customerBookings]);
 
   // Progressive Disclosure: Track expanded booking cards in Customer 360
   const [expandedBookingIds, setExpandedBookingIds] = useState<Record<string | number, boolean>>({});
@@ -718,13 +881,6 @@ export const CustomersPage: React.FC = () => {
     setActiveTab('bookings');
   };
 
-  const [apiSiteVisits, setApiSiteVisits] = useState<SiteVisit[]>([]);
-
-  const customerSiteVisits = useMemo(() => {
-    if (!selectedCustomer || !isJamin) return [];
-    return apiSiteVisits.filter(v => String(v.customerId || '') === String(selectedCustomer.id));
-  }, [selectedCustomer, isJamin, apiSiteVisits]);
-
   // Jamin Bazaar: Site Visit scheduling state
   const [isSiteVisitModalOpen, setIsSiteVisitModalOpen] = useState(false);
   const getTomorrowDate = () => {
@@ -733,12 +889,18 @@ export const CustomersPage: React.FC = () => {
     return d.toISOString().split('T')[0];
   };
 
-  const [svProject, setSvProject] = useState('Greenfield Meadows Phase 2');
-  const [svPlot, setSvPlot] = useState('Plot #15');
+  const [svProjectId, setSvProjectId] = useState('');
+  const [svPlotId, setSvPlotId] = useState('');
+  const [svProjectsList, setSvProjectsList] = useState<any[]>([]);
+  const [svPlotsList, setSvPlotsList] = useState<any[]>([]);
+  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+  const [isLoadingPlots, setIsLoadingPlots] = useState(false);
   const [svDate, setSvDate] = useState(getTomorrowDate);
   const [svTimeSlot, setSvTimeSlot] = useState('11:00 AM');
   const [svHostAgent, setSvHostAgent] = useState('');
   const [svNotes, setSvNotes] = useState('');
+  const [svError, setSvError] = useState('');
+  const [isSubmittingSiteVisit, setIsSubmittingSiteVisit] = useState(false);
   const [jaminAgents, setJaminAgents] = useState<Array<{ id: string; name: string; email: string }>>([]);
 
   useEffect(() => {
@@ -747,7 +909,11 @@ export const CustomersPage: React.FC = () => {
         if (data && data.length > 0) {
           setJaminAgents(data.map(a => ({ id: String(a.id), name: a.name, email: a.email })));
         }
-      });
+      }).catch(err => console.warn('Failed to load Jamin agents:', err));
+
+      jaminApiService.getProjects().then(projs => {
+        setSvProjectsList(projs || []);
+      }).catch(err => console.warn('Failed to load Jamin projects:', err));
 
       const fetchSiteVisits = () => {
         jaminApiService.getSiteVisits(true).then(visits => {
@@ -757,21 +923,87 @@ export const CustomersPage: React.FC = () => {
         }).catch(err => console.warn('Failed to load Jamin site visits in Customers:', err));
       };
       fetchSiteVisits();
-      window.addEventListener('nexus_storage_updated', fetchSiteVisits);
+      let debounceTimer: any = null;
+      const debouncedFetchSiteVisits = () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          fetchSiteVisits();
+        }, 350);
+      };
+      window.addEventListener('nexus_storage_updated', debouncedFetchSiteVisits);
       return () => {
-        window.removeEventListener('nexus_storage_updated', fetchSiteVisits);
+        clearTimeout(debounceTimer);
+        window.removeEventListener('nexus_storage_updated', debouncedFetchSiteVisits);
       };
     }
   }, [isJamin]);
 
-  const handleOpenScheduleSiteVisit = () => {
-    setSvProject('Greenfield Meadows Phase 2');
-    setSvPlot('Plot #15');
+  // Display only eligible plots according to live inventory and booking rules
+  const svEligiblePlots = useMemo(() => {
+    if (!svProjectId || !Array.isArray(svPlotsList)) return [];
+    return svPlotsList.filter(p => {
+      if (String(p.projectId) !== String(svProjectId)) return false;
+      const status = (p.status || '').trim().toLowerCase();
+      // Plot is eligible only if Available (not Booked, Sold, Registered, Blocked, or on Hold)
+      return status === 'available';
+    });
+  }, [svProjectId, svPlotsList]);
+
+  const handleOpenScheduleSiteVisit = async () => {
+    setSvError('');
+    setIsSubmittingSiteVisit(false);
+    setSvPlotId('');
     setSvDate(getTomorrowDate());
     setSvTimeSlot('11:00 AM');
     setSvHostAgent(selectedCustomer?.assignedAgentName || user?.name || (jaminAgents[0]?.name || 'Agent'));
     setSvNotes('');
+
+    setIsLoadingProjects(true);
+    try {
+      const projs = await jaminApiService.getProjects();
+      setSvProjectsList(projs || []);
+      
+      const chosenProjId = svProjectId && projs.some((p: any) => String(p.id) === String(svProjectId))
+        ? svProjectId
+        : (projs && projs.length > 0 ? String(projs[0].id) : '');
+      
+      setSvProjectId(chosenProjId);
+
+      if (chosenProjId) {
+        setIsLoadingPlots(true);
+        const plots = await jaminApiService.getPlots(chosenProjId);
+        setSvPlotsList(plots || []);
+        setIsLoadingPlots(false);
+      } else {
+        setSvPlotsList([]);
+      }
+    } catch (err) {
+      console.error('Failed to load live project/plot inventory for site visit modal:', err);
+    } finally {
+      setIsLoadingProjects(false);
+    }
+
     setIsSiteVisitModalOpen(true);
+  };
+
+  const handleSiteVisitProjectChange = async (newProjId: string) => {
+    setSvProjectId(newProjId);
+    setSvPlotId('');
+    setSvError('');
+    if (newProjId) {
+      setIsLoadingPlots(true);
+      try {
+        const plots = await jaminApiService.getPlots(newProjId);
+        setSvPlotsList(plots || []);
+      } catch (err) {
+        console.error(`Failed to load plots for project ${newProjId}:`, err);
+        setSvPlotsList([]);
+      } finally {
+        setIsLoadingPlots(false);
+      }
+    } else {
+      setSvPlotsList([]);
+    }
   };
 
   const [isScheduleFollowupModalOpen, setIsScheduleFollowupModalOpen] = useState(false);
@@ -803,7 +1035,7 @@ export const CustomersPage: React.FC = () => {
 
       const newF: Followup = {
         id: `fu-${Date.now()}`,
-        companyId: selectedCustomer.companyId || tenant?.id || 't-ghl-01',
+        companyId: selectedCustomer.companyId || tenant?.id || (isJamin ? 't-jamin-02' : 't-ghl-01'),
         contactId: String(selectedCustomer.id),
         contactName: selectedCustomer.name,
         contactPhone: selectedCustomer.phone,
@@ -815,8 +1047,8 @@ export const CustomersPage: React.FC = () => {
         status: 'Pending',
         followupType: custFollowupType,
         notes: custFollowupNotes.trim() || `Follow-up with customer ${selectedCustomer.name}`,
-        assignedAgentId: selectedCustomer.assignedAgentId || (user?.id ? String(user.id) : '1'),
-        assignedAgentName: selectedCustomer.assignedAgentName || user?.name || 'Agent',
+        assignedAgentId: selectedCustomer.assignedAgentId || (user?.id ? String(user.id) : (isJamin ? '2' : '1')),
+        assignedAgentName: selectedCustomer.assignedAgentName || user?.name || (isJamin ? 'Jamin Agent' : 'Agent'),
       };
 
       await apiSaveFollowup(newF);
@@ -834,7 +1066,43 @@ export const CustomersPage: React.FC = () => {
 
   const handleSaveCustomerSiteVisit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedCustomer) return;
+    if (!selectedCustomer) {
+      setSvError('Please select a customer first.');
+      return;
+    }
+
+    if (!selectedCustomer.phone?.trim()) {
+      setSvError('Customer must have a valid mobile number to schedule a site visit.');
+      return;
+    }
+
+    if (!svProjectId) {
+      setSvError('Please select a project from the available live inventory.');
+      return;
+    }
+
+    if (!svDate) {
+      setSvError('Please select a valid visit date.');
+      return;
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (svDate < todayStr) {
+      setSvError('Visit date cannot be in the past.');
+      return;
+    }
+
+    const selProj = svProjectsList.find(p => String(p.id) === String(svProjectId));
+    if (!selProj) {
+      setSvError('Selected project was not found in the live catalog. Please refresh.');
+      return;
+    }
+
+    const selPlot = svPlotId ? svEligiblePlots.find(p => String(p.id) === String(svPlotId)) : null;
+    if (svPlotId && !selPlot) {
+      setSvError('Selected plot is no longer available. Please choose another plot or schedule a General Tour.');
+      return;
+    }
 
     const hostAg = jaminAgents.find(a => a.name === svHostAgent || a.id === svHostAgent);
 
@@ -850,41 +1118,55 @@ export const CustomersPage: React.FC = () => {
 
     const trimmedNotes = svNotes.trim();
 
-    const created = isJamin ? await jaminApiService.scheduleSiteVisit({
-      customerId: Number(selectedCustomer.id),
-      contactType: 'customer',
-      customerName: selectedCustomer.name,
-      customerPhone: selectedCustomer.phone,
-      projectName: svProject,
-      plotNumber: svPlot,
-      scheduledAt: dateFormatted,
-      assignedAgentId: Number(hostAg?.id || selectedCustomer.assignedAgentId || user?.id) || undefined,
-      assignedAgentName: hostAg?.name || svHostAgent || user?.name || 'Agent',
-      visitorNote: trimmedNotes,
-    }) : null;
-    if (!created) {
-      alert('The site visit could not be saved. Check the selected customer and company, then try again.');
-      return;
+    setIsSubmittingSiteVisit(true);
+    setSvError('');
+
+    try {
+      const created = isJamin ? await jaminApiService.scheduleSiteVisit({
+        customerId: Number(selectedCustomer.id),
+        contactType: 'customer',
+        customerName: selectedCustomer.name.trim(),
+        customerPhone: selectedCustomer.phone.trim(),
+        projectId: Number(svProjectId),
+        plotId: selPlot ? Number(selPlot.id) : undefined,
+        projectName: selProj.name,
+        plotNumber: selPlot?.plotNumber || undefined,
+        scheduledAt: dateFormatted,
+        assignedAgentId: Number(hostAg?.id || selectedCustomer.assignedAgentId || user?.id) || undefined,
+        assignedAgentName: hostAg?.name || svHostAgent || user?.name || 'Agent',
+        visitorNote: trimmedNotes || undefined,
+      }) : null;
+
+      if (!created) {
+        throw new Error('The site visit could not be saved. Server returned an empty response.');
+      }
+
+      // Backend confirmed success: update state and local store
+      setApiSiteVisits(prev => [created, ...prev.filter(v => v.id !== created.id)]);
+
+      storageService.addAuditLog({
+        id: `aud-${Date.now()}`,
+        timestamp: 'Just now',
+        actorName: user?.name || 'Agent',
+        actorEmail: user?.email || '',
+        action: 'SITE_VISIT_SCHEDULED',
+        entityType: 'SiteVisit',
+        entityId: created.id,
+        companyId: tenant?.id || 't-jamin-02',
+        companyName: tenant?.name || 'Jamin Bazaar',
+        details: `Scheduled site visit for customer ${selectedCustomer.name} at ${selProj.name}${selPlot?.plotNumber ? ` (Plot ${selPlot.plotNumber})` : ' (General Tour)'}.`,
+      });
+
+      setIsSiteVisitModalOpen(false);
+      loadData();
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+      showToast(`✓ Site visit scheduled for ${selectedCustomer.name}!`);
+    } catch (err: any) {
+      console.error('Failed to schedule site visit:', err);
+      setSvError(err?.message || 'The site visit could not be saved. Check the selected customer and company, then try again.');
+    } finally {
+      setIsSubmittingSiteVisit(false);
     }
-    setApiSiteVisits(prev => [created, ...prev.filter(v => v.id !== created.id)]);
-
-    storageService.addAuditLog({
-      id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
-      actorName: user?.name || 'Agent',
-      actorEmail: user?.email || 'admin@ghlindiaventures.com',
-      action: 'SITE_VISIT_SCHEDULED',
-      entityType: 'SiteVisit',
-      entityId: created.id,
-      companyId: tenant?.id,
-      companyName: tenant?.name,
-      details: `Scheduled site visit for customer ${selectedCustomer.name} at ${svProject} (${svPlot}).`,
-    });
-
-    setIsSiteVisitModalOpen(false);
-    loadData();
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-    showToast(`✓ Site visit scheduled for ${selectedCustomer.name}!`);
   };
 
   const resetAddForm = () => {
@@ -954,16 +1236,23 @@ export const CustomersPage: React.FC = () => {
 
   const getCustomerValueDisplay = (c: Customer): string => {
     if (isJamin) {
+      if (selectedCustomer && String(selectedCustomer.id) === String(c.id) && customer360Data) {
+        if (customer360Data.totalContractValue !== undefined && customer360Data.totalContractValue > 0) {
+          return formatCurrency(customer360Data.totalContractValue);
+        }
+      }
       const cCleanId = String(c.id).replace(/\D/g, '');
       const cPhone10 = (c.phone || '').replace(/\D/g, '').slice(-10);
-      const custBookings = bookings.filter(b => {
-        if (b.customerId && (String(b.customerId) === String(c.id) || String(b.customerId).replace(/\D/g, '') === cCleanId)) return true;
-        const bPhone10 = (b.customerPhone || b.phone || '').replace(/\D/g, '').slice(-10);
-        return cPhone10 && bPhone10 && cPhone10 === bPhone10;
-      });
-      const activeBookings = custBookings.filter(b => b.status !== 'Cancelled' && b.status !== 'Voided');
+      const custBookings = (isJamin && customer360Data && String(selectedCustomer?.id) === String(c.id) && customer360Data.bookings)
+        ? customer360Data.bookings
+        : bookings.filter(b => {
+          if (b.customerId && (String(b.customerId) === String(c.id) || String(b.customerId).replace(/\D/g, '') === cCleanId)) return true;
+          const bPhone10 = (b.customerPhone || b.phone || '').replace(/\D/g, '').slice(-10);
+          return cPhone10 && bPhone10 && cPhone10 === bPhone10;
+        });
+      const activeBookings = custBookings.filter((b: any) => b.status !== 'Cancelled' && b.status !== 'Voided');
       if (activeBookings.length > 0) {
-        const total = activeBookings.reduce((sum, b) => sum + (b.contractValue ?? b.totalPlotPrice ?? b.totalAmount ?? 0), 0);
+        const total = activeBookings.reduce((sum: number, b: any) => sum + (b.contractValue ?? b.totalPlotPrice ?? b.totalAmount ?? 0), 0);
         return formatCurrency(total);
       }
     }
@@ -1053,9 +1342,9 @@ export const CustomersPage: React.FC = () => {
   const timelineEvents = rawEvents.sort((a, b) => {
     const parseTime = (ts: string) => {
       const parsed = Date.parse(ts);
-      return isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed;
+      return isNaN(parsed) ? 0 : parsed;
     };
-    return parseTime(b.timestamp) - parseTime(a.timestamp);
+    return parseTime(a.timestamp) - parseTime(b.timestamp);
   });
 
   return (
@@ -1067,7 +1356,9 @@ export const CustomersPage: React.FC = () => {
             <Building2 size={24} color="var(--primary-600)" /> Customer 360 Profile
           </h1>
           <p className="page-subtitle">
-            Unified contact view across calls, deals, timeline, and documents for {tenant?.name}.
+            {isJamin
+              ? `Unified customer view across plots, bookings, site visits, and timeline for ${tenant?.name || 'Jamin Bazaar'}.`
+              : `Unified contact view across calls, deals, timeline, and documents for ${tenant?.name || 'GHL India Ventures'}.`}
           </p>
         </div>
 
@@ -1385,7 +1676,7 @@ export const CustomersPage: React.FC = () => {
                         </div>
                       )}
                       <div>
-                        <span className="customer-profile-label">Investment Range:</span>
+                        <span className="customer-profile-label">{isJamin ? 'Plot Portfolio Value:' : 'Investment Range:'}</span>
                         <div className="customer-profile-val-green">
                           {getCustomerValueDisplay(selectedCustomer)}
                         </div>
@@ -1851,6 +2142,48 @@ export const CustomersPage: React.FC = () => {
                                         </div>
                                         <div style={{ marginTop: 2, lineHeight: 1.5 }}>
                                           "{b.notes}"
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Payment Ledger Entries */}
+                                    {Array.isArray(b.payments) && b.payments.length > 0 && (
+                                      <div className="booking-payment-ledger" style={{ marginTop: 12 }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 13, color: '#0f172a', marginBottom: 8 }}>
+                                          <CreditCard size={15} color="#059669" />
+                                          Payment Ledger ({b.payments.length} {b.payments.length === 1 ? 'Entry' : 'Entries'})
+                                        </div>
+                                        <div style={{ overflowX: 'auto', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+                                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, textAlign: 'left' }}>
+                                            <thead style={{ background: '#f8fafc', color: '#64748b', borderBottom: '1px solid #e2e8f0' }}>
+                                              <tr>
+                                                <th style={{ padding: '8px 10px' }}>Type</th>
+                                                <th style={{ padding: '8px 10px' }}>Amount</th>
+                                                <th style={{ padding: '8px 10px' }}>Mode</th>
+                                                <th style={{ padding: '8px 10px' }}>Receipt / Ref</th>
+                                                <th style={{ padding: '8px 10px' }}>Status</th>
+                                                <th style={{ padding: '8px 10px' }}>Date</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {b.payments.map((p: any) => (
+                                                <tr key={p.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                                  <td style={{ padding: '8px 10px', fontWeight: 600 }}>{p.paymentType}</td>
+                                                  <td style={{ padding: '8px 10px', color: p.paymentType === 'Refund' ? '#dc2626' : '#059669', fontWeight: 700 }}>
+                                                    {p.paymentType === 'Refund' ? `-${formatCurrency(p.amount)}` : formatCurrency(p.amount)}
+                                                  </td>
+                                                  <td style={{ padding: '8px 10px', color: '#475569' }}>{p.paymentMode || 'Online'}</td>
+                                                  <td style={{ padding: '8px 10px', color: '#64748b' }}>{p.receiptNumber || p.transactionReference || '—'}</td>
+                                                  <td style={{ padding: '8px 10px' }}>
+                                                    <StatusChip status={p.status || 'Verified'} size="sm" />
+                                                  </td>
+                                                  <td style={{ padding: '8px 10px', color: '#64748b' }}>
+                                                    {p.verifiedAt ? new Date(p.verifiedAt).toLocaleDateString('en-IN') : (p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-IN') : '—')}
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
                                         </div>
                                       </div>
                                     )}
@@ -2433,11 +2766,34 @@ export const CustomersPage: React.FC = () => {
       {isJamin && selectedCustomer && (
         <Modal
           isOpen={isSiteVisitModalOpen}
-          onClose={() => setIsSiteVisitModalOpen(false)}
+          onClose={() => {
+            if (!isSubmittingSiteVisit) {
+              setIsSiteVisitModalOpen(false);
+              setSvError('');
+            }
+          }}
           title={`Schedule Site Visit: ${selectedCustomer.name}`}
           subtitle={`Book layout walkthrough for ${selectedCustomer.phone}`}
         >
           <form onSubmit={handleSaveCustomerSiteVisit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {svError && (
+              <div style={{
+                padding: '10px 14px',
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: 8,
+                color: '#ef4444',
+                fontSize: 13,
+                lineHeight: 1.4,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}>
+                <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                <span>{svError}</span>
+              </div>
+            )}
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div className="form-group">
                 <label className="form-label">Client Name</label>
@@ -2470,7 +2826,10 @@ export const CustomersPage: React.FC = () => {
                   required
                   min={new Date().toISOString().split('T')[0]}
                   value={svDate}
-                  onChange={e => setSvDate(e.target.value)}
+                  onChange={e => {
+                    setSvDate(e.target.value);
+                    setSvError('');
+                  }}
                 />
               </div>
               <div className="form-group">
@@ -2506,28 +2865,59 @@ export const CustomersPage: React.FC = () => {
                 </select>
               </div>
               <div className="form-group">
-                <label className="form-label">Project</label>
+                <label className="form-label">
+                  Project * {isLoadingProjects && <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>(Loading...)</span>}
+                </label>
                 <select
                   className="form-select"
-                  value={svProject}
-                  onChange={e => setSvProject(e.target.value)}
+                  value={svProjectId}
+                  onChange={e => handleSiteVisitProjectChange(e.target.value)}
+                  required
+                  disabled={isLoadingProjects || svProjectsList.length === 0}
                 >
-                  <option value="Greenfield Meadows Phase 2">Greenfield Meadows Phase 2</option>
-                  <option value="Valley Crest Country Estates">Valley Crest Country Estates</option>
-                  <option value="Emerald Orchid Enclave">Emerald Orchid Enclave</option>
+                  {svProjectsList.length === 0 && <option value="">No projects available</option>}
+                  {svProjectsList.map(proj => (
+                    <option key={proj.id} value={String(proj.id)}>
+                      {proj.name} ({proj.location || 'Active'})
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
 
             <div className="form-group">
-              <label className="form-label">Plot Number Target</label>
-              <input
-                type="text"
-                className="form-input"
-                value={svPlot}
-                onChange={e => setSvPlot(e.target.value)}
-                placeholder="e.g. Plot #15"
-              />
+              <label className="form-label">
+                Specific Plot
+                <span style={{ fontSize: 11, color: 'var(--text-secondary)', marginLeft: 4 }}>
+                  (optional)
+                </span>
+                {isLoadingPlots && (
+                  <span style={{ fontSize: 11, color: '#3b82f6', marginLeft: 6 }}>
+                    · Loading live inventory...
+                  </span>
+                )}
+              </label>
+              <select
+                className="form-select"
+                value={svPlotId}
+                onChange={e => {
+                  setSvPlotId(e.target.value);
+                  setSvError('');
+                }}
+                disabled={!svProjectId || isLoadingPlots || svEligiblePlots.length === 0}
+              >
+                <option value="">-- General Project Tour (No Specific Plot) --</option>
+                {svEligiblePlots.map((pl: any) => (
+                  <option key={pl.id} value={String(pl.id)}>
+                    Plot {pl.plotNumber} {pl.dimensions ? `· ${pl.dimensions}` : pl.areaSqFt ? `· ${pl.areaSqFt} sq.ft` : ''} · Available {pl.price ? `· ₹${Number(pl.price).toLocaleString('en-IN')}` : ''}
+                  </option>
+                ))}
+              </select>
+              {svProjectId && !isLoadingPlots && svEligiblePlots.length === 0 && (
+                <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
+                  No available plots in this project right now. You can still schedule a General Project Tour.
+                </p>
+              )}
             </div>
 
             <div className="form-group">
@@ -2545,13 +2935,18 @@ export const CustomersPage: React.FC = () => {
               <button
                 type="button"
                 className="btn btn-secondary"
-                onClick={() => setIsSiteVisitModalOpen(false)}
+                disabled={isSubmittingSiteVisit}
+                onClick={() => {
+                  setIsSiteVisitModalOpen(false);
+                  setSvError('');
+                }}
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 className="btn btn-primary"
+                disabled={isSubmittingSiteVisit || !svProjectId}
                 style={{
                   background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
                   borderColor: '#dc2626',
@@ -2560,9 +2955,11 @@ export const CustomersPage: React.FC = () => {
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: 6,
+                  opacity: isSubmittingSiteVisit ? 0.7 : 1,
+                  cursor: isSubmittingSiteVisit ? 'not-allowed' : 'pointer',
                 }}
               >
-                <Calendar size={14} /> Confirm Schedule
+                <Calendar size={14} /> {isSubmittingSiteVisit ? 'Scheduling...' : 'Confirm Schedule'}
               </button>
             </div>
           </form>

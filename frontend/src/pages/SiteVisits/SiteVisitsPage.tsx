@@ -10,6 +10,7 @@ import { jaminApiService } from '../../services/jaminApiService';
 import { storageService } from '../../services/storageService';
 import { getCustomers } from '../../services/ghlApiService';
 import { apiClient } from '../../services/apiClient';
+import { toast } from '../../context/ToastContext';
 import './SiteVisitsPage.css';
 
 const TIME_SLOTS = [
@@ -85,8 +86,8 @@ export const SiteVisitsPage: React.FC = () => {
         jaminApiService.getProjects().catch(() => []),
         jaminApiService.getPlots().catch(() => []),
         jaminApiService.getAgents().catch(() => []),
-        jaminApiService.getLeads(true).catch(() => []),
-        getCustomers(tenantId).catch(() => []),
+        jaminApiService.getLeads(true).catch(() => storageService.getLeads(tenantId)),
+        jaminApiService.getCustomers().catch(() => getCustomers(tenantId).catch(() => [])),
       ]);
 
       // Site visits shown in the table come only from the backend.
@@ -117,8 +118,9 @@ export const SiteVisitsPage: React.FC = () => {
       }
       setCustomers(dedupedCustomers);
 
-      // 2. Deduplicate Leads, exclude "Converted", and exclude anyone already present in Customers strictly from DB API
-      const combinedLeads = (leadList || []) as Lead[];
+      // 2. Deduplicate Leads, exclude "Converted", and exclude anyone already present in Customers
+      const localLeads = storageService.getLeads(tenantId) || [];
+      const combinedLeads = [...(leadList || []), ...(localLeads || [])];
       const seenLeadPhones = new Set<string>();
       const seenLeadNames = new Set<string>();
       const dedupedLeads: Lead[] = [];
@@ -156,10 +158,10 @@ export const SiteVisitsPage: React.FC = () => {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  // When selectedProjectId changes, filter plots
+  // When selectedProjectId changes, filter plots to strictly Available plots
   useEffect(() => {
     if (selectedProjectId) {
-      setFilteredPlots(plots.filter(p => String(p.projectId) === selectedProjectId));
+      setFilteredPlots(plots.filter(p => String(p.projectId) === selectedProjectId && p.status === 'Available'));
     } else {
       setFilteredPlots([]);
     }
@@ -274,6 +276,8 @@ export const SiteVisitsPage: React.FC = () => {
         throw new Error('The site visit could not be saved. Please try again.');
       }
 
+      // Save locally to storageService to ensure immediate linkage
+      storageService.saveSiteVisit(created);
 
       // If linked to a lead, log in lead timeline/notes and update status
       const leadMatch = cleanLeadId
@@ -289,6 +293,7 @@ export const SiteVisitsPage: React.FC = () => {
           status: newStatus,
           notes: `${leadMatch.notes ? leadMatch.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Site Visit Scheduled: ${project?.name || ''} (${plot?.plotNumber || 'Tour'}) on ${dateFormatted}`,
         };
+        storageService.saveLead(updatedLead);
         setLeads(prev => prev.map(l => l.id === leadMatch.id ? updatedLead : l));
 
         // Persist directly to backend database
@@ -299,7 +304,18 @@ export const SiteVisitsPage: React.FC = () => {
             phone: updatedLead.phone,
             status: newStatus,
             companyId: 2,
-          }).catch(() => {});
+          }).catch(() => { });
+        }
+      }
+
+      // If linked to a customer, log in customer notes
+      if (cleanCustomerId) {
+        const matchingCust = customers.find(c => c.id === cleanCustomerId);
+        if (matchingCust) {
+          storageService.saveCustomer({
+            ...matchingCust,
+            notes: `${matchingCust.notes ? matchingCust.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Site Visit Scheduled: ${project?.name || ''} (${plot?.plotNumber || 'Tour'}) on ${dateFormatted}`,
+          });
         }
       }
 
@@ -404,31 +420,53 @@ export const SiteVisitsPage: React.FC = () => {
   const handleSaveManageVisit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!managingVisit || !manageStatus) return;
-    setIsSubmittingManage(true);
 
-    try {
-      const trimmedNote = manageNote.trim();
-      const isRescheduled = manageStatus === 'Rescheduled';
+    const oldVisit = managingVisit;
+    const trimmedNote = manageNote.trim();
+    const isRescheduled = manageStatus === 'Rescheduled';
 
-      let formattedSlot = managingVisit.scheduledAt;
-      if (isRescheduled) {
-        try {
-          const [y, m, d] = manageVisitDate.split('-');
-          const dateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
-          formattedSlot = `${dateObj.toLocaleDateString('en-US', {
-            weekday: 'short',
-            day: 'numeric',
-            month: 'short',
-            year: 'numeric',
-          })} • ${manageVisitTimeSlot}`;
-        } catch {
-          formattedSlot = `${manageVisitDate} • ${manageVisitTimeSlot}`;
-        }
+    let formattedSlot = managingVisit.scheduledAt;
+    if (isRescheduled) {
+      try {
+        const [y, m, d] = manageVisitDate.split('-');
+        const dateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+        formattedSlot = `${dateObj.toLocaleDateString('en-US', {
+          weekday: 'short',
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+        })} • ${manageVisitTimeSlot}`;
+      } catch {
+        formattedSlot = `${manageVisitDate} • ${manageVisitTimeSlot}`;
       }
+    }
 
-      const project = projects.find(p => String(p.id) === String(manageProjectId));
-      const plot = manageFilteredPlots.find(p => String(p.id) === String(managePlotId));
+    const project = projects.find(p => String(p.id) === String(manageProjectId));
+    const plot = manageFilteredPlots.find(p => String(p.id) === String(managePlotId));
 
+    const updatedVisit: SiteVisit = {
+      ...managingVisit,
+      status: manageStatus as any,
+      scheduledAt: formattedSlot,
+      projectId: isRescheduled ? (manageProjectId || managingVisit.projectId) : managingVisit.projectId,
+      projectName: isRescheduled ? (project?.name || managingVisit.projectName) : managingVisit.projectName,
+      plotId: isRescheduled ? (managePlotId || managingVisit.plotId) : managingVisit.plotId,
+      plotNumber: isRescheduled ? (plot?.plotNumber || (managePlotId ? '' : managingVisit.plotNumber)) : managingVisit.plotNumber,
+      assignedAgentId: isRescheduled ? String(manageHostAgentId || managingVisit.assignedAgentId) : managingVisit.assignedAgentId,
+      assignedAgentName: isRescheduled ? (manageHostAgentName || managingVisit.assignedAgentName) : managingVisit.assignedAgentName,
+      visitorNote: trimmedNote,
+      outcomeNotes: trimmedNote,
+    };
+
+    // ── 1. INSTANT 0ms OPTIMISTIC UI UPDATE ────────────────────────────────────
+    setSiteVisits(prev => prev.map(sv => String(sv.id) === String(updatedVisit.id) ? updatedVisit : sv));
+    storageService.saveSiteVisit(updatedVisit);
+    setIsManageModalOpen(false);
+    setManagingVisit(null);
+    toast.success(`✓ Site visit updated to "${manageStatus}"!`);
+
+    // ── 2. BACKGROUND SERVER SYNC (Non-blocking) ──────────────────────────────
+    try {
       const payload: any = {
         status: manageStatus,
         visitorNote: trimmedNote,
@@ -445,30 +483,15 @@ export const SiteVisitsPage: React.FC = () => {
         if (canAssignSiteVisits && manageHostAgentName) payload.assignedAgentName = manageHostAgentName;
       }
 
-      const updated = await jaminApiService.updateSiteVisit(managingVisit.id, payload);
+      const updated = await jaminApiService.updateSiteVisit(oldVisit.id, payload);
       if (!updated) {
-        throw new Error('The site visit could not be updated. Please try again.');
+        throw new Error('Server update failed');
       }
 
-      const updatedVisit: SiteVisit = {
-        ...managingVisit,
-        status: manageStatus as any,
-        scheduledAt: formattedSlot,
-        projectId: isRescheduled ? (manageProjectId || managingVisit.projectId) : managingVisit.projectId,
-        projectName: isRescheduled ? (project?.name || managingVisit.projectName) : managingVisit.projectName,
-        plotId: isRescheduled ? (managePlotId || managingVisit.plotId) : managingVisit.plotId,
-        plotNumber: isRescheduled ? (plot?.plotNumber || (managePlotId ? '' : managingVisit.plotNumber)) : managingVisit.plotNumber,
-        assignedAgentId: isRescheduled ? String(manageHostAgentId || managingVisit.assignedAgentId) : managingVisit.assignedAgentId,
-        assignedAgentName: isRescheduled ? (manageHostAgentName || managingVisit.assignedAgentName) : managingVisit.assignedAgentName,
-        visitorNote: trimmedNote,
-        outcomeNotes: trimmedNote,
-      };
-      setSiteVisits(prev => prev.map(sv => String(sv.id) === String(updatedVisit.id) ? updatedVisit : sv));
-
       // If linked to a lead, log in lead timeline/notes and update status if completed or scheduled
-      const manageLeadMatch = managingVisit.leadId
-        ? leads.find(l => l.id === managingVisit.leadId || String(l.id) === String(managingVisit.leadId))
-        : leads.find(l => (managingVisit.customerPhone && l.phone.replace(/\D/g, '').slice(-10) === managingVisit.customerPhone.replace(/\D/g, '').slice(-10)));
+      const manageLeadMatch = oldVisit.leadId
+        ? leads.find(l => l.id === oldVisit.leadId || String(l.id) === String(oldVisit.leadId))
+        : leads.find(l => (oldVisit.customerPhone && l.phone.replace(/\D/g, '').slice(-10) === oldVisit.customerPhone.replace(/\D/g, '').slice(-10)));
 
       if (manageLeadMatch) {
         const timestamp = new Date().toLocaleDateString();
@@ -477,16 +500,16 @@ export const SiteVisitsPage: React.FC = () => {
         const newStatus = shouldMarkCompleted
           ? ('Site Visit Completed' as const)
           : shouldMarkScheduled
-          ? ('Site Visit Scheduled' as const)
-          : manageLeadMatch.status;
+            ? ('Site Visit Scheduled' as const)
+            : manageLeadMatch.status;
         const updatedLead = {
           ...manageLeadMatch,
           status: newStatus,
           notes: `${manageLeadMatch.notes ? manageLeadMatch.notes + '\n\n' : ''}[${timestamp}] Site Visit Status: ${manageStatus}${isRescheduled ? ` (New slot: ${formattedSlot})` : ''} — ${trimmedNote || 'Updated'}`,
         };
+        storageService.saveLead(updatedLead);
         setLeads(prev => prev.map(l => l.id === manageLeadMatch.id ? updatedLead : l));
 
-        // Persist directly to backend database
         const numericId = parseInt(String(manageLeadMatch.id).replace('db-', ''), 10);
         if (!isNaN(numericId)) {
           apiClient.put(`/leads/${numericId}`, {
@@ -494,7 +517,7 @@ export const SiteVisitsPage: React.FC = () => {
             phone: updatedLead.phone,
             status: newStatus,
             companyId: 2,
-          }).catch(() => {});
+          }).catch(() => { });
         }
       }
 
@@ -505,23 +528,22 @@ export const SiteVisitsPage: React.FC = () => {
         actorEmail: user?.email || 'agent@jaminbazaar.com',
         action: isRescheduled ? 'SITE_VISIT_RESCHEDULED' : `SITE_VISIT_${manageStatus.toUpperCase()}`,
         entityType: 'SiteVisit',
-        entityId: String(managingVisit.id),
+        entityId: String(oldVisit.id),
         companyId: tenant?.id,
         companyName: tenant?.name,
         details: isRescheduled
-          ? `Rescheduled visit for ${managingVisit.customerName} to ${formattedSlot}. Note: ${trimmedNote}`
-          : `Updated visit status to ${manageStatus} for ${managingVisit.customerName}. Note: ${trimmedNote}`,
+          ? `Rescheduled visit for ${oldVisit.customerName} to ${formattedSlot}. Note: ${trimmedNote}`
+          : `Updated visit status to ${manageStatus} for ${oldVisit.customerName}. Note: ${trimmedNote}`,
       });
 
       window.dispatchEvent(new Event('nexus_storage_updated'));
-      setIsManageModalOpen(false);
-      await loadAll();
     } catch (err: any) {
-      console.error('Failed to update visit:', err);
-      const msg = err?.response?.data?.message || err?.message || 'Failed to update visit. Please try again.';
-      alert(msg);
-    } finally {
-      setIsSubmittingManage(false);
+      console.error('Failed to update visit on backend:', err);
+      // Revert optimistic update on error
+      setSiteVisits(prev => prev.map(sv => String(sv.id) === String(oldVisit.id) ? oldVisit : sv));
+      storageService.saveSiteVisit(oldVisit);
+      const msg = err?.response?.data?.message || err?.message || 'Failed to update visit on server. Reverted.';
+      toast.error(msg);
     }
   };
 
@@ -538,7 +560,7 @@ export const SiteVisitsPage: React.FC = () => {
           phone: targetLead.phone,
           status: 'Site Visit Scheduled',
           companyId: 2,
-        }).catch(() => {});
+        }).catch(() => { });
       }
     }
     await loadAll();
@@ -677,7 +699,7 @@ export const SiteVisitsPage: React.FC = () => {
       <DataTable
         columns={columns}
         data={siteVisits}
-          loading={isLoading}
+        loading={isLoading}
         keyExtractor={sv => sv.id}
         rowActions={rowActions}
         searchPlaceholder="Search visits by customer, project, or plot..."
@@ -842,17 +864,17 @@ export const SiteVisitsPage: React.FC = () => {
                 onChange={e => setSelectedPlotId(e.target.value)}
                 disabled={!selectedProjectId || filteredPlots.length === 0}
               >
-                <option value="">-- General Project Tour --</option>
+                <option value="">-- General Project Tour (No Specific Plot) --</option>
                 {filteredPlots.map((pl: any) => (
                   <option key={pl.id} value={String(pl.id)}>
-                    {pl.plotNumber} · {pl.dimensions} · {pl.status}
+                    {pl.plotNumber} · {pl.dimensions} · Available
                     {pl.price ? ` · ₹${Number(pl.price).toLocaleString('en-IN')}` : ''}
                   </option>
                 ))}
               </select>
               {selectedProjectId && filteredPlots.length === 0 && (
                 <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
-                  No plots added for this project yet.
+                  No available plots in this project right now. You can still schedule a General Project Tour.
                 </p>
               )}
             </div>

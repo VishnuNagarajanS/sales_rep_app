@@ -42,7 +42,7 @@ import './DashboardPage.css';
 
 interface DashboardPageProps {
   onNavigate: (route: string) => void;
-  onOpenQuickCreate: (type: 'lead' | 'followup' | 'deal' | 'visit' | 'consultation') => void;
+  onOpenQuickCreate: (type: 'lead' | 'customer' | 'booking' | 'followup' | 'deal' | 'visit' | 'consultation') => void;
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpenQuickCreate }) => {
@@ -319,6 +319,28 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
               >
                 <Plus size={14} /> Quick Lead
               </button>
+              <button
+                className="btn btn-secondary btn-sm dashboard-banner-btn-secondary"
+                onClick={() => onOpenQuickCreate('customer')}
+              >
+                <Users size={14} /> New Customer
+              </button>
+              {(isJamin || enabledFeatures.includes(FEATURES.BOOKINGS)) && (
+                <button
+                  className="btn btn-secondary btn-sm dashboard-banner-btn-secondary"
+                  onClick={() => onOpenQuickCreate('booking')}
+                >
+                  <Briefcase size={14} /> New Booking
+                </button>
+              )}
+              {(isJamin || enabledFeatures.includes(FEATURES.SITE_VISITS)) && (
+                <button
+                  className="btn btn-secondary btn-sm dashboard-banner-btn-secondary"
+                  onClick={() => onOpenQuickCreate('visit')}
+                >
+                  <MapPin size={14} /> Site Visit
+                </button>
+              )}
               <button
                 className="btn btn-primary btn-sm"
                 onClick={() => onOpenQuickCreate('followup')}

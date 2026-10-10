@@ -25,21 +25,61 @@
 .plots-legend-group {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .plots-legend-item {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-base, #e2e8f0);
+  background-color: var(--bg-surface, #ffffff);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.18s ease;
+}
+
+.plots-legend-item:hover {
+  background-color: var(--bg-surface-hover, #f8fafc);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.plots-legend-item.active.all {
+  background-color: #f1f5f9;
+  border-color: #64748b;
+  box-shadow: 0 0 0 1px #64748b;
+}
+
+.plots-legend-item.active.avail {
+  background-color: #ecfdf5;
+  border-color: #059669;
+  box-shadow: 0 0 0 1px #059669;
+}
+
+.plots-legend-item.active.hold {
+  background-color: #fffbeb;
+  border-color: #d97706;
+  box-shadow: 0 0 0 1px #d97706;
+}
+
+.plots-legend-item.active.sold {
+  background-color: #fef2f2;
+  border-color: #dc2626;
+  box-shadow: 0 0 0 1px #dc2626;
 }
 
 .plots-legend-dot {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
+  flex-shrink: 0;
 }
 
+.plots-legend-dot.all { background-color: #64748b; }
 .plots-legend-dot.avail { background-color: #10b981; }
 .plots-legend-dot.hold { background-color: #f59e0b; }
 .plots-legend-dot.sold { background-color: #ef4444; }
@@ -47,6 +87,7 @@
 .plots-legend-label {
   font-size: 13px;
   font-weight: 600;
+  color: var(--text-primary, #0f172a);
 }
 
 .plots-legend-hint {

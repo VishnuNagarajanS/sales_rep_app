@@ -47,7 +47,7 @@ const IRM_STAGE_SUBTITLES: Record<string, string> = {
 };
 
 interface PipelinePageProps {
-  onOpenQuickCreate: (type: 'lead' | 'followup' | 'deal' | 'visit' | 'consultation') => void;
+  onOpenQuickCreate: (type: 'lead' | 'customer' | 'booking' | 'followup' | 'deal' | 'visit' | 'consultation') => void;
 }
 
 export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate }) => {
@@ -60,6 +60,7 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
 
 
   const canUpdateDeals = useCan('deals.update');
+  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2';
   const isIrm = roleCode === 'irm';
   const isGhlIrm = isIrm && tenant?.slug === 'ghl';
 
@@ -218,9 +219,18 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
+    let timer: any = null;
+    const handleUpdate = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        loadData();
+      }, 350);
+    };
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
+    };
   }, [tenant?.id]);
 
   // Stages derived dynamically from current tenant slug!
@@ -407,9 +417,9 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
           )}
           <button
             className="btn btn-primary pipeline-new-deal-btn"
-            onClick={() => onOpenQuickCreate('deal')}
+            onClick={() => onOpenQuickCreate(isJamin ? 'lead' : 'deal')}
           >
-            <Plus size={15} /> New Deal
+            <Plus size={15} /> {isJamin ? 'New Lead' : 'New Deal'}
           </button>
         </div>
       </div>

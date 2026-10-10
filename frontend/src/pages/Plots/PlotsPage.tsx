@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Grid, RefreshCw, Plus, Map, Maximize2, ZoomIn, ZoomOut, RotateCcw, Compass, Layers, ShieldCheck, Edit3, Trash2 } from 'lucide-react';
+import { Grid, RefreshCw, Plus, Map, Maximize2, Minimize2, ZoomIn, ZoomOut, RotateCcw, RotateCw, X, Image as ImageIcon, Compass, Layers, ShieldCheck, Edit3, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
@@ -26,7 +26,10 @@ export const PlotsPage: React.FC = () => {
   const [selectedPlot, setSelectedPlot] = useState<any | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [isMasterLayoutModalOpen, setIsMasterLayoutModalOpen] = useState(false);
-  const [layoutZoom, setLayoutZoom] = useState<number>(1);
+  const [blueprintZoom, setBlueprintZoom] = useState<number>(1);
+  const [blueprintRotation, setBlueprintRotation] = useState<number>(0);
+  const [isBlueprintFullScreen, setIsBlueprintFullScreen] = useState<boolean>(false);
+  const [statusFilter, setStatusFilter] = useState<'All' | 'Available' | 'Hold' | 'Sold'>('All');
   const canManagePlots = user?.role?.code === 'company_admin' || user?.role?.code === 'super_admin';
 
   // Hold action state
@@ -118,7 +121,7 @@ export const PlotsPage: React.FC = () => {
         jaminApiService.getPlots(projId || undefined),
       ]);
       setProjects(projList);
-      if (projList.length > 0 && !selectedProject && !projId) {
+      if (projList.length > 0 && (!selectedProject || !projList.some(p => String(p.id) === String(selectedProject))) && !projId) {
         setSelectedProject(String(projList[0].id));
       }
       setPlots([...plotList].sort(comparePlotNumbers));
@@ -134,8 +137,19 @@ export const PlotsPage: React.FC = () => {
     loadHoldEntities();
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isBlueprintFullScreen) {
+        setIsBlueprintFullScreen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isBlueprintFullScreen]);
+
   const handleProjectChange = async (projId: string) => {
     setSelectedProject(projId);
+    setStatusFilter('All');
     setLoading(true);
     try {
       const plotList = await jaminApiService.getPlots(projId || undefined);
@@ -147,15 +161,32 @@ export const PlotsPage: React.FC = () => {
     }
   };
 
-  const projectPlots = selectedProject
-    ? plots.filter(p => String(p.projectId) === String(selectedProject)).sort(comparePlotNumbers)
+  const currentProjectId = selectedProject || (projects[0]?.id ? String(projects[0].id) : '');
+
+  const projectPlots = currentProjectId
+    ? plots.filter(p => String(p.projectId) === String(currentProjectId)).sort(comparePlotNumbers)
     : [...plots].sort(comparePlotNumbers);
 
   const availableCount = projectPlots.filter(p => p.status === 'Available').length;
   const holdCount = projectPlots.filter(p => p.status === 'Hold').length;
   const soldCount = projectPlots.filter(p => p.status === 'Booked' || p.status === 'Registered' || p.status === 'Sold').length;
 
-  const currentProjectObj = projects.find(p => String(p.id) === String(selectedProject));
+  const displayedPlots = useMemo(() => {
+    if (statusFilter === 'Available') return projectPlots.filter(p => p.status === 'Available');
+    if (statusFilter === 'Hold') return projectPlots.filter(p => p.status === 'Hold');
+    if (statusFilter === 'Sold') return projectPlots.filter(p => p.status === 'Booked' || p.status === 'Registered' || p.status === 'Sold');
+    return projectPlots;
+  }, [projectPlots, statusFilter]);
+
+  const handleToggleStatusFilter = (status: 'All' | 'Available' | 'Hold' | 'Sold') => {
+    if (status === 'All') {
+      setStatusFilter('All');
+    } else {
+      setStatusFilter(prev => (prev === status ? 'All' : status));
+    }
+  };
+
+  const currentProjectObj = projects.find(p => String(p.id) === String(currentProjectId)) || projects[0];
   const hasMasterLayout = Boolean(currentProjectObj?.imageUrl && currentProjectObj.imageUrl.trim() !== '');
 
   const getProjectMasterLayout = () => {
@@ -560,10 +591,10 @@ export const PlotsPage: React.FC = () => {
             <span style={{ fontSize: 13, fontWeight: 600 }}>Project:</span>
             <select
               className="form-select plots-project-selector"
-              value={selectedProject}
+              value={currentProjectId}
               onChange={e => handleProjectChange(e.target.value)}
             >
-              <option value="">All Projects</option>
+              <option value="" disabled>-- Select Project --</option>
               {projects.map(p => (
                 <option key={p.id} value={String(p.id)}>
                   {p.name}
@@ -600,19 +631,49 @@ export const PlotsPage: React.FC = () => {
       {/* Status Legend & Telemetry Bar */}
       <div className="card plots-legend-bar">
         <div className="plots-legend-group">
-          <div className="plots-legend-item">
+          <div
+            className={`plots-legend-item ${statusFilter === 'All' ? 'active all' : ''}`}
+            onClick={() => handleToggleStatusFilter('All')}
+            role="button"
+            tabIndex={0}
+            title="Click to show all plots"
+          >
+            <span className="plots-legend-dot all" />
+            <span className="plots-legend-label">All Plots: </span>
+            <strong style={{ color: '#334155' }}>{projectPlots.length}</strong>
+          </div>
+
+          <div
+            className={`plots-legend-item ${statusFilter === 'Available' ? 'active avail' : ''}`}
+            onClick={() => handleToggleStatusFilter('Available')}
+            role="button"
+            tabIndex={0}
+            title="Click to filter by Available plots"
+          >
             <span className="plots-legend-dot avail" />
             <span className="plots-legend-label">Available: </span>
             <strong style={{ color: '#059669' }}>{availableCount}</strong>
           </div>
 
-          <div className="plots-legend-item">
+          <div
+            className={`plots-legend-item ${statusFilter === 'Hold' ? 'active hold' : ''}`}
+            onClick={() => handleToggleStatusFilter('Hold')}
+            role="button"
+            tabIndex={0}
+            title="Click to filter by On Hold plots"
+          >
             <span className="plots-legend-dot hold" />
             <span className="plots-legend-label">On Hold: </span>
             <strong style={{ color: '#d97706' }}>{holdCount}</strong>
           </div>
 
-          <div className="plots-legend-item">
+          <div
+            className={`plots-legend-item ${statusFilter === 'Sold' ? 'active sold' : ''}`}
+            onClick={() => handleToggleStatusFilter('Sold')}
+            role="button"
+            tabIndex={0}
+            title="Click to filter by Booked & Sold plots"
+          >
             <span className="plots-legend-dot sold" />
             <span className="plots-legend-label">Booked / Sold: </span>
             <strong style={{ color: '#dc2626' }}>{soldCount}</strong>
@@ -620,15 +681,29 @@ export const PlotsPage: React.FC = () => {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {/* {statusFilter !== 'All' && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setStatusFilter('All')}
+              style={{ fontSize: 12, color: '#64748b' }}
+            >
+              Reset Filter
+            </button>
+          )} */}
           <button
             className="btn btn-secondary btn-sm"
-            onClick={() => { setLayoutZoom(1); setIsMasterLayoutModalOpen(true); }}
+            onClick={() => {
+              setBlueprintZoom(1);
+              setBlueprintRotation(0);
+              setIsBlueprintFullScreen(false);
+              setIsMasterLayoutModalOpen(true);
+            }}
             style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', fontWeight: 600 }}
           >
             <Map size={15} /> View Master Layout Blueprint
           </button>
           <div className="plots-legend-hint">
-            Click any plot below to inspect specs or place hold
+            Click status headings above to filter plots
           </div>
         </div>
       </div>
@@ -651,9 +726,18 @@ export const PlotsPage: React.FC = () => {
             <Plus size={16} /> Add Plot
           </button>
         </div>
+      ) : displayedPlots.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '48px', color: '#64748b' }}>
+          <p style={{ fontSize: '1.1rem', marginBottom: '16px' }}>
+            No plots found with status <strong>{statusFilter === 'Sold' ? 'Booked / Sold' : statusFilter}</strong> in this project.
+          </p>
+          <button className="btn btn-secondary btn-sm" onClick={() => setStatusFilter('All')}>
+            Show All Plots ({projectPlots.length})
+          </button>
+        </div>
       ) : (
         <div className="plots-grid-container">
-          {projectPlots.map(plot => {
+          {displayedPlots.map(plot => {
             const isAvailable = plot.status === 'Available';
             const isHold = plot.status === 'Hold';
             const isSold = plot.status === 'Booked' || plot.status === 'Registered' || plot.status === 'Sold';
@@ -1494,92 +1578,127 @@ export const PlotsPage: React.FC = () => {
         </form>
       </Modal>
 
-      {/* Master Gated Community Layout Lightbox / Zoom Modal */}
+      {/* Master Layout Blueprint Modal */}
       <Modal
-        isOpen={isMasterLayoutModalOpen}
-        onClose={() => setIsMasterLayoutModalOpen(false)}
-        title={`${currentProjectObj?.name || 'Project'} — Gated Community Master Plan`}
-        subtitle="High-resolution master layout map, plot boundary alignments, and sanction diagram"
-        size="lg"
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {/* Zoom & Control Bar */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', padding: '8px 16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.85rem', color: '#475569' }}>
-              <span>Zoom Level: <strong>{Math.round(layoutZoom * 100)}%</strong></span>
-              <span>•</span>
-              <span>Total Plots: <strong>{currentProjectObj?.totalPlots || projectPlots.length}</strong></span>
+        isOpen={isMasterLayoutModalOpen && !isBlueprintFullScreen}
+        onClose={() => {
+          setIsMasterLayoutModalOpen(false);
+          setIsBlueprintFullScreen(false);
+        }}
+        title={`${currentProjectObj?.name || 'Project'} — Master Layout Blueprint`}
+        subtitle={`Master layout diagram and community plan for ${currentProjectObj?.location || ''}`}
+        size="xl"
+        headerActions={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: 'var(--text-secondary, #475569)', marginRight: '4px' }}>
+              <span>Zoom: <strong style={{ color: 'var(--text-primary, #0f172a)' }}>{Math.round(blueprintZoom * 100)}%</strong></span>
+              {blueprintRotation > 0 && (
+                <span>• <strong>{blueprintRotation}°</strong></span>
+              )}
               <span>•</span>
               <span style={{ color: '#059669', fontWeight: 600 }}>{availableCount} Available</span>
             </div>
 
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                onClick={() => setLayoutZoom(prev => Math.max(0.75, prev - 0.25))}
-                disabled={layoutZoom <= 0.75}
-                title="Zoom Out"
-                style={{ padding: '4px 10px' }}
+                onClick={() => setBlueprintZoom(prev => Math.max(0.25, parseFloat((prev - 0.25).toFixed(2))))}
+                disabled={blueprintZoom <= 0.25}
+                title="Zoom Out (-25%)"
+                style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center', height: '32px' }}
               >
-                <ZoomOut size={15} />
+                <ZoomOut size={14} />
               </button>
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                onClick={() => setLayoutZoom(1)}
-                title="Reset Zoom"
-                style={{ padding: '4px 10px' }}
+                onClick={() => setBlueprintZoom(prev => Math.min(3.5, parseFloat((prev + 0.25).toFixed(2))))}
+                disabled={blueprintZoom >= 3.5}
+                title="Zoom In (+25%)"
+                style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center', height: '32px' }}
               >
-                <RotateCcw size={15} />
+                <ZoomIn size={14} />
               </button>
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                onClick={() => setLayoutZoom(prev => Math.min(2.5, prev + 0.25))}
-                disabled={layoutZoom >= 2.5}
-                title="Zoom In"
-                style={{ padding: '4px 10px' }}
+                onClick={() => setBlueprintRotation(prev => (prev + 90) % 360)}
+                title="Rotate 90° Clockwise"
+                style={{ padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 500, height: '32px' }}
               >
-                <ZoomIn size={15} />
+                <RotateCw size={14} /> Rotate
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => { setBlueprintZoom(1); setBlueprintRotation(0); }}
+                title="Reset Zoom (100%) and Rotation (0°)"
+                style={{ padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px', height: '32px' }}
+              >
+                <RotateCcw size={14} /> Reset
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setIsBlueprintFullScreen(true)}
+                title="Open Full Screen View"
+                style={{ padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 600, color: 'var(--primary-600, #4f46e5)', height: '32px' }}
+              >
+                <Maximize2 size={14} /> Full Screen
               </button>
             </div>
           </div>
-
-          {/* Blueprint Canvas Container */}
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {/* Blueprint Canvas Container - sized strictly to the image with no harsh background color */}
           <div style={{
             width: '100%',
-            height: '520px',
+            maxHeight: '68vh',
+            minHeight: '220px',
             overflow: 'auto',
-            background: '#0f172a',
-            borderRadius: '10px',
+            background: 'transparent',
+            borderRadius: '8px',
+            border: '1px solid var(--border-base, #e2e8f0)',
             position: 'relative',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            border: '2px solid #334155',
+            padding: '12px',
           }}>
             {getProjectMasterLayout() ? (
-              <img
-                src={getProjectMasterLayout()}
-                alt="Gated Community Master Layout Blueprint"
+              <div
                 style={{
-                  transform: `scale(${layoutZoom})`,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transform: `scale(${blueprintZoom}) rotate(${blueprintRotation}deg)`,
                   transformOrigin: 'center center',
                   transition: 'transform 0.2s ease',
-                  maxWidth: '100%',
-                  maxHeight: '100%',
-                  objectFit: 'contain',
-                  boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
                 }}
-              />
+              >
+                <img
+                  src={getProjectMasterLayout()}
+                  alt={`${currentProjectObj?.name || 'Project'} Master Layout Blueprint`}
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: '62vh',
+                    width: 'auto',
+                    height: 'auto',
+                    display: 'block',
+                    objectFit: 'contain',
+                    borderRadius: '4px',
+                  }}
+                />
+              </div>
             ) : (
-              <div style={{ textAlign: 'center', color: '#94a3b8', padding: '32px' }}>
-                <Map size={48} style={{ margin: '0 auto 12px auto', opacity: 0.5 }} />
-                <p style={{ fontSize: '1rem', color: '#cbd5e1', margin: '0 0 8px 0' }}>
-                  No Master Layout Blueprint uploaded for {currentProjectObj?.name || 'this project'}.
+              <div style={{ textAlign: 'center', color: 'var(--text-muted, #94a3b8)', padding: '32px' }}>
+                <ImageIcon size={48} style={{ margin: '0 auto 12px auto', opacity: 0.5 }} />
+                <p style={{ fontSize: '1rem', color: 'var(--text-primary, #1e293b)', margin: '0 0 8px 0', fontWeight: 600 }}>
+                  No Master Layout Blueprint uploaded for this project.
                 </p>
-                <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary, #64748b)', margin: 0 }}>
                   Upload a community layout map or CAD blueprint when creating or editing the project in the Projects page.
                 </p>
               </div>
@@ -1587,6 +1706,144 @@ export const PlotsPage: React.FC = () => {
           </div>
         </div>
       </Modal>
+
+      {/* Fullscreen Overlay Viewer */}
+      {isMasterLayoutModalOpen && isBlueprintFullScreen && getProjectMasterLayout() && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 99999,
+            backgroundColor: '#0b0f19',
+            display: 'flex',
+            flexDirection: 'column',
+            width: '100vw',
+            height: '100vh',
+          }}
+        >
+          {/* Fullscreen Top Bar */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '12px 24px',
+              background: 'rgba(15, 23, 42, 0.95)',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+              color: '#ffffff',
+              flexWrap: 'wrap',
+              gap: '12px',
+            }}
+          >
+            <div>
+              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 600, color: '#f8fafc' }}>
+                {currentProjectObj?.name || 'Project'} — Master Layout Blueprint
+              </h3>
+              <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
+                {currentProjectObj?.location || ''} • Zoom: {Math.round(blueprintZoom * 100)}% {blueprintRotation > 0 ? `• ${blueprintRotation}°` : ''} • Press ESC to exit
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setBlueprintZoom(prev => Math.max(0.25, parseFloat((prev - 0.25).toFixed(2))))}
+                disabled={blueprintZoom <= 0.25}
+                title="Zoom Out (-25%)"
+                style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)' }}
+              >
+                <ZoomOut size={16} />
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setBlueprintZoom(prev => Math.min(4.0, parseFloat((prev + 0.25).toFixed(2))))}
+                disabled={blueprintZoom >= 4.0}
+                title="Zoom In (+25%)"
+                style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)' }}
+              >
+                <ZoomIn size={16} />
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setBlueprintRotation(prev => (prev + 90) % 360)}
+                title="Rotate 90° Clockwise"
+                style={{ padding: '6px 14px', background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                <RotateCw size={16} /> Rotate 90°
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => { setBlueprintZoom(1); setBlueprintRotation(0); }}
+                title="Reset (100% Zoom & 0°)"
+                style={{ padding: '6px 14px', background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                <RotateCcw size={16} /> Reset
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => setIsBlueprintFullScreen(false)}
+                title="Exit Full Screen"
+                style={{ padding: '6px 16px', display: 'inline-flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}
+              >
+                <Minimize2 size={16} /> Exit Full Screen
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsBlueprintFullScreen(false);
+                  setIsMasterLayoutModalOpen(false);
+                }}
+                style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center' }}
+                title="Close Viewer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+          </div>
+
+          {/* Fullscreen Body - clean display centered to the image */}
+          <div
+            style={{
+              flex: 1,
+              overflow: 'auto',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '24px',
+            }}
+          >
+            <div
+              style={{
+                transform: `scale(${blueprintZoom}) rotate(${blueprintRotation}deg)`,
+                transformOrigin: 'center center',
+                transition: 'transform 0.2s ease',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <img
+                src={getProjectMasterLayout()}
+                alt={`${currentProjectObj?.name || 'Project'} Blueprint`}
+                style={{
+                  maxWidth: '92vw',
+                  maxHeight: '85vh',
+                  width: 'auto',
+                  height: 'auto',
+                  objectFit: 'contain',
+                  borderRadius: '6px',
+                  display: 'block',
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

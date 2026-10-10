@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { MessageSquare, Phone, Video, ArrowLeft } from 'lucide-react';
 import { adminUserService } from '../../services/adminUserService';
 import { ChatConversation, ChatMember, User } from '../../types';
@@ -28,7 +28,7 @@ export const ChatPage: React.FC<{ onNavigate?: (route: string) => void }> = ({ o
   const [showNewModal, setShowNewModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [activeMeeting, setActiveMeeting] = useState<ActiveMeetingState | null>(null);
-  const [directory, setDirectory] = useState<ChatMember[]>([]);
+  const [liveUsers, setLiveUsers] = useState<User[]>([]);
   const [isMobileThreadOpen, setIsMobileThreadOpen] = useState(false);
 
   // Derive companyId: prefer numeric/slug id from user, fall back to tenant id
@@ -38,9 +38,10 @@ export const ChatPage: React.FC<{ onNavigate?: (route: string) => void }> = ({ o
   const currentPresenceStatus: 'online' | 'busy' | 'offline' =
     availability === 'Available' ? 'online' : availability === 'Busy' ? 'busy' : 'offline';
 
-  // Build "me" as a ChatMember
-  const me: ChatMember | null = user
-    ? {
+  // Build "me" as a memoized ChatMember
+  const me: ChatMember | null = useMemo(() => {
+    if (!user) return null;
+    return {
       id: String(user.id),
       name: user.name,
       email: user.email,
@@ -48,8 +49,8 @@ export const ChatPage: React.FC<{ onNavigate?: (route: string) => void }> = ({ o
       roleName: user.role?.name || 'Sales Executive',
       companyId: String(companyId),
       status: currentPresenceStatus,
-    }
-    : null;
+    };
+  }, [user?.id, user?.name, user?.email, user?.role?.code, user?.role?.name, companyId, currentPresenceStatus]);
 
   // Sync presence to chatStorage whenever TopBar availability changes
   useEffect(() => {
@@ -58,20 +59,30 @@ export const ChatPage: React.FC<{ onNavigate?: (route: string) => void }> = ({ o
     }
   }, [user?.id, currentPresenceStatus]);
 
-  const loadData = useCallback(async () => {
-    if (!companyId) return;
-
-    // 1. Fetch live company team members from backend API
-    let liveUsers: User[] = [];
-    try {
-      liveUsers = await adminUserService.getUsers(companyId);
-    } catch (e) {
-      console.error('Failed to load team members for chat', e);
+  // Fetch live company team members from backend API only when companyId changes
+  useEffect(() => {
+    let cancelled = false;
+    if (!companyId) {
+      setLiveUsers([]);
+      return;
     }
 
-    // 2. Build live directory from backend users
+    adminUserService.getUsers(companyId)
+      .then(users => {
+        if (!cancelled) setLiveUsers(users || []);
+      })
+      .catch(e => {
+        console.error('Failed to load team members for chat', e);
+        if (!cancelled) setLiveUsers([]);
+      });
+
+    return () => { cancelled = true; };
+  }, [companyId]);
+
+  // Derive live directory from liveUsers and presence
+  const directory: ChatMember[] = useMemo(() => {
     const presenceMap = cs.getPresence();
-    const dir: ChatMember[] = (liveUsers || []).map(u => {
+    return (liveUsers || []).map(u => {
       const uId = String(u.id);
       const isMe = String(user?.id) === uId;
       const isOnline = isMe
@@ -88,49 +99,54 @@ export const ChatPage: React.FC<{ onNavigate?: (route: string) => void }> = ({ o
         status: isOnline ? 'online' : 'offline',
       };
     });
-    setDirectory(dir);
+  }, [liveUsers, user?.id, currentPresenceStatus, companyId]);
 
-    // 3. Load conversations or initialize team channel
+  const loadData = useCallback(() => {
+    if (!companyId) return;
+
+    // Load conversations or initialize team channel
     let convs = cs.getConversations(companyId);
 
     // Update members in existing conversations with live directory and presence
-    convs = convs.map(c => {
-      const updatedMembers = c.members.map(m => {
-        const found = dir.find(d => String(d.id) === String(m.id)) || (String(m.id) === String(me?.id) ? me : null);
-        if (found) {
-          return {
-            ...m,
-            name: found.name,
-            email: found.email,
-            roleCode: found.roleCode,
-            roleName: found.roleName,
-            status: found.status,
-          };
-        }
-        return m;
+    if (directory.length > 0) {
+      convs = convs.map(c => {
+        const updatedMembers = c.members.map(m => {
+          const found = directory.find(d => String(d.id) === String(m.id)) || (String(m.id) === String(me?.id) ? me : null);
+          if (found) {
+            return {
+              ...m,
+              name: found.name,
+              email: found.email,
+              roleCode: found.roleCode,
+              roleName: found.roleName,
+              status: found.status,
+            };
+          }
+          return m;
+        });
+
+        // Deduplicate members
+        const uniqueMembers = Array.from(new Map(updatedMembers.map(m => [String(m.id), m])).values());
+        return {
+          ...c,
+          members: uniqueMembers,
+          memberIds: uniqueMembers.map(m => String(m.id)),
+        };
       });
+    }
 
-      // Deduplicate members
-      const uniqueMembers = Array.from(new Map(updatedMembers.map(m => [String(m.id), m])).values());
-      return {
-        ...c,
-        members: uniqueMembers,
-        memberIds: uniqueMembers.map(m => String(m.id)),
-      };
-    });
-
-    if (convs.length === 0 && dir.length > 0) {
+    if (convs.length === 0 && directory.length > 0) {
       const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2';
       const teamName = isJamin 
         ? 'Jamin Bazaar — Sales & Operations'
         : 'Team General Channel';
-      const allMembers = me ? [me, ...dir.filter(m => String(m.id) !== String(me.id))] : dir;
+      const allMembers = me ? [me, ...directory.filter(m => String(m.id) !== String(me.id))] : directory;
       const uniqueMembers = Array.from(new Map(allMembers.map(m => [String(m.id), m])).values());
       const generalConv = cs.createGroup(companyId, teamName, uniqueMembers);
       convs = [generalConv];
     }
     setConversations(convs);
-  }, [companyId, tenant?.slug, tenant?.id, me, user?.id, currentPresenceStatus]);
+  }, [companyId, directory, me, tenant?.slug, tenant?.id]);
 
   useEffect(() => {
     loadData();

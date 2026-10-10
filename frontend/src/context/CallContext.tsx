@@ -137,8 +137,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const effectiveType = recordType || (matchedCust ? 'customer' : 'lead');
     const effectiveId = recordId || (effectiveType === 'customer' ? matchedCust?.id : matchedLead?.id);
-    const effectiveName = (name && name !== 'Direct Outbound Call' && name !== 'Contact') 
-      ? name 
+    const effectiveName = (name && name !== 'Direct Outbound Call' && name !== 'Contact')
+      ? name
       : (effectiveType === 'customer' ? matchedCust?.name : matchedLead?.name) || name || 'Contact';
 
     const newCall: ActiveCall = {
@@ -395,7 +395,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ];
       const normalize = (p: string) => (p || '').replace(/\D/g, '').slice(-10);
       const callPhoneDigits = normalize(lastCallRecord.contactPhone);
-      
+
       let matchedLead = allLeads.find((l: Lead) => {
         const lCleanId = String(l.id || '').replace('db-', '').replace('lead-', '').replace('l-', '').trim();
         if (cleanLeadId && lCleanId === cleanLeadId) return true;
@@ -490,7 +490,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       else if (disposition === 'Follow-up Required') {
         const followupScheduledAt = scheduleFollowup?.scheduledAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         const followupPriority = scheduleFollowup?.priority || 'High';
-        const followupNotes = scheduleFollowup?.notes || (notes ? `Follow-up required: ${notes}` : `Follow-up required from call with ${lastCallRecord.contactName}`);
+        const followupNotes = scheduleFollowup?.notes || (notes ? `Follow-up required: ${notes}` : ` ${lastCallRecord.contactName}`);
         const isJaminTenant = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2';
         if (!lastCallRecord.sourceFollowupId) {
           const isCust = lastCallRecord.matchedRecord?.type === 'customer';

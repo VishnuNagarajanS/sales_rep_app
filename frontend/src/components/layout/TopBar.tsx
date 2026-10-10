@@ -19,7 +19,7 @@ import './TopBar.css';
 
 interface TopBarProps {
   onNavigate: (route: string, extraState?: any) => void;
-  onOpenQuickCreate: (type: 'lead' | 'followup' | 'deal' | 'visit' | 'consultation') => void;
+  onOpenQuickCreate: (type: 'lead' | 'customer' | 'booking' | 'followup' | 'deal' | 'visit' | 'consultation') => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate }) => {
@@ -27,7 +27,17 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
   const { theme, toggleTheme } = useTheme();
 
   const roleCode = user?.role?.code;
+  const isJamin = Boolean(
+    tenant?.slug?.toLowerCase() === 'jamin' ||
+    tenant?.id === 't-jamin-02' ||
+    tenant?.id === '2' ||
+    user?.companySlug?.toLowerCase() === 'jamin' ||
+    (user?.companyName && /jamin/i.test(user.companyName)) ||
+    user?.companyId === 2 ||
+    (user?.companyId as any) === '2'
+  );
   const isGhlAdmin =
+    !isJamin &&
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
 
@@ -378,7 +388,29 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
                     + New Lead
                   </button>
 
-                  {enabledFeatures.includes(FEATURES.SITE_VISITS) && (
+                  <button
+                    className="btn btn-ghost btn-sm topbar-menu-item-btn"
+                    onClick={() => {
+                      setIsNewMenuOpen(false);
+                      onOpenQuickCreate('customer');
+                    }}
+                  >
+                    + New Customer
+                  </button>
+
+                  {(isJamin || enabledFeatures.includes(FEATURES.BOOKINGS)) && (
+                    <button
+                      className="btn btn-ghost btn-sm topbar-menu-item-btn"
+                      onClick={() => {
+                        setIsNewMenuOpen(false);
+                        onOpenQuickCreate('booking');
+                      }}
+                    >
+                      + New Booking
+                    </button>
+                  )}
+
+                  {(isJamin || enabledFeatures.includes(FEATURES.SITE_VISITS)) && (
                     <button
                       className="btn btn-ghost btn-sm topbar-menu-item-btn"
                       onClick={() => {
@@ -389,7 +421,18 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
                       + Schedule Site Visit
                     </button>
                   )}
-                  {enabledFeatures.includes(FEATURES.CONSULTATIONS) && (
+
+                  <button
+                    className="btn btn-ghost btn-sm topbar-menu-item-btn"
+                    onClick={() => {
+                      setIsNewMenuOpen(false);
+                      onOpenQuickCreate('followup');
+                    }}
+                  >
+                    + Schedule Follow-up
+                  </button>
+
+                  {!isJamin && enabledFeatures.includes(FEATURES.CONSULTATIONS) && (
                     <button
                       className="btn btn-ghost btn-sm topbar-menu-item-btn"
                       onClick={() => {
@@ -398,6 +441,18 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
                       }}
                     >
                       + Schedule Consultation
+                    </button>
+                  )}
+
+                  {!isJamin && enabledFeatures.includes(FEATURES.DEALS) && (
+                    <button
+                      className="btn btn-ghost btn-sm topbar-menu-item-btn"
+                      onClick={() => {
+                        setIsNewMenuOpen(false);
+                        onOpenQuickCreate('deal');
+                      }}
+                    >
+                      + New Deal
                     </button>
                   )}
                 </div>

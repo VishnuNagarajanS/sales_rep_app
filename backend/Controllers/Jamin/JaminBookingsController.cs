@@ -511,11 +511,18 @@ public class JaminBookingsController : JaminTenantControllerBase
                 plot.HeldByCustomerName = null;
                 plot.HeldByCustomerPhone = null;
                 plot.HoldByAgent = null;
+                plot.HoldExpiresAt = null;
+                booking.CancelledAt = DateTime.UtcNow;
             }
             plot.UpdatedAt = DateTime.UtcNow;
 
             var project = await _db.JaminProjects.FirstOrDefaultAsync(p => p.Id == plot.ProjectId && p.CompanyId == booking.CompanyId, ct);
             if (project != null) await RecalculateInventoryAsync(project, ct);
+        }
+
+        if (normalizedStatus == "Cancelled" && booking.CustomerId.HasValue)
+        {
+            await RecalculateCustomerTotalValueAsync(booking.CustomerId.Value, booking.CompanyId, ct);
         }
 
         await _db.SaveChangesAsync(ct);

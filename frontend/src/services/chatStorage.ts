@@ -176,7 +176,7 @@ export function markRead(conversationId: string, companyId: string): void {
     if (!raw) return;
     const all: ChatConversation[] = JSON.parse(raw);
     const idx = all.findIndex(c => c.id === conversationId && c.companyId === companyId);
-    if (idx >= 0) {
+    if (idx >= 0 && (all[idx].unreadCount || 0) > 0) {
       all[idx].unreadCount = 0;
       localStorage.setItem(getConvsKey(), JSON.stringify(all));
       emit();

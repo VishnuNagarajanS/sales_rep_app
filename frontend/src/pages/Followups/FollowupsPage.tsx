@@ -235,7 +235,7 @@ export const FollowupsPage: React.FC = () => {
         }
       });
     }
-  }, [tenant?.slug, tenant?.id, user]);
+  }, [tenant?.slug, tenant?.id, user?.id, user?.name, user?.email, user?.role?.code]);
 
   const assignableAgentOptions = assignableAgents;
 
@@ -355,7 +355,9 @@ export const FollowupsPage: React.FC = () => {
       // Load the same normalized contacts used by the Leads and Customers pages.
       let directLeads: Lead[] = [];
       try {
-        directLeads = await getLeads(tenant?.id);
+        directLeads = isJamin
+          ? await jaminApiService.getLeads(true)
+          : await getLeads(tenant?.id);
       } catch (err) {
         console.warn('Failed to load leads from API:', err);
       }
@@ -383,7 +385,9 @@ export const FollowupsPage: React.FC = () => {
       // Include converted leads because they are customer records in the CRM.
       let directCustomers: Customer[] = [];
       try {
-        directCustomers = await getCustomers(tenant?.id);
+        directCustomers = isJamin
+          ? await jaminApiService.getCustomers()
+          : await getCustomers(tenant?.id);
       } catch (err) {
         console.warn('Failed to load customers from DB API:', err);
       }
@@ -439,9 +443,18 @@ export const FollowupsPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
+    let timer: any = null;
+    const handleUpdate = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        loadData();
+      }, 350);
+    };
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
+    };
   }, [tenant?.id]);
 
   // Sync IRM preference state when drawer opens for a contact
@@ -1066,7 +1079,8 @@ export const FollowupsPage: React.FC = () => {
     if (activeTab === 'overdue') {
       return isFollowupOverdue(f);
     }
-    return f.status === 'Pending' || f.status === 'Rescheduled';
+    // 'all' tab — show every task regardless of status
+    return true;
   });
 
   const drawerFollowupRole = drawerFollowup ? getFollowupRole(drawerFollowup) : '';
@@ -1211,7 +1225,7 @@ export const FollowupsPage: React.FC = () => {
       {/* Tabs */}
       <div className="followups-tabs-container">
         {[
-          { id: 'all', label: `All Tasks (${activePendingFollowups.length})` },
+          { id: 'all', label: `All Tasks (${processedFollowups.length})` },
           {
             id: 'due',
             label: `Due Today (${dueTodayFollowups.length})`,

@@ -111,14 +111,14 @@ public class JaminSiteVisitService : IJaminSiteVisitService
         {
             var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == dto.LeadId.Value && l.CompanyId == JaminTenantId, ct);
             if (lead == null) return ApiResponse<JaminSiteVisitDto>.FailureResult("Active Jamin lead not found.");
-            if (IsSalesExecutive && lead.AssignedAgentId != _currentUser.UserId)
+            if (IsSalesExecutive && lead.AssignedAgentId.HasValue && lead.AssignedAgentId != _currentUser.UserId)
                 return ApiResponse<JaminSiteVisitDto>.FailureResult("You can schedule site visits only for leads assigned to you.");
         }
         if (dto.CustomerId.HasValue)
         {
             var customer = await _context.Customers.FirstOrDefaultAsync(c => c.Id == dto.CustomerId.Value && c.CompanyId == JaminTenantId, ct);
             if (customer == null) return ApiResponse<JaminSiteVisitDto>.FailureResult("Jamin customer not found.");
-            if (IsSalesExecutive && customer.AssignedAgentId != _currentUser.UserId)
+            if (IsSalesExecutive && customer.AssignedAgentId.HasValue && customer.AssignedAgentId != _currentUser.UserId)
                 return ApiResponse<JaminSiteVisitDto>.FailureResult("You can schedule site visits only for customers assigned to you.");
         }
         if (IsSalesExecutive && dto.AssignedAgentId.HasValue && dto.AssignedAgentId != _currentUser.UserId)
@@ -145,6 +145,10 @@ public class JaminSiteVisitService : IJaminSiteVisitService
             {
                 if (resolvedProjectId.HasValue && resolvedProjectId.Value != plot.ProjectId)
                     return ApiResponse<JaminSiteVisitDto>.FailureResult("Selected plot does not belong to the selected project.");
+
+                if (plot.Status is "Registered" or "Sold" or "Booked")
+                    return ApiResponse<JaminSiteVisitDto>.FailureResult($"Plot {plot.PlotNumber} has already been {plot.Status.ToLower()} and is not available for new site visits.");
+
                 resolvedProjectId ??= plot.ProjectId;
                 projectName = plot.Project?.Name ?? projectName;
                 plotNumber = plot.PlotNumber;
@@ -213,6 +217,23 @@ public class JaminSiteVisitService : IJaminSiteVisitService
             if (!siteVisit.LeadId.HasValue) siteVisit.LeadId = leadToUpdate.Id;
         }
 
+        await _context.SaveChangesAsync(ct);
+
+        _context.AuditLogs.Add(new AuditLog
+        {
+            CompanyId = JaminTenantId,
+            Timestamp = DateTime.UtcNow,
+            ActorName = !string.IsNullOrWhiteSpace(_currentUser.Name) ? _currentUser.Name : "System",
+            ActorEmail = !string.IsNullOrWhiteSpace(_currentUser.Email) ? _currentUser.Email : string.Empty,
+            Action = "CREATE",
+            EntityType = "SiteVisit",
+            EntityId = siteVisit.Id.ToString(),
+            LeadId = siteVisit.LeadId,
+            CustomerId = siteVisit.CustomerId,
+            Details = $"Scheduled site visit for {siteVisit.CustomerName} at {siteVisit.ProjectName}" + (string.IsNullOrWhiteSpace(siteVisit.PlotNumber) ? "" : $" (Plot {siteVisit.PlotNumber})"),
+            Module = "SiteVisits",
+            Status = "success"
+        });
         await _context.SaveChangesAsync(ct);
 
         return ApiResponse<JaminSiteVisitDto>.SuccessResult(MapToDto(siteVisit), "Site visit scheduled successfully.");
@@ -331,6 +352,10 @@ public class JaminSiteVisitService : IJaminSiteVisitService
                 p => p.Id == dto.PlotId.Value && p.CompanyId == JaminTenantId, ct);
             if (plot == null || (dto.ProjectId.HasValue && plot.ProjectId != dto.ProjectId.Value))
                 return ApiResponse<JaminSiteVisitDto>.FailureResult("Selected plot does not belong to the selected project.");
+
+            if (plot.Status is "Registered" or "Sold" or "Booked")
+                return ApiResponse<JaminSiteVisitDto>.FailureResult($"Plot {plot.PlotNumber} has already been {plot.Status.ToLower()} and is not available for site visits.");
+
             visit.ProjectId = dto.ProjectId ?? plot.ProjectId;
             visit.PlotId = plot.Id;
         }

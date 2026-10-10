@@ -11,7 +11,7 @@ import {
 interface SalesLayoutProps {
   currentRoute: string;
   onNavigate: (route: string, extraState?: any) => void;
-  onOpenQuickCreate: (type: 'lead' | 'followup' | 'deal' | 'visit' | 'consultation') => void;
+  onOpenQuickCreate: (type: 'lead' | 'customer' | 'booking' | 'followup' | 'deal' | 'visit' | 'consultation') => void;
   children: React.ReactNode;
 }
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from './context/AuthContext';
 import { AuthLayout } from './layouts/AuthLayout';
 import { SalesLayout } from './layouts/SalesLayout';
@@ -55,18 +55,21 @@ import { PlatformFeaturesPage } from './pages/Admin/Features/PlatformFeaturesPag
 import { PlatformCallConfigPage } from './pages/Admin/CallConfig/PlatformCallConfigPage';
 import { PlatformAuditPage } from './pages/Admin/Audit/PlatformAuditPage';
 
+import { AlertCircle, Calendar, Plus } from 'lucide-react';
 import { ProtectedRoute } from './components/common/Guards';
 import { Modal } from './components/common/Modal';
 import { storageService } from './services/storageService';
-import { Investor, Customer } from './types';
+import { jaminApiService } from './services/jaminApiService';
+import { toast } from './context/ToastContext';
+import { Investor, Customer, Lead, Booking, SiteVisit } from './types';
 import {
-  saveLead as apiSaveLead,
   saveFollowup as apiSaveFollowup,
   saveConsultation as apiSaveConsultation,
   saveDeal as apiSaveDeal,
   saveCustomer as apiSaveCustomer,
   getInvestors as apiGetInvestors,
   getCustomers as apiGetCustomers,
+  getLeads as apiGetLeads,
 } from './services/ghlApiService';
 import { PERMISSIONS } from './constants/permissions';
 import { FEATURES } from './constants/features';
@@ -112,7 +115,7 @@ const SIDEBAR_ROUTES = [
 ];
 
 export const App: React.FC = () => {
-  const { isAuthenticated, isSuperAdmin, tenant, user } = useAuth();
+  const { isAuthenticated, isSuperAdmin, tenant, user, enabledFeatures = [] } = useAuth();
 
   // Resolve initial route from browser URL path or sessionStorage
   const [currentRoute, setCurrentRoute] = useState<string>(() => {
@@ -132,8 +135,17 @@ export const App: React.FC = () => {
   });
 
   const roleCode = user?.role?.code;
-  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2' || user?.companySlug === 'jamin';
+  const isJamin = Boolean(
+    tenant?.slug?.toLowerCase() === 'jamin' ||
+    tenant?.id === 't-jamin-02' ||
+    tenant?.id === '2' ||
+    user?.companySlug?.toLowerCase() === 'jamin' ||
+    (user?.companyName && /jamin/i.test(user.companyName)) ||
+    user?.companyId === 2 ||
+    (user?.companyId as any) === '2'
+  );
   const isGhlAdmin =
+    !isJamin &&
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
 
@@ -188,19 +200,31 @@ export const App: React.FC = () => {
 
   // Quick Create Modal State
   const [quickCreateType, setQuickCreateType] = useState<
-    'lead' | 'followup' | 'deal' | 'visit' | 'consultation' | null
+    'lead' | 'customer' | 'booking' | 'visit' | 'followup' | 'deal' | 'consultation' | null
   >(null);
 
   const [quickName, setQuickName] = useState('');
-  const [quickPhone, setQuickPhone] = useState('+91 ');
+  const [quickPhone, setQuickPhone] = useState('');
   const [quickEmail, setQuickEmail] = useState('');
   const [quickLocation, setQuickLocation] = useState('');
-  const [quickSource, setQuickSource] = useState('Website Inbound');
-  const [quickAssetClass, setQuickAssetClass] = useState('AIF');
+  const [quickSource, setQuickSource] = useState('');
+  const [quickAssetClass, setQuickAssetClass] = useState('');
   const [quickInvestmentCapacity, setQuickInvestmentCapacity] = useState('');
-  const [quickBudgetRange, setQuickBudgetRange] = useState('₹45L – ₹65L');
-  const [quickPreferredLocation, setQuickPreferredLocation] = useState('Devanahalli North');
+  const [quickBudgetRange, setQuickBudgetRange] = useState('');
+  const [quickPreferredLocation, setQuickPreferredLocation] = useState('');
   const [quickNotes, setQuickNotes] = useState('');
+
+  // Project & Plot selection for Quick Site Visit & Quick Booking
+  const [quickProjectsList, setQuickProjectsList] = useState<any[]>([]);
+  const [quickPlotsList, setQuickPlotsList] = useState<any[]>([]);
+  const [quickProjectId, setQuickProjectId] = useState('');
+  const [quickPlotId, setQuickPlotId] = useState('');
+  const [isLoadingQuickPlots, setIsLoadingQuickPlots] = useState(false);
+  const [quickTokenAmount, setQuickTokenAmount] = useState<number | ''>('');
+  const [quickPaymentMode, setQuickPaymentMode] = useState('UPI');
+  const [quickTimeSlot, setQuickTimeSlot] = useState('11:00 AM');
+  const [quickSubmitting, setQuickSubmitting] = useState(false);
+  const [quickError, setQuickError] = useState('');
 
   // Consultation-specific state
   const [consInvestorId, setConsInvestorId] = useState('');
@@ -221,171 +245,616 @@ export const App: React.FC = () => {
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [newCustomerName, setNewCustomerName] = useState('');
 
-  const handleOpenQuickCreate = (type: 'lead' | 'followup' | 'deal' | 'visit' | 'consultation') => {
-    setQuickCreateType(type);
-    setQuickName('');
-    setQuickPhone('+91 ');
-    setQuickEmail('');
-    setQuickLocation('');
-    setQuickSource('Website Inbound');
-    setQuickAssetClass('AIF');
-    setQuickInvestmentCapacity('₹1 Cr – ₹5 Cr');
-    setQuickBudgetRange('₹45L – ₹65L');
-    setQuickPreferredLocation('Devanahalli North');
+  // Contact linkage for Booking, Site Visit & Follow-up
+  const [quickContactSource, setQuickContactSource] = useState<'new' | 'lead' | 'customer'>('new');
+  const [selectedLeadId, setSelectedLeadId] = useState('');
+
+  // Live API contacts for dropdown selection
+  const [liveCustomers, setLiveCustomers] = useState<Customer[]>([]);
+  const [liveLeads, setLiveLeads] = useState<Lead[]>([]);
+  const [isLoadingLiveContacts, setIsLoadingLiveContacts] = useState(false);
+
+  const fetchLiveContacts = useCallback(async () => {
+    setIsLoadingLiveContacts(true);
+    const tenantId = user?.companyId ? String(user.companyId) : (tenant?.id || 't-jamin-02');
+    try {
+      const [leadsRes, custsRes, projsRes] = await Promise.all([
+        isJamin
+          ? jaminApiService.getLeads(true)
+          : apiGetLeads(tenantId).catch(() => storageService.getLeads(tenantId)),
+        isJamin
+          ? jaminApiService.getCustomers()
+          : apiGetCustomers(tenantId).catch(() => storageService.getCustomers(tenantId)),
+        isJamin
+          ? jaminApiService.getProjects()
+          : Promise.resolve([]),
+      ]);
+
+      const validLeads = Array.isArray(leadsRes) && leadsRes.length > 0
+        ? leadsRes
+        : storageService.getLeads(tenantId);
+      setLiveLeads(validLeads);
+
+      const validCusts = Array.isArray(custsRes) && custsRes.length > 0
+        ? custsRes
+        : storageService.getCustomers(tenantId);
+      setLiveCustomers(validCusts);
+
+      if (Array.isArray(projsRes) && projsRes.length > 0) {
+        setQuickProjectsList(projsRes);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch live contacts from API:', err);
+      setLiveLeads(storageService.getLeads(tenantId));
+      setLiveCustomers(storageService.getCustomers(tenantId));
+    } finally {
+      setIsLoadingLiveContacts(false);
+    }
+  }, [user?.companyId, tenant?.id, isJamin]);
+
+  useEffect(() => {
+    fetchLiveContacts();
+    let debounceTimer: any = null;
+    const debouncedHandler = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        fetchLiveContacts();
+      }, 350);
+    };
+    window.addEventListener('nexus_storage_updated', debouncedHandler);
+    return () => {
+      clearTimeout(debounceTimer);
+      window.removeEventListener('nexus_storage_updated', debouncedHandler);
+    };
+  }, [fetchLiveContacts]);
+
+  const availableCustomers = useMemo(() => {
+    const apiList = liveCustomers && liveCustomers.length > 0 ? liveCustomers : storageService.getCustomers(tenant?.id);
+    // In real estate, converted leads are also full customer profiles
+    const convertedFromLeads = (liveLeads || []).filter(l => (l.status || '').toLowerCase() === 'converted');
+    const existingPhones = new Set(apiList.map(c => (c.phone || '').replace(/\D/g, '').slice(-10)));
+    const existingIds = new Set(apiList.map(c => String(c.id)));
+    const merged = [...apiList];
+    for (const cl of convertedFromLeads) {
+      const phoneKey = (cl.phone || '').replace(/\D/g, '').slice(-10);
+      if ((phoneKey && existingPhones.has(phoneKey)) || existingIds.has(String(cl.id))) continue;
+      if (phoneKey) existingPhones.add(phoneKey);
+      existingIds.add(String(cl.id));
+      merged.push({
+        id: String(cl.id),
+        companyId: cl.companyId,
+        name: cl.name,
+        phone: cl.phone,
+        email: cl.email || '',
+        status: 'Active',
+        assignedAgentId: cl.assignedAgentId,
+        assignedAgentName: cl.assignedAgentName,
+        location: cl.location || '',
+        lastContacted: cl.createdAt || '',
+        openDealsCount: 0,
+        totalValue: 0,
+        createdAt: cl.createdAt,
+        notes: cl.notes,
+        customFields: cl.customFields,
+      });
+    }
+    return merged;
+  }, [liveCustomers, liveLeads, tenant?.id]);
+
+  const availableLeads = useMemo(() => {
+    const list = liveLeads && liveLeads.length > 0 ? liveLeads : storageService.getLeads(tenant?.id);
+    return list.filter(l => (l.status || '').toLowerCase() !== 'converted');
+  }, [liveLeads, tenant?.id]);
+
+  const quickEligiblePlots = useMemo(() => {
+    if (!quickProjectId || !Array.isArray(quickPlotsList)) return [];
+    return quickPlotsList.filter(p => {
+      if (String(p.projectId) !== String(quickProjectId)) return false;
+      const status = (p.status || '').trim().toLowerCase();
+      return status === 'available';
+    });
+  }, [quickProjectId, quickPlotsList]);
+
+  const handleQuickProjectChange = async (projId: string) => {
+    setQuickProjectId(projId);
+    setQuickPlotId('');
+    if (projId) {
+      setIsLoadingQuickPlots(true);
+      try {
+        const plots = await jaminApiService.getPlots(projId);
+        setQuickPlotsList(plots || []);
+      } catch (err) {
+        console.error(`Failed to load plots for project ${projId}:`, err);
+        setQuickPlotsList([]);
+      } finally {
+        setIsLoadingQuickPlots(false);
+      }
+    } else {
+      setQuickPlotsList([]);
+    }
+  };
+
+  const handleSwitchQuickTab = async (
+    type: 'lead' | 'customer' | 'booking' | 'visit' | 'followup' | 'deal' | 'consultation'
+  ) => {
+    const resolvedType = isJamin && (type === 'deal' || type === 'consultation') ? 'lead' : type;
+    setQuickCreateType(resolvedType);
+    setQuickError('');
+    fetchLiveContacts();
+
+    if (resolvedType === 'booking') {
+      const src = availableCustomers.length > 0 ? 'customer' : (availableLeads.length > 0 ? 'lead' : 'new');
+      setQuickContactSource(src);
+      if (src === 'customer' && availableCustomers[0]) {
+        setSelectedCustomerId(availableCustomers[0].id);
+        setSelectedLeadId('');
+        setQuickName(availableCustomers[0].name);
+        setQuickPhone(availableCustomers[0].phone);
+        setQuickEmail(availableCustomers[0].email || '');
+      } else if (src === 'lead' && availableLeads[0]) {
+        setSelectedLeadId(availableLeads[0].id);
+        setSelectedCustomerId('');
+        setQuickName(availableLeads[0].name);
+        setQuickPhone(availableLeads[0].phone);
+        setQuickEmail(availableLeads[0].email || '');
+      }
+    } else if (resolvedType === 'visit' || resolvedType === 'followup') {
+      const src = availableLeads.length > 0 ? 'lead' : (availableCustomers.length > 0 ? 'customer' : 'new');
+      setQuickContactSource(src);
+      if (src === 'lead' && availableLeads[0]) {
+        setSelectedLeadId(availableLeads[0].id);
+        setSelectedCustomerId('');
+        setQuickName(availableLeads[0].name);
+        setQuickPhone(availableLeads[0].phone);
+        setQuickEmail(availableLeads[0].email || '');
+      } else if (src === 'customer' && availableCustomers[0]) {
+        setSelectedCustomerId(availableCustomers[0].id);
+        setSelectedLeadId('');
+        setQuickName(availableCustomers[0].name);
+        setQuickPhone(availableCustomers[0].phone);
+        setQuickEmail(availableCustomers[0].email || '');
+      }
+    }
+
+    if (quickProjectsList.length === 0) {
+      try {
+        const projs = await jaminApiService.getProjects();
+        setQuickProjectsList(projs || []);
+        if (projs && projs.length > 0 && (resolvedType === 'visit' || resolvedType === 'booking') && !quickProjectId) {
+          const firstProjId = String(projs[0].id);
+          setQuickProjectId(firstProjId);
+          setIsLoadingQuickPlots(true);
+          const plots = await jaminApiService.getPlots(firstProjId);
+          setQuickPlotsList(plots || []);
+          setIsLoadingQuickPlots(false);
+        }
+      } catch (err) {
+        console.error('Failed to load projects/plots for quick modal', err);
+      }
+    }
+  };
+
+  const handleOpenQuickCreate = async (
+    type: 'lead' | 'customer' | 'booking' | 'visit' | 'followup' | 'deal' | 'consultation'
+  ) => {
+    const resolvedType = isJamin && (type === 'deal' || type === 'consultation') ? 'lead' : type;
+    setQuickCreateType(resolvedType);
+    setQuickError('');
+    setQuickSubmitting(false);
+    fetchLiveContacts();
+
+    // Default contact source appropriately for each type:
+    // For bookings: prefer existing customer if available, else existing lead
+    // For site visits: prefer existing lead if available, else existing customer
+    // For followups: prefer existing lead if available, else existing customer
+    let defaultSource: 'new' | 'lead' | 'customer' = 'new';
+    if (resolvedType === 'booking') {
+      defaultSource = availableCustomers.length > 0 ? 'customer' : (availableLeads.length > 0 ? 'lead' : 'new');
+    } else if (resolvedType === 'visit' || resolvedType === 'followup') {
+      defaultSource = availableLeads.length > 0 ? 'lead' : (availableCustomers.length > 0 ? 'customer' : 'new');
+    }
+    setQuickContactSource(defaultSource);
+
+    if (defaultSource === 'customer' && availableCustomers.length > 0) {
+      const firstCust = availableCustomers[0];
+      setSelectedCustomerId(firstCust.id);
+      setSelectedLeadId('');
+      setQuickName(firstCust.name);
+      setQuickPhone(firstCust.phone);
+      setQuickEmail(firstCust.email || '');
+      setQuickLocation(firstCust.location || '');
+    } else if (defaultSource === 'lead' && availableLeads.length > 0) {
+      const firstLead = availableLeads[0];
+      setSelectedLeadId(firstLead.id);
+      setSelectedCustomerId('');
+      setQuickName(firstLead.name);
+      setQuickPhone(firstLead.phone);
+      setQuickEmail(firstLead.email || '');
+      setQuickLocation(firstLead.location || '');
+    } else {
+      setSelectedLeadId('');
+      setSelectedCustomerId('');
+      setQuickName('');
+      setQuickPhone('');
+      setQuickEmail('');
+      setQuickLocation('');
+    }
+
+    setQuickSource('');
+    setQuickAssetClass('');
+    setQuickInvestmentCapacity('');
+    setQuickBudgetRange('');
+    setQuickPreferredLocation('');
     setQuickNotes('');
+    setQuickProjectId('');
+    setQuickPlotId('');
+    setQuickTokenAmount('');
+    setQuickPaymentMode('UPI');
+    setQuickTimeSlot('11:00 AM');
     setConsInvestorId('');
     setConsInvestorName('');
     setConsInvestorPhone('');
-    setConsSlot('This Friday, 03:00 PM');
-    setConsConsultantName(user?.name ?? 'Advisor');
+    setConsSlot('');
+    setConsConsultantName(user?.name || '');
     setConsStatus('Scheduled');
-    setConsAgenda('Commercial REIT yield analysis & pass-through taxation discussion.');
+    setConsAgenda('');
     setConsOutcome('');
     setScheduledDate(new Date(Date.now() + 86400000).toISOString().split('T')[0]);
-    setScheduledTime(storageService.getCallPreferences().defaultFollowupTime);
-    // Reset deal-specific state; pre-select first available customer
+    setScheduledTime(storageService.getCallPreferences().defaultFollowupTime || '11:00');
     setDealCustomerMode('existing');
     setNewCustomerName('');
-    const existingCustomers = storageService.getCustomers(tenant?.id);
-    setSelectedCustomerId(existingCustomers[0]?.id || '');
+
+    try {
+      const projs = await jaminApiService.getProjects();
+      setQuickProjectsList(projs || []);
+      if (projs && projs.length > 0) {
+        const firstProjId = String(projs[0].id);
+        if (resolvedType === 'visit' || resolvedType === 'booking') {
+          setQuickProjectId(firstProjId);
+          setIsLoadingQuickPlots(true);
+          const plots = await jaminApiService.getPlots(firstProjId);
+          setQuickPlotsList(plots || []);
+          setIsLoadingQuickPlots(false);
+        }
+      } else {
+        setQuickPlotsList([]);
+      }
+    } catch (err) {
+      console.error('Failed to load projects/plots for quick modal', err);
+      setQuickProjectsList([]);
+      setQuickPlotsList([]);
+    }
   };
 
-  const handleSaveQuickCreate = (e: React.FormEvent) => {
+  const handleSaveQuickCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!quickName) return;
+    setQuickError('');
 
-    if (quickCreateType === 'lead') {
-      storageService.saveLead({
-        id: `lead-${Date.now()}`,
-        companyId: tenant?.id || (tenant?.slug === 'jamin' ? 't-jamin-02' : 't-ghl-01'),
-        name: quickName,
-        phone: quickPhone,
-        email: quickEmail,
-        location: quickLocation || (tenant?.slug === 'jamin' ? 'Bengaluru, Devanahalli' : 'Bengaluru'),
-        source: quickSource,
-        status: 'New',
-        priority: 'Medium',
-        assignedAgentId: user?.id || '1',
-        assignedAgentName: user?.name || 'Agent',
-        createdAt: new Date().toISOString().split('T')[0],
-        notes: quickNotes,
-        customFields: tenant?.slug === 'jamin'
-          ? {
-            budgetRange: quickBudgetRange,
-            preferredLocation: quickPreferredLocation,
-          }
-          : {
-            assetClass: quickAssetClass,
-            preferredAssetClass: quickAssetClass,
-            investmentCapacity: quickInvestmentCapacity,
-          },
-      });
+    const currentCompanyId = tenant?.id || '';
+    const currentAgentId = user?.id ? String(user.id) : '';
+    const currentAgentName = user?.name || '';
 
-    } else if (quickCreateType === 'followup') {
-      const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
-      storageService.saveFollowup({
-        id: `flw-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
-        contactId: `contact-${Date.now()}`,
-        contactName: quickName,
-        contactPhone: quickPhone,
-        contactType: 'lead',
-        scheduledAt: combinedDateTime,
-        scheduledDate,
-        scheduledTime,
-        priority: 'High',
-        status: 'Pending',
-        notes: quickNotes,
-        assignedAgentId: user?.id || 'usr-exec',
-        assignedAgentName: user?.name || 'Agent',
-      });
-
-    } else if (quickCreateType === 'consultation') {
-      // Task 1 — Schedule Consultation
-      storageService.saveConsultation({
-        id: `cons-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
-        investorId: consInvestorId || `investor-${Date.now()}`,
-        investorName: consInvestorName,
-        investorPhone: consInvestorPhone,
-        scheduledAt: consSlot.trim(),
-        consultantId: user?.id || 'usr-exec',
-        consultantName: consConsultantName.trim() || user?.name || 'Agent',
-        status: consStatus,
-        agenda: consAgenda.trim(),
-        outcomeNotes: consOutcome.trim() || undefined,
-      });
-
-    } else if (quickCreateType === 'visit') {
-      // Task 2 — Schedule Site Visit
-      const combinedDateTime = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
-      storageService.saveSiteVisit({
-        id: `visit-${Date.now()}`,
-        companyId: tenant?.id || 't-jamin-02',
-        customerId: `cust-${Date.now()}`,
-        customerName: quickName,
-        customerPhone: quickPhone,
-        projectId: 'proj-01',
-        projectName: 'Greenfield Meadows Phase 2',
-        scheduledAt: combinedDateTime,
-        assignedAgentId: user?.id || 'usr-exec',
-        assignedAgentName: user?.name || 'Agent',
-        status: 'Scheduled',
-        outcomeNotes: quickNotes,
-      });
-
-    } else if (quickCreateType === 'deal') {
-      // Task 4 — Deal linked to real customer
-      let resolvedCustomerId: string;
-      let resolvedCustomerName: string;
-
-      if (dealCustomerMode === 'existing' && selectedCustomerId) {
-        // Link to the chosen existing customer
-        const existing = storageService.getCustomers(tenant?.id)
-          .find(c => c.id === selectedCustomerId);
-        resolvedCustomerId = existing?.id || selectedCustomerId;
-        resolvedCustomerName = existing?.name || 'Customer';
-      } else {
-        // Create a real Customer record first so it shows in Customer 360
-        if (!newCustomerName) return;
-        resolvedCustomerId = `cust-${Date.now()}`;
-        resolvedCustomerName = newCustomerName;
-        storageService.saveCustomer({
-          id: resolvedCustomerId,
-          companyId: tenant?.id || 't-ghl-01',
-          name: resolvedCustomerName,
-          phone: quickPhone,
-          email: '',
-          status: 'Active',
-          assignedAgentId: user?.id || 'usr-exec',
-          assignedAgentName: user?.name || 'Agent',
-          location: 'Bengaluru',
-          lastContacted: new Date().toISOString().split('T')[0],
-          openDealsCount: 1,
-          totalValue: 5000000,
-          createdAt: new Date().toISOString().split('T')[0],
-          notes: '',
-          customFields: {},
-        });
+    // Validation
+    if (quickCreateType !== 'consultation') {
+      if (!quickName.trim()) {
+        setQuickError('Name is required.');
+        return;
       }
-
-      storageService.saveDeal({
-        id: `deal-${Date.now()}`,
-        companyId: tenant?.id || 't-ghl-01',
-        title: quickName,
-        customerId: resolvedCustomerId,
-        customerName: resolvedCustomerName,
-        stage: 'new',
-        value: 5000000,
-        expectedCloseDate: '30 Days',
-        assignedAgentId: user?.id || 'usr-exec',
-        assignedAgentName: user?.name || 'Agent',
-        notes: quickNotes,
-        createdAt: new Date().toISOString().split('T')[0],
-      });
+      if (!quickPhone.trim()) {
+        setQuickError('Phone number is required.');
+        return;
+      }
     }
 
-    setQuickCreateType(null);
+    setQuickSubmitting(true);
+
+    try {
+      if (quickCreateType === 'lead') {
+        let createdLead: Lead | null = null;
+        const selProj = quickProjectsList.find(p => p.name === quickPreferredLocation || String(p.id) === String(quickProjectId));
+        const resolvedTargetDev = selProj?.name || quickPreferredLocation.trim();
+        const resolvedLocation = quickLocation.trim() || selProj?.location || '';
+
+        // Only auto-assign if the creator is actually a sales executive!
+        // Company Admins, Managers, and Super Admins create UNASSIGNED leads so they can assign them to sales executives.
+        const isSalesExec = user?.role?.code === 'sales_executive';
+        const assignedId = isSalesExec && user?.id ? Number(user.id) : undefined;
+        const assignedName = isSalesExec && user?.name ? user.name : 'Unassigned';
+
+        if (isJamin) {
+          try {
+            createdLead = await jaminApiService.createLead({
+              name: quickName.trim(),
+              phone: quickPhone.trim(),
+              email: quickEmail.trim() || undefined,
+              location: resolvedLocation || undefined,
+              targetDevelopment: resolvedTargetDev || undefined,
+              source: quickSource.trim() || undefined,
+              priority: 'Medium',
+              budgetRange: quickBudgetRange.trim() || undefined,
+              notes: quickNotes.trim() || undefined,
+              assignedAgentId: assignedId,
+            });
+          } catch (apiErr: any) {
+            console.warn('Backend create lead note:', apiErr);
+          }
+        }
+
+        const finalLead: Lead = createdLead || {
+          id: `lead-${Date.now()}`,
+          companyId: currentCompanyId,
+          name: quickName.trim(),
+          phone: quickPhone.trim(),
+          email: quickEmail.trim(),
+          location: resolvedLocation,
+          source: quickSource.trim(),
+          status: 'New',
+          priority: 'Medium',
+          assignedAgentId: assignedId ? String(assignedId) : '',
+          assignedAgentName: assignedName,
+          createdAt: new Date().toISOString().split('T')[0],
+          notes: quickNotes.trim(),
+          targetDevelopment: resolvedTargetDev,
+          customFields: tenant?.slug === 'jamin'
+            ? {
+              budgetRange: quickBudgetRange.trim(),
+              preferredLocation: resolvedTargetDev,
+              targetDevelopment: resolvedTargetDev,
+            }
+            : {
+              assetClass: quickAssetClass.trim(),
+              preferredAssetClass: quickAssetClass.trim(),
+              investmentCapacity: quickInvestmentCapacity.trim(),
+            },
+        };
+        storageService.saveLead(finalLead);
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+
+      } else if (quickCreateType === 'customer') {
+        const newCust: Customer = {
+          id: `cust-${Date.now()}`,
+          companyId: currentCompanyId,
+          name: quickName.trim(),
+          phone: quickPhone.trim(),
+          email: quickEmail.trim(),
+          location: quickLocation.trim(),
+          status: 'Active',
+          assignedAgentId: currentAgentId,
+          assignedAgentName: currentAgentName,
+          lastContacted: new Date().toISOString().split('T')[0],
+          openDealsCount: 0,
+          totalValue: 0,
+          createdAt: new Date().toISOString().split('T')[0],
+          notes: quickNotes.trim(),
+          customFields: {},
+        };
+        try {
+          const saved = await apiSaveCustomer(newCust);
+          storageService.saveCustomer(saved || newCust);
+        } catch (apiErr: any) {
+          console.warn('Backend customer sync note:', apiErr);
+          storageService.saveCustomer(newCust);
+        }
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+
+      } else if (quickCreateType === 'booking') {
+        if (!quickProjectId) {
+          setQuickError('Please select a project for the booking.');
+          setQuickSubmitting(false);
+          return;
+        }
+
+        if (!quickPlotId) {
+          setQuickError('Please select an available plot for the booking.');
+          setQuickSubmitting(false);
+          return;
+        }
+
+        const selProj = quickProjectsList.find(p => String(p.id) === String(quickProjectId));
+        const selPlot = quickPlotId ? quickPlotsList.find(p => String(p.id) === String(quickPlotId)) : null;
+
+        const tokenAmt = typeof quickTokenAmount === 'number' ? quickTokenAmount : 0;
+        const totalAmount = selPlot?.price || 0;
+
+        if (isJamin) {
+          const res = await jaminApiService.createBooking({
+            customerName: quickName.trim(),
+            customerPhone: quickPhone.trim(),
+            customerId: quickContactSource === 'customer' && selectedCustomerId ? Number(String(selectedCustomerId).replace(/\D/g, '')) : undefined,
+            leadId: quickContactSource === 'lead' && selectedLeadId ? Number(String(selectedLeadId).replace(/\D/g, '')) : undefined,
+            projectId: Number(quickProjectId),
+            plotId: Number(quickPlotId),
+            projectName: selProj?.name || '',
+            plotNumber: selPlot?.plotNumber || '',
+            tokenAmountPaid: tokenAmt,
+            totalPlotPrice: totalAmount,
+            paymentMode: quickPaymentMode,
+            notes: quickNotes.trim(),
+          });
+          if (!res.success) {
+            throw new Error(res.message || 'Failed to create booking.');
+          }
+        }
+
+        storageService.saveBooking({
+          id: `bkg-${Date.now()}`,
+          companyId: currentCompanyId,
+          dealId: `deal-${Date.now()}`,
+          leadId: quickContactSource === 'lead' ? selectedLeadId : '',
+          customerId: quickContactSource === 'customer' ? selectedCustomerId : '',
+          customerName: quickName.trim(),
+          customerPhone: quickPhone.trim(),
+          propertyId: quickProjectId,
+          propertyName: selProj?.name || '',
+          unitNumber: selPlot?.plotNumber || '',
+          bookingAmount: tokenAmt,
+          totalAmount: totalAmount,
+          bookingDate: new Date().toISOString().split('T')[0],
+          status: 'Token Paid',
+          salesExecId: currentAgentId,
+          salesExecName: currentAgentName,
+          notes: quickNotes.trim(),
+        });
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+
+      } else if (quickCreateType === 'visit') {
+        if (!quickProjectId) {
+          setQuickError('Please select a project for the site visit.');
+          setQuickSubmitting(false);
+          return;
+        }
+
+        const selProj = quickProjectsList.find(p => String(p.id) === String(quickProjectId));
+        const selPlot = quickPlotId ? quickPlotsList.find(p => String(p.id) === String(quickPlotId)) : null;
+
+        const formattedSchedule = `${scheduledDate} • ${quickTimeSlot}`;
+
+        if (isJamin) {
+          const res = await jaminApiService.scheduleSiteVisit({
+            customerName: quickName.trim(),
+            customerPhone: quickPhone.trim(),
+            contactType: quickContactSource === 'customer' ? 'customer' : 'lead',
+            customerId: quickContactSource === 'customer' && selectedCustomerId ? Number(String(selectedCustomerId).replace(/\D/g, '')) : undefined,
+            leadId: quickContactSource === 'lead' && selectedLeadId ? Number(String(selectedLeadId).replace(/\D/g, '')) : undefined,
+            projectId: Number(quickProjectId),
+            plotId: quickPlotId ? Number(quickPlotId) : undefined,
+            projectName: selProj?.name || 'Project Tour',
+            plotNumber: selPlot?.plotNumber || undefined,
+            scheduledAt: formattedSchedule,
+            assignedAgentId: user?.id ? Number(user.id) : undefined,
+            assignedAgentName: user?.name || 'Agent',
+            visitorNote: quickNotes.trim() || undefined,
+          });
+          if (res) {
+            storageService.saveSiteVisit(res);
+          }
+        } else {
+          storageService.saveSiteVisit({
+            id: `visit-${Date.now()}`,
+            companyId: currentCompanyId,
+            customerId: quickContactSource === 'customer' ? selectedCustomerId : '',
+            customerName: quickName.trim(),
+            customerPhone: quickPhone.trim(),
+            projectId: quickProjectId,
+            projectName: selProj?.name || '',
+            plotNumber: selPlot?.plotNumber || '',
+            scheduledAt: formattedSchedule,
+            assignedAgentId: currentAgentId,
+            assignedAgentName: currentAgentName,
+            status: 'Scheduled',
+            outcomeNotes: quickNotes.trim(),
+          });
+        }
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+
+      } else if (quickCreateType === 'followup') {
+        const combinedDateTime = scheduledDate && scheduledTime
+          ? new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString()
+          : new Date().toISOString();
+        const newFlw: Followup = {
+          id: `flw-${Date.now()}`,
+          companyId: currentCompanyId,
+          contactId: quickContactSource === 'customer' && selectedCustomerId ? selectedCustomerId : (quickContactSource === 'lead' && selectedLeadId ? selectedLeadId : `contact-${Date.now()}`),
+          contactName: quickName.trim(),
+          contactPhone: quickPhone.trim(),
+          contactType: quickContactSource === 'customer' ? 'customer' : 'lead',
+          scheduledAt: combinedDateTime,
+          scheduledDate,
+          scheduledTime,
+          priority: 'Medium',
+          status: 'Pending',
+          notes: quickNotes.trim(),
+          assignedAgentId: currentAgentId,
+          assignedAgentName: currentAgentName,
+        };
+        try {
+          await apiSaveFollowup(newFlw);
+        } catch (apiErr: any) {
+          console.warn('Backend followup sync note:', apiErr);
+          storageService.saveFollowup(newFlw);
+        }
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+
+      } else if (quickCreateType === 'consultation') {
+        storageService.saveConsultation({
+          id: `cons-${Date.now()}`,
+          companyId: currentCompanyId,
+          investorId: consInvestorId || '',
+          investorName: consInvestorName.trim(),
+          investorPhone: consInvestorPhone.trim(),
+          scheduledAt: consSlot.trim(),
+          consultantId: currentAgentId,
+          consultantName: consConsultantName.trim() || currentAgentName,
+          status: consStatus,
+          agenda: consAgenda.trim(),
+          outcomeNotes: consOutcome.trim() || undefined,
+        });
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+
+      } else if (quickCreateType === 'deal') {
+        let resolvedCustomerId = '';
+        let resolvedCustomerName = '';
+
+        if (dealCustomerMode === 'existing' && selectedCustomerId) {
+          const existing = storageService.getCustomers(tenant?.id)
+            .find(c => c.id === selectedCustomerId);
+          resolvedCustomerId = existing?.id || selectedCustomerId;
+          resolvedCustomerName = existing?.name || '';
+        } else {
+          if (!newCustomerName.trim()) {
+            setQuickError('Customer name is required.');
+            setQuickSubmitting(false);
+            return;
+          }
+          resolvedCustomerId = `cust-${Date.now()}`;
+          resolvedCustomerName = newCustomerName.trim();
+          storageService.saveCustomer({
+            id: resolvedCustomerId,
+            companyId: currentCompanyId,
+            name: resolvedCustomerName,
+            phone: quickPhone.trim(),
+            email: '',
+            status: 'Active',
+            assignedAgentId: currentAgentId,
+            assignedAgentName: currentAgentName,
+            location: '',
+            lastContacted: new Date().toISOString().split('T')[0],
+            openDealsCount: 0,
+            totalValue: 0,
+            createdAt: new Date().toISOString().split('T')[0],
+            notes: '',
+            customFields: {},
+          });
+        }
+
+        storageService.saveDeal({
+          id: `deal-${Date.now()}`,
+          companyId: currentCompanyId,
+          title: quickName.trim(),
+          customerId: resolvedCustomerId,
+          customerName: resolvedCustomerName,
+          stage: 'new',
+          value: 0,
+          expectedCloseDate: '',
+          assignedAgentId: currentAgentId,
+          assignedAgentName: currentAgentName,
+          notes: quickNotes.trim(),
+          createdAt: new Date().toISOString().split('T')[0],
+        });
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+      }
+
+      const createdTypeLabel = quickCreateType === 'visit' ? 'Site visit' : (quickCreateType ? quickCreateType.charAt(0).toUpperCase() + quickCreateType.slice(1) : 'Item');
+      toast.success(`✓ ${createdTypeLabel} created successfully!`);
+      setQuickCreateType(null);
+    } catch (err: any) {
+      console.error('Quick create failed:', err);
+      const msg = err?.message || 'Failed to save entry. Please try again.';
+      setQuickError(msg);
+      toast.error(msg);
+    } finally {
+      setQuickSubmitting(false);
+    }
   };
 
   // If unauthenticated
@@ -540,16 +1009,96 @@ export const App: React.FC = () => {
       {/* Global Quick Action Modal */}
       <Modal
         isOpen={!!quickCreateType}
-        onClose={() => setQuickCreateType(null)}
-        title={`Quick Create: ${quickCreateType?.toUpperCase()}`}
-        subtitle={`Instant creation into ${tenant?.name}`}
+        onClose={() => {
+          if (!quickSubmitting) {
+            setQuickCreateType(null);
+            setQuickError('');
+          }
+        }}
+        title={
+          quickCreateType === 'lead' ? 'Quick Create: New Lead' :
+            quickCreateType === 'customer' ? 'Quick Create: New Customer' :
+              quickCreateType === 'booking' ? 'Quick Create: New Booking' :
+                quickCreateType === 'visit' ? 'Quick Schedule: Site Visit' :
+                  quickCreateType === 'followup' ? 'Quick Schedule: Follow-up' :
+                    quickCreateType === 'consultation' ? 'Quick Schedule: Consultation' :
+                      quickCreateType === 'deal' ? 'Quick Create: New Deal' : 'Quick Create'
+        }
+        subtitle={`Instant creation into ${tenant?.name || 'Workspace'}`}
       >
-        <form onSubmit={handleSaveQuickCreate} className="app-quickcreate-form">
+        {/* Quick Action Switcher Tabs */}
+        <div style={{
+          display: 'flex',
+          gap: 6,
+          backgroundColor: 'var(--bg-surface-hover, #f1f5f9)',
+          padding: '4px',
+          borderRadius: '10px',
+          marginBottom: '16px',
+          overflowX: 'auto',
+          flexWrap: 'nowrap'
+        }}>
+          {[
+            { id: 'lead', label: 'New Lead' },
+            { id: 'customer', label: 'New Customer' },
+            ...(isJamin || (Array.isArray(enabledFeatures) && enabledFeatures.includes(FEATURES.BOOKINGS))
+              ? [{ id: 'booking', label: 'New Booking' }] : []),
+            ...(isJamin || (Array.isArray(enabledFeatures) && enabledFeatures.includes(FEATURES.SITE_VISITS))
+              ? [{ id: 'visit', label: 'Site Visit' }] : []),
+            { id: 'followup', label: 'Follow-up' },
+            ...(!isJamin && Array.isArray(enabledFeatures) && enabledFeatures.includes(FEATURES.CONSULTATIONS)
+              ? [{ id: 'consultation', label: 'Consultation' }] : []),
+            ...(!isJamin && Array.isArray(enabledFeatures) && enabledFeatures.includes(FEATURES.DEALS)
+              ? [{ id: 'deal', label: 'Deal' }] : []),
+          ].map(tab => {
+            const isActive = quickCreateType === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => handleSwitchQuickTab(tab.id as any)}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 7,
+                  fontSize: 12.5,
+                  fontWeight: isActive ? 600 : 500,
+                  border: 'none',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  backgroundColor: isActive ? '#ffffff' : 'transparent',
+                  color: isActive ? 'var(--primary-600, #059669)' : 'var(--text-secondary, #64748b)',
+                  boxShadow: isActive ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
 
-          {/* ── LEAD: Full form matching Add New Prospect Lead ── */}
+        <form onSubmit={handleSaveQuickCreate} className="app-quickcreate-form">
+          {quickError && (
+            <div style={{
+              padding: '10px 14px',
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              borderRadius: 8,
+              color: '#ef4444',
+              fontSize: 13,
+              lineHeight: 1.4,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              marginBottom: 12,
+            }}>
+              <AlertCircle size={16} style={{ flexShrink: 0 }} />
+              <span>{quickError}</span>
+            </div>
+          )}
+
+          {/* ── 1. LEAD: Prospect Lead Form ── */}
           {quickCreateType === 'lead' ? (
             <>
-              {/* Full Name */}
               <div className="form-group">
                 <label className="form-label">Full Name *</label>
                 <input
@@ -557,12 +1106,11 @@ export const App: React.FC = () => {
                   className="form-input"
                   required
                   value={quickName}
-                  onChange={e => setQuickName(e.target.value)}
+                  onChange={e => { setQuickName(e.target.value); setQuickError(''); }}
                   placeholder="e.g. Ramesh Chandra"
                 />
               </div>
 
-              {/* Phone + Email */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group">
                   <label className="form-label">Phone Number *</label>
@@ -571,7 +1119,7 @@ export const App: React.FC = () => {
                     className="form-input"
                     required
                     value={quickPhone}
-                    onChange={e => setQuickPhone(e.target.value)}
+                    onChange={e => { setQuickPhone(e.target.value); setQuickError(''); }}
                     placeholder="+91 98800 00000"
                   />
                 </div>
@@ -587,7 +1135,6 @@ export const App: React.FC = () => {
                 </div>
               </div>
 
-              {/* Location + Source */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group">
                   <label className="form-label">Location / City</label>
@@ -606,6 +1153,7 @@ export const App: React.FC = () => {
                     value={quickSource}
                     onChange={e => setQuickSource(e.target.value)}
                   >
+                    <option value="">— Select Source —</option>
                     <option value="Website Inbound">Website Inbound</option>
                     <option value="Google Search">Google Search</option>
                     <option value="Facebook / Instagram">Facebook / Instagram</option>
@@ -617,12 +1165,11 @@ export const App: React.FC = () => {
                 </div>
               </div>
 
-              {/* Tenant-Specific Custom Schema Terms */}
               <div className="lead-custom-schema-box">
                 <div className="lead-custom-schema-title">
                   {tenant?.slug === 'jamin'
                     ? `${tenant?.name || 'Jamin Bazaar'} Property Preferences`
-                    : 'GHL India Ventures Asset Terms'}
+                    : 'Asset Terms'}
                 </div>
 
                 {tenant?.slug === 'jamin' ? (
@@ -634,6 +1181,7 @@ export const App: React.FC = () => {
                         value={quickBudgetRange}
                         onChange={e => setQuickBudgetRange(e.target.value)}
                       >
+                        <option value="">— Select Budget Range —</option>
                         <option value="₹25L – ₹45L">₹25L – ₹45L</option>
                         <option value="₹45L – ₹65L">₹45L – ₹65L</option>
                         <option value="₹65L – ₹90L">₹65L – ₹90L</option>
@@ -641,16 +1189,32 @@ export const App: React.FC = () => {
                       </select>
                     </div>
                     <div className="form-group">
-                      <label className="form-label">Preferred Micro-Market</label>
+                      <label className="form-label">Preferred Micro-Market / Project</label>
                       <select
                         className="form-select"
                         value={quickPreferredLocation}
-                        onChange={e => setQuickPreferredLocation(e.target.value)}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setQuickPreferredLocation(val);
+                          const matching = quickProjectsList.find(p => p.name === val || String(p.id) === val);
+                          if (matching) {
+                            setQuickProjectId(String(matching.id));
+                            if (!quickLocation && matching.location) {
+                              setQuickLocation(matching.location);
+                            }
+                          }
+                        }}
                       >
-                        <option value="Devanahalli North">Devanahalli North (Airport)</option>
-                        <option value="Sarjapur East">Sarjapur East</option>
-                        <option value="Mysore Highway Corridor">Mysore Highway Corridor</option>
-                        <option value="Kanakapura Road">Kanakapura Road</option>
+                        <option value="">
+                          {quickProjectsList.length === 0
+                            ? '— Loading projects from server... —'
+                            : `— Select Project (${quickProjectsList.length} available) —`}
+                        </option>
+                        {quickProjectsList.map(p => (
+                          <option key={p.id} value={p.name}>
+                            {p.name} {p.location ? `(${p.location})` : ''}
+                          </option>
+                        ))}
                       </select>
                     </div>
                   </div>
@@ -664,6 +1228,7 @@ export const App: React.FC = () => {
                           value={quickAssetClass}
                           onChange={e => setQuickAssetClass(e.target.value)}
                         >
+                          <option value="">— Select Asset Class —</option>
                           <option value="AIF">AIF</option>
                           <option value="CO-AIF">CO-AIF</option>
                         </select>
@@ -676,7 +1241,7 @@ export const App: React.FC = () => {
                         value={quickInvestmentCapacity}
                         onChange={e => setQuickInvestmentCapacity(e.target.value)}
                       >
-                        <option value="" disabled>Select a range</option>
+                        <option value="">— Select Capacity Range —</option>
                         {[
                           'Contact for Co-Invest Details',
                           '₹1 Cr – ₹5 Cr',
@@ -693,21 +1258,610 @@ export const App: React.FC = () => {
                 )}
               </div>
 
-              {/* Notes & Requirements */}
               <div className="form-group">
                 <label className="form-label">Notes & Requirements</label>
                 <textarea
                   className="form-textarea"
-                  rows={3}
+                  rows={2}
                   value={quickNotes}
                   onChange={e => setQuickNotes(e.target.value)}
-                  placeholder={tenant?.slug === 'jamin' ? "Interested plot dimensions, site visit availability, token readiness..." : "Client background, key objections, time horizon..."}
+                  placeholder="Client background, key objections, time horizon..."
                 />
               </div>
             </>
+
+            /* ── 2. CUSTOMER: New Customer Form ── */
+          ) : quickCreateType === 'customer' ? (
+            <>
+              <div className="form-group">
+                <label className="form-label">Customer Full Name *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  required
+                  value={quickName}
+                  onChange={e => { setQuickName(e.target.value); setQuickError(''); }}
+                  placeholder="e.g. Anand Mahindra"
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Phone Number *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    required
+                    value={quickPhone}
+                    onChange={e => { setQuickPhone(e.target.value); setQuickError(''); }}
+                    placeholder="+91 98800 00000"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Email Address</label>
+                  <input
+                    type="email"
+                    className="form-input"
+                    value={quickEmail}
+                    onChange={e => setQuickEmail(e.target.value)}
+                    placeholder="client@example.com"
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Location / City</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={quickLocation}
+                  onChange={e => setQuickLocation(e.target.value)}
+                  placeholder="e.g. Bengaluru, Indiranagar"
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Notes & Requirements</label>
+                <textarea
+                  className="form-textarea"
+                  rows={2}
+                  value={quickNotes}
+                  onChange={e => setQuickNotes(e.target.value)}
+                  placeholder="Preferences, investment size, specific needs..."
+                />
+              </div>
+            </>
+
+            /* ── 3. BOOKING: New Booking Form ── */
+          ) : quickCreateType === 'booking' ? (
+            <>
+              <div className="form-group" style={{ marginBottom: 12 }}>
+                <label className="form-label">Buyer Source</label>
+                <div className="app-segmented-toggle">
+                  {(['customer', 'lead', 'new'] as const).map(src => (
+                    <button
+                      key={src}
+                      type="button"
+                      className={`btn btn-sm app-segmented-btn ${quickContactSource === src ? 'btn-primary' : 'btn-ghost'}`}
+                      onClick={() => {
+                        setQuickContactSource(src);
+                        if (src === 'new') {
+                          setSelectedCustomerId('');
+                          setSelectedLeadId('');
+                        }
+                      }}
+                    >
+                      {src === 'customer' ? 'Existing Customer' : src === 'lead' ? 'Existing Lead' : 'New Buyer'}
+                    </button>
+                  ))}
+                </div>
+
+                {quickContactSource === 'customer' && (
+                  <select
+                    className="form-select"
+                    value={selectedCustomerId}
+                    onChange={e => {
+                      const cId = e.target.value;
+                      setSelectedCustomerId(cId);
+                      const found = availableCustomers.find(c => c.id === cId);
+                      if (found) {
+                        setQuickName(found.name);
+                        setQuickPhone(found.phone);
+                        if (found.email) setQuickEmail(found.email);
+                      }
+                    }}
+                  >
+                    <option value="">
+                      {isLoadingLiveContacts
+                        ? '— Loading customers from server... —'
+                        : availableCustomers.length === 0
+                          ? '— No existing customers found —'
+                          : `— Select Customer (${availableCustomers.length} available) —`}
+                    </option>
+                    {availableCustomers.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} {c.phone ? `· ${c.phone}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+
+                {quickContactSource === 'lead' && (
+                  <select
+                    className="form-select"
+                    value={selectedLeadId}
+                    onChange={e => {
+                      const lId = e.target.value;
+                      setSelectedLeadId(lId);
+                      const found = availableLeads.find(l => l.id === lId);
+                      if (found) {
+                        setQuickName(found.name);
+                        setQuickPhone(found.phone);
+                        if (found.email) setQuickEmail(found.email);
+                      }
+                    }}
+                  >
+                    <option value="">
+                      {isLoadingLiveContacts
+                        ? '— Loading leads from server... —'
+                        : availableLeads.length === 0
+                          ? '— No active leads found —'
+                          : `— Select Lead (${availableLeads.length} available) —`}
+                    </option>
+                    {availableLeads.map(l => (
+                      <option key={l.id} value={l.id}>
+                        {l.name} {l.phone ? `· ${l.phone}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Buyer Full Name *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    required
+                    value={quickName}
+                    onChange={e => { setQuickName(e.target.value); setQuickError(''); }}
+                    placeholder="e.g. Rajesh Kumar"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Buyer Mobile *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    required
+                    value={quickPhone}
+                    onChange={e => { setQuickPhone(e.target.value); setQuickError(''); }}
+                    placeholder="+91 98800 00000"
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Project *</label>
+                  <select
+                    className="form-select"
+                    value={quickProjectId}
+                    onChange={e => handleQuickProjectChange(e.target.value)}
+                    required
+                  >
+                    <option value="">
+                      {quickProjectsList.length === 0
+                        ? '— Loading projects from server... —'
+                        : `— Select Project (${quickProjectsList.length} available) —`}
+                    </option>
+                    {quickProjectsList.map(p => (
+                      <option key={p.id} value={String(p.id)}>
+                        {p.name} {p.location ? `· ${p.location}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">
+                    Plot / Unit * {isLoadingQuickPlots && <span style={{ fontSize: 11, color: '#3b82f6' }}>(Loading...)</span>}
+                  </label>
+                  <select
+                    className="form-select"
+                    value={quickPlotId}
+                    onChange={e => { setQuickPlotId(e.target.value); setQuickError(''); }}
+                    required
+                    disabled={!quickProjectId || isLoadingQuickPlots}
+                  >
+                    <option value="">— Select Available Plot —</option>
+                    {quickEligiblePlots.map(pl => (
+                      <option key={pl.id} value={String(pl.id)}>
+                        Plot {pl.plotNumber} {pl.dimensions ? `· ${pl.dimensions}` : ''} {pl.price ? `· ₹${Number(pl.price).toLocaleString('en-IN')}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Token Amount Paid (₹)</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    value={quickTokenAmount}
+                    onChange={e => setQuickTokenAmount(e.target.value ? Number(e.target.value) : '')}
+                    placeholder="e.g. 50000"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Payment Mode</label>
+                  <select
+                    className="form-select"
+                    value={quickPaymentMode}
+                    onChange={e => setQuickPaymentMode(e.target.value)}
+                  >
+                    <option value="UPI">UPI</option>
+                    <option value="Bank Transfer">Bank Transfer / NEFT</option>
+                    <option value="Cheque">Cheque</option>
+                    <option value="Card">Card</option>
+                    <option value="Cash">Cash</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Booking Notes</label>
+                <textarea
+                  className="form-textarea"
+                  rows={2}
+                  value={quickNotes}
+                  onChange={e => setQuickNotes(e.target.value)}
+                  placeholder="Special conditions, token receipt ref, payment terms..."
+                />
+              </div>
+            </>
+
+            /* ── 4. VISIT: Schedule Site Visit Form ── */
+          ) : quickCreateType === 'visit' ? (
+            <>
+              <div className="form-group" style={{ marginBottom: 12 }}>
+                <label className="form-label">Visitor Contact Source</label>
+                <div className="app-segmented-toggle">
+                  {(['lead', 'customer', 'new'] as const).map(src => (
+                    <button
+                      key={src}
+                      type="button"
+                      className={`btn btn-sm app-segmented-btn ${quickContactSource === src ? 'btn-primary' : 'btn-ghost'}`}
+                      onClick={() => {
+                        setQuickContactSource(src);
+                        if (src === 'new') {
+                          setSelectedCustomerId('');
+                          setSelectedLeadId('');
+                        }
+                      }}
+                    >
+                      {src === 'lead' ? 'Existing Lead' : src === 'customer' ? 'Existing Customer' : 'New Visitor'}
+                    </button>
+                  ))}
+                </div>
+
+                {quickContactSource === 'lead' && (
+                  <select
+                    className="form-select"
+                    value={selectedLeadId}
+                    onChange={e => {
+                      const lId = e.target.value;
+                      setSelectedLeadId(lId);
+                      const found = availableLeads.find(l => l.id === lId);
+                      if (found) {
+                        setQuickName(found.name);
+                        setQuickPhone(found.phone);
+                        if (found.email) setQuickEmail(found.email);
+                      }
+                    }}
+                  >
+                    <option value="">
+                      {isLoadingLiveContacts
+                        ? '— Loading leads from server... —'
+                        : availableLeads.length === 0
+                          ? '— No active leads found —'
+                          : `— Select Lead (${availableLeads.length} available) —`}
+                    </option>
+                    {availableLeads.map(l => (
+                      <option key={l.id} value={l.id}>
+                        {l.name} {l.phone ? `· ${l.phone}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+
+                {quickContactSource === 'customer' && (
+                  <select
+                    className="form-select"
+                    value={selectedCustomerId}
+                    onChange={e => {
+                      const cId = e.target.value;
+                      setSelectedCustomerId(cId);
+                      const found = availableCustomers.find(c => c.id === cId);
+                      if (found) {
+                        setQuickName(found.name);
+                        setQuickPhone(found.phone);
+                        if (found.email) setQuickEmail(found.email);
+                      }
+                    }}
+                  >
+                    <option value="">
+                      {isLoadingLiveContacts
+                        ? '— Loading customers from server... —'
+                        : availableCustomers.length === 0
+                          ? '— No existing customers found —'
+                          : `— Select Customer (${availableCustomers.length} available) —`}
+                    </option>
+                    {availableCustomers.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} {c.phone ? `· ${c.phone}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Visitor / Client Name *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    required
+                    value={quickName}
+                    onChange={e => { setQuickName(e.target.value); setQuickError(''); }}
+                    placeholder="e.g. Ramesh Chandra"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Mobile Number *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    required
+                    value={quickPhone}
+                    onChange={e => { setQuickPhone(e.target.value); setQuickError(''); }}
+                    placeholder="+91 98800 00000"
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Visit Date *</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    required
+                    min={new Date().toISOString().split('T')[0]}
+                    value={scheduledDate}
+                    onChange={e => setScheduledDate(e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Time Slot *</label>
+                  <select
+                    className="form-select"
+                    value={quickTimeSlot}
+                    onChange={e => setQuickTimeSlot(e.target.value)}
+                  >
+                    <option value="09:30 AM">09:30 AM (Morning Tour)</option>
+                    <option value="11:00 AM">11:00 AM (Mid-Day Walkthrough)</option>
+                    <option value="02:00 PM">02:00 PM (Afternoon Tour)</option>
+                    <option value="03:30 PM">03:30 PM (Late Afternoon Slot)</option>
+                    <option value="05:00 PM">05:00 PM (Sunset Inspection)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Project *</label>
+                  <select
+                    className="form-select"
+                    value={quickProjectId}
+                    onChange={e => handleQuickProjectChange(e.target.value)}
+                    required
+                  >
+                    <option value="">
+                      {quickProjectsList.length === 0
+                        ? '— Loading projects from server... —'
+                        : `— Select Project (${quickProjectsList.length} available) —`}
+                    </option>
+                    {quickProjectsList.map(p => (
+                      <option key={p.id} value={String(p.id)}>
+                        {p.name} {p.location ? `· ${p.location}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">
+                    Specific Plot <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>(optional)</span>
+                  </label>
+                  <select
+                    className="form-select"
+                    value={quickPlotId}
+                    onChange={e => setQuickPlotId(e.target.value)}
+                    disabled={!quickProjectId || isLoadingQuickPlots}
+                  >
+                    <option value="">-- General Project Tour --</option>
+                    {quickEligiblePlots.map(pl => (
+                      <option key={pl.id} value={String(pl.id)}>
+                        Plot {pl.plotNumber} {pl.dimensions ? `· ${pl.dimensions}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Visit Notes / Requirements</label>
+                <textarea
+                  className="form-textarea"
+                  rows={2}
+                  value={quickNotes}
+                  onChange={e => setQuickNotes(e.target.value)}
+                  placeholder="Cab pickup, family visit, plot preferences..."
+                />
+              </div>
+            </>
+
+            /* ── 5. FOLLOWUP: Schedule Follow-up Form ── */
+          ) : quickCreateType === 'followup' ? (
+            <>
+              <div className="form-group" style={{ marginBottom: 12 }}>
+                <label className="form-label">Contact Source</label>
+                <div className="app-segmented-toggle">
+                  {(['lead', 'customer', 'new'] as const).map(src => (
+                    <button
+                      key={src}
+                      type="button"
+                      className={`btn btn-sm app-segmented-btn ${quickContactSource === src ? 'btn-primary' : 'btn-ghost'}`}
+                      onClick={() => {
+                        setQuickContactSource(src);
+                        if (src === 'new') {
+                          setSelectedCustomerId('');
+                          setSelectedLeadId('');
+                        }
+                      }}
+                    >
+                      {src === 'lead' ? 'Existing Lead' : src === 'customer' ? 'Existing Customer' : 'New Contact'}
+                    </button>
+                  ))}
+                </div>
+
+                {quickContactSource === 'lead' && (
+                  <select
+                    className="form-select"
+                    value={selectedLeadId}
+                    onChange={e => {
+                      const lId = e.target.value;
+                      setSelectedLeadId(lId);
+                      const found = availableLeads.find(l => l.id === lId);
+                      if (found) {
+                        setQuickName(found.name);
+                        setQuickPhone(found.phone);
+                        if (found.email) setQuickEmail(found.email);
+                      }
+                    }}
+                  >
+                    <option value="">
+                      {isLoadingLiveContacts
+                        ? '— Loading leads from server... —'
+                        : availableLeads.length === 0
+                          ? '— No active leads found —'
+                          : `— Select Lead (${availableLeads.length} available) —`}
+                    </option>
+                    {availableLeads.map(l => (
+                      <option key={l.id} value={l.id}>
+                        {l.name} {l.phone ? `· ${l.phone}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+
+                {quickContactSource === 'customer' && (
+                  <select
+                    className="form-select"
+                    value={selectedCustomerId}
+                    onChange={e => {
+                      const cId = e.target.value;
+                      setSelectedCustomerId(cId);
+                      const found = availableCustomers.find(c => c.id === cId);
+                      if (found) {
+                        setQuickName(found.name);
+                        setQuickPhone(found.phone);
+                        if (found.email) setQuickEmail(found.email);
+                      }
+                    }}
+                  >
+                    <option value="">
+                      {isLoadingLiveContacts
+                        ? '— Loading customers from server... —'
+                        : availableCustomers.length === 0
+                          ? '— No existing customers found —'
+                          : `— Select Customer (${availableCustomers.length} available) —`}
+                    </option>
+                    {availableCustomers.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} {c.phone ? `· ${c.phone}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">Contact Name *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    required
+                    value={quickName}
+                    onChange={e => { setQuickName(e.target.value); setQuickError(''); }}
+                    placeholder="e.g. Ramesh Chandra"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Phone Number *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    required
+                    value={quickPhone}
+                    onChange={e => { setQuickPhone(e.target.value); setQuickError(''); }}
+                    placeholder="+91 98800 00000"
+                  />
+                </div>
+              </div>
+
+              <div className="app-schedule-grid">
+                <div className="form-group">
+                  <label className="form-label">Scheduled Date *</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    required
+                    value={scheduledDate}
+                    onChange={e => setScheduledDate(e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Scheduled Time *</label>
+                  <input
+                    type="time"
+                    className="form-input"
+                    required
+                    value={scheduledTime}
+                    onChange={e => setScheduledTime(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Follow-up Notes</label>
+                <textarea
+                  className="form-textarea"
+                  rows={2}
+                  value={quickNotes}
+                  onChange={e => setQuickNotes(e.target.value)}
+                  placeholder="Agenda for follow-up call, discussion topics..."
+                />
+              </div>
+            </>
+
+            /* ── 6. CONSULTATION: Schedule Consultation Form ── */
           ) : quickCreateType === 'consultation' ? (
             <>
-              {/* ── CONSULTATION: Full form matching Schedule Consultation ── */}
               {(() => {
                 const investors = storageService.getInvestors(tenant?.id);
                 return (
@@ -802,8 +1956,8 @@ export const App: React.FC = () => {
                       <label className="form-label">Discussion Agenda & Objectives</label>
                       <textarea
                         className="form-textarea"
-                        rows={3}
-                        placeholder="e.g. Commercial REIT yield analysis & pass-through taxation discussion."
+                        rows={2}
+                        placeholder="Key discussion topics, yield requirements, investor questions..."
                         value={consAgenda}
                         onChange={e => setConsAgenda(e.target.value)}
                       />
@@ -813,7 +1967,7 @@ export const App: React.FC = () => {
                       <label className="form-label">Outcome Notes & Recommendations</label>
                       <textarea
                         className="form-textarea"
-                        rows={3}
+                        rows={2}
                         placeholder="Record key takeaways, investor interest level, follow-up requirements..."
                         value={consOutcome}
                         onChange={e => setConsOutcome(e.target.value)}
@@ -823,17 +1977,16 @@ export const App: React.FC = () => {
                 );
               })()}
             </>
+
+            /* ── 7. DEAL: Deal Linked to Customer ── */
           ) : (
             <>
-              {/* ── Deal: existing vs. new customer picker ── */}
-              {quickCreateType === 'deal' && (() => {
+              {(() => {
                 const tenantCustomers = storageService.getCustomers(tenant?.id);
                 const hasCustomers = tenantCustomers.length > 0;
                 return (
                   <div className="form-group">
                     <label className="form-label">Link to Customer</label>
-
-                    {/* Segmented toggle — same style as Reports page period toggle */}
                     <div className="app-segmented-toggle">
                       {(['existing', 'new'] as const).map(mode => (
                         <button
@@ -868,9 +2021,9 @@ export const App: React.FC = () => {
                         ))}
                       </select>
                     ) : (
-                      <div>
+                      <div style={{ marginTop: 8 }}>
                         <label className="form-label app-new-customer-label">
-                          New Customer Name * — a new Customer record will be created
+                          New Customer Name *
                         </label>
                         <input
                           type="text"
@@ -886,69 +2039,65 @@ export const App: React.FC = () => {
                 );
               })()}
 
-              {/* ── Phone (non-lead, non-deal-existing) ── */}
-              {!(quickCreateType === 'deal' && dealCustomerMode === 'existing') && (
+              <div className="form-group">
+                <label className="form-label">Deal Title *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  required
+                  value={quickName}
+                  onChange={e => { setQuickName(e.target.value); setQuickError(''); }}
+                  placeholder="e.g. Commercial Office Acquisition"
+                />
+              </div>
+
+              {!(dealCustomerMode === 'existing') && (
                 <div className="form-group">
-                  <label className="form-label">Phone Number</label>
+                  <label className="form-label">Customer Phone</label>
                   <input
                     type="text"
                     className="form-input"
                     value={quickPhone}
                     onChange={e => setQuickPhone(e.target.value)}
+                    placeholder="+91 98800 00000"
                   />
                 </div>
               )}
 
-              {/* ── Scheduled Date + Time (followup, visit) ── */}
-              {(quickCreateType === 'followup' || quickCreateType === 'visit') && (
-                <div className="app-schedule-grid">
-                  <div className="form-group">
-                    <label className="form-label">Scheduled Date *</label>
-                    <input
-                      type="date"
-                      className="form-input"
-                      required
-                      value={scheduledDate}
-                      onChange={e => setScheduledDate(e.target.value)}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Scheduled Time *</label>
-                    <input
-                      type="time"
-                      className="form-input"
-                      required
-                      value={scheduledTime}
-                      onChange={e => setScheduledTime(e.target.value)}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* ── Notes/Agenda (non-lead types) ── */}
               <div className="form-group">
-                <label className="form-label">Quick Notes</label>
+                <label className="form-label">Deal Notes</label>
                 <textarea
                   className="form-textarea"
                   rows={2}
                   value={quickNotes}
                   onChange={e => setQuickNotes(e.target.value)}
-                  placeholder={
-                    quickCreateType === 'visit'
-                      ? 'Special requirements, preferred plots...'
-                      : 'Brief requirement summary...'
-                  }
+                  placeholder="Deal background, expected terms..."
                 />
               </div>
             </>
           )}
 
-          <div className="app-modal-actions">
-            <button type="button" className="btn btn-secondary" onClick={() => setQuickCreateType(null)}>
+          <div className="app-modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
+            <button type="button" className="btn btn-secondary" disabled={quickSubmitting} onClick={() => setQuickCreateType(null)}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
-              Save Entry
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={quickSubmitting}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontWeight: 600,
+              }}
+            >
+              {quickCreateType === 'visit' || quickCreateType === 'followup' || quickCreateType === 'consultation' ? (
+                <Calendar size={14} />
+              ) : (
+                <Plus size={14} />
+              )}
+              {quickSubmitting ? 'Saving...' : (quickCreateType === 'visit' || quickCreateType === 'followup' || quickCreateType === 'consultation' ? 'Schedule' : 'Create')}
             </button>
           </div>
         </form>

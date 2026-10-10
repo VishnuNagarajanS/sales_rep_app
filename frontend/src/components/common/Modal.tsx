@@ -5,12 +5,13 @@ import './Modal.css';
 interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
-  title: string;
-  subtitle?: string;
+  title: string | React.ReactNode;
+  subtitle?: string | React.ReactNode;
   children: React.ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl' | string;
   maxWidth?: string | number;
   footer?: React.ReactNode;
+  headerActions?: React.ReactNode;
   className?: string;
 }
 
@@ -30,6 +31,7 @@ export const Modal: React.FC<ModalProps> = ({
   size,
   maxWidth,
   footer,
+  headerActions,
   className = '',
 }) => {
   const resolvedMaxWidth = maxWidth ?? (size ? (MODAL_SIZE_MAP[size] ?? size) : 560);
@@ -56,7 +58,7 @@ export const Modal: React.FC<ModalProps> = ({
       >
         {/* Header */}
         <div className="modal-header">
-          <div>
+          <div style={{ minWidth: 0, flex: 1, marginRight: headerActions ? 16 : 0 }}>
             <h3 className="modal-title">{title}</h3>
             {subtitle && (
               <p className="modal-subtitle">
@@ -64,9 +66,12 @@ export const Modal: React.FC<ModalProps> = ({
               </p>
             )}
           </div>
-          <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose}>
-            <X size={18} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+            {headerActions}
+            <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose} aria-label="Close modal">
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Content */}

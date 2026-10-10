@@ -12,9 +12,11 @@ import {
   Building2,
   DollarSign,
   UserCheck,
+  Edit,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { DataTable, Column } from '../../components/common/DataTable';
+import { FilterBar } from '../../components/common/FilterBar';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { Drawer } from '../../components/common/Drawer';
@@ -24,6 +26,7 @@ import { jaminApiService } from '../../services/jaminApiService';
 import { getCustomers, getLeads } from '../../services/ghlApiService';
 import { storageService } from '../../services/storageService';
 import { apiClient } from '../../services/apiClient';
+import { toast } from '../../context/ToastContext';
 import './BookingsPage.css';
 
 const PAYMENT_MODES = ['Bank Transfer / NEFT', 'RTGS', 'Cheque / DD', 'UPI / Online', 'Cash'];
@@ -38,6 +41,10 @@ export const BookingsPage: React.FC = () => {
   const [isNewBookingModalOpen, setIsNewBookingModalOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Filters for Buyer Type (Lead vs Customer) and Payment Status (Verified vs Pending)
+  const [buyerTypeFilter, setBuyerTypeFilter] = useState('All');
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState('All');
 
   // Role checking for financial actions
   const roleCode = String(user?.role?.code || user?.role?.name || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -81,6 +88,10 @@ export const BookingsPage: React.FC = () => {
   const [managePaymentModeOther, setManagePaymentModeOther] = useState('');
   const [managePaymentTerms, setManagePaymentTerms] = useState('');
   const [isSubmittingManage, setIsSubmittingManage] = useState(false);
+  const [manageCancelReason, setManageCancelReason] = useState('');
+  const [manageCancelRefundAmount, setManageCancelRefundAmount] = useState<number>(0);
+  const [manageCancelRefundMode, setManageCancelRefundMode] = useState('Bank Transfer / NEFT');
+  const [manageCancelRefundRef, setManageCancelRefundRef] = useState('');
 
   // Form State for New Booking
   const [buyerSourceType, setBuyerSourceType] = useState<'customer' | 'lead' | 'custom'>('customer');
@@ -105,9 +116,9 @@ export const BookingsPage: React.FC = () => {
       const [bkgList, projList, plotList, custs, lds] = await Promise.all([
         jaminApiService.getBookings(),
         jaminApiService.getProjects(),
-        jaminApiService.getPlots(),
-        getCustomers(tenant?.id).catch(() => []),
-        getLeads(tenant?.id).catch(() => []),
+        jaminApiService.getPlots().catch(() => []),
+        jaminApiService.getCustomers().catch(() => getCustomers(tenant?.id).catch(() => storageService.getCustomers(tenant?.id) || [])),
+        jaminApiService.getLeads(true).catch(() => getLeads(tenant?.id).catch(() => storageService.getLeads(tenant?.id) || [])),
       ]);
       setBookings(bkgList || []);
       setProjects(projList || []);
@@ -304,6 +315,7 @@ export const BookingsPage: React.FC = () => {
 
         if (leadObj && leadObj.status !== 'Converted') {
           const updatedLead = { ...leadObj, status: 'Booking In Progress' as const };
+          storageService.saveLead(updatedLead);
           setLeadsList(prev => prev.map(l => String(l.id) === String(leadObj.id) ? updatedLead : l));
           const numId = parseInt(String(leadObj.id).replace('db-', ''), 10);
           if (!isNaN(numId)) {
@@ -312,7 +324,7 @@ export const BookingsPage: React.FC = () => {
               phone: updatedLead.phone,
               status: 'Booking In Progress',
               companyId: 2
-            }).catch(() => {});
+            }).catch(() => { });
           }
         }
 
@@ -355,28 +367,40 @@ export const BookingsPage: React.FC = () => {
     e.preventDefault();
     if (!verifyingBooking) return;
 
-    setIsSubmittingVerify(true);
+    const bkg = verifyingBooking;
+    const prevBooking = bkg;
+    const updatedBooking = { ...bkg, status: 'Token Verified', paymentStatus: 'Verified' };
+
+    // 0ms Optimistic UI update
+    setBookings(prev => prev.map(b => b.id === bkg.id ? updatedBooking : b));
+    if (selectedBooking && selectedBooking.id === bkg.id) {
+      setSelectedBooking(updatedBooking);
+    }
+    setIsVerifyModalOpen(false);
+    setVerifyingBooking(null);
+    toast.success(`✓ Token payment verified for Plot ${bkg.plotNumber || ''}!`);
+
     try {
       const res = await jaminApiService.verifyBookingPayment(
-        verifyingBooking.id,
+        bkg.id,
         undefined,
         verifyReceiptNumber.trim(),
         verifyNotes.trim()
       );
 
-      if (res.success) {
-        setIsVerifyModalOpen(false);
-        setVerifyingBooking(null);
+      if (res && res.success) {
         window.dispatchEvent(new Event('nexus_storage_updated'));
-        await loadData();
       } else {
-        alert(res.message || 'Payment verification failed.');
+        throw new Error(res?.message || 'Payment verification failed on server.');
       }
     } catch (err: any) {
       console.error('Error verifying payment', err);
-      alert(err?.message || 'Verification failed. Please check permissions.');
-    } finally {
-      setIsSubmittingVerify(false);
+      // Revert optimistic update
+      setBookings(prev => prev.map(b => b.id === bkg.id ? prevBooking : b));
+      if (selectedBooking && selectedBooking.id === bkg.id) {
+        setSelectedBooking(prevBooking);
+      }
+      toast.error(err?.message || 'Verification failed. Reverted.');
     }
   };
 
@@ -395,14 +419,19 @@ export const BookingsPage: React.FC = () => {
   const handleConfirmAddPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!payingBooking || !paymentAmount || paymentAmount <= 0) {
-      alert('Please enter a valid payment amount.');
+      toast.warning('Please enter a valid payment amount.');
       return;
     }
 
-    setIsSubmittingPayment(true);
+    const bkg = payingBooking;
+    const amt = paymentAmount;
+    setIsAddPaymentModalOpen(false);
+    setPayingBooking(null);
+    toast.success(`✓ Recorded ₹${amt.toLocaleString()} payment for ${bkg.plotNumber || 'plot'}!`);
+
     try {
-      const success = await jaminApiService.addBookingPayment(payingBooking.id, {
-        amount: paymentAmount,
+      const success = await jaminApiService.addBookingPayment(bkg.id, {
+        amount: amt,
         paymentType,
         paymentMode: newPaymentMode,
         transactionReference: paymentRef.trim(),
@@ -411,22 +440,69 @@ export const BookingsPage: React.FC = () => {
       });
 
       if (success) {
-        setIsAddPaymentModalOpen(false);
-        setPayingBooking(null);
         window.dispatchEvent(new Event('nexus_storage_updated'));
-        await loadData();
+        loadData();
       } else {
-        alert('Failed to record payment in the ledger.');
+        toast.error('Failed to record payment on server.');
+        loadData();
       }
     } catch (err) {
       console.error('Error adding payment', err);
-      alert('Unable to record payment.');
-    } finally {
-      setIsSubmittingPayment(false);
+      toast.error('Unable to record payment on server.');
+      loadData();
     }
   };
 
-  // ── CANCELLATION & REFUND WORKFLOW ─────────────────────────────────────────
+  // ── UNIFIED CANCELLATION & INVENTORY RELEASE LOGIC ────────────────────────
+  const executeCancelBooking = async (
+    bookingId: number | string,
+    plotNumber: string,
+    reason: string,
+    refundAmount: number,
+    refundMode: string,
+    refundRef: string
+  ): Promise<boolean> => {
+    if (!reason.trim()) {
+      toast.warning('Please state a reason for cancellation.');
+      return false;
+    }
+
+    const bkg = bookings.find(b => String(b.id) === String(bookingId)) || cancellingBooking || managingBooking;
+    const updated = bkg ? { ...bkg, status: 'Cancelled' } : null;
+    if (updated) {
+      setBookings(prev => prev.map(b => String(b.id) === String(bookingId) ? updated : b));
+      if (selectedBooking && String(selectedBooking.id) === String(bookingId)) {
+        setSelectedBooking(updated);
+      }
+    }
+    toast.info(`✓ Booking cancelled for Plot ${plotNumber || ''}.`);
+
+    try {
+      const success = await jaminApiService.cancelBookingWithAudit(bookingId, {
+        cancellationReason: reason.trim(),
+        refundAmount: refundAmount,
+        refundPaymentMode: refundAmount > 0 ? refundMode : undefined,
+        refundTransactionReference: refundAmount > 0 ? refundRef.trim() : undefined,
+      });
+
+      if (success) {
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+        await loadData();
+        return true;
+      } else {
+        toast.error('Server failed to cancel booking. Reverting.');
+        await loadData();
+        return false;
+      }
+    } catch (err) {
+      console.error('Error cancelling booking', err);
+      toast.error('Unable to cancel booking on server.');
+      await loadData();
+      return false;
+    }
+  };
+
+  // ── DIRECT CANCELLATION MODAL ──────────────────────────────────────────────
   const handleOpenCancelModal = (b: any) => {
     setCancellingBooking(b);
     setCancelReason('');
@@ -440,33 +516,19 @@ export const BookingsPage: React.FC = () => {
   const handleConfirmCancelBooking = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!cancellingBooking) return;
-    if (!cancelReason.trim()) {
-      alert('Please state a reason for cancellation.');
-      return;
-    }
-
     setIsSubmittingCancel(true);
-    try {
-      const success = await jaminApiService.cancelBookingWithAudit(cancellingBooking.id, {
-        cancellationReason: cancelReason.trim(),
-        refundAmount: cancelRefundAmount,
-        refundPaymentMode: cancelRefundAmount > 0 ? cancelRefundMode : undefined,
-        refundTransactionReference: cancelRefundAmount > 0 ? cancelRefundRef.trim() : undefined,
-      });
-
-      if (success) {
-        setIsCancelModalOpen(false);
-        setCancellingBooking(null);
-        window.dispatchEvent(new Event('nexus_storage_updated'));
-        await loadData();
-      } else {
-        alert('Failed to cancel the booking. Please try again.');
-      }
-    } catch (err) {
-      console.error('Error cancelling booking', err);
-      alert('Unable to process cancellation.');
-    } finally {
-      setIsSubmittingCancel(false);
+    const ok = await executeCancelBooking(
+      cancellingBooking.id,
+      cancellingBooking.plotNumber || '',
+      cancelReason,
+      cancelRefundAmount,
+      cancelRefundMode,
+      cancelRefundRef
+    );
+    setIsSubmittingCancel(false);
+    if (ok) {
+      setIsCancelModalOpen(false);
+      setCancellingBooking(null);
     }
   };
 
@@ -481,6 +543,14 @@ export const BookingsPage: React.FC = () => {
     setManagePaymentMode(PAYMENT_MODES.includes(savedPaymentMode) ? savedPaymentMode : savedPaymentMode ? 'Other' : '');
     setManagePaymentModeOther(PAYMENT_MODES.includes(savedPaymentMode) ? '' : savedPaymentMode);
     setManagePaymentTerms(b.paymentTerms || '');
+
+    // Synchronize cancellation fields with direct cancel modal
+    const verifiedPaid = b.verifiedReceipts ?? b.tokenAmountPaid ?? 0;
+    setManageCancelReason(b.cancellationReason || '');
+    setManageCancelRefundAmount(verifiedPaid);
+    setManageCancelRefundMode('Bank Transfer / NEFT');
+    setManageCancelRefundRef('');
+
     setIsManageModalOpen(true);
   };
 
@@ -488,9 +558,22 @@ export const BookingsPage: React.FC = () => {
     e.preventDefault();
     if (!managingBooking || !manageStatus) return;
 
+    // Unified cancellation: execute identical plot release, refund audit, and status transition
     if (manageStatus === 'Cancelled') {
-      setIsManageModalOpen(false);
-      handleOpenCancelModal(managingBooking);
+      setIsSubmittingManage(true);
+      const ok = await executeCancelBooking(
+        managingBooking.id,
+        managingBooking.plotNumber || '',
+        manageCancelReason,
+        manageCancelRefundAmount,
+        manageCancelRefundMode,
+        manageCancelRefundRef
+      );
+      setIsSubmittingManage(false);
+      if (ok) {
+        setIsManageModalOpen(false);
+        setManagingBooking(null);
+      }
       return;
     }
 
@@ -525,6 +608,9 @@ export const BookingsPage: React.FC = () => {
   };
 
   const getAvailableStatusOptions = (currentStatus?: string) => {
+    if (currentStatus === 'Cancelled') {
+      return [{ value: 'Cancelled', label: 'Cancelled (Plot Released - Permanent)' }];
+    }
     return [
       { value: 'Hold', label: 'Hold (Temporary Reservation)' },
       { value: 'Pending Verification', label: 'Pending Verification' },
@@ -532,7 +618,7 @@ export const BookingsPage: React.FC = () => {
       { value: 'Token Verified', label: 'Token Verified' },
       { value: 'Agreement Signed', label: 'Agreement Signed' },
       { value: 'Registration Completed', label: 'Registration Completed' },
-      { value: 'Cancelled', label: 'Cancel Booking...' },
+      { value: 'Cancelled', label: 'Cancel Booking & Release Plot' },
     ];
   };
 
@@ -543,17 +629,63 @@ export const BookingsPage: React.FC = () => {
     return `₹${val.toLocaleString('en-IN')}`;
   };
 
-  const filteredPlotsForProject = selectedProjectId
-    ? plots.filter(p => String(p.projectId) === String(selectedProjectId) && (p.status === 'Available' || p.status === 'Hold'))
-    : plots.filter(p => p.status === 'Available' || p.status === 'Hold');
+  const filteredPlotsForProject = useMemo(() => {
+    if (!selectedProjectId) return [];
+    const normPhone = (p?: string) => (p || '').replace(/\D/g, '').slice(-10);
+    const buyerPhone10 = normPhone(customerPhone);
+    const buyerCustId = selectedCustomerId ? String(selectedCustomerId) : '';
+
+    return plots.filter(p => {
+      if (String(p.projectId) !== String(selectedProjectId)) return false;
+      // Do not expose already-booked, registered, or sold plots
+      if (p.status === 'Registered' || p.status === 'Sold' || p.status === 'Booked') return false;
+
+      // Available plots are open for booking
+      if (p.status === 'Available') return true;
+
+      // Plots on Hold: only selectable if held by this buyer or before buyer is selected
+      if (p.status === 'Hold') {
+        const heldPhone10 = normPhone(p.heldByCustomerPhone || p.holdPhone);
+        const heldCustId = p.heldByCustomerId ? String(p.heldByCustomerId) : '';
+        if (buyerCustId && heldCustId && buyerCustId === heldCustId) return true;
+        if (buyerPhone10 && heldPhone10 && buyerPhone10 === heldPhone10) return true;
+        if (!buyerCustId && !buyerPhone10) return true;
+        return false;
+      }
+
+      return false;
+    });
+  }, [selectedProjectId, plots, customerPhone, selectedCustomerId]);
+
+  const filteredBookings = useMemo(() => {
+    return bookings.filter(b => {
+      // 1. Buyer Type filter: 'Customer' vs 'Lead'
+      if (buyerTypeFilter === 'Customer') {
+        const isCustomer = Boolean(b.customerId && Number(b.customerId) > 0);
+        if (!isCustomer) return false;
+      } else if (buyerTypeFilter === 'Lead') {
+        const isCustomer = Boolean(b.customerId && Number(b.customerId) > 0);
+        if (isCustomer) return false;
+      }
+
+      // 2. Payment Status filter: 'Verified' vs 'Pending'
+      if (paymentStatusFilter !== 'All') {
+        const pStatus = (b.paymentStatus || (b.status === 'Booking Pending Verification' ? 'Pending' : 'Verified')).toLowerCase();
+        if (pStatus !== paymentStatusFilter.toLowerCase()) return false;
+      }
+
+      return true;
+    });
+  }, [bookings, buyerTypeFilter, paymentStatusFilter]);
 
   const columns: Column<any>[] = [
     {
       key: 'plotNumber',
       header: 'Plot & Community',
       sortable: true,
+      width: '16%',
       render: b => (
-        <div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
           <div className="booking-plot-number" style={{ fontWeight: 700, color: '#0f172a' }}>{b.plotNumber || 'Plot'}</div>
           <div className="booking-project-name" style={{ fontSize: '0.8rem', color: '#64748b' }}>{b.projectName || 'Jamin Project'}</div>
         </div>
@@ -563,53 +695,57 @@ export const BookingsPage: React.FC = () => {
       key: 'customerName',
       header: 'Buyer Information',
       sortable: true,
+      width: '22%',
       render: b => (
-        <div>
-          <div className="booking-customer-name" style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
-            {b.customerName}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+          <div className="booking-customer-name" style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            <span style={{ color: '#0f172a', fontSize: '0.9rem' }}>{b.customerName || '—'}</span>
             {b.customerId ? (
-              <span style={{ fontSize: '10px', background: '#e0f2fe', color: '#0369a1', padding: '1px 5px', borderRadius: '4px', fontWeight: 600 }}>Customer</span>
+              <span style={{ fontSize: '10px', background: '#e0f2fe', color: '#0369a1', padding: '1px 6px', borderRadius: '4px', fontWeight: 600, whiteSpace: 'nowrap', display: 'inline-block' }}>Customer</span>
             ) : (
-              <span style={{ fontSize: '10px', background: '#fef3c7', color: '#b45309', padding: '1px 5px', borderRadius: '4px', fontWeight: 600 }}>Lead</span>
+              <span style={{ fontSize: '10px', background: '#fef3c7', color: '#b45309', padding: '1px 6px', borderRadius: '4px', fontWeight: 600, whiteSpace: 'nowrap', display: 'inline-block' }}>Lead</span>
             )}
           </div>
-          <div className="booking-customer-phone" style={{ fontSize: '0.8rem', color: '#64748b' }}>{b.customerPhone}</div>
+          <div className="booking-customer-phone" style={{ fontSize: '0.8rem', color: '#64748b', whiteSpace: 'nowrap' }}>
+            {b.customerPhone || '—'}
+          </div>
         </div>
       ),
     },
     {
       key: 'totalPlotPrice',
-      header: 'Contract Value',
+      header: 'Contract & Balance Due',
       sortable: true,
-      render: b => (
-        <span className="booking-total-amount" style={{ fontWeight: 700, color: '#0f172a' }}>
-          {formatCurrency(b.totalPlotPrice || b.totalAmount)}
-        </span>
-      ),
-    },
-    {
-      key: 'verifiedReceipts',
-      header: 'Verified Paid',
-      sortable: true,
+      width: '19%',
       render: b => {
-        const verified = b.verifiedReceipts ?? (b.status === 'Token Paid' || b.paymentStatus === 'Verified' ? b.tokenAmountPaid : 0);
+        const val = b.contractBalance ?? Math.max(0, (b.totalPlotPrice || 0) - (b.verifiedReceipts ?? b.tokenAmountPaid ?? 0));
         return (
-          <span className="booking-token-amount" style={{ fontWeight: 700, color: verified > 0 ? '#059669' : '#64748b' }}>
-            {formatCurrency(verified)}
-          </span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            <span className="booking-total-amount" style={{ fontWeight: 700, color: '#0f172a' }}>
+              {formatCurrency(b.totalPlotPrice || b.totalAmount)}
+            </span>
+            <span style={{ fontSize: '0.78rem', fontWeight: 600, color: b.status === 'Cancelled' ? '#94a3b8' : val > 0 ? '#d97706' : '#059669', whiteSpace: 'nowrap' }}>
+              {b.status === 'Cancelled' ? 'Cancelled' : val > 0 ? `Due: ${formatCurrency(val)}` : 'Fully Settled'}
+            </span>
+          </div>
         );
       },
     },
     {
-      key: 'contractBalance',
-      header: 'Balance Due',
+      key: 'verifiedReceipts',
+      header: 'Payment & Status',
       sortable: true,
+      width: '16%',
       render: b => {
-        const val = b.contractBalance ?? Math.max(0, (b.totalPlotPrice || 0) - (b.verifiedReceipts ?? b.tokenAmountPaid ?? 0));
+        const verified = b.verifiedReceipts ?? (b.status === 'Token Paid' || b.paymentStatus === 'Verified' ? b.tokenAmountPaid : 0);
+        const pStatus = b.paymentStatus || (b.status === 'Booking Pending Verification' ? 'Pending' : 'Verified');
         return (
-          <span style={{ fontWeight: 600, color: b.status === 'Cancelled' ? '#94a3b8' : val > 0 ? '#d97706' : '#059669' }}>
-            {b.status === 'Cancelled' ? '—' : formatCurrency(val)}
-          </span>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '3px' }}>
+            <span className="booking-token-amount" style={{ fontWeight: 700, color: verified > 0 ? '#059669' : '#64748b' }}>
+              {formatCurrency(verified)}
+            </span>
+            <StatusChip status={pStatus} size="sm" />
+          </div>
         );
       },
     },
@@ -617,11 +753,12 @@ export const BookingsPage: React.FC = () => {
       key: 'status',
       header: 'Booking Lifecycle',
       sortable: true,
+      width: '16%',
       render: b => (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', minWidth: '130px', textAlign: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '3px' }}>
           <StatusChip status={b.status || 'Booking Pending Verification'} size="sm" />
           {b.notes ? (
-            <div style={{ fontSize: '11px', color: '#64748b', fontStyle: 'italic', wordBreak: 'break-word', lineHeight: 1.25, maxWidth: '160px' }} title={b.notes}>
+            <div style={{ fontSize: '11px', color: '#64748b', fontStyle: 'italic', wordBreak: 'break-word', lineHeight: 1.25, maxWidth: '140px' }} title={b.notes}>
               "{b.notes}"
             </div>
           ) : null}
@@ -629,21 +766,12 @@ export const BookingsPage: React.FC = () => {
       ),
     },
     {
-      key: 'paymentStatus',
-      header: 'Payment Status',
-      sortable: true,
-      render: b => (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', minWidth: '110px' }}>
-          <StatusChip status={b.paymentStatus || (b.status === 'Booking Pending Verification' ? 'Pending' : 'Verified')} size="sm" />
-        </div>
-      ),
-    },
-    {
       key: 'bookingDate',
       header: 'Date',
       sortable: true,
+      width: '11%',
       render: b => (
-        <span style={{ fontSize: '0.85rem', color: '#64748b' }}>
+        <span style={{ fontSize: '0.85rem', color: '#64748b', whiteSpace: 'nowrap' }}>
           {b.bookingDate ? new Date(b.bookingDate).toLocaleDateString() : 'Recent'}
         </span>
       ),
@@ -680,9 +808,61 @@ export const BookingsPage: React.FC = () => {
 
       <DataTable
         columns={columns}
-        data={bookings}
+        data={filteredBookings}
         loading={loading}
         keyExtractor={b => String(b.id)}
+        searchPlaceholder="Search bookings by buyer, plot, or status..."
+        searchFilter={(b: any, query: string) => {
+          const q = query.toLowerCase();
+          return (
+            (b.customerName || '').toLowerCase().includes(q) ||
+            (b.customerPhone || '').toLowerCase().includes(q) ||
+            (b.plotNumber || '').toLowerCase().includes(q) ||
+            (b.projectName || '').toLowerCase().includes(q) ||
+            (b.status || '').toLowerCase().includes(q) ||
+            (b.paymentStatus || '').toLowerCase().includes(q)
+          );
+        }}
+        emptyTitle="No bookings found"
+        emptyDescription={
+          buyerTypeFilter !== 'All' || paymentStatusFilter !== 'All'
+            ? 'No booking records match the selected buyer and payment filters. Try resetting filters.'
+            : 'No plot reservations or booking contracts have been registered yet.'
+        }
+        filtersNode={
+          <FilterBar
+            showLabel={false}
+            hideItemLabels={true}
+            filters={[
+              {
+                key: 'buyerType',
+                label: 'Buyer Type',
+                allLabel: 'All(Leads & Customers)',
+                value: buyerTypeFilter,
+                onChange: setBuyerTypeFilter,
+                options: [
+                  { value: 'Customer', label: 'Customers' },
+                  { value: 'Lead', label: 'Leads' },
+                ],
+              },
+              {
+                key: 'paymentStatus',
+                label: 'Payment Status',
+                allLabel: 'All Payment Statuses',
+                value: paymentStatusFilter,
+                onChange: setPaymentStatusFilter,
+                options: [
+                  { value: 'Verified', label: 'Verified Payments' },
+                  { value: 'Pending', label: 'Pending Verification' },
+                ],
+              },
+            ]}
+            onClearAll={() => {
+              setBuyerTypeFilter('All');
+              setPaymentStatusFilter('All');
+            }}
+          />
+        }
         rowActions={[
           {
             label: 'Verify Payment',
@@ -698,8 +878,10 @@ export const BookingsPage: React.FC = () => {
             disabled: (b: any) => b.status === 'Cancelled' || b.status === 'Registration Completed',
           },
           {
-            label: 'Update Status',
-            onClick: (b: any) => handleOpenManageModal(b, 'status'),
+            label: 'Edit Booking',
+            icon: <Edit size={14} color="#3b82f6" />,
+            onClick: (b: any) => handleOpenManageModal(b, 'details'),
+            disabled: (b: any) => b.status === 'Cancelled',
           },
           {
             label: 'Cancel Booking',
@@ -713,7 +895,6 @@ export const BookingsPage: React.FC = () => {
             onClick: b => setSelectedBooking(b),
           },
         ]}
-        searchPlaceholder="Search bookings by customer, plot, or date..."
         onRowClick={b => setSelectedBooking(b)}
       />
 
@@ -816,6 +997,16 @@ export const BookingsPage: React.FC = () => {
                   onClick={() => handleOpenAddPaymentModal(selectedBooking)}
                 >
                   <CreditCard size={14} /> Record Installment
+                </button>
+              )}
+              {selectedBooking.status !== 'Cancelled' && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                  onClick={() => handleOpenManageModal(selectedBooking, 'details')}
+                >
+                  <Edit size={14} /> Edit Booking
                 </button>
               )}
               {selectedBooking.status !== 'Cancelled' && (
@@ -1547,16 +1738,81 @@ export const BookingsPage: React.FC = () => {
             </div>
           )}
 
-          <div className="form-group">
-            <label className="form-label">Remarks / Notes</label>
-            <textarea
-              className="form-textarea"
-              rows={3}
-              value={manageNote}
-              onChange={e => setManageNote(e.target.value)}
-              placeholder="Add booking remarks..."
-            />
-          </div>
+          {manageStatus === 'Cancelled' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '12px 16px', color: '#991b1b', fontSize: '13px' }}>
+                <div style={{ fontWeight: 700, marginBottom: '4px' }}>⚠️ Inventory Release Warning</div>
+                <div>Cancelling this booking will immediately release <strong>Plot {managingBooking?.plotNumber}</strong> back to <strong>Available</strong> inventory and record cancellation audit.</div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Cancellation Reason *</label>
+                <textarea
+                  className="form-textarea"
+                  rows={2}
+                  required
+                  value={manageCancelReason}
+                  onChange={e => setManageCancelReason(e.target.value)}
+                  placeholder="e.g. Buyer opted out due to financial constraints, loan rejected, or plot relocated..."
+                />
+              </div>
+
+              <div className="booking-form-grid-2">
+                <div className="form-group">
+                  <label className="form-label">Refund Amount (₹)</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    min={0}
+                    value={manageCancelRefundAmount}
+                    onChange={e => setManageCancelRefundAmount(Number(e.target.value))}
+                  />
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>
+                    Total verified: {formatCurrency(managingBooking?.verifiedReceipts ?? managingBooking?.tokenAmountPaid)}
+                  </span>
+                </div>
+
+                {manageCancelRefundAmount > 0 && (
+                  <div className="form-group">
+                    <label className="form-label">Refund Payment Mode</label>
+                    <select
+                      className="form-select"
+                      value={manageCancelRefundMode}
+                      onChange={e => setManageCancelRefundMode(e.target.value)}
+                    >
+                      {PAYMENT_MODES.map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {manageCancelRefundAmount > 0 && (
+                <div className="form-group">
+                  <label className="form-label">Refund Transaction Reference / UTR</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={manageCancelRefundRef}
+                    onChange={e => setManageCancelRefundRef(e.target.value)}
+                    placeholder="Bank UTR or refund transaction reference"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {manageStatus !== 'Cancelled' && (
+            <div className="form-group">
+              <label className="form-label">Remarks / Notes</label>
+              <textarea
+                className="form-textarea"
+                rows={3}
+                value={manageNote}
+                onChange={e => setManageNote(e.target.value)}
+                placeholder="Add booking remarks..."
+              />
+            </div>
+          )}
 
           <div className="booking-form-actions">
             <button
@@ -1570,9 +1826,12 @@ export const BookingsPage: React.FC = () => {
             <button
               type="submit"
               className="btn btn-primary"
+              style={manageStatus === 'Cancelled' ? { background: '#dc2626', borderColor: '#dc2626' } : undefined}
               disabled={isSubmittingManage || !manageStatus}
             >
-              {isSubmittingManage ? 'Saving...' : 'Save Booking Details'}
+              {isSubmittingManage
+                ? (manageStatus === 'Cancelled' ? 'Cancelling...' : 'Saving...')
+                : (manageStatus === 'Cancelled' ? 'Confirm Cancellation & Release Plot' : 'Save Booking Details')}
             </button>
           </div>
         </form>

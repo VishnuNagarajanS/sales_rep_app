@@ -953,40 +953,26 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
         }}
         title={`${viewingBlueprintProject?.name || 'Project'} — Master Layout Blueprint`}
         subtitle={`Master layout diagram and community plan for ${viewingBlueprintProject?.location || ''}`}
-        size="lg"
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {/* Controls Bar */}
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            background: 'var(--bg-surface-hover, #f8fafc)',
-            padding: '8px 14px',
-            borderRadius: '8px',
-            border: '1px solid var(--border-base, #e2e8f0)',
-            flexWrap: 'wrap',
-            gap: '8px',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.85rem', color: 'var(--text-secondary, #475569)' }}>
+        size="xl"
+        headerActions={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: 'var(--text-secondary, #475569)', marginRight: '4px' }}>
               <span>Zoom: <strong style={{ color: 'var(--text-primary, #0f172a)' }}>{Math.round(blueprintZoom * 100)}%</strong></span>
               {blueprintRotation > 0 && (
-                <span>• Rotation: <strong>{blueprintRotation}°</strong></span>
+                <span>• <strong>{blueprintRotation}°</strong></span>
               )}
-              <span>•</span>
-              <span>Total Plots: <strong>{viewingBlueprintProject?.totalPlots || 0}</strong></span>
               <span>•</span>
               <span style={{ color: '#059669', fontWeight: 600 }}>{viewingBlueprintProject?.availablePlots || 0} Available</span>
             </div>
 
-            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
                 onClick={() => setBlueprintZoom(prev => Math.max(0.25, parseFloat((prev - 0.25).toFixed(2))))}
                 disabled={blueprintZoom <= 0.25}
                 title="Zoom Out (-25%)"
-                style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center', height: '32px' }}
               >
                 <ZoomOut size={14} />
               </button>
@@ -996,7 +982,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
                 onClick={() => setBlueprintZoom(prev => Math.min(3.5, parseFloat((prev + 0.25).toFixed(2))))}
                 disabled={blueprintZoom >= 3.5}
                 title="Zoom In (+25%)"
-                style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center', height: '32px' }}
               >
                 <ZoomIn size={14} />
               </button>
@@ -1005,7 +991,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
                 className="btn btn-secondary btn-sm"
                 onClick={() => setBlueprintRotation(prev => (prev + 90) % 360)}
                 title="Rotate 90° Clockwise"
-                style={{ padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 500 }}
+                style={{ padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 500, height: '32px' }}
               >
                 <RotateCw size={14} /> Rotate
               </button>
@@ -1014,7 +1000,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
                 className="btn btn-secondary btn-sm"
                 onClick={() => { setBlueprintZoom(1); setBlueprintRotation(0); }}
                 title="Reset Zoom (100%) and Rotation (0°)"
-                style={{ padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                style={{ padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px', height: '32px' }}
               >
                 <RotateCcw size={14} /> Reset
               </button>
@@ -1023,13 +1009,15 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
                 className="btn btn-secondary btn-sm"
                 onClick={() => setIsBlueprintFullScreen(true)}
                 title="Open Full Screen View"
-                style={{ padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 600, color: 'var(--primary-600, #4f46e5)' }}
+                style={{ padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 600, color: 'var(--primary-600, #4f46e5)', height: '32px' }}
               >
                 <Maximize2 size={14} /> Full Screen
               </button>
             </div>
           </div>
-
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
           {/* Blueprint Canvas Container - sized strictly to the image with no harsh background color */}
           <div style={{
             width: '100%',

@@ -29,11 +29,20 @@ import { useAuth } from '../../context/AuthContext';
 import './AdminKanbanBoard.css';
 
 interface AdminKanbanBoardProps {
-  onOpenQuickCreate?: (type: 'lead' | 'followup' | 'deal' | 'visit' | 'consultation') => void;
+  onOpenQuickCreate?: (type: 'lead' | 'customer' | 'booking' | 'followup' | 'visit' | 'consultation') => void;
 }
 
 export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({ onOpenQuickCreate }) => {
   const { tenant, user } = useAuth();
+  const isJamin = Boolean(
+    tenant?.slug?.toLowerCase() === 'jamin' ||
+    tenant?.id === 't-jamin-02' ||
+    tenant?.id === '2' ||
+    user?.companySlug?.toLowerCase() === 'jamin' ||
+    (user?.companyName && /jamin/i.test(user.companyName)) ||
+    user?.companyId === 2 ||
+    (user?.companyId as any) === '2'
+  );
 
   // ── Global Filter States ────────────────────────────────────────────────
   const [selectedRole, setSelectedRole] = useState<KanbanRole>('sales_executive');
@@ -311,9 +320,9 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({ onOpenQuickC
           {onOpenQuickCreate && (
             <button
               className="btn btn-primary btn-sm"
-              onClick={() => onOpenQuickCreate(selectedRole === 'sales_executive' ? 'lead' : 'deal')}
+              onClick={() => onOpenQuickCreate(isJamin || selectedRole === 'sales_executive' ? 'lead' : ('deal' as any))}
             >
-              <Plus size={14} /> New {selectedRole === 'sales_executive' ? 'Lead' : 'Investor Record'}
+              <Plus size={14} /> New {isJamin || selectedRole === 'sales_executive' ? 'Lead' : 'Investor Record'}
             </button>
           )}
         </div>

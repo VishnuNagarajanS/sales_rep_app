@@ -26,6 +26,7 @@ import { jaminApiService } from '../../services/jaminApiService';
 import { getFollowups as apiGetFollowups, saveFollowup as apiSaveFollowup } from '../../services/ghlApiService';
 import { adminUserService } from '../../services/adminUserService';
 import { storageService } from '../../services/storageService';
+import { toast } from '../../context/ToastContext';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { FilterBar } from '../../components/common/FilterBar';
 import { StatusChip } from '../../components/common/StatusChip';
@@ -371,9 +372,11 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       if (isJamin) {
         const liveLeads = await jaminApiService.getLeads(true);
         const convertedLeads = await jaminApiService.getLeads(true, undefined, 'Converted');
+        const localLeads = storageService.getLeads(tenant?.id) || [];
         const leadMap = new Map<string, Lead>();
-        (liveLeads || []).forEach(l => leadMap.set(String(l.id), l));
-        (convertedLeads || []).forEach(l => leadMap.set(String(l.id), l));
+        localLeads.forEach(l => leadMap.set(l.id, l));
+        (liveLeads || []).forEach(l => leadMap.set(l.id, l));
+        (convertedLeads || []).forEach(l => leadMap.set(l.id, l));
         updated = Array.from(leadMap.values());
       } else {
         const res = await apiClient.get<any>(`/leads?tenantId=${effectiveCompanyId}`);
@@ -428,7 +431,11 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         }
       }
     } catch (err) {
-      console.warn('API leads load error:', err);
+      console.warn('API leads load error, falling back to storage:', err);
+    }
+
+    if (updated.length === 0) {
+      updated = storageService.getLeads(tenant?.id);
     }
 
     const sanitizeAgent = (lead: Lead): Lead => {
@@ -563,6 +570,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
   const showToast = (msg: string) => {
     setToast(msg);
+    toast.success(msg);
     setTimeout(() => setToast(null), 3500);
   };
 
@@ -759,6 +767,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       nextFollowupDate: isoScheduledAt,
       nextFollowupType: scheduleType,
     };
+    storageService.saveLead(updatedLead);
     setSelectedLead(updatedLead);
     setLeads(prev => prev.map(l => l.id === updatedLead.id ? updatedLead : l));
 
@@ -941,7 +950,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     setLeadVisitPlotId('');
     setLeadVisitPlot('');
     if (projId) {
-      jaminApiService.getPlots(projId).then(data => setLeadVisitPlotsList(data || [])).catch(() => setLeadVisitPlotsList([]));
+      jaminApiService.getPlots(projId).then(data => setLeadVisitPlotsList((data || []).filter((p: any) => p.status === 'Available'))).catch(() => setLeadVisitPlotsList([]));
     } else {
       setLeadVisitPlotsList([]);
     }
@@ -963,7 +972,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     setLeadVisitPlotId('');
     setLeadVisitPlot('');
     if (projId) {
-      jaminApiService.getPlots(projId).then(data => setLeadVisitPlotsList(data || [])).catch(() => setLeadVisitPlotsList([]));
+      jaminApiService.getPlots(projId).then(data => setLeadVisitPlotsList((data || []).filter((p: any) => p.status === 'Available'))).catch(() => setLeadVisitPlotsList([]));
     } else {
       setLeadVisitPlotsList([]);
     }
@@ -998,25 +1007,31 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     const plotObj = leadVisitPlotsList.find(p => String(p.id) === leadVisitPlotId);
 
     if (isJamin) {
-      created = await jaminApiService.scheduleSiteVisit({
-        leadId: Number(selectedLead.id),
-        contactType: 'lead',
-        customerName: selectedLead.name,
-        customerPhone: selectedLead.phone,
-        projectId: leadVisitProjectId ? Number(leadVisitProjectId) : undefined,
-        plotId: leadVisitPlotId ? Number(leadVisitPlotId) : undefined,
-        projectName: projectObj?.name || leadVisitProject || 'Jamin Development',
-        plotNumber: plotObj?.plotNumber || (leadVisitPlot || 'General Project Tour'),
-        scheduledAt: dateFormatted,
-        assignedAgentId: Number(hostAg?.id || selectedLead.assignedAgentId || user?.id) || undefined,
-        assignedAgentName: hostAg?.name || leadVisitHostAgent || selectedLead.assignedAgentName || user?.name || 'Agent',
-        visitorNote: trimmedNotes,
-      });
+      try {
+        created = await jaminApiService.scheduleSiteVisit({
+          leadId: Number(selectedLead.id),
+          contactType: 'lead',
+          customerName: selectedLead.name,
+          customerPhone: selectedLead.phone,
+          projectId: leadVisitProjectId ? Number(leadVisitProjectId) : undefined,
+          plotId: leadVisitPlotId ? Number(leadVisitPlotId) : undefined,
+          projectName: projectObj?.name || leadVisitProject || 'Jamin Development',
+          plotNumber: plotObj?.plotNumber || '',
+          scheduledAt: dateFormatted,
+          assignedAgentId: Number(hostAg?.id || selectedLead.assignedAgentId || user?.id) || undefined,
+          assignedAgentName: hostAg?.name || leadVisitHostAgent || selectedLead.assignedAgentName || user?.name || 'Agent',
+          visitorNote: trimmedNotes,
+        });
+      } catch (err: any) {
+        alert(err?.message || 'The site visit could not be saved. Check the selected lead and company, then try again.');
+        return;
+      }
     }
     if (!created) {
       alert('The site visit could not be saved. Check the selected lead and company, then try again.');
       return;
     }
+    storageService.saveSiteVisit(created);
     setApiSiteVisits(prev => [created!, ...prev.filter(v => v.id !== created!.id)]);
 
     // Automatically transition lead status to 'Site Visit Scheduled'
@@ -1024,6 +1039,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       const updatedLead: Lead = { ...selectedLead, status: 'Site Visit Scheduled' };
       setSelectedLead(updatedLead);
       setLeads(prev => prev.map(l => l.id === selectedLead.id ? updatedLead : l));
+      storageService.saveLead(updatedLead);
       const numericId = parseInt(String(selectedLead.id).replace('db-', ''), 10);
       if (!isNaN(numericId)) {
         await apiClient.put(`/leads/${numericId}`, {
@@ -1209,7 +1225,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       : (resolvedAgentId ? 'Agent' : 'Unassigned');
 
     const targetCompanyId = formData.companyId || tenant?.id || 't-ghl-01';
-    const existingMatch = leads.find(l => l.id === formData.id) || (formData.phone ? leads.find(l => (l.phone || '').replace(/\D/g, '').slice(-10) === formData.phone.replace(/\D/g, '').slice(-10)) : null);
+    const existingMatch = leads.find(l => l.id === formData.id) || (formData.phone ? storageService.findLeadByPhone(formData.phone, targetCompanyId) : null);
     const isExistingById = Boolean(existingMatch);
 
     const resolvedBudget = formData.budgetRange || formData.customFields?.budgetRange || formData.customFields?.investmentCapacity || existingMatch?.budgetRange || existingMatch?.customFields?.budgetRange || '';
@@ -1325,7 +1341,44 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       return;
     }
 
-    window.dispatchEvent(new Event('nexus_storage_updated'));
+    storageService.saveLead(leadToSave);
+
+    // Synchronize local site visits cache when lead status changes
+    if (leadToSave.status === 'Site Visit Completed') {
+      const allVisits = storageService.getSiteVisits ? storageService.getSiteVisits(tenant?.id) : [];
+      const cleanLId = String(leadToSave.id).replace(/\D/g, '');
+      const lPhone = (leadToSave.phone || '').replace(/\D/g, '').slice(-10);
+      let changed = false;
+      allVisits.forEach((sv: any) => {
+        const svLId = String(sv.leadId || '').replace(/\D/g, '');
+        const svPhone = (sv.customerPhone || '').replace(/\D/g, '').slice(-10);
+        if ((cleanLId && svLId === cleanLId) || (lPhone && svPhone === lPhone)) {
+          if (sv.status !== 'Cancelled') {
+            sv.status = 'Completed';
+            storageService.saveSiteVisit(sv);
+            changed = true;
+          }
+        }
+      });
+      if (changed) window.dispatchEvent(new Event('nexus_storage_updated'));
+    } else if (leadToSave.status === 'Site Visit Scheduled') {
+      const allVisits = storageService.getSiteVisits ? storageService.getSiteVisits(tenant?.id) : [];
+      const cleanLId = String(leadToSave.id).replace(/\D/g, '');
+      const lPhone = (leadToSave.phone || '').replace(/\D/g, '').slice(-10);
+      let changed = false;
+      allVisits.forEach((sv: any) => {
+        const svLId = String(sv.leadId || '').replace(/\D/g, '');
+        const svPhone = (sv.customerPhone || '').replace(/\D/g, '').slice(-10);
+        if ((cleanLId && svLId === cleanLId) || (lPhone && svPhone === lPhone)) {
+          if (sv.status === 'Pending' || sv.status === 'Requested') {
+            sv.status = 'Scheduled';
+            storageService.saveSiteVisit(sv);
+            changed = true;
+          }
+        }
+      });
+      if (changed) window.dispatchEvent(new Event('nexus_storage_updated'));
+    }
 
     // ── Immediately sync React state so the 360 view shows the saved values ──
     setLeads(prev => {
@@ -1391,6 +1444,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       } catch (err) {
         console.error('Failed to delete lead from DB', err);
       }
+      storageService.deleteLead(lead.id);
       storageService.addAuditLog({
         id: `aud-${Date.now()}`,
         timestamp: new Date().toISOString(),
@@ -1435,6 +1489,27 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     }
 
     const updatedLead: Lead = { ...selectedLead, status: 'Converted' };
+    storageService.saveLead(updatedLead);
+    if (!conversionResult.customerId && !isJamin) {
+      storageService.saveCustomer({
+        id: `cust-${Date.now()}`,
+        companyId: tenant.id,
+        name: selectedLead.name,
+        phone: selectedLead.phone,
+        email: selectedLead.email || '',
+        status: 'Active',
+        assignedAgentId: selectedLead.assignedAgentId,
+        assignedAgentName: selectedLead.assignedAgentName,
+        location: selectedLead.location || '',
+        lastContacted: new Date().toISOString(),
+        openDealsCount: 0,
+        totalValue: 0,
+        createdAt: new Date().toISOString(),
+        notes: selectedLead.notes || '',
+        customFields: selectedLead.customFields,
+      });
+    }
+
     showToast(`✓ Lead "${selectedLead.name}" converted to Customer successfully.`);
     setIsConvertModalOpen(false);
     setIsDetailDrawerOpen(false);
@@ -3973,10 +4048,10 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                   onChange={e => handleLeadVisitPlotChange(e.target.value)}
                   disabled={!leadVisitProjectId || leadVisitPlotsList.length === 0}
                 >
-                  <option value="">-- General Project Tour --</option>
+                  <option value="">-- General Project Tour (No Specific Plot) --</option>
                   {leadVisitPlotsList.map((pl: any) => (
                     <option key={pl.id} value={String(pl.id)}>
-                      {pl.plotNumber} · {pl.dimensions || ''} · {pl.status || ''}
+                      {pl.plotNumber} · {pl.dimensions || ''} · Available
                       {pl.price ? ` · ₹${Number(pl.price).toLocaleString('en-IN')}` : ''}
                     </option>
                   ))}

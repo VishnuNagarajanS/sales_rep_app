@@ -9,6 +9,8 @@
   letter-spacing: 0.01em;
   border: 1px solid transparent;
   white-space: nowrap;
+  width: fit-content;
+  max-width: max-content;
 }
 
 .status-dot {
