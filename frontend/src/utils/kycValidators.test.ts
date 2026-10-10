@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { kycValidators, validateKycStep, getDobValidationError } from './kycValidators';
+import { kycValidators, validateKycStep, getDobValidationError, sanitizeDobString } from './kycValidators';
 
 describe('kycValidators', () => {
   describe('pan', () => {
@@ -121,6 +121,16 @@ describe('kycValidators', () => {
     it('returns specific explanation for impossible dates like 30-02-1999', () => {
       expect(getDobValidationError('30-02-1999')).toContain('February 1999 has only 28 days');
       expect(getDobValidationError('')).toBe('Date of birth is required.');
+    });
+    it('rejects years with more than 4 digits', () => {
+      expect(getDobValidationError('20000-02-03')).toBe('Year must be 4 digits.');
+      expect(getDobValidationError('03-02-20000')).toBe('Year must be 4 digits.');
+    });
+    it('clamps 5+ digit years correctly using sanitizeDobString', () => {
+      expect(sanitizeDobString('20000-02-03')).toBe('2000-02-03');
+      expect(sanitizeDobString('03-02-20000')).toBe('03-02-2000');
+      expect(sanitizeDobString('1995-12-15')).toBe('1995-12-15');
+      expect(sanitizeDobString('')).toBe('');
     });
   });
 

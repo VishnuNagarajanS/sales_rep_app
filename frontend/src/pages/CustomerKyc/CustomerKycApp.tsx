@@ -26,6 +26,7 @@ import './CustomerKycApp.css';
 import {
   kycValidators,
   validateKycStep,
+  sanitizeDobString,
   SharedKycFormData,
   NomineeItem,
   GENDER_OPTIONS,
@@ -1518,9 +1519,11 @@ export const CustomerKycApp: React.FC = () => {
                   <input
                     id="w-dob"
                     type="date"
+                    min="1900-01-01"
+                    max={new Date().toISOString().split('T')[0]}
                     className={`ckyc-input${formErrors.dob ? ' ckyc-input-error' : ''}`}
-                    value={formData.dob}
-                    onChange={e => handleInputChange('dob', e.target.value)}
+                    value={sanitizeDobString(formData.dob)}
+                    onChange={e => handleInputChange('dob', sanitizeDobString(e.target.value))}
                   />
                   <FieldError field="dob" />
                 </div>
@@ -1848,9 +1851,11 @@ export const CustomerKycApp: React.FC = () => {
                             <input
                               id={`w-nom-${idx}-dob`}
                               type="date"
+                              min="1900-01-01"
+                              max={new Date().toISOString().split('T')[0]}
                               className={`ckyc-input${formErrors[`nominee_${idx}_dob`] ? ' ckyc-input-error' : ''}`}
-                              value={nom.dob}
-                              onChange={e => handleUpdateNominee(idx, 'dob', e.target.value)}
+                              value={sanitizeDobString(nom.dob)}
+                              onChange={e => handleUpdateNominee(idx, 'dob', sanitizeDobString(e.target.value))}
                             />
                             <FieldError field={`nominee_${idx}_dob`} />
                           </div>

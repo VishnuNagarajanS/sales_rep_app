@@ -515,7 +515,7 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
                 className="all-leads-agent-select"
                 title="Filter by Assigner / Creator"
               >
-                <option value="all">All Agents & Sources</option>
+                <option value="all">Agents</option>
                 {agentOptions.map(agent => (
                   <option key={agent} value={agent}>
                     {agent}

@@ -35,7 +35,8 @@ import {
 } from '../../../services/ghlApiService';
 import { apiUrl } from '../../../utils/apiUrl';
 import { getAuthHeaders } from '../../../utils/authHeaders';
-import { formatSmartScheduleDate, isDateToday } from '../../../utils/dateUtils';
+import { formatSmartScheduleDate, isDateToday, isDateOverdue, isDateDueTodayOrOverdue } from '../../../utils/dateUtils';
+import { getAgentRoleInfo, getAssigningSalesAgentInfo } from '../../../utils/agentRoleUtils';
 import {
   Lead,
   Deal,
@@ -179,9 +180,24 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
     return false;
   }, [user]);
 
+  // Lead scoping for this IRM: includes leads directly assigned to IRM or handed over to IRM
+  const isMineLead = useCallback((l: Lead) => {
+    if (!user) return false;
+    const uId = String(user.id);
+    const uName = (user.name || '').trim().toLowerCase();
+    return (
+      (l.assignedIrmId && String(l.assignedIrmId) === uId) ||
+      (l.assignedIrmName && l.assignedIrmName.trim().toLowerCase() === uName) ||
+      (l.customFields?.assignedIrmId && String(l.customFields.assignedIrmId) === uId) ||
+      (l.customFields?.assignedIrmName && String(l.customFields.assignedIrmName).trim().toLowerCase() === uName) ||
+      (l.assignedAgentId && String(l.assignedAgentId) === uId) ||
+      (!!l.assignedAgentName && l.assignedAgentName.trim().toLowerCase() === uName)
+    );
+  }, [user]);
+
   // Scoped datasets for the logged-in IRM
-  const scopedLeads = useMemo(() => leads.filter(l => isMine(l.assignedAgentId, l.assignedAgentName)), [leads, isMine]);
-  const scopedInvestors = useMemo(() => investors.filter(i => isMine(i.assignedAgentId, i.assignedAgentName)), [investors, isMine]);
+  const scopedLeads = useMemo(() => leads.filter(l => isMineLead(l)), [leads, isMineLead]);
+  const scopedInvestors = useMemo(() => investors.filter(i => isMine(i.assignedAgentId, i.assignedAgentName) || (i.assignedIrmId && String(i.assignedIrmId) === String(user?.id)) || (i.assignedIrmName && i.assignedIrmName.trim().toLowerCase() === (user?.name || '').trim().toLowerCase())), [investors, isMine, user]);
   const scopedOpportunities = useMemo(() => opportunities.filter(o => isMine(o.assignedAgentId, o.assignedAgentName)), [opportunities, isMine]);
   const scopedFollowups = useMemo(() => followups.filter(f => isMine(f.assignedAgentId, f.assignedAgentName)), [followups, isMine]);
   const scopedConsultations = useMemo(() => consultations.filter(c => isMine(c.consultantId, c.consultantName)), [consultations, isMine]);
@@ -288,28 +304,17 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
   }, [scopedFollowups]);
 
   const overdueFollowups = useMemo(() => {
-    return pendingFollowups.filter(f => {
-      if (!f.scheduledAt) return false;
-      const d = new Date(f.scheduledAt);
-      if (isNaN(d.getTime())) {
-        const sch = (f.scheduledAt || '').toLowerCase();
-        return sch.includes('yesterday') || sch.includes('overdue');
-      }
-      return d.getTime() < Date.now();
-    });
+    return pendingFollowups.filter(f => isDateOverdue(f.scheduledAt));
   }, [pendingFollowups]);
 
   // Today's Follow-ups
   const todaysFollowups = useMemo(() => {
-    return pendingFollowups.filter(f => {
-      if (!f.scheduledAt) return false;
-      const d = new Date(f.scheduledAt);
-      if (isNaN(d.getTime())) {
-        const sch = (f.scheduledAt || '').toLowerCase();
-        return sch.includes('today') || !sch.includes('yesterday');
-      }
-      return isDateToday(d);
-    });
+    return pendingFollowups.filter(f => isDateToday(f.scheduledAt));
+  }, [pendingFollowups]);
+
+  // Actionable Due Follow-ups (Due Today + Overdue)
+  const dueFollowups = useMemo(() => {
+    return pendingFollowups.filter(f => isDateDueTodayOrOverdue(f.scheduledAt));
   }, [pendingFollowups]);
 
   // Client Tiers
@@ -334,7 +339,7 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
 
   const todayLeads = useMemo(() => {
     return scopedLeads.filter(l => {
-      const d = l.assignedAt || l.createdAt;
+      const d = l.assignedIrmAt || (l as any).assignedAt || l.createdAt;
       return isDateToday(d);
     });
   }, [scopedLeads]);
@@ -367,7 +372,7 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
             Welcome back, {user?.name?.split(' ')[0] || user?.name || 'Advisor'} 👋
           </h1>
           <p className="irm-banner-subtitle">
-            You have <strong>{pendingFollowups.length} follow-ups</strong> scheduled and{' '}
+            You have <strong>{dueFollowups.length} follow-up{dueFollowups.length === 1 ? '' : 's'}</strong> due today and{' '}
             <strong>{totalKycTargetCount - verifiedKycs.length} investor KYC cases</strong> awaiting compliance verification.
           </p>
         </div>
@@ -470,12 +475,12 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
             <span className="irm-kpi-label">DUE FOLLOW-UPS</span>
             <div className="irm-kpi-icon followups"><Clock size={16} /></div>
           </div>
-          <div className="irm-kpi-val">{pendingFollowups.length}</div>
+          <div className="irm-kpi-val">{dueFollowups.length}</div>
           <div className="irm-kpi-progress-track">
             <div
               className="irm-kpi-progress-fill followups"
               style={{
-                width: `${overdueFollowups.length > 0 ? 100 : 45}%`,
+                width: `${overdueFollowups.length > 0 ? 100 : (dueFollowups.length > 0 ? 60 : 0)}%`,
                 backgroundColor: overdueFollowups.length > 0 ? '#ef4444' : '#f59e0b',
               }}
             />
@@ -488,6 +493,8 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
               <>
                 <AlertCircle size={13} /> {overdueFollowups.length} overdue follow-up item!
               </>
+            ) : dueFollowups.length > 0 ? (
+              `${dueFollowups.length} scheduled for today`
             ) : (
               'All scheduled on time'
             )}
@@ -546,59 +553,67 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
           </div>
 
           <div className="irm-followups-list">
-            {todayLeads.slice(0, 5).map(lead => (
-              <div key={lead.id} className="irm-followup-row">
-                <div className="irm-followup-info">
-                  <div className="irm-followup-top">
-                    <span className="irm-followup-name">{lead.name}</span>
-                    <StatusChip status={lead.status} size="sm" />
-                    {lead.priority && (
-                      <span
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          padding: '1px 6px',
-                          borderRadius: 4,
-                          textTransform: 'uppercase',
-                          background:
-                            lead.priority.toLowerCase() === 'high' || lead.priority.toLowerCase() === 'urgent'
-                              ? 'rgba(239, 68, 68, 0.15)'
-                              : 'rgba(59, 130, 246, 0.15)',
-                          color:
-                            lead.priority.toLowerCase() === 'high' || lead.priority.toLowerCase() === 'urgent'
-                              ? '#ef4444'
-                              : '#3b82f6',
-                        }}
-                      >
-                        {lead.priority}
+            {todayLeads.slice(0, 5).map(lead => {
+              const salesAgent = getAssigningSalesAgentInfo(lead);
+              return (
+                <div key={lead.id} className="irm-followup-row">
+                  <div className="irm-followup-info">
+                    <div className="irm-followup-top">
+                      <span className="irm-followup-name">{lead.name}</span>
+                      <StatusChip status={lead.status} size="sm" />
+                      {lead.priority && (
+                        <span
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 700,
+                            padding: '1px 6px',
+                            borderRadius: 4,
+                            textTransform: 'uppercase',
+                            background:
+                              lead.priority.toLowerCase() === 'high' || lead.priority.toLowerCase() === 'urgent'
+                                ? 'rgba(239, 68, 68, 0.15)'
+                                : 'rgba(59, 130, 246, 0.15)',
+                            color:
+                              lead.priority.toLowerCase() === 'high' || lead.priority.toLowerCase() === 'urgent'
+                                ? '#ef4444'
+                                : '#3b82f6',
+                          }}
+                        >
+                          {lead.priority}
+                        </span>
+                      )}
+                    </div>
+                    <div className="irm-td-sub" style={{ marginTop: 2 }}>
+                      📞 {lead.phone} {lead.location ? `• 📍 ${lead.location}` : ''}
+                    </div>
+                    <div className="irm-followup-due" style={{ color: 'var(--text-muted)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 3 }}>
+                      <span>👤 Assigned by:</span>
+                      <strong style={{ color: 'var(--text-primary)' }}>{salesAgent.name}</strong>
+                      <span className={`badge-role-inline ${salesAgent.badgeClass}`}>
+                        {salesAgent.role}
                       </span>
-                    )}
+                      <span>• 🕒 {formatLeadTime(lead.assignedIrmAt || (lead as any).assignedAt || lead.createdAt)}</span>
+                    </div>
                   </div>
-                  <div className="irm-td-sub" style={{ marginTop: 2 }}>
-                    📞 {lead.phone} {lead.location ? `• 📍 ${lead.location}` : ''}
-                  </div>
-                  <div className="irm-followup-due" style={{ color: 'var(--text-muted)', fontSize: 11 }}>
-                    👤 Assigned by: <strong>{lead.assignedAgentName || 'Sales Agent'}</strong> • 🕒 {formatLeadTime(lead.assignedAt || lead.createdAt)}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button
+                      className="btn btn-call btn-sm irm-action-call-btn"
+                      title={`Dial ${lead.name}`}
+                      onClick={() => initiateCall(lead.name, lead.phone, 'lead', lead.id)}
+                    >
+                      <Phone size={12} /> Call
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      title="Open in My Leads"
+                      onClick={() => onNavigate('leads')}
+                    >
+                      <ArrowRight size={12} />
+                    </button>
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <button
-                    className="btn btn-call btn-sm irm-action-call-btn"
-                    title={`Dial ${lead.name}`}
-                    onClick={() => initiateCall(lead.name, lead.phone, 'lead', lead.id)}
-                  >
-                    <Phone size={12} /> Call
-                  </button>
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    title="Open in My Leads"
-                    onClick={() => onNavigate('leads')}
-                  >
-                    <ArrowRight size={12} />
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
 
             {todayLeads.length === 0 && (
               <div className="irm-empty-box">
@@ -620,7 +635,7 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
                 className={`irm-toggle-btn ${scheduleTab === 'followups' ? 'active' : ''}`}
                 onClick={() => setScheduleTab('followups')}
               >
-                <Calendar size={13} /> Follow-ups ({pendingFollowups.length})
+                <Calendar size={13} /> Follow-ups ({dueFollowups.length})
               </button>
               <button
                 className={`irm-toggle-btn ${scheduleTab === 'consultations' ? 'active' : ''}`}
@@ -639,7 +654,7 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
 
           {scheduleTab === 'followups' ? (
             <div className="irm-followups-list">
-              {pendingFollowups.slice(0, 5).map(f => (
+              {dueFollowups.slice(0, 5).map(f => (
                 <div key={f.id} className="irm-followup-row">
                   <div className="irm-followup-info">
                     <div className="irm-followup-top">
@@ -660,10 +675,15 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
                 </div>
               ))}
 
-              {pendingFollowups.length === 0 && (
+              {dueFollowups.length === 0 && (
                 <div className="irm-empty-box">
                   <CheckCircle2 size={28} color="#10b981" />
-                  <p>No pending follow-ups. You are completely caught up!</p>
+                  <p>No follow-ups due today. You are completely caught up!</p>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    {pendingFollowups.length > 0
+                      ? `${pendingFollowups.length} upcoming follow-up${pendingFollowups.length > 1 ? 's' : ''} scheduled for later dates.`
+                      : 'When new follow-ups are scheduled for today, they will appear here.'}
+                  </span>
                 </div>
               )}
             </div>

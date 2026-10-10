@@ -60,6 +60,7 @@ import {
   SharedKycFormData,
   NomineeItem,
   validateKycStep,
+  sanitizeDobString,
   GENDER_OPTIONS,
   INVESTOR_TYPE_OPTIONS,
   RESIDENT_TYPE_OPTIONS,
@@ -87,6 +88,7 @@ export interface KYCFormData extends SharedKycFormData {
   panDoc: KycDoc | null;
   bankProofDoc: KycDoc | null;
   dematDoc: KycDoc | null;
+  photoDoc: KycDoc | null;
 }
 
 const BLANK_KYC_FORM: KYCFormData = {
@@ -111,6 +113,7 @@ const BLANK_KYC_FORM: KYCFormData = {
   pincode: '',
   aadhaarDoc: null,
   panDoc: null,
+  photoDoc: null,
 
   accountType: 'Savings Account',
   accountNumber: '',
@@ -353,6 +356,8 @@ const GhlIrmKycView: React.FC = () => {
   const [isAssistedReviewModalOpen, setIsAssistedReviewModalOpen] = useState<boolean>(false);
   const [customerConsentChecked, setCustomerConsentChecked] = useState<boolean>(false);
   const [lastSavedDraftAt, setLastSavedDraftAt] = useState<string | null>(null);
+
+  const todayDateString = useMemo(() => new Date().toISOString().split('T')[0], []);
   const [validationErrorSummary, setValidationErrorSummary] = useState<string | null>(null);
 
   const enrichDealWithContact = (d: Deal, leadsList: Lead[], customersList: Customer[]): Deal => {
@@ -867,7 +872,7 @@ const GhlIrmKycView: React.FC = () => {
       nameAsPerPan: dbKyc?.nameAsPerPan || dbKyc?.investorName || savedNonEmpty.nameAsPerPan || deal.customerName || '',
       aadhaarNumber: dbKyc?.aadhaarNumber || savedNonEmpty.aadhaarNumber || '',
       fatherName: dbKyc?.fatherName || savedNonEmpty.fatherName || '',
-      dob: dbKyc?.dateOfBirth || dbKyc?.dob || savedNonEmpty.dob || '',
+      dob: sanitizeDobString(dbKyc?.dateOfBirth || dbKyc?.dob || savedNonEmpty.dob || ''),
       bankName: dbKyc?.bankName || savedNonEmpty.bankName || '',
       accountNumber: dbKyc?.accountNumber || savedNonEmpty.accountNumber || '',
       ifscCode: dbKyc?.ifscCode || savedNonEmpty.ifscCode || '',
@@ -885,7 +890,8 @@ const GhlIrmKycView: React.FC = () => {
       panDoc: docFrom(dbKyc?.panDocumentUrl, 'PAN (uploaded)') || savedNonEmpty.panDoc || null,
       bankProofDoc: docFrom(dbKyc?.bankChequeUrl, 'Bank proof (uploaded)') || savedNonEmpty.bankProofDoc || null,
       dematDoc: docFrom(dbKyc?.dematDocumentUrl, 'Demat proof (uploaded)') || savedNonEmpty.dematDoc || null,
-      photoUrl: dbKyc?.photoUrl || savedNonEmpty.photoUrl || null,
+      photoDoc: docFrom(dbKyc?.photoUrl || savedNonEmpty.photoUrl, 'Investor Photo (uploaded)') || savedNonEmpty.photoDoc || null,
+      photoUrl: dbKyc?.photoUrl || savedNonEmpty.photoUrl || (savedNonEmpty.photoDoc as any)?.url || null,
       submittedAt: dbKyc?.submittedAt || savedNonEmpty.submittedAt || null,
       customerConsentTimestamp: dbKyc?.customerConsentTimestamp || savedNonEmpty.customerConsentTimestamp || null,
     };
@@ -1067,7 +1073,7 @@ const GhlIrmKycView: React.FC = () => {
           nameAsPerPan: dbKyc.nameAsPerPan || dbKyc.investorName || initialForm.nameAsPerPan || '',
           aadhaarNumber: dbKyc.aadhaarNumber || initialForm.aadhaarNumber || '',
           fatherName: dbKyc.fatherName || initialForm.fatherName || '',
-          dob: dbKyc.dateOfBirth || dbKyc.dob || initialForm.dob || '',
+          dob: sanitizeDobString(dbKyc.dateOfBirth || dbKyc.dob || initialForm.dob || ''),
           address: dbKyc.addressLine1 || dbKyc.address || initialForm.address || '',
           courierAddress: dbKyc.addressLine2 || dbKyc.courierAddress || initialForm.courierAddress || '',
           country: dbKyc.country || initialForm.country || 'India',
@@ -1090,6 +1096,7 @@ const GhlIrmKycView: React.FC = () => {
           panDoc: docFrom(dbKyc.panDocumentUrl, 'PAN (saved)') || initialForm.panDoc,
           bankProofDoc: docFrom(dbKyc.bankChequeUrl, 'Bank proof (saved)') || initialForm.bankProofDoc,
           dematDoc: docFrom(dbKyc.dematDocumentUrl, 'Demat statement (saved)') || initialForm.dematDoc,
+          photoDoc: docFrom(dbKyc.photoUrl, 'Investor Photo (saved)') || initialForm.photoDoc,
         };
       }
     }
@@ -1178,6 +1185,7 @@ const GhlIrmKycView: React.FC = () => {
         aadhaar: await tryUpload(data.aadhaarDoc, 'KYC - Aadhaar'),
         bank: await tryUpload(data.bankProofDoc, 'KYC - Bank Proof'),
         demat: data.hasNoDemat ? null : await tryUpload(data.dematDoc, 'KYC - Demat Statement'),
+        photo: await tryUpload(data.photoDoc, 'KYC - Investor Photo'),
       };
       const payload = {
         investorId: deal.customerId ? Number(deal.customerId) || 0 : 0,
@@ -1211,6 +1219,7 @@ const GhlIrmKycView: React.FC = () => {
         aadhaarDocumentUrl: docUrls.aadhaar,
         bankChequeUrl: docUrls.bank,
         dematDocumentUrl: docUrls.demat,
+        photoUrl: docUrls.photo || data.photoUrl || undefined,
         // Consent is only captured on final submit; a draft must never claim it was obtained.
         customerConsentObtained: false,
         customerConsentTimestamp: null,
@@ -1239,6 +1248,7 @@ const GhlIrmKycView: React.FC = () => {
       const aadhaarUrl = await uploadKycDoc(data.aadhaarDoc, 'KYC - Aadhaar', deal);
       const bankUrl = await uploadKycDoc(data.bankProofDoc, 'KYC - Bank Proof', deal);
       const dematUrl = data.hasNoDemat ? null : await uploadKycDoc(data.dematDoc, 'KYC - Demat Statement', deal);
+      const photoUrl = await uploadKycDoc(data.photoDoc, 'KYC - Investor Photo', deal);
       const payload = {
         investorId: deal.customerId ? Number(deal.customerId) || 0 : 0,
         kycId: deal.kycId || (deal as any).kycRecordId || undefined,
@@ -1271,6 +1281,7 @@ const GhlIrmKycView: React.FC = () => {
         aadhaarDocumentUrl: aadhaarUrl,
         bankChequeUrl: bankUrl,
         dematDocumentUrl: dematUrl,
+        photoUrl: photoUrl || data.photoUrl || undefined,
         customerConsentObtained: Boolean(customerConsentChecked),
         customerConsentTimestamp: new Date().toISOString(),
         customerConsentDetails: "Customer verbal and electronic consent obtained during assisted KYC session.",
@@ -1642,6 +1653,9 @@ const GhlIrmKycView: React.FC = () => {
       }
       if (!formData.panDoc) {
         errs.panDoc = 'Upload PAN is required';
+      }
+      if (!formData.photoDoc) {
+        errs.photoDoc = 'Upload Investor Face Photo is required for biometric verification';
       }
     }
     if (step === 3) {
@@ -3150,10 +3164,13 @@ const GhlIrmKycView: React.FC = () => {
                       <label className="form-label">Date of Birth (DOB) <span className="kyc-required-star">*</span></label>
                       <input
                         type="date"
+                        min="1900-01-01"
+                        max={todayDateString}
                         className={`form-input ${formErrors.dob ? 'kyc-input-error' : ''}`}
-                        value={formData.dob}
+                        value={sanitizeDobString(formData.dob)}
                         onChange={e => {
-                          setFormData({ ...formData, dob: e.target.value });
+                          const val = sanitizeDobString(e.target.value);
+                          setFormData({ ...formData, dob: val });
                           if (formErrors.dob) {
                             setFormErrors(prev => { const c = { ...prev }; delete c.dob; return c; });
                           }
@@ -3291,7 +3308,7 @@ const GhlIrmKycView: React.FC = () => {
                 <div className="kyc-form-section-card">
                   <div className="kyc-form-section-header">
                     <h3 className="kyc-form-section-title">Identity Proof Documents</h3>
-                    <p className="kyc-form-section-subtitle">Upload clear scanned copies or photos of the investor's Aadhaar and PAN cards</p>
+                    <p className="kyc-form-section-subtitle">Upload clear scanned copies or photos of the investor's Aadhaar, PAN card, and Face Photo for Biometric verification</p>
                   </div>
                   <div className="kyc-form-grid">
                     <KYCUploadCard
@@ -3320,6 +3337,20 @@ const GhlIrmKycView: React.FC = () => {
                         }
                       }}
                       onRemove={() => setFormData({ ...formData, panDoc: null })}
+                    />
+
+                    <KYCUploadCard
+                      label="Upload Investor Face Photo / Live Selfie (Biometric Verification) *"
+                      required
+                      doc={formData.photoDoc}
+                      error={formErrors.photoDoc}
+                      onUpload={doc => {
+                        setFormData({ ...formData, photoDoc: doc });
+                        if (formErrors.photoDoc) {
+                          setFormErrors(prev => { const c = { ...prev }; delete c.photoDoc; return c; });
+                        }
+                      }}
+                      onRemove={() => setFormData({ ...formData, photoDoc: null })}
                     />
                   </div>
                 </div>
@@ -3736,9 +3767,11 @@ const GhlIrmKycView: React.FC = () => {
                             <label className="form-label">Date of Birth / Age <span className="kyc-required-star">*</span></label>
                             <input
                               type="date"
+                              min="1900-01-01"
+                              max={todayDateString}
                               className={`form-input ${formErrors[`nominee_${idx}_dob`] ? 'kyc-input-error' : ''}`}
-                              value={nom.dob}
-                              onChange={e => handleNomineeChange(nom.id || idx, 'dob', e.target.value)}
+                              value={sanitizeDobString(nom.dob)}
+                              onChange={e => handleNomineeChange(nom.id || idx, 'dob', sanitizeDobString(e.target.value))}
                             />
                             {formErrors[`nominee_${idx}_dob`] && (
                               <div className="kyc-field-error">{formErrors[`nominee_${idx}_dob`]}</div>
@@ -4039,9 +4072,11 @@ const GhlIrmKycView: React.FC = () => {
                   <label className="form-label">Date of Birth</label>
                   <input
                     type="date"
+                    min="1900-01-01"
+                    max={todayDateString}
                     className="form-input"
-                    value={sectionFormData.dob || ''}
-                    onChange={e => setSectionFormData({ ...sectionFormData, dob: e.target.value })}
+                    value={sanitizeDobString(sectionFormData.dob || '')}
+                    onChange={e => setSectionFormData({ ...sectionFormData, dob: sanitizeDobString(e.target.value) })}
                   />
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>

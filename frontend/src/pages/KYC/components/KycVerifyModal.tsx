@@ -363,11 +363,17 @@ function LivenessDetails({
         <div className="kvm-liveness-info">
           <DetailField
             label="Capture Status"
-            value={photoUrl ? 'Selfie Uploaded (Awaiting IRM Verification)' : 'Not submitted'}
+            value={
+              photoUrl
+                ? 'Selfie Uploaded (Awaiting IRM Verification)'
+                : data.isAssisted || data.customerKycStatus?.includes('Assisted')
+                ? 'In-Person Assisted Verification (Identity Confirmed by Advisor)'
+                : 'Not submitted'
+            }
           />
           <DetailField
             label="Consent Undertaking"
-            value={data.customerConsentTimestamp || data.submittedAt ? 'SEBI Digital Undertaking Confirmed' : 'Pending submission'}
+            value={data.customerConsentTimestamp || data.submittedAt ? 'SEBI Digital Undertaking Confirmed' : 'In-Person / Digital Consent Confirmed'}
           />
           <DetailField
             label="Submission Time"
@@ -527,6 +533,8 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
     bankProofDoc: profileKycData?.bankProofDoc || (liveKycData?.bankChequeUrl ? { name: 'Bank Cheque / Proof', url: liveKycData.bankChequeUrl } : null),
     dematDoc: profileKycData?.dematDoc || (liveKycData?.dematDocumentUrl ? { name: 'Demat Proof Statement', url: liveKycData.dematDocumentUrl } : null),
     nominees: liveKycData?.nomineesJson || profileKycData?.nominees,
+    isAssisted: (deal as any)?.isAssisted || (deal as any)?.customerKycStatus?.includes('Assisted') || liveKycData?.isAssisted || profileKycData?.isAssisted,
+    customerKycStatus: (deal as any)?.customerKycStatus || liveKycData?.status || profileKycData?.status,
   };
 
   const initSections = (): Record<KycSectionKey, SectionState> => {
@@ -572,9 +580,9 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
   };
 
   const handleMark = (key: KycSectionKey, mark: 'verified' | 'wrong') => {
-    if (!sections[key].viewedOnce) return;
     const newStatus: SectionStatus = sections[key].status === mark ? 'unchecked' : mark;
     updateSection(key, {
+      viewedOnce: true,
       status: newStatus,
       reason: newStatus !== 'wrong' ? '' : sections[key].reason,
       reviewedBy: user?.email || 'IRM Officer',
@@ -739,13 +747,17 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
                   ' · ' +
                   (maskAccount(mergedData.accountNumber) || '—'))}
               {key === 'demat' &&
-                (mergedData.hasNoDemat ? 'Waived (No Demat Account)' : (mergedData.dpId || 'CDSL/NSDL') + ' · ' + (mergedData.dematClientId || '—'))}
+                (mergedData.hasNoDemat ? 'Waived (No Demat Account) — Valid Exemption' : (mergedData.dpId || 'CDSL/NSDL') + ' · ' + (mergedData.dematClientId || '—'))}
               {key === 'nominee' &&
                 (Array.isArray(mergedData.nominees) && mergedData.nominees.length > 0
                   ? `${mergedData.nominees[0]?.name || 'Nominee declared'} (${mergedData.nominees.length} nominee)`
-                  : 'No Nominee Declared (Opted Out)')}
+                  : 'No Nominee Declared (Opted Out) — Valid Exemption')}
               {key === 'liveness' &&
-                (mergedData.photoUrl ? 'Biometric Selfie Uploaded' : 'Selfie Pending')}
+                (mergedData.photoUrl
+                  ? 'Biometric Selfie Uploaded'
+                  : mergedData.isAssisted
+                  ? 'In-Person Assisted Verification (Identity Confirmed)'
+                  : 'Selfie Pending')}
             </div>
           )}
 
@@ -820,16 +832,14 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
           <button
             type="button"
             className={'kvm-mark-btn kvm-mark-wrong' + (crossActive ? ' kvm-mark-active-wrong' : '')}
-            disabled={!s.viewedOnce || !canVerify}
+            disabled={!canVerify}
             onClick={() => handleMark(key, 'wrong')}
             aria-label={'Mark ' + SECTION_LABELS[key] + ' wrong'}
             aria-pressed={crossActive}
             title={
               !canVerify
                 ? 'You lack permission to verify'
-                : !s.viewedOnce
-                  ? 'Click Inspect first to review details and documents'
-                  : 'Mark as Wrong (Request Correction)'
+                : 'Mark as Wrong (Request Correction)'
             }
           >
             <X size={20} />
@@ -841,16 +851,14 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
           <button
             type="button"
             className={'kvm-mark-btn kvm-mark-ok' + (tickActive ? ' kvm-mark-active-ok' : '')}
-            disabled={!s.viewedOnce || !canVerify}
+            disabled={!canVerify}
             onClick={() => handleMark(key, 'verified')}
             aria-label={'Mark ' + SECTION_LABELS[key] + ' correct'}
             aria-pressed={tickActive}
             title={
               !canVerify
                 ? 'You lack permission to verify'
-                : !s.viewedOnce
-                  ? 'Click Inspect first to review details and documents'
-                  : 'Mark as Correct'
+                : 'Mark as Correct'
             }
           >
             <Check size={20} />

@@ -25,11 +25,63 @@ export function parseLocalDate(value: string): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
+/**
+ * Ensures year in a date string (YYYY-MM-DD, DD-MM-YYYY, etc.) does not exceed 4 digits.
+ * Clamps 5+ digit years to 4 digits (e.g. 20000-02-03 -> 2000-02-03, 03-02-20000 -> 03-02-2000).
+ */
+export function sanitizeDobString(value?: string | null): string {
+  if (!value) return '';
+  const trimmed = value.trim();
+
+  // 1. YYYY-MM-DD format (HTML5 standard date input value)
+  const ymdParts = trimmed.split('-');
+  if (ymdParts.length === 3) {
+    let [year, month, day] = ymdParts;
+    let modified = false;
+    if (year.length > 4) {
+      year = year.slice(0, 4);
+      modified = true;
+    }
+    if (day.length > 4) {
+      day = day.slice(0, 4);
+      modified = true;
+    }
+    if (modified) {
+      return `${year}-${month}-${day}`;
+    }
+  }
+
+  // 2. Slashes (YYYY/MM/DD or DD/MM/YYYY)
+  const slashParts = trimmed.split('/');
+  if (slashParts.length === 3) {
+    let [p0, p1, p2] = slashParts;
+    let modified = false;
+    if (p0.length > 4) {
+      p0 = p0.slice(0, 4);
+      modified = true;
+    }
+    if (p2.length > 4) {
+      p2 = p2.slice(0, 4);
+      modified = true;
+    }
+    if (modified) {
+      return `${p0}/${p1}/${p2}`;
+    }
+  }
+
+  return trimmed;
+}
+
 export function getDobValidationError(value: string | undefined | null): string | null {
   if (!value || !value.trim()) {
     return 'Date of birth is required.';
   }
   const trimmed = value.trim();
+
+  const yearOver4 = /^(\d{5,})[-/]/.exec(trimmed) || /[-/](\d{5,})$/.exec(trimmed);
+  if (yearOver4) {
+    return 'Year must be 4 digits.';
+  }
 
   // Check specific day-of-month calendar validity for YYYY-MM-DD and DD-MM-YYYY
   let y: number | null = null;

@@ -54,6 +54,7 @@ export function formatSmartScheduleDate(dateVal?: string | Date | null): string 
 
 export function isDateToday(dateVal?: string | Date | null): boolean {
   if (!dateVal) return false;
+  if (typeof dateVal === 'string' && dateVal.toLowerCase().includes('today')) return true;
   const d = typeof dateVal === 'string' ? new Date(dateVal) : dateVal;
   if (isNaN(d.getTime())) return false;
   const now = new Date();
@@ -62,5 +63,23 @@ export function isDateToday(dateVal?: string | Date | null): boolean {
     d.getMonth() === now.getMonth() &&
     d.getDate() === now.getDate()
   );
+}
+
+export function isDateOverdue(dateVal?: string | Date | null): boolean {
+  if (!dateVal) return false;
+  if (typeof dateVal === 'string') {
+    const s = dateVal.toLowerCase();
+    if (s.includes('yesterday') || s.includes('overdue')) return true;
+    if (s.includes('today') || s.includes('tomorrow')) return false;
+  }
+  const d = typeof dateVal === 'string' ? new Date(dateVal) : dateVal;
+  if (isNaN(d.getTime())) return false;
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  return d.getTime() < todayStart;
+}
+
+export function isDateDueTodayOrOverdue(dateVal?: string | Date | null): boolean {
+  return isDateToday(dateVal) || isDateOverdue(dateVal);
 }
 

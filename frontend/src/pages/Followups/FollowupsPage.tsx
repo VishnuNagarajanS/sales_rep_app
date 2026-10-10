@@ -10,6 +10,8 @@ import {
   ShieldCheck,
   CheckCircle,
   Pencil,
+  X,
+  CalendarRange,
 } from 'lucide-react';
 import { Followup, CallRecord, Deal, Lead, Customer } from '../../types';
 import { storageService } from '../../services/storageService';
@@ -38,7 +40,7 @@ import { adminUserService } from '../../services/adminUserService';
 import { fetchIrmAllLeads, IrmAllLeadsSummary } from '../../services/irmAllLeadsService';
 import { User as UserModel } from '../../types';
 import { getAgentRoleInfo, getAssigningSalesAgentInfo } from '../../utils/agentRoleUtils';
-import { formatSmartScheduleDate } from '../../utils/dateUtils';
+import { formatSmartScheduleDate, isDateToday, isDateOverdue } from '../../utils/dateUtils';
 import './FollowupsPage.css';
 import '../Leads/LeadsPage.css';
 
@@ -53,6 +55,111 @@ export const FollowupsPage: React.FC = () => {
   const [irmSummaryData, setIrmSummaryData] = useState<IrmAllLeadsSummary | null>(null);
   const [activeTab, setActiveTab] = useState<'all' | 'due' | 'overdue'>('all');
   const [handoverFilter, setHandoverFilter] = useState('Mine');
+
+  // ── IRM Date Range Filter State (Only for IRM) ───────────────────────────
+  const [irmStartDate, setIrmStartDate] = useState<string>('');
+  const [irmEndDate, setIrmEndDate] = useState<string>('');
+  const [irmDatePreset, setIrmDatePreset] = useState<'all' | 'today' | 'tomorrow' | 'this_week' | 'this_month' | 'overdue' | 'custom'>('all');
+
+  const getLocalDateString = (d: Date): string => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const handleApplyIrmPreset = (preset: 'all' | 'today' | 'tomorrow' | 'this_week' | 'this_month' | 'overdue') => {
+    setIrmDatePreset(preset);
+    const now = new Date();
+
+    if (preset === 'all' || preset === 'overdue') {
+      setIrmStartDate('');
+      setIrmEndDate('');
+      return;
+    }
+
+    if (preset === 'today') {
+      const todayStr = getLocalDateString(now);
+      setIrmStartDate(todayStr);
+      setIrmEndDate(todayStr);
+      return;
+    }
+
+    if (preset === 'tomorrow') {
+      const tom = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      const tomStr = getLocalDateString(tom);
+      setIrmStartDate(tomStr);
+      setIrmEndDate(tomStr);
+      return;
+    }
+
+    if (preset === 'this_week') {
+      const startStr = getLocalDateString(now);
+      const endOfWeek = new Date(now.getTime() + 6 * 24 * 60 * 60 * 1000);
+      const endStr = getLocalDateString(endOfWeek);
+      setIrmStartDate(startStr);
+      setIrmEndDate(endStr);
+      return;
+    }
+
+    if (preset === 'this_month') {
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      setIrmStartDate(getLocalDateString(startOfMonth));
+      setIrmEndDate(getLocalDateString(endOfMonth));
+      return;
+    }
+  };
+
+  const handleIrmDateChange = (field: 'start' | 'end', value: string) => {
+    setIrmDatePreset('custom');
+    if (field === 'start') {
+      setIrmStartDate(value);
+    } else {
+      setIrmEndDate(value);
+    }
+  };
+
+  const handleClearIrmDateFilter = () => {
+    setIrmDatePreset('all');
+    setIrmStartDate('');
+    setIrmEndDate('');
+  };
+
+  const isFollowupInIrmDateRange = (f: Followup): boolean => {
+    if (!isIrm) return true;
+    if (irmDatePreset === 'all' && !irmStartDate && !irmEndDate) return true;
+
+    if (irmDatePreset === 'overdue') {
+      return isDateOverdue(f.scheduledAt || f.scheduledDate) && !isDateToday(f.scheduledAt || f.scheduledDate);
+    }
+
+    if (irmDatePreset === 'today') {
+      return isDateToday(f.scheduledAt || f.scheduledDate);
+    }
+
+    const schedStr = (f.scheduledAt || '').trim();
+    const dateStr = (f.scheduledDate || '').trim();
+    const parsedTime = Date.parse(schedStr) || (dateStr ? Date.parse(dateStr) : NaN);
+
+    if (irmStartDate || irmEndDate) {
+      if (isNaN(parsedTime)) {
+        const s = schedStr.toLowerCase();
+        if (s.includes('today')) {
+          const nowStr = getLocalDateString(new Date());
+          if (irmStartDate && nowStr < irmStartDate) return false;
+          if (irmEndDate && nowStr > irmEndDate) return false;
+          return true;
+        }
+        return true;
+      }
+      const start = irmStartDate ? new Date(`${irmStartDate}T00:00:00`).getTime() : 0;
+      const end = irmEndDate ? new Date(`${irmEndDate}T23:59:59.999`).getTime() : Infinity;
+      return parsedTime >= start && parsedTime <= end;
+    }
+
+    return true;
+  };
 
   const handoverOptions = useMemo(() => {
     const names = Array.from(new Set(followups.map(f => f.handedOverFromName).filter(Boolean)));
@@ -1162,20 +1269,20 @@ export const FollowupsPage: React.FC = () => {
     return true;
   });
 
-  const filteredFollowups = processedFollowups.filter(f => {
-    if (f.status !== 'Pending') return false;
-    if (handoverOptions.length > 0) {
-      if (handoverFilter === 'Mine' && f.handoverId) return false;
-      if (handoverFilter !== 'Mine' && handoverFilter !== 'All') {
-        const name = handoverFilter.replace('Handover_', '');
-        if (f.handedOverFromName !== name) return false;
+  // Base list for current role/date-filtering
+  const dateScopedFollowups = useMemo(() => {
+    if (!isIrm) return activePendingFollowups;
+    return activePendingFollowups.filter(isFollowupInIrmDateRange);
+  }, [isIrm, activePendingFollowups, irmDatePreset, irmStartDate, irmEndDate]);
+
+  const filteredFollowups = dateScopedFollowups.filter(f => {
+    if (!isIrm) {
+      if (activeTab === 'due') {
+        return isFollowupToday(f);
       }
-    }
-    if (activeTab === 'due') {
-      return isFollowupToday(f);
-    }
-    if (activeTab === 'overdue') {
-      return isFollowupOverdue(f) && !isFollowupToday(f);
+      if (activeTab === 'overdue') {
+        return isFollowupOverdue(f) && !isFollowupToday(f);
+      }
     }
     return true;
   });
@@ -1334,56 +1441,186 @@ export const FollowupsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="followups-tabs-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {[
-          { id: 'all', label: `All Tasks (${activePendingFollowups.length})` },
-          {
-            id: 'due',
-            label: `Due Today (${activePendingFollowups.filter(isFollowupToday).length})`,
-          },
-          {
-            id: 'overdue',
-            label: `Overdue (${activePendingFollowups.filter(f => isFollowupOverdue(f) && !isFollowupToday(f)).length})`,
-            danger: true,
-          },
-        ].map(tab => (
-          <button
-            key={tab.id}
-            className={`btn btn-sm ${activeTab === tab.id ? 'btn-primary' : 'btn-secondary'
-              } ${tab.danger && activeTab === tab.id
-                ? 'followups-tab-danger-active'
-                : tab.danger
-                  ? 'followups-tab-danger-inactive'
-                  : ''
-              }`}
-            onClick={() => setActiveTab(tab.id as any)}
-          >
-            {tab.danger && (
-              <AlertTriangle size={13} color={activeTab === tab.id ? '#ffffff' : '#dc2626'} />
-            )}
-            {tab.label}
-          </button>
-        ))}
-        </div>
+      {/* ── IRM Date Range Filter Bar (Only for IRM) - Red and Black Theme ── */}
+      {isIrm && (
+        <div className="irm-followup-filterbar">
+          <div className="irm-followup-filter-left">
+            <div className="irm-followup-filter-title">
+              <CalendarRange size={16} color="#ef4444" />
+              <span>Filter by Date:</span>
+            </div>
 
-        {handoverOptions.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)' }}>View:</span>
-            <select
-              className="form-select customers-filter-select"
-              style={{ width: 'auto', padding: '4px 28px 4px 10px', fontSize: 13 }}
-              value={handoverFilter}
-              onChange={e => setHandoverFilter(e.target.value)}
-            >
-              {handoverOptions.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
+            {/* Quick Presets */}
+            <div className="irm-followup-presets">
+              <button
+                type="button"
+                className={`irm-preset-chip ${irmDatePreset === 'all' && !irmStartDate && !irmEndDate ? 'active' : ''}`}
+                onClick={() => handleApplyIrmPreset('all')}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                className={`irm-preset-chip ${irmDatePreset === 'today' ? 'active' : ''}`}
+                onClick={() => handleApplyIrmPreset('today')}
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                className={`irm-preset-chip ${irmDatePreset === 'tomorrow' ? 'active' : ''}`}
+                onClick={() => handleApplyIrmPreset('tomorrow')}
+              >
+                Tomorrow
+              </button>
+              <button
+                type="button"
+                className={`irm-preset-chip ${irmDatePreset === 'this_week' ? 'active' : ''}`}
+                onClick={() => handleApplyIrmPreset('this_week')}
+              >
+                This Week
+              </button>
+              <button
+                type="button"
+                className={`irm-preset-chip ${irmDatePreset === 'this_month' ? 'active' : ''}`}
+                onClick={() => handleApplyIrmPreset('this_month')}
+              >
+                This Month
+              </button>
+              <button
+                type="button"
+                className={`irm-preset-chip ${irmDatePreset === 'overdue' ? 'active' : ''} ${activePendingFollowups.some(f => isFollowupOverdue(f) && !isFollowupToday(f)) ? 'has-overdue' : ''}`}
+                onClick={() => handleApplyIrmPreset('overdue')}
+              >
+                {activePendingFollowups.some(f => isFollowupOverdue(f) && !isFollowupToday(f)) && (
+                  <AlertTriangle size={11} color={irmDatePreset === 'overdue' ? '#ffffff' : '#ef4444'} style={{ marginRight: 3, verticalAlign: 'middle' }} />
+                )}
+                Overdue ({activePendingFollowups.filter(f => isFollowupOverdue(f) && !isFollowupToday(f)).length})
+              </button>
+            </div>
+
+            {/* From & To Date Pickers */}
+            <div className="irm-date-range-box">
+              <div className="irm-date-field">
+                <label htmlFor="irm-followup-from-date" className="irm-date-label">From:</label>
+                <input
+                  id="irm-followup-from-date"
+                  type="date"
+                  className="irm-date-input"
+                  value={irmStartDate}
+                  onChange={e => handleIrmDateChange('start', e.target.value)}
+                  title="Filter from date"
+                />
+              </div>
+
+              <span className="irm-date-sep">to</span>
+
+              <div className="irm-date-field">
+                <label htmlFor="irm-followup-to-date" className="irm-date-label">To:</label>
+                <input
+                  id="irm-followup-to-date"
+                  type="date"
+                  className="irm-date-input"
+                  value={irmEndDate}
+                  onChange={e => handleIrmDateChange('end', e.target.value)}
+                  title="Filter to date"
+                />
+              </div>
+
+              {(irmStartDate || irmEndDate || irmDatePreset !== 'all') && (
+                <button
+                  type="button"
+                  onClick={handleClearIrmDateFilter}
+                  className="irm-filter-clear-btn"
+                  title="Reset date filter"
+                >
+                  <X size={12} /> Clear
+                </button>
+              )}
+            </div>
           </div>
-        )}
-      </div>
+
+          <div className="irm-followup-filter-right">
+            {(irmStartDate || irmEndDate) && (
+              <span className="irm-active-range-pill">
+                <Calendar size={11} /> {irmStartDate || 'Start'} &rarr; {irmEndDate || 'End'}
+              </span>
+            )}
+            <span className="irm-filter-count-badge">
+              Tasks: <strong>{filteredFollowups.length}</strong> of {activePendingFollowups.length}
+            </span>
+
+            {handoverOptions.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>View:</span>
+                <select
+                  className="form-select customers-filter-select"
+                  style={{ width: 'auto', padding: '3px 26px 3px 8px', fontSize: 12, height: 32 }}
+                  value={handoverFilter}
+                  onChange={e => setHandoverFilter(e.target.value)}
+                >
+                  {handoverOptions.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Tabs (Only for Non-IRM) */}
+      {!isIrm && (
+        <div className="followups-tabs-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {[
+            { id: 'all', label: `All Tasks (${activePendingFollowups.length})` },
+            {
+              id: 'due',
+              label: `Due Today (${activePendingFollowups.filter(isFollowupToday).length})`,
+            },
+            {
+              id: 'overdue',
+              label: `Overdue (${activePendingFollowups.filter(f => isFollowupOverdue(f) && !isFollowupToday(f)).length})`,
+              danger: true,
+            },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              className={`btn btn-sm ${activeTab === tab.id ? 'btn-primary' : 'btn-secondary'
+                } ${tab.danger && activeTab === tab.id
+                  ? 'followups-tab-danger-active'
+                  : tab.danger
+                    ? 'followups-tab-danger-inactive'
+                    : ''
+                }`}
+              onClick={() => setActiveTab(tab.id as any)}
+            >
+              {tab.danger && (
+                <AlertTriangle size={13} color={activeTab === tab.id ? '#ffffff' : '#dc2626'} />
+              )}
+              {tab.label}
+            </button>
+          ))}
+          </div>
+
+          {handoverOptions.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)' }}>View:</span>
+              <select
+                className="form-select customers-filter-select"
+                style={{ width: 'auto', padding: '4px 28px 4px 10px', fontSize: 13 }}
+                value={handoverFilter}
+                onChange={e => setHandoverFilter(e.target.value)}
+              >
+                {handoverOptions.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Follow-ups List Cards */}
       <div className="followups-list">
