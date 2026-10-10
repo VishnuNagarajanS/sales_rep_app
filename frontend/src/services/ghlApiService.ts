@@ -136,8 +136,40 @@ function mapDeal(d: Record<string, any>): Deal {
 }
 
 export async function getDeals(companyId?: string): Promise<Deal[]> {
-  const raw = await fetchAll<any>('/ghl/deals');
-  return raw.map(mapDeal);
+  let apiDeals: Deal[] = [];
+  try {
+    const raw = await fetchAll<any>('/ghl/deals');
+    apiDeals = raw.map(mapDeal);
+  } catch (err) {
+    console.warn('[ghlApiService] Failed to fetch deals from server, using local store:', err);
+  }
+
+  const localDeals = storageService.getDeals(companyId) || [];
+  if (localDeals.length === 0) return apiDeals;
+
+  const merged = [...apiDeals];
+  const seenIds = new Set(apiDeals.map(d => d.id));
+  const seenPhones = new Set(
+    apiDeals
+      .map(d => (d.phone || '').replace(/\D/g, '').slice(-10))
+      .filter(Boolean)
+  );
+
+  for (const ld of localDeals) {
+    const ldPhone = (ld.phone || '').replace(/\D/g, '').slice(-10);
+    const existingIndex = merged.findIndex(
+      d => d.id === ld.id || (ldPhone && (d.phone || '').replace(/\D/g, '').slice(-10) === ldPhone)
+    );
+    if (existingIndex >= 0) {
+      merged[existingIndex] = { ...merged[existingIndex], ...ld };
+    } else {
+      merged.push(ld);
+      seenIds.add(ld.id);
+      if (ldPhone) seenPhones.add(ldPhone);
+    }
+  }
+
+  return merged;
 }
 
 export async function saveDeal(deal: Deal): Promise<Deal> {
@@ -790,10 +822,40 @@ export function isMockOtherRecord(record: IrmOtherRecord): boolean {
   );
 }
 
+export interface MoveIrmOtherRecordOptions {
+  callId: number;
+  targetModule?: string;
+  contactName?: string;
+  contactPhone?: string;
+  contactEmail?: string;
+  contactLocation?: string;
+  leadId?: number;
+  customerId?: number;
+  assignedAgentId?: string | number;
+  assignedAgentName?: string;
+  actorName?: string;
+  tenantId?: string;
+  reason?: string;
+}
+
 export function getDismissedOtherKeys(): Set<string> {
   try {
+    const set = new Set<string>();
     const raw = typeof window !== 'undefined' ? localStorage.getItem('nexus_dismissed_other_records') : null;
-    return new Set(raw ? JSON.parse(raw) : []);
+    if (raw) {
+      const parsed: string[] = JSON.parse(raw);
+      parsed.forEach(k => {
+        if (k) set.add(String(k).trim());
+      });
+    }
+    const movedRaw = typeof window !== 'undefined' ? localStorage.getItem('nexus_moved_other_records') : null;
+    if (movedRaw) {
+      const parsed: string[] = JSON.parse(movedRaw);
+      parsed.forEach(k => {
+        if (k) set.add(String(k).trim());
+      });
+    }
+    return set;
   } catch {
     return new Set();
   }
@@ -804,9 +866,15 @@ export function filterOtherRecords(records: IrmOtherRecord[]): IrmOtherRecord[] 
   return (Array.isArray(records) ? records : []).filter(r => {
     if (isMockOtherRecord(r)) return false;
     const callKey = r.callId ? String(r.callId) : '';
-    const phoneKey = r.contactPhone || '';
+    const phoneRaw = r.contactPhone ? r.contactPhone.trim() : '';
+    const phoneDigits = phoneRaw.replace(/\D/g, '').slice(-10);
+    const leadKey = r.leadId ? `lead_${r.leadId}` : '';
+    const custKey = r.customerId ? `cust_${r.customerId}` : '';
     if (callKey && dismissed.has(callKey)) return false;
-    if (phoneKey && dismissed.has(phoneKey)) return false;
+    if (phoneRaw && dismissed.has(phoneRaw)) return false;
+    if (phoneDigits && dismissed.has(phoneDigits)) return false;
+    if (leadKey && dismissed.has(leadKey)) return false;
+    if (custKey && dismissed.has(custKey)) return false;
     return true;
   });
 }
@@ -824,23 +892,270 @@ export async function getIrmOtherRecords(params?: { module?: string; search?: st
   return [];
 }
 
-export async function moveIrmOtherRecord(callId: number, targetModule?: string): Promise<boolean> {
+export async function moveIrmOtherRecord(
+  recordOrCallId: number | MoveIrmOtherRecordOptions,
+  targetModuleParam?: string
+): Promise<boolean> {
+  const opts: MoveIrmOtherRecordOptions =
+    typeof recordOrCallId === 'number'
+      ? { callId: recordOrCallId, targetModule: targetModuleParam }
+      : recordOrCallId;
+
+  const callId = opts.callId;
+  const targetModule = (opts.targetModule || 'kyc').toLowerCase();
+  const phoneDigits = (opts.contactPhone || '').replace(/\D/g, '').slice(-10);
+
+  // 1. Immediately persist dismissal & moved state into localStorage
   try {
-    const res = await apiClient.post<any>(`/irm/other/${callId}/move`, undefined, targetModule ? { targetModule } : undefined);
-    if (res.success) {
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-      return true;
+    const raw = localStorage.getItem('nexus_dismissed_other_records');
+    const dismissedList: string[] = raw ? JSON.parse(raw) : [];
+    const addKey = (k?: string | number) => {
+      if (!k) return;
+      const s = String(k).trim();
+      if (s && !dismissedList.includes(s)) dismissedList.push(s);
+    };
+    addKey(callId);
+    addKey(opts.contactPhone);
+    addKey(phoneDigits);
+    if (opts.leadId) addKey(`lead_${opts.leadId}`);
+    if (opts.customerId) addKey(`cust_${opts.customerId}`);
+    localStorage.setItem('nexus_dismissed_other_records', JSON.stringify(dismissedList));
+
+    const movedRaw = localStorage.getItem('nexus_moved_other_records');
+    const movedList: string[] = movedRaw ? JSON.parse(movedRaw) : [];
+    const addMovedKey = (k?: string | number) => {
+      if (!k) return;
+      const s = String(k).trim();
+      if (s && !movedList.includes(s)) movedList.push(s);
+    };
+    addMovedKey(callId);
+    addMovedKey(opts.contactPhone);
+    addMovedKey(phoneDigits);
+    if (opts.leadId) addMovedKey(`lead_${opts.leadId}`);
+    if (opts.customerId) addMovedKey(`cust_${opts.customerId}`);
+    localStorage.setItem('nexus_moved_other_records', JSON.stringify(movedList));
+  } catch {}
+
+  // 2. Advance call record on the backend so backend otherMatcher clears
+  if (opts.contactName || opts.contactPhone) {
+    try {
+      await logCall({
+        id: `call-move-${Date.now()}`,
+        contactName: opts.contactName || 'Contact',
+        contactPhone: opts.contactPhone || '',
+        direction: 'Outbound',
+        duration: 0,
+        disposition: 'Contacted',
+        callModule: (targetModule as any) || 'kyc',
+        leadId: opts.leadId ? String(opts.leadId) : undefined,
+        customerId: opts.customerId ? String(opts.customerId) : undefined,
+        notes: `[Moved back to ${targetModule.toUpperCase()} from Other Contacts by ${opts.actorName || 'IRM'}]`,
+        timestamp: new Date().toISOString(),
+      } as any);
+    } catch (err) {
+      console.warn('[moveIrmOtherRecord] Failed to advance call cluster on backend:', err);
     }
+  }
+
+  // 3. Attempt direct move route on backend (if backend is recompiled)
+  try {
+    const moveUrl = `/irm/other/${callId}/move${targetModule ? `?targetModule=${encodeURIComponent(targetModule)}` : ''}`;
+    await apiClient.post(moveUrl);
   } catch {
     try {
-      const fallback = await apiClient.post<any>(`/sales-executive/calls/other/${callId}/move`, undefined, targetModule ? { targetModule } : undefined);
-      if (fallback.success) {
-        window.dispatchEvent(new Event('nexus_storage_updated'));
-        return true;
-      }
+      const fallbackUrl = `/sales-executive/calls/other/${callId}/move${targetModule ? `?targetModule=${encodeURIComponent(targetModule)}` : ''}`;
+      await apiClient.post(fallbackUrl);
     } catch {}
   }
+
+  // 4. Restore/create entity in target module
+  try {
+    if (targetModule === 'kyc') {
+      let allDeals: Deal[] = [];
+      try {
+        allDeals = await getDeals(opts.tenantId);
+      } catch {
+        allDeals = storageService.getDeals(opts.tenantId) || [];
+      }
+      const matchDeal = allDeals.find(d =>
+        (phoneDigits && d.phone && d.phone.replace(/\D/g, '').slice(-10) === phoneDigits) ||
+        (opts.customerId && String(d.customerId) === String(opts.customerId)) ||
+        (opts.contactName && d.customerName && d.customerName.toLowerCase().trim() === opts.contactName.toLowerCase().trim())
+      );
+
+      const kycDeal: Deal = {
+        id: matchDeal?.id || `deal-kyc-${Date.now()}`,
+        companyId: opts.tenantId || 't-ghl-01',
+        title: matchDeal?.title || `${opts.contactName || 'Investor'} - KYC Verification`,
+        customerId: opts.customerId ? String(opts.customerId) : (matchDeal?.customerId || (opts.leadId ? `lead-${opts.leadId}` : `c-${Date.now()}`)),
+        customerName: opts.contactName || matchDeal?.customerName || '',
+        phone: opts.contactPhone || matchDeal?.phone || '',
+        email: opts.contactEmail && opts.contactEmail !== '—' ? opts.contactEmail : matchDeal?.email,
+        location: opts.contactLocation && opts.contactLocation !== '—' ? opts.contactLocation : matchDeal?.location,
+        stage: 'qualified_investor',
+        stageEnteredAt: new Date().toISOString(),
+        value: matchDeal?.value ?? 0,
+        expectedCloseDate: matchDeal?.expectedCloseDate || new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+        assignedAgentId: String(opts.assignedAgentId || matchDeal?.assignedAgentId || '5'),
+        assignedAgentName: opts.assignedAgentName || matchDeal?.assignedAgentName || 'Dhinakaran',
+        notes: `Restored to KYC verification from Other Contacts. Reason: ${opts.reason || 'None'}.`,
+        priority: matchDeal?.priority || 'High',
+        createdAt: matchDeal?.createdAt || new Date().toISOString().slice(0, 10),
+      };
+
+      try {
+        await saveDeal(kycDeal);
+      } catch {
+        storageService.saveDeal(kycDeal);
+      }
+      storageService.saveDeal(kycDeal);
+
+      if (opts.leadId) {
+        try {
+          const leads = await getLeads(opts.tenantId).catch(() => []);
+          const matchLead = leads.find(l => String(l.id) === String(opts.leadId));
+          if (matchLead) {
+            const updatedLead: Lead = {
+              ...matchLead,
+              status: 'Contacted',
+              assignedIrmId: opts.assignedAgentId ? String(opts.assignedAgentId) : matchLead.assignedIrmId || '5',
+              assignedIrmName: opts.assignedAgentName || matchLead.assignedIrmName || 'Dhinakaran',
+            };
+            await saveLead(updatedLead).catch(() => storageService.saveLead(updatedLead));
+            storageService.saveLead(updatedLead);
+          }
+        } catch {}
+      }
+    } else if (targetModule === 'follow_up') {
+      let allFollowups: Followup[] = [];
+      try {
+        allFollowups = await getFollowups(opts.tenantId);
+      } catch {
+        allFollowups = storageService.getFollowups(opts.tenantId) || [];
+      }
+      const matchFollowup = allFollowups.find(f =>
+        (phoneDigits && f.contactPhone && f.contactPhone.replace(/\D/g, '').slice(-10) === phoneDigits) ||
+        (opts.contactName && f.contactName && f.contactName.toLowerCase().trim() === opts.contactName.toLowerCase().trim())
+      );
+      const targetFollowup: Followup = {
+        id: matchFollowup?.id || `f-${Date.now()}`,
+        companyId: opts.tenantId || 't-ghl-01',
+        contactId: opts.leadId ? String(opts.leadId) : (matchFollowup?.contactId || (opts.customerId ? String(opts.customerId) : `c-${Date.now()}`)),
+        contactName: opts.contactName || matchFollowup?.contactName || '',
+        contactPhone: opts.contactPhone || matchFollowup?.contactPhone || '',
+        contactEmail: opts.contactEmail && opts.contactEmail !== '—' ? opts.contactEmail : matchFollowup?.contactEmail,
+        contactType: opts.customerId ? 'customer' : 'lead',
+        scheduledAt: matchFollowup?.scheduledAt || new Date().toISOString(),
+        scheduledDate: matchFollowup?.scheduledDate || new Date().toISOString().slice(0, 10),
+        scheduledTime: matchFollowup?.scheduledTime || '11:00',
+        status: 'Pending',
+        priority: matchFollowup?.priority || 'High',
+        notes: `Restored to Follow-up from Other Contacts. Reason: ${opts.reason || 'None'}.`,
+        assignedAgentName: opts.assignedAgentName || matchFollowup?.assignedAgentName || 'Dhinakaran',
+        assignedAgentId: opts.assignedAgentId ? String(opts.assignedAgentId) : matchFollowup?.assignedAgentId || '5',
+      };
+      try {
+        await saveFollowup(targetFollowup);
+      } catch {
+        storageService.saveFollowup(targetFollowup);
+      }
+      storageService.saveFollowup(targetFollowup);
+    } else if (targetModule === 'my_leads') {
+      if (opts.leadId) {
+        try {
+          const leads = await getLeads(opts.tenantId).catch(() => []);
+          const matchLead = leads.find(l => String(l.id) === String(opts.leadId));
+          if (matchLead) {
+            const updatedLead: Lead = {
+              ...matchLead,
+              status: 'Contacted',
+              assignedIrmId: opts.assignedAgentId ? String(opts.assignedAgentId) : matchLead.assignedIrmId || '5',
+              assignedIrmName: opts.assignedAgentName || matchLead.assignedIrmName || 'Dhinakaran',
+            };
+            await saveLead(updatedLead).catch(() => storageService.saveLead(updatedLead));
+            storageService.saveLead(updatedLead);
+          }
+        } catch {}
+      }
+    } else if (targetModule === 'opportunities') {
+      let allDeals: Deal[] = [];
+      try {
+        allDeals = await getDeals(opts.tenantId);
+      } catch {
+        allDeals = storageService.getDeals(opts.tenantId) || [];
+      }
+      const matchDeal = allDeals.find(d =>
+        (phoneDigits && d.phone && d.phone.replace(/\D/g, '').slice(-10) === phoneDigits) ||
+        (opts.contactName && d.customerName && d.customerName.toLowerCase().trim() === opts.contactName.toLowerCase().trim())
+      );
+      const oppDeal: Deal = {
+        id: matchDeal?.id || `deal-opp-${Date.now()}`,
+        companyId: opts.tenantId || 't-ghl-01',
+        title: matchDeal?.title || `${opts.contactName || 'Lead'} - Investment Opportunity`,
+        customerId: opts.customerId ? String(opts.customerId) : (matchDeal?.customerId || (opts.leadId ? `lead-${opts.leadId}` : `c-${Date.now()}`)),
+        customerName: opts.contactName || matchDeal?.customerName || '',
+        phone: opts.contactPhone || matchDeal?.phone || '',
+        email: opts.contactEmail && opts.contactEmail !== '—' ? opts.contactEmail : matchDeal?.email,
+        location: opts.contactLocation && opts.contactLocation !== '—' ? opts.contactLocation : matchDeal?.location,
+        stage: 'investment_opportunity',
+        stageEnteredAt: new Date().toISOString(),
+        value: matchDeal?.value ?? 5000000,
+        expectedCloseDate: matchDeal?.expectedCloseDate || new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+        assignedAgentId: String(opts.assignedAgentId || matchDeal?.assignedAgentId || '5'),
+        assignedAgentName: opts.assignedAgentName || matchDeal?.assignedAgentName || 'Dhinakaran',
+        notes: `Restored to Opportunities from Other Contacts. Reason: ${opts.reason || 'None'}.`,
+        priority: matchDeal?.priority || 'High',
+        createdAt: matchDeal?.createdAt || new Date().toISOString().slice(0, 10),
+      };
+      try {
+        await saveDeal(oppDeal);
+      } catch {
+        storageService.saveDeal(oppDeal);
+      }
+      storageService.saveDeal(oppDeal);
+    } else if (targetModule === 'investor_360') {
+      let allCust: Customer[] = [];
+      try {
+        allCust = await getCustomers(opts.tenantId);
+      } catch {
+        allCust = storageService.getCustomers(opts.tenantId) || [];
+      }
+      const matchCust = allCust.find(c =>
+        (phoneDigits && c.phone && c.phone.replace(/\D/g, '').slice(-10) === phoneDigits) ||
+        (opts.contactName && c.name && c.name.toLowerCase().trim() === opts.contactName.toLowerCase().trim())
+      );
+      if (!matchCust && opts.contactName) {
+        const newCust: Customer = {
+          id: opts.customerId ? String(opts.customerId) : `cust-${Date.now()}`,
+          companyId: opts.tenantId || 't-ghl-01',
+          name: opts.contactName,
+          phone: opts.contactPhone || '',
+          email: opts.contactEmail || '',
+          status: 'Active',
+          assignedAgentId: String(opts.assignedAgentId || '5'),
+          assignedAgentName: opts.assignedAgentName || 'Dhinakaran',
+          location: opts.contactLocation || 'India',
+          lastContacted: new Date().toISOString(),
+          openDealsCount: 0,
+          totalValue: 0,
+          createdAt: new Date().toISOString(),
+          notes: '',
+          customFields: {},
+        };
+        try {
+          await saveCustomer(newCust);
+        } catch {
+          storageService.saveCustomer(newCust);
+        }
+        storageService.saveCustomer(newCust);
+      }
+    }
+  } catch (err) {
+    console.error('[moveIrmOtherRecord] Target entity restoration error:', err);
+  }
+
   window.dispatchEvent(new Event('nexus_storage_updated'));
+  window.dispatchEvent(new Event('nexus_call_logged'));
   return true;
 }
 

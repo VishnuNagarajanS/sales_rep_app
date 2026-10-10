@@ -871,7 +871,7 @@ export const App: React.FC = () => {
         user?.role?.code !== 'irm' && !isGhlAdmin && !isSuperAdmin ? (
           <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
         ) : (
-          <IrmOtherPage />
+          <IrmOtherPage onNavigate={navigate} />
         )
       ) : (
         <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />

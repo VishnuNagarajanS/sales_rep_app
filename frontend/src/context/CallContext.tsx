@@ -47,6 +47,8 @@ interface ActiveCall {
   // The disposition modal uses this to restrict available Call Outcome options.
   sourceFollowupId?: string;
   callModule?: string;
+  customerId?: string;
+  leadId?: string;
   isSimulated?: boolean;
   providerStatus?: string;
   twilioCallSid?: string;

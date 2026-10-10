@@ -89,6 +89,7 @@ export interface KYCFormData extends SharedKycFormData {
   bankProofDoc: KycDoc | null;
   dematDoc: KycDoc | null;
   photoDoc: KycDoc | null;
+  photoUrl?: string;
 }
 
 const BLANK_KYC_FORM: KYCFormData = {
@@ -572,11 +573,17 @@ const GhlIrmKycView: React.FC = () => {
       const enriched = (allDeals || []).map(d => enrichDealWithContact(d, leadsList, customersList));
       const qualified = enriched.filter(d => d.stage === 'qualified_investor');
       const isIrmUser = user?.role?.code === 'irm';
+      const myNameLower = (user?.name || '').toLowerCase().trim();
+      const myIdStr = user?.id ? String(user.id) : '';
       const scopedQualified = isIrmUser
-        ? qualified.filter(d =>
-            (d.assignedAgentId && String(d.assignedAgentId) === String(user?.id)) ||
-            (d.assignedAgentName && d.assignedAgentName === user?.name)
-          )
+        ? qualified.filter(d => {
+            const agentId = d.assignedAgentId ? String(d.assignedAgentId) : '';
+            const agentName = (d.assignedAgentName || '').toLowerCase().trim();
+            if (myIdStr && agentId === myIdStr) return true;
+            if (myNameLower && (agentName === myNameLower || agentName.includes(myNameLower) || myNameLower.includes(agentName))) return true;
+            if (!agentId && !agentName) return true;
+            return false;
+          })
         : qualified;
 
       const seenCustomer = new Set<string>();
@@ -593,11 +600,14 @@ const GhlIrmKycView: React.FC = () => {
       setDeals(dedupedDeals);
       setLeads(leadsList);
       setCustomers(customersList);
-      setIsLoading(false);
     } catch {
-      if (my !== reqId.current) return;
-      setLoadError(true);
-      setIsLoading(false);
+      if (my === reqId.current) {
+        setLoadError(true);
+      }
+    } finally {
+      if (my === reqId.current) {
+        setIsLoading(false);
+      }
     }
 
     fetch(apiUrl('/irm/kyc/all'), {
