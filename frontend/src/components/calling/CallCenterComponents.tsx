@@ -1274,36 +1274,40 @@ export const DispositionModal: React.FC = () => {
       return;
     }
 
+    const isKycOrIrmModule = isIrm || currentModule === 'kyc' || currentModule === 'opportunities' || currentModule === 'investor_360';
+
     if (disposition === 'No Response') {
-      if (!customerMessage.trim()) {
+      if (!isKycOrIrmModule && !customerMessage.trim()) {
         alert('Please provide a message for the customer before saving wrap-up.');
         return;
       }
 
-      // Validate contact for selected channel
-      if (selectedChannel === 'email') {
-        if (!recipientEmail.trim()) {
-          setSendDeliveryNotice({
-            type: 'error',
-            text: 'Message delivery unavailable: No email address on file. Please enter a valid recipient email address above.',
-          });
-          return;
-        }
-        if (!recipientEmail.includes('@') || !recipientEmail.includes('.')) {
-          setSendDeliveryNotice({
-            type: 'error',
-            text: `Message delivery failed: "${recipientEmail}" is not a valid email address.`,
-          });
-          return;
-        }
-      } else {
-        const phone = recipientPhone.trim() || (lastCallRecord.contactPhone || '').trim();
-        if (!phone) {
-          setSendDeliveryNotice({
-            type: 'error',
-            text: `Message delivery unavailable: No phone number provided for ${selectedChannel.toUpperCase()}.`,
-          });
-          return;
+      // Validate contact for selected channel if message is provided
+      if (customerMessage.trim()) {
+        if (selectedChannel === 'email') {
+          if (!recipientEmail.trim() && !isKycOrIrmModule) {
+            setSendDeliveryNotice({
+              type: 'error',
+              text: 'Message delivery unavailable: No email address on file. Please enter a valid recipient email address above.',
+            });
+            return;
+          }
+          if (recipientEmail.trim() && (!recipientEmail.includes('@') || !recipientEmail.includes('.'))) {
+            setSendDeliveryNotice({
+              type: 'error',
+              text: `Message delivery failed: "${recipientEmail}" is not a valid email address.`,
+            });
+            return;
+          }
+        } else {
+          const phone = recipientPhone.trim() || (lastCallRecord.contactPhone || '').trim();
+          if (!phone && !isKycOrIrmModule) {
+            setSendDeliveryNotice({
+              type: 'error',
+              text: `Message delivery unavailable: No phone number provided for ${selectedChannel.toUpperCase()}.`,
+            });
+            return;
+          }
         }
       }
     }
@@ -1322,7 +1326,7 @@ export const DispositionModal: React.FC = () => {
     try {
       let finalNotes = notes;
 
-      if (disposition === 'No Response') {
+      if (disposition === 'No Response' && customerMessage.trim()) {
         const leadIdNum = parseInt(String(lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : '').replace(/\D/g, ''), 10) || undefined;
         const customerIdNum = parseInt(String(lastCallRecord.matchedRecord?.type === 'customer' ? lastCallRecord.matchedRecord.id : '').replace(/\D/g, ''), 10) || undefined;
         const effectivePhone = recipientPhone.trim() || (lastCallRecord.contactPhone || '').trim();
@@ -1338,18 +1342,22 @@ export const DispositionModal: React.FC = () => {
         });
 
         if (!sendResult.delivered) {
-          setSendDeliveryNotice({
-            type: 'error',
-            text: sendResult.deliveryResult || `Message delivery via ${selectedChannel.toUpperCase()} is unavailable or failed. State preserved for retry.`,
-          });
-          setIsSubmitting(false);
-          return;
+          if (!isKycOrIrmModule) {
+            setSendDeliveryNotice({
+              type: 'error',
+              text: sendResult.deliveryResult || `Message delivery via ${selectedChannel.toUpperCase()} is unavailable or failed. State preserved for retry.`,
+            });
+            setIsSubmitting(false);
+            return;
+          } else {
+            console.warn('[CallCenterComponents] Message dispatch unavailable for IRM/KYC:', sendResult.deliveryResult);
+          }
+        } else {
+          const channelLabel = selectedChannel.toUpperCase();
+          const contactTarget = selectedChannel === 'email' ? recipientEmail.trim() : effectivePhone;
+          const logSnippet = `[No Response Follow-up Message Sent via ${channelLabel} to ${contactTarget}]: ${customerMessage.trim()}`;
+          finalNotes = finalNotes ? `${finalNotes}\n\n${logSnippet}` : logSnippet;
         }
-
-        const channelLabel = selectedChannel.toUpperCase();
-        const contactTarget = selectedChannel === 'email' ? recipientEmail.trim() : effectivePhone;
-        const logSnippet = `[No Response Follow-up Message Sent via ${channelLabel} to ${contactTarget}]: ${customerMessage.trim()}`;
-        finalNotes = finalNotes ? `${finalNotes}\n\n${logSnippet}` : logSnippet;
       }
 
       await saveDisposition(
