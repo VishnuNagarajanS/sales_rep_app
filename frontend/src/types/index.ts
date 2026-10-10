@@ -456,6 +456,9 @@ export interface Investor {
   handedOverFromName?: string;
   handoverPlannedEnd?: string;
   originalOwnerId?: number;
+  assignedIrmId?: string;
+  assignedIrmName?: string;
+  assignedIrmAt?: string;
 }
 
 export interface Consultation {
