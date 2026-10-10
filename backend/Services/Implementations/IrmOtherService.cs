@@ -329,4 +329,31 @@ public class IrmOtherService : IIrmOtherService
 
         return ApiResponse<List<IrmOtherRecordDto>>.SuccessResponse(otherRecords, "Other module records retrieved successfully.");
     }
+
+    public async Task<ApiResponse<bool>> MoveOtherRecordAsync(
+        int companyId,
+        int callId,
+        string? targetModule,
+        CancellationToken ct = default)
+    {
+        var call = await _context.CallRecords.FirstOrDefaultAsync(c => c.Id == callId && c.CompanyId == companyId, ct);
+        if (call == null)
+        {
+            return ApiResponse<bool>.FailureResult("Call record not found.");
+        }
+
+        // Advance disposition out of 'Other' so the contact is restored to their source module
+        call.Disposition = "Contacted";
+        if (!string.IsNullOrWhiteSpace(targetModule))
+        {
+            call.CallModule = NormalizeModule(targetModule) ?? call.CallModule;
+        }
+        var timestampStr = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm");
+        call.Notes = string.IsNullOrWhiteSpace(call.Notes)
+            ? $"[Moved back to {(call.CallModule ?? "original module")} on {timestampStr}]"
+            : $"{call.Notes} [Moved back to {(call.CallModule ?? "original module")} on {timestampStr}]";
+
+        await _context.SaveChangesAsync(ct);
+        return ApiResponse<bool>.SuccessResponse(true, "Contact successfully moved back to original module.");
+    }
 }

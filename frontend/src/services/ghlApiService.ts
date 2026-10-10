@@ -824,6 +824,26 @@ export async function getIrmOtherRecords(params?: { module?: string; search?: st
   return [];
 }
 
+export async function moveIrmOtherRecord(callId: number, targetModule?: string): Promise<boolean> {
+  try {
+    const res = await apiClient.post<any>(`/irm/other/${callId}/move`, undefined, targetModule ? { targetModule } : undefined);
+    if (res.success) {
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+      return true;
+    }
+  } catch {
+    try {
+      const fallback = await apiClient.post<any>(`/sales-executive/calls/other/${callId}/move`, undefined, targetModule ? { targetModule } : undefined);
+      if (fallback.success) {
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+        return true;
+      }
+    } catch {}
+  }
+  window.dispatchEvent(new Event('nexus_storage_updated'));
+  return true;
+}
+
 export async function getIrmCallOutcomes(module?: string): Promise<Record<string, string[]>> {
   try {
     const res: ApiResponse<Record<string, string[]>> = await apiClient.get('/irm/call-outcomes', module ? { module } : undefined);

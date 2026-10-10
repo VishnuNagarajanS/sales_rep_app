@@ -16,12 +16,12 @@ import {
   CalendarCheck,
   Briefcase,
   HelpCircle,
-  ArrowRight,
   CheckCircle2,
   Trash2,
+  CornerUpLeft,
 } from 'lucide-react';
 import { IrmOtherRecord } from '../../types';
-import { getIrmOtherRecords } from '../../services/ghlApiService';
+import { getIrmOtherRecords, moveIrmOtherRecord } from '../../services/ghlApiService';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
@@ -345,12 +345,57 @@ export const IrmOtherPage: React.FC = () => {
     []
   );
 
+  // ── Move Contact to Lastly Present (Source) Module ─────────────────────────
+  const [movingCallId, setMovingCallId] = useState<number | null>(null);
+  const [moveNotice, setMoveNotice] = useState<string | null>(null);
+
+  const handleMoveContact = useCallback(
+    async (record: IrmOtherRecord) => {
+      if (!record.callId) return;
+      setMovingCallId(record.callId);
+      try {
+        await moveIrmOtherRecord(record.callId, record.callModule);
+
+        // Remove from local table state
+        setRecords(prev => prev.filter(r => r.callId !== record.callId));
+
+        // Clean up from dismissed list if it was there
+        try {
+          const raw = localStorage.getItem('nexus_dismissed_other_records');
+          if (raw) {
+            const list: string[] = JSON.parse(raw);
+            const filtered = list.filter(k => k !== String(record.callId) && k !== record.contactPhone);
+            localStorage.setItem('nexus_dismissed_other_records', JSON.stringify(filtered));
+          }
+        } catch {}
+
+        if (selectedRecord?.callId === record.callId) {
+          setSelectedRecord(null);
+        }
+
+        const targetName = record.moduleDisplayName || MODULE_DISPLAY_CONFIG[record.callModule]?.label || 'original module';
+        setMoveNotice(`Successfully moved ${record.contactName} back to ${targetName}.`);
+        setTimeout(() => setMoveNotice(null), 5000);
+      } catch (err: any) {
+        console.error('[IrmOtherPage] Failed to move contact:', err);
+      } finally {
+        setMovingCallId(null);
+      }
+    },
+    [selectedRecord]
+  );
+
   const rowActions: RowAction<IrmOtherRecord>[] = useMemo(
     () => [
       {
         label: 'Call Contact',
         icon: <Phone size={14} color="#059669" style={{ marginRight: 6 }} />,
         onClick: r => handleCallContact(r),
+      },
+      {
+        label: 'Move to Source Page',
+        icon: <CornerUpLeft size={14} color="#2563eb" style={{ marginRight: 6 }} />,
+        onClick: r => handleMoveContact(r),
       },
       {
         label: 'View Details',
@@ -363,7 +408,7 @@ export const IrmOtherPage: React.FC = () => {
         onClick: r => handleDismissContact(r),
       },
     ],
-    [handleCallContact, handleDismissContact]
+    [handleCallContact, handleMoveContact, handleDismissContact]
   );
 
   return (
@@ -411,6 +456,27 @@ export const IrmOtherPage: React.FC = () => {
         >
           <AlertCircle size={18} />
           <span>{loadError}</span>
+        </div>
+      )}
+
+      {/* ── Success Move Banner ──────────────────────────────────────────────── */}
+      {moveNotice && (
+        <div
+          className="alert-banner success"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '12px 16px',
+            borderRadius: 'var(--radius-md)',
+            background: 'rgba(16, 185, 129, 0.1)',
+            border: '1px solid rgba(16, 185, 129, 0.3)',
+            color: '#10b981',
+            fontWeight: 500,
+          }}
+        >
+          <CheckCircle2 size={18} />
+          <span>{moveNotice}</span>
         </div>
       )}
 
@@ -608,7 +674,7 @@ export const IrmOtherPage: React.FC = () => {
                   This contact's last call in this module ended with disposition "Other". Call the contact to update their outcome.
                 </p>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <button
                   type="button"
                   className="btn btn-sm btn-primary"
@@ -620,6 +686,17 @@ export const IrmOtherPage: React.FC = () => {
                 >
                   <Phone size={13} />
                   <span>Call</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-secondary"
+                  style={{ color: '#2563eb', borderColor: 'rgba(37, 99, 235, 0.4)', backgroundColor: 'rgba(37, 99, 235, 0.08)', display: 'flex', alignItems: 'center', gap: 6 }}
+                  onClick={() => handleMoveContact(selectedRecord)}
+                  disabled={movingCallId === selectedRecord.callId}
+                  title={`Move contact back to ${selectedRecord.moduleDisplayName || 'source page'}`}
+                >
+                  <CornerUpLeft size={13} />
+                  <span>Move to {selectedRecord.moduleDisplayName || 'Source'}</span>
                 </button>
                 <button
                   type="button"

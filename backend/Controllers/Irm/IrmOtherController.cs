@@ -49,4 +49,19 @@ public class IrmOtherController : ControllerBase
         }
         return Ok(result);
     }
+
+    [HttpPost("other/{callId:int}/move")]
+    public async Task<IActionResult> MoveOtherRecord(
+        int callId,
+        [FromQuery] string? targetModule,
+        CancellationToken ct)
+    {
+        var companyId = User.GetCompanyId();
+        var result = await _otherService.MoveOtherRecordAsync(companyId, callId, targetModule, ct);
+        if (!result.Success)
+        {
+            return BadRequest(result);
+        }
+        return Ok(result);
+    }
 }

@@ -465,45 +465,38 @@ public class SalesExecutiveCallsController : ControllerBase
             if (lead != null)
             {
                 var dispo = dto.Disposition.Trim();
-                var isLeadInKyc = lead.Status == "Qualified" ||
-                    (lead.CustomFieldsJson != null && lead.CustomFieldsJson.Contains("\"movedToKycAt\"")) ||
-                    normalizedModule == "kyc";
-
-                if (!isLeadInKyc)
+                if (string.Equals(dispo, "Follow-up Required", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(dispo, "Follow Up Required", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (string.Equals(dispo, "Follow-up Required", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(dispo, "Follow Up Required", StringComparison.OrdinalIgnoreCase))
-                    {
-                        lead.Status = "Follow-up Required";
-                    }
-                    else if (string.Equals(dispo, "Interested", StringComparison.OrdinalIgnoreCase))
-                    {
-                        lead.Status = "Interested";
+                    lead.Status = "Follow-up Required";
+                }
+                else if (string.Equals(dispo, "Interested", StringComparison.OrdinalIgnoreCase))
+                {
+                    lead.Status = "Interested";
 
-                        // Qualified lead: close its pending sales follow-ups so they leave the Follow-ups page.
-                        var leadIdStr = lead.Id.ToString();
-                        var pendingFollowups = await _context.Followups
-                            .Where(f => f.CompanyId == lead.CompanyId &&
-                                        f.ContactType == "lead" &&
-                                        f.ContactId == leadIdStr &&
-                                        f.Status == backend.Models.Enums.FollowupStatus.Pending &&
-                                        f.AssignedToRole != "irm")
-                            .ToListAsync(ct);
-                        foreach (var pf in pendingFollowups)
-                        {
-                            pf.Status = backend.Models.Enums.FollowupStatus.Cancelled;
-                            pf.OutcomeNotes = "Auto-closed: lead marked Interested.";
-                            pf.UpdatedAt = DateTime.UtcNow;
-                        }
-                    }
-                    else if (string.Equals(dispo, "Not Interested", StringComparison.OrdinalIgnoreCase))
+                    // Qualified lead: close its pending sales follow-ups so they leave the Follow-ups page.
+                    var leadIdStr = lead.Id.ToString();
+                    var pendingFollowups = await _context.Followups
+                        .Where(f => f.CompanyId == lead.CompanyId &&
+                                    f.ContactType == "lead" &&
+                                    f.ContactId == leadIdStr &&
+                                    f.Status == backend.Models.Enums.FollowupStatus.Pending &&
+                                    f.AssignedToRole != "irm")
+                        .ToListAsync(ct);
+                    foreach (var pf in pendingFollowups)
                     {
-                        lead.Status = "Not Interested";
+                        pf.Status = backend.Models.Enums.FollowupStatus.Cancelled;
+                        pf.OutcomeNotes = "Auto-closed: lead marked Interested.";
+                        pf.UpdatedAt = DateTime.UtcNow;
                     }
-                    else if (string.Equals(dispo, "Wrong Number", StringComparison.OrdinalIgnoreCase))
-                    {
-                        lead.Status = "Junk";
-                    }
+                }
+                else if (string.Equals(dispo, "Not Interested", StringComparison.OrdinalIgnoreCase))
+                {
+                    lead.Status = "Not Interested";
+                }
+                else if (string.Equals(dispo, "Wrong Number", StringComparison.OrdinalIgnoreCase))
+                {
+                    lead.Status = "Junk";
                 }
             }
         }
@@ -587,6 +580,19 @@ public class SalesExecutiveCallsController : ControllerBase
         int? effectiveIrmId = (role == "irm") ? (_currentUser.UserId ?? User.GetUserId()) : irmId;
 
         var result = await otherService.GetOtherRecordsAsync(companyId, effectiveIrmId, module, search, ct);
+        return Ok(result);
+    }
+
+    [HttpPost("other/{callId:int}/move")]
+    public async Task<IActionResult> MoveOtherRecord(
+        int callId,
+        [FromQuery] string? targetModule,
+        [FromServices] IIrmOtherService otherService,
+        CancellationToken ct = default)
+    {
+        var companyId = _currentUser.CompanyId ?? User.GetCompanyId();
+        var result = await otherService.MoveOtherRecordAsync(companyId, callId, targetModule, ct);
+        if (!result.Success) return BadRequest(result);
         return Ok(result);
     }
 

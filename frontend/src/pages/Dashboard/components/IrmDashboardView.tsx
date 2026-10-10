@@ -599,7 +599,7 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
                     <button
                       className="btn btn-call btn-sm irm-action-call-btn"
                       title={`Dial ${lead.name}`}
-                      onClick={() => initiateCall(lead.name, lead.phone, 'lead', lead.id)}
+                      onClick={() => initiateCall(lead.name, lead.phone, 'lead', lead.id, undefined, 'my_leads')}
                     >
                       <Phone size={12} /> Call
                     </button>
@@ -668,7 +668,7 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
                   </div>
                   <button
                     className="btn btn-call btn-sm irm-action-call-btn"
-                    onClick={() => initiateCall(f.contactName, f.contactPhone, 'customer', f.contactId)}
+                    onClick={() => initiateCall(f.contactName, f.contactPhone, (f.contactType as any) || 'customer', f.contactId, f.id, 'follow_up')}
                   >
                     <Phone size={12} /> Call
                   </button>
