@@ -14,13 +14,13 @@ import {
   ArrowRight,
   ShieldCheck,
 } from 'lucide-react';
-import { Lead, User } from '../../types';
+import { Lead, User, IrmProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
 import { apiClient } from '../../services/apiClient';
 import { adminUserService } from '../../services/adminUserService';
-import { loadAgentDirectory, AssignableAgent, persistLeadAssignment } from '../../services/agentDirectory';
+import { getCompanyIrms } from '../../services/ghlApiService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
@@ -28,8 +28,18 @@ import { Modal } from '../../components/common/Modal';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
 import './PendingLeadsPage.css';
 
-// Statuses that represent leads that have moved to the next step / module
-const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk'];
+// Statuses that represent leads that have moved beyond the initial leads stage to the next step / module
+const EXCLUDED_PENDING_STATUSES = [
+  'Qualified',
+  'Converted',
+  'Follow-up Required',
+  'Not Interested',
+  'Junk',
+  'Wrong Number',
+  'Lost',
+  'Closed',
+  'Contacted',
+];
 
 export const PendingLeadsPage: React.FC = () => {
   const { tenant, user } = useAuth();
@@ -37,6 +47,7 @@ export const PendingLeadsPage: React.FC = () => {
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [usersList, setUsersList] = useState<User[]>([]);
+  const [companyIrms, setCompanyIrms] = useState<IrmProfile[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Filters
@@ -55,7 +66,7 @@ export const PendingLeadsPage: React.FC = () => {
   const [selectedNewAgentId, setSelectedNewAgentId] = useState<string>('');
   const [reassignSuccessMsg, setReassignSuccessMsg] = useState<string>('');
 
-  // Load leads and users
+  // Load leads, users, and IRMs
   const loadData = async () => {
     setLoading(true);
     try {
@@ -68,18 +79,40 @@ export const PendingLeadsPage: React.FC = () => {
       }
       setUsersList(fetchedUsers);
 
+      // Fetch IRMs
+      try {
+        const irms = await getCompanyIrms(tenant?.id);
+        setCompanyIrms(irms || []);
+      } catch (err) {
+        console.warn('Failed to load company IRMs', err);
+      }
+
       // 2. Fetch Leads
       if (apiClient.isMockMode()) {
         const allLeads = storageService.getLeads(tenant?.id) || [];
         setLeads(allLeads);
       } else {
         try {
-          const res = await apiClient.get<any>('/sales-executive/leads?page=1&pageSize=300');
+          const res = await apiClient.get<any>('/sales-executive/leads?page=1&pageSize=1000&status=all&assignment=all');
           if (res.success && res.data && res.data.items) {
             const apiLeads = res.data.items.map((item: any) => ({
               ...item,
               id: String(item.id),
               assignedAgentId: item.assignedAgentId ? String(item.assignedAgentId) : undefined,
+              assignedAgentName: item.assignedAgentName || item.assignedAgent?.name || '',
+              assignedAgentRole: item.assignedAgentRole || item.assignedAgent?.role?.code || undefined,
+              assignedSalesExecutiveId: item.assignedSalesExecutiveId ? String(item.assignedSalesExecutiveId) : undefined,
+              assignedSalesExecutiveName: item.assignedSalesExecutiveName || undefined,
+              assignedSalesExecutiveAt: item.assignedSalesExecutiveAt || undefined,
+              transferredBySalesExecutiveName: item.transferredBySalesExecutiveName || item.customFields?.qualifiedByAgentName || undefined,
+              activeOwnerName: item.activeOwnerName || undefined,
+              activeOwnerRole: item.activeOwnerRole || undefined,
+              isCovered: Boolean(item.isCovered),
+              coveredByName: item.coveredByName || undefined,
+              assignedIrmId: item.assignedIrmId ? String(item.assignedIrmId) : (item.customFields?.assignedIrmId ? String(item.customFields.assignedIrmId) : undefined),
+              assignedIrmName: item.assignedIrmName || item.customFields?.assignedIrmName || '',
+              assignedIrmAt: item.assignedIrmAt || item.customFields?.assignedIrmAt || undefined,
+              assignedAt: item.assignedAt || item.createdAt || undefined,
               customFields: item.customFields || {},
             }));
             setLeads(apiLeads);
@@ -114,36 +147,98 @@ export const PendingLeadsPage: React.FC = () => {
         map.set(u.name.toLowerCase().trim(), code);
       }
     });
-    return map;
-  }, [usersList]);
-
-  // 1. Filter ALL assigned leads that are still in initial leads stage (haven't moved to next module)
-  const allPendingLeads = useMemo(() => {
-    return leads.filter(l => {
-      const isAssigned = l.assignedAgentId && l.assignedAgentId !== '0' && l.assignmentStatus !== 'unassigned';
-      if (!isAssigned) return false;
-      // Stalled in leads stage (not moved to Follow-up, Interested, Converted, Not Interested, Junk)
-      return !MOVED_LEAD_STATUSES.includes(l.status);
+    companyIrms.forEach(irm => {
+      map.set(String(irm.id), 'irm');
+      map.set(irm.name.toLowerCase().trim(), 'irm');
     });
-  }, [leads]);
+    return map;
+  }, [usersList, companyIrms]);
 
-  // Determine an agent's role
+  // Determine an agent's role for a lead
   const getAgentRole = (lead: Lead): 'sales_executive' | 'irm' => {
-    const idKey = String(lead.assignedAgentId || '');
-    const nameKey = (lead.assignedAgentName || '').toLowerCase().trim();
+    // If the lead is in 'Interested' status, it's definitively in the IRM module
+    if (lead.status === 'Interested') return 'irm';
+
+    // Check explicit active owner role or assigned role
+    if (lead.activeOwnerRole === 'irm' || lead.assignedAgentRole === 'irm') return 'irm';
+    if (lead.activeOwnerRole === 'sales_executive' || lead.assignedAgentRole === 'sales_executive') return 'sales_executive';
+
+    // If assigned to an IRM specifically
+    if (lead.assignedIrmName || lead.customFields?.assignedIrmName) {
+      if (lead.status !== 'New') return 'irm';
+    }
+
+    // Check agentRoleMap
+    const idKey = String(lead.assignedAgentId || lead.assignedIrmId || '');
+    const nameKey = (lead.assignedAgentName || lead.assignedIrmName || lead.activeOwnerName || '').toLowerCase().trim();
     if (agentRoleMap.has(idKey)) return agentRoleMap.get(idKey)!;
     if (agentRoleMap.has(nameKey)) return agentRoleMap.get(nameKey)!;
-    return 'sales_executive'; // default fallback
+
+    // Check companyIrms
+    if (companyIrms.some(i => i.name.toLowerCase().trim() === nameKey || String(i.id) === idKey)) {
+      return 'irm';
+    }
+
+    return 'sales_executive';
   };
+
+  // Determine assigned person display name
+  const getAssignedPersonName = (lead: Lead): string => {
+    const role = getAgentRole(lead);
+    if (role === 'irm') {
+      return (
+        lead.assignedIrmName ||
+        lead.customFields?.assignedIrmName ||
+        lead.activeOwnerName ||
+        lead.assignedAgentName ||
+        '—'
+      );
+    }
+    return (
+      lead.assignedSalesExecutiveName ||
+      lead.customFields?.assignedSalesExecutiveName ||
+      lead.activeOwnerName ||
+      lead.assignedAgentName ||
+      '—'
+    );
+  };
+
+  // 1. Filter ALL assigned leads that are in initial leads stage (New for Sales Exec, Interested for IRM)
+  const allPendingLeads = useMemo(() => {
+    return leads.filter(l => {
+      const hasAssignedId = Boolean(l.assignedAgentId && l.assignedAgentId !== '0');
+      const hasAssignedName = Boolean(l.assignedAgentName && l.assignedAgentName.trim() !== '');
+      const hasIrm = Boolean(l.assignedIrmId || l.assignedIrmName || l.customFields?.assignedIrmName);
+      const isAssigned = (hasAssignedId || hasAssignedName || hasIrm) && l.assignmentStatus !== 'unassigned';
+      if (!isAssigned) return false;
+
+      // Strict whitelist: Only 'New' and 'Interested' leads can ever be pending leads
+      if (l.status !== 'New' && l.status !== 'Interested') {
+        return false;
+      }
+
+      const role = getAgentRole(l);
+      if (role === 'sales_executive') {
+        // Sales Executive pending leads must be strictly in 'New' status (uncontacted)
+        return l.status === 'New';
+      }
+      if (role === 'irm') {
+        // IRM pending leads must be strictly in 'Interested' status (awaiting IRM outreach)
+        return l.status === 'Interested';
+      }
+
+      return false;
+    });
+  }, [leads, agentRoleMap, companyIrms]);
 
   // Available Person Options filtered by selected Role
   const availablePersons = useMemo(() => {
-    // Collect all unique agents present in the pending leads
     const agentMap = new Map<string, { id: string; name: string; role: 'sales_executive' | 'irm'; count: number }>();
 
     allPendingLeads.forEach(l => {
-      const name = l.assignedAgentName || 'Unknown Agent';
-      const id = String(l.assignedAgentId || name);
+      const name = getAssignedPersonName(l);
+      if (!name || name === '—') return;
+      const id = String(l.assignedAgentId || l.assignedIrmId || name);
       const role = getAgentRole(l);
 
       if (!agentMap.has(name)) {
@@ -156,7 +251,14 @@ export const PendingLeadsPage: React.FC = () => {
     usersList.forEach(u => {
       const role = u.role?.code;
       if ((role === 'sales_executive' || role === 'irm') && !agentMap.has(u.name)) {
-        agentMap.set(u.name, { id: String(u.id), name: u.name, role, count: 0 });
+        agentMap.set(u.name, { id: String(u.id), name: u.name, role: role as 'sales_executive' | 'irm', count: 0 });
+      }
+    });
+
+    // Include company IRMs if not already present
+    companyIrms.forEach(irm => {
+      if (!agentMap.has(irm.name)) {
+        agentMap.set(irm.name, { id: String(irm.id), name: irm.name, role: 'irm', count: 0 });
       }
     });
 
@@ -166,12 +268,13 @@ export const PendingLeadsPage: React.FC = () => {
     }
 
     return list.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  }, [allPendingLeads, usersList, roleFilter, agentRoleMap]);
+  }, [allPendingLeads, usersList, companyIrms, roleFilter, agentRoleMap]);
 
   // Filtered Leads based on all active filter controls
   const filteredLeads = useMemo(() => {
     return allPendingLeads.filter(lead => {
       const agentRole = getAgentRole(lead);
+      const personName = getAssignedPersonName(lead);
 
       // Role filter
       if (roleFilter !== 'all' && agentRole !== roleFilter) {
@@ -180,8 +283,10 @@ export const PendingLeadsPage: React.FC = () => {
 
       // Person filter
       if (personFilter !== 'all') {
-        const matchesName = (lead.assignedAgentName || '').toLowerCase() === personFilter.toLowerCase();
-        const matchesId = String(lead.assignedAgentId || '') === personFilter;
+        const matchesName = personName.toLowerCase() === personFilter.toLowerCase();
+        const matchesId =
+          String(lead.assignedAgentId || '') === personFilter ||
+          String(lead.assignedIrmId || '') === personFilter;
         if (!matchesName && !matchesId) return false;
       }
 
@@ -197,15 +302,15 @@ export const PendingLeadsPage: React.FC = () => {
         const phone = (lead.phone || '').toLowerCase();
         const email = (lead.email || '').toLowerCase();
         const location = (lead.location || '').toLowerCase();
-        const agentName = (lead.assignedAgentName || '').toLowerCase();
-        if (!name.includes(q) && !phone.includes(q) && !email.includes(q) && !location.includes(q) && !agentName.includes(q)) {
+        const agent = personName.toLowerCase();
+        if (!name.includes(q) && !phone.includes(q) && !email.includes(q) && !location.includes(q) && !agent.includes(q)) {
           return false;
         }
       }
 
       return true;
     });
-  }, [allPendingLeads, roleFilter, personFilter, statusFilter, searchQuery, agentRoleMap]);
+  }, [allPendingLeads, roleFilter, personFilter, statusFilter, searchQuery, agentRoleMap, companyIrms]);
 
   // KPI Calculations
   const stats = useMemo(() => {
@@ -214,7 +319,7 @@ export const PendingLeadsPage: React.FC = () => {
     const irmTotal = allPendingLeads.filter(l => getAgentRole(l) === 'irm').length;
     const freshNewCount = allPendingLeads.filter(l => l.status === 'New').length;
     return { total, salesExecTotal, irmTotal, freshNewCount };
-  }, [allPendingLeads, agentRoleMap]);
+  }, [allPendingLeads, agentRoleMap, companyIrms]);
 
   // Calculate days in stage
   const getDaysInStage = (lead: Lead): number => {
@@ -238,7 +343,8 @@ export const PendingLeadsPage: React.FC = () => {
     if (!leadToReassign || !selectedNewAgentId) return;
 
     const chosenUser = usersList.find(u => String(u.id) === selectedNewAgentId) ||
-      availablePersons.find(a => a.id === selectedNewAgentId);
+      availablePersons.find(a => a.id === selectedNewAgentId) ||
+      companyIrms.find(i => String(i.id) === selectedNewAgentId);
 
     const newAgentName = chosenUser?.name || 'Assigned Agent';
 
@@ -296,9 +402,10 @@ export const PendingLeadsPage: React.FC = () => {
       sortable: true,
       render: l => {
         const role = getAgentRole(l);
+        const personName = getAssignedPersonName(l);
         return (
           <div className="pending-lead-agent-cell">
-            <span className="pending-lead-agent-name">{l.assignedAgentName || '—'}</span>
+            <span className="pending-lead-agent-name">{personName}</span>
             <span className={`pending-lead-role-badge ${role}`}>
               {role === 'sales_executive' ? 'Sales Exec' : 'IRM'}
             </span>
@@ -423,7 +530,7 @@ export const PendingLeadsPage: React.FC = () => {
           <div className="pending-leads-kpi-info">
             <span className="pending-leads-kpi-label">Sales Exec Leads</span>
             <span className="pending-leads-kpi-value">{stats.salesExecTotal}</span>
-            <span className="pending-leads-kpi-subtext">Assigned to Sales Execs</span>
+            <span className="pending-leads-kpi-subtext">Assigned to Sales Execs (New)</span>
           </div>
         </div>
 
@@ -434,7 +541,7 @@ export const PendingLeadsPage: React.FC = () => {
           <div className="pending-leads-kpi-info">
             <span className="pending-leads-kpi-label">IRM Leads</span>
             <span className="pending-leads-kpi-value">{stats.irmTotal}</span>
-            <span className="pending-leads-kpi-subtext">Assigned to IRMs</span>
+            <span className="pending-leads-kpi-subtext">Assigned to IRMs (Interested)</span>
           </div>
         </div>
 
@@ -513,8 +620,8 @@ export const PendingLeadsPage: React.FC = () => {
             onChange={e => setStatusFilter(e.target.value)}
           >
             <option value="all">All Pending Statuses</option>
-            <option value="New">New (Fresh)</option>
-            <option value="Contacted">Contacted</option>
+            <option value="New">New (Sales Exec)</option>
+            <option value="Interested">Interested (IRM)</option>
           </select>
         </div>
 
@@ -586,7 +693,7 @@ export const PendingLeadsPage: React.FC = () => {
           ) : (
             <>
               <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>
-                This lead is currently with <strong>{leadToReassign?.assignedAgentName || 'an agent'}</strong> and has not progressed. Select a new person to reassign this lead to:
+                This lead is currently with <strong>{getAssignedPersonName(leadToReassign || ({} as any)) || 'an agent'}</strong> and has not progressed. Select a new person to reassign this lead to:
               </p>
 
               <div>
@@ -604,7 +711,14 @@ export const PendingLeadsPage: React.FC = () => {
                     .filter(u => u.role?.code === 'sales_executive' || u.role?.code === 'irm')
                     .map(u => (
                       <option key={u.id} value={u.id}>
-                        {u.name} ({u.role?.name || u.role?.code})
+                        {u.name} ({u.role?.name || (u.role?.code === 'irm' ? 'IRM' : 'Sales Executive')})
+                      </option>
+                    ))}
+                  {companyIrms
+                    .filter(irm => !usersList.some(u => String(u.id) === String(irm.id)))
+                    .map(irm => (
+                      <option key={`irm-${irm.id}`} value={irm.id}>
+                        {irm.name} (IRM)
                       </option>
                     ))}
                 </select>

@@ -10,6 +10,7 @@ using backend.Authentication.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace backend.Controllers.GhlAdmin;
 
@@ -231,9 +232,15 @@ public class GhlLeadAssignmentController : ControllerBase
             .Where(l => targetLeadIds.Contains(l.Id) && l.CompanyId == companyId)
             .ToListAsync(ct);
         
+        var agentsWithRoles = await _context.Users
+            .Include(u => u.Role)
+            .Where(u => agents.Contains(u.Id))
+            .ToListAsync(ct);
+
         foreach (var leadId in targetLeadIds)
         {
             var agentId = agents[nextAgentIndex];
+            var agent = agentsWithRoles.FirstOrDefault(u => u.Id == agentId);
             
             var lead = leads.FirstOrDefault(l => l.Id == leadId);
             if (lead == null)
@@ -262,6 +269,27 @@ public class GhlLeadAssignmentController : ControllerBase
                 Method = "auto",
                 AssignedAt = DateTime.UtcNow
             });
+
+            var autoPendingFollowups = await _context.Followups
+                .Where(f => f.CompanyId == companyId &&
+                            (f.ContactId == lead.Id.ToString() || (f.ContactPhone != "" && f.ContactPhone == lead.Phone)) &&
+                            f.ContactType == "lead" &&
+                            f.Status == backend.Models.Enums.FollowupStatus.Pending)
+                .ToListAsync(ct);
+
+            if (autoPendingFollowups.Any())
+            {
+                foreach (var f in autoPendingFollowups)
+                {
+                    f.AssignedAgentId = agentId;
+                    if (agent != null)
+                    {
+                        f.AssignedToName = agent.Name;
+                        f.AssignedToRole = agent.Role?.Code ?? "sales_executive";
+                    }
+                    f.UpdatedAt = DateTime.UtcNow;
+                }
+            }
 
             assignedCount++;
             nextAgentIndex = (nextAgentIndex + 1) % agents.Count;
@@ -372,14 +400,22 @@ public class GhlLeadAssignmentController : ControllerBase
                 lead.OriginalOwnerId = null;
             }
 
-            if (isReassign && oldAgentId.HasValue)
+            // Update or create pending followups for this lead
+            var pendingFollowups = await _context.Followups
+                .Where(f => f.CompanyId == companyId &&
+                            (f.ContactId == lead.Id.ToString() || (f.ContactPhone != "" && f.ContactPhone == lead.Phone)) &&
+                            f.ContactType == "lead" &&
+                            f.Status == backend.Models.Enums.FollowupStatus.Pending)
+                .ToListAsync(ct);
+
+            if (pendingFollowups.Any())
             {
-                var pendingFollowups = await _context.Followups
-                    .Where(f => f.CompanyId == companyId && f.ContactId == lead.Id.ToString() && f.ContactType == "lead" && f.Status == backend.Models.Enums.FollowupStatus.Pending)
-                    .ToListAsync(ct);
                 foreach (var f in pendingFollowups)
                 {
                     f.AssignedAgentId = agentId;
+                    f.AssignedToName = agent.Name;
+                    f.AssignedToRole = agent.Role?.Code ?? "sales_executive";
+                    f.UpdatedAt = DateTime.UtcNow;
                     
                     if (f.HandoverId.HasValue)
                     {
@@ -420,7 +456,7 @@ public class GhlLeadAssignmentController : ControllerBase
         var companyId = GetCompanyId();
         var query = _context.Leads
             .Include(l => l.AssignedAgent)
-            .Where(l => l.CompanyId == companyId && (l.Status == "Junk" || l.Status == "Not Interested"));
+            .Where(l => l.CompanyId == companyId && (l.Status == "Junk" || l.Status == "Wrong Number" || l.Status == "Not Interested"));
 
         if (agentId.HasValue && agentId.Value > 0)
         {
@@ -439,20 +475,39 @@ public class GhlLeadAssignmentController : ControllerBase
 
         var leads = await query.OrderByDescending(l => l.UpdatedAt).ToListAsync(ct);
 
-        var result = leads.Select(l => new
-        {
-            id = l.Id,
-            name = l.Name,
-            phone = l.Phone,
-            email = l.Email,
-            status = l.Status,
-            source = l.Source,
-            assignedAgentId = l.AssignedAgentId,
-            assignedAgentName = l.AssignedAgent?.Name,
-            updatedAt = l.UpdatedAt,
-            notes = l.Notes
+        var result = leads.Select(l => {
+            var cf = DeserializeCustomFields(l.CustomFieldsJson);
+            var reason = !string.IsNullOrWhiteSpace(cf.GetValueOrDefault("dispositionReason")) ? cf["dispositionReason"] : l.Notes;
+            return new
+            {
+                id = l.Id,
+                name = l.Name,
+                phone = l.Phone,
+                email = l.Email,
+                status = l.Status,
+                reason = reason,
+                source = l.Source,
+                assignedAgentId = l.AssignedAgentId,
+                assignedAgentName = l.AssignedAgent?.Name,
+                updatedAt = l.UpdatedAt,
+                notes = l.Notes,
+                customFields = cf
+            };
         });
 
         return Ok(new { success = true, data = result });
+    }
+
+    private static Dictionary<string, string> DeserializeCustomFields(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new Dictionary<string, string>();
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new Dictionary<string, string>();
+        }
+        catch
+        {
+            return new Dictionary<string, string>();
+        }
     }
 }

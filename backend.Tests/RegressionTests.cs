@@ -224,7 +224,7 @@ namespace backend.Tests
             db.Roles.Add(role);
             db.Users.Add(new User { Id = 1, CompanyId = 1, Role = role, Status = backend.Models.Enums.UserStatus.Active });
             db.Users.Add(new User { Id = 2, CompanyId = 2, Role = role, Status = backend.Models.Enums.UserStatus.Active });
-            db.Users.Add(new User { Id = 10, CompanyId = 1, Role = role, Status = backend.Models.Enums.UserStatus.Active });
+            db.Users.Add(new User { Id = 10, CompanyId = 1, Name = "Agent Ten", Role = role, Status = backend.Models.Enums.UserStatus.Active });
             db.Leads.Add(new Lead { Id = 5, CompanyId = 1, Name = "A", AssignedAgentId = 1 });
             db.Followups.Add(new Followup { Id = 101, ContactType = "lead", ContactId = "5", CompanyId = 1, AssignedAgentId = 1, Status = FollowupStatus.Pending });
             db.Followups.Add(new Followup { Id = 102, ContactType = "lead", ContactId = "5", CompanyId = 2, AssignedAgentId = 2, Status = FollowupStatus.Pending });
@@ -245,6 +245,8 @@ namespace backend.Tests
             
             var f1 = await db.Followups.FindAsync(101);
             Assert.Equal(10, f1!.AssignedAgentId);
+            Assert.Equal("Agent Ten", f1!.AssignedToName);
+            Assert.Equal("sales_executive", f1!.AssignedToRole);
             
             var f2 = await db.Followups.FindAsync(102);
             Assert.Equal(2, f2!.AssignedAgentId);

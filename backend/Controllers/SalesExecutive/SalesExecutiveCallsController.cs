@@ -7,6 +7,7 @@ using backend.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace backend.Controllers.SalesExecutive;
 
@@ -326,29 +327,36 @@ public class SalesExecutiveCallsController : ControllerBase
                 {
                     lead.Status = "Interested";
 
-                    // Qualified lead: close its pending sales follow-ups so they leave the Follow-ups page.
-                    var leadIdStr = lead.Id.ToString();
-                    var pendingFollowups = await _context.Followups
-                        .Where(f => f.CompanyId == lead.CompanyId &&
-                                    f.ContactType == "lead" &&
-                                    f.ContactId == leadIdStr &&
-                                    f.Status == backend.Models.Enums.FollowupStatus.Pending &&
-                                    f.AssignedToRole != "irm")
-                        .ToListAsync(ct);
-                    foreach (var pf in pendingFollowups)
-                    {
-                        pf.Status = backend.Models.Enums.FollowupStatus.Cancelled;
-                        pf.OutcomeNotes = "Auto-closed: lead marked Interested.";
-                        pf.UpdatedAt = DateTime.UtcNow;
-                    }
+                    // Qualified lead: remove its open sales follow-ups (lead stays in leads) (same SaveChanges).
+                    await backend.Services.Implementations.InterestedLeadConversion.RemoveSalesFollowupsAsync(_context, lead, ct);
                 }
                 else if (string.Equals(dispo, "Not Interested", StringComparison.OrdinalIgnoreCase))
                 {
                     lead.Status = "Not Interested";
+                    lead.UpdatedAt = DateTime.UtcNow;
+                    var cf = DeserializeCustomFields(lead.CustomFieldsJson);
+                    cf["dispositionReason"] = !string.IsNullOrWhiteSpace(dto.Notes) ? dto.Notes : "Not Interested";
+                    lead.CustomFieldsJson = JsonSerializer.Serialize(cf);
+                    if (!string.IsNullOrWhiteSpace(dto.Notes))
+                    {
+                        lead.Notes = string.IsNullOrWhiteSpace(lead.Notes)
+                            ? $"[{DateTime.UtcNow:yyyy-MM-dd}] Not Interested: {dto.Notes}"
+                            : $"{lead.Notes}\n\n[{DateTime.UtcNow:yyyy-MM-dd}] Not Interested: {dto.Notes}";
+                    }
                 }
                 else if (string.Equals(dispo, "Wrong Number", StringComparison.OrdinalIgnoreCase))
                 {
                     lead.Status = "Junk";
+                    lead.UpdatedAt = DateTime.UtcNow;
+                    var cf = DeserializeCustomFields(lead.CustomFieldsJson);
+                    cf["dispositionReason"] = !string.IsNullOrWhiteSpace(dto.Notes) ? dto.Notes : "Wrong Number";
+                    lead.CustomFieldsJson = JsonSerializer.Serialize(cf);
+                    if (!string.IsNullOrWhiteSpace(dto.Notes))
+                    {
+                        lead.Notes = string.IsNullOrWhiteSpace(lead.Notes)
+                            ? $"[{DateTime.UtcNow:yyyy-MM-dd}] Wrong Number: {dto.Notes}"
+                            : $"{lead.Notes}\n\n[{DateTime.UtcNow:yyyy-MM-dd}] Wrong Number: {dto.Notes}";
+                    }
                 }
             }
         }
@@ -609,5 +617,18 @@ public class SalesExecutiveCallsController : ControllerBase
         return Ok(ApiResponse<SendCustomerMessageResponseDto>.SuccessResult(
             response, 
             delivered ? "Customer message dispatched successfully." : "Message delivery failed or unavailable."));
+    }
+
+    private static Dictionary<string, string> DeserializeCustomFields(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new Dictionary<string, string>();
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new Dictionary<string, string>();
+        }
+        catch
+        {
+            return new Dictionary<string, string>();
+        }
     }
 }

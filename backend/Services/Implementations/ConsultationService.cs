@@ -61,7 +61,9 @@ public class ConsultationService : IConsultationService
 
         if (role == "sales_executive" && consultantId.HasValue)
         {
-            query = query.Where(c => c.ConsultantId == consultantId.Value);
+            var agentUser = _context.Users.FirstOrDefault(u => u.Id == consultantId.Value);
+            var agentName = agentUser?.Name;
+            query = query.Where(c => c.ConsultantId == consultantId.Value || (agentName != null && c.ReferredByAgentName != null && EF.Functions.ILike(c.ReferredByAgentName, agentName)));
         }
 
         return query;
@@ -87,7 +89,9 @@ public class ConsultationService : IConsultationService
 
         if (role == "sales_executive" && consultantId.HasValue)
         {
-            query = query.Where(c => c.ConsultantId == consultantId.Value);
+            var agentUser = await _context.Users.FirstOrDefaultAsync(u => u.Id == consultantId.Value, ct);
+            var agentName = agentUser?.Name;
+            query = query.Where(c => c.ConsultantId == consultantId.Value || (agentName != null && c.ReferredByAgentName != null && EF.Functions.ILike(c.ReferredByAgentName, agentName)));
         }
 
         return await query.FirstOrDefaultAsync(ct);
@@ -150,19 +154,45 @@ public class ConsultationService : IConsultationService
         if (!companyId.HasValue || companyId.Value <= 0)
             return ApiResponse<ConsultationResponseDto>.FailureResult("Unauthorized: Company ID is missing.");
 
-        int.TryParse(dto.InvestorId, out var investorId);
+        int? finalInvestorId = null;
+        if (int.TryParse(dto.InvestorId, out var parsedInvId) && parsedInvId > 0)
+        {
+            var invExists = await _context.Investors.AnyAsync(i => i.Id == parsedInvId && i.CompanyId == companyId.Value, ct);
+            if (invExists) finalInvestorId = parsedInvId;
+        }
+
+        if (!finalInvestorId.HasValue && !string.IsNullOrWhiteSpace(dto.InvestorPhone))
+        {
+            var cleanPhone = dto.InvestorPhone.Trim();
+            var existingInv = await _context.Investors.FirstOrDefaultAsync(i => i.CompanyId == companyId.Value && i.Phone == cleanPhone, ct);
+            if (existingInv != null)
+            {
+                finalInvestorId = existingInv.Id;
+            }
+        }
+
+        var callerUser = await _context.Users.FirstOrDefaultAsync(u => u.Id == consultantId.Value, ct);
+        var targetConsultantId = dto.ConsultantId.HasValue && dto.ConsultantId.Value > 0
+            ? dto.ConsultantId.Value
+            : consultantId.Value;
+
+        var consultantUser = await _context.Users.FirstOrDefaultAsync(u => u.Id == targetConsultantId && u.CompanyId == companyId.Value, ct);
 
         var consultation = new Consultation
         {
             CompanyId = companyId.Value,
-            ConsultantId = consultantId.Value,
-            InvestorId = investorId,
+            ConsultantId = targetConsultantId,
+            ConsultantName = consultantUser?.Name ?? (!string.IsNullOrWhiteSpace(dto.ConsultantName) ? dto.ConsultantName.Trim() : (callerUser?.Name ?? string.Empty)),
+            InvestorId = finalInvestorId,
             InvestorName = dto.InvestorName.Trim(),
             InvestorPhone = dto.InvestorPhone.Trim(),
             ScheduledAt = dto.ScheduledAt,
             Status = ConsultationStatus.Scheduled,
             Agenda = dto.Agenda?.Trim() ?? string.Empty,
             OutcomeNotes = dto.Notes?.Trim() ?? string.Empty,
+            ReferredByAgentName = !string.IsNullOrWhiteSpace(dto.ReferredByAgentName)
+                ? dto.ReferredByAgentName.Trim()
+                : (_currentUser.Role == "sales_executive" ? callerUser?.Name : null),
             CreatedAt = DateTime.UtcNow
         };
 
@@ -321,13 +351,14 @@ public class ConsultationService : IConsultationService
             CompanyId = c.CompanyId,
             ConsultantId = c.ConsultantId,
             ConsultantName = c.Consultant?.Name ?? c.ConsultantName,
-            InvestorId = c.InvestorId.ToString(),
+            InvestorId = c.InvestorId?.ToString() ?? string.Empty,
             InvestorName = c.InvestorName,
             InvestorPhone = c.InvestorPhone,
             ScheduledAt = c.ScheduledAt,
             Status = c.Status.ToString(),
             Agenda = c.Agenda,
             OutcomeNotes = c.OutcomeNotes ?? string.Empty,
+            ReferredByAgentName = c.ReferredByAgentName,
             CreatedAt = c.CreatedAt,
             UpdatedAt = c.UpdatedAt,
             HandoverId = c.HandoverId,
@@ -340,7 +371,7 @@ public class ConsultationService : IConsultationService
     private static ConsultationDto MapToIrmDto(Consultation c) => new()
     {
         Id = c.Id,
-        InvestorId = c.InvestorId,
+        InvestorId = c.InvestorId ?? 0,
         CompanyId = c.CompanyId,
         ConsultantId = c.ConsultantId,
         ConsultantName = c.ConsultantName,

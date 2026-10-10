@@ -19,7 +19,7 @@ public class Consultation
     public int? OriginalOwnerId { get; set; }
     public User? OriginalOwner { get; set; }
 
-    public int InvestorId { get; set; }
+    public int? InvestorId { get; set; }
     public Investor? Investor { get; set; }
 
     public string InvestorName { get; set; } = string.Empty;

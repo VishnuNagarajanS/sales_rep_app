@@ -197,6 +197,12 @@ public class FollowupService : IFollowupService
                 f.CreatedAt >= DateTime.UtcNow.AddSeconds(-60))
             .FirstOrDefaultAsync(ct);
 
+        var agent = await _context.Users
+            .Include(u => u.Role)
+            .FirstOrDefaultAsync(u => u.Id == agentId.Value && u.CompanyId == companyId.Value, ct);
+        var agentName = agent?.Name ?? string.Empty;
+        var agentRole = agent?.Role?.Code ?? "sales_executive";
+
         if (existingPending != null)
         {
             if (IsIrmFollowup(existingPending) && IsGhlAdmin())
@@ -210,6 +216,8 @@ public class FollowupService : IFollowupService
             if (!string.IsNullOrWhiteSpace(dto.Notes)) existingPending.Notes = dto.Notes.Trim();
             if (!string.IsNullOrWhiteSpace(dto.ContactEmail)) existingPending.ContactEmail = dto.ContactEmail.Trim();
             existingPending.AssignedAgentId = agentId.Value;
+            existingPending.AssignedToName = agentName;
+            existingPending.AssignedToRole = agentRole;
             existingPending.UpdatedAt = DateTime.UtcNow;
 
             var existingLeadId = int.TryParse(existingPending.ContactId, out var elid)
@@ -252,6 +260,8 @@ public class FollowupService : IFollowupService
         {
             CompanyId = companyId.Value,
             AssignedAgentId = agentId.Value,
+            AssignedToName = agentName,
+            AssignedToRole = agentRole,
             ContactId = dto.ContactId.Trim(),
             ContactType = string.IsNullOrWhiteSpace(dto.ContactType) ? "lead" : dto.ContactType.Trim().ToLower(),
             ContactName = dto.ContactName.Trim(),

@@ -161,9 +161,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
   const isLeadInFollowupOrMoved = (l: Lead) => {
     if (MOVED_LEAD_STATUSES.includes(l.status)) return true;
-    if (pendingFollowupContactIds.has(String(l.id))) return true;
+    if (l.status !== 'New' && pendingFollowupContactIds.has(String(l.id))) return true;
     const phoneDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
-    if (phoneDigits && pendingFollowupPhones.has(phoneDigits)) return true;
+    if (l.status !== 'New' && phoneDigits && pendingFollowupPhones.has(phoneDigits)) return true;
     return false;
   };
 
@@ -602,7 +602,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     const failed = results.filter(r => r.status === 'rejected') as PromiseRejectedResult[];
     if (failed.length > 0) {
       console.error('[Lead assignment] failed', failed.map(f => f.reason));
-      alert(`${failed.length} lead(s) could not be assigned: ${failed[0].reason?.message || 'Unknown error'}`);
+      showToast(`⚠️ ${failed.length} lead(s) could not be assigned: ${failed[0].reason?.message || 'Unknown error'}`);
     }
     return results.length - failed.length;
   };
@@ -671,10 +671,10 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         });
         realAssigned = res?.data?.assigned ?? 0;
         const skipped = res?.data?.skipped || [];
-        if (skipped.length > 0) alert(`${skipped.length} lead(s) skipped: ${skipped[0].reason}`);
+        if (skipped.length > 0) showToast(`⚠️ ${skipped.length} lead(s) skipped: ${skipped[0].reason}`);
       } catch (err: any) {
         console.error('Manual assign failed', err);
-        alert(`Manual assign failed: ${err.message || 'Unknown error'}`);
+        showToast(`❌ Manual assign failed: ${err.message || 'Unknown error'}`);
         return;
       }
     }
@@ -747,10 +747,10 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
           okCount += res?.data?.assigned ?? 0;
           skippedCount += (res?.data?.skipped || []).length;
         }
-        if (skippedCount > 0) alert(`${skippedCount} lead(s) were skipped (already assigned).`);
+        if (skippedCount > 0) showToast(`⚠️ ${skippedCount} lead(s) were skipped (already assigned).`);
       } catch (err: any) {
         console.error('Auto assign failed', err);
-        alert(`Auto assign failed: ${err.message || 'Unknown error'}`);
+        showToast(`❌ Auto assign failed: ${err.message || 'Unknown error'}`);
         loadData();
         return;
       }

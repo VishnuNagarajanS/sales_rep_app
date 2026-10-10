@@ -5,8 +5,6 @@ import {
   CheckCircle,
   XCircle,
   Clock,
-  ChevronRight,
-  ChevronLeft,
   Plus,
   Phone,
   Mail,
@@ -263,23 +261,6 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
   // ID of the won stage for this pipeline
   const wonStageId = stages[stages.length - 1].id;
 
-  const handleMoveStage = (deal: Deal, direction: 'forward' | 'backward') => {
-    const currentIndex = stages.findIndex(s => s.id === deal.stage);
-    if (currentIndex === -1) return;
-
-    const newIndex = direction === 'forward' ? currentIndex + 1 : currentIndex - 1;
-    if (newIndex >= 0 && newIndex < stages.length) {
-      const updatedDeal: Deal = {
-        ...deal,
-        stage: stages[newIndex].id,
-        stageEnteredAt: new Date().toISOString(),
-      };
-      persistDeal(updatedDeal).catch(e => {
-        console.error("Error saving deal:", e);
-        showToast("Failed to update deal stage");
-      });
-    }
-  };
 
   const handleMarkWon = async (deal: Deal) => {
     const updated = { ...deal, stage: wonStageId, stageEnteredAt: new Date().toISOString() };
@@ -581,49 +562,28 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                               👤 {deal.assignedAgentName}
                             </span>
 
-                            {/* Stage Mover and Action Buttons */}
-                            <div className="pipeline-deal-actions">
-                              {!isWon && !isLost && sIdx > 0 && (
-                                <button
-                                  className="btn btn-ghost btn-icon btn-sm pipeline-stage-mover-btn"
-                                  title="Move to Previous Stage"
-                                  onClick={() => handleMoveStage(deal, 'backward')}
-                                >
-                                  <ChevronLeft size={13} />
-                                </button>
-                              )}
-                              {!isWon && !isLost && sIdx < stages.length - 1 && (
-                                <button
-                                  className="btn btn-primary btn-icon btn-sm pipeline-stage-mover-btn"
-                                  title="Advance to Next Stage"
-                                  onClick={() => handleMoveStage(deal, 'forward')}
-                                >
-                                  <ChevronRight size={13} />
-                                </button>
-                              )}
-                              {canUpdateDeals && (
-                                <>
-                                  {!isWon && (
-                                    <button
-                                      className="btn btn-ghost btn-icon btn-sm pipeline-mark-won-btn"
-                                      title="Mark Won"
-                                      onClick={() => handleMarkWon(deal)}
-                                    >
-                                      <CheckCircle size={14} />
-                                    </button>
-                                  )}
-                                  {!isLost && !isWon && (
-                                    <button
-                                      className="btn btn-ghost btn-icon btn-sm pipeline-mark-lost-btn"
-                                      title="Mark Lost"
-                                      onClick={() => setSelectedDealForLoss(deal)}
-                                    >
-                                      <XCircle size={14} />
-                                    </button>
-                                  )}
-                                </>
-                              )}
-                            </div>
+                            {canUpdateDeals && (
+                              <div className="pipeline-deal-actions">
+                                {!isWon && (
+                                  <button
+                                    className="btn btn-ghost btn-icon btn-sm pipeline-mark-won-btn"
+                                    title="Mark Won"
+                                    onClick={() => handleMarkWon(deal)}
+                                  >
+                                    <CheckCircle size={14} />
+                                  </button>
+                                )}
+                                {!isLost && !isWon && (
+                                  <button
+                                    className="btn btn-ghost btn-icon btn-sm pipeline-mark-lost-btn"
+                                    title="Mark Lost"
+                                    onClick={() => setSelectedDealForLoss(deal)}
+                                  >
+                                    <XCircle size={14} />
+                                  </button>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
                       );

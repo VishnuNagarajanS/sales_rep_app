@@ -9,11 +9,12 @@ import {
   CheckCircle2,
   AlertCircle,
 } from 'lucide-react';
-import { Lead } from '../../types';
+import { Lead, IrmProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
 import { apiClient } from '../../services/apiClient';
+import { getCompanyIrms } from '../../services/ghlApiService';
 import {
   AssignableAgent,
   loadAgentDirectory,
@@ -41,9 +42,17 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
   const [formData, setFormData] = useState<Partial<Lead>>({});
   const [agentFilter, setAgentFilter] = useState<string>('All');
+  const [irmFilter, setIrmFilter] = useState<string>('All');
   const [datePreset, setDatePreset] = useState<string>('all');
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
+
+  // IRM assignment state
+  const [companyIrms, setCompanyIrms] = useState<IrmProfile[]>([]);
+  const [isAssignIrmModalOpen, setIsAssignIrmModalOpen] = useState(false);
+  const [leadToAssignIrm, setLeadToAssignIrm] = useState<Lead | null>(null);
+  const [selectedIrmForLead, setSelectedIrmForLead] = useState<string>('');
+  const [isSubmittingIrm, setIsSubmittingIrm] = useState(false);
 
   // Agent reassignment confirmation state for Edit panel
   const [pendingAgent, setPendingAgent] = useState<AssignableAgent | null>(null);
@@ -193,8 +202,128 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
     }
   };
 
+  const formatDateDisplay = (raw?: string | null): string => {
+    if (!raw) return '';
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return raw;
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  const resolveLeadOwnership = (lead: Lead) => {
+    const custom = lead.customFields || {};
+
+    // 1. Sales Executive
+    let salesExecutiveName = lead.assignedSalesExecutiveName;
+    let salesExecutiveDate = lead.assignedSalesExecutiveAt;
+
+    const isAgentIrm =
+      lead.assignedAgentRole === 'irm' ||
+      companyIrms.some(i => i.name.toLowerCase() === (lead.assignedAgentName || '').toLowerCase());
+
+    if (!salesExecutiveName) {
+      if (lead.assignedAgentName && !isAgentIrm) {
+        salesExecutiveName = lead.assignedAgentName;
+        salesExecutiveDate = lead.assignedSalesExecutiveAt || lead.assignedAt || lead.createdAt;
+      } else if (custom.qualifiedByAgentName) {
+        salesExecutiveName = custom.qualifiedByAgentName;
+        salesExecutiveDate = custom.qualifiedAt || lead.assignedAt || lead.createdAt;
+      } else if (custom.assignedSalesExecutiveName) {
+        salesExecutiveName = custom.assignedSalesExecutiveName;
+        salesExecutiveDate = custom.assignedSalesExecutiveAt || lead.assignedAt || lead.createdAt;
+      }
+    }
+
+    if (salesExecutiveName && !salesExecutiveDate) {
+      salesExecutiveDate = lead.assignedSalesExecutiveAt || lead.assignedAt || lead.createdAt;
+    }
+
+    // Check coverage for sales executive
+    let isSalesCovered = false;
+    let salesCoveredBy: string | undefined;
+
+    if (lead.isCovered && lead.activeOwnerRole === 'sales_executive' && lead.coveredByName) {
+      isSalesCovered = true;
+      salesCoveredBy = lead.coveredByName;
+    } else if (lead.handoverId && lead.handedOverFromName === salesExecutiveName) {
+      isSalesCovered = true;
+      salesCoveredBy = (lead as any).handover?.coveringUser?.name || 'Covering Agent';
+    } else if (salesExecutiveName) {
+      const activeCov = activeCoverages.find(
+        c => (c.originalUserName || c.fromIrmName || '').toLowerCase() === salesExecutiveName!.toLowerCase()
+      );
+      if (activeCov) {
+        isSalesCovered = true;
+        salesCoveredBy = activeCov.coveringUserName || activeCov.toIrmName;
+      }
+    }
+
+    // 2. IRM
+    let irmName = lead.assignedIrmName || custom.assignedIrmName;
+    let irmDate = lead.assignedIrmAt || custom.assignedIrmAt;
+
+    if (!irmName && isAgentIrm && lead.assignedAgentName) {
+      irmName = lead.assignedAgentName;
+      irmDate = lead.assignedIrmAt || custom.assignedIrmAt || lead.assignedAt || lead.createdAt;
+    }
+
+    if (irmName && !irmDate) {
+      irmDate = lead.assignedIrmAt || custom.assignedIrmAt || lead.assignedAt || lead.createdAt;
+    }
+
+    let transferredBy =
+      lead.transferredBySalesExecutiveName ||
+      custom.qualifiedByAgentName ||
+      custom.transferredBy;
+
+    // Check coverage for IRM
+    let isIrmCovered = false;
+    let irmCoveredBy: string | undefined;
+
+    if (lead.isCovered && (lead.activeOwnerRole === 'irm' || irmName) && lead.coveredByName) {
+      isIrmCovered = true;
+      irmCoveredBy = lead.coveredByName;
+    } else if (irmName) {
+      const activeCov = activeCoverages.find(
+        c =>
+          (c.fromIrmName || c.originalUserName || '').toLowerCase() === irmName!.toLowerCase() ||
+          (lead.assignedIrmId && String(c.fromIrmId || c.originalUserId) === String(lead.assignedIrmId))
+      );
+      if (activeCov) {
+        isIrmCovered = true;
+        irmCoveredBy = activeCov.toIrmName || activeCov.coveringUserName;
+      }
+    }
+
+    // 3. Latest active owner
+    let latestActiveOwnerName: string | undefined;
+    let latestActiveOwnerRole: string | undefined;
+
+    if (irmName) {
+      latestActiveOwnerName = (isIrmCovered && irmCoveredBy) ? irmCoveredBy : irmName;
+      latestActiveOwnerRole = 'irm';
+    } else if (salesExecutiveName) {
+      latestActiveOwnerName = (isSalesCovered && salesCoveredBy) ? salesCoveredBy : salesExecutiveName;
+      latestActiveOwnerRole = 'sales_executive';
+    }
+
+    return {
+      salesExecutiveName,
+      salesExecutiveDate,
+      isSalesCovered,
+      salesCoveredBy,
+      irmName,
+      irmDate,
+      isIrmCovered,
+      irmCoveredBy,
+      transferredBy,
+      latestActiveOwnerName,
+      latestActiveOwnerRole,
+    };
+  };
+
   const getLeadDateStr = (lead: Lead): string => {
-    const raw = lead.assignedAt || lead.createdAt;
+    const info = resolveLeadOwnership(lead);
+    const raw = info.salesExecutiveDate || info.irmDate || lead.assignedAt || lead.createdAt;
     if (!raw) return '';
     if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
       return raw.substring(0, 10);
@@ -230,22 +359,35 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
   const loadData = async () => {
     if (apiClient.isMockMode()) {
       const allLeads = storageService.getLeads(tenant?.id);
-      const assigned = allLeads.filter(lead => isLeadAssigned(lead, adminIds));
-      setLeads(assigned);
+      setLeads(allLeads);
       setSelectedLead(prev => {
         if (!prev) return null;
-        return assigned.find(l => l.id === prev.id) || null;
+        return allLeads.find(l => l.id === prev.id) || null;
       });
       return;
     }
 
     try {
-      const res = await apiClient.get<any>('/sales-executive/leads?page=1&pageSize=200&assignment=assigned');
+      const res = await apiClient.get<any>('/sales-executive/leads?page=1&pageSize=1000&status=all&assignment=all');
       if (res.success && res.data && res.data.items) {
         const apiLeads = res.data.items.map((item: any) => ({
           ...item,
           id: String(item.id),
           assignedAgentId: item.assignedAgentId ? String(item.assignedAgentId) : undefined,
+          assignedAgentName: item.assignedAgentName || item.assignedAgent?.name || '',
+          assignedAgentRole: item.assignedAgentRole || item.assignedAgent?.role?.code || undefined,
+          assignedSalesExecutiveId: item.assignedSalesExecutiveId ? String(item.assignedSalesExecutiveId) : undefined,
+          assignedSalesExecutiveName: item.assignedSalesExecutiveName || undefined,
+          assignedSalesExecutiveAt: item.assignedSalesExecutiveAt || undefined,
+          transferredBySalesExecutiveName: item.transferredBySalesExecutiveName || item.customFields?.qualifiedByAgentName || undefined,
+          activeOwnerName: item.activeOwnerName || undefined,
+          activeOwnerRole: item.activeOwnerRole || undefined,
+          isCovered: Boolean(item.isCovered),
+          coveredByName: item.coveredByName || undefined,
+          assignedIrmId: item.assignedIrmId ? String(item.assignedIrmId) : (item.customFields?.assignedIrmId ? String(item.customFields.assignedIrmId) : undefined),
+          assignedIrmName: item.assignedIrmName || item.customFields?.assignedIrmName || '',
+          assignedIrmAt: item.assignedIrmAt || item.customFields?.assignedIrmAt || undefined,
+          assignedAt: item.assignedAt || item.createdAt || undefined,
           customFields: item.customFields || {}
         }));
         setLeads(apiLeads);
@@ -258,6 +400,11 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
       console.error('Failed to load leads from API', err);
     }
   };
+
+  useEffect(() => {
+    loadActiveCoverages();
+    getCompanyIrms(tenant?.id).then(list => setCompanyIrms(list || []));
+  }, [tenant?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -347,16 +494,88 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
     setPendingAgent(null);
   };
 
+  const handleOpenAssignIrm = (lead: Lead) => {
+    setLeadToAssignIrm(lead);
+    const existingIrm = lead.assignedIrmId || lead.customFields?.assignedIrmId;
+    setSelectedIrmForLead(existingIrm ? String(existingIrm) : (companyIrms[0]?.id || ''));
+    setIsAssignIrmModalOpen(true);
+  };
+
+  const handleConfirmAssignIrm = async () => {
+    if (!leadToAssignIrm) return;
+    const chosenIrm = companyIrms.find(i => String(i.id) === String(selectedIrmForLead));
+    const nowIso = new Date().toISOString();
+
+    const updatedLead: Lead = {
+      ...leadToAssignIrm,
+      assignedIrmId: chosenIrm ? String(chosenIrm.id) : undefined,
+      assignedIrmName: chosenIrm ? chosenIrm.name : undefined,
+      assignedIrmAt: chosenIrm ? nowIso : undefined,
+      notes: `${leadToAssignIrm.notes ? leadToAssignIrm.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Assigned to IRM: ${chosenIrm?.name || 'Unassigned'} by ${user?.name || 'Admin'}`,
+      customFields: {
+        ...leadToAssignIrm.customFields,
+        assignedIrmId: chosenIrm ? String(chosenIrm.id) : undefined,
+        assignedIrmName: chosenIrm ? chosenIrm.name : undefined,
+        assignedIrmAt: chosenIrm ? nowIso : undefined,
+      }
+    };
+
+    setIsSubmittingIrm(true);
+    try {
+      if (apiClient.isMockMode()) {
+        storageService.saveLead(updatedLead);
+      } else {
+        await apiClient.put(`/sales-executive/leads/${leadToAssignIrm.id}`, {
+          name: leadToAssignIrm.name,
+          phone: leadToAssignIrm.phone,
+          companyId: parseInt(String(leadToAssignIrm.companyId), 10) || 1,
+          email: leadToAssignIrm.email,
+          location: leadToAssignIrm.location,
+          source: leadToAssignIrm.source,
+          priority: leadToAssignIrm.priority,
+          notes: updatedLead.notes,
+          investmentCapacity: leadToAssignIrm.customFields?.investmentCapacity || '',
+          assignedIrmId: chosenIrm ? parseInt(chosenIrm.id, 10) : 0,
+          assignedIrmName: chosenIrm ? chosenIrm.name : '',
+          assignedIrmAt: chosenIrm ? nowIso : '',
+        });
+        storageService.saveLead(updatedLead);
+      }
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+      setIsAssignIrmModalOpen(false);
+      setLeadToAssignIrm(null);
+      await loadData();
+    } catch (e) {
+      console.error('Failed to assign IRM', e);
+      storageService.saveLead(updatedLead);
+    } finally {
+      setIsSubmittingIrm(false);
+    }
+  };
+
   const handleSaveLead = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.phone) return;
 
     const existingLead = leads.find(l => l.id === formData.id);
+    const irmChanged = existingLead && (existingLead.assignedIrmName || '') !== (formData.assignedIrmName || '');
+    const nowIso = new Date().toISOString();
+
     const leadToSave: Lead = {
       ...(existingLead || ({} as Lead)),
       ...(formData as Lead),
       id: formData.id || `lead-${Date.now()}`,
       companyId: formData.companyId || tenant?.id || 't-ghl-01',
+      assignedIrmId: formData.assignedIrmId,
+      assignedIrmName: formData.assignedIrmName,
+      assignedIrmAt: irmChanged ? nowIso : (formData.assignedIrmAt || existingLead?.assignedIrmAt || (formData.assignedIrmName ? nowIso : undefined)),
+      customFields: {
+        ...(existingLead?.customFields || {}),
+        ...(formData.customFields || {}),
+        assignedIrmId: formData.assignedIrmId,
+        assignedIrmName: formData.assignedIrmName,
+        assignedIrmAt: irmChanged ? nowIso : (formData.assignedIrmAt || existingLead?.assignedIrmAt || (formData.assignedIrmName ? nowIso : undefined)),
+      }
     };
 
     if (apiClient.isMockMode()) {
@@ -373,10 +592,16 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
           source: leadToSave.source,
           priority: leadToSave.priority,
           notes: leadToSave.notes,
-          investmentCapacity: leadToSave.customFields?.investmentCapacity || ''
+          investmentCapacity: leadToSave.customFields?.investmentCapacity || '',
+          assignedAgentId: leadToSave.assignedAgentId ? parseInt(leadToSave.assignedAgentId, 10) : undefined,
+          assignedIrmId: leadToSave.assignedIrmId ? parseInt(leadToSave.assignedIrmId, 10) : 0,
+          assignedIrmName: leadToSave.assignedIrmName || '',
+          assignedIrmAt: leadToSave.assignedIrmAt || '',
         });
+        storageService.saveLead(leadToSave);
       } catch (err) {
         console.error('Failed to update lead', err);
+        storageService.saveLead(leadToSave);
       }
     }
 
@@ -413,7 +638,7 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
     loadData();
   };
 
-  // Table columns exactly matching the requested specification
+  // Table columns: Lead Name & Contact, Email, Investment Amount Range, Assigned Sales Executive, Assigned IRM, Source, Status, Quick Call, Action
   const columns: Column<Lead>[] = [
     {
       key: 'name',
@@ -446,29 +671,51 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
       },
     },
     {
-      key: 'assignedAgent',
-      header: 'Assigned Agent',
-      sortable: true,
-      render: l => (
-        <span className="lead-assigned-agent-val">{l.assignedAgentName || '—'}</span>
-      ),
-    },
-    {
-      key: 'assignedAt',
-      header: 'Assigned Date',
+      key: 'assignedSalesExecutive',
+      header: 'Assigned Sales Executive',
       sortable: true,
       render: l => {
-        const raw = l.assignedAt || l.createdAt;
-        if (!raw) return <span className="lead-text-muted">—</span>;
-        const d = new Date(raw);
-        const formatted = isNaN(d.getTime())
-          ? raw
-          : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        const info = resolveLeadOwnership(l);
+        const formattedSalesDate = formatDateDisplay(info.salesExecutiveDate);
         return (
-          <div className="lead-date-cell">
-            <span className="lead-date-primary">{formatted}</span>
-            {l.assignedAt && l.createdAt && l.assignedAt.slice(0, 10) !== l.createdAt.slice(0, 10) && (
-              <span className="lead-date-sub">Created {l.createdAt.slice(0, 10)}</span>
+          <div className="lead-person-cell">
+            <span className="lead-assigned-agent-val">{info.salesExecutiveName || '—'}</span>
+            {info.isSalesCovered && info.salesCoveredBy && (
+              <span className="lead-person-coverage-badge" title={`Work covered by ${info.salesCoveredBy}`}>
+                Covered by {info.salesCoveredBy}
+              </span>
+            )}
+            <span className="lead-person-date">{formattedSalesDate || '—'}</span>
+          </div>
+        );
+      },
+    },
+    {
+      key: 'assignedIrm',
+      header: 'Assigned IRM',
+      sortable: true,
+      render: l => {
+        const info = resolveLeadOwnership(l);
+        const formattedIrmDate = formatDateDisplay(info.irmDate);
+        return (
+          <div className="lead-person-cell">
+            <span className={`lead-assigned-irm-val ${info.irmName ? 'assigned' : 'unassigned'}`}>
+              {info.irmName || '—'}
+            </span>
+            {info.isIrmCovered && info.irmCoveredBy && (
+              <span className="lead-person-coverage-badge" title={`Work covered by ${info.irmCoveredBy}`}>
+                Covered by {info.irmCoveredBy}
+              </span>
+            )}
+            {info.irmName && formattedIrmDate ? (
+              <span className="lead-person-date">{formattedIrmDate}</span>
+            ) : (
+              <span className="lead-person-date lead-text-muted">—</span>
+            )}
+            {info.irmName && info.transferredBy && (
+              <span className="lead-transferred-by" title={`Transferred by ${info.transferredBy}`}>
+                Transferred by {info.transferredBy}
+              </span>
             )}
           </div>
         );
@@ -479,6 +726,20 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
       header: 'Source',
       sortable: true,
       render: l => <span className="lead-text-muted">{l.source || '—'}</span>,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      render: l => {
+        const rawStatus = l.status || 'New';
+        const statusClass = rawStatus.toLowerCase().replace(/\s+/g, '-');
+        return (
+          <span className={`lead-status-pill status-${statusClass}`}>
+            {rawStatus}
+          </span>
+        );
+      },
     },
     {
       key: 'quickCall',
@@ -512,6 +773,11 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
       },
     },
     {
+      label: 'Assign / Change IRM',
+      icon: <UserCheck size={14} className="leads-action-icon" />,
+      onClick: l => handleOpenAssignIrm(l),
+    },
+    {
       label: 'Edit Lead',
       icon: <Edit size={14} className="leads-action-icon" />,
       onClick: l => handleOpenEdit(l),
@@ -520,21 +786,60 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
 
   // Unique agent names for the filter dropdown
   const uniqueAgents = useMemo(() => {
-    const names = leads
-      .map(l => l.assignedAgentName)
-      .filter((n): n is string => Boolean(n));
-    return Array.from(new Set(names)).sort();
-  }, [leads]);
+    const names = new Set<string>();
+    leads.forEach(l => {
+      const info = resolveLeadOwnership(l);
+      if (info.salesExecutiveName) names.add(info.salesExecutiveName);
+    });
+    agents.forEach(a => {
+      if (a.name) names.add(a.name);
+    });
+    return Array.from(names).sort();
+  }, [leads, agents]);
 
-  // Apply agent and date range filter on top of the full leads list
+  // Unique IRM names for the filter dropdown
+  const uniqueIrms = useMemo(() => {
+    const names = new Set<string>();
+    leads.forEach(l => {
+      const info = resolveLeadOwnership(l);
+      if (info.irmName) names.add(info.irmName);
+    });
+    companyIrms.forEach(i => {
+      if (i.name) names.add(i.name);
+    });
+    return Array.from(names).sort();
+  }, [leads, companyIrms]);
+
+  // Apply agent, IRM, and date range filter on top of the full leads list
   const filteredLeads = useMemo(() => {
     return leads.filter(l => {
-      // 1. Agent filter
-      if (agentFilter && agentFilter !== 'All' && l.assignedAgentName !== agentFilter) {
-        return false;
+      const info = resolveLeadOwnership(l);
+
+      // 1. Sales Executive filter
+      if (agentFilter && agentFilter !== 'All') {
+        if (agentFilter === 'Unassigned') {
+          if (info.salesExecutiveName) return false;
+        } else if (
+          info.salesExecutiveName !== agentFilter &&
+          info.salesCoveredBy !== agentFilter
+        ) {
+          return false;
+        }
       }
 
-      // 2. Date range filter
+      // 2. IRM filter
+      if (irmFilter && irmFilter !== 'All') {
+        if (irmFilter === 'Unassigned') {
+          if (info.irmName) return false;
+        } else if (
+          info.irmName !== irmFilter &&
+          info.irmCoveredBy !== irmFilter
+        ) {
+          return false;
+        }
+      }
+
+      // 3. Date range filter
       if (datePreset === 'all' && !dateFrom && !dateTo) {
         return true;
       }
@@ -553,7 +858,7 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
 
       return true;
     });
-  }, [leads, agentFilter, datePreset, dateFrom, dateTo]);
+  }, [leads, agentFilter, irmFilter, datePreset, dateFrom, dateTo, activeCoverages]);
 
   if (!isGhlAdmin) {
     return (
@@ -607,12 +912,20 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
           setIsDetailDrawerOpen(true);
         }}
         searchPlaceholder="Search assigned leads by name, phone, or agent..."
-        searchFilter={(lead, query) =>
-          lead.name.toLowerCase().includes(query) ||
-          lead.phone.includes(query) ||
-          (lead.assignedAgentName || '').toLowerCase().includes(query) ||
-          (lead.email || '').toLowerCase().includes(query)
-        }
+        searchFilter={(lead, query) => {
+          const info = resolveLeadOwnership(lead);
+          const q = query.toLowerCase();
+          return (
+            lead.name.toLowerCase().includes(q) ||
+            lead.phone.includes(q) ||
+            (lead.email || '').toLowerCase().includes(q) ||
+            (lead.source || '').toLowerCase().includes(q) ||
+            (lead.status || '').toLowerCase().includes(q) ||
+            (info.salesExecutiveName || '').toLowerCase().includes(q) ||
+            (info.irmName || '').toLowerCase().includes(q) ||
+            (info.transferredBy || '').toLowerCase().includes(q)
+          );
+        }}
         emptyTitle="No assigned leads found"
         emptyDescription="Leads assigned to agents will appear here."
         filtersNode={
@@ -620,11 +933,22 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
             filters={[
               {
                 key: 'assignedAgent',
-                label: 'Assigned Agent',
+                label: 'Assigned Sales Executive',
                 value: agentFilter,
                 onChange: setAgentFilter,
-                placeholder: 'Select an agent',
+                placeholder: 'Select a sales executive',
                 options: uniqueAgents.map(name => ({ value: name, label: name })),
+              },
+              {
+                key: 'assignedIrm',
+                label: 'Assigned IRM',
+                value: irmFilter,
+                onChange: setIrmFilter,
+                placeholder: 'Select an IRM',
+                options: [
+                  ...uniqueIrms.map(name => ({ value: name, label: name })),
+                  { value: 'Unassigned', label: 'Unassigned' },
+                ],
               },
             ]}
             dateRange={{
@@ -636,6 +960,7 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
             }}
             onClearAll={() => {
               setAgentFilter('All');
+              setIrmFilter('All');
               setDatePreset('all');
               setDateFrom('');
               setDateTo('');
@@ -676,11 +1001,54 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
         {selectedLead && (
           <>
             {/* Quick Info Banner */}
-            <div className="lead-quick-banner">
-              <div className="lead-assigned-note">
-                Assigned : <strong>{selectedLead.assignedAgentName || 'Unassigned'}</strong>
-              </div>
-            </div>
+            {(() => {
+              const info = resolveLeadOwnership(selectedLead);
+              return (
+                <div className="lead-quick-banner" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div className="lead-assigned-note">
+                    Sales Executive: <strong>{info.salesExecutiveName || 'Unassigned'}</strong>
+                    {info.salesExecutiveDate && (
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 6 }}>
+                        ({formatDateDisplay(info.salesExecutiveDate)})
+                      </span>
+                    )}
+                    {info.isSalesCovered && info.salesCoveredBy && (
+                      <span className="lead-person-coverage-badge" style={{ marginLeft: 8 }}>
+                        Covered by {info.salesCoveredBy}
+                      </span>
+                    )}
+                  </div>
+                  <div className="lead-assigned-note" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      Assigned IRM: <strong>{info.irmName || 'Not Assigned'}</strong>
+                      {info.irmDate && (
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 6 }}>
+                          ({formatDateDisplay(info.irmDate)})
+                        </span>
+                      )}
+                      {info.isIrmCovered && info.irmCoveredBy && (
+                        <span className="lead-person-coverage-badge" style={{ marginLeft: 8 }}>
+                          Covered by {info.irmCoveredBy}
+                        </span>
+                      )}
+                      {info.transferredBy && (
+                        <span className="lead-transferred-by" style={{ marginLeft: 8 }}>
+                          Transferred by {info.transferredBy}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontSize: 11, padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                      onClick={() => handleOpenAssignIrm(selectedLead)}
+                    >
+                      <UserCheck size={12} /> {info.irmName ? 'Change IRM' : 'Assign IRM'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Core Details */}
             <div className="card lead-detail-card">
@@ -849,20 +1217,55 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
             </div>
           </div>
 
-          <div className="form-group">
-            <label className="form-label">Assigned Agent</label>
-            <select
-              className="form-select"
-              value={formData.assignedAgentName || ''}
-              onChange={handleAgentChange}
-            >
-              {!formData.assignedAgentName && <option value="">Select Agent</option>}
-              {agentOptions.map(agent => (
-                <option key={agent.id} value={agent.name}>
-                  {agent.name}
-                </option>
-              ))}
-            </select>
+          <div className="form-grid-2">
+            <div className="form-group">
+              <label className="form-label">Assigned Sales Executive</label>
+              <select
+                className="form-select"
+                value={formData.assignedAgentName || ''}
+                onChange={handleAgentChange}
+              >
+                {!formData.assignedAgentName && <option value="">Select Sales Executive</option>}
+                {agentOptions.map(agent => (
+                  <option key={agent.id} value={agent.name}>
+                    {agent.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Assigned IRM</label>
+              <select
+                className="form-select"
+                value={formData.assignedIrmName || ''}
+                onChange={e => {
+                  const selectedName = e.target.value;
+                  if (!selectedName) {
+                    setFormData(prev => ({
+                      ...prev,
+                      assignedIrmId: undefined,
+                      assignedIrmName: undefined,
+                      assignedIrmAt: undefined,
+                    }));
+                  } else {
+                    const found = companyIrms.find(i => i.name === selectedName);
+                    setFormData(prev => ({
+                      ...prev,
+                      assignedIrmId: found ? String(found.id) : undefined,
+                      assignedIrmName: selectedName,
+                      assignedIrmAt: new Date().toISOString(),
+                    }));
+                  }
+                }}
+              >
+                <option value="">— Not Assigned —</option>
+                {companyIrms.map(irm => (
+                  <option key={irm.id} value={irm.name}>
+                    {irm.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div className="form-group">
@@ -908,6 +1311,76 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
           <strong>{formData.assignedAgentName || 'Unassigned'}</strong> to{' '}
           <strong>{pendingAgent?.name}</strong>.
         </p>
+      </Modal>
+
+      {/* Assign / Change IRM Modal */}
+      <Modal
+        isOpen={isAssignIrmModalOpen}
+        onClose={() => {
+          setIsAssignIrmModalOpen(false);
+          setLeadToAssignIrm(null);
+        }}
+        title={leadToAssignIrm?.assignedIrmName ? "Change Assigned IRM" : "Assign IRM to Lead"}
+        maxWidth={480}
+        footer={
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', width: '100%' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setIsAssignIrmModalOpen(false);
+                setLeadToAssignIrm(null);
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={isSubmittingIrm}
+              onClick={handleConfirmAssignIrm}
+            >
+              {isSubmittingIrm ? 'Saving...' : 'Confirm Assignment'}
+            </button>
+          </div>
+        }
+      >
+        {leadToAssignIrm && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, margin: '8px 0' }}>
+            <div style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--bg-card)', border: '1px solid var(--border-color)', fontSize: 13 }}>
+              <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+                {leadToAssignIrm.name} <span style={{ fontWeight: 400, color: 'var(--text-secondary)' }}>({leadToAssignIrm.phone})</span>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                Sales Executive: <strong>{leadToAssignIrm.assignedAgentName || 'Unassigned'}</strong>
+                {(leadToAssignIrm.assignedIrmName || leadToAssignIrm.customFields?.assignedIrmName) && (
+                  <span style={{ marginLeft: 10 }}>
+                    Current IRM: <strong>{leadToAssignIrm.assignedIrmName || leadToAssignIrm.customFields?.assignedIrmName}</strong>
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Select IRM</label>
+              <select
+                className="form-select"
+                value={selectedIrmForLead}
+                onChange={e => setSelectedIrmForLead(e.target.value)}
+              >
+                <option value="">— Unassign / Remove IRM —</option>
+                {companyIrms.map(irm => (
+                  <option key={irm.id} value={irm.id}>
+                    {irm.name} {irm.experience ? `(${irm.experience})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>
+              Selecting an IRM assigns this prospect to the relationship manager and records today's date as the handover timestamp.
+            </p>
+          </div>
+        )}
       </Modal>
 
       {/* Admin IRM Coverage & Reassignment Modal */}

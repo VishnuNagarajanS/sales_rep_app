@@ -201,6 +201,15 @@ using (var scope = app.Services.CreateScope())
                     ELSIF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'leads' AND column_name = 'AssignedAgentId') THEN
                         ALTER TABLE leads ALTER COLUMN ""AssignedAgentId"" DROP NOT NULL;
                     END IF;
+
+                    -- Backfill followups AssignedToName and AssignedToRole if empty
+                    UPDATE followups f
+                    SET ""AssignedToName"" = u.""Name"",
+                        ""AssignedToRole"" = COALESCE(r.""Code"", 'sales_executive')
+                    FROM users u
+                    LEFT JOIN roles r ON r.""Id"" = u.""RoleId""
+                    WHERE f.""AssignedAgentId"" = u.""Id""
+                      AND (f.""AssignedToName"" IS NULL OR f.""AssignedToName"" = '' OR f.""AssignedToRole"" IS NULL OR f.""AssignedToRole"" = '');
                 END $$;
             ";
             db.Database.ExecuteSqlRaw(sql);

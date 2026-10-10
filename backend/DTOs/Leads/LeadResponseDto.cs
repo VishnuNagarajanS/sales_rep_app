@@ -25,6 +25,16 @@ public class LeadResponseDto
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
 
+    public int? AssignedSalesExecutiveId { get; set; }
+    public string? AssignedSalesExecutiveName { get; set; }
+    public DateTime? AssignedSalesExecutiveAt { get; set; }
+    public string? AssignedAgentRole { get; set; }
+    public string? TransferredBySalesExecutiveName { get; set; }
+    public string? ActiveOwnerName { get; set; }
+    public string? ActiveOwnerRole { get; set; }
+    public bool IsCovered { get; set; }
+    public string? CoveredByName { get; set; }
+
     public int? HandoverId { get; set; }
     public string? HandedOverFromName { get; set; }
     public DateTime? HandoverPlannedEnd { get; set; }

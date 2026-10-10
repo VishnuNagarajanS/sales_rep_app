@@ -423,6 +423,23 @@ function mapLead(l: Record<string, any>): Lead {
     priority: l.priority ?? 'Medium',
     assignedAgentId: l.assignedAgentId != null && l.assignedAgentId !== '' ? sid(l.assignedAgentId) : '',
     assignedAgentName: l.assignedAgentName ?? '',
+    assignedAgentRole: l.assignedAgentRole ?? undefined,
+    assignedSalesExecutiveId: l.assignedSalesExecutiveId != null ? sid(l.assignedSalesExecutiveId) : undefined,
+    assignedSalesExecutiveName: l.assignedSalesExecutiveName ?? undefined,
+    assignedSalesExecutiveAt: l.assignedSalesExecutiveAt ?? undefined,
+    transferredBySalesExecutiveName: l.transferredBySalesExecutiveName ?? l.customFields?.qualifiedByAgentName ?? undefined,
+    activeOwnerName: l.activeOwnerName ?? undefined,
+    activeOwnerRole: l.activeOwnerRole ?? undefined,
+    isCovered: l.isCovered ?? false,
+    coveredByName: l.coveredByName ?? undefined,
+    assignedIrmId: l.assignedIrmId != null ? sid(l.assignedIrmId) : (l.customFields?.assignedIrmId ? sid(l.customFields.assignedIrmId) : undefined),
+    assignedIrmName: l.assignedIrmName ?? l.customFields?.assignedIrmName ?? undefined,
+    assignedIrmAt: l.assignedIrmAt ?? l.customFields?.assignedIrmAt ?? undefined,
+    assignedAt: l.assignedAt ?? undefined,
+    handoverId: l.handoverId ?? undefined,
+    handedOverFromName: l.handedOverFromName ?? undefined,
+    handoverPlannedEnd: l.handoverPlannedEnd ?? undefined,
+    originalOwnerId: l.originalOwnerId ?? undefined,
     nextFollowupDate: l.nextFollowupDate,
     createdAt: l.createdAt ?? new Date().toISOString(),
     notes: l.notes ?? '',
@@ -430,12 +447,63 @@ function mapLead(l: Record<string, any>): Lead {
   };
 }
 
-export async function getLeads(companyId?: string): Promise<Lead[]> {
+export async function getLeads(companyId?: string, status?: string): Promise<Lead[]> {
   if (isMockMode()) {
-    return storageService.getLeads(companyId);
+    const all = storageService.getLeads(companyId);
+    if (status && status !== 'all') {
+      return all.filter(l => l.status === status);
+    }
+    return all;
   }
-  const raw = await fetchAll<any>('/sales-executive/leads');
+  const params: Record<string, string> = {};
+  if (status) params.status = status;
+  const raw = await fetchAll<any>('/sales-executive/leads', params);
   return raw.map(mapLead);
+}
+
+export async function getNotInterestedLeads(companyId?: string): Promise<Lead[]> {
+  if (isMockMode()) {
+    const all = storageService.getLeads(companyId);
+    return all.filter(l => l.status === 'Not Interested');
+  }
+  try {
+    const raw = await fetchAll<any>('/sales-executive/leads/not-interested');
+    if (raw && raw.length > 0) {
+      return raw.map(mapLead);
+    }
+  } catch (err) {
+    console.warn('[ghlApiService] /sales-executive/leads/not-interested failed, falling back to status query', err);
+  }
+  const fallback = await fetchAll<any>('/sales-executive/leads', { status: 'Not Interested' });
+  return fallback.map(mapLead);
+}
+
+export async function getJunkLeads(companyId?: string): Promise<Lead[]> {
+  if (isMockMode()) {
+    const all = storageService.getLeads(companyId);
+    return all.filter(l => l.status === 'Junk' || l.status === 'Wrong Number');
+  }
+  try {
+    const raw = await fetchAll<any>('/sales-executive/leads/junk');
+    if (raw && raw.length > 0) {
+      return raw.map(mapLead);
+    }
+  } catch (err) {
+    console.warn('[ghlApiService] /sales-executive/leads/junk failed, falling back to status query', err);
+  }
+  const [fallbackJunk, fallbackWrong] = await Promise.all([
+    fetchAll<any>('/sales-executive/leads', { status: 'Junk' }),
+    fetchAll<any>('/sales-executive/leads', { status: 'Wrong Number' }),
+  ]);
+  const combined = [...fallbackJunk, ...fallbackWrong];
+  const seen = new Set<string>();
+  const unique = combined.filter(l => {
+    const id = String(l.id);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+  return unique.map(mapLead);
 }
 
 export async function saveLead(lead: Lead): Promise<Lead> {
@@ -454,6 +522,9 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         priority: lead.priority,
         notes: lead.notes,
         assignedAgentId: nid(lead.assignedAgentId) || undefined,
+        assignedIrmId: nid(lead.assignedIrmId) || (customFields.assignedIrmId ? nid(customFields.assignedIrmId) : undefined),
+        assignedIrmName: lead.assignedIrmName ?? customFields.assignedIrmName ?? undefined,
+        assignedIrmAt: lead.assignedIrmAt ?? customFields.assignedIrmAt ?? undefined,
         companyId: nid(lead.companyId) || 1,
         investmentCapacity: customFields['Investment Capacity'] ?? customFields['investmentCapacity'],
         investmentAmount: (lead as any).investmentAmount ?? customFields['Investment Amount'] ?? customFields['investmentAmount'],
@@ -482,6 +553,9 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         notes: lead.notes,
         nextFollowupDate: lead.nextFollowupDate,
         assignedAgentId: nid(lead.assignedAgentId?.toString()) || undefined,
+        assignedIrmId: nid(lead.assignedIrmId) || (customFields.assignedIrmId ? nid(customFields.assignedIrmId) : undefined),
+        assignedIrmName: lead.assignedIrmName ?? customFields.assignedIrmName ?? undefined,
+        assignedIrmAt: lead.assignedIrmAt ?? customFields.assignedIrmAt ?? undefined,
         investmentCapacity: customFields['Investment Capacity'] ?? customFields['investmentCapacity'],
         investmentAmount: (lead as any).investmentAmount ?? customFields['Investment Amount'] ?? customFields['investmentAmount'],
         assetClass: customFields['Asset Class'] ?? customFields['assetClass'],
@@ -864,13 +938,16 @@ export async function saveConsultation(consultation: Consultation): Promise<Cons
   const isNew =
     !consultation.id ||
     consultation.id.startsWith('cons-') ||
-    consultation.id.startsWith('co-');
+    consultation.id.startsWith('co-') ||
+    consultation.id.startsWith('cns-');
 
   const payload = {
     investorId: consultation.investorId,
     investorName: consultation.investorName,
     investorPhone: consultation.investorPhone,
     scheduledAt: consultation.scheduledAt,
+    consultantId: nid(consultation.consultantId) || undefined,
+    consultantName: consultation.consultantName || undefined,
     agenda: consultation.agenda,
     outcomeNotes: consultation.outcomeNotes,
     referredByAgentName: consultation.referredByAgentName,

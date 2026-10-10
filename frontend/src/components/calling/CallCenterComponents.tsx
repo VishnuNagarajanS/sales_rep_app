@@ -340,7 +340,10 @@ export const InCallBar: React.FC = () => {
       consultantId: irm.name,
       consultantName: irm.name,
       status: 'Scheduled',
-      agenda: isIrm ? `Connected to Agent: ${reason}` : reason,
+      agenda: isIrm
+        ? `Connected to Agent: ${reason}`
+        : (reason.toLowerCase().includes('connected to irm') ? reason : `Connected to IRM: ${irm.name}. Reason: ${reason}`),
+      referredByAgentName: user.name,
     };
 
     if (tenant.slug === 'ghl' || tenant.id === 't-ghl-01') {

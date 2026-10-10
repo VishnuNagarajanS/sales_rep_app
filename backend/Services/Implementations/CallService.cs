@@ -5,6 +5,7 @@ using backend.DTOs.Common;
 using backend.Models.Entities;
 using backend.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace backend.Services.Implementations;
 
@@ -58,24 +59,25 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
                 if (request.Disposition is "Interested" or "Not Interested" or "Wrong Number")
                 {
                     lead.Status = request.Disposition == "Wrong Number" ? "Junk" : request.Disposition;
+                    lead.UpdatedAt = DateTime.UtcNow;
+
+                    if (request.Disposition is "Not Interested" or "Wrong Number")
+                    {
+                        var cf = DeserializeCustomFields(lead.CustomFieldsJson);
+                        cf["dispositionReason"] = !string.IsNullOrWhiteSpace(request.Notes) ? request.Notes : request.Disposition;
+                        lead.CustomFieldsJson = JsonSerializer.Serialize(cf);
+                        if (!string.IsNullOrWhiteSpace(request.Notes))
+                        {
+                            lead.Notes = string.IsNullOrWhiteSpace(lead.Notes)
+                                ? $"[{DateTime.UtcNow:yyyy-MM-dd}] {request.Disposition}: {request.Notes}"
+                                : $"{lead.Notes}\n\n[{DateTime.UtcNow:yyyy-MM-dd}] {request.Disposition}: {request.Notes}";
+                        }
+                    }
 
                     if (request.Disposition == "Interested")
                     {
-                        // Qualified lead: close its pending sales follow-ups so they leave the Follow-ups page.
-                        var leadIdStr = lead.Id.ToString();
-                        var pendingFollowups = await context.Set<Followup>()
-                            .Where(f => f.CompanyId == lead.CompanyId &&
-                                        f.ContactType == "lead" &&
-                                        f.ContactId == leadIdStr &&
-                                        f.Status == backend.Models.Enums.FollowupStatus.Pending &&
-                                        f.AssignedToRole != "irm")
-                            .ToListAsync(cancellationToken);
-                        foreach (var pf in pendingFollowups)
-                        {
-                            pf.Status = backend.Models.Enums.FollowupStatus.Cancelled;
-                            pf.OutcomeNotes = "Auto-closed: lead marked Interested.";
-                            pf.UpdatedAt = DateTime.UtcNow;
-                        }
+                        // Qualified lead: remove its open sales follow-ups (lead stays in leads) (same SaveChanges).
+                        await backend.Services.Implementations.InterestedLeadConversion.RemoveSalesFollowupsAsync(context, lead, cancellationToken);
                     }
                 }
                 else if (request.Disposition is "Follow-up Required" or "Follow Up Required")
@@ -96,14 +98,18 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
             }
             if (lead != null && request.Disposition is "Follow-up Required" or "Follow Up Required" or "Call Back" or "No Response") 
             {
+                var agentUser = await context.Set<User>().Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == currentUser.UserId.Value, cancellationToken);
                 newFollowup = new Followup { 
                     CompanyId = currentUser.CompanyId.Value, 
                     AssignedAgentId = currentUser.UserId.Value, 
+                    AssignedToName = agentUser?.Name ?? string.Empty,
+                    AssignedToRole = agentUser?.Role?.Code ?? "sales_executive",
                     LeadId = lead.Id, 
                     ContactId = lead.Id.ToString(), 
                     ContactType = "lead", 
                     ContactName = lead.Name, 
                     ContactPhone = lead.Phone, 
+                    ContactEmail = lead.Email,
                     ScheduledAt = request.FollowupAt ?? DateTime.UtcNow.AddDays(1), 
                     Notes = request.Notes ?? string.Empty,
                     HandoverId = lead.HandoverId,
@@ -128,4 +134,17 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
     }
 
     private static CallRecordDto Map(CallRecord x) => new() { Id = x.Id, CompanyId = x.CompanyId, AgentId = x.AgentId, ContactName = x.ContactName, ContactPhone = x.ContactPhone, Direction = x.Direction, Duration = x.Duration, Disposition = x.Disposition, Notes = x.Notes, LeadId = x.LeadId, CustomerId = x.CustomerId, Timestamp = x.Timestamp, CreatedAt = x.CreatedAt };
+
+    private static Dictionary<string, string> DeserializeCustomFields(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new Dictionary<string, string>();
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new Dictionary<string, string>();
+        }
+        catch
+        {
+            return new Dictionary<string, string>();
+        }
+    }
 }

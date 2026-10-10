@@ -235,6 +235,7 @@ public class AdminUserService : IAdminUserService
                 return ApiResponse<AdminUserDto>.FailureResult("Old user not found.");
 
             var newUser = await _context.Users
+                .Include(u => u.Role)
                 .FirstOrDefaultAsync(u => u.CompanyId == companyId && u.Id == request.NewUserId, cancellationToken);
 
             if (newUser == null)
@@ -273,6 +274,9 @@ public class AdminUserService : IAdminUserService
             foreach (var f in followups)
             {
                 f.AssignedAgentId = request.NewUserId;
+                f.AssignedToName = newUser.Name;
+                f.AssignedToRole = newUser.Role?.Code ?? "sales_executive";
+                f.UpdatedAt = DateTime.UtcNow;
             }
 
             // Update Old User Role

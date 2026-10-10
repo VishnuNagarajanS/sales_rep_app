@@ -111,7 +111,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
   const isExec = roleCode === 'sales_executive';
   const isIrm = roleCode === 'irm';
 
-  const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk'];
+  const EXCLUDED_PENDING_STATUSES = ['Qualified', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk', 'Wrong Number', 'Lost', 'Closed'];
 
   const isUserMatch = (agentId?: string | number, agentName?: string) => {
     if (agentId && user?.id && String(agentId) === String(user.id)) return true;
@@ -129,18 +129,22 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
   const scopedLeads = isExec
     ? leads.filter(l =>
         (isUserMatch(l.assignedAgentId, l.assignedAgentName) || !l.assignedAgentId) &&
-        !MOVED_LEAD_STATUSES.includes(l.status)
+        (l.status === 'New' || l.status === 'Contacted')
       )
-    : unassignedLeads.filter(l => !MOVED_LEAD_STATUSES.includes(l.status));
+    : unassignedLeads.filter(l => !EXCLUDED_PENDING_STATUSES.includes(l.status));
 
-  // Pending Leads: Leads assigned to agents that are still in initial leads stage (haven't moved to next step)
-  const allPendingLeads = leads.filter(l => 
-    (l.assignedAgentId && l.assignedAgentId !== '0' && l.assignmentStatus !== 'unassigned') &&
-    !MOVED_LEAD_STATUSES.includes(l.status)
-  );
+  // Pending Leads: Leads assigned to agents that are still in initial leads stage (New for Sales Exec, Interested for IRM)
+  const allPendingLeads = leads.filter(l => {
+    const isAssigned = Boolean((l.assignedAgentId && l.assignedAgentId !== '0') || l.assignedAgentName) && l.assignmentStatus !== 'unassigned';
+    if (!isAssigned) return false;
+    if (l.status !== 'New' && l.status !== 'Interested') return false;
+    return true;
+  });
 
   const scopedPendingLeads = isExec
-    ? allPendingLeads.filter(l => isUserMatch(l.assignedAgentId, l.assignedAgentName) || !l.assignedAgentId)
+    ? allPendingLeads.filter(l => (isUserMatch(l.assignedAgentId, l.assignedAgentName) || !l.assignedAgentId) && l.status === 'New')
+    : isIrm
+    ? allPendingLeads.filter(l => isUserMatch(l.assignedAgentId, l.assignedAgentName) && l.status === 'Interested')
     : allPendingLeads;
 
   // IRM "My Leads" KPI — leads assigned to this IRM that the agent has marked Interested

@@ -5,10 +5,12 @@ import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import {
   getLeads,
+  getNotInterestedLeads,
   saveLead as apiSaveLead,
   saveFollowup as apiSaveFollowup,
   getCalls,
 } from '../../services/ghlApiService';
+import { apiClient } from '../../services/apiClient';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { Drawer } from '../../components/common/Drawer';
 import { Timeline, TimelineEvent } from '../../components/common/Timeline';
@@ -31,17 +33,26 @@ export const NotInterestedPage: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [allLeads, allCalls] = await Promise.all([
-        getLeads(tenant?.id),
+      const [niLeads, allCalls] = await Promise.all([
+        getNotInterestedLeads(tenant?.id),
         getCalls(tenant?.id),
       ]);
-      const niLeads = allLeads.filter(l => l.status === 'Not Interested');
 
       const scopedLeads = isExec
-        ? niLeads.filter(l =>
-            (l.assignedAgentId && l.assignedAgentId === user?.id) ||
-            (l.assignedAgentName && l.assignedAgentName === user?.name)
-          )
+        ? niLeads.filter(l => {
+            const uid = user?.id ? String(user.id) : '';
+            const uname = user?.name ? user.name.trim().toLowerCase() : '';
+            const agentId = l.assignedAgentId ? String(l.assignedAgentId) : '';
+            const agentName = l.assignedAgentName ? l.assignedAgentName.trim().toLowerCase() : '';
+            const salesExecId = l.assignedSalesExecutiveId ? String(l.assignedSalesExecutiveId) : '';
+            const salesExecName = l.assignedSalesExecutiveName ? l.assignedSalesExecutiveName.trim().toLowerCase() : '';
+
+            // If unassigned or matches this sales executive
+            if (!agentId && !agentName) return true;
+            if (uid && (agentId === uid || salesExecId === uid)) return true;
+            if (uname && (agentName === uname || salesExecName === uname)) return true;
+            return false;
+          })
         : niLeads;
 
       setLeads(scopedLeads);
@@ -59,12 +70,21 @@ export const NotInterestedPage: React.FC = () => {
   }, [tenant?.id, user?.id, isExec]);
 
   // Re-engage: move lead from Not Interested → Contacted and create a follow-up entry
-  const handleReengage = (lead: Lead) => {
+  const handleReengage = async (lead: Lead) => {
     if (!tenant || !user) return;
     setReengaging(true);
     try {
-      // Reset lead status to Contacted
-      apiSaveLead({ ...lead, status: 'Contacted' }).catch(console.error);
+      const numId = parseInt(String(lead.id).replace(/\D/g, ''), 10);
+      if (numId) {
+        try {
+          await apiClient.post(`/sales-executive/leads/${numId}/reengage`);
+        } catch (e) {
+          console.warn('Backend reengage error, falling back to apiSaveLead', e);
+          await apiSaveLead({ ...lead, status: 'Contacted' });
+        }
+      } else {
+        await apiSaveLead({ ...lead, status: 'Contacted' });
+      }
 
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
@@ -82,10 +102,13 @@ export const NotInterestedPage: React.FC = () => {
         assignedAgentId: user.id,
         assignedAgentName: user.name,
       };
-      apiSaveFollowup(newFlw).then(loadData).catch(console.error);
+      await apiSaveFollowup(newFlw);
+      await loadData();
 
       setIsDetailDrawerOpen(false);
       setSelectedLead(null);
+    } catch (err) {
+      console.error('Failed to reengage lead', err);
     } finally {
       setReengaging(false);
     }
@@ -93,7 +116,7 @@ export const NotInterestedPage: React.FC = () => {
 
   const getNotInterestedReason = (lead: Lead): string => {
     // 1. Check customFields (saved during call disposition wrap-up)
-    if (lead.customFields?.dispositionReason?.trim()) {
+    if (lead.customFields?.dispositionReason && typeof lead.customFields.dispositionReason === 'string' && lead.customFields.dispositionReason.trim()) {
       return lead.customFields.dispositionReason.trim();
     }
 
@@ -103,6 +126,10 @@ export const NotInterestedPage: React.FC = () => {
       if (match && match[1]?.trim()) {
         return match[1].trim();
       }
+      const match2 = lead.notes.match(/\[Reason\]:\s*([^\n]+)/i);
+      if (match2 && match2[1]?.trim()) {
+        return match2[1].trim();
+      }
     }
 
     // 3. Fallback to latest call log with disposition 'Not Interested'
@@ -110,8 +137,11 @@ export const NotInterestedPage: React.FC = () => {
       .filter((c: any) => (c.contactPhone === lead.phone || c.contactName === lead.name) && c.disposition === 'Not Interested');
     if (notInterestedCalls.length > 0) {
       const latestCall = notInterestedCalls.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+      if (latestCall.reason && typeof latestCall.reason === 'string' && latestCall.reason.trim()) {
+        return latestCall.reason.trim();
+      }
       if (latestCall.notes) {
-        const reasonMatch = latestCall.notes.match(/Reason:\s*([^\n]+)/i);
+        const reasonMatch = latestCall.notes.match(/Reason:\s*([^\n]+)/i) || latestCall.notes.match(/\[Reason\]:\s*([^\n]+)/i);
         if (reasonMatch && reasonMatch[1]?.trim()) {
           return reasonMatch[1].trim();
         }

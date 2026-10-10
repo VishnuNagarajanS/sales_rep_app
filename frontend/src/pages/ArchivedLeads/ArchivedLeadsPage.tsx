@@ -62,14 +62,23 @@ export const ArchivedLeadsPage: React.FC = () => {
   }, [tenant?.id, agentIdFilter, startDate, endDate]);
 
   const filteredLeads = leads.filter(lead => {
-    if (statusFilter !== 'all' && lead.status !== statusFilter) return false;
+    if (statusFilter !== 'all') {
+      if (statusFilter === 'Junk') {
+        if (lead.status !== 'Junk' && lead.status !== 'Wrong Number') return false;
+      } else if (lead.status !== statusFilter) {
+        return false;
+      }
+    }
     
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
+      const reason = ((lead as any).reason || lead.customFields?.dispositionReason || lead.notes || '').toLowerCase();
       return (
         lead.name.toLowerCase().includes(q) ||
         (lead.email && lead.email.toLowerCase().includes(q)) ||
-        (lead.phone && lead.phone.includes(q))
+        (lead.phone && lead.phone.includes(q)) ||
+        (lead.status && lead.status.toLowerCase().includes(q)) ||
+        reason.includes(q)
       );
     }
     return true;
@@ -100,6 +109,34 @@ export const ArchivedLeadsPage: React.FC = () => {
       header: 'STATUS',
       key: 'status',
       render: (row: Lead) => <StatusChip status={row.status} />
+    },
+    {
+      header: 'REASON / NOTES',
+      key: 'reason' as any,
+      render: (row: any) => {
+        const reasonText = row.reason || row.customFields?.dispositionReason || row.notes || '';
+        if (!reasonText) return <span style={{ color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>—</span>;
+        const firstLine = reasonText.split('\n')[0];
+        const isTruncated = firstLine.length < reasonText.length || firstLine.length > 50;
+        const displayText = firstLine.length > 50 ? firstLine.slice(0, 50) + '…' : firstLine;
+        return (
+          <span
+            title={reasonText}
+            style={{
+              fontSize: 12,
+              color: 'var(--text-secondary)',
+              maxWidth: 220,
+              display: 'block',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              cursor: isTruncated ? 'help' : 'default',
+            }}
+          >
+            {displayText}
+          </span>
+        );
+      }
     },
     {
       header: 'UPDATED AT',
@@ -151,9 +188,10 @@ export const ArchivedLeadsPage: React.FC = () => {
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
-            <option value="all">All</option>
-            <option value="Junk">Junk</option>
+            <option value="all">All Archived</option>
             <option value="Not Interested">Not Interested</option>
+            <option value="Junk">Junk (Includes Wrong Number)</option>
+            <option value="Wrong Number">Wrong Number Only</option>
           </select>
         </div>
 

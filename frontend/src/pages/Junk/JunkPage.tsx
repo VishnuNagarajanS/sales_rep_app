@@ -3,8 +3,10 @@ import { Phone, ExternalLink, Trash2, RefreshCw } from 'lucide-react';
 import { Lead, CallRecord } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
-import { getLeads, saveLead as apiSaveLead, saveFollowup as apiSaveFollowup, getCalls } from '../../services/ghlApiService';
+import { getLeads, getJunkLeads, saveLead as apiSaveLead, saveFollowup as apiSaveFollowup, getCalls } from '../../services/ghlApiService';
+import { apiClient } from '../../services/apiClient';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
+import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
 import { Timeline, TimelineEvent } from '../../components/common/Timeline';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
@@ -26,17 +28,25 @@ export const JunkPage: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [allLeads, allCalls] = await Promise.all([
-        getLeads(tenant?.id),
+      const [junkLeads, allCalls] = await Promise.all([
+        getJunkLeads(tenant?.id),
         getCalls(tenant?.id),
       ]);
-      const junkLeads = allLeads.filter(l => l.status === 'Junk');
 
       const scopedLeads = isExec
-        ? junkLeads.filter(l =>
-          (l.assignedAgentId && l.assignedAgentId === user?.id) ||
-          (l.assignedAgentName && l.assignedAgentName === user?.name)
-        )
+        ? junkLeads.filter(l => {
+            const uid = user?.id ? String(user.id) : '';
+            const uname = user?.name ? user.name.trim().toLowerCase() : '';
+            const agentId = l.assignedAgentId ? String(l.assignedAgentId) : '';
+            const agentName = l.assignedAgentName ? l.assignedAgentName.trim().toLowerCase() : '';
+            const salesExecId = l.assignedSalesExecutiveId ? String(l.assignedSalesExecutiveId) : '';
+            const salesExecName = l.assignedSalesExecutiveName ? l.assignedSalesExecutiveName.trim().toLowerCase() : '';
+
+            if (!agentId && !agentName) return true;
+            if (uid && (agentId === uid || salesExecId === uid)) return true;
+            if (uname && (agentName === uname || salesExecName === uname)) return true;
+            return false;
+          })
         : junkLeads;
 
       setLeads(scopedLeads);
@@ -53,13 +63,68 @@ export const JunkPage: React.FC = () => {
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id, user?.id, isExec]);
 
+  // Helper to extract disposition/junk reason with robust fallbacks
+  const getDispositionReason = (lead: Lead): string => {
+    // 1. Stored in customFields.dispositionReason
+    if (lead.customFields?.dispositionReason && typeof lead.customFields.dispositionReason === 'string' && lead.customFields.dispositionReason.trim()) {
+      return lead.customFields.dispositionReason.trim();
+    }
+
+    // 2. Parse from lead notes if present
+    if (lead.notes) {
+      const match = lead.notes.match(/(?:Junk|Wrong Number) Reason:\s*([^\n]+)/i);
+      if (match && match[1]?.trim()) {
+        return match[1].trim();
+      }
+      const match2 = lead.notes.match(/\[Reason\]:\s*([^\n]+)/i);
+      if (match2 && match2[1]?.trim()) {
+        return match2[1].trim();
+      }
+    }
+
+    // 3. Fallback to latest call log with disposition 'Wrong Number' or 'Junk'
+    const junkCalls = calls
+      .filter((c: any) => (c.contactPhone === lead.phone || c.contactName === lead.name) && (c.disposition === 'Wrong Number' || c.disposition === 'Junk'));
+    if (junkCalls.length > 0) {
+      const latestCall = junkCalls.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+      if (latestCall.reason && typeof latestCall.reason === 'string' && latestCall.reason.trim()) {
+        return latestCall.reason.trim();
+      }
+      if (latestCall.notes) {
+        const reasonMatch = latestCall.notes.match(/Reason:\s*([^\n]+)/i) || latestCall.notes.match(/\[Reason\]:\s*([^\n]+)/i);
+        if (reasonMatch && reasonMatch[1]?.trim()) {
+          return reasonMatch[1].trim();
+        }
+        return latestCall.notes.trim();
+      }
+      if (latestCall.disposition === 'Wrong Number') {
+        return 'Wrong Number';
+      }
+    }
+
+    if (lead.status === 'Wrong Number') {
+      return 'Wrong Number';
+    }
+
+    return 'No specific reason provided';
+  };
+
   // Re-engage: move lead from Junk → Contacted and create a follow-up entry
-  const handleReengage = (lead: Lead) => {
+  const handleReengage = async (lead: Lead) => {
     if (!tenant || !user) return;
     setReengaging(true);
     try {
-      // Reset lead status to Contacted
-      apiSaveLead({ ...lead, status: 'Contacted' }).catch(console.error);
+      const numId = parseInt(String(lead.id).replace(/\D/g, ''), 10);
+      if (numId) {
+        try {
+          await apiClient.post(`/sales-executive/leads/${numId}/reengage`);
+        } catch (e) {
+          console.warn('Backend reengage error, falling back to apiSaveLead', e);
+          await apiSaveLead({ ...lead, status: 'Contacted' });
+        }
+      } else {
+        await apiSaveLead({ ...lead, status: 'Contacted' });
+      }
 
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
@@ -77,10 +142,13 @@ export const JunkPage: React.FC = () => {
         assignedAgentId: user.id,
         assignedAgentName: user.name,
       };
-      apiSaveFollowup(newFlw).then(loadData).catch(console.error);
+      await apiSaveFollowup(newFlw);
+      await loadData();
 
       setIsDetailDrawerOpen(false);
       setSelectedLead(null);
+    } catch (err) {
+      console.error('Failed to reengage lead', err);
     } finally {
       setReengaging(false);
     }
@@ -120,11 +188,16 @@ export const JunkPage: React.FC = () => {
       ),
     },
     {
+      key: 'status',
+      header: 'Status',
+      render: (r: Lead) => <StatusChip status={r.status || 'Junk'} size="sm" />
+    },
+    {
       key: 'reason',
       header: 'Reason',
       render: (r: Lead) => {
-        const reasonText = r.customFields?.dispositionReason as string | undefined;
-        if (!reasonText) return <span style={{ color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>—</span>;
+        const reasonText = getDispositionReason(r);
+        if (!reasonText || reasonText === 'No specific reason provided') return <span style={{ color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>—</span>;
         const firstLine = reasonText.split('\n')[0];
         const isTruncated = firstLine.length < reasonText.length || firstLine.length > 60;
         const displayText = firstLine.length > 60 ? firstLine.slice(0, 60) + '…' : firstLine;
@@ -244,11 +317,14 @@ export const JunkPage: React.FC = () => {
                 }}
               >
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', textTransform: 'uppercase' }}>
-                    Junk Lead
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#92400e', textTransform: 'uppercase' }}>
+                      {selectedLead.status === 'Wrong Number' ? 'Wrong Number' : 'Junk Lead'}
+                    </span>
+                    <StatusChip status={selectedLead.status || 'Junk'} size="sm" />
                   </div>
-                  <div style={{ fontSize: 13, color: '#78350f', marginTop: 2 }}>
-                    {selectedLead.customFields?.dispositionReason || 'No specific reason provided.'}
+                  <div style={{ fontSize: 13, color: '#78350f', marginTop: 4 }}>
+                    {getDispositionReason(selectedLead)}
                   </div>
                 </div>
                 <button
@@ -313,10 +389,10 @@ export const JunkPage: React.FC = () => {
               {/* Reason Details */}
               <div className="card">
                 <h4 style={{ fontSize: 13, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 12, fontWeight: 700 }}>
-                  Junk Reason Details
+                  Reason Details
                 </h4>
                 <p style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
-                  {selectedLead.customFields?.dispositionReason || 'No specific reason provided.'}
+                  {getDispositionReason(selectedLead)}
                 </p>
               </div>
 

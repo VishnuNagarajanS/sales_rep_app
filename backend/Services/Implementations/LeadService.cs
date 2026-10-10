@@ -27,7 +27,7 @@ public class LeadService : ILeadService
         _clock = clock;
     }
 
-    private static readonly string[] ExcludedStatuses = { "Not Interested", "Junk", "Converted" };
+    private static readonly string[] ExcludedStatuses = { "Not Interested", "Junk", "Wrong Number", "Converted" };
 
     public static string? NormalizePhone(string? phone)
     {
@@ -137,7 +137,7 @@ public class LeadService : ILeadService
         }
         else
         {
-            query = query.Where(l => l.Status != "Not Interested" && l.Status != "Junk" && l.Status != "Follow-up Required" && l.Status != "Converted");
+            query = query.Where(l => l.Status != "Not Interested" && l.Status != "Junk" && l.Status != "Wrong Number" && l.Status != "Follow-up Required" && l.Status != "Converted");
         }
 
         // Search
@@ -170,14 +170,37 @@ public class LeadService : ILeadService
         };
 
         var page = Math.Max(1, filter.Page);
-        var pageSize = Math.Clamp(filter.PageSize, 1, 100);
+        var pageSize = Math.Clamp(filter.PageSize, 1, 1000);
 
         var entities = await query
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct);
 
-        var items = entities.Select(MapToDto).ToList();
+        var leadIds = entities.Select(l => l.Id).ToList();
+        var histories = await _context.LeadAssignmentHistories
+            .AsNoTracking()
+            .Include(h => h.FromAgent).ThenInclude(u => u!.Role)
+            .Include(h => h.ToAgent).ThenInclude(u => u!.Role)
+            .Include(h => h.AssignedBy).ThenInclude(u => u!.Role)
+            .Where(h => leadIds.Contains(h.LeadId))
+            .OrderBy(h => h.AssignedAt)
+            .ToListAsync(ct);
+
+        var historiesByLead = histories.GroupBy(h => h.LeadId).ToDictionary(g => g.Key, g => g.ToList());
+
+        var companyId = entities.FirstOrDefault()?.CompanyId ?? _currentUser.CompanyId ?? 0;
+        var activeHandovers = await _context.WorkHandovers
+            .AsNoTracking()
+            .Include(wh => wh.CoveringUser)
+            .Where(wh => wh.CompanyId == companyId && wh.Status == "active")
+            .ToListAsync(ct);
+
+        var handoversByOriginalUser = activeHandovers
+            .GroupBy(wh => wh.OriginalUserId)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var items = entities.Select(lead => MapToDtoEnriched(lead, historiesByLead, handoversByOriginalUser)).ToList();
 
         return ApiResponse<PagedResult<LeadResponseDto>>.SuccessResult(
             PagedResult<LeadResponseDto>.Create(items, totalCount, page, pageSize),
@@ -618,6 +641,8 @@ public class LeadService : ILeadService
                 Priority = string.IsNullOrWhiteSpace(dto.Priority) ? "Medium" : dto.Priority.Trim(),
                 Notes = dto.Notes?.Trim() ?? string.Empty,
                 CustomFieldsJson = customFields.Count > 0 ? JsonSerializer.Serialize(customFields) : null,
+                AssignedAt = assignedAt,
+                AssignedById = targetAgentId.HasValue ? callerId : null,
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -654,30 +679,6 @@ public class LeadService : ILeadService
             {
                 semaphore.Release();
             }
-        }
-    }
-
-    /// <summary>
-    /// Once a lead is qualified as 'Interested' its sales follow-up tasks are no longer needed.
-    /// Cancels the lead's still-pending sales follow-ups so they drop off the Follow-ups page.
-    /// (IRM follow-ups are left alone; they belong to the IRM who now works the lead.)
-    /// </summary>
-    private async Task CancelPendingSalesFollowupsAsync(Lead lead, CancellationToken ct)
-    {
-        var leadIdStr = lead.Id.ToString();
-        var pending = await _context.Followups
-            .Where(f => f.CompanyId == lead.CompanyId &&
-                        f.ContactType == "lead" &&
-                        f.ContactId == leadIdStr &&
-                        f.Status == FollowupStatus.Pending &&
-                        f.AssignedToRole != "irm")
-            .ToListAsync(ct);
-
-        foreach (var f in pending)
-        {
-            f.Status = FollowupStatus.Cancelled;
-            f.OutcomeNotes = "Auto-closed: lead marked Interested.";
-            f.UpdatedAt = DateTime.UtcNow;
         }
     }
 
@@ -740,8 +741,15 @@ public class LeadService : ILeadService
         if (dto.Location != null) lead.Location = dto.Location.Trim();
         if (dto.Source != null) lead.Source = dto.Source.Trim();
         if (dto.Status != null) lead.Status = dto.Status.Trim();
+        bool isNewCustomer = false;
+        Customer? newCustomer = null;
+
         if (lead.Status == "Interested" && previousStatus != "Interested")
-            await CancelPendingSalesFollowupsAsync(lead, ct);
+        {
+            // Interested leads stay in `leads`; only their open sales follow-ups are removed.
+            await InterestedLeadConversion.RemoveSalesFollowupsAsync(_context, lead, ct);
+        }
+
         if (dto.Priority != null) lead.Priority = dto.Priority.Trim();
         if (dto.Notes != null) lead.Notes = dto.Notes.Trim();
         if (dto.NextFollowupDate.HasValue) lead.NextFollowupDate = dto.NextFollowupDate.Value;
@@ -764,6 +772,31 @@ public class LeadService : ILeadService
                     Method = "manual",
                     AssignedAt = DateTime.UtcNow
                 });
+            }
+
+            var targetUser = await _context.Users
+                .Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.Id == dto.AssignedAgentId.Value && u.CompanyId == lead.CompanyId, ct);
+
+            var pendingFollowups = await _context.Followups
+                .Where(f => f.CompanyId == lead.CompanyId &&
+                            (f.ContactId == lead.Id.ToString() || (f.ContactPhone != "" && f.ContactPhone == lead.Phone)) &&
+                            f.ContactType == "lead" &&
+                            f.Status == FollowupStatus.Pending)
+                .ToListAsync(ct);
+
+            if (pendingFollowups.Any())
+            {
+                foreach (var f in pendingFollowups)
+                {
+                    f.AssignedAgentId = dto.AssignedAgentId.Value;
+                    if (targetUser != null)
+                    {
+                        f.AssignedToName = targetUser.Name;
+                        f.AssignedToRole = targetUser.Role?.Code ?? "sales_executive";
+                    }
+                    f.UpdatedAt = DateTime.UtcNow;
+                }
             }
         }
         // Merge custom fields
@@ -797,13 +830,30 @@ public class LeadService : ILeadService
         
         if (dto.Horizon != null) customFields["horizon"] = dto.Horizon;
         if (dto.DispositionReason != null) customFields["dispositionReason"] = dto.DispositionReason;
-        if (dto.AssignedIrmId.HasValue) customFields["assignedIrmId"] = dto.AssignedIrmId.Value.ToString();
-        if (dto.AssignedIrmName != null) customFields["assignedIrmName"] = dto.AssignedIrmName.Trim();
-        if (dto.AssignedIrmAt != null) customFields["assignedIrmAt"] = dto.AssignedIrmAt.Trim();
-        else if (dto.AssignedIrmId.HasValue || dto.AssignedIrmName != null)
+        var existingIrmId = customFields.TryGetValue("assignedIrmId", out var prevIrmId) ? prevIrmId : null;
+        var existingIrmName = customFields.TryGetValue("assignedIrmName", out var prevIrmName) ? prevIrmName : null;
+
+        bool irmChanged = (dto.AssignedIrmId.HasValue && dto.AssignedIrmId.Value.ToString() != existingIrmId) ||
+                          (!string.IsNullOrEmpty(dto.AssignedIrmName) && dto.AssignedIrmName.Trim() != existingIrmName);
+
+        if (dto.AssignedIrmId.HasValue && dto.AssignedIrmId.Value > 0) 
+            customFields["assignedIrmId"] = dto.AssignedIrmId.Value.ToString();
+        if (dto.AssignedIrmName != null && !string.IsNullOrWhiteSpace(dto.AssignedIrmName)) 
+            customFields["assignedIrmName"] = dto.AssignedIrmName.Trim();
+
+        if (dto.AssignedIrmAt != null) 
+            customFields["assignedIrmAt"] = dto.AssignedIrmAt.Trim();
+        else if (irmChanged || !customFields.ContainsKey("assignedIrmAt"))
         {
-            if (!customFields.ContainsKey("assignedIrmAt"))
+            if (dto.AssignedIrmId.HasValue || !string.IsNullOrWhiteSpace(dto.AssignedIrmName))
                 customFields["assignedIrmAt"] = DateTime.UtcNow.ToString("o");
+        }
+
+        if (dto.AssignedIrmName == string.Empty || (dto.AssignedIrmId.HasValue && dto.AssignedIrmId.Value == 0))
+        {
+            customFields.Remove("assignedIrmId");
+            customFields.Remove("assignedIrmName");
+            customFields.Remove("assignedIrmAt");
         }
         if (dto.AdditionalCustomFields != null)
         {
@@ -815,6 +865,18 @@ public class LeadService : ILeadService
         lead.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(ct);
+
+        if (isNewCustomer && newCustomer?.HandoverId.HasValue == true)
+        {
+            _context.WorkHandoverItems.Add(new WorkHandoverItem
+            {
+                HandoverId = newCustomer.HandoverId.Value,
+                EntityType = "Customer",
+                EntityId = newCustomer.Id,
+                Origin = "created_during_coverage"
+            });
+            await _context.SaveChangesAsync(ct);
+        }
 
         return ApiResponse<LeadResponseDto>.SuccessResult(MapToDto(lead), "Lead updated successfully.");
     }
@@ -926,7 +988,7 @@ public class LeadService : ILeadService
         pageSize = Math.Clamp(pageSize, 1, 100);
 
         var query = GetScopedLeadsQuery()
-            .Where(l => l.Status == "Junk")
+            .Where(l => l.Status == "Junk" || l.Status == "Wrong Number")
             .OrderByDescending(l => l.UpdatedAt ?? l.CreatedAt);
 
         var totalCount = await query.CountAsync(ct);
@@ -962,15 +1024,22 @@ public class LeadService : ILeadService
         }
 
         // Schedule fresh followup for tomorrow
-        var tomorrow = (await _clock.GetTodayAsync(lead.CompanyId, ct)).AddDays(1).AddHours(10); // 10:00 AM local tomorrow
+        var today = await _clock.GetTodayAsync(lead.CompanyId, ct);
+        var tomorrow = DateTime.SpecifyKind(today.AddDays(1).AddHours(10), DateTimeKind.Utc); // 10:00 AM local tomorrow
+        var targetAgentId = lead.AssignedAgentId ?? _currentUser.UserId ?? throw new InvalidOperationException("User ID is required");
+        var agentUser = await _context.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == targetAgentId && u.CompanyId == lead.CompanyId, ct);
+
         var freshFollowup = new Followup
         {
             CompanyId = lead.CompanyId,
-            AssignedAgentId = lead.AssignedAgentId ?? _currentUser.UserId ?? throw new InvalidOperationException("User ID is required"),
+            AssignedAgentId = targetAgentId,
+            AssignedToName = agentUser?.Name ?? string.Empty,
+            AssignedToRole = agentUser?.Role?.Code ?? "sales_executive",
             ContactId = lead.Id.ToString(),
             ContactType = "lead",
             ContactName = lead.Name,
             ContactPhone = lead.Phone,
+            ContactEmail = lead.Email,
             ScheduledAt = tomorrow,
             Priority = "High",
             Status = FollowupStatus.Pending,
@@ -997,15 +1066,59 @@ public class LeadService : ILeadService
         string? assignedIrmName = customFields.TryGetValue("assignedIrmName", out var iname) ? iname : null;
         string? assignedIrmAt = customFields.TryGetValue("assignedIrmAt", out var iat) ? iat : null;
 
+        var agentRole = lead.AssignedAgent?.Role?.Code;
+        int? salesExecId = null;
+        string? salesExecName = null;
+        DateTime? salesExecAt = null;
+
+        if (agentRole == "sales_executive")
+        {
+            salesExecId = lead.AssignedAgentId;
+            salesExecName = lead.AssignedAgent?.Name;
+            salesExecAt = lead.AssignedAt ?? lead.CreatedAt;
+        }
+        else if (customFields.TryGetValue("qualifiedByAgentName", out var qName) && !string.IsNullOrWhiteSpace(qName))
+        {
+            salesExecName = qName;
+            if (customFields.TryGetValue("qualifiedAt", out var qAtStr) && DateTime.TryParse(qAtStr, out var qAt))
+                salesExecAt = qAt;
+            else
+                salesExecAt = lead.AssignedAt ?? lead.CreatedAt;
+        }
+
+        if (agentRole == "irm")
+        {
+            if (assignedIrmId == null) assignedIrmId = lead.AssignedAgentId;
+            if (string.IsNullOrWhiteSpace(assignedIrmName)) assignedIrmName = lead.AssignedAgent?.Name;
+            if (string.IsNullOrWhiteSpace(assignedIrmAt)) assignedIrmAt = lead.AssignedAt?.ToString("o");
+        }
+
+        string? transferredByName = customFields.TryGetValue("qualifiedByAgentName", out var qb) && !string.IsNullOrWhiteSpace(qb) ? qb : null;
+
+        string? activeOwnerName = (assignedIrmId != null || !string.IsNullOrWhiteSpace(assignedIrmName)) ? assignedIrmName : salesExecName;
+        string? activeOwnerRole = (assignedIrmId != null || !string.IsNullOrWhiteSpace(assignedIrmName)) ? "irm" : (salesExecName != null ? "sales_executive" : null);
+
+        bool isCovered = lead.HandoverId.HasValue && lead.Handover?.CoveringUser != null;
+        string? coveredByName = isCovered ? lead.Handover?.CoveringUser?.Name : null;
+
         return new LeadResponseDto
         {
             Id = lead.Id,
             CompanyId = lead.CompanyId,
             AssignedAgentId = lead.AssignedAgentId,
             AssignedAgentName = lead.AssignedAgent?.Name,
+            AssignedAgentRole = agentRole,
+            AssignedSalesExecutiveId = salesExecId,
+            AssignedSalesExecutiveName = salesExecName,
+            AssignedSalesExecutiveAt = salesExecAt,
             AssignedIrmId = assignedIrmId,
             AssignedIrmName = assignedIrmName,
             AssignedIrmAt = assignedIrmAt,
+            TransferredBySalesExecutiveName = transferredByName,
+            ActiveOwnerName = activeOwnerName,
+            ActiveOwnerRole = activeOwnerRole,
+            IsCovered = isCovered,
+            CoveredByName = coveredByName,
             AssignedAt = lead.AssignedAt,
             Name = lead.Name,
             Phone = lead.Phone,
@@ -1024,6 +1137,67 @@ public class LeadService : ILeadService
             HandoverPlannedEnd = lead.Handover?.PlannedEndAt,
             OriginalOwnerId = lead.OriginalOwnerId
         };
+    }
+
+    private static LeadResponseDto MapToDtoEnriched(
+        Lead lead,
+        Dictionary<int, List<LeadAssignmentHistory>> historiesByLead,
+        Dictionary<int, WorkHandover> handoversByOriginalUser)
+    {
+        var dto = MapToDto(lead);
+        var leadHists = historiesByLead.TryGetValue(lead.Id, out var lh) ? lh : new List<LeadAssignmentHistory>();
+
+        if (string.IsNullOrWhiteSpace(dto.AssignedSalesExecutiveName))
+        {
+            var seHist = leadHists.LastOrDefault(h => h.ToAgent?.Role?.Code == "sales_executive")
+                         ?? leadHists.LastOrDefault(h => h.FromAgent?.Role?.Code == "sales_executive");
+            if (seHist != null)
+            {
+                var agent = seHist.ToAgent?.Role?.Code == "sales_executive" ? seHist.ToAgent : seHist.FromAgent;
+                dto.AssignedSalesExecutiveId = agent?.Id;
+                dto.AssignedSalesExecutiveName = agent?.Name;
+                dto.AssignedSalesExecutiveAt = seHist.AssignedAt;
+            }
+        }
+        else if (!dto.AssignedSalesExecutiveAt.HasValue)
+        {
+            var seHist = leadHists.LastOrDefault(h => h.ToAgent?.Role?.Code == "sales_executive" || h.FromAgent?.Role?.Code == "sales_executive");
+            dto.AssignedSalesExecutiveAt = seHist?.AssignedAt ?? lead.AssignedAt ?? lead.CreatedAt;
+        }
+
+        var irmHist = leadHists.LastOrDefault(h => h.ToAgent?.Role?.Code == "irm");
+        if (irmHist != null)
+        {
+            if (dto.AssignedIrmId == null) dto.AssignedIrmId = irmHist.ToAgentId;
+            if (string.IsNullOrWhiteSpace(dto.AssignedIrmName)) dto.AssignedIrmName = irmHist.ToAgent?.Name;
+            if (string.IsNullOrWhiteSpace(dto.AssignedIrmAt)) dto.AssignedIrmAt = irmHist.AssignedAt.ToString("o");
+
+            if (string.IsNullOrWhiteSpace(dto.TransferredBySalesExecutiveName))
+            {
+                if (irmHist.FromAgent?.Role?.Code == "sales_executive")
+                    dto.TransferredBySalesExecutiveName = irmHist.FromAgent.Name;
+                else if (irmHist.AssignedBy?.Role?.Code == "sales_executive")
+                    dto.TransferredBySalesExecutiveName = irmHist.AssignedBy.Name;
+            }
+        }
+
+        if (dto.AssignedIrmId.HasValue && handoversByOriginalUser.TryGetValue(dto.AssignedIrmId.Value, out var irmHandover))
+        {
+            dto.IsCovered = true;
+            dto.CoveredByName = irmHandover.CoveringUser?.Name;
+            dto.ActiveOwnerName = irmHandover.CoveringUser?.Name ?? dto.AssignedIrmName;
+        }
+        else if (dto.AssignedSalesExecutiveId.HasValue && handoversByOriginalUser.TryGetValue(dto.AssignedSalesExecutiveId.Value, out var seHandover))
+        {
+            if (string.IsNullOrWhiteSpace(dto.AssignedIrmName))
+            {
+                dto.IsCovered = true;
+                dto.CoveredByName = seHandover.CoveringUser?.Name;
+                dto.ActiveOwnerName = seHandover.CoveringUser?.Name ?? dto.AssignedSalesExecutiveName;
+            }
+        }
+
+        return dto;
     }
 
     private static Dictionary<string, string> DeserializeCustomFields(string? json)
