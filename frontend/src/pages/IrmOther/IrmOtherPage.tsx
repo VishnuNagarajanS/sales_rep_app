@@ -17,7 +17,8 @@ import {
   Briefcase,
   HelpCircle,
   ArrowRight,
-  CheckCircle2
+  CheckCircle2,
+  Trash2,
 } from 'lucide-react';
 import { IrmOtherRecord } from '../../types';
 import { getIrmOtherRecords } from '../../services/ghlApiService';
@@ -311,6 +312,39 @@ export const IrmOtherPage: React.FC = () => {
     [handleCallContact]
   );
 
+  // ── Dismiss / Remove Handler ──────────────────────────────────────────────
+  const handleDismissContact = useCallback(
+    (record: IrmOtherRecord) => {
+      const callKey = record.callId ? String(record.callId) : '';
+      const phoneKey = record.contactPhone || '';
+      try {
+        const raw = localStorage.getItem('nexus_dismissed_other_records');
+        const list: string[] = raw ? JSON.parse(raw) : [];
+        if (callKey && !list.includes(callKey)) list.push(callKey);
+        if (phoneKey && !list.includes(phoneKey)) list.push(phoneKey);
+        localStorage.setItem('nexus_dismissed_other_records', JSON.stringify(list));
+      } catch {}
+
+      setRecords(prev =>
+        prev.filter(r => {
+          if (callKey && String(r.callId) === callKey) return false;
+          if (phoneKey && r.contactPhone === phoneKey) return false;
+          return true;
+        })
+      );
+
+      setSelectedRecord(prev => {
+        if (!prev) return null;
+        if (callKey && String(prev.callId) === callKey) return null;
+        if (phoneKey && prev.contactPhone === phoneKey) return null;
+        return prev;
+      });
+
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+    },
+    []
+  );
+
   const rowActions: RowAction<IrmOtherRecord>[] = useMemo(
     () => [
       {
@@ -323,8 +357,13 @@ export const IrmOtherPage: React.FC = () => {
         icon: <ChevronRight size={14} style={{ marginRight: 6 }} />,
         onClick: r => setSelectedRecord(r),
       },
+      {
+        label: 'Remove from List',
+        icon: <Trash2 size={14} color="#ef4444" style={{ marginRight: 6 }} />,
+        onClick: r => handleDismissContact(r),
+      },
     ],
-    [handleCallContact]
+    [handleCallContact, handleDismissContact]
   );
 
   return (
@@ -569,18 +608,30 @@ export const IrmOtherPage: React.FC = () => {
                   This contact's last call in this module ended with disposition "Other". Call the contact to update their outcome.
                 </p>
               </div>
-              <button
-                type="button"
-                className="btn btn-sm btn-primary"
-                style={{ backgroundColor: '#059669', borderColor: '#059669', display: 'flex', alignItems: 'center', gap: 6 }}
-                onClick={() => {
-                  handleCallContact(selectedRecord);
-                  setSelectedRecord(null);
-                }}
-              >
-                <Phone size={13} />
-                <span>Call</span>
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  style={{ backgroundColor: '#059669', borderColor: '#059669', display: 'flex', alignItems: 'center', gap: 6 }}
+                  onClick={() => {
+                    handleCallContact(selectedRecord);
+                    setSelectedRecord(null);
+                  }}
+                >
+                  <Phone size={13} />
+                  <span>Call</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-secondary"
+                  style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.4)', display: 'flex', alignItems: 'center', gap: 6 }}
+                  onClick={() => handleDismissContact(selectedRecord)}
+                  title="Remove from Other Contacts list"
+                >
+                  <Trash2 size={13} />
+                  <span>Remove</span>
+                </button>
+              </div>
             </div>
 
             <div className="irm-detail-reason-box">

@@ -776,14 +776,49 @@ export async function logCall(call: CallRecord): Promise<CallRecord> {
   return mapCallRecord(res.data);
 }
 
+export function isMockOtherRecord(record: IrmOtherRecord): boolean {
+  if (!record) return false;
+  const name = (record.contactName || '').trim().toLowerCase();
+  const phone = (record.contactPhone || '').replace(/\D/g, '');
+  return (
+    name.includes('pravin godbole') ||
+    name.includes('kishore varma') ||
+    phone.includes('9741088223') ||
+    phone.includes('9886077112') ||
+    name.includes('simulate') ||
+    (record.reason === 'n' && name.includes('pravin'))
+  );
+}
+
+export function getDismissedOtherKeys(): Set<string> {
+  try {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem('nexus_dismissed_other_records') : null;
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function filterOtherRecords(records: IrmOtherRecord[]): IrmOtherRecord[] {
+  const dismissed = getDismissedOtherKeys();
+  return (Array.isArray(records) ? records : []).filter(r => {
+    if (isMockOtherRecord(r)) return false;
+    const callKey = r.callId ? String(r.callId) : '';
+    const phoneKey = r.contactPhone || '';
+    if (callKey && dismissed.has(callKey)) return false;
+    if (phoneKey && dismissed.has(phoneKey)) return false;
+    return true;
+  });
+}
+
 export async function getIrmOtherRecords(params?: { module?: string; search?: string }): Promise<IrmOtherRecord[]> {
   try {
     const res: ApiResponse<IrmOtherRecord[]> = await apiClient.get('/irm/other', params);
-    if (res.success && res.data) return res.data;
+    if (res.success && res.data) return filterOtherRecords(res.data);
   } catch {
     try {
       const fallbackRes: ApiResponse<IrmOtherRecord[]> = await apiClient.get('/sales-executive/calls/other', params);
-      if (fallbackRes.success && fallbackRes.data) return fallbackRes.data;
+      if (fallbackRes.success && fallbackRes.data) return filterOtherRecords(fallbackRes.data);
     } catch {}
   }
   return [];
