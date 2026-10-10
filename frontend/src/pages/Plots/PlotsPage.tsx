@@ -397,7 +397,7 @@ export const PlotsPage: React.FC = () => {
     setSubmittingBooking(true);
     try {
       const price = bookingTotalAgreementValue ?? (selectedPlot.price || selectedPlot.totalPrice || 0);
-      const success = await jaminApiService.createBooking({
+      const result = await jaminApiService.createBooking({
         plotId: selectedPlot.id,
         projectId: selectedPlot.projectId,
         customerId: bookingSourceType === 'customer' && selectedBookingCustomerId ? parseInt(selectedBookingCustomerId, 10) : (selectedPlot?.heldByCustomerId ? parseInt(String(selectedPlot.heldByCustomerId), 10) : undefined),
@@ -413,17 +413,17 @@ export const PlotsPage: React.FC = () => {
         projectName: currentProjectObj?.name || '',
       });
 
-      if (success) {
+      if (result.success) {
         setIsBookingModalOpen(false);
         setSelectedPlot(null);
         await loadData(selectedProject);
-        alert(`Plot ${selectedPlot.plotNumber} successfully confirmed as Booked! ${bookingCustomerName.trim()} has been registered as an Active Customer in CRM.`);
+        alert(`✓ Plot ${selectedPlot.plotNumber} successfully reserved! The token payment of ₹${(bookingTokenAmount || 0).toLocaleString('en-IN')} is awaiting finance verification. The prospect will be officially confirmed in Customer 360 once the payment is verified.`);
       } else {
-        alert('Failed to confirm booking. Please check plot status.');
+        alert(result.message || 'Failed to confirm booking. The plot may already be held or booked by another transaction.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error confirming booking', err);
-      alert('Error communicating with server.');
+      alert(err?.message || 'Error communicating with server.');
     } finally {
       setSubmittingBooking(false);
     }

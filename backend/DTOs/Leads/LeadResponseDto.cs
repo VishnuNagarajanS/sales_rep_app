@@ -25,6 +25,8 @@ public class LeadResponseDto
 
     public Dictionary<string, string> CustomFields { get; set; } = new();
 
+    public List<backend.DTOs.Calls.CallRecordResponseDto> Calls { get; set; } = new();
+
     public DateTime? NextFollowupDate { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }

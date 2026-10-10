@@ -230,18 +230,22 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       ? (isIrm ? PIPELINE_STAGES.ghl_irm : PIPELINE_STAGES.ghl)
       : PIPELINE_STAGES.default;
 
-  // ID of the won stage for this pipeline
-  const wonStageId = stages[stages.length - 1].id;
+  // Identify the correct Won and Lost stages strictly by their IDs, not array index!
+  const wonStageObj = stages.find(s => s.id === 'converted' || s.id === 'won');
+  const wonStageId = wonStageObj ? wonStageObj.id : (stages.find(s => s.id !== 'lost')?.id || stages[0].id);
+  const lostStageId = 'lost';
 
   const handleMoveStage = (deal: Deal, direction: 'forward' | 'backward') => {
-    const currentIndex = stages.findIndex(s => s.id === deal.stage);
+    // Progression moves through linear stages, excluding terminal lost
+    const activePipelineStages = stages.filter(s => s.id !== lostStageId);
+    const currentIndex = activePipelineStages.findIndex(s => s.id === deal.stage);
     if (currentIndex === -1) return;
 
     const newIndex = direction === 'forward' ? currentIndex + 1 : currentIndex - 1;
-    if (newIndex >= 0 && newIndex < stages.length) {
+    if (newIndex >= 0 && newIndex < activePipelineStages.length) {
       const updatedDeal: Deal = {
         ...deal,
-        stage: stages[newIndex].id,
+        stage: activePipelineStages[newIndex].id,
         stageEnteredAt: new Date().toISOString(),
       };
       storageService.saveDeal(updatedDeal);

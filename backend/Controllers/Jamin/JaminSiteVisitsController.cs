@@ -95,7 +95,7 @@ public class JaminSiteVisitsController : JaminTenantControllerBase
         var result = await _siteVisitService.UpdateSiteVisitAsync(id, dto, ct);
         if (!result.Success)
         {
-            return NotFound(result);
+            return BadRequest(result);
         }
 
         return Ok(result);

@@ -35,8 +35,30 @@ export type PopupPosition = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-
 
 class StorageService {
   constructor() {
-    this.runLeadsDedupMigration();
-    this.cleanupDuplicateCustomers();
+    this.purgeLegacyEntityStorage();
+  }
+
+  private purgeLegacyEntityStorage(): void {
+    try {
+      if (typeof window === 'undefined' || !window.localStorage) return;
+      const purgeKeys = [
+        'nexus_leads',
+        'nexus_customers',
+        'nexus_site_visits',
+        'nexus_bookings',
+        'leads',
+        'customers',
+        'site_visits',
+        'bookings'
+      ];
+      purgeKeys.forEach(k => {
+        try {
+          window.localStorage.removeItem(k);
+        } catch { }
+      });
+    } catch (e) {
+      console.warn('Storage purge error:', e);
+    }
   }
 
   private runLeadsDedupMigration(): void {
@@ -106,6 +128,14 @@ class StorageService {
     try {
       localStorage.setItem(`nexus_${key}`, JSON.stringify(value));
       window.dispatchEvent(new Event('nexus_storage_updated'));
+    } catch (e) {
+      console.error('Failed to save to localStorage', e);
+    }
+  }
+
+  private setSilent<T>(key: string, value: T): void {
+    try {
+      localStorage.setItem(`nexus_${key}`, JSON.stringify(value));
     } catch (e) {
       console.error('Failed to save to localStorage', e);
     }
@@ -248,10 +278,25 @@ class StorageService {
       return Boolean(digits && lDigits && digits === lDigits);
     });
 
+    const sanitizedNotes = lead.notes
+      ? lead.notes
+          .split('\n')
+          .filter(line => {
+            const trimmed = line.trim();
+            if (/^\[\d{1,2}\/\d{1,2}\/\d{4}[^\]]*\]\s*(Interested|Follow-up|Call Back|No Response|Converted|Not Interested|Wrong Number|Site Visit)/i.test(trimmed)) return false;
+            if (/^\[Call Disposition\s*-.*?\]:/i.test(trimmed)) return false;
+            return true;
+          })
+          .join('\n')
+          .trim()
+      : lead.notes;
+
+    const leadToSave = { ...lead, notes: sanitizedNotes };
+
     if (index >= 0) {
-      leads[index] = { ...leads[index], ...lead };
+      leads[index] = { ...leads[index], ...leadToSave };
     } else {
-      leads.unshift(lead);
+      leads.unshift(leadToSave);
     }
     this.set('leads', leads);
   }
@@ -448,13 +493,30 @@ class StorageService {
   // Calls (Defaults to empty [] - real calls are prepended via addCall)
   getCalls(companyId?: string): CallRecord[] {
     const stored = this.get<CallRecord[]>('calls', []);
-    return companyId ? stored.filter(c => c.companyId === companyId) : stored;
+    if (!companyId) return stored;
+    const isGhl = companyId === '1' || (companyId as any) === 1 || companyId === 't-ghl-01' || companyId === 'ghl';
+    const isJamin = companyId === '2' || (companyId as any) === 2 || companyId === 't-jamin-02' || companyId === 'jamin';
+    return stored.filter(c => {
+      if (isGhl) return c.companyId === 't-ghl-01' || c.companyId === '1' || (c.companyId as any) === 1 || c.companyId === 'ghl';
+      if (isJamin) return c.companyId === 't-jamin-02' || c.companyId === '2' || (c.companyId as any) === 2 || c.companyId === 'jamin';
+      return c.companyId === companyId;
+    });
+  }
+
+  setCalls(calls: CallRecord[], companyId?: string): void {
+    const existing = this.get<CallRecord[]>('calls', []);
+    const callMap = new Map<string, CallRecord>();
+    existing.forEach(c => callMap.set(String(c.id), c));
+    calls.forEach(c => callMap.set(String(c.id), c));
+    this.setSilent('calls', Array.from(callMap.values()));
   }
 
   addCall(call: CallRecord): void {
-    const calls = this.getCalls();
-    calls.unshift(call);
-    this.set('calls', calls);
+    const calls = this.get<CallRecord[]>('calls', []);
+    const cleanId = String(call.id);
+    const filtered = calls.filter(c => String(c.id) !== cleanId);
+    filtered.unshift(call);
+    this.set('calls', filtered);
   }
 
   getFollowups(companyId?: string): Followup[] {

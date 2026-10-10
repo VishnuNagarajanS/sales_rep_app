@@ -82,7 +82,23 @@ export interface Lead {
   email: string;
   location: string;
   source: string;
-  status: 'New' | 'Contacted' | 'Qualified' | 'Proposal' | 'Negotiation' | 'Converted' | 'Lost' | 'Not Interested' | 'Junk' | 'Callback' | 'No Response' | 'Follow-up Required' | 'Interested';
+  status:
+    | 'New'
+    | 'Contacted'
+    | 'Qualified'
+    | 'Proposal'
+    | 'Negotiation'
+    | 'Interested'
+    | 'Follow-up Required'
+    | 'Callback'
+    | 'No Response'
+    | 'Site Visit Scheduled'
+    | 'Site Visit Completed'
+    | 'Booking In Progress'
+    | 'Converted'
+    | 'Lost'
+    | 'Not Interested'
+    | 'Junk';
   priority: 'Low' | 'Medium' | 'High' | 'Urgent';
   assignedAgentId: string;
   assignedAgentName: string;
@@ -125,7 +141,7 @@ export interface Lead {
   slaStatus?: 'on_track' | 'at_risk' | 'breached';
   createdBy?: string;
   updatedBy?: string;
-  readyToRegister?: boolean;
+  readyToRegister?: string | boolean;
 }
 
 export interface Customer {
@@ -216,7 +232,9 @@ export type CallDisposition =
   | 'Call Back'
   | 'Wrong Number'
   | 'Converted'
-  | 'No Response';
+  | 'No Response'
+  | 'Skipped'
+  | '';
 
 export interface CallRecord {
   id: string;
@@ -422,7 +440,7 @@ export interface AuditLog {
   beforeValue?: Record<string, any>;
   afterValue?: Record<string, any>;
   module?: string;
-  status?: 'success' | 'failure';
+  status?: 'success' | 'failure' | string;
 }
 
 export interface NotificationItem {

@@ -122,6 +122,8 @@ export const jaminApiService = {
           preferredTimeSlot: l.preferredTimeSlot,
           anythingWeShouldKnow: l.anythingWeShouldKnow,
           notes: l.notes || '',
+          budgetRange: l.budgetRange || l.customFields?.budgetRange || l.customFields?.investmentCapacity || '',
+          readyToRegister: l.readyToRegister || l.customFields?.readyToRegister || '',
           createdAt: l.createdAt ? new Date(l.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
           customFields: {
             budgetRange: l.budgetRange || l.customFields?.budgetRange || '',
@@ -159,6 +161,8 @@ export const jaminApiService = {
           preferredTimeSlot: d.preferredTimeSlot,
           anythingWeShouldKnow: d.anythingWeShouldKnow,
           notes: d.notes || '',
+          budgetRange: d.budgetRange || d.customFields?.budgetRange || d.customFields?.investmentCapacity || '',
+          readyToRegister: d.readyToRegister || d.customFields?.readyToRegister || '',
           createdAt: d.createdAt,
           customFields: {
             budgetRange: d.budgetRange || d.customFields?.budgetRange || '',
@@ -221,7 +225,7 @@ export const jaminApiService = {
     }
   },
 
-  async convertLead(id: string | number, dealTitle?: string, dealValue?: number, notes?: string): Promise<{ customerId?: number; leadId?: number; success: boolean }> {
+  async convertLead(id: string | number, dealTitle?: string, dealValue?: number, notes?: string): Promise<{ customerId?: number; leadId?: number; success: boolean; message?: string }> {
     try {
       const cleanId = String(id).replace('db-', '').replace('lead-', '').trim();
       const res = await apiClient.post<any>(`/leads/${cleanId}/convert`, {
@@ -234,12 +238,15 @@ export const jaminApiService = {
           customerId: res.data?.customerId,
           leadId: res.data?.leadId,
           success: true,
+          message: res.message,
         };
       }
-    } catch (err) {
+      return { success: false, message: res?.message || 'Conversion failed.' };
+    } catch (err: any) {
       console.error(`Failed to convert lead #${id} on backend`, err);
+      const msg = err?.response?.data?.message || err?.message || 'Failed to convert lead.';
+      return { success: false, message: msg };
     }
-    return { success: false };
   },
 
   async deleteLead(id: string | number): Promise<boolean> {
@@ -336,8 +343,9 @@ export const jaminApiService = {
 
   async confirmSiteVisit(id: string | number): Promise<boolean> {
     try {
-      const res = await apiClient.put<any>(`/jamin/site-visits/${id}/confirm`, {});
-      return res && res.success;
+      const cleanId = String(id).replace(/\D/g, '') || String(id);
+      const res = await apiClient.put<any>(`/jamin/site-visits/${cleanId}/confirm`, {});
+      return Boolean(res && res.success);
     } catch (err) {
       console.error(`Failed to confirm site visit #${id}`, err);
       return false;
@@ -346,8 +354,9 @@ export const jaminApiService = {
 
   async completeSiteVisit(id: string | number, outcomeNotes: string): Promise<boolean> {
     try {
-      const res = await apiClient.put<any>(`/jamin/site-visits/${id}/complete`, { outcomeNotes });
-      return res && res.success;
+      const cleanId = String(id).replace(/\D/g, '') || String(id);
+      const res = await apiClient.put<any>(`/jamin/site-visits/${cleanId}/complete`, { outcomeNotes });
+      return Boolean(res && res.success);
     } catch (err) {
       console.error(`Failed to complete site visit #${id}`, err);
       return false;
@@ -356,8 +365,9 @@ export const jaminApiService = {
 
   async updateSiteVisit(id: string | number, data: any): Promise<boolean> {
     try {
-      const res = await apiClient.put<any>(`/jamin/site-visits/${id}`, data);
-      return res && res.success;
+      const cleanId = String(id).replace(/\D/g, '') || String(id);
+      const res = await apiClient.put<any>(`/jamin/site-visits/${cleanId}`, data);
+      return Boolean(res && res.success);
     } catch (err) {
       console.error(`Failed to update site visit #${id}`, err);
       return false;
@@ -366,11 +376,12 @@ export const jaminApiService = {
 
   async cancelSiteVisit(id: string | number, reason?: string): Promise<boolean> {
     try {
-      const res = await apiClient.put<any>(`/jamin/site-visits/${id}`, {
+      const cleanId = String(id).replace(/\D/g, '') || String(id);
+      const res = await apiClient.put<any>(`/jamin/site-visits/${cleanId}`, {
         status: 'Cancelled',
         outcomeNotes: reason || 'Cancelled by user',
       });
-      return res && res.success;
+      return Boolean(res && res.success);
     } catch (err) {
       console.error(`Failed to cancel site visit #${id}`, err);
       return false;
@@ -716,13 +727,18 @@ export const jaminApiService = {
     return null;
   },
 
-  async createBooking(booking: any): Promise<boolean> {
+  async createBooking(booking: any): Promise<{ success: boolean; data?: any; message?: string }> {
     try {
       const res = await apiClient.post<any>('/jamin/bookings', booking);
-      return res && res.success;
-    } catch (err) {
+      return {
+        success: Boolean(res && res.success),
+        data: res?.data,
+        message: res?.message || (res && res.success ? 'Booking created successfully.' : 'Unable to create booking.')
+      };
+    } catch (err: any) {
       console.error('Failed to create booking on backend', err);
-      return false;
+      const serverMessage = err?.response?.data?.message || err?.message || 'Server connection error during booking creation.';
+      return { success: false, message: serverMessage };
     }
   },
 
@@ -732,6 +748,36 @@ export const jaminApiService = {
       return res && res.success;
     } catch (err) {
       console.error(`Failed to update booking #${id} status`, err);
+      return false;
+    }
+  },
+
+  async verifyBookingPayment(id: number | string, paymentId?: number, receiptNumber?: string, notes?: string): Promise<{ success: boolean; data?: any; message?: string }> {
+    try {
+      const res = await apiClient.post<any>(`/jamin/bookings/${id}/verify-payment`, { paymentId, receiptNumber, notes });
+      return { success: Boolean(res && res.success), data: res?.data, message: res?.message };
+    } catch (err: any) {
+      console.error(`Failed to verify payment on booking #${id}`, err);
+      return { success: false, message: err?.message || 'Verification failed.' };
+    }
+  },
+
+  async addBookingPayment(id: number | string, payment: { amount: number; paymentType?: string; paymentMode?: string; transactionReference?: string; receiptNumber?: string; notes?: string }): Promise<boolean> {
+    try {
+      const res = await apiClient.post<any>(`/jamin/bookings/${id}/payments`, payment);
+      return res && res.success;
+    } catch (err) {
+      console.error(`Failed to add payment to booking #${id}`, err);
+      return false;
+    }
+  },
+
+  async cancelBookingWithAudit(id: number | string, cancellation: { cancellationReason: string; refundAmount?: number; refundPaymentMode?: string; refundTransactionReference?: string; notes?: string }): Promise<boolean> {
+    try {
+      const res = await apiClient.post<any>(`/jamin/bookings/${id}/cancel`, cancellation);
+      return res && res.success;
+    } catch (err) {
+      console.error(`Failed to cancel booking #${id} with audit`, err);
       return false;
     }
   },

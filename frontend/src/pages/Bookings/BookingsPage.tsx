@@ -1,5 +1,18 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { CheckCircle, Plus, RefreshCw, FileText } from 'lucide-react';
+import {
+  CheckCircle,
+  Plus,
+  RefreshCw,
+  FileText,
+  ShieldCheck,
+  CreditCard,
+  XCircle,
+  AlertTriangle,
+  History,
+  Building2,
+  DollarSign,
+  UserCheck,
+} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { DataTable, Column } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
@@ -10,9 +23,11 @@ import { DocumentList } from '../../components/common/DocumentList';
 import { jaminApiService } from '../../services/jaminApiService';
 import { getCustomers, getLeads } from '../../services/ghlApiService';
 import { storageService } from '../../services/storageService';
+import { apiClient } from '../../services/apiClient';
 import './BookingsPage.css';
 
 const PAYMENT_MODES = ['Bank Transfer / NEFT', 'RTGS', 'Cheque / DD', 'UPI / Online', 'Cash'];
+const PAYMENT_TYPES = ['Installment', 'Milestone', 'Registration Fee', 'Maintenance', 'Token Addition', 'Other'];
 
 export const BookingsPage: React.FC = () => {
   const { tenant, user } = useAuth();
@@ -23,6 +38,37 @@ export const BookingsPage: React.FC = () => {
   const [isNewBookingModalOpen, setIsNewBookingModalOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Role checking for financial actions
+  const roleCode = String(user?.role?.code || user?.role?.name || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const canVerifyPayment = ['company_admin', 'super_admin', 'sales_manager', 'admin', 'manager'].includes(roleCode);
+
+  // Verification Modal State
+  const [isVerifyModalOpen, setIsVerifyModalOpen] = useState(false);
+  const [verifyingBooking, setVerifyingBooking] = useState<any | null>(null);
+  const [verifyReceiptNumber, setVerifyReceiptNumber] = useState('');
+  const [verifyNotes, setVerifyNotes] = useState('');
+  const [isSubmittingVerify, setIsSubmittingVerify] = useState(false);
+
+  // Add Installment Payment Modal State
+  const [isAddPaymentModalOpen, setIsAddPaymentModalOpen] = useState(false);
+  const [payingBooking, setPayingBooking] = useState<any | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState<number | undefined>();
+  const [paymentType, setPaymentType] = useState('Installment');
+  const [newPaymentMode, setNewPaymentMode] = useState('Bank Transfer / NEFT');
+  const [paymentRef, setPaymentRef] = useState('');
+  const [paymentReceiptNo, setPaymentReceiptNo] = useState('');
+  const [paymentNotes, setPaymentNotes] = useState('');
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+
+  // Cancellation Modal State
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [cancellingBooking, setCancellingBooking] = useState<any | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelRefundAmount, setCancelRefundAmount] = useState<number>(0);
+  const [cancelRefundMode, setCancelRefundMode] = useState('Bank Transfer / NEFT');
+  const [cancelRefundRef, setCancelRefundRef] = useState('');
+  const [isSubmittingCancel, setIsSubmittingCancel] = useState(false);
 
   // Unified Manage Status Modal State
   const [managingBooking, setManagingBooking] = useState<any | null>(null);
@@ -36,7 +82,7 @@ export const BookingsPage: React.FC = () => {
   const [managePaymentTerms, setManagePaymentTerms] = useState('');
   const [isSubmittingManage, setIsSubmittingManage] = useState(false);
 
-  // Form State
+  // Form State for New Booking
   const [buyerSourceType, setBuyerSourceType] = useState<'customer' | 'lead' | 'custom'>('customer');
   const [customersList, setCustomersList] = useState<any[]>([]);
   const [leadsList, setLeadsList] = useState<any[]>([]);
@@ -60,14 +106,22 @@ export const BookingsPage: React.FC = () => {
         jaminApiService.getBookings(),
         jaminApiService.getProjects(),
         jaminApiService.getPlots(),
-        getCustomers(tenant?.id).catch(() => storageService.getCustomers(tenant?.id) || []),
-        getLeads(tenant?.id).catch(() => storageService.getLeads(tenant?.id) || []),
+        getCustomers(tenant?.id).catch(() => []),
+        getLeads(tenant?.id).catch(() => []),
       ]);
-      setBookings(bkgList);
-      setProjects(projList);
-      setPlots(plotList);
+      setBookings(bkgList || []);
+      setProjects(projList || []);
+      setPlots(plotList || []);
       setCustomersList(custs || []);
       setLeadsList(lds || []);
+
+      // If a booking is currently selected in the drawer, refresh it too
+      if (selectedBooking) {
+        const refreshed = (bkgList || []).find((b: any) => String(b.id) === String(selectedBooking.id));
+        if (refreshed) {
+          setSelectedBooking(refreshed);
+        }
+      }
     } catch (err) {
       console.error('Failed to load bookings from backend', err);
     } finally {
@@ -103,17 +157,14 @@ export const BookingsPage: React.FC = () => {
     return list;
   }, [customersList, leadsList]);
 
-  // Active unconverted leads ONLY (leads who are already converted are customers and excluded here)
+  // Active unconverted leads ONLY
   const availableLeadsList = useMemo(() => {
     return leadsList.filter(l => (l.status || '').toLowerCase() !== 'converted');
   }, [leadsList]);
 
-  // When project changes in the form, reset plot selection
   const handleProjectSelect = (projId: string) => {
     setSelectedProjectId(projId);
     setSelectedPlotId('');
-    setSelectedCustomerId('');
-    setSelectedLeadId('');
     setTotalPlotPrice(undefined);
   };
 
@@ -143,13 +194,21 @@ export const BookingsPage: React.FC = () => {
     if (found) {
       setCustomerName(found.name || '');
       setCustomerPhone(found.phone || '');
+      const targetProj = found.targetDevelopment || found.customFields?.targetDevelopment || found.customFields?.project;
+      if (targetProj) {
+        const matchedP = projects.find(p => p.name.trim().toLowerCase() === targetProj.trim().toLowerCase() || targetProj.trim().toLowerCase().includes(p.name.trim().toLowerCase()));
+        if (matchedP) {
+          setSelectedProjectId(String(matchedP.id));
+          setSelectedPlotId('');
+          setTotalPlotPrice(undefined);
+        }
+      }
     } else {
       setCustomerName('');
       setCustomerPhone('');
     }
   };
 
-  // When plot is selected, auto-populate the total price and match customer/lead if held
   const handlePlotSelect = (plotId: string) => {
     setSelectedPlotId(plotId);
     const chosenPlot = plots.find(p => String(p.id) === String(plotId));
@@ -236,8 +295,27 @@ export const BookingsPage: React.FC = () => {
         notes,
       };
 
-      const success = await jaminApiService.createBooking(payload);
-      if (success) {
+      const res = await jaminApiService.createBooking(payload);
+      if (res.success) {
+        // Automatically transition linked lead status to 'Booking In Progress'
+        const leadObj = selectedLeadId
+          ? leadsList.find(l => String(l.id) === String(selectedLeadId))
+          : leadsList.find(l => l.phone.replace(/\D/g, '').slice(-10) === customerPhone.replace(/\D/g, '').slice(-10));
+
+        if (leadObj && leadObj.status !== 'Converted') {
+          const updatedLead = { ...leadObj, status: 'Booking In Progress' as const };
+          setLeadsList(prev => prev.map(l => String(l.id) === String(leadObj.id) ? updatedLead : l));
+          const numId = parseInt(String(leadObj.id).replace('db-', ''), 10);
+          if (!isNaN(numId)) {
+            apiClient.put(`/leads/${numId}`, {
+              name: updatedLead.name,
+              phone: updatedLead.phone,
+              status: 'Booking In Progress',
+              companyId: 2
+            }).catch(() => {});
+          }
+        }
+
         setIsNewBookingModalOpen(false);
         // Reset form
         setCustomerName('');
@@ -252,22 +330,151 @@ export const BookingsPage: React.FC = () => {
         setPaymentModeOther('');
         setPaymentTerms('');
         setNotes('');
+        window.dispatchEvent(new Event('nexus_storage_updated'));
         await loadData();
       } else {
-        alert('Unable to create the booking. Please check plot availability.');
+        alert(res.message || 'Unable to create the booking. The plot may already be held or booked by another transaction.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Booking submission error', err);
-      alert('Unable to create the booking. Please try again.');
+      alert(err?.message || 'Unable to create the booking. Please check plot availability and try again.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleOpenManageModal = (b: any, requestedStatus?: string) => {
+  // ── PAYMENT VERIFICATION WORKFLOW ──────────────────────────────────────────
+  const handleOpenVerifyModal = (b: any) => {
+    setVerifyingBooking(b);
+    setVerifyReceiptNumber(`RCPT-${Date.now().toString().slice(-6)}`);
+    setVerifyNotes(`Token payment verified for ${b.plotNumber || 'Plot'}.`);
+    setIsVerifyModalOpen(true);
+  };
+
+  const handleConfirmVerification = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!verifyingBooking) return;
+
+    setIsSubmittingVerify(true);
+    try {
+      const res = await jaminApiService.verifyBookingPayment(
+        verifyingBooking.id,
+        undefined,
+        verifyReceiptNumber.trim(),
+        verifyNotes.trim()
+      );
+
+      if (res.success) {
+        setIsVerifyModalOpen(false);
+        setVerifyingBooking(null);
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+        await loadData();
+      } else {
+        alert(res.message || 'Payment verification failed.');
+      }
+    } catch (err: any) {
+      console.error('Error verifying payment', err);
+      alert(err?.message || 'Verification failed. Please check permissions.');
+    } finally {
+      setIsSubmittingVerify(false);
+    }
+  };
+
+  // ── ADD INSTALLMENT PAYMENT WORKFLOW ───────────────────────────────────────
+  const handleOpenAddPaymentModal = (b: any) => {
+    setPayingBooking(b);
+    setPaymentAmount(undefined);
+    setPaymentType('Installment');
+    setNewPaymentMode('Bank Transfer / NEFT');
+    setPaymentRef('');
+    setPaymentReceiptNo(`RCPT-${Date.now().toString().slice(-6)}`);
+    setPaymentNotes('');
+    setIsAddPaymentModalOpen(true);
+  };
+
+  const handleConfirmAddPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!payingBooking || !paymentAmount || paymentAmount <= 0) {
+      alert('Please enter a valid payment amount.');
+      return;
+    }
+
+    setIsSubmittingPayment(true);
+    try {
+      const success = await jaminApiService.addBookingPayment(payingBooking.id, {
+        amount: paymentAmount,
+        paymentType,
+        paymentMode: newPaymentMode,
+        transactionReference: paymentRef.trim(),
+        receiptNumber: paymentReceiptNo.trim(),
+        notes: paymentNotes.trim(),
+      });
+
+      if (success) {
+        setIsAddPaymentModalOpen(false);
+        setPayingBooking(null);
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+        await loadData();
+      } else {
+        alert('Failed to record payment in the ledger.');
+      }
+    } catch (err) {
+      console.error('Error adding payment', err);
+      alert('Unable to record payment.');
+    } finally {
+      setIsSubmittingPayment(false);
+    }
+  };
+
+  // ── CANCELLATION & REFUND WORKFLOW ─────────────────────────────────────────
+  const handleOpenCancelModal = (b: any) => {
+    setCancellingBooking(b);
+    setCancelReason('');
+    const verifiedPaid = b.verifiedReceipts ?? b.tokenAmountPaid ?? 0;
+    setCancelRefundAmount(verifiedPaid);
+    setCancelRefundMode('Bank Transfer / NEFT');
+    setCancelRefundRef('');
+    setIsCancelModalOpen(true);
+  };
+
+  const handleConfirmCancelBooking = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cancellingBooking) return;
+    if (!cancelReason.trim()) {
+      alert('Please state a reason for cancellation.');
+      return;
+    }
+
+    setIsSubmittingCancel(true);
+    try {
+      const success = await jaminApiService.cancelBookingWithAudit(cancellingBooking.id, {
+        cancellationReason: cancelReason.trim(),
+        refundAmount: cancelRefundAmount,
+        refundPaymentMode: cancelRefundAmount > 0 ? cancelRefundMode : undefined,
+        refundTransactionReference: cancelRefundAmount > 0 ? cancelRefundRef.trim() : undefined,
+      });
+
+      if (success) {
+        setIsCancelModalOpen(false);
+        setCancellingBooking(null);
+        window.dispatchEvent(new Event('nexus_storage_updated'));
+        await loadData();
+      } else {
+        alert('Failed to cancel the booking. Please try again.');
+      }
+    } catch (err) {
+      console.error('Error cancelling booking', err);
+      alert('Unable to process cancellation.');
+    } finally {
+      setIsSubmittingCancel(false);
+    }
+  };
+
+  // ── MANAGE DETAILS / STATUS MODAL ──────────────────────────────────────────
+  const handleOpenManageModal = (b: any, requestedMode?: 'details' | 'status') => {
     setManagingBooking(b);
-    setManageMode('details');
-    setManageStatus(b.status || 'Token Paid');
+    setManageMode(requestedMode === 'status' ? 'status' : 'details');
+    setManageStatus(b.status || 'Token Verified');
     setManageNote(b.notes || '');
     setManageTokenAmount(b.tokenAmountPaid ?? b.bookingAmount ?? 0);
     const savedPaymentMode = b.paymentMode || '';
@@ -280,6 +487,13 @@ export const BookingsPage: React.FC = () => {
   const handleSaveManageBooking = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!managingBooking || !manageStatus) return;
+
+    if (manageStatus === 'Cancelled') {
+      setIsManageModalOpen(false);
+      handleOpenCancelModal(managingBooking);
+      return;
+    }
+
     setIsSubmittingManage(true);
     try {
       const trimmedNote = manageNote.trim();
@@ -293,20 +507,9 @@ export const BookingsPage: React.FC = () => {
           paymentTerms: managePaymentTerms.trim(),
         } : undefined
       );
+
       if (success) {
         setIsManageModalOpen(false);
-        if (selectedBooking && String(selectedBooking.id) === String(managingBooking.id)) {
-          setSelectedBooking((prev: any) => prev ? {
-            ...prev,
-            status: manageStatus,
-            ...(manageMode === 'details' ? {
-              tokenAmountPaid: manageTokenAmount,
-              paymentMode: managePaymentMode,
-              paymentTerms: managePaymentTerms,
-            } : {}),
-            notes: trimmedNote || prev.notes,
-          } : null);
-        }
         setManagingBooking(null);
         window.dispatchEvent(new Event('nexus_storage_updated'));
         await loadData();
@@ -323,31 +526,18 @@ export const BookingsPage: React.FC = () => {
 
   const getAvailableStatusOptions = (currentStatus?: string) => {
     return [
-      { value: 'Token Paid', label: 'Token Paid' },
+      { value: 'Hold', label: 'Hold (Temporary Reservation)' },
+      { value: 'Pending Verification', label: 'Pending Verification' },
+      { value: 'Token Paid', label: 'Token Paid (Pending Verification)' },
+      { value: 'Token Verified', label: 'Token Verified' },
       { value: 'Agreement Signed', label: 'Agreement Signed' },
       { value: 'Registration Completed', label: 'Registration Completed' },
-      { value: 'Cancelled', label: 'Cancelled' },
+      { value: 'Cancelled', label: 'Cancel Booking...' },
     ];
   };
 
-  const handleStatusChange = async (bookingId: number | string, newStatus: string) => {
-    try {
-      const success = await jaminApiService.updateBookingStatus(bookingId, newStatus);
-      if (success) {
-        await loadData();
-        if (selectedBooking && String(selectedBooking.id) === String(bookingId)) {
-          setSelectedBooking((prev: any) => prev ? { ...prev, status: newStatus } : null);
-        }
-      } else {
-        alert('Failed to update booking status.');
-      }
-    } catch (err) {
-      console.error('Error updating status', err);
-    }
-  };
-
   const formatCurrency = (val?: number) => {
-    if (!val) return '₹0';
+    if (!val || val === 0) return '₹0';
     if (val >= 10000000) return `₹${(val / 10000000).toFixed(2)} Cr`;
     if (val >= 100000) return `₹${(val / 100000).toFixed(2)} L`;
     return `₹${val.toLocaleString('en-IN')}`;
@@ -375,46 +565,87 @@ export const BookingsPage: React.FC = () => {
       sortable: true,
       render: b => (
         <div>
-          <div className="booking-customer-name" style={{ fontWeight: 600 }}>{b.customerName}</div>
+          <div className="booking-customer-name" style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {b.customerName}
+            {b.customerId ? (
+              <span style={{ fontSize: '10px', background: '#e0f2fe', color: '#0369a1', padding: '1px 5px', borderRadius: '4px', fontWeight: 600 }}>Customer</span>
+            ) : (
+              <span style={{ fontSize: '10px', background: '#fef3c7', color: '#b45309', padding: '1px 5px', borderRadius: '4px', fontWeight: 600 }}>Lead</span>
+            )}
+          </div>
           <div className="booking-customer-phone" style={{ fontSize: '0.8rem', color: '#64748b' }}>{b.customerPhone}</div>
         </div>
       ),
     },
     {
-      key: 'tokenAmountPaid',
-      header: 'Token Paid',
+      key: 'totalPlotPrice',
+      header: 'Contract Value',
       sortable: true,
-      render: b => <span className="booking-token-amount" style={{ fontWeight: 700, color: '#059669' }}>{formatCurrency(b.tokenAmountPaid || b.bookingAmount)}</span>,
+      render: b => (
+        <span className="booking-total-amount" style={{ fontWeight: 700, color: '#0f172a' }}>
+          {formatCurrency(b.totalPlotPrice || b.totalAmount)}
+        </span>
+      ),
     },
     {
-      key: 'totalPlotPrice',
-      header: 'Total Sale Value',
+      key: 'verifiedReceipts',
+      header: 'Verified Paid',
       sortable: true,
-      render: b => <span className="booking-total-amount" style={{ fontWeight: 700 }}>{formatCurrency(b.totalPlotPrice || b.totalAmount)}</span>,
+      render: b => {
+        const verified = b.verifiedReceipts ?? (b.status === 'Token Paid' || b.paymentStatus === 'Verified' ? b.tokenAmountPaid : 0);
+        return (
+          <span className="booking-token-amount" style={{ fontWeight: 700, color: verified > 0 ? '#059669' : '#64748b' }}>
+            {formatCurrency(verified)}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'contractBalance',
+      header: 'Balance Due',
+      sortable: true,
+      render: b => {
+        const val = b.contractBalance ?? Math.max(0, (b.totalPlotPrice || 0) - (b.verifiedReceipts ?? b.tokenAmountPaid ?? 0));
+        return (
+          <span style={{ fontWeight: 600, color: b.status === 'Cancelled' ? '#94a3b8' : val > 0 ? '#d97706' : '#059669' }}>
+            {b.status === 'Cancelled' ? '—' : formatCurrency(val)}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'status',
+      header: 'Booking Lifecycle',
+      sortable: true,
+      render: b => (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', minWidth: '130px', textAlign: 'center' }}>
+          <StatusChip status={b.status || 'Booking Pending Verification'} size="sm" />
+          {b.notes ? (
+            <div style={{ fontSize: '11px', color: '#64748b', fontStyle: 'italic', wordBreak: 'break-word', lineHeight: 1.25, maxWidth: '160px' }} title={b.notes}>
+              "{b.notes}"
+            </div>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      key: 'paymentStatus',
+      header: 'Payment Status',
+      sortable: true,
+      render: b => (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', minWidth: '110px' }}>
+          <StatusChip status={b.paymentStatus || (b.status === 'Booking Pending Verification' ? 'Pending' : 'Verified')} size="sm" />
+        </div>
+      ),
     },
     {
       key: 'bookingDate',
       header: 'Date',
       sortable: true,
       render: b => (
-        <span style={{ fontSize: '0.85rem' }}>
+        <span style={{ fontSize: '0.85rem', color: '#64748b' }}>
           {b.bookingDate ? new Date(b.bookingDate).toLocaleDateString() : 'Recent'}
         </span>
-      ),
-    },
-    {
-      key: 'status',
-      header: 'Status & Remarks',
-      sortable: true,
-      render: b => (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', minWidth: '150px', maxWidth: '240px', width: '100%', textAlign: 'center' }}>
-          <StatusChip status={b.status || 'Token Paid'} size="sm" />
-          {b.notes ? (
-            <div style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)', fontStyle: 'italic', wordBreak: 'break-word', lineHeight: 1.35 }} title={b.notes}>
-              "{b.notes}"
-            </div>
-          ) : null}
-        </div>
       ),
     },
   ];
@@ -423,11 +654,11 @@ export const BookingsPage: React.FC = () => {
     <div className="bookings-page-container">
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
-          <h1 className="page-title">
+          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <CheckCircle size={24} color="#059669" /> Plot Bookings & Contracts
           </h1>
           <p className="page-subtitle">
-            Bookings, token receipts, and registration contracts for {tenant?.name}.
+            Authoritative plot inventory reservations, payment ledgers, and buyer contracts for {tenant?.name}.
           </p>
         </div>
 
@@ -454,12 +685,27 @@ export const BookingsPage: React.FC = () => {
         keyExtractor={b => String(b.id)}
         rowActions={[
           {
-            label: 'Update Status',
-            onClick: b => handleOpenManageModal(b, '__status__'),
+            label: 'Verify Payment',
+            icon: <ShieldCheck size={14} color="#059669" />,
+            onClick: (b: any) => handleOpenVerifyModal(b),
+            // Show only if payment is pending and user is authorized
+            disabled: (b: any) => !(canVerifyPayment && (b.paymentStatus === 'Pending' || b.status === 'Booking Pending Verification' || b.status === 'Pending Verification')),
           },
           {
-            label: 'Edit Details',
-            onClick: b => handleOpenManageModal(b),
+            label: 'Add Installment',
+            icon: <CreditCard size={14} color="#2563eb" />,
+            onClick: (b: any) => handleOpenAddPaymentModal(b),
+            disabled: (b: any) => b.status === 'Cancelled' || b.status === 'Registration Completed',
+          },
+          {
+            label: 'Update Status',
+            onClick: (b: any) => handleOpenManageModal(b, 'status'),
+          },
+          {
+            label: 'Cancel Booking',
+            icon: <XCircle size={14} color="#dc2626" />,
+            onClick: (b: any) => handleOpenCancelModal(b),
+            disabled: (b: any) => b.status === 'Cancelled',
           },
           {
             label: 'Documents',
@@ -471,19 +717,123 @@ export const BookingsPage: React.FC = () => {
         onRowClick={b => setSelectedBooking(b)}
       />
 
-      {/* Booking Documents Drawer */}
+      {/* ── BOOKING DETAILS & PAYMENT LEDGER DRAWER ────────────────────────── */}
       <Drawer
         isOpen={!!selectedBooking}
         onClose={() => setSelectedBooking(null)}
         title={selectedBooking ? `Booking: ${selectedBooking.plotNumber || 'Plot'}` : ''}
         subtitle={selectedBooking ? `${selectedBooking.customerName} • ${selectedBooking.bookingDate ? new Date(selectedBooking.bookingDate).toLocaleDateString() : ''}` : ''}
-        width={520}
+        width={580}
       >
         {selectedBooking && (
           <div className="booking-drawer-content">
-            <div className="card booking-drawer-card" style={{ marginBottom: '16px', padding: '16px' }}>
+            {/* Cancellation Notice if cancelled */}
+            {selectedBooking.status === 'Cancelled' && (
+              <div style={{
+                background: '#fef2f2',
+                border: '1px solid #fecaca',
+                borderRadius: '8px',
+                padding: '12px 16px',
+                color: '#991b1b',
+                display: 'flex',
+                gap: '12px',
+                alignItems: 'flex-start',
+              }}>
+                <AlertTriangle size={20} color="#dc2626" style={{ flexShrink: 0, marginTop: '2px' }} />
+                <div style={{ fontSize: '0.85rem' }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: '2px' }}>This booking has been cancelled</div>
+                  <div><strong>Reason:</strong> {selectedBooking.cancellationReason || 'No reason specified'}</div>
+                  {selectedBooking.refundAmount > 0 && (
+                    <div style={{ marginTop: '2px' }}><strong>Refund Issued:</strong> {formatCurrency(selectedBooking.refundAmount)}</div>
+                  )}
+                  {selectedBooking.cancelledByName && (
+                    <div style={{ marginTop: '2px', fontSize: '0.8rem', color: '#b91c1c' }}>
+                      Processed by {selectedBooking.cancelledByName} on {selectedBooking.cancelledAt ? new Date(selectedBooking.cancelledAt).toLocaleDateString() : ''}
+                    </div>
+                  )}
+                  <div style={{ marginTop: '4px', fontWeight: 600 }}>Plot {selectedBooking.plotNumber} has been released back to Available inventory.</div>
+                </div>
+              </div>
+            )}
+
+            {/* Financial Ledger Metrics Card */}
+            <div className="card booking-drawer-card" style={{ padding: '16px', background: 'linear-gradient(135deg, #f8fafc 0%, #edf2f7 100%)', border: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Contract Financials & Ledger
+                </span>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <StatusChip status={selectedBooking.status || 'Booking Pending Verification'} size="sm" />
+                  <StatusChip status={selectedBooking.paymentStatus || 'Pending'} size="sm" />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '8px' }}>
+                <div>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>Contract Value</span>
+                  <div style={{ fontWeight: 800, fontSize: '15px', color: '#0f172a' }}>
+                    {formatCurrency(selectedBooking.contractValue ?? selectedBooking.totalPlotPrice)}
+                  </div>
+                </div>
+                <div>
+                  <span style={{ fontSize: '11px', color: '#059669' }}>Verified Receipts</span>
+                  <div style={{ fontWeight: 800, fontSize: '15px', color: '#059669' }}>
+                    {formatCurrency(selectedBooking.verifiedReceipts ?? selectedBooking.tokenAmountPaid ?? 0)}
+                  </div>
+                </div>
+                <div>
+                  <span style={{ fontSize: '11px', color: '#d97706' }}>Balance Due</span>
+                  <div style={{ fontWeight: 800, fontSize: '15px', color: selectedBooking.status === 'Cancelled' ? '#94a3b8' : '#d97706' }}>
+                    {selectedBooking.status === 'Cancelled' ? '₹0' : formatCurrency(selectedBooking.contractBalance ?? Math.max(0, (selectedBooking.totalPlotPrice || 0) - (selectedBooking.verifiedReceipts || 0)))}
+                  </div>
+                </div>
+              </div>
+
+              {selectedBooking.totalRefunds > 0 && (
+                <div style={{ fontSize: '12px', color: '#dc2626', paddingTop: '8px', borderTop: '1px dashed #cbd5e1' }}>
+                  Total Refunds Issued: <strong>{formatCurrency(selectedBooking.totalRefunds)}</strong> • Net Cash Received: <strong>{formatCurrency(selectedBooking.netCashReceived)}</strong>
+                </div>
+              )}
+            </div>
+
+            {/* Quick Action Buttons */}
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {canVerifyPayment && (selectedBooking.paymentStatus === 'Pending' || selectedBooking.status === 'Booking Pending Verification') && (
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  style={{ background: '#059669', color: '#fff', display: 'inline-flex', alignItems: 'center', gap: '5px', fontWeight: 600 }}
+                  onClick={() => handleOpenVerifyModal(selectedBooking)}
+                >
+                  <ShieldCheck size={14} /> Verify Token Payment
+                </button>
+              )}
+              {selectedBooking.status !== 'Cancelled' && selectedBooking.status !== 'Registration Completed' && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                  onClick={() => handleOpenAddPaymentModal(selectedBooking)}
+                >
+                  <CreditCard size={14} /> Record Installment
+                </button>
+              )}
+              {selectedBooking.status !== 'Cancelled' && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ color: '#dc2626', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                  onClick={() => handleOpenCancelModal(selectedBooking)}
+                >
+                  <XCircle size={14} /> Cancel & Refund
+                </button>
+              )}
+            </div>
+
+            {/* Property and Buyer Details Card */}
+            <div className="card booking-drawer-card" style={{ padding: '16px' }}>
               <h4 className="booking-drawer-section-title" style={{ fontWeight: 600, marginBottom: '10px' }}>
-                Booking Details
+                Property & Buyer Info
               </h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '0.85rem' }}>
                 <div>
@@ -491,24 +841,24 @@ export const BookingsPage: React.FC = () => {
                   <div style={{ fontWeight: 600 }}>{selectedBooking.projectName || 'Jamin Community'}</div>
                 </div>
                 <div>
-                  <span style={{ color: '#64748b' }}>Status:</span>
-                  <div><StatusChip status={selectedBooking.status || 'Token Paid'} size="sm" /></div>
+                  <span style={{ color: '#64748b' }}>Plot Number:</span>
+                  <div style={{ fontWeight: 700 }}>{selectedBooking.plotNumber}</div>
                 </div>
                 <div>
-                  <span style={{ color: '#64748b' }}>Token Paid:</span>
-                  <div style={{ fontWeight: 700, color: '#059669' }}>{formatCurrency(selectedBooking.tokenAmountPaid || selectedBooking.bookingAmount)}</div>
+                  <span style={{ color: '#64748b' }}>Buyer Name:</span>
+                  <div style={{ fontWeight: 600 }}>{selectedBooking.customerName}</div>
                 </div>
                 <div>
-                  <span style={{ color: '#64748b' }}>Total Sale Value:</span>
-                  <div style={{ fontWeight: 700 }}>{formatCurrency(selectedBooking.totalPlotPrice || selectedBooking.totalAmount)}</div>
-                </div>
-                <div>
-                  <span style={{ color: '#64748b' }}>Payment Mode:</span>
-                  <div>{selectedBooking.paymentMode}</div>
+                  <span style={{ color: '#64748b' }}>Buyer Phone:</span>
+                  <div style={{ fontWeight: 600 }}>{selectedBooking.customerPhone}</div>
                 </div>
                 <div>
                   <span style={{ color: '#64748b' }}>Assigned Agent:</span>
                   <div>{selectedBooking.assignedAgentName || user?.name || 'Agent'}</div>
+                </div>
+                <div>
+                  <span style={{ color: '#64748b' }}>Booking Date:</span>
+                  <div>{selectedBooking.bookingDate ? new Date(selectedBooking.bookingDate).toLocaleDateString() : '—'}</div>
                 </div>
                 {selectedBooking.paymentTerms && (
                   <div style={{ gridColumn: '1 / -1' }}>
@@ -519,24 +869,76 @@ export const BookingsPage: React.FC = () => {
                   </div>
                 )}
               </div>
-              {selectedBooking.notes && (
-                <div style={{ marginTop: '12px', fontSize: '0.85rem' }}>
-                  <span style={{ color: '#64748b' }}>Notes:</span>
-                  <p style={{ marginTop: '4px', background: '#f8fafc', padding: '8px', borderRadius: '6px' }}>{selectedBooking.notes}</p>
+            </div>
+
+            {/* ── PAYMENT LEDGER TABLE ────────────────────────────────────── */}
+            <div className="card booking-drawer-card" style={{ padding: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <h4 className="booking-drawer-section-title" style={{ fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <History size={15} /> Payment Ledger Records
+                </h4>
+                {selectedBooking.status !== 'Cancelled' && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ fontSize: '11px', padding: '3px 8px' }}
+                    onClick={() => handleOpenAddPaymentModal(selectedBooking)}
+                  >
+                    + Add Payment
+                  </button>
+                )}
+              </div>
+
+              {selectedBooking.payments && selectedBooking.payments.length > 0 ? (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse', textAlign: 'left' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>
+                        <th style={{ padding: '6px 4px' }}>Date</th>
+                        <th style={{ padding: '6px 4px' }}>Type</th>
+                        <th style={{ padding: '6px 4px' }}>Amount</th>
+                        <th style={{ padding: '6px 4px' }}>Mode / Ref</th>
+                        <th style={{ padding: '6px 4px' }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedBooking.payments.map((p: any) => (
+                        <tr key={p.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '8px 4px', color: '#64748b' }}>
+                            {p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '—'}
+                          </td>
+                          <td style={{ padding: '8px 4px', fontWeight: 600 }}>
+                            {p.paymentType}
+                          </td>
+                          <td style={{
+                            padding: '8px 4px',
+                            fontWeight: 700,
+                            color: p.paymentType === 'Refund' ? '#dc2626' : '#059669',
+                          }}>
+                            {p.paymentType === 'Refund' ? '-' : '+'}{formatCurrency(p.amount)}
+                          </td>
+                          <td style={{ padding: '8px 4px', fontSize: '11px' }}>
+                            <div>{p.paymentMode}</div>
+                            {p.transactionReference && (
+                              <div style={{ color: '#64748b', fontFamily: 'monospace' }}>{p.transactionReference}</div>
+                            )}
+                          </td>
+                          <td style={{ padding: '8px 4px' }}>
+                            <StatusChip status={p.status || 'Verified'} size="sm" />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              )}
-              {(
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  style={{ marginTop: '14px', width: '100%', fontWeight: 600, padding: '7px 12px' }}
-                  onClick={() => handleOpenManageModal(selectedBooking)}
-                >
-                  Edit Booking Details
-                </button>
+              ) : (
+                <div style={{ textAlign: 'center', padding: '16px', color: '#94a3b8', fontSize: '13px' }}>
+                  No standalone ledger receipts recorded yet. Initial token payment was recorded at booking creation.
+                </div>
               )}
             </div>
 
+            {/* Documents Section */}
             <div className="card booking-drawer-card">
               <h4 className="booking-drawer-section-title">
                 Booking Documents
@@ -546,17 +948,262 @@ export const BookingsPage: React.FC = () => {
                 entityId={String(selectedBooking.id)}
                 allowedCategories={['Token Receipt', 'Sale Agreement', 'Registration Doc', 'Payment Proof', 'Other']}
               />
+              <DocumentList
+                entityType="booking"
+                entityId={String(selectedBooking.id)}
+                canDelete
+              />
             </div>
-            <DocumentList
-              entityType="booking"
-              entityId={String(selectedBooking.id)}
-              canDelete
-            />
           </div>
         )}
       </Drawer>
 
-      {/* New Booking Modal */}
+      {/* ── VERIFY PAYMENT MODAL ────────────────────────────────────────────── */}
+      <Modal
+        isOpen={isVerifyModalOpen && !!verifyingBooking}
+        onClose={() => setIsVerifyModalOpen(false)}
+        title="Verify Token Payment"
+        subtitle={`Confirm receipt of token funds for Plot ${verifyingBooking?.plotNumber || ''}`}
+        size="md"
+      >
+        <form onSubmit={handleConfirmVerification} className="booking-form">
+          <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '8px', padding: '12px 16px', color: '#065f46', fontSize: '13px' }}>
+            <div style={{ fontWeight: 700, marginBottom: '4px' }}>Finance Verification Notice</div>
+            <div>
+              Verifying this token payment will:
+            </div>
+            <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
+              <li>Record receipt of <strong>{formatCurrency(verifyingBooking?.tokenAmountPaid ?? verifyingBooking?.bookingAmount)}</strong> as verified in the ledger.</li>
+              <li>Advance booking status to <strong>Token Verified</strong> and payment status to <strong>Verified</strong>.</li>
+              <li>Automatically convert any linked Lead into an official <strong>Customer in Customer 360</strong>.</li>
+            </ul>
+          </div>
+
+          <div className="booking-form-grid-2">
+            <div className="form-group">
+              <label className="form-label">Buyer</label>
+              <input type="text" className="form-input" value={verifyingBooking?.customerName || ''} readOnly />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Token Amount (₹)</label>
+              <input type="text" className="form-input" value={formatCurrency(verifyingBooking?.tokenAmountPaid ?? verifyingBooking?.bookingAmount)} readOnly />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Official Receipt Number *</label>
+            <input
+              type="text"
+              className="form-input"
+              required
+              value={verifyReceiptNumber}
+              onChange={e => setVerifyReceiptNumber(e.target.value)}
+              placeholder="e.g. RCPT-2026-091"
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Verification Remarks / Bank UTR</label>
+            <textarea
+              className="form-textarea"
+              rows={2}
+              value={verifyNotes}
+              onChange={e => setVerifyNotes(e.target.value)}
+              placeholder="Enter bank statement reference or finance notes..."
+            />
+          </div>
+
+          <div className="booking-form-actions">
+            <button type="button" className="btn btn-secondary" onClick={() => setIsVerifyModalOpen(false)} disabled={isSubmittingVerify}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary" style={{ background: '#059669', borderColor: '#059669' }} disabled={isSubmittingVerify}>
+              {isSubmittingVerify ? 'Verifying...' : 'Confirm & Authorize Verification'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ── ADD INSTALLMENT PAYMENT MODAL ──────────────────────────────────── */}
+      <Modal
+        isOpen={isAddPaymentModalOpen && !!payingBooking}
+        onClose={() => setIsAddPaymentModalOpen(false)}
+        title="Record Installment / Milestone Payment"
+        subtitle={`Post a receipt into the payment ledger for Plot ${payingBooking?.plotNumber || ''}`}
+        size="md"
+      >
+        <form onSubmit={handleConfirmAddPayment} className="booking-form">
+          <div className="booking-form-grid-2">
+            <div className="form-group">
+              <label className="form-label">Payment Amount (₹) *</label>
+              <input
+                type="number"
+                className="form-input"
+                required
+                min={1}
+                value={paymentAmount ?? ''}
+                onChange={e => setPaymentAmount(e.target.value ? Number(e.target.value) : undefined)}
+                placeholder="e.g. 500000"
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Payment Type *</label>
+              <select
+                className="form-select"
+                value={paymentType}
+                onChange={e => setPaymentType(e.target.value)}
+              >
+                {PAYMENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="booking-form-grid-2">
+            <div className="form-group">
+              <label className="form-label">Payment Mode *</label>
+              <select
+                className="form-select"
+                value={newPaymentMode}
+                onChange={e => setNewPaymentMode(e.target.value)}
+              >
+                {PAYMENT_MODES.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Transaction Reference / UTR / Cheque #</label>
+              <input
+                type="text"
+                className="form-input"
+                value={paymentRef}
+                onChange={e => setPaymentRef(e.target.value)}
+                placeholder="UTR, Cheque number or Txn ID"
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Receipt Number</label>
+            <input
+              type="text"
+              className="form-input"
+              value={paymentReceiptNo}
+              onChange={e => setPaymentReceiptNo(e.target.value)}
+              placeholder="e.g. RCPT-2026-092"
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Payment Notes</label>
+            <textarea
+              className="form-textarea"
+              rows={2}
+              value={paymentNotes}
+              onChange={e => setPaymentNotes(e.target.value)}
+              placeholder="Milestone notes or bank details..."
+            />
+          </div>
+
+          <div className="booking-form-actions">
+            <button type="button" className="btn btn-secondary" onClick={() => setIsAddPaymentModalOpen(false)} disabled={isSubmittingPayment}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={isSubmittingPayment}>
+              {isSubmittingPayment ? 'Recording...' : 'Post to Ledger'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ── CANCELLATION & REFUND MODAL ─────────────────────────────────────── */}
+      <Modal
+        isOpen={isCancelModalOpen && !!cancellingBooking}
+        onClose={() => setIsCancelModalOpen(false)}
+        title="Cancel Booking & Release Plot"
+        subtitle={`Process cancellation for Plot ${cancellingBooking?.plotNumber || ''}`}
+        size="md"
+      >
+        <form onSubmit={handleConfirmCancelBooking} className="booking-form">
+          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '12px 16px', color: '#991b1b', fontSize: '13px' }}>
+            <div style={{ fontWeight: 700, marginBottom: '4px' }}>⚠️ Inventory Release Warning</div>
+            <div>
+              Cancelling this booking will:
+            </div>
+            <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
+              <li>Immediately release <strong>Plot {cancellingBooking?.plotNumber}</strong> back to <strong>Available</strong> inventory.</li>
+              <li>Record cancellation audit details (time, staff, reason) permanently.</li>
+              <li>If refund amount is entered, write a verified refund transaction into the payment ledger.</li>
+              <li>Preserve historical buyer records in Customer 360.</li>
+            </ul>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Cancellation Reason *</label>
+            <textarea
+              className="form-textarea"
+              rows={3}
+              required
+              value={cancelReason}
+              onChange={e => setCancelReason(e.target.value)}
+              placeholder="e.g. Buyer opted out due to financial constraints, loan rejected, or plot relocated..."
+            />
+          </div>
+
+          <div className="booking-form-grid-2">
+            <div className="form-group">
+              <label className="form-label">Refund Amount (₹)</label>
+              <input
+                type="number"
+                className="form-input"
+                min={0}
+                value={cancelRefundAmount}
+                onChange={e => setCancelRefundAmount(Number(e.target.value))}
+              />
+              <span style={{ fontSize: '11px', color: '#64748b' }}>
+                Total previously verified: {formatCurrency(cancellingBooking?.verifiedReceipts ?? cancellingBooking?.tokenAmountPaid)}
+              </span>
+            </div>
+
+            {cancelRefundAmount > 0 && (
+              <div className="form-group">
+                <label className="form-label">Refund Payment Mode</label>
+                <select
+                  className="form-select"
+                  value={cancelRefundMode}
+                  onChange={e => setCancelRefundMode(e.target.value)}
+                >
+                  {PAYMENT_MODES.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
+
+          {cancelRefundAmount > 0 && (
+            <div className="form-group">
+              <label className="form-label">Refund Transaction Reference / UTR</label>
+              <input
+                type="text"
+                className="form-input"
+                value={cancelRefundRef}
+                onChange={e => setCancelRefundRef(e.target.value)}
+                placeholder="Bank UTR or refund transaction reference"
+              />
+            </div>
+          )}
+
+          <div className="booking-form-actions">
+            <button type="button" className="btn btn-secondary" onClick={() => setIsCancelModalOpen(false)} disabled={isSubmittingCancel}>
+              Back
+            </button>
+            <button type="submit" className="btn btn-primary" style={{ background: '#dc2626', borderColor: '#dc2626' }} disabled={isSubmittingCancel}>
+              {isSubmittingCancel ? 'Cancelling...' : 'Confirm Cancellation & Release Plot'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ── NEW BOOKING MODAL ──────────────────────────────────────────────── */}
       <Modal
         isOpen={isNewBookingModalOpen}
         onClose={() => setIsNewBookingModalOpen(false)}
@@ -564,43 +1211,6 @@ export const BookingsPage: React.FC = () => {
         subtitle=""
       >
         <form onSubmit={handleCreateBooking} className="booking-form">
-          <div className="booking-form-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-            <div className="form-group">
-              <label className="form-label">Project *</label>
-              <select
-                className="form-select"
-                required
-                value={selectedProjectId}
-                onChange={e => handleProjectSelect(e.target.value)}
-              >
-                <option value="">-- Select Project --</option>
-                {projects.map(p => (
-                  <option key={p.id} value={String(p.id)}>
-                    {p.name} ({p.location})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Plot Number *</label>
-              <select
-                className="form-select"
-                required
-                value={selectedPlotId}
-                onChange={e => handlePlotSelect(e.target.value)}
-                disabled={!selectedProjectId}
-              >
-                <option value="">{selectedProjectId ? '-- Select Available/Held Plot --' : '-- First Select Project --'}</option>
-                {filteredPlotsForProject.map(p => (
-                  <option key={p.id} value={String(p.id)}>
-                    {p.plotNumber} - {p.areaSqFt || p.sizeSqft} sq.ft ({p.status}) - ₹{(p.price / 100000).toFixed(2)}L
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
           {/* Buyer selection tabs: Customer, Lead, Custom */}
           <div className="form-group">
             <label className="form-label">Link Buyer To</label>
@@ -679,7 +1289,7 @@ export const BookingsPage: React.FC = () => {
                 </select>
               </div>
               {customerName && (
-                <div className="booking-form-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="booking-form-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '10px' }}>
                   <div className="form-group">
                     <label className="form-label">Lead Name</label>
                     <input type="text" className="form-input" value={customerName} readOnly />
@@ -719,22 +1329,62 @@ export const BookingsPage: React.FC = () => {
             </div>
           )}
 
+          {/* Project & Plot selection placed under the Buyer/Customer section */}
+          <div className="booking-form-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginTop: '14px' }}>
+            <div className="form-group">
+              <label className="form-label">Project *</label>
+              <select
+                className="form-select"
+                required
+                value={selectedProjectId}
+                onChange={e => handleProjectSelect(e.target.value)}
+              >
+                <option value="">-- Select Project --</option>
+                {projects.map(p => (
+                  <option key={p.id} value={String(p.id)}>
+                    {p.name} ({p.location})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Plot Number *</label>
+              <select
+                className="form-select"
+                required
+                value={selectedPlotId}
+                onChange={e => handlePlotSelect(e.target.value)}
+                disabled={!selectedProjectId}
+              >
+                <option value="">{selectedProjectId ? '-- Select Available/Held Plot --' : '-- First Select Project --'}</option>
+                {filteredPlotsForProject.map(p => (
+                  <option key={p.id} value={String(p.id)}>
+                    {p.plotNumber} - {p.areaSqFt || p.sizeSqft} sq.ft ({p.status}) - ₹{(p.price / 100000).toFixed(2)}L
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           <div className="booking-form-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             <div className="form-group">
-              <label className="form-label">Token Advance (₹) <span style={{ fontSize: '0.8rem', fontWeight: 'normal', color: 'var(--text-muted)' }}></span></label>
+              <label className="form-label">Token Advance (₹)</label>
               <input
                 type="number"
                 className="form-input"
                 min={0}
                 value={tokenAmountPaid ?? ''}
                 onChange={e => setTokenAmountPaid(e.target.value ? Number(e.target.value) : undefined)}
+                placeholder="e.g. 100000"
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Total Agreement Value (₹) <span style={{ fontSize: '0.8rem', fontWeight: 'normal', color: 'var(--text-muted)' }}></span></label>
+              <label className="form-label">Total Agreement Value (₹) *</label>
               <input
                 type="number"
                 className="form-input"
+                required
                 min={0}
                 value={totalPlotPrice ?? ''}
                 onChange={e => setTotalPlotPrice(e.target.value ? Number(e.target.value) : undefined)}
@@ -768,12 +1418,13 @@ export const BookingsPage: React.FC = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Payment Terms / Milestone Schedule <span style={{ fontSize: '0.8rem', fontWeight: 'normal', color: 'var(--text-muted)' }}></span></label>
+            <label className="form-label">Payment Terms / Milestone Schedule</label>
             <input
               type="text"
               className="form-input"
               value={paymentTerms}
               onChange={e => setPaymentTerms(e.target.value)}
+              placeholder="e.g. 10% token, 40% on agreement, 50% on registration"
             />
           </div>
 
@@ -784,6 +1435,7 @@ export const BookingsPage: React.FC = () => {
               rows={2}
               value={notes}
               onChange={e => setNotes(e.target.value)}
+              placeholder="Internal remarks or special requests..."
             />
           </div>
 
@@ -792,13 +1444,13 @@ export const BookingsPage: React.FC = () => {
               Cancel
             </button>
             <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? 'Creating Booking...' : 'Confirm & Mark Plot Booked'}
+              {submitting ? 'Creating Booking...' : 'Confirm & Reserve Plot'}
             </button>
           </div>
         </form>
       </Modal>
 
-      {/* Unified Manage Booking Status Modal */}
+      {/* ── MANAGE DETAILS & STATUS MODAL ──────────────────────────────────── */}
       <Modal
         isOpen={isManageModalOpen && !!managingBooking}
         onClose={() => setIsManageModalOpen(false)}
@@ -807,7 +1459,6 @@ export const BookingsPage: React.FC = () => {
         size="md"
       >
         <form onSubmit={handleSaveManageBooking} className="booking-form">
-          {/* Booking Summary Card */}
           <div className="booking-summary-card">
             <div className="booking-summary-row">
               <span className="booking-summary-label">Buyer:</span>
@@ -818,14 +1469,10 @@ export const BookingsPage: React.FC = () => {
               <span className="booking-summary-val">{managingBooking?.projectName || 'Project'} · Plot {managingBooking?.plotNumber}</span>
             </div>
             <div className="booking-summary-row">
-              <span className="booking-summary-label">Token Paid / Total Value:</span>
-              <span className="booking-summary-val" style={{ color: '#059669' }}>
-                {formatCurrency(managingBooking?.tokenAmountPaid || managingBooking?.bookingAmount)} of {formatCurrency(managingBooking?.totalPlotPrice || managingBooking?.totalAmount)}
-              </span>
-            </div>
-            <div className="booking-summary-row">
               <span className="booking-summary-label">Current Status:</span>
-              <span className="booking-summary-val"><StatusChip status={managingBooking?.status || 'Token Paid'} size="sm" /></span>
+              <span className="booking-summary-val">
+                <StatusChip status={managingBooking?.status || 'Booking Pending Verification'} size="sm" />
+              </span>
             </div>
           </div>
 
@@ -837,7 +1484,6 @@ export const BookingsPage: React.FC = () => {
                   type="number"
                   className="form-input"
                   min={0}
-                  max={managingBooking?.totalPlotPrice || managingBooking?.totalAmount || undefined}
                   value={manageTokenAmount ?? ''}
                   onChange={e => setManageTokenAmount(e.target.value === '' ? undefined : Number(e.target.value))}
                 />
@@ -845,27 +1491,18 @@ export const BookingsPage: React.FC = () => {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group">
                   <label className="form-label">Payment Mode</label>
-                      <select
-                        className="form-select"
-                        value={managePaymentMode}
-                        onChange={e => {
-                          setManagePaymentMode(e.target.value);
-                          if (e.target.value !== 'Other') setManagePaymentModeOther('');
-                        }}
-                      >
-                        <option value="">-- Select Payment Mode --</option>
-                        {PAYMENT_MODES.map(mode => <option key={mode} value={mode}>{mode}</option>)}
-                        <option value="Other">Other</option>
-                      </select>
-                      {managePaymentMode === 'Other' && (
-                        <input
-                          className="form-input"
-                          style={{ marginTop: 8 }}
-                          value={managePaymentModeOther}
-                          onChange={e => setManagePaymentModeOther(e.target.value)}
-                          placeholder="Enter payment mode"
-                        />
-                      )}
+                  <select
+                    className="form-select"
+                    value={managePaymentMode}
+                    onChange={e => {
+                      setManagePaymentMode(e.target.value);
+                      if (e.target.value !== 'Other') setManagePaymentModeOther('');
+                    }}
+                  >
+                    <option value="">-- Select Payment Mode --</option>
+                    {PAYMENT_MODES.map(mode => <option key={mode} value={mode}>{mode}</option>)}
+                    <option value="Other">Other</option>
+                  </select>
                 </div>
                 <div className="form-group">
                   <label className="form-label">Payment Terms</label>
@@ -880,99 +1517,47 @@ export const BookingsPage: React.FC = () => {
             </>
           )}
 
-          {manageMode === 'details' ? (
-            <>
-              <div className="form-group">
-                <label className="form-label" style={{ fontWeight: 700, fontSize: '13px' }}>
-                  Booking Status *
-                </label>
-                <select
-                  className="form-select"
-                  required
-                  value={manageStatus}
-                  onChange={e => setManageStatus(e.target.value)}
-                  style={{ fontWeight: 600, fontSize: '13px', borderColor: 'var(--primary-500)' }}
-                >
-                  <option value="">-- Select Status to Proceed --</option>
-                  {getAvailableStatusOptions(managingBooking?.status).map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
+          <div className="form-group">
+            <label className="form-label" style={{ fontWeight: 700, fontSize: '13px' }}>
+              Booking Status *
+            </label>
+            <select
+              className="form-select"
+              required
+              value={manageStatus}
+              onChange={e => setManageStatus(e.target.value)}
+              style={{ fontWeight: 600, fontSize: '13px', borderColor: 'var(--primary-500)' }}
+            >
+              <option value="">-- Select Status to Proceed --</option>
+              {getAvailableStatusOptions(managingBooking?.status).map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
 
-            </>
-          ) : null}
-
-          {/* Dynamic Guidance Banner & Notes */}
           {manageStatus === 'Agreement Signed' && (
-            <>
-              <div className="booking-manage-banner agreement">
-                <span>📄 <strong>Agreement Signed:</strong> Confirm that the official sale agreement has been signed by the buyer.</span>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Agreement Remarks & Date / Document Ref</label>
-                <textarea
-                  className="form-textarea"
-                  rows={3}
-                  value={manageNote}
-                  onChange={e => setManageNote(e.target.value)}
-                  placeholder="e.g. Agreement executed on 15 Oct, Stamp duty paid, 30% milestone due next week..."
-                />
-              </div>
-            </>
-          )}
-
-          {manageStatus === 'Registration Completed' && (
-            <>
-              <div className="booking-manage-banner registration">
-                <span>🏛️ <strong>Registration Completed:</strong> Mark deed registration as completed. The plot will be permanently marked as Registered / Sold in inventory.</span>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Registration Deed Number & Office Remarks</label>
-                <textarea
-                  className="form-textarea"
-                  rows={3}
-                  value={manageNote}
-                  onChange={e => setManageNote(e.target.value)}
-                  placeholder="e.g. Deed #REG-4091 at Sub-Registrar Office, all dues settled..."
-                />
-              </div>
-            </>
-          )}
-
-          {manageStatus === 'Cancelled' && (
-            <>
-              <div className="booking-manage-banner cancelled">
-                <span>⚠️ <strong>Booking Cancellation:</strong> This will cancel the booking and immediately release <strong>Plot {managingBooking?.plotNumber}</strong> back to <strong>Available</strong> inventory.</span>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Reason for Cancellation *</label>
-                <textarea
-                  className="form-textarea"
-                  rows={3}
-                  required
-                  value={manageNote}
-                  onChange={e => setManageNote(e.target.value)}
-                  placeholder="Why is this booking cancelled? (e.g. Buyer opted out, loan rejected, token refunded...)"
-                />
-              </div>
-            </>
-          )}
-
-          {manageMode === 'details' && manageStatus !== 'Agreement Signed' && manageStatus !== 'Registration Completed' && (
-            <div className="form-group">
-              <label className="form-label">Booking Notes / Remarks</label>
-              <textarea
-                className="form-textarea"
-                rows={3}
-                value={manageNote}
-                onChange={e => setManageNote(e.target.value)}
-                placeholder="Add booking remarks..."
-              />
+            <div className="booking-manage-banner agreement">
+              <span>📄 <strong>Agreement Signed:</strong> Official sale agreement executed with the buyer.</span>
             </div>
           )}
 
-          {/* Modal Actions */}
+          {manageStatus === 'Registration Completed' && (
+            <div className="booking-manage-banner registration">
+              <span>🏛️ <strong>Registration Completed:</strong> Deed registration is registered in sub-registrar office. The plot is permanently marked as Registered.</span>
+            </div>
+          )}
+
+          <div className="form-group">
+            <label className="form-label">Remarks / Notes</label>
+            <textarea
+              className="form-textarea"
+              rows={3}
+              value={manageNote}
+              onChange={e => setManageNote(e.target.value)}
+              placeholder="Add booking remarks..."
+            />
+          </div>
+
           <div className="booking-form-actions">
             <button
               type="button"
@@ -986,32 +1571,8 @@ export const BookingsPage: React.FC = () => {
               type="submit"
               className="btn btn-primary"
               disabled={isSubmittingManage || !manageStatus}
-              style={{
-                backgroundColor:
-                  manageStatus === 'Registration Completed'
-                    ? '#059669'
-                    : manageStatus === 'Cancelled'
-                      ? '#dc2626'
-                      : manageStatus === 'Agreement Signed'
-                        ? '#2563eb'
-                        : 'var(--primary-600, #4f46e5)',
-                borderColor:
-                  manageStatus === 'Registration Completed'
-                    ? '#059669'
-                    : manageStatus === 'Cancelled'
-                      ? '#dc2626'
-                      : manageStatus === 'Agreement Signed'
-                        ? '#2563eb'
-                        : 'var(--primary-600, #4f46e5)',
-                color: '#ffffff',
-                fontWeight: 600,
-                opacity: !manageStatus ? 0.6 : 1,
-                cursor: !manageStatus ? 'not-allowed' : 'pointer',
-              }}
             >
-              {isSubmittingManage
-                ? 'Saving...'
-                : 'Save Booking Details'}
+              {isSubmittingManage ? 'Saving...' : 'Save Booking Details'}
             </button>
           </div>
         </form>

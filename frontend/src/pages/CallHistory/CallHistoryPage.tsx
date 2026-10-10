@@ -37,12 +37,19 @@ export const CallHistoryPage: React.FC = () => {
         getConsultations(tenant?.id),
         adminUserService.getUsers(tenant?.id || tenant?.slug || '2'),
       ]);
-      setCalls(callsData || []);
+      const localCalls = storageService.getCalls(tenant?.id) || [];
+      const callMap = new Map<string, CallRecord>();
+      (callsData || []).forEach(c => callMap.set(String(c.id), c));
+      localCalls.forEach(c => {
+        if (!callMap.has(String(c.id))) callMap.set(String(c.id), c);
+      });
+      setCalls(Array.from(callMap.values()));
       setConsultations(consultationsData || []);
       setUsers(liveUsers || []);
     } catch (err) {
       console.error('Failed to load call history', err);
-      setCalls([]);
+      const fallbackCalls = storageService.getCalls(tenant?.id) || [];
+      setCalls(fallbackCalls);
     }
   };
 
@@ -122,8 +129,9 @@ export const CallHistoryPage: React.FC = () => {
   const isExec = user?.role?.code === 'sales_executive';
   const scopedCalls = isExec
     ? calls.filter(c =>
-      (c.agentId && String(c.agentId) === String(user?.id)) ||
-      (c.agentName && user?.name && c.agentName.toLowerCase() === user.name.toLowerCase())
+      !c.agentId ||
+      String(c.agentId) === String(user?.id) ||
+      (c.agentName && user?.name && c.agentName.toLowerCase().trim() === user.name.toLowerCase().trim())
     )
     : calls;
 
@@ -314,7 +322,13 @@ export const CallHistoryPage: React.FC = () => {
     {
       label: 'Call Back',
       icon: <Phone size={14} style={{ marginRight: 6 }} />,
-      onClick: c => initiateCall(c.contactName, c.contactPhone),
+      onClick: c =>
+        initiateCall(
+          c.contactName,
+          c.contactPhone,
+          c.customerId ? 'customer' : 'lead',
+          c.customerId || c.leadId
+        ),
     },
   ];
 
@@ -427,7 +441,14 @@ export const CallHistoryPage: React.FC = () => {
               tenantName={tenant?.name}
               consultationReason={irmConsultationReason}
               hideAutoNotes={true}
-              onCall={() => initiateCall(selectedCall.contactName, selectedCall.contactPhone)}
+              onCall={() =>
+                initiateCall(
+                  selectedCall.contactName,
+                  selectedCall.contactPhone,
+                  selectedCall.customerId ? 'customer' : 'lead',
+                  selectedCall.customerId || selectedCall.leadId
+                )
+              }
             />
           )}
         </Drawer>

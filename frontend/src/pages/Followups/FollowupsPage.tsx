@@ -363,9 +363,16 @@ export const FollowupsPage: React.FC = () => {
         directLeads = storageService.getLeads(tenant?.id, false) || [];
       }
 
-      // Deduplicate leads by 10-digit phone
+      // Deduplicate leads by 10-digit phone and sanitize legacy audit lines
       const leadsMap = new Map<string, Lead>();
       directLeads.forEach(l => {
+        if (l.notes && l.notes.includes('Follow-up completed:')) {
+          l.notes = l.notes
+            .split('\n')
+            .filter(line => !line.includes('Follow-up completed:'))
+            .join('\n')
+            .trim();
+        }
         const phone = (l.phone || '').replace(/\D/g, '').slice(-10) || l.id;
         if (phone && !leadsMap.has(phone)) {
           leadsMap.set(phone, l);
@@ -625,7 +632,7 @@ export const FollowupsPage: React.FC = () => {
   };
 
   const handleMoveToKyc = async () => {
-    if (!drawerFollowup) return;
+    if (isJamin || !drawerFollowup) return;
 
     const leads = storageService.getLeads(tenant?.id) || [];
     const customers = storageService.getCustomers(tenant?.id) || [];
@@ -800,9 +807,9 @@ export const FollowupsPage: React.FC = () => {
   };
 
   const handleCompleteFollowup = async (followup: Followup, outcomeNotes?: string) => {
-    const updatedNotes = outcomeNotes
-      ? (followup.notes ? `${followup.notes} | ${outcomeNotes}` : outcomeNotes)
-      : followup.notes;
+    const trimmedOutcome = (outcomeNotes || '').trim();
+    // Overwrite with the latest outcome notes rather than endlessly concatenating
+    const updatedNotes = trimmedOutcome || followup.notes || '';
 
     const completedFollowup: Followup = {
       ...followup,
@@ -813,22 +820,22 @@ export const FollowupsPage: React.FC = () => {
 
     try {
       await apiCompleteFollowup(followup.id);
-      if (outcomeNotes) await apiSaveFollowup({ ...completedFollowup, status: 'Completed' });
+      if (trimmedOutcome) await apiSaveFollowup({ ...completedFollowup, status: 'Completed' });
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Could not complete follow-up. Please retry.');
       return;
     }
     storageService.saveFollowup(completedFollowup);
 
-    // 3. If tied to a lead, update lead notes
+    // 3. If tied to a lead and agent entered custom outcome remarks, replace lead notes with the latest remarks
     const leads = storageService.getLeads(tenant?.id) || [];
     const matchingLead = followup.contactType === 'lead'
       ? leads.find(l => String(l.id) === String(followup.contactId))
       : undefined;
-    if (matchingLead) {
+    if (matchingLead && trimmedOutcome && trimmedOutcome !== 'Marked as completed') {
       storageService.saveLead({
         ...matchingLead,
-        notes: `${matchingLead.notes ? matchingLead.notes + '\n' : ''}[${new Date().toLocaleDateString()}] Follow-up completed: ${outcomeNotes || 'Marked as completed'}`,
+        notes: trimmedOutcome,
       });
     }
 
@@ -873,9 +880,19 @@ export const FollowupsPage: React.FC = () => {
     showToast(`Follow-up with ${followup.contactName} moved back to Pending.`);
   };
 
-  // Directly use the agent role from the database
+  const formatRoleName = (role?: string) => {
+    if (!role) return isJamin ? 'Sales Executive' : '';
+    const lower = role.toLowerCase().trim();
+    if (lower === 'sales_executive' || lower === 'sales executive') return 'Sales Executive';
+    if (lower === 'company_admin' || lower === 'company admin') return 'Company Admin';
+    if (lower === 'super_admin' || lower === 'super admin') return 'Super Admin';
+    if (lower === 'irm') return 'IRM';
+    return role.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  };
+
+  // Directly use the agent role from the database with formatting
   const getFollowupRole = (f: Followup): string => {
-    return f.assignedRole || (isJamin ? 'Sales Executive' : 'Sales Executive');
+    return formatRoleName(f.assignedRole);
   };
 
   // Helper to test if a followup date falls within date range filter
@@ -1797,10 +1814,10 @@ export const FollowupsPage: React.FC = () => {
                   key={chip}
                   type="button"
                   className="btn btn-secondary btn-sm"
-                  onClick={() => setCompletionNotes(prev => prev ? `${prev} | ${chip}` : chip)}
+                  onClick={() => setCompletionNotes(chip)}
                   style={{ fontSize: '12px', padding: '4px 10px' }}
                 >
-                  + {chip}
+                  {chip}
                 </button>
               ))}
             </div>
@@ -1867,9 +1884,9 @@ export const FollowupsPage: React.FC = () => {
           width={720}
           footer={
             drawerFollowup && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: isExec ? 'flex-end' : 'space-between', width: '100%', gap: 10 }}>
-                {/* Ready for KYC button (Hidden for Sales Executive, available for IRM / Admins) */}
-                {!isExec && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: (isJamin || isExec) ? 'flex-end' : 'space-between', width: '100%', gap: 10 }}>
+                {/* Ready for KYC button (Only for GHL IRM / Wealth Admins; NEVER for Jamin Real Estate) */}
+                {!isJamin && !isExec && (
                   <button
                     type="button"
                     className="btn btn-primary"
@@ -1891,7 +1908,7 @@ export const FollowupsPage: React.FC = () => {
                 )}
 
                 {/* Right side buttons */}
-                <div style={{ display: 'flex', gap: 10, marginLeft: isExec ? 'auto' : undefined }}>
+                <div style={{ display: 'flex', gap: 10, marginLeft: (isJamin || isExec) ? 'auto' : undefined }}>
                   <button
                     className="btn btn-secondary"
                     onClick={() => {
@@ -1950,17 +1967,37 @@ export const FollowupsPage: React.FC = () => {
               (drawerFollowup as any)?.investmentCapacity ||
               null;
 
-            const userMessage =
+            // Actual inquiry submitted by the prospect/user (NOT internal follow-up audit notes)
+            const rawInquiry =
               (matchingLead as any)?.message ||
               (matchingLead as any)?.userMessage ||
               matchingLead?.customFields?.message ||
               matchingLead?.customFields?.userMessage ||
+              (matchingLead as any)?.anythingWeShouldKnow ||
               (matchingCustomer as any)?.message ||
               (matchingCustomer as any)?.userMessage ||
-              matchingLead?.notes ||
-              matchingCustomer?.notes ||
-              drawerFollowup.notes ||
               null;
+
+            const userMessage = rawInquiry
+              ? rawInquiry
+                  .split('\n')
+                  .filter((l: string) => !l.includes('Follow-up completed:') && !l.startsWith('[Reassigned to'))
+                  .join('\n')
+                  .trim() || null
+              : null;
+
+            // Follow-up's own notes (scheduled purpose / agent remarks)
+            const followupNotes = drawerFollowup.notes?.trim() || null;
+
+            // Internal lead notes (excluding any previous audit trail lines)
+            const rawLeadNotes = matchingLead?.notes || matchingCustomer?.notes || null;
+            const leadNotes = rawLeadNotes
+              ? rawLeadNotes
+                  .split('\n')
+                  .filter((l: string) => !l.includes('Follow-up completed:') && !l.startsWith('[Reassigned to'))
+                  .join('\n')
+                  .trim() || null
+              : null;
 
             const isExcludedCustomField = (key: string, label?: string) => {
               const k = (key || '').toLowerCase().replace(/[^a-z]/g, '');
@@ -2317,6 +2354,16 @@ export const FollowupsPage: React.FC = () => {
                   </>
                 )}
 
+                {/* ── Follow-up Purpose / Notes ── */}
+                {followupNotes && (
+                  <div className="card lead-custom-card">
+                    <h4 className="lead-custom-title">Follow-up Notes / Agenda</h4>
+                    <div className="lead-user-message-box">
+                      <div className="lead-user-message-text">{followupNotes}</div>
+                    </div>
+                  </div>
+                )}
+
                 {/* ── Message from User ── */}
                 <div className="card lead-custom-card">
                   <h4 className="lead-custom-title">Message from User</h4>
@@ -2324,10 +2371,20 @@ export const FollowupsPage: React.FC = () => {
                     {userMessage ? (
                       <div className="lead-user-message-text">{userMessage}</div>
                     ) : (
-                      <div className="lead-user-message-empty">No message available</div>
+                      <div className="lead-user-message-empty">No message submitted by user</div>
                     )}
                   </div>
                 </div>
+
+                {/* ── Internal Agent Remarks ── */}
+                {leadNotes && leadNotes !== followupNotes && (
+                  <div className="card lead-custom-card">
+                    <h4 className="lead-custom-title">Agent Remarks &amp; Internal Notes</h4>
+                    <div className="lead-user-message-box">
+                      <div className="lead-user-message-text">{leadNotes}</div>
+                    </div>
+                  </div>
+                )}
 
                 {/* ── Call Recordings, Logged Calls & Transcripts (Agent + IRM) ── */}
                 <LeadDetailDrawerContent

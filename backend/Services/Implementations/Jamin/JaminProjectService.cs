@@ -21,6 +21,8 @@ public class JaminProjectService : IJaminProjectService
     {
         try
         {
+            await ExpireOverdueHoldsAsync(ct);
+
             var query = _context.JaminProjects
                 .AsNoTracking()
                 .Include(p => p.Plots)
@@ -85,6 +87,8 @@ public class JaminProjectService : IJaminProjectService
     {
         try
         {
+            await ExpireOverdueHoldsAsync(ct);
+
             var project = await _context.JaminProjects
                 .AsNoTracking()
                 .Include(p => p.Plots)
@@ -232,5 +236,39 @@ public class JaminProjectService : IJaminProjectService
             CreatedAt = p.CreatedAt,
             UpdatedAt = p.UpdatedAt
         };
+    }
+
+    private async Task ExpireOverdueHoldsAsync(CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        var expiredPlots = await _context.JaminPlots
+            .Where(p => p.CompanyId == JaminTenantId && p.Status == "Hold" && p.HoldExpiresAt != null && p.HoldExpiresAt <= now)
+            .ToListAsync(ct);
+
+        if (expiredPlots.Count == 0) return;
+
+        var expiredPlotIds = expiredPlots.Select(p => p.Id).ToList();
+        var activeHoldBookings = await _context.JaminBookings
+            .Where(b => b.CompanyId == JaminTenantId && b.PlotId != null && expiredPlotIds.Contains(b.PlotId.Value) && b.Status == "Hold")
+            .ToListAsync(ct);
+
+        foreach (var p in expiredPlots)
+        {
+            p.Status = "Available";
+            p.HeldByCustomerId = null;
+            p.HeldByCustomerName = null;
+            p.HeldByCustomerPhone = null;
+            p.HoldByAgent = null;
+            p.HoldExpiresAt = null;
+            p.UpdatedAt = now;
+        }
+
+        foreach (var b in activeHoldBookings)
+        {
+            b.Status = "Hold Expired";
+            b.UpdatedAt = now;
+        }
+
+        await _context.SaveChangesAsync(ct);
     }
 }

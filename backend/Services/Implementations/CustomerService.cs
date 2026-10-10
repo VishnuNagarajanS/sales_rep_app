@@ -135,30 +135,48 @@ public class CustomerService : ICustomerService
 
         var customerIdStr = customer.Id.ToString();
 
-        // 1. Fetch related calls from CallRecords
+        // Resolve all historical Lead IDs linked to this Customer
+        var linkedLeadIds = await _context.Leads
+            .Where(l => l.CompanyId == customer.CompanyId && (l.Phone == customer.Phone || _context.JaminBookings.Any(b => b.CustomerId == customer.Id && b.LeadId == l.Id)))
+            .Select(l => l.Id)
+            .ToListAsync(ct);
+
+        // 1. Fetch related calls from CallRecords connecting primarily by stable CustomerId or linked LeadId
+        var cleanPhone = new string(customer.Phone.Where(char.IsDigit).ToArray());
+        var last10 = cleanPhone.Length >= 10 ? cleanPhone[^10..] : cleanPhone;
+
         var callRecords = await _context.CallRecords
             .AsNoTracking()
-            .Where(cr => cr.CompanyId == customer.CompanyId &&
-                         (cr.CustomerId == customer.Id || cr.ContactPhone == customer.Phone))
+            .Include(cr => cr.Agent)
+            .Where(cr => cr.CustomerId == customer.Id ||
+                         (cr.LeadId.HasValue && linkedLeadIds.Contains(cr.LeadId.Value)) ||
+                         (!string.IsNullOrEmpty(last10) && cr.ContactPhone.Contains(last10)) ||
+                         cr.ContactPhone == customer.Phone)
             .OrderByDescending(cr => cr.Timestamp)
-            .Take(50)
+            .Take(100)
             .Select(cr => new Customer360CallSummaryDto
             {
                 Id = cr.Id,
+                AgentId = cr.AgentId,
+                AgentName = cr.Agent != null ? cr.Agent.Name : null,
+                ContactName = cr.ContactName,
+                ContactPhone = cr.ContactPhone,
                 Direction = cr.Direction,
                 Duration = cr.Duration,
                 Disposition = cr.Disposition,
                 Notes = cr.Notes ?? string.Empty,
+                LeadId = cr.LeadId,
+                CustomerId = cr.CustomerId,
                 Timestamp = cr.Timestamp
             })
             .ToListAsync(ct);
 
-        // 2. Fetch associated follow-ups
+        // 2. Fetch associated follow-ups by stable CustomerId or linked LeadId
         var followups = await _context.Followups
             .AsNoTracking()
             .Include(f => f.AssignedAgent)
             .Where(f => f.CompanyId == customer.CompanyId &&
-                         (f.CustomerId == customer.Id || (f.ContactId == customerIdStr && f.ContactType == "customer") || f.ContactPhone == customer.Phone))
+                         (f.CustomerId == customer.Id || (f.LeadId.HasValue && linkedLeadIds.Contains(f.LeadId.Value)) || (f.ContactId == customerIdStr && f.ContactType == "customer") || f.ContactPhone == customer.Phone))
             .OrderByDescending(f => f.ScheduledAt)
             .Take(50)
             .Select(f => new FollowupResponseDto
@@ -184,10 +202,11 @@ public class CustomerService : ICustomerService
             })
             .ToListAsync(ct);
 
-        // 3. Fetch associated site visits
+        // 3. Fetch associated site visits by stable CustomerId or linked LeadId
         var siteVisits = await _context.SiteVisits
             .AsNoTracking()
-            .Where(sv => (sv.TenantId == customer.CompanyId || sv.TenantId == 2) && (sv.CustomerId == customer.Id || sv.CustomerPhone == customer.Phone))
+            .Where(sv => (sv.TenantId == customer.CompanyId || sv.TenantId == 2) && 
+                         (sv.CustomerId == customer.Id || (sv.LeadId.HasValue && linkedLeadIds.Contains(sv.LeadId.Value)) || sv.CustomerPhone == customer.Phone))
             .OrderByDescending(sv => sv.CreatedAt)
             .Take(50)
             .Select(sv => new backend.DTOs.Jamin.JaminSiteVisitDto
@@ -213,13 +232,49 @@ public class CustomerService : ICustomerService
             })
             .ToListAsync(ct);
 
-        // 4. Fetch associated bookings
-        var bookings = await _context.JaminBookings
+        // 4. Fetch associated bookings with payment ledger by stable CustomerId or linked LeadId
+        var bookingEntities = await _context.JaminBookings
             .AsNoTracking()
-            .Where(b => (b.CompanyId == customer.CompanyId || b.CompanyId == 2) && (b.CustomerId == customer.Id || b.CustomerPhone == customer.Phone))
+            .Include(b => b.Payments)
+            .Where(b => (b.CompanyId == customer.CompanyId || b.CompanyId == 2) && 
+                         (b.CustomerId == customer.Id || (b.LeadId.HasValue && linkedLeadIds.Contains(b.LeadId.Value)) || b.CustomerPhone == customer.Phone))
             .OrderByDescending(b => b.BookingDate)
             .Take(50)
-            .Select(b => new backend.DTOs.Jamin.JaminBookingResponseDto
+            .ToListAsync(ct);
+
+        var bookings = bookingEntities.Select(b =>
+        {
+            var payments = b.Payments.Select(p => new backend.DTOs.Jamin.JaminPaymentResponseDto
+            {
+                Id = p.Id,
+                CompanyId = p.CompanyId,
+                BookingId = p.BookingId,
+                CustomerId = p.CustomerId,
+                LeadId = p.LeadId,
+                Amount = p.Amount,
+                PaymentType = p.PaymentType,
+                PaymentMode = p.PaymentMode,
+                TransactionReference = p.TransactionReference,
+                Status = p.Status,
+                VerifiedAt = p.VerifiedAt,
+                VerifiedByUserId = p.VerifiedByUserId,
+                VerifiedByName = p.VerifiedByName,
+                ReceiptNumber = p.ReceiptNumber,
+                Notes = p.Notes,
+                CreatedAt = p.CreatedAt
+            }).ToList();
+
+            var verifiedReceipts = payments.Where(p => p.Status == "Verified" && p.PaymentType != "Refund").Sum(p => p.Amount);
+            if (verifiedReceipts == 0 && (b.Status == "Token Paid" || b.PaymentStatus == "Verified") && b.TokenAmountPaid > 0)
+            {
+                verifiedReceipts = b.TokenAmountPaid;
+            }
+            var totalRefunds = payments.Where(p => p.Status == "Verified" && p.PaymentType == "Refund").Sum(p => p.Amount) + b.RefundAmount;
+            var netCashReceived = Math.Max(0, verifiedReceipts - totalRefunds);
+            var contractValue = b.TotalPlotPrice;
+            var contractBalance = (b.Status is "Cancelled" or "Voided") ? 0 : Math.Max(0, contractValue - netCashReceived);
+
+            return new backend.DTOs.Jamin.JaminBookingResponseDto
             {
                 Id = b.Id,
                 CompanyId = b.CompanyId,
@@ -231,19 +286,34 @@ public class CustomerService : ICustomerService
                 CustomerPhone = b.CustomerPhone,
                 ProjectName = b.ProjectName,
                 PlotNumber = b.PlotNumber,
+                BasePrice = b.BasePrice > 0 ? b.BasePrice : b.TotalPlotPrice,
+                DevelopmentCharges = b.DevelopmentCharges,
+                ApprovedDiscounts = b.ApprovedDiscounts,
                 TotalPlotPrice = b.TotalPlotPrice,
                 TokenAmountPaid = b.TokenAmountPaid,
                 PaymentMode = b.PaymentMode,
                 PaymentTerms = b.PaymentTerms,
                 Status = b.Status,
+                PaymentStatus = b.PaymentStatus,
+                HoldExpiresAt = b.HoldExpiresAt,
                 BookingDate = b.BookingDate,
                 AssignedAgentId = b.AssignedAgentId,
                 AssignedAgentName = b.AssignedAgentName,
+                CancelledAt = b.CancelledAt,
+                CancelledByUserId = b.CancelledByUserId,
+                CancelledByName = b.CancelledByName,
+                CancellationReason = b.CancellationReason,
+                RefundAmount = b.RefundAmount,
                 Notes = b.Notes,
                 CreatedAt = b.CreatedAt,
-                UpdatedAt = b.UpdatedAt
-            })
-            .ToListAsync(ct);
+                UpdatedAt = b.UpdatedAt,
+                Payments = payments,
+                VerifiedReceipts = verifiedReceipts,
+                TotalRefunds = totalRefunds,
+                NetCashReceived = netCashReceived,
+                ContractBalance = contractBalance
+            };
+        }).ToList();
 
         var result = new Customer360Dto
         {

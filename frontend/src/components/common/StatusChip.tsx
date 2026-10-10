@@ -15,6 +15,9 @@ export const StatusChip: React.FC<StatusChipProps> = ({
   size = 'md',
   className = '',
 }) => {
+  if (!status && !label) {
+    return <span style={{ color: 'var(--text-muted)', fontSize: size === 'sm' ? '12px' : '13px' }}>—</span>;
+  }
   const style = getStatusStyle(status);
 
   return (

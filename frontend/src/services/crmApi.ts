@@ -109,6 +109,11 @@ export interface Customer360Dto {
   bookings?: any[];
   totalCalls: number;
   pendingFollowupsCount: number;
+  totalContractValue?: number;
+  totalVerifiedReceipts?: number;
+  totalRefunds?: number;
+  totalNetCashReceived?: number;
+  totalContractBalance?: number;
 }
 
 export interface CreateCustomerPayload {

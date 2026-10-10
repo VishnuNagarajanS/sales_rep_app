@@ -9,7 +9,7 @@ namespace backend.Controllers.SalesExecutive;
 
 [ApiController]
 [Route("api/sales-executive/customers")]
-[Authorize(Roles = "sales_executive,company_admin,sales_manager,super_admin,irm")]
+[Authorize(Roles = "sales_executive,company_admin,super_admin,irm,sales_manager,admin")]
 public class SalesExecutiveCustomersController : ControllerBase
 {
     private readonly ICustomerService _customerService;

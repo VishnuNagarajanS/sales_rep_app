@@ -38,8 +38,6 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
 
         int? customerId = request.CustomerId;
         int? leadId = request.LeadId;
-        if (customerId.HasValue && leadId.HasValue)
-            return ApiResponse<CallRecordDto>.FailureResult("A call can be linked to either a lead or a customer, not both.");
 
         if (leadId.HasValue)
         {
@@ -105,9 +103,6 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
         CallRecord? record = request.CallId.HasValue
             ? await context.Set<CallRecord>().FirstOrDefaultAsync(x => x.Id == request.CallId && x.CompanyId == companyId && x.AgentId == agentId, cancellationToken)
             : null;
-
-        if (request.LeadId.HasValue && request.CustomerId.HasValue)
-            return ApiResponse<CallRecordDto>.FailureResult("A call can be linked to either a lead or a customer, not both.");
 
         var contactWasSelected = request.LeadId.HasValue || request.CustomerId.HasValue;
         int? leadId = contactWasSelected ? request.LeadId : record?.LeadId;
@@ -197,7 +192,7 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
                 }
             }
         }
-        else if (customerId.HasValue)
+        if (customerId.HasValue)
         {
             var customer = await context.Set<Customer>().FirstOrDefaultAsync(x => x.Id == customerId.Value && x.CompanyId == companyId, cancellationToken);
             if (customer != null)

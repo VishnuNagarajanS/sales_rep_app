@@ -11,7 +11,7 @@ namespace backend.Controllers;
 
 [ApiController]
 [Route("api/audit-logs")]
-[Authorize(Roles = "company_admin,sales_manager,super_admin,irm,admin,sales_executive")]
+[Authorize(Roles = "company_admin,super_admin,irm,admin,sales_executive")]
 public class AuditLogsController : ControllerBase
 {
     private readonly ApplicationDbContext _db;

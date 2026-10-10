@@ -23,6 +23,8 @@ public class JaminPlotsController : JaminTenantControllerBase
         try
         {
             var companyId = JaminCompanyId;
+            await ExpireOverdueHoldsAsync(companyId, ct);
+
             var query = _db.JaminPlots.AsNoTracking().Where(p => p.CompanyId == companyId);
             if (projectId.HasValue) query = query.Where(p => p.ProjectId == projectId.Value);
             if (!string.IsNullOrWhiteSpace(status) && status != "All") query = query.Where(p => p.Status == status);
@@ -40,6 +42,7 @@ public class JaminPlotsController : JaminTenantControllerBase
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetPlot(int id, CancellationToken ct)
     {
+        await ExpireOverdueHoldsAsync(JaminCompanyId, ct);
         var plot = await _db.JaminPlots.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id && p.CompanyId == JaminCompanyId, ct);
         return plot == null ? NotFound(ApiResponse<JaminPlotResponseDto>.FailureResult("Plot not found."))
             : Ok(ApiResponse<JaminPlotResponseDto>.SuccessResult(ToDto(plot)));
@@ -136,15 +139,47 @@ public class JaminPlotsController : JaminTenantControllerBase
     [HttpPost("{id:int}/release")]
     public async Task<IActionResult> ReleasePlotHold(int id, CancellationToken ct)
     {
-        var plot = await _db.JaminPlots.FirstOrDefaultAsync(p => p.Id == id && p.CompanyId == JaminCompanyId, ct);
-        if (plot == null) return NotFound(ApiResponse<JaminPlotResponseDto>.FailureResult("Plot not found."));
-        if (plot.Status != "Hold") return Conflict(ApiResponse<JaminPlotResponseDto>.FailureResult("Plot is not on hold."));
-        plot.Status = "Available"; plot.HeldByCustomerId = null; plot.HeldByCustomerName = null; plot.HeldByCustomerPhone = null; plot.HoldByAgent = null; plot.HoldExpiresAt = null;
-        var releaseProject = await _db.JaminProjects.FirstOrDefaultAsync(p => p.Id == plot.ProjectId && p.CompanyId == plot.CompanyId, ct);
-        if (releaseProject != null) await RecalculateInventoryAsync(releaseProject, ct);
-        plot.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync(ct);
-        return Ok(ApiResponse<JaminPlotResponseDto>.SuccessResult(ToDto(plot), "Plot hold released."));
+        var companyId = JaminCompanyId;
+        var currentUserName = User.GetUserName();
+        if (string.IsNullOrWhiteSpace(currentUserName)) currentUserName = "Staff";
+
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync<IActionResult>(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync(ct);
+
+            var plot = await _db.JaminPlots.FirstOrDefaultAsync(p => p.Id == id && p.CompanyId == companyId, ct);
+            if (plot == null) return NotFound(ApiResponse<JaminPlotResponseDto>.FailureResult("Plot not found."));
+            if (plot.Status != "Hold") return Conflict(ApiResponse<JaminPlotResponseDto>.FailureResult("Plot is not on hold."));
+
+            plot.Status = "Available";
+            plot.HeldByCustomerId = null;
+            plot.HeldByCustomerName = null;
+            plot.HeldByCustomerPhone = null;
+            plot.HoldByAgent = null;
+            plot.HoldExpiresAt = null;
+            plot.UpdatedAt = DateTime.UtcNow;
+
+            var activeHoldBookings = await _db.JaminBookings
+                .Where(b => b.CompanyId == companyId && b.PlotId == plot.Id && b.Status == "Hold")
+                .ToListAsync(ct);
+
+            foreach (var b in activeHoldBookings)
+            {
+                b.Status = "Hold Expired";
+                b.UpdatedAt = DateTime.UtcNow;
+                var releaseNote = $"[Hold released manually by {currentUserName} on {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC]";
+                b.Notes = string.IsNullOrWhiteSpace(b.Notes) ? releaseNote : $"{b.Notes}\n{releaseNote}";
+            }
+
+            var releaseProject = await _db.JaminProjects.FirstOrDefaultAsync(p => p.Id == plot.ProjectId && p.CompanyId == companyId, ct);
+            if (releaseProject != null) await RecalculateInventoryAsync(releaseProject, ct);
+
+            await _db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+
+            return Ok(ApiResponse<JaminPlotResponseDto>.SuccessResult(ToDto(plot), "Plot hold released and reservation updated."));
+        });
     }
 
     [HttpDelete("{id:int}")]
@@ -189,6 +224,48 @@ public class JaminPlotsController : JaminTenantControllerBase
         project.BookedPlots = plots.Count(p => IsBooked(p.Status));
         project.AvailablePlots = plots.Count(p => p.Status == "Available");
         project.UpdatedAt = DateTime.UtcNow;
+    }
+
+    private async Task ExpireOverdueHoldsAsync(int companyId, CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        var expiredPlots = await _db.JaminPlots
+            .Where(p => p.CompanyId == companyId && p.Status == "Hold" && p.HoldExpiresAt != null && p.HoldExpiresAt <= now)
+            .ToListAsync(ct);
+
+        if (expiredPlots.Any())
+        {
+            var projectIds = expiredPlots.Select(p => p.ProjectId).Distinct().ToList();
+            foreach (var p in expiredPlots)
+            {
+                p.Status = "Available";
+                p.HeldByCustomerId = null;
+                p.HeldByCustomerName = null;
+                p.HeldByCustomerPhone = null;
+                p.HoldByAgent = null;
+                p.HoldExpiresAt = null;
+                p.UpdatedAt = now;
+            }
+
+            // Also expire any corresponding JaminBookings that were on temporary Hold
+            var plotIds = expiredPlots.Select(p => p.Id).ToList();
+            var expiredBookings = await _db.JaminBookings
+                .Where(b => b.CompanyId == companyId && b.PlotId != null && plotIds.Contains(b.PlotId.Value) && b.Status == "Hold")
+                .ToListAsync(ct);
+            foreach (var b in expiredBookings)
+            {
+                b.Status = "Hold Expired";
+                b.UpdatedAt = now;
+            }
+
+            await _db.SaveChangesAsync(ct);
+
+            foreach (var projId in projectIds)
+            {
+                var project = await _db.JaminProjects.FirstOrDefaultAsync(pr => pr.Id == projId && pr.CompanyId == companyId, ct);
+                if (project != null) await RecalculateInventoryAsync(project, ct);
+            }
+        }
     }
 }
 

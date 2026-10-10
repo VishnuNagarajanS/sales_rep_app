@@ -1221,8 +1221,14 @@ export const ProfilePage: React.FC = () => {
               contactId={statPerson.contactId}
               tenantId={tenant?.id}
               tenantName={tenant?.name}
-              hideAutoNotes={true}
-              onCall={() => initiateCall(statPerson.name, statPerson.phone)}
+              onCall={() =>
+                initiateCall(
+                  statPerson.name,
+                  statPerson.phone,
+                  (statPerson as any).contactType || 'lead',
+                  statPerson.contactId
+                )
+              }
             />
           </div>
         ) : (

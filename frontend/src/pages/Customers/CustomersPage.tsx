@@ -15,8 +15,14 @@ import {
   Sparkles,
   Calendar,
   Pencil,
+  CreditCard,
+  Tag,
+  ChevronDown,
+  ChevronUp,
+  Info,
+  FileText,
 } from 'lucide-react';
-import { Customer, CallRecord, Followup, Deal, Lead, IrmProfile, SiteVisit, CustomFieldDefinition } from '../../types';
+import { Customer, CallRecord, Followup, Deal, Lead, IrmProfile, SiteVisit, CustomFieldDefinition, Booking } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
@@ -133,7 +139,7 @@ export const CustomersPage: React.FC = () => {
         (isExec && !c.assignedAgentId)
       );
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'calls' | 'followups' | 'timeline' | 'documents' | 'site_visits'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'bookings' | 'calls' | 'followups' | 'timeline' | 'documents' | 'site_visits'>('overview');
   const [statusFilter, setStatusFilter] = useState('All');
   const [agentFilter, setAgentFilter] = useState('All');
   const [assignmentFilter, setAssignmentFilter] = useState<'All' | 'Assigned' | 'Unassigned'>('All');
@@ -258,12 +264,13 @@ export const CustomersPage: React.FC = () => {
   const [followups, setFollowups] = useState<Followup[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [bookings, setBookings] = useState<any[]>([]);
 
   const loadData = async () => {
     setIsLoading(true);
     try {
       // Fetch customers directly from database API
-      const [apiCusts, cCalls, cFollowups, cDeals, cLeads] = await Promise.all([
+      const [apiCusts, cCalls, cFollowups, cDeals, cLeads, cBookings] = await Promise.all([
         getCustomers(tenant?.id).catch(err => {
           console.error('Failed to fetch customers from the database:', err);
           return [];
@@ -272,15 +279,16 @@ export const CustomersPage: React.FC = () => {
         getFollowups(tenant?.id).catch(() => []),
         getDeals(tenant?.id).catch(() => []),
         getLeads(tenant?.id).catch(() => []),
+        jaminApiService.getBookings().catch(() => []),
       ]);
 
       const allCusts = apiCusts || [];
-
       setCustomers(allCusts);
       setCalls(cCalls);
       setFollowups(cFollowups);
       setDeals(cDeals);
       setLeads(cLeads);
+      setBookings(cBookings || []);
 
       const userVisibleCusts = isAdmin
         ? allCusts
@@ -589,15 +597,18 @@ export const CustomersPage: React.FC = () => {
     setEditingRecommendationCustomerId(null);
   };
 
-  // Filter linked records for selected customer strictly by primary key
+  // Filter linked records for selected customer by primary key and phone
   const customerCalls = useMemo(() => {
     if (!selectedCustomer) return [];
-    const custIdClean = String(selectedCustomer.id || '').replace('cust-', '').replace('db-', '').trim();
+    const custIdClean = String(selectedCustomer.id || '').replace(/\D/g, '');
+    const custPhone10 = (selectedCustomer.phone || '').replace(/\D/g, '').slice(-10);
 
     return calls.filter(c => {
-      if (!c.customerId) return false;
-      const callCustId = String(c.customerId).replace('cust-', '').replace('db-', '').trim();
-      return callCustId === custIdClean;
+      const callCustIdClean = c.customerId ? String(c.customerId).replace(/\D/g, '') : '';
+      if (custIdClean && callCustIdClean && custIdClean === callCustIdClean) return true;
+      const callPhone10 = (c.contactPhone || '').replace(/\D/g, '').slice(-10);
+      if (custPhone10 && callPhone10 && custPhone10 === callPhone10) return true;
+      return false;
     });
   }, [calls, selectedCustomer]);
 
@@ -615,6 +626,97 @@ export const CustomersPage: React.FC = () => {
       return dealCustId === custIdClean;
     });
   }, [deals, selectedCustomer]);
+
+  const customerBookings = useMemo(() => {
+    if (!selectedCustomer) return [];
+    const custIdClean = String(selectedCustomer.id || '').replace(/\D/g, '');
+    const custPhone10 = (selectedCustomer.phone || '').replace(/\D/g, '').slice(-10);
+    const custName = (selectedCustomer.name || '').trim().toLowerCase();
+
+    return bookings.filter(b => {
+      // 1. Direct or clean customerId match
+      if (b.customerId) {
+        if (String(b.customerId) === String(selectedCustomer.id)) return true;
+        const bCustIdClean = String(b.customerId).replace(/\D/g, '');
+        if (custIdClean && bCustIdClean && custIdClean === bCustIdClean) return true;
+      }
+      // 2. Phone match (last 10 digits)
+      const bPhone10 = (b.customerPhone || b.phone || '').replace(/\D/g, '').slice(-10);
+      if (custPhone10 && bPhone10 && custPhone10 === bPhone10) return true;
+
+      // 3. Lead match if customer originated from an associated lead
+      if (b.leadId) {
+        const bLeadClean = String(b.leadId).replace(/\D/g, '');
+        if (custPhone10 && leadsByPhone.has(custPhone10)) {
+          const matchedLead = leadsByPhone.get(custPhone10);
+          if (matchedLead && String(matchedLead.id).replace(/\D/g, '') === bLeadClean) {
+            return true;
+          }
+        }
+      }
+
+      // 4. Exact customer name match
+      if (custName && b.customerName && b.customerName.trim().toLowerCase() === custName) {
+        if (custPhone10 && bPhone10) {
+          return custPhone10 === bPhone10;
+        }
+        return true;
+      }
+
+      return false;
+    });
+  }, [bookings, selectedCustomer, leadsByPhone]);
+
+  // Authoritative Customer 360 Financial Metrics derived from actual booking and payment records
+  const selectedCustomerFinancials = useMemo(() => {
+    const activeBookings = customerBookings.filter(b => b.status !== 'Cancelled' && b.status !== 'Voided');
+    const contractValue = activeBookings.reduce((sum, b) => sum + (b.contractValue ?? b.totalPlotPrice ?? b.totalAmount ?? 0), 0);
+    const verifiedReceipts = customerBookings.reduce((sum, b) => {
+      const v = b.verifiedReceipts ?? ((b.status === 'Token Paid' || b.paymentStatus === 'Verified') ? (b.tokenAmountPaid ?? b.bookingAmount ?? 0) : 0);
+      return sum + v;
+    }, 0);
+    const totalRefunds = customerBookings.reduce((sum, b) => sum + (b.totalRefunds ?? b.refundAmount ?? 0), 0);
+    const netCashReceived = Math.max(0, verifiedReceipts - totalRefunds);
+    const contractBalance = activeBookings.reduce((sum, b) => {
+      const bContract = b.contractValue ?? b.totalPlotPrice ?? b.totalAmount ?? 0;
+      const bPaid = b.verifiedReceipts ?? ((b.status === 'Token Paid' || b.paymentStatus === 'Verified') ? (b.tokenAmountPaid ?? b.bookingAmount ?? 0) : 0);
+      return sum + Math.max(0, bContract - bPaid);
+    }, 0);
+
+    return {
+      contractValue,
+      verifiedReceipts,
+      totalRefunds,
+      netCashReceived,
+      contractBalance,
+      totalBookings: customerBookings.length,
+      activeBookingsCount: activeBookings.length,
+    };
+  }, [customerBookings]);
+
+  // Progressive Disclosure: Track expanded booking cards in Customer 360
+  const [expandedBookingIds, setExpandedBookingIds] = useState<Record<string | number, boolean>>({});
+
+  const toggleBookingExpand = (id: string | number) => {
+    setExpandedBookingIds(prev => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
+
+  const handleExpandAllBookings = () => {
+    const allExpanded = customerBookings.length > 0 && customerBookings.every(b => expandedBookingIds[b.id]);
+    const next: Record<string | number, boolean> = {};
+    customerBookings.forEach(b => {
+      next[b.id] = !allExpanded;
+    });
+    setExpandedBookingIds(next);
+  };
+
+  const handleOpenBookingDetails = (bookingId: string | number) => {
+    setExpandedBookingIds(prev => ({ ...prev, [bookingId]: true }));
+    setActiveTab('bookings');
+  };
 
   const [apiSiteVisits, setApiSiteVisits] = useState<SiteVisit[]>([]);
 
@@ -764,7 +866,6 @@ export const CustomersPage: React.FC = () => {
       alert('The site visit could not be saved. Check the selected customer and company, then try again.');
       return;
     }
-    storageService.saveSiteVisit(created);
     setApiSiteVisits(prev => [created, ...prev.filter(v => v.id !== created.id)]);
 
     storageService.addAuditLog({
@@ -852,6 +953,20 @@ export const CustomersPage: React.FC = () => {
   };
 
   const getCustomerValueDisplay = (c: Customer): string => {
+    if (isJamin) {
+      const cCleanId = String(c.id).replace(/\D/g, '');
+      const cPhone10 = (c.phone || '').replace(/\D/g, '').slice(-10);
+      const custBookings = bookings.filter(b => {
+        if (b.customerId && (String(b.customerId) === String(c.id) || String(b.customerId).replace(/\D/g, '') === cCleanId)) return true;
+        const bPhone10 = (b.customerPhone || b.phone || '').replace(/\D/g, '').slice(-10);
+        return cPhone10 && bPhone10 && cPhone10 === bPhone10;
+      });
+      const activeBookings = custBookings.filter(b => b.status !== 'Cancelled' && b.status !== 'Voided');
+      if (activeBookings.length > 0) {
+        const total = activeBookings.reduce((sum, b) => sum + (b.contractValue ?? b.totalPlotPrice ?? b.totalAmount ?? 0), 0);
+        return formatCurrency(total);
+      }
+    }
     const range = getInvestmentRange(c);
     if (range) return range;
     if (typeof c.totalValue === 'number' && c.totalValue > 0) {
@@ -864,10 +979,11 @@ export const CustomersPage: React.FC = () => {
 
   if (selectedCustomer) {
     customerCalls.forEach(c => {
+      const outcomeText = !c.disposition || c.disposition === 'Skipped' ? 'Wrap-up Skipped' : c.disposition;
       rawEvents.push({
         id: c.id,
         type: 'call',
-        title: `${c.direction === 'outbound' ? 'Outbound' : 'Inbound'} Call — ${c.disposition}`,
+        title: `${c.direction === 'outbound' ? 'Outbound' : 'Inbound'} Call — ${outcomeText}`,
         description: c.transcription || undefined,
         timestamp: c.timestamp,
         actorName: c.agentName,
@@ -893,6 +1009,35 @@ export const CustomersPage: React.FC = () => {
         description: `Stage: ${d.stage} • Value: ${formatCurrency(d.value)}`,
         timestamp: d.createdAt,
         actorName: d.assignedAgentName,
+      });
+    });
+
+    customerBookings.forEach(b => {
+      const bDate = b.bookingDate || b.createdAt || selectedCustomer.createdAt;
+      const plotTxt = b.plotNumber ? `Plot ${b.plotNumber}` : 'Plot';
+      const projTxt = b.projectName || 'Project';
+      const totalAmt = b.totalPlotPrice ?? b.totalAmount ?? 0;
+      const tokenAmt = b.tokenAmountPaid ?? b.bookingAmount ?? 0;
+      const statusTxt = b.status || 'Token Paid';
+
+      rawEvents.push({
+        id: `bkg-${b.id}`,
+        type: 'status_change',
+        title: `Property Booked — ${plotTxt} (${projTxt})`,
+        description: `Status: ${statusTxt} • Total Value: ${formatCurrency(totalAmt)} • Token Paid: ${formatCurrency(tokenAmt)}${b.paymentMode ? ` • Mode: ${b.paymentMode}` : ''}`,
+        timestamp: bDate,
+        actorName: b.assignedAgentName || b.agentName || selectedCustomer.assignedAgentName,
+      });
+    });
+
+    customerSiteVisits.forEach(sv => {
+      rawEvents.push({
+        id: `sv-${sv.id}`,
+        type: 'status_change',
+        title: `Site Visit — ${sv.projectName} (${sv.plotNumber || 'General Tour'})`,
+        description: `Status: ${sv.status} • Scheduled: ${sv.scheduledAt}${sv.visitorNote ? ` • Note: ${sv.visitorNote}` : ''}`,
+        timestamp: sv.scheduledAt || selectedCustomer.createdAt,
+        actorName: sv.assignedAgentName,
       });
     });
 
@@ -1201,6 +1346,7 @@ export const CustomersPage: React.FC = () => {
             <div className="customer-tabs-bar">
               {[
                 { id: 'overview', label: 'Overview' },
+                { id: 'bookings', label: `Bookings (${customerBookings.length})` },
                 { id: 'calls', label: `Calls (${customerCalls.length})` },
                 { id: 'followups', label: `Follow-ups (${customerFollowups.length})` },
                 ...(isJamin ? [{ id: 'site_visits', label: `Site Visits (${customerSiteVisits.length})` }] : []),
@@ -1318,6 +1464,405 @@ export const CustomersPage: React.FC = () => {
                       </div>
                     );
                   })()}
+                  {/* --- Purchased / Booked Properties Overview Widget --- */}
+                  {customerBookings.length > 0 && (
+                    <div className="card customer-bookings-overview-card" style={{ padding: '16px', background: 'linear-gradient(to right, #f8fafc, #f1f5f9)', border: '1px solid #e2e8f0' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <Building2 size={18} color="#0284c7" />
+                          <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
+                            Purchased / Booked Properties ({customerBookings.length})
+                          </h4>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ fontSize: 12, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4 }}
+                          onClick={() => setActiveTab('bookings')}
+                        >
+                          View All Bookings →
+                        </button>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px' }}>
+                        {customerBookings.map(b => {
+                          const totalAmt = b.contractValue ?? b.totalPlotPrice ?? b.totalAmount ?? 0;
+                          const tokenAmt = b.tokenAmountPaid ?? b.bookingAmount ?? 0;
+                          const verifiedAmt = b.verifiedReceipts ?? ((b.status === 'Token Paid' || b.paymentStatus === 'Verified') ? tokenAmt : 0);
+                          const isCancelled = b.status === 'Cancelled' || b.status === 'Voided';
+                          const balanceDue = isCancelled ? 0 : Math.max(0, totalAmt - verifiedAmt);
+
+                          return (
+                            <div
+                              key={b.id}
+                              className="customer-overview-booking-card"
+                              onClick={() => handleOpenBookingDetails(b.id)}
+                              style={{ cursor: 'pointer' }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                  <div
+                                    style={{
+                                      width: 34,
+                                      height: 34,
+                                      borderRadius: 8,
+                                      backgroundColor: isCancelled ? '#fee2e2' : '#e0f2fe',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      color: isCancelled ? '#dc2626' : '#0284c7',
+                                      fontWeight: 700,
+                                      fontSize: 12,
+                                      flexShrink: 0,
+                                    }}
+                                  >
+                                    <Building2 size={16} />
+                                  </div>
+                                  <div>
+                                    <div style={{ fontWeight: 700, fontSize: '13px', color: '#0f172a' }}>
+                                      {b.plotNumber ? `Plot ${b.plotNumber}` : 'Plot Unit'}
+                                    </div>
+                                    <div style={{ fontSize: '11px', color: '#64748b' }}>
+                                      {b.projectName || 'Jamin Community'}
+                                    </div>
+                                  </div>
+                                </div>
+                                <StatusChip status={b.status || 'Token Paid'} size="sm" />
+                              </div>
+
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: '11px', paddingTop: 8, borderTop: '1px dashed #e2e8f0' }}>
+                                <div>
+                                  <span style={{ color: '#64748b' }}>Sale Price:</span>
+                                  <div style={{ fontWeight: 700, color: '#0f172a', fontSize: '12px' }}>
+                                    {formatCurrency(totalAmt)}
+                                  </div>
+                                </div>
+                                <div>
+                                  <span style={{ color: '#64748b' }}>Paid Token:</span>
+                                  <div style={{ fontWeight: 700, color: '#059669', fontSize: '12px' }}>
+                                    {formatCurrency(tokenAmt)}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 4 }}>
+                                <span style={{ fontSize: '11px', color: isCancelled ? '#dc2626' : '#64748b' }}>
+                                  {isCancelled ? 'Cancelled' : `Balance: ${formatCurrency(balanceDue)}`}
+                                </span>
+                                <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--primary-600)', display: 'flex', alignItems: 'center', gap: 2 }}>
+                                  More Info →
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'bookings' && (
+                <div className="customer-bookings-stack">
+                  {customerBookings.length === 0 ? (
+                    <div className="card" style={{ padding: 40, textAlign: 'center' }}>
+                      <Building2 size={38} color="#94a3b8" style={{ margin: '0 auto 12px' }} />
+                      <h4 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 600 }}>No Bookings on Record</h4>
+                      <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 13, maxWidth: 440, marginInline: 'auto' }}>
+                        This customer currently has no booked plots or property transactions registered under their profile.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Financial & Portfolio Summary Banner */}
+                      <div className="customer-portfolio-banner">
+                        <div className="customer-portfolio-banner-header">
+                          <div>
+                            <span className="customer-portfolio-banner-subtitle">
+                              Customer Portfolio Financials (Customer 360)
+                            </span>
+                            <h3 className="customer-portfolio-banner-title">
+                              <Building2 size={18} color="#0284c7" />
+                              {customerBookings.length} {customerBookings.length === 1 ? 'Property Booking' : 'Property Bookings'}{' '}
+                              <span style={{ fontSize: 13, fontWeight: 500, color: '#64748b' }}>
+                                ({selectedCustomerFinancials.activeBookingsCount} Active)
+                              </span>
+                            </h3>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={handleExpandAllBookings}
+                              style={{ fontSize: 12, padding: '5px 12px', display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                            >
+                              {customerBookings.every(b => expandedBookingIds[b.id]) ? (
+                                <>
+                                  <ChevronUp size={14} /> Collapse All
+                                </>
+                              ) : (
+                                <>
+                                  <ChevronDown size={14} /> Expand All
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="customer-portfolio-metrics-grid">
+                          <div className="portfolio-metric-box">
+                            <span className="portfolio-metric-label">Contract Value</span>
+                            <span className="portfolio-metric-value">
+                              {formatCurrency(selectedCustomerFinancials.contractValue)}
+                            </span>
+                          </div>
+
+                          <div className="portfolio-metric-box">
+                            <span className="portfolio-metric-label" style={{ color: '#059669' }}>Verified Receipts</span>
+                            <span className="portfolio-metric-value" style={{ color: '#059669' }}>
+                              {formatCurrency(selectedCustomerFinancials.verifiedReceipts)}
+                            </span>
+                          </div>
+
+                          {selectedCustomerFinancials.totalRefunds > 0 && (
+                            <div className="portfolio-metric-box">
+                              <span className="portfolio-metric-label" style={{ color: '#dc2626' }}>Total Refunds</span>
+                              <span className="portfolio-metric-value" style={{ color: '#dc2626' }}>
+                                {formatCurrency(selectedCustomerFinancials.totalRefunds)}
+                              </span>
+                            </div>
+                          )}
+
+                          <div className="portfolio-metric-box">
+                            <span className="portfolio-metric-label" style={{ color: '#0284c7' }}>Net Cash Received</span>
+                            <span className="portfolio-metric-value" style={{ color: '#0284c7' }}>
+                              {formatCurrency(selectedCustomerFinancials.netCashReceived)}
+                            </span>
+                          </div>
+
+                          <div className="portfolio-metric-box">
+                            <span className="portfolio-metric-label" style={{ color: '#d97706' }}>Contract Balance</span>
+                            <span className="portfolio-metric-value" style={{ color: '#d97706' }}>
+                              {formatCurrency(selectedCustomerFinancials.contractBalance)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* List of Bookings Cards with Progressive Disclosure */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        {customerBookings.map(b => {
+                          const totalAmt = b.contractValue ?? b.totalPlotPrice ?? b.totalAmount ?? 0;
+                          const verifiedAmt = b.verifiedReceipts ?? ((b.status === 'Token Paid' || b.paymentStatus === 'Verified') ? (b.tokenAmountPaid ?? b.bookingAmount ?? 0) : 0);
+                          const isCancelled = b.status === 'Cancelled' || b.status === 'Voided';
+                          const balanceDue = isCancelled ? 0 : Math.max(0, totalAmt - verifiedAmt);
+                          const progressPct = totalAmt > 0 ? Math.min(100, Math.round((verifiedAmt / totalAmt) * 100)) : 0;
+                          const bDateFormatted = b.bookingDate
+                            ? new Date(b.bookingDate).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })
+                            : '—';
+                          const isExpanded = Boolean(expandedBookingIds[b.id]);
+
+                          return (
+                            <div
+                              key={b.id}
+                              className={`booking-item-card ${isCancelled ? 'is-cancelled' : ''}`}
+                            >
+                              {/* Little Bit / Preview Header Row */}
+                              <div
+                                className="booking-compact-row"
+                                onClick={() => toggleBookingExpand(b.id)}
+                              >
+                                <div className="booking-compact-main">
+                                  <div className="booking-plot-badge">
+                                    <Building2 size={20} />
+                                  </div>
+                                  <div className="booking-title-info">
+                                    <div className="booking-plot-name">
+                                      <span>{b.plotNumber ? `Plot ${b.plotNumber}` : 'Plot Unit'}</span>
+                                      <StatusChip status={b.status || 'Booking Pending Verification'} size="sm" />
+                                      {b.paymentStatus && <StatusChip status={b.paymentStatus} size="sm" />}
+                                    </div>
+                                    <div className="booking-project-sub">
+                                      <span style={{ fontWeight: 600, color: '#334155' }}>
+                                        {b.projectName || 'Jamin Community'}
+                                      </span>
+                                      {b.bookingDate && (
+                                        <>
+                                          <span>•</span>
+                                          <span>Booked: {bDateFormatted}</span>
+                                        </>
+                                      )}
+                                      <span>•</span>
+                                      <span style={{ color: '#94a3b8' }}>ID: #{b.id}</span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="booking-compact-numbers">
+                                  <div className="booking-num-item">
+                                    <span className="booking-num-label">Contract Price</span>
+                                    <span className="booking-num-val" style={{ color: isCancelled ? '#94a3b8' : '#0f172a' }}>
+                                      {formatCurrency(totalAmt)}
+                                    </span>
+                                  </div>
+
+                                  <div className="booking-num-item">
+                                    <span className="booking-num-label">Verified Paid</span>
+                                    <span className="booking-num-val" style={{ color: '#059669' }}>
+                                      {formatCurrency(verifiedAmt)}
+                                    </span>
+                                  </div>
+
+                                  {!isCancelled && (
+                                    <div className="booking-num-item">
+                                      <span className="booking-num-label">Balance Due</span>
+                                      <span className="booking-num-val" style={{ color: balanceDue > 0 ? '#d97706' : '#059669' }}>
+                                        {balanceDue > 0 ? formatCurrency(balanceDue) : 'Cleared'}
+                                      </span>
+                                    </div>
+                                  )}
+
+                                  <div className="booking-compact-actions">
+                                    <button
+                                      type="button"
+                                      className={`booking-more-btn ${isExpanded ? 'is-active' : ''}`}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleBookingExpand(b.id);
+                                      }}
+                                    >
+                                      {isExpanded ? (
+                                        <>
+                                          Less Info <ChevronUp size={13} />
+                                        </>
+                                      ) : (
+                                        <>
+                                          More Info <ChevronDown size={13} />
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Expanded Detailed Breakdown */}
+                              {isExpanded && (
+                                <div className="booking-expanded-body">
+                                  <div className="booking-expanded-content">
+                                    {/* Cancellation banner if cancelled */}
+                                    {isCancelled && (
+                                      <div className="booking-callout booking-callout-cancelled">
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                                          <div>
+                                            <strong>Cancelled:</strong> {b.cancellationReason || 'Booking terminated'}
+                                            {b.refundAmount > 0 && <span> • Refund Issued: {formatCurrency(b.refundAmount)}</span>}
+                                          </div>
+                                          <span style={{ fontSize: '11px', fontWeight: 700, color: '#b91c1c' }}>
+                                            Inventory Released
+                                          </span>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Payment Realization Progress Bar */}
+                                    {!isCancelled && (
+                                      <div className="booking-progress-card">
+                                        <div className="booking-progress-header">
+                                          <span style={{ color: '#64748b' }}>
+                                            Payment Realization: <strong style={{ color: '#059669' }}>{progressPct}% Verified</strong>
+                                          </span>
+                                          <span style={{ color: balanceDue > 0 ? '#d97706' : '#059669', fontWeight: 600 }}>
+                                            {balanceDue > 0 ? `Outstanding: ${formatCurrency(balanceDue)}` : 'Fully Paid'}
+                                          </span>
+                                        </div>
+                                        <div className="booking-progress-bar-bg">
+                                          <div
+                                            className="booking-progress-bar-fill"
+                                            style={{
+                                              width: `${progressPct}%`,
+                                              backgroundColor: progressPct >= 100 ? '#059669' : '#0284c7',
+                                            }}
+                                          />
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Comprehensive Specifications Grid */}
+                                    <div className="booking-details-grid">
+                                      <div className="booking-detail-item">
+                                        <span className="booking-detail-label">Sale / Contract Value</span>
+                                        <span className="booking-detail-val">{formatCurrency(totalAmt)}</span>
+                                      </div>
+
+                                      <div className="booking-detail-item">
+                                        <span className="booking-detail-label">Token Amount Paid</span>
+                                        <span className="booking-detail-val" style={{ color: '#059669' }}>
+                                          {formatCurrency(b.tokenAmountPaid ?? b.bookingAmount ?? 0)}
+                                        </span>
+                                      </div>
+
+                                      <div className="booking-detail-item">
+                                        <span className="booking-detail-label">Verified Receipts</span>
+                                        <span className="booking-detail-val" style={{ color: '#0284c7' }}>
+                                          {formatCurrency(verifiedAmt)}
+                                        </span>
+                                      </div>
+
+                                      <div className="booking-detail-item">
+                                        <span className="booking-detail-label">Payment Mode</span>
+                                        <span className="booking-detail-val">{b.paymentMode || 'Bank Transfer / Online'}</span>
+                                      </div>
+
+                                      <div className="booking-detail-item">
+                                        <span className="booking-detail-label">Assigned Agent</span>
+                                        <span className="booking-detail-val">
+                                          {b.assignedAgentName || selectedCustomer.assignedAgentName || 'Agent'}
+                                        </span>
+                                      </div>
+
+                                      <div className="booking-detail-item">
+                                        <span className="booking-detail-label">Booking Reference</span>
+                                        <span className="booking-detail-val" style={{ color: '#64748b' }}>
+                                          {b.receiptNumber || b.transactionReference || `#${b.id}`}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    {/* Payment Terms & Milestones */}
+                                    {b.paymentTerms && (
+                                      <div className="booking-callout booking-callout-terms">
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}>
+                                          <FileText size={14} color="#0284c7" />
+                                          Payment Terms & Milestones
+                                        </div>
+                                        <div style={{ marginTop: 2, lineHeight: 1.5 }}>
+                                          {b.paymentTerms}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Notes / Remarks */}
+                                    {b.notes && (
+                                      <div className="booking-callout booking-callout-notes">
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}>
+                                          <Info size={14} color="#ca8a04" />
+                                          Notes & Remarks
+                                        </div>
+                                        <div style={{ marginTop: 2, lineHeight: 1.5 }}>
+                                          "{b.notes}"
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 

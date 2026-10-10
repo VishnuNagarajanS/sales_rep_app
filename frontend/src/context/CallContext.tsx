@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { CallDisposition, CallRecord, Lead, Customer, Deal, Followup } from '../types';
+import { CallDisposition, CallRecord, Lead, Customer, Deal, Followup, AuditLog } from '../types';
 import {
   getFollowups,
   logCall as apiLogCall,
@@ -116,9 +116,34 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [activeCall?.status]);
 
   const initiateCall = (name: string, phone: string, recordType: 'lead' | 'customer' = 'lead', recordId?: string, sourceFollowupId?: string) => {
+    const phoneDigits = (phone || '').replace(/\D/g, '').slice(-10);
+    const allLeads = [
+      ...(leads || []),
+      ...(tenant?.id ? storageService.getLeads(tenant.id) : [])
+    ];
+    const allCusts = storageService.getCustomers ? (storageService.getCustomers(tenant?.id) || []) : [];
+
+    const matchedLead = allLeads.find(l => {
+      if (recordId && (recordType === 'lead' || !recordType) && (l.id === recordId || String(l.id).replace(/\D/g, '') === String(recordId).replace(/\D/g, ''))) return true;
+      const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+      return phoneDigits && lDigits && phoneDigits === lDigits;
+    });
+
+    const matchedCust = allCusts.find(c => {
+      if (recordId && recordType === 'customer' && (c.id === recordId || String(c.id).replace(/\D/g, '') === String(recordId).replace(/\D/g, ''))) return true;
+      const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
+      return phoneDigits && cDigits && phoneDigits === cDigits;
+    });
+
+    const effectiveType = recordType || (matchedCust ? 'customer' : 'lead');
+    const effectiveId = recordId || (effectiveType === 'customer' ? matchedCust?.id : matchedLead?.id);
+    const effectiveName = (name && name !== 'Direct Outbound Call' && name !== 'Contact') 
+      ? name 
+      : (effectiveType === 'customer' ? matchedCust?.name : matchedLead?.name) || name || 'Contact';
+
     const newCall: ActiveCall = {
       id: `call-${Date.now()}`,
-      contactName: name,
+      contactName: effectiveName,
       contactPhone: phone,
       direction: 'outbound',
       status: 'connected', // instantly connected for dialer simulation
@@ -127,10 +152,10 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isOnHold: false,
       quickNotes: '',
       matchedRecord: {
-        type: recordType,
-        id: recordId,
-        name: name,
-        meta: recordType === 'lead' ? 'Active Inbound Lead' : 'Customer Account',
+        type: effectiveType,
+        id: effectiveId,
+        name: effectiveName,
+        meta: effectiveType === 'lead' ? 'Active Inbound Lead' : 'Customer Account',
       },
       isExpanded: true,
       isVideoMode: false,
@@ -210,11 +235,103 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const persistCallRecord = async (
+    call: ActiveCall,
+    disposition: CallDisposition,
+    notes?: string,
+    reason?: string
+  ): Promise<CallRecord | null> => {
+    if (!tenant || !user) return null;
+
+    const isCustomer = call.matchedRecord?.type === 'customer';
+    const isLead = call.matchedRecord?.type === 'lead';
+
+    const allLeads = [
+      ...(leads || []),
+      ...(tenant?.id ? storageService.getLeads(tenant.id) : [])
+    ];
+    const allCusts = storageService.getCustomers ? (storageService.getCustomers(tenant?.id) || []) : [];
+    const phoneDigits = (call.contactPhone || '').replace(/\D/g, '').slice(-10);
+
+    const matchedLead = allLeads.find((l: Lead) => {
+      if (call.matchedRecord?.id && (l.id === call.matchedRecord.id || String(l.id).replace(/\D/g, '') === String(call.matchedRecord.id).replace(/\D/g, ''))) return true;
+      const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+      return phoneDigits && lDigits && phoneDigits === lDigits;
+    });
+
+    const matchedCust = allCusts.find((c: Customer) => {
+      if (call.matchedRecord?.id && (c.id === call.matchedRecord.id || String(c.id).replace(/\D/g, '') === String(call.matchedRecord.id).replace(/\D/g, ''))) return true;
+      const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
+      return phoneDigits && cDigits && phoneDigits === cDigits;
+    });
+
+    const targetLeadId = isLead ? (call.matchedRecord?.id || matchedLead?.id) : matchedLead?.id;
+    const targetCustomerId = isCustomer ? (call.matchedRecord?.id || matchedCust?.id) : matchedCust?.id;
+
+    const callRecord: CallRecord = {
+      id: call.id,
+      companyId: tenant.id,
+      customerId: targetCustomerId,
+      leadId: targetLeadId,
+      contactName: call.contactName,
+      contactPhone: call.contactPhone,
+      direction: call.direction,
+      duration: call.duration,
+      agentId: user.id,
+      agentName: user.name,
+      disposition: disposition || ('' as CallDisposition),
+      timestamp: new Date().toISOString(),
+      recordingUrl: 'https://cdn.nexusplatform.io/recordings/sample.mp3',
+      transcription: disposition
+        ? `Automated Call Transcript: Agent ${user.name} connected with ${call.contactName}. Call disposition marked as ${disposition}.`
+        : `Automated Call Transcript: Agent ${user.name} connected with ${call.contactName}.`,
+      notes: notes || call.quickNotes || undefined,
+      reason: reason || undefined,
+    };
+
+    let savedRecord: CallRecord;
+    try {
+      const saved = await apiLogCall(callRecord);
+      savedRecord = saved;
+    } catch (err) {
+      console.warn('CallContext persistCallRecord fallback to local:', err);
+      storageService.addCall(callRecord);
+      savedRecord = callRecord;
+    }
+
+    // Record in Company Audit Log and Lead/Customer Activity Trail
+    const dirTitle = (call.direction || 'outbound').charAt(0).toUpperCase() + (call.direction || 'outbound').slice(1).toLowerCase();
+    const outcomeDesc = !disposition || disposition === 'Skipped' ? 'Wrap-up Skipped' : `Outcome: ${disposition}`;
+    const callNotesDesc = notes ? ` • Note: ${notes}` : '';
+    const auditDetails = `${dirTitle} call (${call.duration}s) with ${call.contactName} (${call.contactPhone}) • ${outcomeDesc}${callNotesDesc}`;
+
+    const localAudit: AuditLog = {
+      id: `aud-${Date.now()}`,
+      companyId: tenant.id,
+      timestamp: new Date().toISOString(),
+      actorName: user.name,
+      actorEmail: user.email,
+      action: `${(call.direction || 'outbound').toUpperCase()}_CALL`,
+      entityType: targetCustomerId ? 'Customer' : (targetLeadId ? 'Lead' : 'CallRecord'),
+      entityId: String(targetCustomerId || targetLeadId || call.id),
+      leadId: targetLeadId ? String(targetLeadId).replace(/\D/g, '') : undefined,
+      customerId: targetCustomerId ? String(targetCustomerId).replace(/\D/g, '') : undefined,
+      details: auditDetails,
+      module: 'CallCenter',
+      status: (!disposition || disposition === 'Skipped') ? 'Skipped' : disposition,
+    };
+    storageService.addAuditLog(localAudit);
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+
+    return savedRecord;
+  };
+
   const endCall = (skipDisposition?: boolean | unknown) => {
     if (activeCall) {
       const finishedCall = { ...activeCall, status: 'ended' as CallStatus };
       setLastCallRecord(finishedCall);
       setActiveCall(null);
+
       if (skipDisposition === true) {
         setAvailability(prev => prev === 'Busy' ? 'Available' : prev);
       } else {
@@ -266,31 +383,8 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     reason?: string
   ) => {
     if (lastCallRecord && tenant && user) {
-      const isCustomer = lastCallRecord.matchedRecord?.type === 'customer';
-      const isLead = lastCallRecord.matchedRecord?.type === 'lead';
-      const targetCustomerId = isCustomer ? lastCallRecord.matchedRecord?.id : undefined;
-      const targetLeadId = isLead ? lastCallRecord.matchedRecord?.id : undefined;
-
-      const callRecord: CallRecord = {
-        id: lastCallRecord.id,
-        companyId: tenant.id,
-        customerId: targetCustomerId,
-        leadId: targetLeadId,
-        contactName: lastCallRecord.contactName,
-        contactPhone: lastCallRecord.contactPhone,
-        direction: lastCallRecord.direction,
-        duration: lastCallRecord.duration,
-        agentId: user.id,
-        agentName: user.name,
-        disposition,
-        timestamp: new Date().toISOString(),
-        recordingUrl: 'https://cdn.nexusplatform.io/recordings/sample.mp3',
-        transcription: `Automated Call Transcript: Agent ${user.name} connected with ${lastCallRecord.contactName}. Call disposition marked as ${disposition}.`,
-        notes: notes || lastCallRecord.quickNotes || undefined,
-        reason: reason || undefined,
-      };
-
-      apiLogCall(callRecord).catch(console.error);
+      await persistCallRecord(lastCallRecord, disposition, notes, reason);
+      const isJaminTenant = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2';
 
       // Locate matched lead if any
       const rawLeadId = String(lastCallRecord.matchedRecord?.type === 'lead' ? (lastCallRecord.matchedRecord.id || '') : '');
@@ -380,7 +474,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             String(matchedLead?.companyId) === '2';
 
           matchedLead.status = 'Interested';
-          matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Interested - ${isJaminTenant ? 'Qualified Prospect' : 'Handed over to IRM'}${notes ? `: ${notes}` : ''}`;
           if (!matchedLead.customFields) matchedLead.customFields = {};
           matchedLead.customFields.qualifiedByAgentName = user.name;
           matchedLead.customFields.qualifiedAt = new Date().toISOString();
@@ -443,9 +536,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (matchedLead) {
           matchedLead.status = 'Follow-up Required';
           matchedLead.nextFollowupDate = followupScheduledAt;
-          if (notes) {
-            matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Follow-up Required: ${notes}`;
-          }
           apiSaveLead(matchedLead).catch(console.error);
         }
       }
@@ -456,9 +546,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           matchedLead.status = 'Callback';
           if (scheduleFollowup?.scheduledAt) {
             matchedLead.nextFollowupDate = scheduleFollowup.scheduledAt;
-          }
-          if (notes) {
-            matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Call Back: ${notes}`;
           }
           apiSaveLead(matchedLead).catch(console.error);
         } else {
@@ -559,9 +646,6 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       else if (disposition === 'No Response') {
         if (matchedLead) {
           matchedLead.status = 'No Response';
-          if (notes) {
-            matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] No Response: ${notes}`;
-          }
           apiSaveLead(matchedLead).catch(console.error);
         } else {
           const newLead: Lead = {
@@ -587,41 +671,101 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // 7. Converted -> Instant Conversion to Customer 360
       else if (disposition === 'Converted') {
         if (matchedLead) {
-          // 1. Create / Update Customer in Customer 360
-          const cust: Customer = {
-            id: `cust-${Date.now()}`,
-            companyId: tenant.id,
-            name: matchedLead.name,
-            phone: matchedLead.phone,
-            email: matchedLead.email || '',
-            status: 'Active',
-            assignedAgentId: matchedLead.assignedAgentId || user.id,
-            assignedAgentName: matchedLead.assignedAgentName || user.name,
-            location: matchedLead.location || '',
-            lastContacted: 'Just now',
-            openDealsCount: 0,
-            totalValue: 0,
-            createdAt: new Date().toISOString().split('T')[0],
-            notes: `Converted from lead via Call Wrap-up. ${notes ? `Call notes: ${notes}` : ''} ${matchedLead.notes ? `Original: ${matchedLead.notes}` : ''}`.trim(),
-            customFields: matchedLead.customFields,
-          };
-          storageService.saveCustomer(cust);
-          apiSaveCustomer(cust).catch(console.error);
+          if (isJaminTenant) {
+            // For Jamin Bazaar: conversion is strictly gated behind an active verified plot booking.
+            // Do not create a local Customer or mark the lead Converted unless backend confirms conversion.
+            const cleanId = String(matchedLead.id).replace('db-', '').replace('lead-', '').replace('l-', '').trim();
+            let backendConversionSuccess = false;
+            let backendMessage = 'In Jamin Bazaar, lead conversion requires a verified token payment on an active plot booking.';
 
-          // 2. Mark Lead as Converted locally and in DB
-          matchedLead.status = 'Converted';
-          if (notes) {
-            matchedLead.notes = `${matchedLead.notes ? matchedLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Converted: ${notes}`;
-          }
-          storageService.saveLead(matchedLead);
-          setLeads(prev => prev.filter(l => l.id !== matchedLead!.id));
+            if (!isNaN(Number(cleanId)) && Number(cleanId) > 0) {
+              try {
+                const res = await jaminApiService.convertLead(cleanId, undefined, undefined, matchedLead.notes);
+                if (res?.success) {
+                  backendConversionSuccess = true;
+                } else if (res?.message) {
+                  backendMessage = res.message;
+                }
+              } catch (err: any) {
+                if (err?.message) backendMessage = err.message;
+              }
+            }
 
-          // 3. Call backend convert API to create backend Customer and set Lead.Status = 'Converted'
-          const cleanId = String(matchedLead.id).replace('db-', '').replace('lead-', '').replace('l-', '').trim();
-          if (!isNaN(Number(cleanId)) && Number(cleanId) > 0) {
-            jaminApiService.convertLead(cleanId, undefined, undefined, matchedLead.notes).catch(console.error);
+            if (backendConversionSuccess) {
+              const cust: Customer = {
+                id: `cust-${Date.now()}`,
+                companyId: tenant.id,
+                name: matchedLead.name,
+                phone: matchedLead.phone,
+                email: matchedLead.email || '',
+                status: 'Active',
+                assignedAgentId: matchedLead.assignedAgentId || user.id,
+                assignedAgentName: matchedLead.assignedAgentName || user.name,
+                location: matchedLead.location || '',
+                lastContacted: 'Just now',
+                openDealsCount: 0,
+                totalValue: 0,
+                createdAt: new Date().toISOString().split('T')[0],
+                notes: `Converted from lead via Call Wrap-up. ${notes ? `Call notes: ${notes}` : ''} ${matchedLead.notes ? `Original: ${matchedLead.notes}` : ''}`.trim(),
+                customFields: matchedLead.customFields,
+              };
+              storageService.saveCustomer(cust);
+              apiSaveCustomer(cust).catch(console.error);
+
+              matchedLead.status = 'Converted';
+              storageService.saveLead(matchedLead);
+              setLeads(prev => prev.filter(l => l.id !== matchedLead!.id));
+            } else {
+              console.warn(`[Jamin Call Wrap-up] Cannot mark lead Converted: ${backendMessage}`);
+              // Retain active lead status without bypassing booking requirement
+              if (matchedLead.status !== 'Converted') {
+                matchedLead.status = matchedLead.status || 'Interested';
+                storageService.saveLead(matchedLead);
+                apiSaveLead(matchedLead).catch(console.error);
+                setLeads(prev => prev.map(l => l.id === matchedLead!.id ? { ...matchedLead! } : l));
+              }
+            }
+          } else {
+            // Generic CRM behavior preserved for GHL India and other tenants
+            const cust: Customer = {
+              id: `cust-${Date.now()}`,
+              companyId: tenant.id,
+              name: matchedLead.name,
+              phone: matchedLead.phone,
+              email: matchedLead.email || '',
+              status: 'Active',
+              assignedAgentId: matchedLead.assignedAgentId || user.id,
+              assignedAgentName: matchedLead.assignedAgentName || user.name,
+              location: matchedLead.location || '',
+              lastContacted: 'Just now',
+              openDealsCount: 0,
+              totalValue: 0,
+              createdAt: new Date().toISOString().split('T')[0],
+              notes: `Converted from lead via Call Wrap-up. ${notes ? `Call notes: ${notes}` : ''} ${matchedLead.notes ? `Original: ${matchedLead.notes}` : ''}`.trim(),
+              customFields: matchedLead.customFields,
+            };
+            storageService.saveCustomer(cust);
+            apiSaveCustomer(cust).catch(console.error);
+
+            // Mark Lead as Converted locally and in DB
+            matchedLead.status = 'Converted';
+            storageService.saveLead(matchedLead);
+            setLeads(prev => prev.filter(l => l.id !== matchedLead!.id));
+
+            const cleanId = String(matchedLead.id).replace('db-', '').replace('lead-', '').replace('l-', '').trim();
+            if (!isNaN(Number(cleanId)) && Number(cleanId) > 0) {
+              jaminApiService.convertLead(cleanId, undefined, undefined, matchedLead.notes).catch(console.error);
+            }
           }
         }
+      }
+
+      // Ensure updated lead status is saved to storage, API, and local state for all non-converted dispositions
+      if (matchedLead && disposition !== 'Converted') {
+        storageService.saveLead(matchedLead);
+        apiSaveLead(matchedLead).catch(console.error);
+        setLeads(prev => prev.map(l => l.id === matchedLead!.id ? { ...matchedLead! } : l));
+        window.dispatchEvent(new Event('nexus_storage_updated'));
       }
     }
 
@@ -631,6 +775,14 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const closeDispositionModal = () => {
+    if (lastCallRecord) {
+      // Only store the call record itself — do not modify lead status, schedule followups, or assign automatic disposition
+      persistCallRecord(
+        lastCallRecord,
+        '' as CallDisposition,
+        lastCallRecord.quickNotes || undefined
+      );
+    }
     setShowDispositionModal(false);
     setLastCallRecord(null);
     setAvailability(prev => prev === 'Busy' ? 'Available' : prev);

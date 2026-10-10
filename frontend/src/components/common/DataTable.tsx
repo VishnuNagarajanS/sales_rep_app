@@ -27,6 +27,7 @@ export interface RowAction<T> {
   icon?: React.ReactNode;
   onClick: (item: T) => void;
   danger?: boolean;
+  disabled?: (item: T) => boolean;
   hidden?: (item: T) => boolean;
 }
 
@@ -549,6 +550,7 @@ export function DataTable<T>({
                   <button
                     key={aIdx}
                     className="btn btn-ghost btn-sm"
+                    disabled={action.disabled ? action.disabled(item) : false}
                     style={{
                       width: '100%',
                       justifyContent: 'flex-start',
@@ -557,8 +559,11 @@ export function DataTable<T>({
                       padding: '8px 10px',
                       borderRadius: 6,
                       gap: 8,
+                      opacity: action.disabled && action.disabled(item) ? 0.5 : 1,
+                      cursor: action.disabled && action.disabled(item) ? 'not-allowed' : 'pointer',
                     }}
                     onClick={() => {
+                      if (action.disabled && action.disabled(item)) return;
                       setActiveMenuKey(null);
                       action.onClick(item);
                     }}

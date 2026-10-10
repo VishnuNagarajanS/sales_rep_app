@@ -465,7 +465,15 @@ export const CallCenterPage: React.FC = () => {
                       <button
                         className="btn btn-primary btn-sm"
                         style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', flexShrink: 0 }}
-                        onClick={() => initiateCall(item.name, item.phone)}
+                        onClick={() =>
+                          initiateCall(
+                            item.name,
+                            item.phone,
+                            item.source === 'lead' ? 'lead' : 'lead',
+                            item.source === 'lead' ? item.id : undefined,
+                            item.source === 'followup' ? item.id : undefined
+                          )
+                        }
                       >
                         <Phone size={13} /> Dial Contact
                       </button>

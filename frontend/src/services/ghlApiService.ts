@@ -36,7 +36,12 @@ import type {
 // ── ID type helpers ───────────────────────────────────────────────────────────
 // Backend uses int IDs; frontend types use string.
 const sid = (n: number | string | undefined | null): string => String(n ?? '');
-const nid = (s: string | undefined | null): number => parseInt(s ?? '0', 10) || 0;
+const nid = (s: string | number | undefined | null): number => {
+  if (typeof s === 'number') return s;
+  if (!s) return 0;
+  const digits = String(s).replace(/\D/g, '');
+  return parseInt(digits || '0', 10) || 0;
+};
 
 // ── Tenant match helper ───────────────────────────────────────────────────────
 export function isTenantMatch(
@@ -760,25 +765,42 @@ function mapCallRecord(c: Record<string, any>): CallRecord {
 }
 
 export async function getCalls(companyId?: string): Promise<CallRecord[]> {
-  const raw = await fetchAll<any>('/sales-executive/calls');
+  const params: Record<string, string> = {};
+  if (companyId) {
+    const cid = String(companyId).toLowerCase();
+    params.tenantId = (cid === 'jamin' || cid === 't-jamin-02' || cid === '2') ? '2' : '1';
+  }
+  const raw = await fetchAll<any>('/sales-executive/calls', params);
   return raw.map(mapCallRecord);
 }
 
 export async function logCall(call: CallRecord): Promise<CallRecord> {
-  const payload = {
-    contactName: call.contactName,
-    contactPhone: call.contactPhone,
-    direction: call.direction,
-    duration: call.duration,
-    disposition: call.disposition,
-    notes: call.notes,
-    leadId: call.leadId ? nid(call.leadId) : undefined,
-    customerId: call.customerId ? nid(call.customerId) : undefined,
-  };
-  const res: ApiResponse<any> = await apiClient.post('/sales-executive/calls', payload);
-  if (!res.success || !res.data) throw new Error(res.message);
+  try {
+    const payload = {
+      contactName: call.contactName,
+      contactPhone: call.contactPhone,
+      direction: call.direction,
+      duration: call.duration,
+      disposition: call.disposition,
+      notes: call.notes,
+      leadId: call.leadId ? nid(call.leadId) : undefined,
+      customerId: call.customerId ? nid(call.customerId) : undefined,
+    };
+    const res: ApiResponse<any> = await apiClient.post('/sales-executive/calls', payload);
+    if (res && res.success && res.data) {
+      const saved = mapCallRecord(res.data);
+      storageService.addCall(saved);
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+      return saved;
+    }
+  } catch (err) {
+    console.warn('[ghlApiService] API logCall failed, falling back to local storage:', err);
+  }
+
+  // Fallback: preserve call record in local storage so it is never lost
+  storageService.addCall(call);
   window.dispatchEvent(new Event('nexus_storage_updated'));
-  return mapCallRecord(res.data);
+  return call;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

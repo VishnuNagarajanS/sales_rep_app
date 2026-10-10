@@ -110,7 +110,7 @@ public class JaminProjectsController : JaminTenantControllerBase
         if (existingPlots.Count > 0)
         {
             project.BookedPlots = existingPlots.Count(p => p.Status == "Booked" || p.Status == "Registered" || p.Status == "Sold");
-            project.AvailablePlots = Math.Max(0, project.TotalPlots - project.BookedPlots);
+            project.AvailablePlots = existingPlots.Count(p => p.Status == "Available");
         }
         else
         {
@@ -127,10 +127,6 @@ public class JaminProjectsController : JaminTenantControllerBase
 
         if (project.AvailablePlots < 0) project.AvailablePlots = 0;
         if (project.BookedPlots < 0) project.BookedPlots = 0;
-        if (project.AvailablePlots + project.BookedPlots > project.TotalPlots)
-        {
-            project.AvailablePlots = Math.Max(0, project.TotalPlots - project.BookedPlots);
-        }
 
         project.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);

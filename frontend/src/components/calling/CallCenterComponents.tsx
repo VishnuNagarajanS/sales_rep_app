@@ -303,16 +303,10 @@ export const InCallBar: React.FC = () => {
       leadId: activeCall.matchedRecord?.id,
     };
 
-    if (tenant.slug === 'ghl' || tenant.id === 't-ghl-01') {
-      logCall(callRecord).catch(console.error);
-    } else {
-      try {
-        const calls = JSON.parse(localStorage.getItem('nexus_calls') || '[]');
-        calls.unshift(callRecord);
-        localStorage.setItem('nexus_calls', JSON.stringify(calls));
-        window.dispatchEvent(new Event('nexus_storage_updated'));
-      } catch { }
-    }
+    logCall(callRecord).catch(err => {
+      console.warn('[CallCenter] logCall API failed, storing locally:', err);
+      storageService.addCall(callRecord);
+    });
 
     const consult: Consultation = {
       id: `cns-${Date.now()}`,

@@ -299,8 +299,35 @@ public class FollowupService : IFollowupService
 
         _context.Followups.Add(followup);
 
+        if (leadId.HasValue)
+        {
+            var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == leadId.Value, ct);
+            if (lead != null && lead.Status == "New")
+            {
+                lead.Status = "Follow-up Required";
+                lead.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
         await _context.SaveChangesAsync(ct);
         await RefreshLeadNextFollowupDateAsync(followup, ct);
+
+        _context.AuditLogs.Add(new AuditLog
+        {
+            CompanyId = companyId,
+            Timestamp = DateTime.UtcNow,
+            ActorName = assignedAgent?.Name ?? _currentUser.Email ?? "Agent",
+            ActorEmail = assignedAgent?.Email ?? _currentUser.Email ?? string.Empty,
+            Action = "FOLLOWUP_SCHEDULED",
+            EntityType = customerId.HasValue ? "Customer" : (leadId.HasValue ? "Lead" : "Followup"),
+            EntityId = customerId.HasValue ? customerId.Value.ToString() : (leadId.HasValue ? leadId.Value.ToString() : followup.Id.ToString()),
+            LeadId = leadId,
+            CustomerId = customerId,
+            Details = $"Scheduled {followup.FollowupType} follow-up for {followup.ContactName} on {followup.ScheduledAt:yyyy-MM-dd HH:mm} • Priority: {followup.Priority}{(string.IsNullOrWhiteSpace(followup.Notes) ? "" : $" • Notes: {followup.Notes}")}",
+            Module = "Followups",
+            Status = followup.Status.ToString()
+        });
+        await _context.SaveChangesAsync(ct);
 
         if (followup.AssignedAgent == null && followup.AssignedAgentId.HasValue)
         {
@@ -424,6 +451,22 @@ public class FollowupService : IFollowupService
         followup.Status = FollowupStatus.Completed;
         followup.CompletedAt = DateTime.UtcNow;
         followup.UpdatedAt = DateTime.UtcNow;
+
+        _context.AuditLogs.Add(new AuditLog
+        {
+            CompanyId = followup.CompanyId,
+            Timestamp = DateTime.UtcNow,
+            ActorName = _currentUser.Email ?? "Agent",
+            ActorEmail = _currentUser.Email ?? string.Empty,
+            Action = "FOLLOWUP_COMPLETED",
+            EntityType = followup.CustomerId.HasValue ? "Customer" : (followup.LeadId.HasValue ? "Lead" : "Followup"),
+            EntityId = followup.CustomerId.HasValue ? followup.CustomerId.Value.ToString() : (followup.LeadId.HasValue ? followup.LeadId.Value.ToString() : followup.Id.ToString()),
+            LeadId = followup.LeadId,
+            CustomerId = followup.CustomerId,
+            Details = $"Completed follow-up for {followup.ContactName}{(string.IsNullOrWhiteSpace(followup.Notes) ? "" : $" • Notes: {followup.Notes}")}",
+            Module = "Followups",
+            Status = FollowupStatus.Completed.ToString()
+        });
 
         await _context.SaveChangesAsync(ct);
         await RefreshLeadNextFollowupDateAsync(followup, ct);

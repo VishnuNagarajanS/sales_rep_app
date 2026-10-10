@@ -9,6 +9,7 @@ import { Modal } from '../../components/common/Modal';
 import { jaminApiService } from '../../services/jaminApiService';
 import { storageService } from '../../services/storageService';
 import { getCustomers } from '../../services/ghlApiService';
+import { apiClient } from '../../services/apiClient';
 import './SiteVisitsPage.css';
 
 const TIME_SLOTS = [
@@ -84,7 +85,7 @@ export const SiteVisitsPage: React.FC = () => {
         jaminApiService.getProjects().catch(() => []),
         jaminApiService.getPlots().catch(() => []),
         jaminApiService.getAgents().catch(() => []),
-        jaminApiService.getLeads(true).catch(() => storageService.getLeads(tenantId)),
+        jaminApiService.getLeads(true).catch(() => []),
         getCustomers(tenantId).catch(() => []),
       ]);
 
@@ -116,9 +117,8 @@ export const SiteVisitsPage: React.FC = () => {
       }
       setCustomers(dedupedCustomers);
 
-      // 2. Deduplicate Leads, exclude "Converted", and exclude anyone already present in Customers
-      const localLeads = storageService.getLeads(tenantId) || [];
-      const combinedLeads = [...(leadList || []), ...(localLeads || [])];
+      // 2. Deduplicate Leads, exclude "Converted", and exclude anyone already present in Customers strictly from DB API
+      const combinedLeads = (leadList || []) as Lead[];
       const seenLeadPhones = new Set<string>();
       const seenLeadNames = new Set<string>();
       const dedupedLeads: Lead[] = [];
@@ -274,28 +274,32 @@ export const SiteVisitsPage: React.FC = () => {
         throw new Error('The site visit could not be saved. Please try again.');
       }
 
-      // Save locally to storageService to ensure immediate linkage
-      storageService.saveSiteVisit(created);
 
-      // If linked to a lead, log in lead timeline/notes
-      if (cleanLeadId) {
-        const matchingLead = leads.find(l => l.id === cleanLeadId);
-        if (matchingLead) {
-          storageService.saveLead({
-            ...matchingLead,
-            notes: `${matchingLead.notes ? matchingLead.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Site Visit Scheduled: ${project?.name || ''} (${plot?.plotNumber || 'Tour'}) on ${dateFormatted}`,
-          });
-        }
-      }
+      // If linked to a lead, log in lead timeline/notes and update status
+      const leadMatch = cleanLeadId
+        ? leads.find(l => l.id === cleanLeadId || String(l.id) === String(cleanLeadId))
+        : leads.find(l => l.phone.replace(/\D/g, '').slice(-10) === customerPhone.replace(/\D/g, '').slice(-10));
 
-      // If linked to a customer, log in customer notes
-      if (cleanCustomerId) {
-        const matchingCust = customers.find(c => c.id === cleanCustomerId);
-        if (matchingCust) {
-          storageService.saveCustomer({
-            ...matchingCust,
-            notes: `${matchingCust.notes ? matchingCust.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Site Visit Scheduled: ${project?.name || ''} (${plot?.plotNumber || 'Tour'}) on ${dateFormatted}`,
-          });
+      if (leadMatch) {
+        const newStatus = (leadMatch.status !== 'Converted' && leadMatch.status !== 'Booking In Progress')
+          ? ('Site Visit Scheduled' as const)
+          : leadMatch.status;
+        const updatedLead = {
+          ...leadMatch,
+          status: newStatus,
+          notes: `${leadMatch.notes ? leadMatch.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Site Visit Scheduled: ${project?.name || ''} (${plot?.plotNumber || 'Tour'}) on ${dateFormatted}`,
+        };
+        setLeads(prev => prev.map(l => l.id === leadMatch.id ? updatedLead : l));
+
+        // Persist directly to backend database
+        const numericId = parseInt(String(leadMatch.id).replace('db-', ''), 10);
+        if (!isNaN(numericId)) {
+          apiClient.put(`/leads/${numericId}`, {
+            name: updatedLead.name,
+            phone: updatedLead.phone,
+            status: newStatus,
+            companyId: 2,
+          }).catch(() => {});
         }
       }
 
@@ -459,17 +463,38 @@ export const SiteVisitsPage: React.FC = () => {
         visitorNote: trimmedNote,
         outcomeNotes: trimmedNote,
       };
-      storageService.saveSiteVisit(updatedVisit);
+      setSiteVisits(prev => prev.map(sv => String(sv.id) === String(updatedVisit.id) ? updatedVisit : sv));
 
-      // If linked to a lead, log in lead timeline/notes
-      if (managingVisit.leadId) {
-        const matchingLead = leads.find(l => l.id === managingVisit.leadId);
-        if (matchingLead) {
-          const timestamp = new Date().toLocaleDateString();
-          storageService.saveLead({
-            ...matchingLead,
-            notes: `${matchingLead.notes ? matchingLead.notes + '\n\n' : ''}[${timestamp}] Site Visit Status: ${manageStatus}${isRescheduled ? ` (New slot: ${formattedSlot})` : ''} — ${trimmedNote || 'Updated'}`,
-          });
+      // If linked to a lead, log in lead timeline/notes and update status if completed or scheduled
+      const manageLeadMatch = managingVisit.leadId
+        ? leads.find(l => l.id === managingVisit.leadId || String(l.id) === String(managingVisit.leadId))
+        : leads.find(l => (managingVisit.customerPhone && l.phone.replace(/\D/g, '').slice(-10) === managingVisit.customerPhone.replace(/\D/g, '').slice(-10)));
+
+      if (manageLeadMatch) {
+        const timestamp = new Date().toLocaleDateString();
+        const shouldMarkCompleted = manageStatus === 'Completed' && manageLeadMatch.status !== 'Converted' && manageLeadMatch.status !== 'Booking In Progress';
+        const shouldMarkScheduled = (manageStatus === 'Scheduled' || manageStatus === 'Rescheduled') && manageLeadMatch.status !== 'Converted' && manageLeadMatch.status !== 'Booking In Progress';
+        const newStatus = shouldMarkCompleted
+          ? ('Site Visit Completed' as const)
+          : shouldMarkScheduled
+          ? ('Site Visit Scheduled' as const)
+          : manageLeadMatch.status;
+        const updatedLead = {
+          ...manageLeadMatch,
+          status: newStatus,
+          notes: `${manageLeadMatch.notes ? manageLeadMatch.notes + '\n\n' : ''}[${timestamp}] Site Visit Status: ${manageStatus}${isRescheduled ? ` (New slot: ${formattedSlot})` : ''} — ${trimmedNote || 'Updated'}`,
+        };
+        setLeads(prev => prev.map(l => l.id === manageLeadMatch.id ? updatedLead : l));
+
+        // Persist directly to backend database
+        const numericId = parseInt(String(manageLeadMatch.id).replace('db-', ''), 10);
+        if (!isNaN(numericId)) {
+          apiClient.put(`/leads/${numericId}`, {
+            name: updatedLead.name,
+            phone: updatedLead.phone,
+            status: newStatus,
+            companyId: 2,
+          }).catch(() => {});
         }
       }
 
@@ -491,9 +516,10 @@ export const SiteVisitsPage: React.FC = () => {
       window.dispatchEvent(new Event('nexus_storage_updated'));
       setIsManageModalOpen(false);
       await loadAll();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to update visit:', err);
-      alert('Failed to update visit. Please try again.');
+      const msg = err?.response?.data?.message || err?.message || 'Failed to update visit. Please try again.';
+      alert(msg);
     } finally {
       setIsSubmittingManage(false);
     }
@@ -501,6 +527,20 @@ export const SiteVisitsPage: React.FC = () => {
 
   const handleConfirmVisit = async (sv: SiteVisit) => {
     await jaminApiService.confirmSiteVisit(sv.id);
+    const targetLead = sv.leadId
+      ? leads.find(l => l.id === sv.leadId || String(l.id) === String(sv.leadId))
+      : leads.find(l => sv.customerPhone && l.phone.replace(/\D/g, '').slice(-10) === sv.customerPhone.replace(/\D/g, '').slice(-10));
+    if (targetLead && targetLead.status !== 'Converted' && targetLead.status !== 'Booking In Progress') {
+      const numId = parseInt(String(targetLead.id).replace('db-', ''), 10);
+      if (!isNaN(numId)) {
+        apiClient.put(`/leads/${numId}`, {
+          name: targetLead.name,
+          phone: targetLead.phone,
+          status: 'Site Visit Scheduled',
+          companyId: 2,
+        }).catch(() => {});
+      }
+    }
     await loadAll();
   };
 
@@ -589,7 +629,13 @@ export const SiteVisitsPage: React.FC = () => {
     {
       label: 'Call Client',
       icon: <Phone size={14} color="#059669" style={{ marginRight: 6 }} />,
-      onClick: sv => initiateCall(sv.customerName, sv.customerPhone),
+      onClick: sv =>
+        initiateCall(
+          sv.customerName,
+          sv.customerPhone,
+          sv.contactType === 'customer' || sv.customerId ? 'customer' : 'lead',
+          sv.customerId ? String(sv.customerId) : sv.leadId ? String(sv.leadId) : undefined
+        ),
     },
     {
       label: 'Confirm Visit',
@@ -948,6 +994,7 @@ export const SiteVisitsPage: React.FC = () => {
               style={{ fontWeight: 600, fontSize: '13px', borderColor: 'var(--primary-500)' }}
             >
               <option value="">-- Select Status to Proceed --</option>
+              <option value="Scheduled">Scheduled</option>
               <option value="Rescheduled">Rescheduled</option>
               <option value="Completed">Completed</option>
               <option value="Cancelled">Cancelled</option>
@@ -1082,7 +1129,27 @@ export const SiteVisitsPage: React.FC = () => {
             </>
           )}
 
-          {/* ── CASE B: COMPLETED ── */}
+          {/* ── CASE B: SCHEDULED / CONFIRMED ── */}
+          {manageStatus === 'Scheduled' && (
+            <>
+              <div className="sitevisit-manage-banner rescheduled" style={{ background: '#ecfdf5', borderColor: '#a7f3d0', color: '#065f46' }}>
+                <span>✓ <strong>Confirm Visit:</strong> Site visit is confirmed for the client.</span>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Confirmation Notes / Requirements (Optional)</label>
+                <textarea
+                  className="form-textarea"
+                  rows={3}
+                  value={manageNote}
+                  onChange={e => setManageNote(e.target.value)}
+                  placeholder="Any requirements or discussion points for the visit..."
+                />
+              </div>
+            </>
+          )}
+
+          {/* ── CASE C: COMPLETED ── */}
           {manageStatus === 'Completed' && (
             <>
               <div className="sitevisit-manage-banner completed">

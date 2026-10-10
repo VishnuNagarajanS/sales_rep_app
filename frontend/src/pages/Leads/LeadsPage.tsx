@@ -16,6 +16,7 @@ import {
   Clock,
   Sparkles,
   TrendingUp,
+  Building2,
 } from 'lucide-react';
 import { Lead, Customer, Deal, Followup, SiteVisit } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -266,10 +267,6 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         }).catch(err => console.warn('Failed to load Jamin followups in Leads:', err));
       };
       fetchJaminActivities();
-      window.addEventListener('nexus_storage_updated', fetchJaminActivities);
-      return () => {
-        window.removeEventListener('nexus_storage_updated', fetchJaminActivities);
-      };
     } else {
       const fetchGhlActivities = () => {
         apiGetFollowups(tenant?.id).then(fws => {
@@ -279,7 +276,6 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         }).catch(err => console.warn('Failed to load GHL followups in Leads:', err));
       };
       fetchGhlActivities();
-      window.addEventListener('nexus_storage_updated', fetchGhlActivities);
 
       adminUserService.getUsers(tenant?.id || '1').then(users => {
         if (users && users.length > 0) {
@@ -293,10 +289,6 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
           setApiAgents(valid);
         }
       }).catch(err => console.warn('Failed to load GHL agents:', err));
-
-      return () => {
-        window.removeEventListener('nexus_storage_updated', fetchGhlActivities);
-      };
     }
   }, [isJamin, tenant?.id]);
 
@@ -310,8 +302,11 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
   // Jamin Lead Site Visit state
   const [isLeadSiteVisitModalOpen, setIsLeadSiteVisitModalOpen] = useState(false);
-  const [leadVisitProject, setLeadVisitProject] = useState('Greenfield Meadows Phase 2');
-  const [leadVisitPlot, setLeadVisitPlot] = useState('Plot #15');
+  const [leadVisitProjectId, setLeadVisitProjectId] = useState('');
+  const [leadVisitProject, setLeadVisitProject] = useState('');
+  const [leadVisitPlotId, setLeadVisitPlotId] = useState('');
+  const [leadVisitPlot, setLeadVisitPlot] = useState('');
+  const [leadVisitPlotsList, setLeadVisitPlotsList] = useState<any[]>([]);
   const [leadVisitDate, setLeadVisitDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 1);
@@ -376,11 +371,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       if (isJamin) {
         const liveLeads = await jaminApiService.getLeads(true);
         const convertedLeads = await jaminApiService.getLeads(true, undefined, 'Converted');
-        const localLeads = storageService.getLeads(tenant?.id) || [];
         const leadMap = new Map<string, Lead>();
-        localLeads.forEach(l => leadMap.set(l.id, l));
-        (liveLeads || []).forEach(l => leadMap.set(l.id, l));
-        (convertedLeads || []).forEach(l => leadMap.set(l.id, l));
+        (liveLeads || []).forEach(l => leadMap.set(String(l.id), l));
+        (convertedLeads || []).forEach(l => leadMap.set(String(l.id), l));
         updated = Array.from(leadMap.values());
       } else {
         const res = await apiClient.get<any>(`/leads?tenantId=${effectiveCompanyId}`);
@@ -435,11 +428,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         }
       }
     } catch (err) {
-      console.warn('API leads load error, falling back to storage:', err);
-    }
-
-    if (updated.length === 0) {
-      updated = storageService.getLeads(tenant?.id);
+      console.warn('API leads load error:', err);
     }
 
     const sanitizeAgent = (lead: Lead): Lead => {
@@ -469,11 +458,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   };
 
   useEffect(() => {
-    storageService.cleanupDuplicateLeads(tenant?.id);
     loadData();
-    const handleUpdate = () => loadData();
-    window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id]);
 
   const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
@@ -774,7 +759,6 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       nextFollowupDate: isoScheduledAt,
       nextFollowupType: scheduleType,
     };
-    storageService.saveLead(updatedLead);
     setSelectedLead(updatedLead);
     setLeads(prev => prev.map(l => l.id === updatedLead.id ? updatedLead : l));
 
@@ -793,13 +777,6 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
           : (user?.name || 'Agent'),
     };
 
-    const resolvedNotes =
-      scheduleNotes ||
-      (scheduleType === 'whatsapp'
-        ? 'WhatsApp discussion on plot requirements'
-        : scheduleType === 'meeting'
-          ? 'Discussion meeting on property selection'
-          : 'Phone call follow-up on property requirements');
 
     if (existingPending) {
       // Mark previous pending follow-up as Rescheduled in DB
@@ -824,7 +801,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       priority: 'Medium',
       status: 'Pending',
       followupType: scheduleType as any,
-      notes: resolvedNotes,
+      notes: scheduleNotes.trim(),
       assignedAgentId: String(targetAgentId),
       assignedAgentName: targetAgent.name,
       createdBy: user?.name || 'Admin',
@@ -895,16 +872,10 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     if (fromStorage.length > 0) {
       return fromStorage.map(p => ({ id: p.id, name: p.name }));
     }
-    // Fallback defaults (only if no API/storage data)
-    return [
-      { id: 'proj-01', name: 'Greenfield Meadows Phase 2' },
-      { id: 'proj-02', name: 'Greenfield Meadows Phase 1' },
-      { id: 'proj-03', name: 'Palm Grove Estates' },
-      { id: 'proj-04', name: 'Emerald Orchards' },
-    ];
+    return [];
   }, [jaminApiProjects, tenant?.id]);
 
-  const handleUpdateLeadStatus = (leadId: string, newStatus: Lead['status']) => {
+  const handleUpdateLeadStatus = async (leadId: string, newStatus: Lead['status']) => {
     const updated = leads.map(l => l.id === leadId ? { ...l, status: newStatus } : l);
     setLeads(updated);
     const leadObj = updated.find(l => l.id === leadId);
@@ -913,11 +884,20 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       if (selectedLead && selectedLead.id === leadId) {
         setSelectedLead(leadObj);
       }
+      const numericId = parseInt(String(leadId).replace('db-', ''), 10);
+      if (!isNaN(numericId)) {
+        await apiClient.put(`/leads/${numericId}`, {
+          name: leadObj.name,
+          phone: leadObj.phone,
+          status: newStatus,
+          companyId: isJaminUser ? 2 : 1,
+        }).catch(() => { });
+      }
       showToast(`✓ Lead status updated to "${newStatus}"!`);
     }
   };
 
-  const handleUpdateLeadField = (leadId: string, updates: Partial<Lead>) => {
+  const handleUpdateLeadField = async (leadId: string, updates: Partial<Lead>) => {
     const updated = leads.map(l => {
       if (l.id === leadId) {
         const merged: Lead = {
@@ -939,6 +919,13 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       if (selectedLead && selectedLead.id === leadId) {
         setSelectedLead(leadObj);
       }
+      const numericId = parseInt(String(leadId).replace('db-', ''), 10);
+      if (!isNaN(numericId)) {
+        await apiClient.put(`/leads/${numericId}`, {
+          ...leadObj,
+          companyId: isJaminUser ? 2 : 1,
+        }).catch(() => { });
+      }
       showToast(`✓ Updated details for ${leadObj.name}`);
     }
   };
@@ -946,8 +933,18 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   const handleOpenLeadSiteVisitModal = (lead: Lead) => {
     const d = new Date();
     d.setDate(d.getDate() + 1);
-    setLeadVisitProject('Greenfield Meadows Phase 2');
-    setLeadVisitPlot('Plot #15');
+    const defProj = jaminApiProjects[0] || (availableProjects[0] ? { id: availableProjects[0].id, name: availableProjects[0].name } : null);
+    const projId = defProj ? String(defProj.id) : '';
+    const projName = defProj ? defProj.name : '';
+    setLeadVisitProjectId(projId);
+    setLeadVisitProject(projName);
+    setLeadVisitPlotId('');
+    setLeadVisitPlot('');
+    if (projId) {
+      jaminApiService.getPlots(projId).then(data => setLeadVisitPlotsList(data || [])).catch(() => setLeadVisitPlotsList([]));
+    } else {
+      setLeadVisitPlotsList([]);
+    }
     setLeadVisitDate(d.toISOString().split('T')[0]);
     setLeadVisitTimeSlot('11:00 AM');
     setLeadVisitNotes('');
@@ -957,6 +954,25 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         : (user?.name || (jaminAgents[0]?.name || 'Agent'))
     );
     setIsLeadSiteVisitModalOpen(true);
+  };
+
+  const handleLeadVisitProjectChange = (projId: string) => {
+    setLeadVisitProjectId(projId);
+    const found = jaminApiProjects.find(p => String(p.id) === projId);
+    setLeadVisitProject(found ? found.name : '');
+    setLeadVisitPlotId('');
+    setLeadVisitPlot('');
+    if (projId) {
+      jaminApiService.getPlots(projId).then(data => setLeadVisitPlotsList(data || [])).catch(() => setLeadVisitPlotsList([]));
+    } else {
+      setLeadVisitPlotsList([]);
+    }
+  };
+
+  const handleLeadVisitPlotChange = (plotId: string) => {
+    setLeadVisitPlotId(plotId);
+    const found = leadVisitPlotsList.find(p => String(p.id) === plotId);
+    setLeadVisitPlot(found ? found.plotNumber : '');
   };
 
   const handleSaveLeadSiteVisit = async (e: React.FormEvent) => {
@@ -975,20 +991,25 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       }
     })();
 
-    const trimmedNotes = leadVisitNotes.trim();
+    const trimmedNotes = leadVisitNotes.trim() || undefined;
 
     let created: SiteVisit | null = null;
+    const projectObj = jaminApiProjects.find(p => String(p.id) === leadVisitProjectId);
+    const plotObj = leadVisitPlotsList.find(p => String(p.id) === leadVisitPlotId);
+
     if (isJamin) {
       created = await jaminApiService.scheduleSiteVisit({
         leadId: Number(selectedLead.id),
         contactType: 'lead',
         customerName: selectedLead.name,
         customerPhone: selectedLead.phone,
-        projectName: leadVisitProject,
-        plotNumber: leadVisitPlot,
+        projectId: leadVisitProjectId ? Number(leadVisitProjectId) : undefined,
+        plotId: leadVisitPlotId ? Number(leadVisitPlotId) : undefined,
+        projectName: projectObj?.name || leadVisitProject || 'Jamin Development',
+        plotNumber: plotObj?.plotNumber || (leadVisitPlot || 'General Project Tour'),
         scheduledAt: dateFormatted,
         assignedAgentId: Number(hostAg?.id || selectedLead.assignedAgentId || user?.id) || undefined,
-        assignedAgentName: hostAg?.name || leadVisitHostAgent || user?.name || 'Agent',
+        assignedAgentName: hostAg?.name || leadVisitHostAgent || selectedLead.assignedAgentName || user?.name || 'Agent',
         visitorNote: trimmedNotes,
       });
     }
@@ -996,8 +1017,23 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       alert('The site visit could not be saved. Check the selected lead and company, then try again.');
       return;
     }
-    storageService.saveSiteVisit(created);
     setApiSiteVisits(prev => [created!, ...prev.filter(v => v.id !== created!.id)]);
+
+    // Automatically transition lead status to 'Site Visit Scheduled'
+    if (selectedLead.status !== 'Converted' && selectedLead.status !== 'Booking In Progress') {
+      const updatedLead: Lead = { ...selectedLead, status: 'Site Visit Scheduled' };
+      setSelectedLead(updatedLead);
+      setLeads(prev => prev.map(l => l.id === selectedLead.id ? updatedLead : l));
+      const numericId = parseInt(String(selectedLead.id).replace('db-', ''), 10);
+      if (!isNaN(numericId)) {
+        await apiClient.put(`/leads/${numericId}`, {
+          name: updatedLead.name,
+          phone: updatedLead.phone,
+          status: 'Site Visit Scheduled',
+          companyId: isJaminUser ? 2 : 1
+        }).catch(() => { });
+      }
+    }
 
     storageService.addAuditLog({
       id: `aud-${Date.now()}`,
@@ -1008,13 +1044,12 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       entityType: 'SiteVisit',
       entityId: created.id,
       companyId: tenant?.id,
-      companyName: tenant?.name,
-      details: `Scheduled site visit for LEAD: ${selectedLead.name} at ${leadVisitProject} (${leadVisitPlot}).`,
+      details: `Scheduled site visit for LEAD: ${selectedLead.name} at ${projectObj?.name || leadVisitProject} (${plotObj?.plotNumber || leadVisitPlot || 'General Project Tour'}).`,
     });
 
     window.dispatchEvent(new Event('nexus_storage_updated'));
     setIsLeadSiteVisitModalOpen(false);
-    showToast(`✓ Site visit scheduled for ${selectedLead.name}!`);
+    showToast(`✓ Site visit scheduled for ${selectedLead.name}! Status updated to "Site Visit Scheduled".`);
   };
 
   const handleManualAssignConfirm = () => {
@@ -1140,7 +1175,24 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   };
 
   const handleOpenEdit = (lead: Lead) => {
-    setFormData({ ...lead });
+    const budget = (lead as any).budgetRange || lead.customFields?.budgetRange || lead.customFields?.investmentCapacity || '';
+    const timeline = (lead as any).readyToRegister || lead.customFields?.readyToRegister || '';
+    const proj = lead.targetDevelopment || lead.customFields?.targetDevelopment || lead.customFields?.project || '';
+
+    setFormData({
+      ...lead,
+      targetDevelopment: proj,
+      budgetRange: budget,
+      readyToRegister: timeline,
+      customFields: {
+        ...(lead.customFields || {}),
+        budgetRange: budget,
+        investmentCapacity: budget,
+        readyToRegister: timeline,
+        targetDevelopment: proj,
+        project: proj,
+      },
+    });
     setIsEditDrawerOpen(true);
   };
 
@@ -1157,8 +1209,12 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       : (resolvedAgentId ? 'Agent' : 'Unassigned');
 
     const targetCompanyId = formData.companyId || tenant?.id || 't-ghl-01';
-    const existingMatch = leads.find(l => l.id === formData.id) || (formData.phone ? storageService.findLeadByPhone(formData.phone, targetCompanyId) : null);
+    const existingMatch = leads.find(l => l.id === formData.id) || (formData.phone ? leads.find(l => (l.phone || '').replace(/\D/g, '').slice(-10) === formData.phone.replace(/\D/g, '').slice(-10)) : null);
     const isExistingById = Boolean(existingMatch);
+
+    const resolvedBudget = formData.budgetRange || formData.customFields?.budgetRange || formData.customFields?.investmentCapacity || existingMatch?.budgetRange || existingMatch?.customFields?.budgetRange || '';
+    const resolvedTimeline = formData.readyToRegister || formData.customFields?.readyToRegister || existingMatch?.readyToRegister || existingMatch?.customFields?.readyToRegister || '';
+    const resolvedProj = formData.targetDevelopment || formData.customFields?.targetDevelopment || formData.customFields?.project || existingMatch?.targetDevelopment || existingMatch?.customFields?.targetDevelopment || '';
 
     let leadToSave: Lead;
     let isUpdated = isExistingById;
@@ -1171,22 +1227,41 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         id: existingMatch.id, // Preserve existing ID
         companyId: existingMatch.companyId || targetCompanyId,
         status: formData.status || existingMatch.status || 'New',
+        targetDevelopment: resolvedProj,
+        budgetRange: resolvedBudget,
+        readyToRegister: resolvedTimeline,
         // An empty selection means explicitly unassigned. Do not silently retain the old agent.
         assignedAgentId: resolvedAgentId,
         assignedAgentName: resolvedAgentId ? resolvedAgentName : 'Unassigned',
         customFields: {
           ...(existingMatch.customFields || {}),
           ...(formData.customFields || {}),
+          budgetRange: resolvedBudget,
+          investmentCapacity: resolvedBudget,
+          readyToRegister: resolvedTimeline,
+          targetDevelopment: resolvedProj,
+          project: resolvedProj,
         },
       };
     } else {
       leadToSave = {
         ...formData,
         status: formData.status || 'New',
+        targetDevelopment: resolvedProj,
+        budgetRange: resolvedBudget,
+        readyToRegister: resolvedTimeline,
         assignedAgentId: resolvedAgentId,
         assignedAgentName: resolvedAgentName,
         companyId: targetCompanyId,
         createdAt: formData.createdAt || new Date().toISOString().split('T')[0],
+        customFields: {
+          ...(formData.customFields || {}),
+          budgetRange: resolvedBudget,
+          investmentCapacity: resolvedBudget,
+          readyToRegister: resolvedTimeline,
+          targetDevelopment: resolvedProj,
+          project: resolvedProj,
+        },
       } as Lead;
     }
 
@@ -1209,9 +1284,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
           targetDevelopment: leadToSave.targetDevelopment,
           assignedAgentId: parsedAgentId,
           assignedAgentName: resolvedAgentName !== 'Unassigned' ? resolvedAgentName : undefined,
-          budgetRange: leadToSave.customFields?.budgetRange || leadToSave.customFields?.investmentCapacity || '',
-          readyToRegister: leadToSave.customFields?.readyToRegister || (leadToSave as any).readyToRegister || '',
-          investmentCapacity: leadToSave.customFields?.investmentCapacity || ''
+          budgetRange: leadToSave.budgetRange || leadToSave.customFields?.budgetRange || leadToSave.customFields?.investmentCapacity || '',
+          readyToRegister: leadToSave.readyToRegister || leadToSave.customFields?.readyToRegister || '',
+          investmentCapacity: leadToSave.customFields?.investmentCapacity || leadToSave.budgetRange || ''
         });
         if (res.success && res.data) {
           leadToSave.id = String(res.data.id);
@@ -1233,9 +1308,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
             targetDevelopment: leadToSave.targetDevelopment,
             assignedAgentId: parsedAgentId,
             assignedAgentName: resolvedAgentName !== 'Unassigned' ? resolvedAgentName : undefined,
-            budgetRange: leadToSave.customFields?.budgetRange || leadToSave.customFields?.investmentCapacity || '',
-            readyToRegister: leadToSave.customFields?.readyToRegister || (leadToSave as any).readyToRegister || '',
-            investmentCapacity: leadToSave.customFields?.investmentCapacity || ''
+            budgetRange: leadToSave.budgetRange || leadToSave.customFields?.budgetRange || leadToSave.customFields?.investmentCapacity || '',
+            readyToRegister: leadToSave.readyToRegister || leadToSave.customFields?.readyToRegister || '',
+            investmentCapacity: leadToSave.customFields?.investmentCapacity || leadToSave.budgetRange || ''
           });
           if (response && response.success === false) {
             throw new Error(response.message || 'The backend rejected the lead update.');
@@ -1250,7 +1325,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       return;
     }
 
-    storageService.saveLead(leadToSave);
+    window.dispatchEvent(new Event('nexus_storage_updated'));
 
     // ── Immediately sync React state so the 360 view shows the saved values ──
     setLeads(prev => {
@@ -1316,7 +1391,6 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       } catch (err) {
         console.error('Failed to delete lead from DB', err);
       }
-      storageService.deleteLead(lead.id);
       storageService.addAuditLog({
         id: `aud-${Date.now()}`,
         timestamp: new Date().toISOString(),
@@ -1349,39 +1423,18 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.id === '2';
     const conversionResult = !isNaN(Number(cleanId))
       ? await jaminApiService.convertLead(cleanId, undefined, undefined, selectedLead.notes)
-      : { success: true, customerId: undefined };
+      : { success: !isJamin, customerId: undefined, message: isJamin ? 'In Jamin Bazaar, an active booking with verified token payment is required.' : undefined };
 
     if (!conversionResult.success) {
-      showToast('Unable to convert this lead. No records were changed.');
+      showToast(conversionResult.message || 'Unable to convert this lead. In Jamin Bazaar, lead conversion requires a verified token payment on an active plot booking.');
       return;
     }
     if (isJamin && !conversionResult.customerId) {
-      showToast('Unable to create the customer record. The lead was not converted.');
+      showToast('Unable to create the customer record. In Jamin Bazaar, an active verified plot booking is required.');
       return;
     }
 
     const updatedLead: Lead = { ...selectedLead, status: 'Converted' };
-    storageService.saveLead(updatedLead);
-    if (!conversionResult.customerId) {
-      storageService.saveCustomer({
-        id: `cust-${Date.now()}`,
-        companyId: tenant.id,
-        name: selectedLead.name,
-        phone: selectedLead.phone,
-        email: selectedLead.email || '',
-        status: 'Active',
-        assignedAgentId: selectedLead.assignedAgentId,
-        assignedAgentName: selectedLead.assignedAgentName,
-        location: selectedLead.location || '',
-        lastContacted: new Date().toISOString(),
-        openDealsCount: 0,
-        totalValue: 0,
-        createdAt: new Date().toISOString(),
-        notes: selectedLead.notes || '',
-        customFields: selectedLead.customFields,
-      });
-    }
-
     showToast(`✓ Lead "${selectedLead.name}" converted to Customer successfully.`);
     setIsConvertModalOpen(false);
     setIsDetailDrawerOpen(false);
@@ -1697,8 +1750,8 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       },
     },
     {
-      label: 'Convert to Customer',
-      icon: <Sparkles size={14} color="#10b981" className="leads-action-icon" />,
+      label: isJamin ? 'Book Plot / Convert' : 'Convert to Customer',
+      icon: isJamin ? <Building2 size={14} color="#0284c7" className="leads-action-icon" /> : <Sparkles size={14} color="#10b981" className="leads-action-icon" />,
       onClick: l => handleStartConvert(l),
     },
     {
@@ -1774,10 +1827,12 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                       { value: 'New', label: 'New' },
                       { value: 'Contacted', label: 'Contacted' },
                       { value: 'Interested', label: 'Interested' },
-                      { value: 'Qualified', label: 'Qualified' },
                       { value: 'Follow-up Required', label: 'Follow-up Required' },
                       { value: 'Callback', label: 'Callback' },
                       { value: 'No Response', label: 'No Response' },
+                      { value: 'Site Visit Scheduled', label: 'Site Visit Scheduled' },
+                      { value: 'Site Visit Completed', label: 'Site Visit Completed' },
+                      { value: 'Booking In Progress', label: 'Booking In Progress' },
                       { value: 'Not Interested', label: 'Not Interested' },
                       { value: 'Junk', label: 'Junk' },
                       { value: 'Lost', label: 'Lost' },
@@ -1973,7 +2028,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
             null;
 
           /** ── User-facing message ── */
-          const userMessage =
+          const rawUserMessage =
             (selectedLead as any).message ||
             (selectedLead as any).userMessage ||
             selectedLead.customFields?.message ||
@@ -1983,6 +2038,20 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
             (selectedLead as any).whatAreYouLookingFor ||
             selectedLead.notes ||
             null;
+
+          const userMessage = rawUserMessage
+            ? String(rawUserMessage)
+              .split('\n')
+              .filter(line => {
+                const trimmed = line.trim();
+                if (/^\[\d{1,2}\/\d{1,2}\/\d{4}[^\]]*\]\s*(Interested|Follow-up|Call|No Response|Converted|Not Interested|Wrong Number|Site Visit)/i.test(trimmed)) return false;
+                if (/^\[Call Disposition\s*-.*?\]:/i.test(trimmed)) return false;
+                if (/^\[[\d/]+\]\s.*(Reason|Wrong Number|Not Interested).*/i.test(trimmed)) return false;
+                return true;
+              })
+              .join('\n')
+              .trim() || null
+            : null;
 
           // ══════════════════════════════════════════════════════════════════
           //  JAMIN ONLY: Tabbed 360 Layout
@@ -2087,22 +2156,10 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                           <Calendar size={15} color="var(--primary-600)" /> Follow-ups ({leadFollowups.length})
                         </h4>
                         <button type="button" className="btn btn-sm btn-secondary" onClick={() => handleOpenJaminSchedule(selectedLead)} style={{ fontSize: '11px', padding: '3px 10px', fontWeight: 600, color: 'var(--primary-600)', borderColor: 'var(--primary-200, #fca5a5)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          <Calendar size={12} /> {selectedLead.nextFollowupDate ? 'Reschedule' : '+ Schedule'}
+                          <Calendar size={12} /> + Schedule
                         </button>
                       </div>
-                      {selectedLead.nextFollowupDate && (
-                        <div style={{ padding: '10px 14px', borderRadius: 8, backgroundColor: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)', marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                          <div>
-                            <div style={{ fontSize: '11px', textTransform: 'uppercase', fontWeight: 700, color: '#dc2626' }}>Next Action</div>
-                            <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', marginTop: 2 }}>
-                              {selectedLead.nextFollowupType && <span style={{ marginRight: 6 }}>{selectedLead.nextFollowupType === 'call' ? '📞' : selectedLead.nextFollowupType === 'whatsapp' ? '💬' : '🤝'} •</span>}
-                              {selectedLead.nextFollowupDate}
-                            </div>
-                          </div>
-                          <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: 12, backgroundColor: '#fee2e2', color: '#991b1b', fontWeight: 700 }}>Action Due</span>
-                        </div>
-                      )}
-                      {leadFollowups.length === 0 && !selectedLead.nextFollowupDate ? (
+                      {leadFollowups.length === 0 ? (
                         <div style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '20px', textAlign: 'center', backgroundColor: 'var(--bg-surface)', borderRadius: 8, border: '1px dashed var(--border-base)' }}>
                           No follow-ups scheduled yet. Click "+ Schedule" to set a task.
                         </div>
@@ -2256,10 +2313,14 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                   {drawerActiveTab === 'activity' && (() => {
                     const allLogs = storageService.getAuditLogs(tenant?.id) || [];
                     const cleanLeadId = String(selectedLead.id || '').replace('lead-', '').replace('db-', '').replace('l-', '').trim();
+                    const leadPhone = (selectedLead.phone || '').replace(/\D/g, '').slice(-10);
                     const leadLogs = allLogs.filter(l => {
-                      if (!l.entityId) return false;
-                      const logId = String(l.entityId).replace('lead-', '').replace('db-', '').replace('l-', '').trim();
-                      return logId === cleanLeadId || l.entityId === String(selectedLead.id);
+                      const logId = String(l.entityId || '').replace('lead-', '').replace('db-', '').replace('l-', '').trim();
+                      const logLeadId = String(l.leadId || '').replace('lead-', '').replace('db-', '').replace('l-', '').trim();
+                      if (cleanLeadId && (logId === cleanLeadId || logLeadId === cleanLeadId)) return true;
+                      if (l.entityId === String(selectedLead.id)) return true;
+                      if (leadPhone && l.details && l.details.includes(leadPhone)) return true;
+                      return false;
                     });
                     return (
                       <div className="card lead-detail-card">
@@ -2361,16 +2422,16 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: 4,
-                          backgroundColor: '#10b981',
+                          backgroundColor: isJamin ? '#0284c7' : '#10b981',
                           color: '#ffffff',
                           border: 'none',
                           borderRadius: 6,
                           fontWeight: 600,
                           cursor: 'pointer',
                         }}
-                        title="Convert this lead into an active Customer record"
+                        title={isJamin ? "Formalize plot booking & convert lead via verified token payment" : "Convert this lead into an active Customer record"}
                       >
-                        <Sparkles size={12} /> Convert to Customer
+                        {isJamin ? <Building2 size={12} /> : <Sparkles size={12} />} {isJamin ? 'Book Plot / Convert' : 'Convert to Customer'}
                       </button>
                     )}
                 </div>
@@ -2443,60 +2504,12 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                       gap: 4
                     }}
                   >
-                    <Calendar size={12} /> {selectedLead.nextFollowupDate ? 'Reschedule' : '+ Schedule Follow-up'}
+                    <Calendar size={12} /> + Schedule Follow-up
                   </button>
                 </div>
 
-                {/* Next Follow-up Banner */}
-                {selectedLead.nextFollowupDate ? (
-                  <div
-                    style={{
-                      padding: '10px 14px',
-                      borderRadius: 8,
-                      backgroundColor: 'rgba(239, 68, 68, 0.06)',
-                      border: '1px solid rgba(239, 68, 68, 0.2)',
-                      marginBottom: leadFollowups.length > 0 ? 12 : 0,
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      flexWrap: 'wrap',
-                      gap: 8
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontSize: '11px', textTransform: 'uppercase', fontWeight: 700, color: '#dc2626' }}>
-                        Next Scheduled Action
-                      </div>
-                      <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', marginTop: 2 }}>
-                        {selectedLead.nextFollowupType && (
-                          <span style={{ marginRight: '6px', textTransform: 'capitalize' }}>
-                            {selectedLead.nextFollowupType === 'call' && '📞 Phone Call'}
-                            {selectedLead.nextFollowupType === 'whatsapp' && '💬 WhatsApp'}
-                            {selectedLead.nextFollowupType === 'meeting' && '🤝 Meeting'}
-                            {!['call', 'whatsapp', 'meeting'].includes(selectedLead.nextFollowupType) && selectedLead.nextFollowupType}
-                            {' •'}
-                          </span>
-                        )}
-                        {selectedLead.nextFollowupDate}
-                      </div>
-                    </div>
-                    <span
-                      style={{
-                        fontSize: '11px',
-                        padding: '2px 8px',
-                        borderRadius: 12,
-                        backgroundColor: '#fee2e2',
-                        color: '#991b1b',
-                        fontWeight: 700
-                      }}
-                    >
-                      Action Due
-                    </span>
-                  </div>
-                ) : null}
-
                 {/* List of Follow-up Records */}
-                {leadFollowups.length === 0 && !selectedLead.nextFollowupDate ? (
+                {leadFollowups.length === 0 ? (
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>
                     No follow-ups scheduled for this prospect yet. Click "+ Schedule Follow-up" to set a task.
                   </div>
@@ -3045,17 +3058,20 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
               >
                 <option value="New">New</option>
                 <option value="Contacted">Contacted</option>
-                <option value="Qualified">Qualified</option>
-                <option value="Proposal">Proposal</option>
-                <option value="Negotiation">Negotiation</option>
                 <option value="Interested">Interested</option>
                 <option value="Follow-up Required">Follow-up Required</option>
                 <option value="Callback">Callback</option>
                 <option value="No Response">No Response</option>
+                <option value="Site Visit Scheduled">Site Visit Scheduled</option>
+                <option value="Site Visit Completed">Site Visit Completed</option>
+                <option value="Booking In Progress">Booking In Progress</option>
                 <option value="Not Interested">Not Interested</option>
                 <option value="Junk">Junk</option>
                 <option value="Lost">Lost</option>
-                <option value="Converted">Converted</option>
+                {!isJamin && <option value="Converted">Converted</option>}
+                {isJamin && formData.status === 'Converted' && (
+                  <option value="Converted" disabled>Converted (Via Verified Booking)</option>
+                )}
               </select>
             </div>
             <div className="form-group">
@@ -3148,7 +3164,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                     }}
                   >
                     <option value="">-- Select Available Project --</option>
-                    {availableProjects.map(proj => (
+                    {(availableProjects || []).map(proj => (
                       <option key={proj.id} value={proj.name}>
                         {proj.name}
                       </option>
@@ -3160,13 +3176,19 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                     <label className="form-label">Plot Budget Range</label>
                     <select
                       className="form-select"
-                      value={formData.customFields?.budgetRange || ''}
-                      onChange={e =>
-                        setFormData({
-                          ...formData,
-                          customFields: { ...formData.customFields, budgetRange: e.target.value },
-                        })
-                      }
+                      value={formData.budgetRange || formData.customFields?.budgetRange || formData.customFields?.investmentCapacity || ''}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setFormData(prev => ({
+                          ...prev,
+                          budgetRange: val,
+                          customFields: {
+                            ...prev.customFields,
+                            budgetRange: val,
+                            investmentCapacity: val,
+                          },
+                        }));
+                      }}
                     >
                       <option value="">-- Not Selected --</option>
                       <option value="₹25L - ₹45L">₹25L - ₹45L</option>
@@ -3179,13 +3201,18 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                     <label className="form-label">Ready to Register / Timeline</label>
                     <select
                       className="form-select"
-                      value={formData.customFields?.readyToRegister || ''}
-                      onChange={e =>
-                        setFormData({
-                          ...formData,
-                          customFields: { ...formData.customFields, readyToRegister: e.target.value },
-                        })
-                      }
+                      value={(formData.readyToRegister as string) || formData.customFields?.readyToRegister || ''}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setFormData(prev => ({
+                          ...prev,
+                          readyToRegister: val,
+                          customFields: {
+                            ...prev.customFields,
+                            readyToRegister: val,
+                          },
+                        }));
+                      }}
                     >
                       <option value="">-- Not Selected --</option>
                       <option value="Immediate">Immediate</option>
@@ -3266,32 +3293,81 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       <Modal
         isOpen={isConvertModalOpen && !!selectedLead}
         onClose={() => setIsConvertModalOpen(false)}
-        title="Convert Lead to Customer"
-        subtitle={`Promote ${selectedLead?.name || ''} to your Customer 360 database`}
+        title={isJamin ? "Formalize Booking / Customer Conversion" : "Convert Lead to Customer"}
+        subtitle={isJamin ? `Convert ${selectedLead?.name || ''} via Plot Booking & Verified Token` : `Promote ${selectedLead?.name || ''} to your Customer 360 database`}
         footer={
-          <>
-            <button className="btn btn-secondary" onClick={() => setIsConvertModalOpen(false)}>
-              Cancel
-            </button>
-            <button
-              className="btn btn-primary"
-              onClick={handleConfirmConvert}
-              style={{
-                background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
-                borderColor: '#16a34a',
-                color: '#ffffff',
-                fontWeight: 600,
-              }}
-            >
-              ✓ Confirm & Convert to Customer
-            </button>
-          </>
+          isJamin ? (
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', width: '100%', flexWrap: 'wrap' }}>
+              <button className="btn btn-secondary" onClick={() => setIsConvertModalOpen(false)}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  setIsConvertModalOpen(false);
+                  handleNavigate('bookings');
+                }}
+                style={{
+                  background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                  borderColor: '#0284c7',
+                  color: '#ffffff',
+                  fontWeight: 600,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <Building2 size={14} /> Go to Bookings (Formalize Plot Booking) →
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={handleConfirmConvert}
+                title="Verify if this lead already has a verified booking token payment"
+              >
+                Verify Existing Booking & Convert
+              </button>
+            </div>
+          ) : (
+            <>
+              <button className="btn btn-secondary" onClick={() => setIsConvertModalOpen(false)}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleConfirmConvert}
+                style={{
+                  background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                  borderColor: '#16a34a',
+                  color: '#ffffff',
+                  fontWeight: 600,
+                }}
+              >
+                ✓ Confirm & Convert to Customer
+              </button>
+            </>
+          )
         }
       >
         <div className="lead-modal-content" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <p className="lead-modal-desc" style={{ fontSize: '13.5px', color: 'var(--text-secondary)' }}>
-            Converting this prospect will mark the lead as <strong>Converted</strong> and create a permanent active record in <strong>Customer 360</strong>.
-          </p>
+          {isJamin ? (
+            <div style={{
+              background: '#eff6ff',
+              border: '1px solid #bfdbfe',
+              borderRadius: 8,
+              padding: '12px 14px',
+              fontSize: '13px',
+              color: '#1e40af',
+            }}>
+              <strong>📌 Jamin Bazaar Verified Booking Policy:</strong>
+              <div style={{ marginTop: 4, color: '#1e3a8a' }}>
+                Leads cannot bypass property reservation. In Jamin Bazaar, a lead is promoted to <strong>Customer 360</strong> once a plot booking is created and its token advance is officially verified by finance.
+              </div>
+            </div>
+          ) : (
+            <p className="lead-modal-desc" style={{ fontSize: '13.5px', color: 'var(--text-secondary)' }}>
+              Converting this prospect will mark the lead as <strong>Converted</strong> and create a permanent active record in <strong>Customer 360</strong>.
+            </p>
+          )}
 
           <div style={{
             background: 'var(--bg-card-subtle, #f8fafc)',
@@ -3317,15 +3393,45 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                 <span>{selectedLead?.email}</span>
               </div>
             )}
-            {selectedLead?.location && (
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Location / Interest:</span>
-                <span>{selectedLead?.location}</span>
-              </div>
-            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Lead Location (Current City):</span>
+              <span>{selectedLead?.location || '—'}</span>
+            </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-muted)' }}>Assigned Agent:</span>
               <span>{(() => { const n = selectedLead?.assignedAgentName || ''; return (!n || n === 'Unassigned' || n.toLowerCase() === 'yanosh') ? 'Unassigned' : n; })()}</span>
+            </div>
+
+            {/* Requirements & Preferences */}
+            <div style={{
+              marginTop: 6,
+              paddingTop: 8,
+              borderTop: '1px dashed var(--border-base, #e2e8f0)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6
+            }}>
+              <div style={{ fontSize: '11px', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-muted)' }}>
+                Requirements &amp; Preferences
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Target Project:</span>
+                <strong style={{ color: 'var(--primary-600, #0284c7)' }}>
+                  {selectedLead?.targetDevelopment || selectedLead?.customFields?.targetDevelopment || selectedLead?.customFields?.project || '—'}
+                </strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Budget Range:</span>
+                <span style={{ color: '#059669', fontWeight: 600 }}>
+                  {selectedLead?.budgetRange || selectedLead?.customFields?.budgetRange || selectedLead?.customFields?.investmentCapacity || (selectedLead as any)?.budgetRange || '—'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Ready to Register:</span>
+                <span>
+                  {selectedLead?.readyToRegister || selectedLead?.customFields?.readyToRegister || (selectedLead as any)?.readyToRegister || '—'}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -3839,26 +3945,47 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
             <div className="sitevisit-form-grid-2">
               <div className="form-group">
-                <label className="form-label">Project</label>
+                <label className="form-label">Project *</label>
                 <select
                   className="form-select"
-                  value={leadVisitProject}
-                  onChange={e => setLeadVisitProject(e.target.value)}
+                  required
+                  value={leadVisitProjectId}
+                  onChange={e => handleLeadVisitProjectChange(e.target.value)}
                 >
-                  <option value="Greenfield Meadows Phase 2">Greenfield Meadows Phase 2</option>
-                  <option value="Valley Crest Country Estates">Valley Crest Country Estates</option>
-                  <option value="Emerald Orchid Enclave">Emerald Orchid Enclave</option>
+                  <option value="">-- Select Project --</option>
+                  {jaminApiProjects.map(p => (
+                    <option key={p.id} value={String(p.id)}>
+                      {p.name}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div className="form-group">
-                <label className="form-label">Plot Number Target</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={leadVisitPlot}
-                  onChange={e => setLeadVisitPlot(e.target.value)}
-                  placeholder="e.g. Plot #15"
-                />
+                <label className="form-label">
+                  Specific Plot
+                  <span style={{ fontSize: 11, color: 'var(--text-secondary)', marginLeft: 4 }}>
+                    (optional)
+                  </span>
+                </label>
+                <select
+                  className="form-select"
+                  value={leadVisitPlotId}
+                  onChange={e => handleLeadVisitPlotChange(e.target.value)}
+                  disabled={!leadVisitProjectId || leadVisitPlotsList.length === 0}
+                >
+                  <option value="">-- General Project Tour --</option>
+                  {leadVisitPlotsList.map((pl: any) => (
+                    <option key={pl.id} value={String(pl.id)}>
+                      {pl.plotNumber} · {pl.dimensions || ''} · {pl.status || ''}
+                      {pl.price ? ` · ₹${Number(pl.price).toLocaleString('en-IN')}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {leadVisitProjectId && leadVisitPlotsList.length === 0 && (
+                  <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
+                    No plots added for this project yet.
+                  </p>
+                )}
               </div>
             </div>
 

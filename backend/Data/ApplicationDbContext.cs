@@ -51,6 +51,9 @@ public class ApplicationDbContext : DbContext
     /// <summary>Plot booking/sale agreements with lifecycle tracking.</summary>
     public DbSet<JaminBooking> JaminBookings => Set<JaminBooking>();
 
+    /// <summary>Payment ledger entries for plot bookings.</summary>
+    public DbSet<JaminPayment> JaminPayments => Set<JaminPayment>();
+
     // IRM Entities
     public DbSet<Investor> Investors => Set<Investor>();
     public DbSet<InvestorKyc> InvestorKycs => Set<InvestorKyc>();
@@ -62,6 +65,32 @@ public class ApplicationDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<JaminBooking>(entity =>
+        {
+            entity.ToTable("jamin_bookings");
+            entity.HasIndex(b => new { b.CompanyId, b.PlotId })
+                .HasDatabaseName("IX_jamin_bookings_CompanyId_PlotId_Active")
+                .HasFilter("\"PlotId\" IS NOT NULL AND \"Status\" IN ('Hold', 'Pending Verification', 'Booking Pending Verification', 'Token Paid', 'Token Verified', 'Agreement Signed', 'Registration Completed')")
+                .IsUnique();
+        });
+
+        modelBuilder.Entity<JaminPayment>(entity =>
+        {
+            entity.ToTable("jamin_payments");
+            entity.HasOne(p => p.Booking)
+                .WithMany(b => b.Payments)
+                .HasForeignKey(p => p.BookingId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(p => p.Customer)
+                .WithMany(c => c.Payments)
+                .HasForeignKey(p => p.CustomerId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(p => p.Company)
+                .WithMany()
+                .HasForeignKey(p => p.CompanyId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
 
         // Apply entity configurations
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);

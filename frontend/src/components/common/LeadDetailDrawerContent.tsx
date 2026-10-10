@@ -15,10 +15,10 @@ import {
   User,
   MapPin,
 } from 'lucide-react';
-import { AuditLog, CallDisposition, Consultation, SiteVisit, Followup } from '../../types';
+import { AuditLog, CallDisposition, CallRecord, Consultation, SiteVisit, Followup } from '../../types';
 import { storageService } from '../../services/storageService';
 import { jaminApiService } from '../../services/jaminApiService';
-import { getAuditLogs, getFollowups } from '../../services/ghlApiService';
+import { getAuditLogs, getFollowups, getCalls } from '../../services/ghlApiService';
 import { useAuth } from '../../context/AuthContext';
 import { StatusChip } from './StatusChip';
 
@@ -80,6 +80,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   const [apiSiteVisits, setApiSiteVisits] = useState<SiteVisit[]>([]);
   const [apiFollowups, setApiFollowups] = useState<Followup[]>([]);
   const [apiAuditLogs, setApiAuditLogs] = useState<AuditLog[]>([]);
+  const [apiCalls, setApiCalls] = useState<CallRecord[]>([]);
 
   useEffect(() => {
     setCallTab('agent');
@@ -87,13 +88,33 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
 
   useEffect(() => {
     let isMounted = true;
-    jaminApiService.getSiteVisits(true).then(visits => {
-      if (isMounted) setApiSiteVisits(visits || []);
-    }).catch(() => { if (isMounted) setApiSiteVisits([]); });
+    const fetchSiteVisits = () => {
+      jaminApiService.getSiteVisits(true).then(visits => {
+        if (isMounted) setApiSiteVisits(visits || []);
+      }).catch(() => { if (isMounted) setApiSiteVisits([]); });
+    };
+    fetchSiteVisits();
+    window.addEventListener('nexus_storage_updated', fetchSiteVisits);
+
     getFollowups(tenantId || tenant?.id).then(followupItems => {
       if (isMounted && followupItems) setApiFollowups(followupItems);
     }).catch(() => { if (isMounted) setApiFollowups([]); });
-    return () => { isMounted = false; };
+    
+    const fetchCalls = () => {
+      getCalls(tenantId || tenant?.id).then(records => {
+        if (isMounted && records) setApiCalls(records);
+      }).catch(() => {
+        if (isMounted) setApiCalls([]);
+      });
+    };
+    fetchCalls();
+    window.addEventListener('nexus_storage_updated', fetchCalls);
+
+    return () => { 
+      isMounted = false; 
+      window.removeEventListener('nexus_storage_updated', fetchCalls);
+      window.removeEventListener('nexus_storage_updated', fetchSiteVisits);
+    };
   }, [contactPhone, contactId, tenantId, tenant?.id]);
 
   useEffect(() => {
@@ -145,26 +166,74 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   // ── Site Visits lookup (Jamin Bazaar) ──────────────────────────────────────
   const leadSiteVisits = (() => {
     if (!contactId || !['lead', 'customer'].includes(contactType)) return [];
-    return apiSiteVisits.filter(v => contactType === 'customer'
-      ? String(v.customerId || '') === String(contactId)
-      : String(v.leadId || '') === String(contactId));
+    const cleanId = String(contactId).replace(/\D/g, '');
+    const phoneDigits = (contactPhone || selectedLead?.phone || '').replace(/\D/g, '').slice(-10);
+
+    return apiSiteVisits.filter(v => {
+      if (contactType === 'customer') {
+        const cId = String(v.customerId || '').replace(/\D/g, '');
+        if (cleanId && cId && cleanId === cId) return true;
+      } else {
+        const lId = String(v.leadId || '').replace(/\D/g, '');
+        if (cleanId && lId && cleanId === lId) return true;
+      }
+      const vPhoneDigits = (v.customerPhone || '').replace(/\D/g, '').slice(-10);
+      if (phoneDigits && vPhoneDigits && phoneDigits === vPhoneDigits) return true;
+      return false;
+    });
   })();
 
-  const handleConfirmLeadSiteVisit = (sv: SiteVisit) => {
-    storageService.saveSiteVisit({ ...sv, status: 'Scheduled' });
-    setSiteVisitsVersion(v => v + 1);
+  const handleConfirmLeadSiteVisit = async (sv: SiteVisit) => {
+    try {
+      await jaminApiService.confirmSiteVisit(sv.id);
+      setApiSiteVisits(prev => prev.map(v => String(v.id) === String(sv.id) ? { ...v, status: 'Scheduled' } : v));
+      setSiteVisitsVersion(v => v + 1);
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+    } catch (err) {
+      console.error('Failed to confirm site visit:', err);
+    }
+  };
+
+  const handleCompleteLeadSiteVisit = async (sv: SiteVisit) => {
+    try {
+      await jaminApiService.completeSiteVisit(sv.id, 'Completed from Lead Details');
+      setApiSiteVisits(prev => prev.map(v => String(v.id) === String(sv.id) ? { ...v, status: 'Completed', outcomeNotes: 'Completed from Lead Details' } : v));
+      setSiteVisitsVersion(v => v + 1);
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+    } catch (err) {
+      console.error('Failed to complete site visit:', err);
+    }
   };
 
   // ── Call history lookup ──────────────────────────────────────────────────────
-  const allCalls = storageService.getCalls(tenantId) || [];
+  const allCalls = useMemo(() => {
+    const local = storageService.getCalls(tenantId || tenant?.id) || [];
+    const map = new Map<string, CallRecord>();
+    apiCalls.forEach(c => map.set(String(c.id), c));
+    local.forEach(c => {
+      if (!map.has(String(c.id))) map.set(String(c.id), c);
+    });
+    return Array.from(map.values());
+  }, [apiCalls, tenantId, tenant?.id]);
+
+  const cleanContactId = String(contactId || '').replace(/\D/g, '');
   const fPhoneDigits = (contactPhone || '').replace(/\D/g, '').slice(-10);
 
   const selectedCalls = allCalls.filter(c => {
+    const cLeadIdClean = c.leadId ? String(c.leadId).replace(/\D/g, '') : '';
+    const cCustIdClean = c.customerId ? String(c.customerId).replace(/\D/g, '') : '';
+    const cPhoneDigits = (c.contactPhone || '').replace(/\D/g, '').slice(-10);
+
     const isMatch =
-      (contactId && contactId !== 'contact-new' &&
-        (c.leadId === contactId || (c as any).contactId === contactId || (c as any).investorId === contactId)) ||
-      ((c.contactPhone || '').replace(/\D/g, '').slice(-10) === fPhoneDigits &&
-        fPhoneDigits.length > 0);
+      (cleanContactId && contactType === 'customer' && cCustIdClean === cleanContactId) ||
+      (cleanContactId && contactType !== 'customer' && cLeadIdClean === cleanContactId) ||
+      (contactId && contactId !== 'contact-new' && (
+        c.leadId === contactId ||
+        c.customerId === contactId ||
+        (c as any).contactId === contactId ||
+        (c as any).investorId === contactId
+      )) ||
+      (fPhoneDigits && cPhoneDigits && fPhoneDigits === cPhoneDigits);
 
     if (!isMatch) return false;
 
@@ -248,12 +317,13 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
 
     // 3. Logged Calls
     selectedCalls.forEach(c => {
+      const outcomeText = !c.disposition || c.disposition === 'Skipped' ? 'Wrap-up Skipped' : `Outcome: ${c.disposition}`;
       events.push({
         id: `call-${c.id}`,
         timestamp: c.timestamp,
         action: `${c.direction.toUpperCase()}_CALL`,
         actor: c.agentName || 'Agent',
-        details: `${c.direction === 'inbound' ? 'Inbound' : 'Outbound'} call (${formatDuration(c.duration)}) • Outcome: ${c.disposition}${c.notes ? ` • Note: ${c.notes}` : ''}`,
+        details: `${c.direction === 'inbound' ? 'Inbound' : 'Outbound'} call (${formatDuration(c.duration)}) • ${outcomeText}${c.notes ? ` • Note: ${c.notes}` : ''}`,
         type: 'call',
         badgeColor: '#059669',
         badgeBg: '#d1fae5',
@@ -450,23 +520,27 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                   <div style={{ fontWeight: 600 }}>{selectedLead.createdAt}</div>
                 </div>
               )}
-              {selectedLead.targetDevelopment && (
+              {(selectedLead.targetDevelopment || selectedLead.customFields?.targetDevelopment || selectedLead.customFields?.project) && (
                 <div>
                   <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>TARGET DEVELOPMENT</span>
-                  <div style={{ fontWeight: 600, color: '#059669' }}>{selectedLead.targetDevelopment}</div>
+                  <div style={{ fontWeight: 600, color: '#059669' }}>
+                    {selectedLead.targetDevelopment || selectedLead.customFields?.targetDevelopment || selectedLead.customFields?.project}
+                  </div>
                 </div>
               )}
-              {(selectedLead.customFields?.budgetRange || (selectedLead as any).budgetRange) && (
+              {(selectedLead.budgetRange || selectedLead.customFields?.budgetRange || (selectedLead as any).customFields?.investmentCapacity) && (
                 <div>
                   <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>BUDGET RANGE</span>
-                  <div style={{ fontWeight: 600 }}>{selectedLead.customFields?.budgetRange || (selectedLead as any).budgetRange}</div>
+                  <div style={{ fontWeight: 600 }}>
+                    {selectedLead.budgetRange || selectedLead.customFields?.budgetRange || (selectedLead as any).customFields?.investmentCapacity}
+                  </div>
                 </div>
               )}
-              {(selectedLead.customFields?.readyToRegister || (selectedLead as any).readyToRegister) && (
+              {(selectedLead.readyToRegister || selectedLead.customFields?.readyToRegister) && (
                 <div>
                   <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>READY TO REGISTER</span>
                   <div style={{ fontWeight: 600, color: '#059669' }}>
-                    {selectedLead.customFields?.readyToRegister || (selectedLead as any).readyToRegister}
+                    {String(selectedLead.readyToRegister || selectedLead.customFields?.readyToRegister)}
                   </div>
                 </div>
               )}
@@ -496,34 +570,26 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                 const reasonLinePattern = /^\[[\d/]+\]\s.*(Reason|Wrong Number|Not Interested).*/i;
 
                 let notesContent = '';
-                if (hideAutoNotes) {
-                  if (
-                    selectedLead.customFields?.customerNotes &&
-                    typeof selectedLead.customFields.customerNotes === 'string' &&
-                    selectedLead.customFields.customerNotes.trim()
-                  ) {
-                    notesContent = selectedLead.customFields.customerNotes.trim();
-                  } else {
-                    const autoNotePattern1 =
-                      /^\[\d{1,2}\/\d{1,2}\/\d{4}\]\s*(Interested|Follow-up Required|Call Back|No Response|Converted|Not Interested|Wrong Number)/i;
-                    const autoNotePattern2 = /^\[Call Disposition\s*-.*?\]:/i;
-
-                    notesContent = (selectedLead.notes || '')
-                      .split('\n')
-                      .filter(line => {
-                        const trimmed = line.trim();
-                        if (reasonLinePattern.test(trimmed)) return false;
-                        if (autoNotePattern1.test(trimmed)) return false;
-                        if (autoNotePattern2.test(trimmed)) return false;
-                        return true;
-                      })
-                      .join('\n')
-                      .trim();
-                  }
+                if (
+                  selectedLead.customFields?.customerNotes &&
+                  typeof selectedLead.customFields.customerNotes === 'string' &&
+                  selectedLead.customFields.customerNotes.trim()
+                ) {
+                  notesContent = selectedLead.customFields.customerNotes.trim();
                 } else {
+                  const autoNotePattern1 =
+                    /^\[\d{1,2}\/\d{1,2}\/\d{4}[^\]]*\]\s*(Interested|Follow-up|Call Back|No Response|Converted|Not Interested|Wrong Number|Site Visit)/i;
+                  const autoNotePattern2 = /^\[Call Disposition\s*-.*?\]:/i;
+
                   notesContent = (selectedLead.notes || '')
                     .split('\n')
-                    .filter(line => !reasonLinePattern.test(line.trim()))
+                    .filter(line => {
+                      const trimmed = line.trim();
+                      if (reasonLinePattern.test(trimmed)) return false;
+                      if (autoNotePattern1.test(trimmed)) return false;
+                      if (autoNotePattern2.test(trimmed)) return false;
+                      return true;
+                    })
                     .join('\n')
                     .trim();
                 }
@@ -859,6 +925,21 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                           onClick={() => handleConfirmLeadSiteVisit(sv)}
                         >
                           <CheckCircle2 size={12} style={{ marginRight: 4 }} /> Confirm Visit
+                        </button>
+                      )}
+                      {(sv.status === 'Scheduled' || sv.status === 'Rescheduled') && (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-primary"
+                          style={{
+                            fontSize: '11px',
+                            padding: '3px 9px',
+                            backgroundColor: '#0284c7',
+                            borderColor: '#0284c7',
+                          }}
+                          onClick={() => handleCompleteLeadSiteVisit(sv)}
+                        >
+                          <CheckCircle2 size={12} style={{ marginRight: 4 }} /> Mark Completed
                         </button>
                       )}
                     </div>

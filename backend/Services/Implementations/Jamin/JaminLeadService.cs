@@ -176,7 +176,8 @@ public class JaminLeadService : IJaminLeadService
 
         var leadIdStr = id.ToString();
         var followups = await _context.Followups
-            .Where(f => f.CompanyId == JaminTenantId && (f.ContactId == leadIdStr || f.ContactPhone == lead.Phone))
+            .Include(f => f.AssignedAgent).ThenInclude(a => a!.Role)
+            .Where(f => f.CompanyId == JaminTenantId && (f.LeadId == id || f.ContactId == leadIdStr || f.ContactPhone == lead.Phone))
             .OrderByDescending(f => f.ScheduledAt)
             .Select(f => new FollowupResponseDto
             {
@@ -191,7 +192,8 @@ public class JaminLeadService : IJaminLeadService
                 Status = f.Status.ToString(),
                 Notes = f.Notes,
                 AssignedAgentId = f.AssignedAgentId,
-                AssignedAgentName = f.AssignedToName,
+                AssignedAgentName = f.AssignedAgent != null ? f.AssignedAgent.Name : (!string.IsNullOrWhiteSpace(f.AssignedToName) ? f.AssignedToName : "Unassigned"),
+                AssignedRole = f.AssignedAgent != null && f.AssignedAgent.Role != null ? f.AssignedAgent.Role.Name : "Sales Executive",
                 CreatedAt = f.CreatedAt
             })
             .ToListAsync(ct);
@@ -237,7 +239,7 @@ public class JaminLeadService : IJaminLeadService
             Name = dto.Name.Trim(),
             Phone = dto.Phone.Trim(),
             Email = dto.Email?.Trim() ?? string.Empty,
-            Location = dto.Location?.Trim() ?? "Tamil Nadu",
+            Location = dto.Location?.Trim()?? string.Empty,
             Source = dto.Source ?? "Direct Inbound",
             Status = "New",
             Priority = dto.Priority ?? "Medium",
@@ -337,10 +339,10 @@ public class JaminLeadService : IJaminLeadService
             ScheduledAt = dto.FollowupDate,
             Priority = "Medium",
             Status = FollowupStatus.Pending,
-            Notes = dto.Notes ?? $"{dto.FollowupType ?? "call"} follow-up scheduled",
+            Notes = dto.Notes?.Trim() ?? string.Empty,
             AssignedAgentId = dto.AssignedAgentId ?? lead.AssignedAgentId,
             AssignedToName = lead.AssignedAgentName ?? "Agent",
-            AssignedToRole = "sales_executive",
+            AssignedToRole = "Sales Executive",
             CreatedAt = DateTime.UtcNow
         };
 

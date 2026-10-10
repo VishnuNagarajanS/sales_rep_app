@@ -9,7 +9,7 @@ namespace backend.Controllers.SalesExecutive;
 
 [ApiController]
 [Route("api/sales-executive/leads")]
-[Authorize(Roles = "sales_executive,company_admin,sales_manager,super_admin")]
+[Authorize(Roles = "sales_executive,company_admin,super_admin")]
 public class SalesExecutiveLeadsController : ControllerBase
 {
     private readonly ILeadService _leadService;

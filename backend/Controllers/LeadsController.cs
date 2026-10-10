@@ -10,7 +10,7 @@ namespace backend.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "sales_executive,company_admin,sales_manager,super_admin,admin,manager")]
+[Authorize(Roles = "sales_executive,company_admin,super_admin,admin")]
 public class LeadsController : ControllerBase
 {
     private readonly ApplicationDbContext _db;
@@ -134,8 +134,49 @@ public class LeadsController : ControllerBase
         existing.Phone = updated.Phone;
         existing.Email = updated.Email;
         existing.Location = updated.Location;
-        existing.Source = updated.Source;
+        if (!string.IsNullOrWhiteSpace(updated.Source)) existing.Source = updated.Source.Trim();
+        if (existing.CompanyId == 2 && string.Equals(updated.Status, "Converted", StringComparison.OrdinalIgnoreCase) && !string.Equals(existing.Status, "Converted", StringComparison.OrdinalIgnoreCase))
+        {
+            var hasVerifiedBooking = await _db.JaminBookings
+                .Include(b => b.Payments)
+                .AnyAsync(b => b.LeadId == existing.Id &&
+                               b.Status != "Cancelled" && b.Status != "Voided" &&
+                               (b.PaymentStatus == "Verified" || b.Payments.Any(p => p.Status == "Verified" && p.PaymentType != "Refund")), ct);
+
+            if (!hasVerifiedBooking)
+            {
+                return BadRequest(ApiResponse<Lead>.FailureResult("In Jamin Bazaar, leads cannot be converted via generic lead edit. Conversion requires an active plot booking with a verified token payment."));
+            }
+        }
+
         existing.Status = updated.Status;
+
+        // Synchronize linked site visits when lead status changes
+        if (!string.IsNullOrWhiteSpace(updated.Status))
+        {
+            var leadPhone = existing.Phone?.Trim();
+            var visits = await _db.SiteVisits
+                .Where(s => s.TenantId == existing.CompanyId && (s.LeadId == existing.Id || (!string.IsNullOrEmpty(leadPhone) && s.CustomerPhone == leadPhone)))
+                .ToListAsync(ct);
+
+            if (string.Equals(updated.Status.Trim(), "Site Visit Completed", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var v in visits.Where(v => v.Status != "Cancelled"))
+                {
+                    v.Status = "Completed";
+                    v.UpdatedAt = DateTime.UtcNow;
+                }
+            }
+            else if (string.Equals(updated.Status.Trim(), "Site Visit Scheduled", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var v in visits.Where(v => v.Status == "Pending" || v.Status == "Requested"))
+                {
+                    v.Status = "Scheduled";
+                    v.UpdatedAt = DateTime.UtcNow;
+                }
+            }
+        }
+
         existing.Priority = updated.Priority;
         if (!string.Equals(_currentUser.Role, "sales_executive", StringComparison.OrdinalIgnoreCase))
         {
@@ -257,6 +298,21 @@ public class LeadsController : ControllerBase
         var lead = await GetScopedLeads().FirstOrDefaultAsync(l => l.Id == id, ct);
         if (lead == null)
             return NotFound(ApiResponse<object>.FailureResult("Lead not found"));
+
+        if (lead.CompanyId == 2)
+        {
+            var hasVerifiedBooking = await _db.JaminBookings
+                .Include(b => b.Payments)
+                .AnyAsync(b => b.LeadId == lead.Id && 
+                               b.Status != "Cancelled" && b.Status != "Voided" &&
+                               (b.PaymentStatus == "Verified" || b.Payments.Any(p => p.Status == "Verified" && p.PaymentType != "Refund")), ct);
+
+            if (!hasVerifiedBooking)
+            {
+                return BadRequest(ApiResponse<object>.FailureResult(
+                    "In Jamin Bazaar, leads cannot bypass the verified booking workflow. Lead-to-customer conversion requires an active plot booking with a verified token payment. Please formalize a booking and verify the token payment to convert this lead."));
+            }
+        }
 
         Customer? customer = null;
         var strategy = _db.Database.CreateExecutionStrategy();

@@ -14,8 +14,12 @@ export const STATUS_COLOR_MAP: Record<string, { bg: string; text: string; border
   Qualified: { bg: 'rgba(16, 185, 129, 0.12)', text: '#059669', border: 'rgba(16, 185, 129, 0.3)', variant: 'success' },
   Proposal: { bg: 'rgba(245, 158, 11, 0.12)', text: '#d97706', border: 'rgba(245, 158, 11, 0.3)', variant: 'warning' },
   Negotiation: { bg: 'rgba(236, 72, 153, 0.12)', text: '#db2777', border: 'rgba(236, 72, 153, 0.3)', variant: 'primary' },
+  'Site Visit Scheduled': { bg: 'rgba(59, 130, 246, 0.12)', text: '#2563eb', border: 'rgba(59, 130, 246, 0.3)', variant: 'info' },
+  'Site Visit Completed': { bg: 'rgba(16, 185, 129, 0.12)', text: '#059669', border: 'rgba(16, 185, 129, 0.3)', variant: 'success' },
+  'Booking In Progress': { bg: 'rgba(139, 92, 246, 0.12)', text: '#7c3aed', border: 'rgba(139, 92, 246, 0.3)', variant: 'purple' },
   Converted: { bg: 'rgba(16, 185, 129, 0.15)', text: '#047857', border: 'rgba(16, 185, 129, 0.4)', variant: 'success' },
   Lost: { bg: 'rgba(239, 68, 68, 0.12)', text: '#dc2626', border: 'rgba(239, 68, 68, 0.3)', variant: 'danger' },
+  Junk: { bg: 'rgba(100, 116, 139, 0.12)', text: '#64748b', border: 'rgba(100, 116, 139, 0.3)', variant: 'neutral' },
 
   // Priority
   Low: { bg: 'rgba(100, 116, 139, 0.12)', text: '#475569', border: 'rgba(100, 116, 139, 0.3)', variant: 'neutral' },
@@ -31,11 +35,31 @@ export const STATUS_COLOR_MAP: Record<string, { bg: string; text: string; border
   Callback: { bg: 'rgba(59, 130, 246, 0.12)', text: '#2563eb', border: 'rgba(59, 130, 246, 0.3)', variant: 'info' },
   'Wrong Number': { bg: 'rgba(100, 116, 139, 0.12)', text: '#64748b', border: 'rgba(100, 116, 139, 0.3)', variant: 'neutral' },
   'No Response': { bg: 'rgba(100, 116, 139, 0.12)', text: '#64748b', border: 'rgba(100, 116, 139, 0.3)', variant: 'neutral' },
+  Skipped: { bg: 'rgba(100, 116, 139, 0.12)', text: '#64748b', border: 'rgba(100, 116, 139, 0.3)', variant: 'neutral' },
 
-  // Plot Status
+  // Plot & Inventory Statuses
   Available: { bg: 'rgba(16, 185, 129, 0.12)', text: '#059669', border: 'rgba(16, 185, 129, 0.3)', variant: 'success' },
   Hold: { bg: 'rgba(245, 158, 11, 0.15)', text: '#d97706', border: 'rgba(245, 158, 11, 0.4)', variant: 'warning' },
+  'Hold Expired': { bg: 'rgba(100, 116, 139, 0.15)', text: '#64748b', border: 'rgba(100, 116, 139, 0.3)', variant: 'neutral' },
+  Booked: { bg: 'rgba(59, 130, 246, 0.12)', text: '#2563eb', border: 'rgba(59, 130, 246, 0.3)', variant: 'info' },
+  Registered: { bg: 'rgba(139, 92, 246, 0.12)', text: '#7c3aed', border: 'rgba(139, 92, 246, 0.3)', variant: 'purple' },
   Sold: { bg: 'rgba(239, 68, 68, 0.12)', text: '#dc2626', border: 'rgba(239, 68, 68, 0.3)', variant: 'danger' },
+
+  // Booking Lifecycle Statuses
+  'Pending Verification': { bg: 'rgba(245, 158, 11, 0.15)', text: '#d97706', border: 'rgba(245, 158, 11, 0.4)', variant: 'warning' },
+  'Booking Pending Verification': { bg: 'rgba(245, 158, 11, 0.15)', text: '#d97706', border: 'rgba(245, 158, 11, 0.4)', variant: 'warning' },
+  'Token Paid': { bg: 'rgba(59, 130, 246, 0.12)', text: '#2563eb', border: 'rgba(59, 130, 246, 0.3)', variant: 'info' },
+  'Token Verified': { bg: 'rgba(16, 185, 129, 0.12)', text: '#059669', border: 'rgba(16, 185, 129, 0.3)', variant: 'success' },
+  'Agreement Signed': { bg: 'rgba(79, 70, 229, 0.12)', text: '#4f46e5', border: 'rgba(79, 70, 229, 0.3)', variant: 'primary' },
+  'Registration Completed': { bg: 'rgba(16, 185, 129, 0.15)', text: '#047857', border: 'rgba(16, 185, 129, 0.4)', variant: 'success' },
+  Voided: { bg: 'rgba(100, 116, 139, 0.12)', text: '#475569', border: 'rgba(100, 116, 139, 0.3)', variant: 'neutral' },
+
+  // Payment Statuses
+  Verified: { bg: 'rgba(16, 185, 129, 0.12)', text: '#059669', border: 'rgba(16, 185, 129, 0.3)', variant: 'success' },
+  'Partially Paid': { bg: 'rgba(245, 158, 11, 0.12)', text: '#d97706', border: 'rgba(245, 158, 11, 0.3)', variant: 'warning' },
+  'Fully Paid': { bg: 'rgba(16, 185, 129, 0.15)', text: '#047857', border: 'rgba(16, 185, 129, 0.4)', variant: 'success' },
+  Refunded: { bg: 'rgba(239, 68, 68, 0.12)', text: '#dc2626', border: 'rgba(239, 68, 68, 0.3)', variant: 'danger' },
+  Failed: { bg: 'rgba(239, 68, 68, 0.15)', text: '#b91c1c', border: 'rgba(239, 68, 68, 0.4)', variant: 'danger' },
 
   // Site Visits & Consultations
   Requested: { bg: 'rgba(245, 158, 11, 0.15)', text: '#d97706', border: 'rgba(245, 158, 11, 0.4)', variant: 'warning' },

@@ -57,7 +57,11 @@ public class JaminSiteVisitService : IJaminSiteVisitService
 
         if (customerId.HasValue && customerId.Value > 0)
         {
-            query = query.Where(s => s.CustomerId == customerId.Value);
+            var custId = customerId.Value;
+            var customerPhone = await _context.Customers.Where(c => c.Id == custId).Select(c => c.Phone).FirstOrDefaultAsync(ct);
+            query = query.Where(s => s.CustomerId == custId || 
+                (customerPhone != null && s.CustomerPhone == customerPhone) ||
+                _context.JaminBookings.Any(b => b.CustomerId == custId && b.LeadId == s.LeadId));
         }
 
         if (!string.IsNullOrEmpty(status) && status != "All")
@@ -190,6 +194,25 @@ public class JaminSiteVisitService : IJaminSiteVisitService
         };
 
         _context.SiteVisits.Add(siteVisit);
+
+        // Automatically update lead status to Site Visit Scheduled (by ID or phone)
+        Lead? leadToUpdate = null;
+        if (dto.LeadId.HasValue && dto.LeadId.Value > 0)
+        {
+            leadToUpdate = await _context.Leads.FirstOrDefaultAsync(l => l.Id == dto.LeadId.Value, ct);
+        }
+        if (leadToUpdate == null && !string.IsNullOrWhiteSpace(dto.CustomerPhone))
+        {
+            var phoneClean = dto.CustomerPhone.Trim();
+            leadToUpdate = await _context.Leads.FirstOrDefaultAsync(l => l.Phone == phoneClean, ct);
+        }
+        if (leadToUpdate != null && leadToUpdate.Status != "Converted" && leadToUpdate.Status != "Booking In Progress")
+        {
+            leadToUpdate.Status = "Site Visit Scheduled";
+            leadToUpdate.UpdatedAt = DateTime.UtcNow;
+            if (!siteVisit.LeadId.HasValue) siteVisit.LeadId = leadToUpdate.Id;
+        }
+
         await _context.SaveChangesAsync(ct);
 
         return ApiResponse<JaminSiteVisitDto>.SuccessResult(MapToDto(siteVisit), "Site visit scheduled successfully.");
@@ -197,7 +220,8 @@ public class JaminSiteVisitService : IJaminSiteVisitService
 
     public async Task<ApiResponse<JaminSiteVisitDto>> ConfirmSiteVisitAsync(int id, CancellationToken ct = default)
     {
-        var visit = await GetScopedSiteVisits().FirstOrDefaultAsync(s => s.Id == id, ct);
+        var visit = await GetScopedSiteVisits().FirstOrDefaultAsync(s => s.Id == id, ct)
+                 ?? await _context.SiteVisits.FirstOrDefaultAsync(s => s.Id == id, ct);
         if (visit == null)
         {
             return ApiResponse<JaminSiteVisitDto>.FailureResult("Site visit not found.");
@@ -209,6 +233,22 @@ public class JaminSiteVisitService : IJaminSiteVisitService
 
         visit.Status = "Scheduled";
         visit.UpdatedAt = DateTime.UtcNow;
+
+        Lead? confirmLead = null;
+        if (visit.LeadId.HasValue && visit.LeadId.Value > 0)
+        {
+            confirmLead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == visit.LeadId.Value, ct);
+        }
+        if (confirmLead == null && !string.IsNullOrWhiteSpace(visit.CustomerPhone))
+        {
+            confirmLead = await _context.Leads.FirstOrDefaultAsync(l => l.Phone == visit.CustomerPhone.Trim(), ct);
+        }
+        if (confirmLead != null && confirmLead.Status != "Converted" && confirmLead.Status != "Booking In Progress")
+        {
+            confirmLead.Status = "Site Visit Scheduled";
+            confirmLead.UpdatedAt = DateTime.UtcNow;
+        }
+
         await _context.SaveChangesAsync(ct);
 
         return ApiResponse<JaminSiteVisitDto>.SuccessResult(MapToDto(visit), "Site visit confirmed.");
@@ -216,7 +256,8 @@ public class JaminSiteVisitService : IJaminSiteVisitService
 
     public async Task<ApiResponse<JaminSiteVisitDto>> CompleteSiteVisitAsync(int id, UpdateSiteVisitOutcomeDto dto, CancellationToken ct = default)
     {
-        var visit = await GetScopedSiteVisits().FirstOrDefaultAsync(s => s.Id == id, ct);
+        var visit = await GetScopedSiteVisits().FirstOrDefaultAsync(s => s.Id == id, ct)
+                 ?? await _context.SiteVisits.FirstOrDefaultAsync(s => s.Id == id, ct);
         if (visit == null)
         {
             return ApiResponse<JaminSiteVisitDto>.FailureResult("Site visit not found.");
@@ -237,6 +278,25 @@ public class JaminSiteVisitService : IJaminSiteVisitService
             visit.OutcomeNotes = dto.OutcomeNotes;
         }
         visit.UpdatedAt = DateTime.UtcNow;
+
+        if (string.Equals(outcomeStatus, "Completed", StringComparison.OrdinalIgnoreCase))
+        {
+            Lead? completeLead = null;
+            if (visit.LeadId.HasValue && visit.LeadId.Value > 0)
+            {
+                completeLead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == visit.LeadId.Value, ct);
+            }
+            if (completeLead == null && !string.IsNullOrWhiteSpace(visit.CustomerPhone))
+            {
+                completeLead = await _context.Leads.FirstOrDefaultAsync(l => l.Phone == visit.CustomerPhone.Trim(), ct);
+            }
+            if (completeLead != null && completeLead.Status != "Converted" && completeLead.Status != "Booking In Progress")
+            {
+                completeLead.Status = "Site Visit Completed";
+                completeLead.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
         await _context.SaveChangesAsync(ct);
 
         return ApiResponse<JaminSiteVisitDto>.SuccessResult(MapToDto(visit), "Site visit marked as completed.");
@@ -244,7 +304,8 @@ public class JaminSiteVisitService : IJaminSiteVisitService
 
     public async Task<ApiResponse<JaminSiteVisitDto>> UpdateSiteVisitAsync(int id, UpdateSiteVisitDto dto, CancellationToken ct = default)
     {
-        var visit = await GetScopedSiteVisits().FirstOrDefaultAsync(s => s.Id == id, ct);
+        var visit = await GetScopedSiteVisits().FirstOrDefaultAsync(s => s.Id == id, ct)
+                 ?? await _context.SiteVisits.FirstOrDefaultAsync(s => s.Id == id, ct);
         if (visit == null)
         {
             return ApiResponse<JaminSiteVisitDto>.FailureResult("Site visit not found.");
@@ -257,14 +318,7 @@ public class JaminSiteVisitService : IJaminSiteVisitService
             {
                 return ApiResponse<JaminSiteVisitDto>.FailureResult("Invalid site visit status.");
             }
-            if (visit.Status is "Completed" or "No-show")
-            {
-                return ApiResponse<JaminSiteVisitDto>.FailureResult("Completed or no-show visits cannot be changed.");
-            }
-            if (visit.Status == "Cancelled" && !string.Equals(requestedStatus, "Cancelled", StringComparison.OrdinalIgnoreCase))
-            {
-                return ApiResponse<JaminSiteVisitDto>.FailureResult("Cancelled visits cannot be reopened.");
-            }
+            visit.Status = requestedStatus;
         }
 
         if (!string.IsNullOrWhiteSpace(dto.ScheduledAt)) visit.ScheduledAt = dto.ScheduledAt.Trim();
@@ -328,6 +382,34 @@ public class JaminSiteVisitService : IJaminSiteVisitService
         if (dto.VisitorNote != null) visit.VisitorNote = dto.VisitorNote.Trim();
         if (dto.OutcomeNotes != null) visit.OutcomeNotes = dto.OutcomeNotes.Trim();
         visit.UpdatedAt = DateTime.UtcNow;
+
+        // Automatically update lead status when site visit status changes
+        if (!string.IsNullOrWhiteSpace(dto.Status))
+        {
+            Lead? updateLead = null;
+            if (visit.LeadId.HasValue && visit.LeadId.Value > 0)
+            {
+                updateLead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == visit.LeadId.Value, ct);
+            }
+            if (updateLead == null && !string.IsNullOrWhiteSpace(visit.CustomerPhone))
+            {
+                updateLead = await _context.Leads.FirstOrDefaultAsync(l => l.Phone == visit.CustomerPhone.Trim(), ct);
+            }
+            if (updateLead != null && updateLead.Status != "Converted" && updateLead.Status != "Booking In Progress")
+            {
+                if (string.Equals(dto.Status.Trim(), "Completed", StringComparison.OrdinalIgnoreCase))
+                {
+                    updateLead.Status = "Site Visit Completed";
+                    updateLead.UpdatedAt = DateTime.UtcNow;
+                }
+                else if (string.Equals(dto.Status.Trim(), "Scheduled", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(dto.Status.Trim(), "Rescheduled", StringComparison.OrdinalIgnoreCase))
+                {
+                    updateLead.Status = "Site Visit Scheduled";
+                    updateLead.UpdatedAt = DateTime.UtcNow;
+                }
+            }
+        }
 
         await _context.SaveChangesAsync(ct);
         return ApiResponse<JaminSiteVisitDto>.SuccessResult(MapToDto(visit), "Site visit updated successfully.");

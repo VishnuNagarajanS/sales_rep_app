@@ -160,7 +160,37 @@ public class LeadService : ILeadService
         if (lead == null)
             return ApiResponse<LeadResponseDto>.FailureResult("Lead not found or access denied.");
 
-        return ApiResponse<LeadResponseDto>.SuccessResult(MapToDto(lead));
+        var dto = MapToDto(lead);
+        var cleanPhone = new string(lead.Phone.Where(char.IsDigit).ToArray());
+        var last10 = cleanPhone.Length >= 10 ? cleanPhone[^10..] : cleanPhone;
+
+        dto.Calls = await _context.CallRecords.AsNoTracking()
+            .Include(c => c.Agent)
+            .Where(c => c.LeadId == lead.Id ||
+                        (!string.IsNullOrEmpty(last10) && c.ContactPhone.Contains(last10)) ||
+                        c.ContactPhone == lead.Phone)
+            .OrderByDescending(c => c.Timestamp)
+            .Take(50)
+            .Select(c => new backend.DTOs.Calls.CallRecordResponseDto
+            {
+                Id = c.Id,
+                CompanyId = c.CompanyId,
+                AgentId = c.AgentId,
+                AgentName = c.Agent != null ? c.Agent.Name : null,
+                ContactName = c.ContactName,
+                ContactPhone = c.ContactPhone,
+                Direction = c.Direction,
+                Duration = c.Duration,
+                Disposition = c.Disposition,
+                Notes = c.Notes,
+                LeadId = c.LeadId,
+                CustomerId = c.CustomerId,
+                Timestamp = c.Timestamp,
+                CreatedAt = c.CreatedAt
+            })
+            .ToListAsync(ct);
+
+        return ApiResponse<LeadResponseDto>.SuccessResult(dto);
     }
 
     public async Task<ApiResponse<LeadResponseDto>> CreateLeadAsync(CreateLeadDto dto, CancellationToken ct = default)
@@ -228,8 +258,48 @@ public class LeadService : ILeadService
         if (dto.Email != null) lead.Email = dto.Email.Trim();
         if (dto.Location != null) lead.Location = dto.Location.Trim();
         if (dto.Source != null) lead.Source = dto.Source.Trim();
-        if (dto.Status != null) lead.Status = dto.Status.Trim();
         if (dto.Priority != null) lead.Priority = dto.Priority.Trim();
+        if (dto.Status != null)
+        {
+            var requestedStatus = dto.Status.Trim();
+            if (lead.CompanyId == 2 && string.Equals(requestedStatus, "Converted", StringComparison.OrdinalIgnoreCase) && !string.Equals(lead.Status, "Converted", StringComparison.OrdinalIgnoreCase))
+            {
+                var hasVerifiedBooking = await _context.JaminBookings
+                    .Include(b => b.Payments)
+                    .AnyAsync(b => b.LeadId == lead.Id &&
+                                   b.Status != "Cancelled" && b.Status != "Voided" &&
+                                   (b.PaymentStatus == "Verified" || b.Payments.Any(p => p.Status == "Verified" && p.PaymentType != "Refund")), ct);
+
+                if (!hasVerifiedBooking)
+                {
+                    return ApiResponse<LeadResponseDto>.FailureResult("In Jamin Bazaar, leads cannot be converted via generic lead edit. Conversion requires an active plot booking with a verified token payment.");
+                }
+            }
+            lead.Status = requestedStatus;
+
+            // Synchronize linked site visits when lead status changes
+            var leadPhone = lead.Phone?.Trim();
+            var visits = await _context.SiteVisits
+                .Where(s => s.TenantId == lead.CompanyId && (s.LeadId == lead.Id || (!string.IsNullOrEmpty(leadPhone) && s.CustomerPhone == leadPhone)))
+                .ToListAsync(ct);
+
+            if (string.Equals(requestedStatus, "Site Visit Completed", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var v in visits.Where(v => v.Status != "Cancelled"))
+                {
+                    v.Status = "Completed";
+                    v.UpdatedAt = DateTime.UtcNow;
+                }
+            }
+            else if (string.Equals(requestedStatus, "Site Visit Scheduled", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var v in visits.Where(v => v.Status == "Pending" || v.Status == "Requested"))
+                {
+                    v.Status = "Scheduled";
+                    v.UpdatedAt = DateTime.UtcNow;
+                }
+            }
+        }
         if (dto.Notes != null) lead.Notes = dto.Notes.Trim();
         if (dto.TargetDevelopment != null) lead.TargetDevelopment = dto.TargetDevelopment.Trim();
         if (dto.BudgetRange != null) lead.BudgetRange = dto.BudgetRange.Trim();
@@ -241,11 +311,12 @@ public class LeadService : ILeadService
                 dto.AssignedAgentId.Value != _currentUser.UserId)
                 return ApiResponse<LeadResponseDto>.FailureResult("Sales agents cannot reassign leads.");
 
-            var belongsToCompany = await _context.Users.AnyAsync(
+            var agent = await _context.Users.FirstOrDefaultAsync(
                 u => u.Id == dto.AssignedAgentId.Value && u.CompanyId == lead.CompanyId, ct);
-            if (!belongsToCompany)
+            if (agent == null)
                 return ApiResponse<LeadResponseDto>.FailureResult("The selected agent or manager does not belong to this company.");
-            lead.AssignedAgentId = dto.AssignedAgentId.Value;
+            lead.AssignedAgentId = agent.Id;
+            lead.AssignedAgentName = agent.Name;
         }
 
         // Merge custom fields
@@ -274,6 +345,21 @@ public class LeadService : ILeadService
         var lead = await FindScopedLeadAsync(id, ct);
         if (lead == null)
             return ApiResponse<object>.FailureResult("Lead not found or access denied.");
+
+        if (lead.CompanyId == 2)
+        {
+            var hasVerifiedBooking = await _context.JaminBookings
+                .Include(b => b.Payments)
+                .AnyAsync(b => b.LeadId == lead.Id &&
+                               b.Status != "Cancelled" && b.Status != "Voided" &&
+                               (b.PaymentStatus == "Verified" || b.Payments.Any(p => p.Status == "Verified" && p.PaymentType != "Refund")), ct);
+
+            if (!hasVerifiedBooking)
+            {
+                return ApiResponse<object>.FailureResult(
+                    "In Jamin Bazaar, leads cannot bypass the verified booking workflow. Lead-to-customer conversion requires an active plot booking with a verified token payment. Please formalize a booking and verify the token payment to convert this lead.");
+            }
+        }
 
         Customer? customer = null;
         var strategy = _context.Database.CreateExecutionStrategy();
@@ -325,12 +411,18 @@ public class LeadService : ILeadService
             lead.UpdatedAt = DateTime.UtcNow;
 
             // Link existing call records for this lead to the customer
+            var cleanLeadPhone = new string(lead.Phone.Where(char.IsDigit).ToArray());
+            var last10LeadPhone = cleanLeadPhone.Length >= 10 ? cleanLeadPhone[^10..] : cleanLeadPhone;
+
             var leadCalls = await _context.CallRecords
-                .Where(c => c.LeadId == lead.Id && c.CompanyId == companyId)
+                .Where(c => c.LeadId == lead.Id ||
+                            (!string.IsNullOrEmpty(last10LeadPhone) && c.ContactPhone.Contains(last10LeadPhone)) ||
+                            c.ContactPhone == lead.Phone)
                 .ToListAsync(ct);
             foreach (var call in leadCalls)
             {
                 call.CustomerId = customer.Id;
+                call.LeadId = lead.Id;
             }
 
             // Link existing followups for this lead to the customer
@@ -479,7 +571,7 @@ public class LeadService : ILeadService
             Id = lead.Id,
             CompanyId = lead.CompanyId,
             AssignedAgentId = lead.AssignedAgentId,
-            AssignedAgentName = lead.AssignedAgent?.Name,
+            AssignedAgentName = lead.AssignedAgent?.Name ?? lead.AssignedAgentName,
             Name = lead.Name,
             Phone = lead.Phone,
             Email = lead.Email,

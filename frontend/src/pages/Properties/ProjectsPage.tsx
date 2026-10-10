@@ -237,7 +237,9 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onNavigate }) => {
         location: location.trim(),
         status: status.trim(),
         totalPlots: requestedTotal,
-        availablePlots: Math.max(0, (Number(totalPlots) || 0) - (selectedProject.bookedPlots || 0)),
+        availablePlots: allPlots.some(pl => String(pl.projectId) === String(selectedProject.id))
+          ? allPlots.filter(pl => String(pl.projectId) === String(selectedProject.id) && pl.status === 'Available').length
+          : Math.max(0, (Number(totalPlots) || 0) - (selectedProject.bookedPlots || 0) - (selectedProject.heldPlots || 0)),
         bookedPlots: selectedProject.bookedPlots || 0,
         priceRange: priceRange.trim(),
         description: description.trim(),

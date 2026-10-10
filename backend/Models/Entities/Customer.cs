@@ -31,4 +31,5 @@ public class Customer
     public ICollection<CallRecord> CallRecords { get; set; } = new List<CallRecord>();
     public ICollection<Notification> Notifications { get; set; } = new List<Notification>();
     public ICollection<AuditLog> AuditLogs { get; set; } = new List<AuditLog>();
+    public ICollection<JaminPayment> Payments { get; set; } = new List<JaminPayment>();
 }
