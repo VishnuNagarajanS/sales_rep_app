@@ -178,7 +178,7 @@ public class FollowupService : IFollowupService
             var pendingContactPhones = pendingEntities.Where(f => !string.IsNullOrEmpty(f.ContactPhone)).Select(f => f.ContactPhone).Distinct().ToList();
 
             // Statuses that mean the lead has moved beyond Follow-up stage
-            var promotedStatuses = new[] { "Qualified", "Converted", "Not Interested", "Junk" };
+            var promotedStatuses = new[] { "Qualified", "KYC In Progress", "In Opportunity", "Converted", "Not Interested", "Junk" };
 
             var promotedLeads = await _context.Leads
                 .AsNoTracking()
@@ -405,7 +405,7 @@ public class FollowupService : IFollowupService
             }
 
             await _context.SaveChangesAsync(ct);
-            await _context.Entry(existingPending).Reference(f => f.AssignedAgent).LoadAsync(ct);
+            try { await _context.Entry(existingPending).Reference(f => f.AssignedAgent).LoadAsync(ct); } catch { }
             return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(existingPending, targetLead), "Existing pending follow-up updated.");
         }
 
@@ -433,7 +433,7 @@ public class FollowupService : IFollowupService
             ContactType = string.IsNullOrWhiteSpace(dto.ContactType) ? "lead" : dto.ContactType.Trim().ToLower(),
             ContactName = dto.ContactName.Trim(),
             ContactPhone = dto.ContactPhone.Trim(),
-            ContactEmail = resolvedEmail,
+            ContactEmail = resolvedEmail ?? string.Empty,
             ScheduledAt = dto.ScheduledAt,
             Priority = string.IsNullOrWhiteSpace(dto.Priority) ? "Medium" : dto.Priority.Trim(),
             Status = FollowupStatus.Pending,
@@ -479,7 +479,7 @@ public class FollowupService : IFollowupService
             }
 
             await _context.SaveChangesAsync(ct);
-            await _context.Entry(primaryFollowup).Reference(f => f.AssignedAgent).LoadAsync(ct);
+            try { await _context.Entry(primaryFollowup).Reference(f => f.AssignedAgent).LoadAsync(ct); } catch { }
             return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(primaryFollowup, targetLead), "Follow-up rescheduled successfully.");
         }
 
@@ -526,12 +526,16 @@ public class FollowupService : IFollowupService
             await _context.SaveChangesAsync(ct);
         }
 
-        await _context.Entry(followup).Reference(f => f.AssignedAgent).LoadAsync(ct);
-        if (inheritedHandoverId.HasValue)
+        try
         {
-            await _context.Entry(followup).Reference(f => f.OriginalOwner).LoadAsync(ct);
-            await _context.Entry(followup).Reference(f => f.Handover).LoadAsync(ct);
+            await _context.Entry(followup).Reference(f => f.AssignedAgent).LoadAsync(ct);
+            if (inheritedHandoverId.HasValue)
+            {
+                await _context.Entry(followup).Reference(f => f.OriginalOwner).LoadAsync(ct);
+                await _context.Entry(followup).Reference(f => f.Handover).LoadAsync(ct);
+            }
         }
+        catch { }
 
         return ApiResponse<FollowupResponseDto>.SuccessResult(MapToDto(followup, targetLead), "Follow-up scheduled successfully.");
     }

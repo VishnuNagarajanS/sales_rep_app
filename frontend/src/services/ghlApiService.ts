@@ -136,40 +136,39 @@ function mapDeal(d: Record<string, any>): Deal {
 }
 
 export async function getDeals(companyId?: string): Promise<Deal[]> {
-  let apiDeals: Deal[] = [];
   try {
     const raw = await fetchAll<any>('/ghl/deals');
-    apiDeals = raw.map(mapDeal);
-  } catch (err) {
-    console.warn('[ghlApiService] Failed to fetch deals from server, using local store:', err);
-  }
+    const apiDeals = raw.map(mapDeal);
 
-  const localDeals = storageService.getDeals(companyId) || [];
-  if (localDeals.length === 0) return apiDeals;
-
-  const merged = [...apiDeals];
-  const seenIds = new Set(apiDeals.map(d => d.id));
-  const seenPhones = new Set(
-    apiDeals
-      .map(d => (d.phone || '').replace(/\D/g, '').slice(-10))
-      .filter(Boolean)
-  );
-
-  for (const ld of localDeals) {
-    const ldPhone = (ld.phone || '').replace(/\D/g, '').slice(-10);
-    const existingIndex = merged.findIndex(
-      d => d.id === ld.id || (ldPhone && (d.phone || '').replace(/\D/g, '').slice(-10) === ldPhone)
+    // Live database is authoritative for all existing deals
+    const localDeals = storageService.getDeals(companyId) || [];
+    const serverIds = new Set(apiDeals.map(d => String(d.id)));
+    const serverPhones = new Set(
+      apiDeals
+        .map(d => (d.phone || '').replace(/\D/g, '').slice(-10))
+        .filter(Boolean)
     );
-    if (existingIndex >= 0) {
-      merged[existingIndex] = { ...merged[existingIndex], ...ld };
-    } else {
-      merged.push(ld);
-      seenIds.add(ld.id);
-      if (ldPhone) seenPhones.add(ldPhone);
-    }
-  }
 
-  return merged;
+    // Only keep truly local/offline-only draft deals that do not exist on the server
+    const offlineOnly = localDeals.filter(ld => {
+      const isLocalDraft = String(ld.id).startsWith('deal-') || String(ld.id).startsWith('d-');
+      const ldPhone = (ld.phone || '').replace(/\D/g, '').slice(-10);
+      const matchesServer = serverIds.has(String(ld.id)) || (ldPhone && serverPhones.has(ldPhone));
+      return isLocalDraft && !matchesServer;
+    });
+
+    const combined = [...apiDeals, ...offlineOnly];
+
+    // Synchronize storageService silently so read operations never trigger an update loop
+    storageService.setDeals(combined, true);
+
+    return companyId
+      ? combined.filter(d => !d.companyId || isTenantMatch(d.companyId, companyId))
+      : combined;
+  } catch (err) {
+    console.warn('[ghlApiService] Failed to fetch deals from server, using local store fallback:', err);
+    return storageService.getDeals(companyId) || [];
+  }
 }
 
 export async function saveDeal(deal: Deal): Promise<Deal> {
@@ -191,8 +190,10 @@ export async function saveDeal(deal: Deal): Promise<Deal> {
     };
     const res: ApiResponse<any> = await apiClient.post('/ghl/deals', payload);
     if (!res.success || !res.data) throw new Error(res.message);
+    const saved = mapDeal(res.data);
+    storageService.saveDeal(saved);
     window.dispatchEvent(new Event('nexus_storage_updated'));
-    return mapDeal(res.data);
+    return saved;
   } else {
     const payload = {
       title: deal.title,
@@ -211,8 +212,10 @@ export async function saveDeal(deal: Deal): Promise<Deal> {
     };
     const res: ApiResponse<any> = await apiClient.put(`/ghl/deals/${nid(deal.id)}`, payload);
     if (!res.success || !res.data) throw new Error(res.message);
+    const updated = mapDeal(res.data);
+    storageService.saveDeal(updated);
     window.dispatchEvent(new Event('nexus_storage_updated'));
-    return mapDeal(res.data);
+    return updated;
   }
 }
 
@@ -222,6 +225,7 @@ export async function persistDeal(deal: Deal): Promise<Deal> {
 
 export async function deleteDeal(dealId: string): Promise<void> {
   await apiClient.delete(`/ghl/deals/${nid(dealId)}`);
+  storageService.deleteDeal(dealId);
   window.dispatchEvent(new Event('nexus_storage_updated'));
 }
 
@@ -945,7 +949,7 @@ export async function moveIrmOtherRecord(
         contactPhone: opts.contactPhone || '',
         direction: 'Outbound',
         duration: 0,
-        disposition: 'Contacted',
+        disposition: (targetModule === 'my_leads' || targetModule === 'follow_up') ? 'Follow-up Required' : 'Contacted',
         callModule: (targetModule as any) || 'kyc',
         leadId: opts.leadId ? String(opts.leadId) : undefined,
         customerId: opts.customerId ? String(opts.customerId) : undefined,

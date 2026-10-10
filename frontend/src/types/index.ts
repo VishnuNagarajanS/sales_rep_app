@@ -249,6 +249,7 @@ export interface Deal {
   handedOverFromName?: string;
   handoverPlannedEnd?: string;
   originalOwnerId?: number;
+  nextFollowupDate?: string;
 }
 
 export interface DealActivity {

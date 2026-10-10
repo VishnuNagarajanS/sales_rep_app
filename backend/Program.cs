@@ -307,6 +307,93 @@ using (var scope = app.Services.CreateScope())
             Console.WriteLine($"[Database Init Warning] {ex.Message}");
         }
 
+        // Patch: reconcile leads whose KYC/Investor records are Approved
+        try
+        {
+            var reconcileSql = @"
+                -- 1. Active Opportunities
+                UPDATE leads
+                SET ""Status"" = 'In Opportunity', ""UpdatedAt"" = NOW()
+                WHERE ""Status"" != 'In Opportunity'
+                  AND EXISTS (
+                    SELECT 1 FROM ghl_deals d
+                    WHERE d.""CompanyId"" = leads.""CompanyId""
+                      AND LOWER(TRIM(d.""Stage"")) IN ('investment_opportunity', 'opportunity', 'term_sheet', 'committed')
+                      AND (
+                        (d.""CustomerId"" IS NOT NULL AND d.""CustomerId"" = leads.""Id"")
+                        OR LOWER(TRIM(d.""CustomerName"")) = LOWER(TRIM(leads.""Name""))
+                      )
+                  );
+
+                -- 2. Active KYC In Progress
+                UPDATE leads
+                SET ""Status"" = 'KYC In Progress', ""UpdatedAt"" = NOW()
+                WHERE ""Status"" NOT IN ('In Opportunity', 'Converted', 'KYC In Progress')
+                  AND (
+                    EXISTS (
+                        SELECT 1 FROM ghl_deals d
+                        WHERE d.""CompanyId"" = leads.""CompanyId""
+                          AND LOWER(TRIM(d.""Stage"")) IN ('qualified_investor', 'qualified')
+                          AND (
+                            (d.""CustomerId"" IS NOT NULL AND d.""CustomerId"" = leads.""Id"")
+                            OR LOWER(TRIM(d.""CustomerName"")) = LOWER(TRIM(leads.""Name""))
+                          )
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM ""InvestorKycs"" k
+                        WHERE k.""CompanyId"" = leads.""CompanyId""
+                          AND k.""Status"" IN (0, 1, 2)
+                          AND (
+                            (k.""Phone"" IS NOT NULL AND RIGHT(REGEXP_REPLACE(k.""Phone"", '\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(leads.""Phone"", '\D', '', 'g'), 10))
+                            OR (k.""Email"" IS NOT NULL AND LOWER(TRIM(k.""Email"")) = LOWER(TRIM(leads.""Email"")))
+                            OR LOWER(TRIM(k.""InvestorName"")) = LOWER(TRIM(leads.""Name""))
+                          )
+                    )
+                  );
+
+                -- 3. Won / Converted Investors (without active opportunity)
+                UPDATE leads
+                SET ""Status"" = 'Converted', ""UpdatedAt"" = NOW()
+                WHERE ""Status"" NOT IN ('In Opportunity', 'Converted')
+                  AND (
+                    EXISTS (
+                        SELECT 1 FROM ghl_deals d
+                        WHERE d.""CompanyId"" = leads.""CompanyId""
+                          AND LOWER(TRIM(d.""Stage"")) IN ('converted', 'won')
+                          AND (
+                            (d.""CustomerId"" IS NOT NULL AND d.""CustomerId"" = leads.""Id"")
+                            OR LOWER(TRIM(d.""CustomerName"")) = LOWER(TRIM(leads.""Name""))
+                          )
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM ""Investors"" i
+                        WHERE i.""CompanyId"" = leads.""CompanyId""
+                          AND i.""Status"" = 1
+                          AND (
+                            (i.""Phone"" IS NOT NULL AND RIGHT(REGEXP_REPLACE(i.""Phone"", '\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(leads.""Phone"", '\D', '', 'g'), 10))
+                            OR (i.""Email"" IS NOT NULL AND LOWER(TRIM(i.""Email"")) = LOWER(TRIM(leads.""Email"")))
+                            OR LOWER(TRIM(i.""Name"")) = LOWER(TRIM(leads.""Name""))
+                          )
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM ""InvestorKycs"" k
+                        WHERE k.""CompanyId"" = leads.""CompanyId""
+                          AND k.""Status"" = 3
+                          AND (
+                            (k.""Phone"" IS NOT NULL AND RIGHT(REGEXP_REPLACE(k.""Phone"", '\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(leads.""Phone"", '\D', '', 'g'), 10))
+                            OR (k.""Email"" IS NOT NULL AND LOWER(TRIM(k.""Email"")) = LOWER(TRIM(leads.""Email"")))
+                            OR LOWER(TRIM(k.""InvestorName"")) = LOWER(TRIM(leads.""Name""))
+                          )
+                    )
+                  );
+            ";
+            db.Database.ExecuteSqlRaw(reconcileSql);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Lead Reconciliation Warning] {ex.Message}");
+        }
+
         // Patch: ensure tenants have EnabledFeatures populated
         try
         {

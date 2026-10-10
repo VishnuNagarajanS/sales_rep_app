@@ -545,6 +545,23 @@ class StorageService {
     this.set('deals', deals);
   }
 
+  setDeals(deals: Deal[], silent = true): void {
+    if (silent) {
+      try {
+        localStorage.setItem('nexus_deals', JSON.stringify(deals));
+      } catch (e) {
+        console.error('Failed to save to localStorage', e);
+      }
+    } else {
+      this.set('deals', deals);
+    }
+  }
+
+  deleteDeal(dealId: string): void {
+    const deals = this.getDeals();
+    this.set('deals', deals.filter(d => String(d.id) !== String(dealId)));
+  }
+
   // Deal Activities
   getDealActivities(dealId: string, companyId?: string): DealActivity[] {
     const activities = this.get<DealActivity[]>('deal_activities', []);

@@ -87,6 +87,33 @@ public class IrmKycController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("by-phone")]
+    [Authorize]
+    public async Task<IActionResult> GetByPhone([FromQuery] string phone, CancellationToken ct)
+    {
+        var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
+        var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
+        var companyId = User.GetCompanyId(0);
+        if (companyId <= 0 && isPlatformAdmin) companyId = 1;
+        if (companyId <= 0)
+            return Unauthorized();
+
+        var result = await _kycService.GetByPhoneAsync(phone, companyId, ct);
+        if (!result.Success)
+            return NotFound(result);
+
+        if (!isPlatformAdmin)
+        {
+            var userId = User.GetUserId();
+            if (result.Data?.IrmId != null && result.Data.IrmId != userId)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<KycDto>.ErrorResponse("Access denied: You can only view KYC records assigned to you."));
+            }
+        }
+
+        return Ok(result);
+    }
+
     [HttpGet("all")]
     [Authorize]
     public async Task<IActionResult> GetAllKycs([FromQuery] string? status, [FromQuery] int? companyId, CancellationToken ct)

@@ -7,6 +7,7 @@ import {
   saveFollowup as apiSaveFollowup,
   getFollowups as apiGetFollowups,
   saveDeal as apiSaveDeal,
+  getDeals as apiGetDeals,
   getLeads as apiGetLeads,
   getCustomers as apiGetCustomers,
   transitionFollowupToKyc,
@@ -623,13 +624,29 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const isCallFromMyLeads = callMod === 'my_leads' || (!isCallFromFollowup && !isCallFromKyc && !isCallFromOpportunities && !isCallFromInvestor360 && !isCustomerContact);
       const isIrmRole = user?.role?.code === 'irm' || (user as any)?.roleCode === 'irm';
 
+      // Locate matched deal / customer / investor if any
+      const callTargetId = lastCallRecord.customerId || lastCallRecord.matchedRecord?.id;
+      const dealsList = await apiGetDeals(tenant.id).catch(() => storageService.getDeals(tenant.id) || []);
+      let matchedDeal = dealsList.find((d: Deal) =>
+        (callTargetId && (String(d.id) === String(callTargetId) || String(d.customerId) === String(callTargetId))) ||
+        (callPhoneDigits && d.phone && normalize(d.phone) === callPhoneDigits) ||
+        (lastCallRecord.contactName && (d.customerName || '').trim().toLowerCase() === lastCallRecord.contactName.trim().toLowerCase())
+      );
+
+      const customersList = await apiGetCustomers(tenant.id).catch(() => storageService.getCustomers(tenant.id) || []);
+      let matchedCustomer = customersList.find((c: Customer) =>
+        (callTargetId && String(c.id) === String(callTargetId)) ||
+        (callPhoneDigits && c.phone && normalize(c.phone) === callPhoneDigits) ||
+        (lastCallRecord.contactName && (c.name || '').trim().toLowerCase() === lastCallRecord.contactName.trim().toLowerCase())
+      );
+
       // Locate existing follow-up for this contact if any exists
       const followupsList = await apiGetFollowups(tenant.id).catch(() => storageService.getFollowups(tenant.id) || []);
       const existingFollowup =
         (lastCallRecord.sourceFollowupId ? followupsList.find(f => f.id === lastCallRecord.sourceFollowupId) : undefined) ||
         followupsList.find(f =>
           f.status === 'Pending' && (
-            (f.contactId && (f.contactId === matchedLead?.id || f.contactId === lastCallRecord.matchedRecord?.id)) ||
+            (f.contactId && (f.contactId === matchedLead?.id || (matchedDeal && f.contactId === matchedDeal.id) || f.contactId === lastCallRecord.matchedRecord?.id)) ||
             (callPhoneDigits && f.contactPhone && normalize(f.contactPhone) === callPhoneDigits)
           )
         );
@@ -752,35 +769,31 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (isCallFromKyc || isCallFromOpportunities || isCallFromInvestor360 || (isCustomerContact && !isCallFromFollowup && !isCallFromMyLeads)) {
           // Contact is in KYC, Opportunities, or Investor 360.
-          // CRITICAL: They must STAY in their current module! Do NOT create a lead, do NOT demote stage!
-          if (scheduleFollowup || existingFollowup) {
-            if (existingFollowup) {
-              await apiSaveFollowup({
-                ...existingFollowup,
-                scheduledAt: followupScheduledAt,
-                priority: followupPriority,
-                status: 'Pending',
-                notes: cbNotes,
-                assignedRole: isIrmRole ? 'irm' : existingFollowup.assignedRole,
-              });
-            } else if (scheduleFollowup) {
-              await apiSaveFollowup({
-                id: `flw-${Date.now()}`,
-                companyId: tenant.id,
-                contactId: lastCallRecord.customerId || lastCallRecord.matchedRecord?.id || `cust-${Date.now()}`,
-                contactName: lastCallRecord.contactName,
-                contactPhone: lastCallRecord.contactPhone,
-                contactEmail: (lastCallRecord.matchedRecord as any)?.email || undefined,
-                contactType: 'customer',
-                scheduledAt: followupScheduledAt,
-                priority: followupPriority,
-                status: 'Pending',
-                notes: cbNotes,
-                assignedAgentId: user.id,
-                assignedAgentName: user.name,
-                assignedRole: isIrmRole ? 'irm' : undefined,
-              });
-            }
+          // CRITICAL: They must STAY in their current module! Do NOT create a separate sales lead or external follow-up task!
+          if (existingFollowup) {
+            await apiSaveFollowup({
+              ...existingFollowup,
+              scheduledAt: followupScheduledAt,
+              priority: followupPriority,
+              status: 'Pending',
+              notes: cbNotes,
+              assignedRole: isIrmRole ? 'irm' : existingFollowup.assignedRole,
+            });
+          }
+
+          if (matchedDeal) {
+            matchedDeal.nextFollowupDate = followupScheduledAt;
+            matchedDeal.expectedCloseDate = followupScheduledAt;
+            matchedDeal.notes = `${matchedDeal.notes ? matchedDeal.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Call Back (${new Date(followupScheduledAt).toLocaleString()}): ${notes || 'Callback scheduled'}`;
+            await apiSaveDeal(matchedDeal).catch(() => {});
+            storageService.saveDeal(matchedDeal);
+          }
+
+          if (matchedCustomer) {
+            matchedCustomer.notes = `${matchedCustomer.notes ? matchedCustomer.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Call Back (${new Date(followupScheduledAt).toLocaleString()}): ${notes || 'Callback scheduled'}`;
+            matchedCustomer.lastContacted = 'Just now';
+            await apiSaveCustomer(matchedCustomer).catch(() => {});
+            storageService.saveCustomer(matchedCustomer);
           }
 
           if (matchedLead) {
@@ -963,35 +976,30 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (isCallFromKyc || isCallFromOpportunities || isCallFromInvestor360 || (isCustomerContact && !isCallFromFollowup && !isCallFromMyLeads)) {
           // Contact is in KYC, Opportunities, or Investor 360.
-          // CRITICAL: They must STAY in their current module! Do NOT create a lead, do NOT demote stage!
-          if (scheduleFollowup || existingFollowup) {
-            if (existingFollowup) {
-              await apiSaveFollowup({
-                ...existingFollowup,
-                scheduledAt: followupScheduledAt,
-                priority: followupPriority,
-                status: 'Pending',
-                notes: nrNotes,
-                assignedRole: isIrmRole ? 'irm' : existingFollowup.assignedRole,
-              });
-            } else if (scheduleFollowup) {
-              await apiSaveFollowup({
-                id: `flw-${Date.now()}`,
-                companyId: tenant.id,
-                contactId: lastCallRecord.customerId || lastCallRecord.matchedRecord?.id || `cust-${Date.now()}`,
-                contactName: lastCallRecord.contactName,
-                contactPhone: lastCallRecord.contactPhone,
-                contactEmail: (lastCallRecord.matchedRecord as any)?.email || undefined,
-                contactType: 'customer',
-                scheduledAt: followupScheduledAt,
-                priority: followupPriority,
-                status: 'Pending',
-                notes: nrNotes,
-                assignedAgentId: user.id,
-                assignedAgentName: user.name,
-                assignedRole: isIrmRole ? 'irm' : undefined,
-              });
-            }
+          // CRITICAL: They must STAY in their current module! Do NOT create a separate sales lead or external follow-up task!
+          if (existingFollowup) {
+            await apiSaveFollowup({
+              ...existingFollowup,
+              scheduledAt: followupScheduledAt,
+              priority: followupPriority,
+              status: 'Pending',
+              notes: nrNotes,
+              assignedRole: isIrmRole ? 'irm' : existingFollowup.assignedRole,
+            });
+          }
+
+          if (matchedDeal) {
+            matchedDeal.nextFollowupDate = followupScheduledAt;
+            matchedDeal.notes = `${matchedDeal.notes ? matchedDeal.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] No Response: ${notes || 'No response from investor'}`;
+            await apiSaveDeal(matchedDeal).catch(() => {});
+            storageService.saveDeal(matchedDeal);
+          }
+
+          if (matchedCustomer) {
+            matchedCustomer.notes = `${matchedCustomer.notes ? matchedCustomer.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] No Response: ${notes || 'No response from investor'}`;
+            matchedCustomer.lastContacted = 'Just now';
+            await apiSaveCustomer(matchedCustomer).catch(() => {});
+            storageService.saveCustomer(matchedCustomer);
           }
 
           if (matchedLead) {
@@ -1154,6 +1162,17 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             notes: `${existingFollowup.notes ? existingFollowup.notes + '\n\n' : ''}${contactedNote}`,
           });
         }
+        if (matchedDeal) {
+          matchedDeal.notes = `${matchedDeal.notes ? matchedDeal.notes + '\n\n' : ''}${contactedNote}`;
+          await apiSaveDeal(matchedDeal).catch(() => {});
+          storageService.saveDeal(matchedDeal);
+        }
+        if (matchedCustomer) {
+          matchedCustomer.notes = `${matchedCustomer.notes ? matchedCustomer.notes + '\n\n' : ''}${contactedNote}`;
+          matchedCustomer.lastContacted = 'Just now';
+          await apiSaveCustomer(matchedCustomer).catch(() => {});
+          storageService.saveCustomer(matchedCustomer);
+        }
         if (matchedLead) {
           if (isCallFromMyLeads) {
             matchedLead.status = 'Contacted';
@@ -1197,6 +1216,16 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
           } catch (err) {
             console.error('[CallContext] Failed to mark source follow-up completed on Other:', err);
           }
+        }
+        if (matchedDeal) {
+          matchedDeal.notes = `${matchedDeal.notes ? matchedDeal.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Other: ${reason || notes || ''}`;
+          await apiSaveDeal(matchedDeal).catch(() => {});
+          storageService.saveDeal(matchedDeal);
+        }
+        if (matchedCustomer) {
+          matchedCustomer.notes = `${matchedCustomer.notes ? matchedCustomer.notes + '\n\n' : ''}[${new Date().toLocaleDateString()}] Other: ${reason || notes || ''}`;
+          await apiSaveCustomer(matchedCustomer).catch(() => {});
+          storageService.saveCustomer(matchedCustomer);
         }
       }
     }

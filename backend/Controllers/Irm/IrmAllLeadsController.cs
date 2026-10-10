@@ -115,6 +115,12 @@ public class IrmAllLeadsController : ControllerBase
             .Select(k => new { k.Phone, k.Email, k.InvestorName, Status = k.Status.ToString() })
             .ToListAsync(ct);
 
+        var investors = await _db.Investors
+            .AsNoTracking()
+            .Where(i => i.CompanyId == companyId)
+            .Select(i => new { i.Id, i.Phone, i.Email, i.Name, Status = i.Status.ToString() })
+            .ToListAsync(ct);
+
         var customers = await _db.Customers
             .AsNoTracking()
             .Where(c => c.CompanyId == companyId)
@@ -148,6 +154,12 @@ public class IrmAllLeadsController : ControllerBase
                 (!string.IsNullOrWhiteSpace(phoneLast10) && GetLast10(c.Phone) == phoneLast10) ||
                 (!string.IsNullOrWhiteSpace(leadEmailLower) && !string.IsNullOrWhiteSpace(c.Email) && c.Email.Trim().ToLower() == leadEmailLower) ||
                 (!string.IsNullOrWhiteSpace(leadNameLower) && c.Name.Trim().ToLower() == leadNameLower));
+
+            // Match investor in portfolio
+            var matchedInvestor = investors.FirstOrDefault(i =>
+                (!string.IsNullOrWhiteSpace(phoneLast10) && GetLast10(i.Phone) == phoneLast10) ||
+                (!string.IsNullOrWhiteSpace(leadEmailLower) && !string.IsNullOrWhiteSpace(i.Email) && i.Email.Trim().ToLower() == leadEmailLower) ||
+                (!string.IsNullOrWhiteSpace(leadNameLower) && i.Name.Trim().ToLower() == leadNameLower));
 
             // 1. Check if Deal/Opportunity exists: prefer customerId first, then normalized phone/email, then exact name
             var matchedDeal = deals.FirstOrDefault(d =>
@@ -218,6 +230,12 @@ public class IrmAllLeadsController : ControllerBase
                     currentStage = "My Leads";
                     stageDetails = $"Deal in '{matchedDeal.Stage}' stage";
                 }
+            }
+            else if (matchedInvestor != null || (matchedKyc != null && matchedKyc.Status.Equals("Approved", StringComparison.OrdinalIgnoreCase)))
+            {
+                currentStage = "Investor 360";
+                kycStatus = "Approved";
+                stageDetails = "Active Approved Investor in Portfolio";
             }
             else if (matchedKyc != null || (!string.IsNullOrWhiteSpace(l.CustomFieldsJson) && l.CustomFieldsJson.Contains("kyc", StringComparison.OrdinalIgnoreCase)))
             {

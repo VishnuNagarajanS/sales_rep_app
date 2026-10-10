@@ -54,7 +54,7 @@ public class Followup
     public string ContactType { get; set; } = "lead"; // "lead" | "customer" | "investor"
     public string ContactName { get; set; } = string.Empty;
     public string ContactPhone { get; set; } = string.Empty;
-    public string ContactEmail { get; set; } = string.Empty;
+    public string? ContactEmail { get; set; } = string.Empty;
 
     public DateTime ScheduledAt { get; set; }
     public string Priority { get; set; } = "Medium"; // Low, Medium, High, Urgent

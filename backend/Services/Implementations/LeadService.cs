@@ -130,8 +130,129 @@ public class LeadService : ILeadService
         return await query.FirstOrDefaultAsync(ct);
     }
 
+    private async Task ReconcileLeadsWithProgressedKycsAndDealsAsync(int companyId, CancellationToken ct)
+    {
+        try
+        {
+            var candidateLeads = await _context.Leads
+                .Where(l => l.CompanyId == companyId && l.Status != "Converted")
+                .ToListAsync(ct);
+
+            if (candidateLeads.Count == 0) return;
+
+            var kycs = await _context.InvestorKycs
+                .AsNoTracking()
+                .Where(k => k.CompanyId == companyId)
+                .ToListAsync(ct);
+
+            var investors = await _context.Investors
+                .AsNoTracking()
+                .Where(i => i.CompanyId == companyId)
+                .ToListAsync(ct);
+
+            var deals = await _context.GhlDeals
+                .AsNoTracking()
+                .Where(d => d.CompanyId == companyId)
+                .ToListAsync(ct);
+
+            bool changed = false;
+            foreach (var l in candidateLeads)
+            {
+                var pDigits = NormalizePhone(l.Phone);
+                var emailNorm = NormalizeEmail(l.Email);
+                var nameNorm = (l.Name ?? string.Empty).Trim().ToLowerInvariant();
+
+                // 1. Match KYC
+                var matchKyc = kycs.FirstOrDefault(k =>
+                {
+                    if (pDigits != null && NormalizePhone(k.Phone) == pDigits) return true;
+                    if (emailNorm != null && NormalizeEmail(k.Email) == emailNorm) return true;
+                    if (!string.IsNullOrWhiteSpace(nameNorm) && (k.InvestorName ?? string.Empty).Trim().ToLowerInvariant() == nameNorm) return true;
+                    return false;
+                });
+
+                // 2. Match Investor
+                var matchInv = investors.FirstOrDefault(i =>
+                {
+                    if (pDigits != null && NormalizePhone(i.Phone) == pDigits) return true;
+                    if (emailNorm != null && NormalizeEmail(i.Email) == emailNorm) return true;
+                    if (!string.IsNullOrWhiteSpace(nameNorm) && (i.Name ?? string.Empty).Trim().ToLowerInvariant() == nameNorm) return true;
+                    return false;
+                });
+
+                // 3. Match Deal
+                var matchDeal = deals.FirstOrDefault(d =>
+                {
+                    if (d.CustomerId.HasValue && d.CustomerId.Value == l.Id) return true;
+                    if (!string.IsNullOrWhiteSpace(nameNorm) && (d.CustomerName ?? string.Empty).Trim().ToLowerInvariant() == nameNorm) return true;
+                    return false;
+                });
+
+                string? targetStatus = null;
+
+                if (matchDeal != null)
+                {
+                    var dStage = (matchDeal.Stage ?? string.Empty).Trim().ToLowerInvariant();
+                    if (dStage == "converted" || dStage == "won")
+                    {
+                        targetStatus = "Converted";
+                    }
+                    else if (dStage == "investment_opportunity" || dStage == "opportunity" || dStage == "term_sheet" || dStage == "committed")
+                    {
+                        targetStatus = "In Opportunity";
+                    }
+                    else if (dStage == "qualified_investor" || dStage == "qualified")
+                    {
+                        targetStatus = "KYC In Progress";
+                    }
+                }
+                else if (matchKyc != null)
+                {
+                    if (matchKyc.Status == KycStatus.Approved)
+                    {
+                        targetStatus = "Converted";
+                    }
+                    else
+                    {
+                        targetStatus = "KYC In Progress";
+                    }
+                }
+                else if (matchInv != null)
+                {
+                    if (matchInv.Status == InvestorStatus.ActiveInvestor)
+                    {
+                        targetStatus = "Converted";
+                    }
+                    else
+                    {
+                        targetStatus = "KYC In Progress";
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(targetStatus) && l.Status != targetStatus)
+                {
+                    l.Status = targetStatus;
+                    l.UpdatedAt = DateTime.UtcNow;
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                await _context.SaveChangesAsync(ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ReconcileLeadsWithProgressedKycsAndDealsAsync] Error: {ex.Message}");
+        }
+    }
+
     public async Task<ApiResponse<PagedResult<LeadResponseDto>>> GetActiveLeadsAsync(LeadFilterDto filter, CancellationToken ct = default)
     {
+        var companyId = _currentUser.CompanyId ?? 1;
+        await ReconcileLeadsWithProgressedKycsAndDealsAsync(companyId, ct);
+
         var query = GetScopedLeadsQuery(filter);
 
         if (_currentUser.Role == "company_admin" || _currentUser.Role == "super_admin")
@@ -172,7 +293,7 @@ public class LeadService : ILeadService
             query = query.Where(l => l.Priority == filter.Priority);
         }
 
-        var companyId = _currentUser.CompanyId ?? 1;
+        // companyId is already declared at method start
         var otherMatcher = await _otherService.GetOtherMatcherAsync(companyId, "my_leads", ct);
 
         // Sorting

@@ -603,6 +603,28 @@ public class KycService : IKycService
         return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc));
     }
 
+    public async Task<ApiResponse<KycDto>> GetByPhoneAsync(string phone, int companyId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(phone))
+            return ApiResponse<KycDto>.ErrorResponse("Phone is required");
+
+        var cleanDigits = new string(phone.Where(char.IsDigit).ToArray());
+        var last10 = cleanDigits.Length >= 10 ? cleanDigits[^10..] : cleanDigits;
+
+        var all = await _kycRepo.GetAllAsync(companyId, null, ct);
+        var kyc = all.FirstOrDefault(k =>
+        {
+            if (string.IsNullOrWhiteSpace(k.Phone)) return false;
+            var kDigits = new string(k.Phone.Where(char.IsDigit).ToArray());
+            return (!string.IsNullOrWhiteSpace(last10) && kDigits.EndsWith(last10)) || k.Phone.Trim() == phone.Trim();
+        });
+
+        if (kyc == null)
+            return ApiResponse<KycDto>.ErrorResponse("KYC record not found for this phone number");
+
+        return ApiResponse<KycDto>.SuccessResponse(MapToDto(kyc));
+    }
+
     public Task<ApiResponse<List<KycListDto>>> GetAllAsync(int companyId, string? status, CancellationToken ct = default)
         => GetAllAsync(companyId, status, null, ct);
 
@@ -1138,11 +1160,25 @@ public class KycService : IKycService
 
             if (matchedLead != null)
             {
-                if (!string.Equals(matchedLead.Status, "Converted", StringComparison.OrdinalIgnoreCase))
+                var hasActiveOpp = await _db.GhlDeals.AnyAsync(d =>
+                    d.CompanyId == companyId &&
+                    (d.Stage == "investment_opportunity" || d.Stage == "opportunity" || d.Stage == "term_sheet" || d.Stage == "committed") &&
+                    ((d.CustomerId != null && d.CustomerId == matchedLead.Id) || (d.CustomerName != null && d.CustomerName == matchedLead.Name)),
+                    ct);
+
+                if (hasActiveOpp)
                 {
-                    matchedLead.Status = kycStatus == KycStatus.Approved ? "Converted" : "Qualified";
-                    matchedLead.UpdatedAt = DateTime.UtcNow;
+                    matchedLead.Status = "In Opportunity";
                 }
+                else if (kycStatus == KycStatus.Approved)
+                {
+                    matchedLead.Status = "Converted";
+                }
+                else
+                {
+                    matchedLead.Status = "KYC In Progress";
+                }
+                matchedLead.UpdatedAt = DateTime.UtcNow;
             }
 
             // 2. Complete open/pending follow-ups

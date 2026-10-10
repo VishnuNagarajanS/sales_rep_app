@@ -449,6 +449,16 @@ const GhlIrmKycView: React.FC = () => {
       if (emailMatch) return emailMatch;
     }
 
+    // 6. Fallback to customer name match
+    const custName = (deal.customerName || '').toLowerCase().trim();
+    if (custName && custName.length > 2) {
+      const nameMatch = allKycs.find(
+        k => k && (k.investorName || '').toLowerCase().trim() === custName &&
+          (!compIdStr || !k.companyId || String(k.companyId) === compIdStr)
+      );
+      if (nameMatch) return nameMatch;
+    }
+
     return null;
   };
 
@@ -959,6 +969,56 @@ const GhlIrmKycView: React.FC = () => {
             }
           }
         }
+        if (!liveRecord && selectedCustomerDeal.customerId) {
+          const numId = parseInt(String(selectedCustomerDeal.customerId).replace(/\D/g, ''), 10);
+          if (numId > 0) {
+            try {
+              const res = await fetch(apiUrl(`/irm/kyc/${numId}`), { headers: getAuthHeaders() });
+              if (res.ok) {
+                const json = await res.json();
+                if (json.success && json.data) liveRecord = json.data;
+              }
+            } catch {}
+          }
+        }
+        if (!liveRecord && selectedCustomerDeal.phone && selectedCustomerDeal.phone.trim()) {
+          try {
+            const res = await fetch(apiUrl(`/irm/kyc/by-phone?phone=${encodeURIComponent(selectedCustomerDeal.phone.trim())}`), { headers: getAuthHeaders() });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success && json.data) liveRecord = json.data;
+            }
+          } catch {}
+        }
+        if (!liveRecord) {
+          try {
+            const res = await fetch(apiUrl('/irm/kyc/all'), { headers: getAuthHeaders() });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success && Array.isArray(json.data)) {
+                const pDigits = (selectedCustomerDeal.phone || '').replace(/\D/g, '').slice(-10);
+                const cleanMail = (selectedCustomerDeal.email || '').trim().toLowerCase();
+                const cleanName = (selectedCustomerDeal.customerName || '').trim().toLowerCase();
+                const matched = json.data.find((k: any) => {
+                  const kp = (k.phone || '').replace(/\D/g, '').slice(-10);
+                  if (pDigits && kp && pDigits === kp) return true;
+                  const km = (k.email || '').trim().toLowerCase();
+                  if (cleanMail && km && cleanMail === km) return true;
+                  const kn = (k.investorName || '').trim().toLowerCase();
+                  if (cleanName && kn && cleanName === kn) return true;
+                  return false;
+                });
+                if (matched?.id) {
+                  const det = await fetch(apiUrl(`/irm/kyc/${matched.id}`), { headers: getAuthHeaders() });
+                  if (det.ok) {
+                    const detJson = await det.json();
+                    if (detJson.success && detJson.data) liveRecord = detJson.data;
+                  }
+                }
+              }
+            }
+          } catch {}
+        }
         if (!isCancelled && liveRecord) {
           setDbKycs(prev => ({
             ...prev,
@@ -1040,9 +1100,7 @@ const GhlIrmKycView: React.FC = () => {
 
     // If backend record exists in dbKycs, reload genuine submitted/drafted KYC data
     if (targetDeal) {
-      const emailKey = (targetDeal.email || '').toLowerCase().trim();
-      const phoneDigits = (targetDeal.phone || '').replace(/\D/g, '').slice(-10);
-      const dbKyc = dbKycs[emailKey] || (phoneDigits ? Object.values(dbKycs).find((k: any) => (k.phone || '').replace(/\D/g, '').slice(-10) === phoneDigits) : null);
+      const dbKyc = findBackendKyc(targetDeal, dbKycs, tenant?.id);
 
       if (dbKyc) {
         let dbNominees: NomineeItem[] = [];
@@ -1792,21 +1850,6 @@ const GhlIrmKycView: React.FC = () => {
 
     // Clear draft
     localStorage.removeItem(`nexus_kyc_draft_${dealId}`);
-
-    try {
-      const raw = localStorage.getItem('nexus_mock_kyc_records');
-      const records = raw ? JSON.parse(raw) : {};
-      records[dealId] = {
-        ...(records[dealId] || {}),
-        status: 'Submitted',
-        kycStatus: 'Pending',
-        isAssisted: true,
-        assistedByIrmId: user?.id,
-        assistedByIrmName: user?.name,
-        submittedAt: nowIso,
-      };
-      localStorage.setItem('nexus_mock_kyc_records', JSON.stringify(records));
-    } catch {}
 
     window.dispatchEvent(new Event('nexus_storage_updated'));
 

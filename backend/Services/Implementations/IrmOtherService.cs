@@ -342,12 +342,14 @@ public class IrmOtherService : IIrmOtherService
             return ApiResponse<bool>.FailureResult("Call record not found.");
         }
 
-        // Advance disposition out of 'Other' so the contact is restored to their source module
-        call.Disposition = "Contacted";
-        if (!string.IsNullOrWhiteSpace(targetModule))
+        var normalizedTarget = NormalizeModule(targetModule) ?? call.CallModule;
+        if (!string.IsNullOrWhiteSpace(normalizedTarget))
         {
-            call.CallModule = NormalizeModule(targetModule) ?? call.CallModule;
+            call.CallModule = normalizedTarget;
         }
+
+        // Advance disposition out of 'Other' so the contact is restored to their source module
+        call.Disposition = (call.CallModule == "my_leads" || call.CallModule == "follow_up") ? "Follow-up Required" : "Contacted";
         var timestampStr = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm");
         call.Notes = string.IsNullOrWhiteSpace(call.Notes)
             ? $"[Moved back to {(call.CallModule ?? "original module")} on {timestampStr}]"

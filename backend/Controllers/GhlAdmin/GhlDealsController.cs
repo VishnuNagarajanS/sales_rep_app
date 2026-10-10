@@ -639,11 +639,17 @@ public class GhlDealsController : ControllerBase
             .ToListAsync(ct);
 
         bool changesMade = false;
+        string targetStatus = "KYC In Progress";
+        if (stage == "investment_opportunity" || stage == "opportunity" || stage == "term_sheet" || stage == "committed")
+            targetStatus = "In Opportunity";
+        else if (stage == "converted" || stage == "won")
+            targetStatus = "Converted";
+
         foreach (var l in matchingLeads)
         {
-            if (l.Status != "Qualified" && l.Status != "Converted")
+            if (l.Status != targetStatus)
             {
-                l.Status = "Qualified";
+                l.Status = targetStatus;
                 l.UpdatedAt = DateTime.UtcNow;
                 changesMade = true;
             }

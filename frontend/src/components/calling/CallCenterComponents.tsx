@@ -1161,7 +1161,7 @@ export const DispositionModal: React.FC = () => {
   };
 
   const IRM_MODULE_OUTCOMES: Record<string, CallDisposition[]> = {
-    all_leads: ['Follow-up Required', 'Call Back', 'Ready for KYC', 'Other', 'No Response'],
+    all_leads: ['Follow-up Required', 'Call Back', 'Ready for KYC', 'Other', 'No Response', 'Contacted'],
     my_leads: ['Follow-up Required', 'No Response', 'Call Back'],
     follow_up: ['Follow-up Required', 'Other', 'No Response', 'Call Back', 'Ready for KYC'],
     kyc: ['Contacted', 'Other', 'No Response', 'Call Back'],
