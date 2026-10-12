@@ -87,7 +87,20 @@ public class AuditLogsController : ControllerBase
         if (customerId.HasValue && customerId.Value > 0)
         {
             var cidStr = customerId.Value.ToString();
-            query = query.Where(l => l.CustomerId == customerId.Value || (l.EntityType.ToLower() == "customer" && l.EntityId == cidStr));
+            var associatedLeadIds = await _db.JaminBookings.AsNoTracking()
+                .Where(b => b.CustomerId == customerId.Value && b.LeadId.HasValue &&
+                            (!targetCompanyId.HasValue || b.CompanyId == targetCompanyId.Value))
+                .Select(b => b.LeadId!.Value)
+                .Distinct()
+                .ToListAsync(ct);
+
+            var leadIdStrings = associatedLeadIds.Select(id => id.ToString()).ToList();
+
+            query = query.Where(l =>
+                l.CustomerId == customerId.Value ||
+                (l.EntityType.ToLower() == "customer" && l.EntityId == cidStr) ||
+                (associatedLeadIds.Count > 0 && l.LeadId.HasValue && associatedLeadIds.Contains(l.LeadId.Value)) ||
+                (leadIdStrings.Count > 0 && l.EntityType.ToLower() == "lead" && leadIdStrings.Contains(l.EntityId)));
         }
 
         if (!string.IsNullOrWhiteSpace(entityType))

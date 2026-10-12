@@ -53,5 +53,43 @@ export const auditService = {
       console.error('[auditService] Failed to fetch audit logs from database:', err);
       return [];
     }
+  },
+
+  /**
+   * Persists an audit log directly to PostgreSQL Database API using primary keys.
+   */
+  async createAuditLog(entry: {
+    actorName?: string;
+    actorEmail?: string;
+    action: string;
+    entityType: string;
+    entityId: string;
+    leadId?: number;
+    customerId?: number;
+    details: string;
+    module?: string;
+    status?: string;
+  }): Promise<AuditLog | null> {
+    try {
+      const res = await apiClient.post<ApiResponse<any>>('/audit-logs', {
+        actorName: entry.actorName || 'System',
+        actorEmail: entry.actorEmail || '',
+        action: entry.action,
+        entityType: entry.entityType,
+        entityId: entry.entityId,
+        leadId: entry.leadId,
+        customerId: entry.customerId,
+        details: entry.details,
+        module: entry.module || 'Leads',
+        status: entry.status || 'success',
+      });
+      if (res?.success && res.data) {
+        return mapApiAuditLog(res.data);
+      }
+      return null;
+    } catch (err) {
+      console.warn('[auditService] Failed to create audit log on backend:', err);
+      return null;
+    }
   }
 };

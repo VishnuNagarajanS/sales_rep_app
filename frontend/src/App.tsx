@@ -3,6 +3,7 @@ import { useAuth } from './context/AuthContext';
 import { AuthLayout } from './layouts/AuthLayout';
 import { SalesLayout } from './layouts/SalesLayout';
 import { AdminLayout } from './layouts/AdminLayout';
+import { SITE_VISIT_TIME_SLOTS, formatSiteVisitSchedule } from './constants/siteVisit';
 
 // Sales Core Pages
 import { DashboardPage } from './pages/Dashboard/DashboardPage';
@@ -61,7 +62,7 @@ import { Modal } from './components/common/Modal';
 import { storageService } from './services/storageService';
 import { jaminApiService } from './services/jaminApiService';
 import { toast } from './context/ToastContext';
-import { Investor, Customer, Lead, Booking, SiteVisit } from './types';
+import { Investor, Customer, Lead, Booking, SiteVisit, Followup } from './types';
 import {
   saveFollowup as apiSaveFollowup,
   saveConsultation as apiSaveConsultation,
@@ -141,7 +142,7 @@ export const App: React.FC = () => {
     tenant?.id === '2' ||
     user?.companySlug?.toLowerCase() === 'jamin' ||
     (user?.companyName && /jamin/i.test(user.companyName)) ||
-    user?.companyId === 2 ||
+    (user?.companyId as any) === 2 ||
     (user?.companyId as any) === '2'
   );
   const isGhlAdmin =
@@ -222,7 +223,7 @@ export const App: React.FC = () => {
   const [isLoadingQuickPlots, setIsLoadingQuickPlots] = useState(false);
   const [quickTokenAmount, setQuickTokenAmount] = useState<number | ''>('');
   const [quickPaymentMode, setQuickPaymentMode] = useState('UPI');
-  const [quickTimeSlot, setQuickTimeSlot] = useState('11:00 AM');
+  const [quickTimeSlot, setQuickTimeSlot] = useState<string>(SITE_VISIT_TIME_SLOTS[0]);
   const [quickSubmitting, setQuickSubmitting] = useState(false);
   const [quickError, setQuickError] = useState('');
 
@@ -490,7 +491,7 @@ export const App: React.FC = () => {
     setQuickPlotId('');
     setQuickTokenAmount('');
     setQuickPaymentMode('UPI');
-    setQuickTimeSlot('11:00 AM');
+    setQuickTimeSlot(SITE_VISIT_TIME_SLOTS[0]);
     setConsInvestorId('');
     setConsInvestorName('');
     setConsInvestorPhone('');
@@ -690,11 +691,11 @@ export const App: React.FC = () => {
           bookingAmount: tokenAmt,
           totalAmount: totalAmount,
           bookingDate: new Date().toISOString().split('T')[0],
-          status: 'Token Paid',
+          status: 'Token Paid' as any,
           salesExecId: currentAgentId,
           salesExecName: currentAgentName,
           notes: quickNotes.trim(),
-        });
+        } as any);
         window.dispatchEvent(new Event('nexus_storage_updated'));
 
       } else if (quickCreateType === 'visit') {
@@ -707,7 +708,7 @@ export const App: React.FC = () => {
         const selProj = quickProjectsList.find(p => String(p.id) === String(quickProjectId));
         const selPlot = quickPlotId ? quickPlotsList.find(p => String(p.id) === String(quickPlotId)) : null;
 
-        const formattedSchedule = `${scheduledDate} • ${quickTimeSlot}`;
+        const formattedSchedule = formatSiteVisitSchedule(scheduledDate, quickTimeSlot);
 
         if (isJamin) {
           const res = await jaminApiService.scheduleSiteVisit({
@@ -1652,11 +1653,9 @@ export const App: React.FC = () => {
                     value={quickTimeSlot}
                     onChange={e => setQuickTimeSlot(e.target.value)}
                   >
-                    <option value="09:30 AM">09:30 AM (Morning Tour)</option>
-                    <option value="11:00 AM">11:00 AM (Mid-Day Walkthrough)</option>
-                    <option value="02:00 PM">02:00 PM (Afternoon Tour)</option>
-                    <option value="03:30 PM">03:30 PM (Late Afternoon Slot)</option>
-                    <option value="05:00 PM">05:00 PM (Sunset Inspection)</option>
+                    {SITE_VISIT_TIME_SLOTS.map(slot => (
+                      <option key={slot} value={slot}>{slot}</option>
+                    ))}
                   </select>
                 </div>
               </div>

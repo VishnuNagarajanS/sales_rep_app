@@ -11,14 +11,10 @@ import { storageService } from '../../services/storageService';
 import { getCustomers } from '../../services/ghlApiService';
 import { apiClient } from '../../services/apiClient';
 import { toast } from '../../context/ToastContext';
+import { SITE_VISIT_TIME_SLOTS, formatSiteVisitSchedule } from '../../constants/siteVisit';
 import './SiteVisitsPage.css';
 
-const TIME_SLOTS = [
-  'Morning · 9–11 am',
-  'Midday · 11 am–1 pm',
-  'Afternoon · 2–4 pm',
-  'Evening · 4–6 pm',
-];
+const TIME_SLOTS = SITE_VISIT_TIME_SLOTS;
 
 export const SiteVisitsPage: React.FC = () => {
   const { tenant, user } = useAuth();
@@ -45,7 +41,7 @@ export const SiteVisitsPage: React.FC = () => {
   const [managingVisit, setManagingVisit] = useState<SiteVisit | null>(null);
   const [manageStatus, setManageStatus] = useState<string>('');
   const [manageVisitDate, setManageVisitDate] = useState('');
-  const [manageVisitTimeSlot, setManageVisitTimeSlot] = useState(TIME_SLOTS[0]);
+  const [manageVisitTimeSlot, setManageVisitTimeSlot] = useState<string>(TIME_SLOTS[0]);
   const [manageProjectId, setManageProjectId] = useState<string>('');
   const [managePlotId, setManagePlotId] = useState<string>('');
   const [manageFilteredPlots, setManageFilteredPlots] = useState<any[]>([]);
@@ -71,32 +67,36 @@ export const SiteVisitsPage: React.FC = () => {
     return d.toISOString().split('T')[0];
   };
   const [visitDate, setVisitDate] = useState(getTomorrowDate);
-  const [visitTimeSlot, setVisitTimeSlot] = useState(TIME_SLOTS[0]);
+  const [visitTimeSlot, setVisitTimeSlot] = useState<string>(TIME_SLOTS[0]);
   const [notes, setNotes] = useState('');
 
-  // ── Load all data ──────────────────────────────────────────────────────────
   const loadAll = useCallback(async () => {
     setIsLoading(true);
     try {
       const tenantId = user?.companyId ? String(user.companyId) : 't-jamin-02';
-      const [visitsResult, projs, allPlots, agentList, leadList, custList] = await Promise.all([
+      const [visitsResult, projs, allPlots, agentList, leadsResult, custList] = await Promise.all([
         jaminApiService.getSiteVisits(true)
           .then(data => ({ data, error: '' }))
-          .catch(() => ({ data: [], error: 'Site visits could not be loaded from the server.' })),
+          .catch(() => ({ data: null as SiteVisit[] | null, error: 'Site visits could not be loaded from the server.' })),
         jaminApiService.getProjects().catch(() => []),
         jaminApiService.getPlots().catch(() => []),
         jaminApiService.getAgents().catch(() => []),
-        jaminApiService.getLeads(true).catch(() => storageService.getLeads(tenantId)),
+        jaminApiService.getLeads(true)
+          .then(data => ({ data, error: '' }))
+          .catch(() => ({ data: null as Lead[] | null, error: 'Leads could not be loaded from the server.' })),
         jaminApiService.getCustomers().catch(() => getCustomers(tenantId).catch(() => [])),
       ]);
 
-      // Site visits shown in the table come only from the backend.
-      setSiteVisits(visitsResult.data);
-      setLoadError(visitsResult.error);
+      // Only overwrite site visits if fresh response succeeded, preserving valid state on failure
+      if (visitsResult.data !== null) {
+        setSiteVisits(visitsResult.data);
+      }
+      const aggregatedError = visitsResult.error || leadsResult.error || '';
+      setLoadError(aggregatedError);
 
-      setProjects(projs || []);
-      setPlots(allPlots || []);
-      setAgents(agentList || []);
+      if (projs) setProjects(projs);
+      if (allPlots) setPlots(allPlots);
+      if (agentList) setAgents(agentList);
 
       const normPhone = (p?: string) => (p || '').replace(/\D/g, '').slice(-10);
 
@@ -118,38 +118,38 @@ export const SiteVisitsPage: React.FC = () => {
       }
       setCustomers(dedupedCustomers);
 
-      // 2. Deduplicate Leads, exclude "Converted", and exclude anyone already present in Customers
-      const localLeads = storageService.getLeads(tenantId) || [];
-      const combinedLeads = [...(leadList || []), ...(localLeads || [])];
-      const seenLeadPhones = new Set<string>();
-      const seenLeadNames = new Set<string>();
-      const dedupedLeads: Lead[] = [];
+      // 2. Deduplicate Leads from authoritative API, excluding "Converted" and existing Customers
+      if (leadsResult.data !== null) {
+        const leadList = leadsResult.data;
+        const seenLeadPhones = new Set<string>();
+        const seenLeadNames = new Set<string>();
+        const dedupedLeads: Lead[] = [];
 
-      for (const l of combinedLeads) {
-        if (!l.name || !l.phone) continue;
-        // If someone is Converted, they are a customer, not a lead
-        if (l.status === 'Converted') continue;
+        for (const l of leadList) {
+          if (!l.name || !l.phone) continue;
+          // If someone is Converted, they are a customer, not a lead
+          if (l.status === 'Converted') continue;
 
-        const phoneKey = normPhone(l.phone);
-        const nameKey = l.name.trim().toLowerCase();
+          const phoneKey = normPhone(l.phone);
+          const nameKey = l.name.trim().toLowerCase();
 
-        // If this person already exists in Customers, do not show in Leads dropdown
-        if (phoneKey && seenCustomerPhones.has(phoneKey)) continue;
-        if (nameKey && seenCustomerNames.has(nameKey)) continue;
+          // If this person already exists in Customers, do not show in Leads dropdown
+          if (phoneKey && seenCustomerPhones.has(phoneKey)) continue;
+          if (nameKey && seenCustomerNames.has(nameKey)) continue;
 
-        // Deduplicate among leads
-        if (phoneKey && seenLeadPhones.has(phoneKey)) continue;
-        if (nameKey && seenLeadNames.has(nameKey)) continue;
+          // Deduplicate among leads
+          if (phoneKey && seenLeadPhones.has(phoneKey)) continue;
+          if (nameKey && seenLeadNames.has(nameKey)) continue;
 
-        if (phoneKey) seenLeadPhones.add(phoneKey);
-        if (nameKey) seenLeadNames.add(nameKey);
-
-        dedupedLeads.push(l);
+          if (phoneKey) seenLeadPhones.add(phoneKey);
+          if (nameKey) seenLeadNames.add(nameKey);
+          dedupedLeads.push(l);
+        }
+        setLeads(dedupedLeads);
       }
-      setLeads(dedupedLeads);
     } catch (err) {
       console.error('Failed to load site visit data', err);
-      setSiteVisits([]);
+      setSiteVisits(prev => (prev.length > 0 ? prev : []));
       setLoadError('Site visits could not be loaded from the server.');
     } finally {
       setIsLoading(false);
@@ -235,15 +235,7 @@ export const SiteVisitsPage: React.FC = () => {
       return;
     }
 
-    const dateFormatted = (() => {
-      try {
-        const [y, m, d] = visitDate.split('-');
-        const dateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
-        return `${dateObj.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })} • ${visitTimeSlot}`;
-      } catch {
-        return `${visitDate} • ${visitTimeSlot}`;
-      }
-    })();
+    const dateFormatted = formatSiteVisitSchedule(visitDate, visitTimeSlot);
 
     const project = projects.find((p: any) => String(p.id) === selectedProjectId);
     const plot = filteredPlots.find((p: any) => String(p.id) === selectedPlotId);
@@ -279,10 +271,10 @@ export const SiteVisitsPage: React.FC = () => {
       // Save locally to storageService to ensure immediate linkage
       storageService.saveSiteVisit(created);
 
-      // If linked to a lead, log in lead timeline/notes and update status
+      // If linked to a lead, log in lead timeline/notes and update status strictly by LeadId
       const leadMatch = cleanLeadId
-        ? leads.find(l => l.id === cleanLeadId || String(l.id) === String(cleanLeadId))
-        : leads.find(l => l.phone.replace(/\D/g, '').slice(-10) === customerPhone.replace(/\D/g, '').slice(-10));
+        ? (leads.find(l => l.id === cleanLeadId || String(l.id) === String(cleanLeadId)) || null)
+        : null;
 
       if (leadMatch) {
         const newStatus = (leadMatch.status !== 'Converted' && leadMatch.status !== 'Booking In Progress')
@@ -427,18 +419,7 @@ export const SiteVisitsPage: React.FC = () => {
 
     let formattedSlot = managingVisit.scheduledAt;
     if (isRescheduled) {
-      try {
-        const [y, m, d] = manageVisitDate.split('-');
-        const dateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
-        formattedSlot = `${dateObj.toLocaleDateString('en-US', {
-          weekday: 'short',
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric',
-        })} • ${manageVisitTimeSlot}`;
-      } catch {
-        formattedSlot = `${manageVisitDate} • ${manageVisitTimeSlot}`;
-      }
+      formattedSlot = formatSiteVisitSchedule(manageVisitDate, manageVisitTimeSlot);
     }
 
     const project = projects.find(p => String(p.id) === String(manageProjectId));
@@ -488,10 +469,10 @@ export const SiteVisitsPage: React.FC = () => {
         throw new Error('Server update failed');
       }
 
-      // If linked to a lead, log in lead timeline/notes and update status if completed or scheduled
+      // If linked to a lead, log in lead timeline/notes and update status strictly by LeadId
       const manageLeadMatch = oldVisit.leadId
-        ? leads.find(l => l.id === oldVisit.leadId || String(l.id) === String(oldVisit.leadId))
-        : leads.find(l => (oldVisit.customerPhone && l.phone.replace(/\D/g, '').slice(-10) === oldVisit.customerPhone.replace(/\D/g, '').slice(-10)));
+        ? (leads.find(l => l.id === oldVisit.leadId || String(l.id) === String(oldVisit.leadId)) || null)
+        : null;
 
       if (manageLeadMatch) {
         const timestamp = new Date().toLocaleDateString();
@@ -550,8 +531,8 @@ export const SiteVisitsPage: React.FC = () => {
   const handleConfirmVisit = async (sv: SiteVisit) => {
     await jaminApiService.confirmSiteVisit(sv.id);
     const targetLead = sv.leadId
-      ? leads.find(l => l.id === sv.leadId || String(l.id) === String(sv.leadId))
-      : leads.find(l => sv.customerPhone && l.phone.replace(/\D/g, '').slice(-10) === sv.customerPhone.replace(/\D/g, '').slice(-10));
+      ? (leads.find(l => l.id === sv.leadId || String(l.id) === String(sv.leadId)) || null)
+      : null;
     if (targetLead && targetLead.status !== 'Converted' && targetLead.status !== 'Booking In Progress') {
       const numId = parseInt(String(targetLead.id).replace('db-', ''), 10);
       if (!isNaN(numId)) {
@@ -694,7 +675,33 @@ export const SiteVisitsPage: React.FC = () => {
         </div>
       </div>
 
-      {loadError && <div className="card text-center" role="alert">{loadError}</div>}
+      {loadError && (
+        <div
+          className="card text-center site-visits-error-banner"
+          role="alert"
+          style={{
+            padding: '12px 16px',
+            marginBottom: '16px',
+            background: 'var(--danger-50, #fef2f2)',
+            border: '1px solid var(--danger-200, #fecaca)',
+            color: 'var(--danger-700, #b91c1c)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '12px',
+          }}
+        >
+          <span>{loadError}</span>
+          <button
+            type="button"
+            className="btn btn-sm btn-secondary"
+            onClick={() => void loadAll()}
+            style={{ fontWeight: 600, cursor: 'pointer' }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       <DataTable
         columns={columns}

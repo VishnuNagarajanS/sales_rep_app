@@ -60,12 +60,18 @@ export const CompanyAuditPage: React.FC = () => {
       key: 'actorName',
       header: 'Actor',
       sortable: true,
-      render: l => (
-        <div>
-          <div className="company-audit-actor-name">{l.actorName}</div>
-          <div className="company-audit-actor-email">{l.actorEmail}</div>
-        </div>
-      ),
+      render: l => {
+        const actorName = l.actorName?.trim();
+        const actorEmail = l.actorEmail?.trim();
+        const isSame = !actorName || !actorEmail || actorName.toLowerCase() === actorEmail.toLowerCase();
+
+        return (
+          <div>
+            <div className="company-audit-actor-name">{actorName || actorEmail || 'System'}</div>
+            {!isSame && <div className="company-audit-actor-email">{actorEmail}</div>}
+          </div>
+        );
+      },
     },
     {
       key: 'action',

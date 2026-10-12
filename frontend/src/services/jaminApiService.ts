@@ -250,7 +250,7 @@ export const jaminApiService = {
         const siteVisits = await this.getSiteVisits(true);
         const linkedVisits = siteVisits.filter(v => v.leadId === String(id));
         const followups = await this.getFollowups(true);
-        const linkedFollowups = followups.filter(f => f.contactId === String(id) || f.contactPhone === lead.phone);
+        const linkedFollowups = followups.filter(f => f.contactId === String(id) || String(f.leadId || '') === String(id));
         return { lead, siteVisits: linkedVisits, followups: linkedFollowups };
       }
     } catch (err) {
@@ -338,11 +338,19 @@ export const jaminApiService = {
   },
 
   // ── 2. SITE VISITS ─────────────────────────────────────────────────────────
-  async getSiteVisits(isAdmin: boolean = false, agentId?: number, status?: string): Promise<SiteVisit[]> {
+  async getSiteVisits(isAdmin: boolean = false, agentId?: number, status?: string, leadId?: number | string, customerId?: number | string): Promise<SiteVisit[]> {
     try {
       const params = new URLSearchParams();
       if (agentId) params.append('agentId', String(agentId));
       if (status && status !== 'All') params.append('status', status);
+      if (leadId) {
+        const numLeadId = Number(String(leadId).replace(/^(db-|lead-)/i, ''));
+        if (Number.isInteger(numLeadId) && numLeadId > 0) params.append('leadId', String(numLeadId));
+      }
+      if (customerId) {
+        const numCustId = Number(String(customerId).replace(/^(db-|customer-)/i, ''));
+        if (Number.isInteger(numCustId) && numCustId > 0) params.append('customerId', String(numCustId));
+      }
 
       const res = await apiClient.get<any>(`/jamin/site-visits?${params.toString()}`);
       if (res && res.success && Array.isArray(res.data)) {
@@ -512,7 +520,7 @@ export const jaminApiService = {
             updatedAt: f.updatedAt,
           };
         });
-        mapped.forEach((f: Followup) => storageService.saveFollowup(f));
+        storageService.syncFollowupsSilent(mapped);
         return mapped;
       }
     } catch (err) {

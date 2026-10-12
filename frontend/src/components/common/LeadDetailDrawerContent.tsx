@@ -88,8 +88,17 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
 
   useEffect(() => {
     let isMounted = true;
+    const parsedContactId = Number(String(contactId || '').replace(/^(db-|lead-|customer-)/i, ''));
+    const isValidId = Number.isInteger(parsedContactId) && parsedContactId > 0;
+
     const fetchSiteVisits = () => {
-      jaminApiService.getSiteVisits(true).then(visits => {
+      if (!isValidId) {
+        if (isMounted) setApiSiteVisits([]);
+        return;
+      }
+      const lId = contactType !== 'customer' ? parsedContactId : undefined;
+      const cId = contactType === 'customer' ? parsedContactId : undefined;
+      jaminApiService.getSiteVisits(true, undefined, undefined, lId, cId).then(visits => {
         if (isMounted) setApiSiteVisits(visits || []);
       }).catch(() => { if (isMounted) setApiSiteVisits([]); });
     };
@@ -97,12 +106,34 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
     window.addEventListener('nexus_storage_updated', fetchSiteVisits);
 
     getFollowups(tenantId || tenant?.id).then(followupItems => {
-      if (isMounted && followupItems) setApiFollowups(followupItems);
+      if (isMounted && followupItems) {
+        const filtered = followupItems.filter(f => {
+          if (contactType === 'customer') {
+            const fCustId = Number(String(f.customerId || f.contactId || '').replace(/^(db-|customer-)/i, ''));
+            return fCustId === parsedContactId;
+          } else {
+            const fLeadId = Number(String(f.leadId || f.contactId || '').replace(/^(db-|lead-)/i, ''));
+            return fLeadId === parsedContactId;
+          }
+        });
+        setApiFollowups(filtered);
+      }
     }).catch(() => { if (isMounted) setApiFollowups([]); });
     
     const fetchCalls = () => {
       getCalls(tenantId || tenant?.id).then(records => {
-        if (isMounted && records) setApiCalls(records);
+        if (isMounted && records) {
+          const filtered = records.filter(c => {
+            if (contactType === 'customer') {
+              const cCustId = Number(String(c.customerId || '').replace(/^(db-|customer-)/i, ''));
+              return cCustId === parsedContactId;
+            } else {
+              const cLeadId = Number(String(c.leadId || '').replace(/^(db-|lead-)/i, ''));
+              return cLeadId === parsedContactId;
+            }
+          });
+          setApiCalls(filtered);
+        }
       }).catch(() => {
         if (isMounted) setApiCalls([]);
       });
@@ -115,7 +146,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
       window.removeEventListener('nexus_storage_updated', fetchCalls);
       window.removeEventListener('nexus_storage_updated', fetchSiteVisits);
     };
-  }, [contactPhone, contactId, tenantId, tenant?.id]);
+  }, [contactPhone, contactId, contactType, tenantId, tenant?.id]);
 
   useEffect(() => {
     let isMounted = true;
@@ -137,51 +168,30 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   // ── Lead record lookup ───────────────────────────────────────────────────────
   const selectedLead = (() => {
     const leads = storageService.getLeads(tenantId) || [];
-    return leads.find(l => {
-      if (contactId && contactId !== 'contact-new' && l.id === contactId) return true;
-      const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
-      const fPhone = (contactPhone || '').replace(/\D/g, '').slice(-10);
-      return lPhone && fPhone && lPhone === fPhone;
-    }) || null;
+    if (!contactId || contactId === 'contact-new') return null;
+    return leads.find(l => l.id === contactId || String(l.id) === String(contactId)) || null;
   })();
 
-  // ── Lead Activity & Audit History Lookup ──────────────────────────────────
-  const leadAuditLogs = (() => {
-    const allLogs = storageService.getAuditLogs(tenantId) || [];
-    const targetLeadId = selectedLead?.id || contactId;
-    const phoneDigits = (selectedLead?.phone || contactPhone || '').replace(/\D/g, '').slice(-10);
-    const targetName = (selectedLead?.name || contactName || '').toLowerCase();
+  // ── Lead Activity & Audit History Lookup directly from backend ──────────
+  const leadAuditLogs = useMemo(() => {
+    return [...apiAuditLogs].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [apiAuditLogs]);
 
-    const localMatches = allLogs.filter(l => {
-      if (targetLeadId && (l.entityId === targetLeadId || l.entityId === String(targetLeadId))) return true;
-      if (l.details && phoneDigits && l.details.includes(phoneDigits)) return true;
-      if (l.details && targetName && l.details.toLowerCase().includes(targetName)) return true;
-      return false;
-    });
-    const combined = new Map<string, AuditLog>();
-    [...apiAuditLogs, ...localMatches].forEach(log => combined.set(String(log.id), log));
-    return [...combined.values()];
-  })();
-
-  // ── Site Visits lookup (Jamin Bazaar) ──────────────────────────────────────
-  const leadSiteVisits = (() => {
-    if (!contactId || !['lead', 'customer'].includes(contactType)) return [];
-    const cleanId = String(contactId).replace(/\D/g, '');
-    const phoneDigits = (contactPhone || selectedLead?.phone || '').replace(/\D/g, '').slice(-10);
+  // ── Site Visits lookup strictly via backend primary keys ─────────────────
+  const leadSiteVisits = useMemo(() => {
+    const parsedId = Number(String(contactId || '').replace(/^(db-|lead-|customer-)/i, ''));
+    if (!Number.isInteger(parsedId) || parsedId <= 0) return [];
 
     return apiSiteVisits.filter(v => {
       if (contactType === 'customer') {
-        const cId = String(v.customerId || '').replace(/\D/g, '');
-        if (cleanId && cId && cleanId === cId) return true;
+        const cId = Number(String(v.customerId || '').replace(/^(db-|customer-)/i, ''));
+        return cId === parsedId;
       } else {
-        const lId = String(v.leadId || '').replace(/\D/g, '');
-        if (cleanId && lId && cleanId === lId) return true;
+        const lId = Number(String(v.leadId || '').replace(/^(db-|lead-)/i, ''));
+        return lId === parsedId;
       }
-      const vPhoneDigits = (v.customerPhone || '').replace(/\D/g, '').slice(-10);
-      if (phoneDigits && vPhoneDigits && phoneDigits === vPhoneDigits) return true;
-      return false;
     });
-  })();
+  }, [apiSiteVisits, contactId, contactType]);
 
   const handleConfirmLeadSiteVisit = async (sv: SiteVisit) => {
     try {
@@ -206,43 +216,39 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   };
 
   // ── Call history lookup ──────────────────────────────────────────────────────
-  const allCalls = useMemo(() => {
-    const local = storageService.getCalls(tenantId || tenant?.id) || [];
-    const map = new Map<string, CallRecord>();
-    apiCalls.forEach(c => map.set(String(c.id), c));
-    local.forEach(c => {
-      if (!map.has(String(c.id))) map.set(String(c.id), c);
-    });
-    return Array.from(map.values());
-  }, [apiCalls, tenantId, tenant?.id]);
+  const selectedCalls = useMemo(() => {
+    const rawContactId = String(contactId || '').trim();
+    if (!rawContactId || rawContactId === 'contact-new') return [];
 
-  const cleanContactId = String(contactId || '').replace(/\D/g, '');
-  const fPhoneDigits = (contactPhone || '').replace(/\D/g, '').slice(-10);
-
-  const selectedCalls = allCalls.filter(c => {
-    const cLeadIdClean = c.leadId ? String(c.leadId).replace(/\D/g, '') : '';
-    const cCustIdClean = c.customerId ? String(c.customerId).replace(/\D/g, '') : '';
-    const cPhoneDigits = (c.contactPhone || '').replace(/\D/g, '').slice(-10);
-
-    const isMatch =
-      (cleanContactId && contactType === 'customer' && cCustIdClean === cleanContactId) ||
-      (cleanContactId && contactType !== 'customer' && cLeadIdClean === cleanContactId) ||
-      (contactId && contactId !== 'contact-new' && (
-        c.leadId === contactId ||
-        c.customerId === contactId ||
-        (c as any).contactId === contactId ||
-        (c as any).investorId === contactId
-      )) ||
-      (fPhoneDigits && cPhoneDigits && fPhoneDigits === cPhoneDigits);
-
-    if (!isMatch) return false;
-
-    // When a filter is specified, only include matching dispositions
-    if (callDispositionFilter && callDispositionFilter.length > 0) {
-      return callDispositionFilter.includes(c.disposition as CallDisposition);
+    let numericId: number | null = null;
+    if (/^\d+$/.test(rawContactId)) {
+      numericId = parseInt(rawContactId, 10);
+    } else if (/^(db-|lead-|customer-)(\d+)$/i.test(rawContactId)) {
+      numericId = parseInt(rawContactId.replace(/^(db-|lead-|customer-)/i, ''), 10);
     }
-    return true;
-  });
+
+    return apiCalls.filter(c => {
+      let isMatch = false;
+      if (numericId) {
+        if (contactType === 'customer') {
+          const cCustId = Number(String(c.customerId || '').replace(/^(db-|customer-)/i, ''));
+          isMatch = cCustId === numericId;
+        } else {
+          const cLeadId = Number(String(c.leadId || '').replace(/^(db-|lead-)/i, ''));
+          isMatch = cLeadId === numericId;
+        }
+      } else {
+        isMatch = (contactType === 'customer' ? c.customerId === rawContactId : c.leadId === rawContactId);
+      }
+
+      if (!isMatch) return false;
+
+      if (callDispositionFilter && callDispositionFilter.length > 0) {
+        return callDispositionFilter.includes(c.disposition as CallDisposition);
+      }
+      return true;
+    });
+  }, [apiCalls, contactId, contactType, callDispositionFilter]);
 
   const isIrmCall = (c: any) =>
     (c.notes || '').startsWith('Connected to IRM:') ||
@@ -347,7 +353,6 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
     });
 
     // 5. Follow-ups
-    const fPhoneDigits = (selectedLead?.phone || contactPhone || '').replace(/\D/g, '').slice(-10);
     const leadFollowups = followups.filter(f => {
       return f.contactType === contactType && Boolean(contactId && contactId !== 'contact-new' && String(f.contactId) === String(contactId));
     });

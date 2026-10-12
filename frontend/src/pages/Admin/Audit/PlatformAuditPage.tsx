@@ -259,8 +259,10 @@ export const PlatformAuditPage: React.FC = () => {
 
                     <td>
                       <div className="actor-cell">
-                        <div className="actor-name-text">{l.actorName}</div>
-                        <div className="actor-email-text">{l.actorEmail}</div>
+                        <div className="actor-name-text">{l.actorName || l.actorEmail || 'System'}</div>
+                        {l.actorEmail && l.actorName && l.actorEmail.toLowerCase() !== l.actorName.toLowerCase() && (
+                          <div className="actor-email-text">{l.actorEmail}</div>
+                        )}
                       </div>
                     </td>
 

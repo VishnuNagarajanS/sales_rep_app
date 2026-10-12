@@ -99,6 +99,13 @@ export interface Customer360CallSummary {
   disposition: string;
   notes: string;
   timestamp: string;
+  agentId?: number | string;
+  agentName?: string;
+  contactName?: string;
+  contactPhone?: string;
+  leadId?: number | string;
+  customerId?: number | string;
+  recordingUrl?: string;
 }
 
 export interface Customer360Dto {

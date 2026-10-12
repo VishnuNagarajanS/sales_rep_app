@@ -265,7 +265,7 @@ export const InCallBar: React.FC = () => {
   // Look up the full lead record to find who previously handled this contact
   const matchedLead = activeCall?.matchedRecord?.type === 'lead'
     ? storageService.getLeads(tenant?.id).find((l: Lead) => l.id === activeCall.matchedRecord?.id)
-    : (activeCall?.contactPhone ? storageService.findLeadByPhone(activeCall.contactPhone, tenant?.id) : undefined);
+    : undefined;
   const previousAgentName = matchedLead?.assignedAgentName;
 
   const connectOptions = isIrm

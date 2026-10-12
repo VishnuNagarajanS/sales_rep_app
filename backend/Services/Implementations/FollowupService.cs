@@ -302,7 +302,7 @@ public class FollowupService : IFollowupService
         if (leadId.HasValue)
         {
             var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == leadId.Value, ct);
-            if (lead != null && lead.Status == "New")
+            if (lead != null && (lead.Status == "New" || lead.Status == "Follow-up Completed"))
             {
                 lead.Status = "Follow-up Required";
                 lead.UpdatedAt = DateTime.UtcNow;
@@ -316,7 +316,7 @@ public class FollowupService : IFollowupService
         {
             CompanyId = companyId,
             Timestamp = DateTime.UtcNow,
-            ActorName = assignedAgent?.Name ?? _currentUser.Email ?? "Agent",
+            ActorName = assignedAgent?.Name ?? (!string.IsNullOrWhiteSpace(_currentUser.Name) ? _currentUser.Name : (_currentUser.Email ?? "Agent")),
             ActorEmail = assignedAgent?.Email ?? _currentUser.Email ?? string.Empty,
             Action = "FOLLOWUP_SCHEDULED",
             EntityType = customerId.HasValue ? "Customer" : (leadId.HasValue ? "Lead" : "Followup"),
@@ -456,7 +456,7 @@ public class FollowupService : IFollowupService
         {
             CompanyId = followup.CompanyId,
             Timestamp = DateTime.UtcNow,
-            ActorName = _currentUser.Email ?? "Agent",
+            ActorName = !string.IsNullOrWhiteSpace(_currentUser.Name) ? _currentUser.Name : (_currentUser.Email ?? "Agent"),
             ActorEmail = _currentUser.Email ?? string.Empty,
             Action = "FOLLOWUP_COMPLETED",
             EntityType = followup.CustomerId.HasValue ? "Customer" : (followup.LeadId.HasValue ? "Lead" : "Followup"),
@@ -516,21 +516,47 @@ public class FollowupService : IFollowupService
 
     private async Task RefreshLeadNextFollowupDateAsync(Followup followup, CancellationToken ct)
     {
-        if (!string.Equals(followup.ContactType, "lead", StringComparison.OrdinalIgnoreCase) ||
-            !followup.LeadId.HasValue)
+        if (!string.Equals(followup.ContactType, "lead", StringComparison.OrdinalIgnoreCase))
             return;
 
+        int? targetLeadId = followup.LeadId;
+        if (!targetLeadId.HasValue && int.TryParse(followup.ContactId, out var parsedId))
+        {
+            targetLeadId = parsedId;
+        }
+
+        if (!targetLeadId.HasValue) return;
+
         var lead = await _context.Leads.FirstOrDefaultAsync(
-            l => l.Id == followup.LeadId.Value && l.CompanyId == followup.CompanyId, ct);
+            l => l.Id == targetLeadId.Value && l.CompanyId == followup.CompanyId, ct);
         if (lead == null) return;
 
+        // Count active (pending/rescheduled) followups remaining for this lead
         lead.NextFollowupDate = await _context.Followups
             .Where(f => f.CompanyId == followup.CompanyId && f.ContactType == "lead" &&
-                        f.LeadId == followup.LeadId &&
+                        (f.LeadId == targetLeadId.Value || f.ContactId == targetLeadId.Value.ToString()) &&
                         (f.Status == FollowupStatus.Pending || f.Status == FollowupStatus.Rescheduled))
             .OrderBy(f => f.ScheduledAt)
             .Select(f => (DateTime?)f.ScheduledAt)
             .FirstOrDefaultAsync(ct);
+
+        if (!lead.NextFollowupDate.HasValue && lead.Status == "Follow-up Required")
+        {
+            // No more active followups — check whether at least one was Completed or all were Cancelled
+            var hasAnyCompleted = await _context.Followups
+                .AnyAsync(f => f.CompanyId == followup.CompanyId && f.ContactType == "lead" &&
+                               (f.LeadId == targetLeadId.Value || f.ContactId == targetLeadId.Value.ToString()) &&
+                               f.Status == FollowupStatus.Completed, ct);
+
+            // If at least one followup was properly completed → mark as Follow-up Completed
+            // If all remaining were cancelled (none completed) → revert to Contacted (neutral)
+            lead.Status = hasAnyCompleted ? "Follow-up Completed" : "Contacted";
+        }
+        else if (lead.NextFollowupDate.HasValue && (lead.Status == "New" || lead.Status == "Follow-up Completed" || lead.Status == "Contacted"))
+        {
+            lead.Status = "Follow-up Required";
+        }
+
         lead.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync(ct);
     }

@@ -63,6 +63,21 @@ public class JaminHoldExpiryBackgroundService : BackgroundService
 
         foreach (var p in expiredPlots)
         {
+            var customerInfo = !string.IsNullOrWhiteSpace(p.HeldByCustomerName) ? $"for {p.HeldByCustomerName}" : "";
+            db.AuditLogs.Add(new backend.Models.Entities.AuditLog
+            {
+                CompanyId = p.CompanyId,
+                Timestamp = now,
+                ActorName = "System Background Worker",
+                ActorEmail = "system@jaminbazaar.com",
+                Action = "PLOT_HOLD_EXPIRED",
+                EntityType = "Plot",
+                EntityId = p.Id.ToString(),
+                Details = $"Plot {p.PlotNumber} hold expired {customerInfo} and was automatically released to Available status.",
+                Module = "Plots",
+                Status = "success"
+            });
+
             p.Status = "Available";
             p.HeldByCustomerId = null;
             p.HeldByCustomerName = null;
@@ -78,6 +93,20 @@ public class JaminHoldExpiryBackgroundService : BackgroundService
 
         foreach (var b in expiredBookings)
         {
+            db.AuditLogs.Add(new backend.Models.Entities.AuditLog
+            {
+                CompanyId = b.CompanyId,
+                Timestamp = now,
+                ActorName = "System Background Worker",
+                ActorEmail = "system@jaminbazaar.com",
+                Action = "BOOKING_HOLD_EXPIRED",
+                EntityType = "Booking",
+                EntityId = b.Id.ToString(),
+                Details = $"Booking hold #{b.Id} for Plot {b.PlotNumber} ({b.CustomerName}) expired and was closed.",
+                Module = "Bookings",
+                Status = "success"
+            });
+
             b.Status = "Hold Expired";
             b.UpdatedAt = now;
         }

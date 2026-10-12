@@ -12,6 +12,7 @@ import {
   Pencil,
   RotateCcw,
   Plus,
+  Trash2,
 } from 'lucide-react';
 import { Followup, CallRecord, Deal, Lead, Customer } from '../../types';
 import { storageService } from '../../services/storageService';
@@ -21,6 +22,7 @@ import {
   getFollowups,
   saveFollowup as apiSaveFollowup,
   completeFollowup as apiCompleteFollowup,
+  deleteFollowup as apiDeleteFollowup,
   getCalls,
   getLeads,
   getCustomers,
@@ -348,7 +350,7 @@ export const FollowupsPage: React.FC = () => {
         ? apiFollowups.filter(f => f.contactType !== 'investor' && !f.investorId && f.assignedRole !== 'irm')
         : apiFollowups;
 
-      const calls = await getCalls(tenant?.id).catch(() => storageService.getCalls(tenant?.id));
+      const calls = await getCalls(tenant?.id).catch(() => []);
 
       const tenantNum = (tenant?.id === '2' || tenant?.id === 't-jamin-02' || tenant?.slug === 'jamin') ? '2' : '1';
 
@@ -360,9 +362,6 @@ export const FollowupsPage: React.FC = () => {
           : await getLeads(tenant?.id);
       } catch (err) {
         console.warn('Failed to load leads from API:', err);
-      }
-      if (directLeads.length === 0) {
-        directLeads = storageService.getLeads(tenant?.id, false) || [];
       }
 
       // Deduplicate leads by 10-digit phone and sanitize legacy audit lines
@@ -460,13 +459,11 @@ export const FollowupsPage: React.FC = () => {
   // Sync IRM preference state when drawer opens for a contact
   useEffect(() => {
     if (!drawerFollowup) return;
-    const leads = storageService.getLeads(tenant?.id) || [];
-    const customers = storageService.getCustomers(tenant?.id) || [];
     const l = drawerFollowup.contactType === 'lead'
-      ? leads.find(item => String(item.id) === String(drawerFollowup.contactId))
+      ? allLeads.find(item => String(item.id) === String(drawerFollowup.contactId))
       : undefined;
     const c = drawerFollowup.contactType === 'customer'
-      ? customers.find(item => String(item.id) === String(drawerFollowup.contactId))
+      ? allCustomers.find(item => String(item.id) === String(drawerFollowup.contactId))
       : undefined;
 
     const contactKey = drawerFollowup.contactId;
@@ -647,13 +644,11 @@ export const FollowupsPage: React.FC = () => {
   const handleMoveToKyc = async () => {
     if (isJamin || !drawerFollowup) return;
 
-    const leads = storageService.getLeads(tenant?.id) || [];
-    const customers = storageService.getCustomers(tenant?.id) || [];
     const matchingLead = drawerFollowup.contactType === 'lead'
-      ? leads.find(l => String(l.id) === String(drawerFollowup.contactId)) || null
+      ? allLeads.find(l => String(l.id) === String(drawerFollowup.contactId)) || null
       : null;
     const matchingCustomer = drawerFollowup.contactType === 'customer'
-      ? customers.find(c => String(c.id) === String(drawerFollowup.contactId)) || null
+      ? allCustomers.find(c => String(c.id) === String(drawerFollowup.contactId)) || null
       : null;
 
     const resolvedContactId = drawerFollowup.contactId || matchingLead?.id || matchingCustomer?.id || `contact-${Date.now()}`;
@@ -670,12 +665,9 @@ export const FollowupsPage: React.FC = () => {
       (drawerFollowup as any)?.investmentCapacity ||
       '₹10 Lakh to ₹1 Cr';
 
-    // 1. Create or update deal in stage 'qualified_investor' — save to DB first, fallback to localStorage
-    const allDeals = storageService.getDeals(tenant?.id) || [];
-    const existingDeal = allDeals.find(d => d.customerId && String(d.customerId) === String(resolvedContactId));
-
+    // 1. Create deal in stage 'qualified_investor'
     const kycDeal: Deal = {
-      id: existingDeal?.id || `deal-kyc-${Date.now()}`,
+      id: `deal-kyc-${Date.now()}`,
       companyId: tenant?.id || 't-ghl-01',
       title: `${drawerFollowup.contactName} - KYC Verification`,
       customerId: resolvedContactId,
@@ -696,15 +688,16 @@ export const FollowupsPage: React.FC = () => {
       investmentRange: investmentCapacity,
     };
 
-    // Save deal to DB (API) — this persists stage='qualified_investor' in Neon
+    // Save deal to DB (API)
     try {
       await apiSaveDeal(kycDeal);
     } catch (err) {
-      console.warn('[FollowupsPage] API saveDeal failed, saving locally:', err);
-      storageService.saveDeal(kycDeal);
+      console.error('[FollowupsPage] API saveDeal failed:', err);
+      alert(err instanceof Error ? err.message : 'Could not create KYC deal. Please retry.');
+      return;
     }
 
-    // 2. Mark the follow-up task as completed in DB so it does not show in the followup page
+    // 2. Mark the follow-up task as completed in DB
     try {
       await apiSaveFollowup({
         ...drawerFollowup,
@@ -712,19 +705,17 @@ export const FollowupsPage: React.FC = () => {
         notes: `${drawerFollowup.notes ? drawerFollowup.notes + ' | ' : ''}Ready for KYC: Moved to KYC Module by IRM`,
       });
     } catch (err) {
-      console.warn('[FollowupsPage] API saveFollowup (complete) failed:', err);
-      storageService.saveFollowup({
-        ...drawerFollowup,
-        status: 'Completed',
-        notes: `${drawerFollowup.notes ? drawerFollowup.notes + ' | ' : ''}Ready for KYC: Moved to KYC Module by IRM`,
-      });
+      console.error('[FollowupsPage] API saveFollowup (complete) failed:', err);
+      alert(err instanceof Error ? err.message : 'Could not update follow-up status. Please retry.');
+      return;
     }
 
-    // 3. If matching lead exists, update lead status to 'Ready for KYC' in DB
+    // 3. If matching lead exists, update lead status to 'Qualified' in DB (never overwrite Booking In Progress or Converted)
     if (matchingLead) {
+      const isProtected = matchingLead.status === 'Booking In Progress' || matchingLead.status === 'Converted';
       const updatedLead = {
         ...matchingLead,
-        status: 'Qualified' as Lead['status'],
+        status: isProtected ? matchingLead.status : ('Qualified' as Lead['status']),
         customFields: {
           ...(matchingLead.customFields || {}),
           preferredAssetClass: prefAssetClass,
@@ -738,27 +729,12 @@ export const FollowupsPage: React.FC = () => {
         await apiSaveLead(updatedLead);
       } catch (err) {
         console.warn('[FollowupsPage] API saveLead (qualified) failed:', err);
-        storageService.saveLead(updatedLead);
       }
     }
 
-    // 4. Audit Log
-    storageService.addAuditLog({
-      id: `aud-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      actorName: user?.name || 'IRM',
-      actorEmail: user?.email || 'irm@ghl.com',
-      action: 'DEAL_CREATED_KYC',
-      entityType: 'Deal',
-      entityId: kycDeal.id,
-      companyId: tenant?.id || 't-ghl-01',
-      companyName: tenant?.name || 'GHL India Ventures',
-      details: `Moved ${drawerFollowup.contactName} to KYC verification module`,
-    });
-
-    // 5. Update local state & close drawer
+    // 4. Update state, refresh authoritative data from backend, and close drawer
     setDrawerFollowup(null);
-    loadData();
+    await loadData();
     window.dispatchEvent(new Event('nexus_storage_updated'));
     showToast(`✓ ${drawerFollowup.contactName} moved to KYC module!`);
   };
@@ -799,29 +775,37 @@ export const FollowupsPage: React.FC = () => {
       return;
     }
 
-    // Also update lead record if matching
-    const leads = storageService.getLeads(tenant?.id) || [];
-    const lead = leads.find(l =>
-      (rescheduleItem.contactId && rescheduleItem.contactId !== 'contact-new' && l.id === rescheduleItem.contactId) ||
+    // Also update lead record if matching using authoritative state
+    const matchingLead = allLeads.find(l =>
+      (rescheduleItem.contactId && rescheduleItem.contactId !== 'contact-new' && String(l.id) === String(rescheduleItem.contactId)) ||
       (rescheduleItem.contactPhone && (l.phone || '').replace(/\D/g, '').slice(-10) === (rescheduleItem.contactPhone || '').replace(/\D/g, '').slice(-10))
     );
-    if (lead) {
-      storageService.saveLead({
-        ...lead,
+    if (matchingLead) {
+      const isProtected = matchingLead.status === 'Booking In Progress' || matchingLead.status === 'Converted';
+      const nextStatus = (!isProtected && (matchingLead.status === 'New' || matchingLead.status === 'Contacted' || matchingLead.status === 'Follow-up Completed'))
+        ? 'Follow-up Required'
+        : matchingLead.status;
+      const updatedLead = {
+        ...matchingLead,
+        status: nextStatus as any,
         nextFollowupDate: formattedFollowupString,
         nextFollowupType: rescheduleType,
-      });
+      };
+      try {
+        await apiSaveLead(updatedLead);
+      } catch (err) {
+        console.warn('[FollowupsPage] Failed to update lead on reschedule:', err);
+      }
     }
 
     setRescheduleItem(null);
-    loadData();
+    await loadData();
     window.dispatchEvent(new Event('nexus_storage_updated'));
     showToast(`✓ Follow-up rescheduled for ${rescheduleItem.contactName} on ${rescheduleDate}!`);
   };
 
   const handleCompleteFollowup = async (followup: Followup, outcomeNotes?: string) => {
     const trimmedOutcome = (outcomeNotes || '').trim();
-    // Overwrite with the latest outcome notes rather than endlessly concatenating
     const updatedNotes = trimmedOutcome || followup.notes || '';
 
     const completedFollowup: Followup = {
@@ -840,37 +824,81 @@ export const FollowupsPage: React.FC = () => {
     }
     storageService.saveFollowup(completedFollowup);
 
-    // 3. If tied to a lead and agent entered custom outcome remarks, replace lead notes with the latest remarks
-    const leads = storageService.getLeads(tenant?.id) || [];
+    // 3. If tied to a lead, update outcome notes and auto-transition status using synchronized backend state
     const matchingLead = followup.contactType === 'lead'
-      ? leads.find(l => String(l.id) === String(followup.contactId))
+      ? allLeads.find(l => String(l.id) === String(followup.contactId) || (followup.leadId && String(l.id) === String(followup.leadId)))
       : undefined;
-    if (matchingLead && trimmedOutcome && trimmedOutcome !== 'Marked as completed') {
-      storageService.saveLead({
-        ...matchingLead,
-        notes: trimmedOutcome,
-      });
-    }
 
-    // 4. Audit Log
-    storageService.addAuditLog({
-      id: `aud-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      actorName: user?.name || 'Agent',
-      actorEmail: user?.email || '',
-      action: 'FOLLOWUP_COMPLETED',
-      entityType: 'Followup',
-      entityId: followup.id,
-      companyId: tenant?.id || '1',
-      companyName: tenant?.name || '',
-      details: `Completed follow-up for ${followup.contactName}${outcomeNotes ? `: ${outcomeNotes}` : ''}`,
-    });
+    if (matchingLead) {
+      const hasOtherPending = followups.some(
+        f => String(f.id) !== String(followup.id) &&
+             (String(f.contactId) === String(matchingLead.id) || (f.leadId && String(f.leadId) === String(matchingLead.id))) &&
+             f.contactType === 'lead' &&
+             (f.status === 'Pending' || f.status === 'Rescheduled')
+      );
+
+      const isProtected = matchingLead.status === 'Booking In Progress' || matchingLead.status === 'Converted';
+      const nextStatus = (!isProtected && !hasOtherPending && (matchingLead.status === 'Follow-up Required' || matchingLead.status === 'New'))
+        ? 'Follow-up Completed'
+        : matchingLead.status;
+
+      const updatedLead = {
+        ...matchingLead,
+        status: nextStatus as any,
+        notes: (trimmedOutcome && trimmedOutcome !== 'Marked as completed') ? trimmedOutcome : matchingLead.notes,
+        nextFollowupDate: hasOtherPending ? matchingLead.nextFollowupDate : undefined,
+      };
+
+      try {
+        await apiSaveLead(updatedLead);
+      } catch (err) {
+        console.warn('[FollowupsPage] Failed to update lead status via API:', err);
+      }
+    }
 
     setCompleteItem(null);
     setCompletionNotes('');
-    loadData();
+    await loadData();
     window.dispatchEvent(new Event('nexus_storage_updated'));
     showToast(`✓ Follow-up with ${followup.contactName} marked as completed!`);
+  };
+
+  const handleCancelFollowup = async (followup: Followup) => {
+    const confirmCancel = window.confirm(`Are you sure you want to cancel the follow-up with ${followup.contactName}?`);
+    if (!confirmCancel) return;
+
+    const cancelledFollowup: Followup = {
+      ...followup,
+      status: 'Cancelled',
+      notes: followup.notes ? `${followup.notes} | Cancelled` : 'Cancelled',
+    };
+
+    try {
+      await apiSaveFollowup(cancelledFollowup);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Could not cancel follow-up. Please retry.');
+      return;
+    }
+
+    await loadData();
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+    showToast(`Follow-up with ${followup.contactName} has been cancelled.`);
+  };
+
+  const handleDeleteFollowup = async (followup: Followup) => {
+    const confirmDelete = window.confirm(`Are you sure you want to delete the follow-up with ${followup.contactName}?`);
+    if (!confirmDelete) return;
+
+    try {
+      await apiDeleteFollowup(followup.id);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Could not delete follow-up. Please retry.');
+      return;
+    }
+
+    await loadData();
+    window.dispatchEvent(new Event('nexus_storage_updated'));
+    showToast(`Follow-up with ${followup.contactName} has been deleted.`);
   };
 
   const handleReopenFollowup = async (followup: Followup) => {
@@ -888,7 +916,7 @@ export const FollowupsPage: React.FC = () => {
     }
     storageService.saveFollowup(reopenedFollowup);
 
-    loadData();
+    await loadData();
     window.dispatchEvent(new Event('nexus_storage_updated'));
     showToast(`Follow-up with ${followup.contactName} moved back to Pending.`);
   };
@@ -1405,6 +1433,17 @@ export const FollowupsPage: React.FC = () => {
                       >
                         Reschedule
                       </button>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={e => {
+                          e.stopPropagation();
+                          handleDeleteFollowup(f);
+                        }}
+                        title="Delete follow-up"
+                        style={{ color: 'var(--danger-600, #dc2626)', padding: '4px 8px' }}
+                      >
+                        <Trash2 size={13} />
+                      </button>
                     </>
                   ) : (
                     <>
@@ -1427,6 +1466,27 @@ export const FollowupsPage: React.FC = () => {
                         }}
                       >
                         Reschedule
+                      </button>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={e => {
+                          e.stopPropagation();
+                          handleCancelFollowup(f);
+                        }}
+                        title="Cancel follow-up"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={e => {
+                          e.stopPropagation();
+                          handleDeleteFollowup(f);
+                        }}
+                        title="Delete follow-up"
+                        style={{ color: 'var(--danger-600, #dc2626)', padding: '4px 8px' }}
+                      >
+                        <Trash2 size={13} />
                       </button>
                     </>
                   )}
@@ -1952,13 +2012,11 @@ export const FollowupsPage: React.FC = () => {
           }
         >
           {drawerFollowup && (() => {
-            const leads = storageService.getLeads(tenant?.id) || [];
-            const customers = storageService.getCustomers(tenant?.id) || [];
             const matchingLead = drawerFollowup.contactType === 'lead'
-              ? leads.find(l => String(l.id) === String(drawerFollowup.contactId)) || null
+              ? allLeads.find(l => String(l.id) === String(drawerFollowup.contactId)) || null
               : null;
             const matchingCustomer = drawerFollowup.contactType === 'customer'
-              ? customers.find(c => String(c.id) === String(drawerFollowup.contactId)) || null
+              ? allCustomers.find(c => String(c.id) === String(drawerFollowup.contactId)) || null
               : null;
 
             const assignedAgent =

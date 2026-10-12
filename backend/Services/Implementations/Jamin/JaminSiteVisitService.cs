@@ -58,9 +58,7 @@ public class JaminSiteVisitService : IJaminSiteVisitService
         if (customerId.HasValue && customerId.Value > 0)
         {
             var custId = customerId.Value;
-            var customerPhone = await _context.Customers.Where(c => c.Id == custId).Select(c => c.Phone).FirstOrDefaultAsync(ct);
             query = query.Where(s => s.CustomerId == custId || 
-                (customerPhone != null && s.CustomerPhone == customerPhone) ||
                 _context.JaminBookings.Any(b => b.CustomerId == custId && b.LeadId == s.LeadId));
         }
 
@@ -83,26 +81,7 @@ public class JaminSiteVisitService : IJaminSiteVisitService
         if (dto.LeadId is <= 0 || dto.CustomerId is <= 0)
             return ApiResponse<JaminSiteVisitDto>.FailureResult("Contact IDs must be positive.");
 
-        // Auto-resolve Lead or Customer by phone if neither is specified
-        if (!dto.LeadId.HasValue && !dto.CustomerId.HasValue && !string.IsNullOrWhiteSpace(dto.CustomerPhone))
-        {
-            var phone = dto.CustomerPhone.Trim();
-            var customerMatch = await _context.Customers.FirstOrDefaultAsync(c => c.CompanyId == JaminTenantId && c.Phone == phone, ct);
-            if (customerMatch != null)
-            {
-                dto.CustomerId = customerMatch.Id;
-                dto.ContactType = "customer";
-            }
-            else
-            {
-                var leadMatch = await _context.Leads.FirstOrDefaultAsync(l => l.CompanyId == JaminTenantId && l.Phone == phone, ct);
-                if (leadMatch != null)
-                {
-                    dto.LeadId = leadMatch.Id;
-                    dto.ContactType = "lead";
-                }
-            }
-        }
+
 
         if (IsSalesExecutive && !_currentUser.UserId.HasValue)
             return ApiResponse<JaminSiteVisitDto>.FailureResult("The authenticated sales agent could not be identified.");
@@ -125,8 +104,10 @@ public class JaminSiteVisitService : IJaminSiteVisitService
             return ApiResponse<JaminSiteVisitDto>.FailureResult("Sales agents can assign site visits only to themselves.");
         if (!CanManageAllSiteVisits && dto.AssignedAgentId.HasValue && dto.AssignedAgentId != _currentUser.UserId)
             return ApiResponse<JaminSiteVisitDto>.FailureResult("You can assign site visits only to yourself.");
-        var scheduledAgentId = CanManageAllSiteVisits ? dto.AssignedAgentId : _currentUser.UserId;
-        if (scheduledAgentId.HasValue && !await _context.Users.AnyAsync(
+        var scheduledAgentId = CanManageAllSiteVisits
+            ? (dto.AssignedAgentId.HasValue && dto.AssignedAgentId.Value > 0 ? dto.AssignedAgentId : _currentUser.UserId)
+            : _currentUser.UserId;
+        if (scheduledAgentId.HasValue && scheduledAgentId.Value > 0 && !await _context.Users.AnyAsync(
                 u => u.Id == scheduledAgentId.Value && u.CompanyId == JaminTenantId, ct))
             return ApiResponse<JaminSiteVisitDto>.FailureResult("Selected host does not belong to Jamin.");
 
@@ -199,16 +180,11 @@ public class JaminSiteVisitService : IJaminSiteVisitService
 
         _context.SiteVisits.Add(siteVisit);
 
-        // Automatically update lead status to Site Visit Scheduled (by ID or phone)
+        // Automatically update lead status to Site Visit Scheduled strictly by LeadId
         Lead? leadToUpdate = null;
         if (dto.LeadId.HasValue && dto.LeadId.Value > 0)
         {
             leadToUpdate = await _context.Leads.FirstOrDefaultAsync(l => l.Id == dto.LeadId.Value, ct);
-        }
-        if (leadToUpdate == null && !string.IsNullOrWhiteSpace(dto.CustomerPhone))
-        {
-            var phoneClean = dto.CustomerPhone.Trim();
-            leadToUpdate = await _context.Leads.FirstOrDefaultAsync(l => l.Phone == phoneClean, ct);
         }
         if (leadToUpdate != null && leadToUpdate.Status != "Converted" && leadToUpdate.Status != "Booking In Progress")
         {
@@ -260,10 +236,6 @@ public class JaminSiteVisitService : IJaminSiteVisitService
         {
             confirmLead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == visit.LeadId.Value, ct);
         }
-        if (confirmLead == null && !string.IsNullOrWhiteSpace(visit.CustomerPhone))
-        {
-            confirmLead = await _context.Leads.FirstOrDefaultAsync(l => l.Phone == visit.CustomerPhone.Trim(), ct);
-        }
         if (confirmLead != null && confirmLead.Status != "Converted" && confirmLead.Status != "Booking In Progress")
         {
             confirmLead.Status = "Site Visit Scheduled";
@@ -306,10 +278,6 @@ public class JaminSiteVisitService : IJaminSiteVisitService
             if (visit.LeadId.HasValue && visit.LeadId.Value > 0)
             {
                 completeLead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == visit.LeadId.Value, ct);
-            }
-            if (completeLead == null && !string.IsNullOrWhiteSpace(visit.CustomerPhone))
-            {
-                completeLead = await _context.Leads.FirstOrDefaultAsync(l => l.Phone == visit.CustomerPhone.Trim(), ct);
             }
             if (completeLead != null && completeLead.Status != "Converted" && completeLead.Status != "Booking In Progress")
             {
@@ -362,7 +330,7 @@ public class JaminSiteVisitService : IJaminSiteVisitService
         else if (dto.ProjectId.HasValue) visit.ProjectId = dto.ProjectId.Value;
         if (!string.IsNullOrWhiteSpace(dto.ProjectName)) visit.ProjectName = dto.ProjectName.Trim();
         if (dto.PlotNumber != null) visit.PlotNumber = dto.PlotNumber.Trim();
-        if (dto.AssignedAgentId.HasValue)
+        if (dto.AssignedAgentId.HasValue && dto.AssignedAgentId.Value > 0)
         {
             if (!CanManageAllSiteVisits && dto.AssignedAgentId.Value != _currentUser.UserId)
                 return ApiResponse<JaminSiteVisitDto>.FailureResult("You can assign site visits only to yourself.");
@@ -416,22 +384,37 @@ public class JaminSiteVisitService : IJaminSiteVisitService
             {
                 updateLead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == visit.LeadId.Value, ct);
             }
-            if (updateLead == null && !string.IsNullOrWhiteSpace(visit.CustomerPhone))
-            {
-                updateLead = await _context.Leads.FirstOrDefaultAsync(l => l.Phone == visit.CustomerPhone.Trim(), ct);
-            }
             if (updateLead != null && updateLead.Status != "Converted" && updateLead.Status != "Booking In Progress")
             {
-                if (string.Equals(dto.Status.Trim(), "Completed", StringComparison.OrdinalIgnoreCase))
+                var newStatus = dto.Status.Trim();
+                if (string.Equals(newStatus, "Completed", StringComparison.OrdinalIgnoreCase))
                 {
                     updateLead.Status = "Site Visit Completed";
                     updateLead.UpdatedAt = DateTime.UtcNow;
                 }
-                else if (string.Equals(dto.Status.Trim(), "Scheduled", StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(dto.Status.Trim(), "Rescheduled", StringComparison.OrdinalIgnoreCase))
+                else if (string.Equals(newStatus, "Scheduled", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(newStatus, "Rescheduled", StringComparison.OrdinalIgnoreCase))
                 {
                     updateLead.Status = "Site Visit Scheduled";
                     updateLead.UpdatedAt = DateTime.UtcNow;
+                }
+                else if (string.Equals(newStatus, "Cancelled", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(newStatus, "No-show", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Check if lead has any other active (non-cancelled, non-no-show) site visits
+                    var hasOtherActiveSiteVisit = await _context.SiteVisits
+                        .AnyAsync(s => s.TenantId == JaminTenantId &&
+                                       s.Id != visit.Id &&
+                                       s.LeadId == updateLead.Id &&
+                                       s.Status != "Cancelled" && s.Status != "No-show", ct);
+
+                    if (!hasOtherActiveSiteVisit)
+                    {
+                        // No other active site visits — revert lead to neutral "Contacted"
+                        updateLead.Status = "Contacted";
+                        updateLead.UpdatedAt = DateTime.UtcNow;
+                    }
+                    // else: another site visit is still active, leave lead at "Site Visit Scheduled"
                 }
             }
         }

@@ -177,7 +177,7 @@ public class JaminLeadService : IJaminLeadService
         var leadIdStr = id.ToString();
         var followups = await _context.Followups
             .Include(f => f.AssignedAgent).ThenInclude(a => a!.Role)
-            .Where(f => f.CompanyId == JaminTenantId && (f.LeadId == id || f.ContactId == leadIdStr || f.ContactPhone == lead.Phone))
+            .Where(f => f.CompanyId == JaminTenantId && (f.LeadId == id || f.ContactId == leadIdStr))
             .OrderByDescending(f => f.ScheduledAt)
             .Select(f => new FollowupResponseDto
             {

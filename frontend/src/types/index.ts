@@ -83,22 +83,23 @@ export interface Lead {
   location: string;
   source: string;
   status:
-    | 'New'
-    | 'Contacted'
-    | 'Qualified'
-    | 'Proposal'
-    | 'Negotiation'
-    | 'Interested'
-    | 'Follow-up Required'
-    | 'Callback'
-    | 'No Response'
-    | 'Site Visit Scheduled'
-    | 'Site Visit Completed'
-    | 'Booking In Progress'
-    | 'Converted'
-    | 'Lost'
-    | 'Not Interested'
-    | 'Junk';
+  | 'New'
+  | 'Contacted'
+  | 'Qualified'
+  | 'Proposal'
+  | 'Negotiation'
+  | 'Interested'
+  | 'Follow-up Required'
+  | 'Follow-up Completed'
+  | 'Callback'
+  | 'No Response'
+  | 'Site Visit Scheduled'
+  | 'Site Visit Completed'
+  | 'Booking In Progress'
+  | 'Converted'
+  | 'Lost'
+  | 'Not Interested'
+  | 'Junk';
   priority: 'Low' | 'Medium' | 'High' | 'Urgent';
   assignedAgentId: string;
   assignedAgentName: string;
@@ -332,6 +333,8 @@ export interface Plot {
   holdByAgent?: string;
   holdExpiry?: string;
 }
+
+export * from '../constants/siteVisit';
 
 export interface SiteVisit {
   id: string;

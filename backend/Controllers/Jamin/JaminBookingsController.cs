@@ -119,31 +119,22 @@ public class JaminBookingsController : JaminTenantControllerBase
             if (dto.TokenAmountPaid > totalPrice)
                 return BadRequest(ApiResponse<JaminBookingResponseDto>.FailureResult("Token amount cannot exceed the total plot price."));
 
-            // 1. Resolve Lead if provided or by phone
+            // 1. Resolve Lead if provided
             Lead? matchedLead = null;
             if (dto.LeadId.HasValue && dto.LeadId.Value > 0)
             {
                 matchedLead = await _db.Leads.FirstOrDefaultAsync(l => l.Id == dto.LeadId.Value && l.CompanyId == companyId, ct)
                            ?? await _db.Leads.FirstOrDefaultAsync(l => l.Id == dto.LeadId.Value, ct);
             }
-            if (matchedLead == null && !string.IsNullOrWhiteSpace(dto.CustomerPhone))
-            {
-                matchedLead = await _db.Leads.FirstOrDefaultAsync(l => l.Phone == dto.CustomerPhone.Trim() && l.CompanyId == companyId, ct)
-                           ?? await _db.Leads.FirstOrDefaultAsync(l => l.Phone == dto.CustomerPhone.Trim(), ct);
-            }
 
             var agentId = dto.AssignedAgentId ?? matchedLead?.AssignedAgentId ?? User.GetUserId();
             var agent = agentId > 0 ? await _db.Users.FirstOrDefaultAsync(u => u.Id == agentId && u.CompanyId == companyId, ct) : null;
 
-            // 2. Resolve existing Customer if provided or by phone (do NOT create new customer yet until token is verified!)
+            // 2. Resolve existing Customer if provided (do NOT create new customer yet until token is verified!)
             Customer? customer = null;
             if (dto.CustomerId.HasValue && dto.CustomerId.Value > 0)
             {
                 customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == dto.CustomerId.Value && c.CompanyId == companyId, ct);
-            }
-            if (customer == null && !string.IsNullOrWhiteSpace(dto.CustomerPhone))
-            {
-                customer = await _db.Customers.FirstOrDefaultAsync(c => c.Phone == dto.CustomerPhone.Trim() && c.CompanyId == companyId, ct);
             }
 
             var isHold = dto.IsHold;
@@ -331,19 +322,11 @@ public class JaminBookingsController : JaminTenantControllerBase
             {
                 customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == booking.CustomerId.Value && c.CompanyId == companyId, ct);
             }
-            if (customer == null && !string.IsNullOrWhiteSpace(booking.CustomerPhone))
-            {
-                customer = await _db.Customers.FirstOrDefaultAsync(c => c.Phone == booking.CustomerPhone.Trim() && c.CompanyId == companyId, ct);
-            }
 
             Lead? matchedLead = null;
             if (booking.LeadId.HasValue && booking.LeadId.Value > 0)
             {
                 matchedLead = await _db.Leads.FirstOrDefaultAsync(l => l.Id == booking.LeadId.Value, ct);
-            }
-            if (matchedLead == null && !string.IsNullOrWhiteSpace(booking.CustomerPhone))
-            {
-                matchedLead = await _db.Leads.FirstOrDefaultAsync(l => l.Phone == booking.CustomerPhone.Trim(), ct);
             }
 
             if (customer == null)

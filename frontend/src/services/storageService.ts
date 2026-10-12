@@ -46,10 +46,16 @@ class StorageService {
         'nexus_customers',
         'nexus_site_visits',
         'nexus_bookings',
+        'nexus_calls',
+        'nexus_followups',
+        'nexus_audit_logs',
         'leads',
         'customers',
         'site_visits',
-        'bookings'
+        'bookings',
+        'calls',
+        'followups',
+        'audit_logs'
       ];
       purgeKeys.forEach(k => {
         try {
@@ -103,9 +109,8 @@ class StorageService {
 
       const seen = new Set<string>();
       const unique = activeLeads.filter(l => {
-        const phoneKey = (l.phone || '').replace(/\D/g, '').slice(-10);
-        const key = phoneKey || l.id;
-        if (seen.has(key)) return false;
+        const key = l.id;
+        if (!key || seen.has(key)) return false;
         seen.add(key);
         return true;
       });
@@ -197,13 +202,12 @@ class StorageService {
       return false;
     });
 
-    // Deduplicate by 10-digit phone number or unique ID
+    // Deduplicate by primary key ID
     const seen = new Set<string>();
     const deduplicated: Lead[] = [];
     for (const l of filtered) {
-      const phoneDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
-      const key = phoneDigits || l.id;
-      if (!seen.has(key)) {
+      const key = l.id;
+      if (key && !seen.has(key)) {
         seen.add(key);
         deduplicated.push(l);
       }
@@ -228,55 +232,33 @@ class StorageService {
       })
       : [];
 
-    // Deduplicate incoming and existing
+    // Deduplicate incoming and existing strictly by ID
     const leadMap = new Map<string, Lead>();
     incomingActive.forEach(l => {
-      const key = (l.phone || '').replace(/\D/g, '').slice(-10) || l.id;
-      leadMap.set(key, l);
+      if (l.id) leadMap.set(l.id, l);
     });
     existingActive.forEach(l => {
-      const key = (l.phone || '').replace(/\D/g, '').slice(-10) || l.id;
-      if (!leadMap.has(key)) {
-        leadMap.set(key, l);
+      if (l.id && !leadMap.has(l.id)) {
+        leadMap.set(l.id, l);
       }
     });
 
     this.set('leads', [...otherCompany, ...Array.from(leadMap.values())]);
   }
 
-  findLeadByPhone(phone: string, companyId?: string): Lead | undefined {
-    if (!phone) return undefined;
-    const digits = phone.replace(/\D/g, '').slice(-10);
-    if (!digits) return undefined;
-    const leads = this.getLeads(companyId);
-    return leads.find(l => {
-      const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
-      return Boolean(lDigits && lDigits === digits);
-    });
-  }
+
 
   saveLead(lead: Lead): void {
     // If a lead status is Converted, purge from active leads list (history kept in DB)
     if (lead.status === 'Converted') {
       const currentLeads = this.get<Lead[]>('leads', []);
-      const digits = (lead.phone || '').replace(/\D/g, '').slice(-10);
-      const remainingLeads = currentLeads.filter(l => {
-        if (l.id === lead.id) return false;
-        const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
-        if (digits && lDigits && digits === lDigits) return false;
-        return true;
-      });
+      const remainingLeads = currentLeads.filter(l => l.id !== lead.id);
       this.set('leads', remainingLeads);
       return;
     }
 
     const leads = this.get<Lead[]>('leads', []);
-    const digits = (lead.phone || '').replace(/\D/g, '').slice(-10);
-    const index = leads.findIndex(l => {
-      if (l.id === lead.id) return true;
-      const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
-      return Boolean(digits && lDigits && digits === lDigits);
-    });
+    const index = leads.findIndex(l => l.id === lead.id);
 
     const sanitizedNotes = lead.notes
       ? lead.notes
@@ -390,12 +372,11 @@ class StorageService {
   getCustomers(companyId?: string): Customer[] {
     const raw = this.get<Customer[]>('customers', []);
 
-    // Deduplicate by 10-digit phone number or unique ID
+    // Deduplicate strictly by primary key ID
     const seen = new Set<string>();
     const deduplicated: Customer[] = [];
     for (const c of raw) {
-      const phoneDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
-      const key = phoneDigits || c.id || (c.name ? c.name.trim().toLowerCase() : '');
+      const key = c.id;
       if (key && !seen.has(key)) {
         seen.add(key);
         deduplicated.push(c);
@@ -413,14 +394,7 @@ class StorageService {
 
   saveCustomer(customer: Customer): void {
     const customers = this.get<Customer[]>('customers', []);
-    const digits = (customer.phone || '').replace(/\D/g, '').slice(-10);
-    const index = customers.findIndex(c => {
-      if (customer.id && c.id === customer.id) return true;
-      const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
-      if (digits && cDigits && digits === cDigits) return true;
-      if (customer.name && c.name && customer.name.trim().toLowerCase() === c.name.trim().toLowerCase()) return true;
-      return false;
-    });
+    const index = customers.findIndex(c => customer.id && c.id === customer.id);
 
     if (index >= 0) {
       customers[index] = { ...customers[index], ...customer };
@@ -440,8 +414,7 @@ class StorageService {
       let removedCount = 0;
 
       for (const c of allCustomers) {
-        const phoneDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
-        const key = phoneDigits || c.id || (c.name ? c.name.trim().toLowerCase() : '');
+        const key = c.id;
         if (key && seen.has(key)) {
           removedCount++;
         } else {
@@ -606,6 +579,10 @@ class StorageService {
       followups.unshift(followup);
     }
     this.set('followups', followups);
+  }
+
+  syncFollowupsSilent(followups: Followup[]): void {
+    this.setSilent('followups', followups);
   }
 
   deleteFollowup(id: string): void {

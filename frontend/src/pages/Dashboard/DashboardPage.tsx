@@ -105,9 +105,18 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
   // Sync with storage updates
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
+    let timer: any = null;
+    const handleUpdate = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        loadData();
+      }, 350);
+    };
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
+    };
   }, [tenant?.id]);
 
   // ── Role-based scoping (Task 2 & IRM) ────────────────────────────────────

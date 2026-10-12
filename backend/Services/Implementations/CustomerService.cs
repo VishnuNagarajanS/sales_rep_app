@@ -135,23 +135,19 @@ public class CustomerService : ICustomerService
 
         var customerIdStr = customer.Id.ToString();
 
-        // Resolve all historical Lead IDs linked to this Customer
-        var linkedLeadIds = await _context.Leads
-            .Where(l => l.CompanyId == customer.CompanyId && (l.Phone == customer.Phone || _context.JaminBookings.Any(b => b.CustomerId == customer.Id && b.LeadId == l.Id)))
-            .Select(l => l.Id)
+        // Resolve all historical Lead IDs linked to this Customer strictly by booking primary key associations
+        var linkedLeadIds = await _context.JaminBookings
+            .Where(b => b.CustomerId == customer.Id && b.LeadId.HasValue)
+            .Select(b => b.LeadId!.Value)
+            .Distinct()
             .ToListAsync(ct);
 
-        // 1. Fetch related calls from CallRecords connecting primarily by stable CustomerId or linked LeadId
-        var cleanPhone = new string(customer.Phone.Where(char.IsDigit).ToArray());
-        var last10 = cleanPhone.Length >= 10 ? cleanPhone[^10..] : cleanPhone;
-
+        // 1. Fetch related calls from CallRecords connecting strictly by primary keys (CustomerId or linked LeadId)
         var callRecords = await _context.CallRecords
             .AsNoTracking()
             .Include(cr => cr.Agent)
             .Where(cr => cr.CustomerId == customer.Id ||
-                         (cr.LeadId.HasValue && linkedLeadIds.Contains(cr.LeadId.Value)) ||
-                         (!string.IsNullOrEmpty(last10) && cr.ContactPhone.Contains(last10)) ||
-                         cr.ContactPhone == customer.Phone)
+                         (cr.LeadId.HasValue && linkedLeadIds.Contains(cr.LeadId.Value)))
             .OrderByDescending(cr => cr.Timestamp)
             .Take(100)
             .Select(cr => new Customer360CallSummaryDto
@@ -171,12 +167,12 @@ public class CustomerService : ICustomerService
             })
             .ToListAsync(ct);
 
-        // 2. Fetch associated follow-ups by stable CustomerId or linked LeadId
+        // 2. Fetch associated follow-ups strictly by primary keys (CustomerId, linked LeadId, or ContactId)
         var followups = await _context.Followups
             .AsNoTracking()
             .Include(f => f.AssignedAgent)
             .Where(f => f.CompanyId == customer.CompanyId &&
-                         (f.CustomerId == customer.Id || (f.LeadId.HasValue && linkedLeadIds.Contains(f.LeadId.Value)) || (f.ContactId == customerIdStr && f.ContactType == "customer") || f.ContactPhone == customer.Phone))
+                         (f.CustomerId == customer.Id || (f.LeadId.HasValue && linkedLeadIds.Contains(f.LeadId.Value)) || (f.ContactId == customerIdStr && f.ContactType == "customer")))
             .OrderByDescending(f => f.ScheduledAt)
             .Take(50)
             .Select(f => new FollowupResponseDto
@@ -202,11 +198,11 @@ public class CustomerService : ICustomerService
             })
             .ToListAsync(ct);
 
-        // 3. Fetch associated site visits by stable CustomerId or linked LeadId
+        // 3. Fetch associated site visits strictly by primary keys (CustomerId or linked LeadId)
         var siteVisits = await _context.SiteVisits
             .AsNoTracking()
             .Where(sv => (sv.TenantId == customer.CompanyId || sv.TenantId == 2) && 
-                         (sv.CustomerId == customer.Id || (sv.LeadId.HasValue && linkedLeadIds.Contains(sv.LeadId.Value)) || sv.CustomerPhone == customer.Phone))
+                         (sv.CustomerId == customer.Id || (sv.LeadId.HasValue && linkedLeadIds.Contains(sv.LeadId.Value))))
             .OrderByDescending(sv => sv.CreatedAt)
             .Take(50)
             .Select(sv => new backend.DTOs.Jamin.JaminSiteVisitDto
@@ -232,12 +228,12 @@ public class CustomerService : ICustomerService
             })
             .ToListAsync(ct);
 
-        // 4. Fetch associated bookings with payment ledger by stable CustomerId or linked LeadId
+        // 4. Fetch associated bookings with payment ledger strictly by primary keys (CustomerId or linked LeadId)
         var bookingEntities = await _context.JaminBookings
             .AsNoTracking()
             .Include(b => b.Payments)
             .Where(b => (b.CompanyId == customer.CompanyId || b.CompanyId == 2) && 
-                         (b.CustomerId == customer.Id || (b.LeadId.HasValue && linkedLeadIds.Contains(b.LeadId.Value)) || b.CustomerPhone == customer.Phone))
+                         (b.CustomerId == customer.Id || (b.LeadId.HasValue && linkedLeadIds.Contains(b.LeadId.Value))))
             .OrderByDescending(b => b.BookingDate)
             .Take(50)
             .ToListAsync(ct);

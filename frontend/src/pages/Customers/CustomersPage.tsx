@@ -23,7 +23,8 @@ import {
   FileText,
   AlertCircle,
 } from 'lucide-react';
-import { Customer, CallRecord, Followup, Deal, Lead, IrmProfile, SiteVisit, CustomFieldDefinition, Booking } from '../../types';
+import { Customer, CallRecord, Followup, Deal, Lead, IrmProfile, SiteVisit, CustomFieldDefinition, Booking, AuditLog } from '../../types';
+import { SITE_VISIT_TIME_SLOTS, formatSiteVisitSchedule } from '../../constants/siteVisit';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
@@ -37,6 +38,8 @@ import {
   completeFollowup as apiCompleteFollowup,
   getDeals,
   getLeads,
+  getAuditLogs as apiGetAuditLogs,
+  isTenantMatch,
 } from '../../services/ghlApiService';
 import { StatusChip } from '../../components/common/StatusChip';
 import { DocumentUploader } from '../../components/common/DocumentUploader';
@@ -98,7 +101,7 @@ export const CustomersPage: React.FC = () => {
     tenant?.id === '2' ||
     user?.companySlug?.toLowerCase() === 'jamin' ||
     (user?.companyName && /jamin/i.test(user.companyName)) ||
-    user?.companyId === 2 ||
+    (user?.companyId as any) === 2 ||
     (user?.companyId as any) === '2'
   );
   const isGhlTenant = !isJamin && Boolean(
@@ -107,7 +110,7 @@ export const CustomersPage: React.FC = () => {
     tenant?.id === '1' ||
     user?.companySlug?.toLowerCase() === 'ghl' ||
     (user?.companyName && /ghl/i.test(user.companyName)) ||
-    user?.companyId === 1 ||
+    (user?.companyId as any) === 1 ||
     (user?.companyId as any) === '1' ||
     true
   );
@@ -157,6 +160,7 @@ export const CustomersPage: React.FC = () => {
       (isExec && !c.assignedAgentId)
     );
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [customerAuditLogs, setCustomerAuditLogs] = useState<AuditLog[]>([]);
   const [customer360Data, setCustomer360Data] = useState<Customer360Dto | null>(null);
   const [isLoading360, setIsLoading360] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'bookings' | 'calls' | 'followups' | 'timeline' | 'documents' | 'site_visits'>('overview');
@@ -379,6 +383,25 @@ export const CustomersPage: React.FC = () => {
       setCustomer360Data(null);
     }
   }, [isJamin, selectedCustomer?.id]);
+
+  // Fetch backend audit events for the selected customer
+  useEffect(() => {
+    if (!selectedCustomer?.id) {
+      setCustomerAuditLogs([]);
+      return;
+    }
+    let isMounted = true;
+    const numId = Number(selectedCustomer.id);
+    const filterParam = !isNaN(numId) && numId > 0 ? { customerId: numId } : { customerId: selectedCustomer.id };
+    apiGetAuditLogs(tenant?.id, filterParam)
+      .then(logs => {
+        if (isMounted) setCustomerAuditLogs(logs || []);
+      })
+      .catch(() => {
+        if (isMounted) setCustomerAuditLogs([]);
+      });
+    return () => { isMounted = false; };
+  }, [tenant?.id, selectedCustomer?.id]);
 
   useEffect(() => {
     loadData();
@@ -691,21 +714,23 @@ export const CustomersPage: React.FC = () => {
         notes: c.notes || '',
         timestamp: c.timestamp ? new Date(c.timestamp).toLocaleString('en-IN') : '',
         status: 'ended' as const,
+        companyId: tenant?.id || '2',
+        recordingUrl: c.recordingUrl || undefined,
         leadId: c.leadId ? String(c.leadId) : undefined,
         customerId: c.customerId ? String(c.customerId) : undefined,
       }));
     }
     if (!selectedCustomer) return [];
-    const custIdClean = String(selectedCustomer.id || '').replace(/\D/g, '');
-    const custPhone10 = (selectedCustomer.phone || '').replace(/\D/g, '').slice(-10);
+    const numCustId: number | null = /^\d+$/.test(selectedCustomer.id)
+      ? parseInt(selectedCustomer.id, 10)
+      : (/^(db-|customer-|cust-)(\d+)$/i.test(selectedCustomer.id) ? parseInt(selectedCustomer.id.replace(/^(db-|customer-|cust-)/i, ''), 10) : null);
 
     return calls.filter(c => {
-      // 1. Primary linkage: CustomerId
-      if (c.customerId && String(c.customerId).replace(/\D/g, '') === custIdClean) return true;
-      // 2. Secondary fallback: Phone
-      const callPhone10 = (c.contactPhone || '').replace(/\D/g, '').slice(-10);
-      if (custPhone10 && callPhone10 && custPhone10 === callPhone10) return true;
-      return false;
+      if (numCustId && c.customerId) {
+        const cCustId = Number(String(c.customerId).replace(/^(db-|customer-|cust-)/i, ''));
+        return cCustId === numCustId;
+      }
+      return String(c.customerId || '') === String(selectedCustomer.id);
     });
   }, [isJamin, customer360Data, calls, selectedCustomer]);
 
@@ -731,17 +756,17 @@ export const CustomersPage: React.FC = () => {
       }));
     }
     if (!selectedCustomer) return [];
-    const custIdClean = String(selectedCustomer.id || '').replace(/\D/g, '');
-    const custPhone10 = (selectedCustomer.phone || '').replace(/\D/g, '').slice(-10);
+    const numCustId: number | null = /^\d+$/.test(selectedCustomer.id)
+      ? parseInt(selectedCustomer.id, 10)
+      : (/^(db-|customer-|cust-)(\d+)$/i.test(selectedCustomer.id) ? parseInt(selectedCustomer.id.replace(/^(db-|customer-|cust-)/i, ''), 10) : null);
 
     return followups.filter(f => {
-      // 1. Primary linkage: CustomerId / ContactId
-      if (f.contactType === 'customer' && String(f.contactId) === String(selectedCustomer.id)) return true;
-      if (f.customerId && String(f.customerId).replace(/\D/g, '') === custIdClean) return true;
-      // 2. Secondary fallback: Phone
-      const fPhone10 = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-      if (custPhone10 && fPhone10 && custPhone10 === fPhone10) return true;
-      return false;
+      if (f.contactType !== 'customer') return false;
+      if (numCustId) {
+        const fCustId = Number(String(f.customerId || f.contactId || '').replace(/^(db-|customer-|cust-)/i, ''));
+        return fCustId === numCustId;
+      }
+      return String(f.customerId || f.contactId || '') === String(selectedCustomer.id);
     });
   }, [isJamin, customer360Data, followups, selectedCustomer]);
 
@@ -760,59 +785,36 @@ export const CustomersPage: React.FC = () => {
       return customer360Data.bookings;
     }
     if (!selectedCustomer) return [];
-    const custIdClean = String(selectedCustomer.id || '').replace(/\D/g, '');
-    const custPhone10 = (selectedCustomer.phone || '').replace(/\D/g, '').slice(-10);
-    const custName = (selectedCustomer.name || '').trim().toLowerCase();
+    const numCustId: number | null = /^\d+$/.test(selectedCustomer.id)
+      ? parseInt(selectedCustomer.id, 10)
+      : (/^(db-|customer-|cust-)(\d+)$/i.test(selectedCustomer.id) ? parseInt(selectedCustomer.id.replace(/^(db-|customer-|cust-)/i, ''), 10) : null);
 
     return bookings.filter(b => {
-      // 1. Primary: Direct or clean customerId match
-      if (b.customerId) {
-        if (String(b.customerId) === String(selectedCustomer.id)) return true;
-        const bCustIdClean = String(b.customerId).replace(/\D/g, '');
-        if (custIdClean && bCustIdClean && custIdClean === bCustIdClean) return true;
+      if (!b.customerId) return false;
+      if (numCustId) {
+        const bCustId = Number(String(b.customerId).replace(/^(db-|customer-|cust-)/i, ''));
+        return bCustId === numCustId;
       }
-      // 2. Lead match if customer originated from an associated lead
-      if (b.leadId) {
-        const bLeadClean = String(b.leadId).replace(/\D/g, '');
-        if (custPhone10 && leadsByPhone.has(custPhone10)) {
-          const matchedLead = leadsByPhone.get(custPhone10);
-          if (matchedLead && String(matchedLead.id).replace(/\D/g, '') === bLeadClean) {
-            return true;
-          }
-        }
-      }
-      // 3. Fallback: Phone match (last 10 digits)
-      const bPhone10 = (b.customerPhone || b.phone || '').replace(/\D/g, '').slice(-10);
-      if (custPhone10 && bPhone10 && custPhone10 === bPhone10) return true;
-
-      // 4. Fallback: Exact customer name match
-      if (custName && b.customerName && b.customerName.trim().toLowerCase() === custName) {
-        if (custPhone10 && bPhone10) {
-          return custPhone10 === bPhone10;
-        }
-        return true;
-      }
-
-      return false;
+      return String(b.customerId) === String(selectedCustomer.id);
     });
-  }, [isJamin, customer360Data, bookings, selectedCustomer, leadsByPhone]);
+  }, [isJamin, customer360Data, bookings, selectedCustomer]);
 
   const customerSiteVisits = useMemo(() => {
     if (isJamin && customer360Data?.siteVisits) {
       return customer360Data.siteVisits;
     }
     if (!selectedCustomer || !isJamin) return [];
-    const custIdClean = String(selectedCustomer.id || '').replace(/\D/g, '');
-    const custPhone10 = (selectedCustomer.phone || '').replace(/\D/g, '').slice(-10);
+    const numCustId: number | null = /^\d+$/.test(selectedCustomer.id)
+      ? parseInt(selectedCustomer.id, 10)
+      : (/^(db-|customer-|cust-)(\d+)$/i.test(selectedCustomer.id) ? parseInt(selectedCustomer.id.replace(/^(db-|customer-|cust-)/i, ''), 10) : null);
 
     return apiSiteVisits.filter(v => {
-      // 1. Primary: CustomerId
-      if (v.customerId && String(v.customerId).replace(/\D/g, '') === custIdClean) return true;
-      if (String(v.customerId || '') === String(selectedCustomer.id)) return true;
-      // 2. Fallback: phone
-      const vPhone10 = (v.customerPhone || '').replace(/\D/g, '').slice(-10);
-      if (custPhone10 && vPhone10 && custPhone10 === vPhone10) return true;
-      return false;
+      if (!v.customerId) return false;
+      if (numCustId) {
+        const vCustId = Number(String(v.customerId).replace(/^(db-|customer-|cust-)/i, ''));
+        return vCustId === numCustId;
+      }
+      return String(v.customerId) === String(selectedCustomer.id);
     });
   }, [isJamin, customer360Data, selectedCustomer, apiSiteVisits]);
 
@@ -896,7 +898,7 @@ export const CustomersPage: React.FC = () => {
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
   const [isLoadingPlots, setIsLoadingPlots] = useState(false);
   const [svDate, setSvDate] = useState(getTomorrowDate);
-  const [svTimeSlot, setSvTimeSlot] = useState('11:00 AM');
+  const [svTimeSlot, setSvTimeSlot] = useState<string>(SITE_VISIT_TIME_SLOTS[0]);
   const [svHostAgent, setSvHostAgent] = useState('');
   const [svNotes, setSvNotes] = useState('');
   const [svError, setSvError] = useState('');
@@ -954,7 +956,7 @@ export const CustomersPage: React.FC = () => {
     setIsSubmittingSiteVisit(false);
     setSvPlotId('');
     setSvDate(getTomorrowDate());
-    setSvTimeSlot('11:00 AM');
+    setSvTimeSlot(SITE_VISIT_TIME_SLOTS[0]);
     setSvHostAgent(selectedCustomer?.assignedAgentName || user?.name || (jaminAgents[0]?.name || 'Agent'));
     setSvNotes('');
 
@@ -1106,15 +1108,7 @@ export const CustomersPage: React.FC = () => {
 
     const hostAg = jaminAgents.find(a => a.name === svHostAgent || a.id === svHostAgent);
 
-    const dateFormatted = (() => {
-      try {
-        const [y, m, d] = svDate.split('-');
-        const dateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
-        return `${dateObj.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })} • ${svTimeSlot}`;
-      } catch {
-        return `${svDate} • ${svTimeSlot}`;
-      }
-    })();
+    const dateFormatted = formatSiteVisitSchedule(svDate, svTimeSlot);
 
     const trimmedNotes = svNotes.trim();
 
@@ -1241,14 +1235,18 @@ export const CustomersPage: React.FC = () => {
           return formatCurrency(customer360Data.totalContractValue);
         }
       }
-      const cCleanId = String(c.id).replace(/\D/g, '');
-      const cPhone10 = (c.phone || '').replace(/\D/g, '').slice(-10);
+      const numCustId: number | null = /^\d+$/.test(c.id)
+        ? parseInt(c.id, 10)
+        : (/^(db-|customer-|cust-)(\d+)$/i.test(c.id) ? parseInt(c.id.replace(/^(db-|customer-|cust-)/i, ''), 10) : null);
       const custBookings = (isJamin && customer360Data && String(selectedCustomer?.id) === String(c.id) && customer360Data.bookings)
         ? customer360Data.bookings
         : bookings.filter(b => {
-          if (b.customerId && (String(b.customerId) === String(c.id) || String(b.customerId).replace(/\D/g, '') === cCleanId)) return true;
-          const bPhone10 = (b.customerPhone || b.phone || '').replace(/\D/g, '').slice(-10);
-          return cPhone10 && bPhone10 && cPhone10 === bPhone10;
+          if (!b.customerId) return false;
+          if (numCustId) {
+            const bCustId = Number(String(b.customerId).replace(/^(db-|customer-|cust-)/i, ''));
+            return bCustId === numCustId;
+          }
+          return String(b.customerId) === String(c.id);
         });
       const activeBookings = custBookings.filter((b: any) => b.status !== 'Cancelled' && b.status !== 'Voided');
       if (activeBookings.length > 0) {
@@ -1330,6 +1328,45 @@ export const CustomersPage: React.FC = () => {
       });
     });
 
+    // Backend Audit Log events (Lead Converted, Status Changed, Notes, etc.)
+    customerAuditLogs.forEach(log => {
+      if (!isTenantMatch(log.companyId, tenant?.id)) return;
+      const action = (log.action || '').toUpperCase();
+      let title = log.action ? log.action.replace(/_/g, ' ') : 'Audit Event';
+      let type: TimelineEvent['type'] = 'status_change';
+
+      if (action.includes('CONVERT')) {
+        title = 'Lead Converted to Customer';
+        type = 'status_change';
+      } else if (action.includes('STATUS')) {
+        title = 'Status Changed';
+        type = 'status_change';
+      } else if (action.includes('FOLLOWUP')) {
+        title = action.includes('COMPLETE') ? 'Follow-up Completed' : 'Follow-up Scheduled';
+        type = 'followup';
+      } else if (action.includes('VISIT')) {
+        title = 'Site Visit Event';
+        type = 'status_change';
+      } else if (action.includes('BOOKING') || action.includes('PAYMENT')) {
+        title = 'Booking Activity';
+        type = 'status_change';
+      } else if (action.includes('CALL')) {
+        title = 'Call Logged';
+        type = 'call';
+      } else {
+        type = 'note';
+      }
+
+      rawEvents.push({
+        id: `audit-${log.id}`,
+        type,
+        title,
+        description: log.details || undefined,
+        timestamp: log.timestamp,
+        actorName: log.actorName || 'System',
+      });
+    });
+
     rawEvents.push({
       id: `ev-create-${selectedCustomer.id}`,
       type: 'note',
@@ -1339,7 +1376,19 @@ export const CustomersPage: React.FC = () => {
     });
   }
 
-  const timelineEvents = rawEvents.sort((a, b) => {
+  // Deduplicate events by signature (type + normalized timestamp minute + title) and sort
+  const seenSignatures = new Set<string>();
+  const deduplicatedEvents: TimelineEvent[] = [];
+  for (const ev of rawEvents) {
+    const timeKey = (ev.timestamp || '').slice(0, 16);
+    const sig = `${ev.type}_${ev.title}_${timeKey}_${ev.actorName || ''}`;
+    if (!seenSignatures.has(sig)) {
+      seenSignatures.add(sig);
+      deduplicatedEvents.push(ev);
+    }
+  }
+
+  const timelineEvents = deduplicatedEvents.sort((a, b) => {
     const parseTime = (ts: string) => {
       const parsed = Date.parse(ts);
       return isNaN(parsed) ? 0 : parsed;
@@ -2840,11 +2889,9 @@ export const CustomersPage: React.FC = () => {
                   value={svTimeSlot}
                   onChange={e => setSvTimeSlot(e.target.value)}
                 >
-                  <option value="09:30 AM">09:30 AM (Morning Tour)</option>
-                  <option value="11:00 AM">11:00 AM (Mid-Day Walkthrough)</option>
-                  <option value="02:00 PM">02:00 PM (Afternoon Tour)</option>
-                  <option value="03:30 PM">03:30 PM (Late Afternoon Slot)</option>
-                  <option value="05:00 PM">05:00 PM (Sunset Inspection)</option>
+                  {SITE_VISIT_TIME_SLOTS.map(slot => (
+                    <option key={slot} value={slot}>{slot}</option>
+                  ))}
                 </select>
               </div>
             </div>

@@ -154,9 +154,8 @@ public class LeadsController : ControllerBase
         // Synchronize linked site visits when lead status changes
         if (!string.IsNullOrWhiteSpace(updated.Status))
         {
-            var leadPhone = existing.Phone?.Trim();
             var visits = await _db.SiteVisits
-                .Where(s => s.TenantId == existing.CompanyId && (s.LeadId == existing.Id || (!string.IsNullOrEmpty(leadPhone) && s.CustomerPhone == leadPhone)))
+                .Where(s => s.TenantId == existing.CompanyId && s.LeadId == existing.Id)
                 .ToListAsync(ct);
 
             if (string.Equals(updated.Status.Trim(), "Site Visit Completed", StringComparison.OrdinalIgnoreCase))

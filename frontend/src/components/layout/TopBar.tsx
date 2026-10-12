@@ -33,7 +33,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
     tenant?.id === '2' ||
     user?.companySlug?.toLowerCase() === 'jamin' ||
     (user?.companyName && /jamin/i.test(user.companyName)) ||
-    user?.companyId === 2 ||
+    (user?.companyId as any) === 2 ||
     (user?.companyId as any) === '2'
   );
   const isGhlAdmin =

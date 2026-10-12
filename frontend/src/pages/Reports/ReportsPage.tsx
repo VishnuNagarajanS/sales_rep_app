@@ -5,11 +5,11 @@ import { PIPELINE_STAGES } from '../../constants/pipelineStages';
 import { FEATURES } from '../../constants/features';
 import { getLeads, getDeals, getCalls, getConsultations, getOpportunities, getFollowups, getCustomers } from '../../services/ghlApiService';
 import { EmptyState } from '../../components/common/EmptyState';
-import { Lead, Deal, CallRecord, SiteVisit, Booking, Consultation, InvestmentOpportunity, Followup, Customer } from '../../types';
+import { Lead, Deal, CallRecord, SiteVisit, Booking, Consultation, InvestmentOpportunity, Followup, Customer, User } from '../../types';
 import './ReportsPage.css';
 
 import { jaminApiService } from '../../services/jaminApiService';
-import { storageService } from '../../services/storageService';
+import { adminUserService } from '../../services/adminUserService';
 import { isTenantMatch } from '../../services/ghlApiService';
 
 export const ReportsPage: React.FC = () => {
@@ -26,15 +26,26 @@ export const ReportsPage: React.FC = () => {
   const [opportunities, setOpportunities] = useState<InvestmentOpportunity[]>([]);
   const [followups, setFollowups] = useState<Followup[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   const loadData = async () => {
-    if (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2') {
-      try {
-        const [liveLeads, liveVisits, liveBookings, liveFollowups] = await Promise.all([
-          jaminApiService.getLeads(true),
-          jaminApiService.getSiteVisits(),
-          jaminApiService.getBookings(),
-          getFollowups(tenant?.id),
+    setIsLoading(true);
+    setLoadError('');
+    try {
+      const targetCompanyId = String(tenant?.id || (tenant?.slug === 'jamin' ? '2' : '1'));
+      const liveUsersPromise = adminUserService.getUsers(targetCompanyId).catch(() => []);
+
+      if (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2') {
+        const [liveLeads, liveVisits, liveBookings, liveFollowups, liveCalls, liveCustomers, liveStaff] = await Promise.all([
+          jaminApiService.getLeads(true).catch(() => []),
+          jaminApiService.getSiteVisits(true).catch(() => []),
+          jaminApiService.getBookings().catch(() => []),
+          getFollowups(tenant?.id).catch(() => []),
+          getCalls(tenant?.id).catch(() => []),
+          jaminApiService.getCustomers().catch(() => []),
+          liveUsersPromise,
         ]);
         setLeads(liveLeads || []);
         setSiteVisits(liveVisits || []);
@@ -42,56 +53,54 @@ export const ReportsPage: React.FC = () => {
         setDeals([]);
         setConsultations([]);
         setOpportunities([]);
-        const allCalls: CallRecord[] = storageService.getCalls ? storageService.getCalls(tenant?.id) : [];
-        setCalls(allCalls.filter(c => isTenantMatch(c.companyId || (c as any).tenantId, tenant?.id)));
+        setCalls((liveCalls || []).filter(c => isTenantMatch(c.companyId || (c as any).tenantId, tenant?.id)));
         setFollowups(liveFollowups || []);
-        const allCust: Customer[] = storageService.getCustomers ? storageService.getCustomers(tenant?.id) : [];
-        setCustomers(allCust.filter(c => isTenantMatch(c.companyId, tenant?.id)));
-      } catch (err) {
-        console.error('Failed to load Jamin report data', err);
-        setFollowups([]);
-      }
-    } else if (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') {
-      try {
-        const [l, d, c, cs, opp, flw, cust] = await Promise.all([
-          getLeads(tenant?.id),
-          getDeals(tenant?.id),
-          getCalls(tenant?.id),
-          getConsultations(tenant?.id),
-          getOpportunities(tenant?.id),
-          getFollowups(tenant?.id),
-          getCustomers(tenant?.id),
+        setCustomers((liveCustomers || []).filter(c => isTenantMatch(c.companyId, tenant?.id)));
+        setUsers(liveStaff || []);
+      } else {
+        const [l, d, c, cs, opp, flw, cust, liveStaff] = await Promise.all([
+          getLeads(tenant?.id).catch(() => []),
+          getDeals(tenant?.id).catch(() => []),
+          getCalls(tenant?.id).catch(() => []),
+          getConsultations(tenant?.id).catch(() => []),
+          getOpportunities(tenant?.id).catch(() => []),
+          getFollowups(tenant?.id).catch(() => []),
+          getCustomers(tenant?.id).catch(() => []),
+          liveUsersPromise,
         ]);
         setLeads(l || []);
         setDeals(d || []);
-        setCalls(c || []);
+        setCalls((c || []).filter(item => isTenantMatch(item.companyId, tenant?.id)));
         setConsultations(cs || []);
         setOpportunities(opp || []);
         setFollowups(flw || []);
-        setCustomers(cust || []);
-      } catch {
-        setFollowups([]);
-      }
-    } else {
-      try {
-        setFollowups(await getFollowups(tenant?.id));
-        setLeads(storageService.getLeads ? storageService.getLeads(tenant?.id) : []);
-        setDeals(storageService.getDeals ? storageService.getDeals(tenant?.id) : []);
-        setCalls(storageService.getCalls ? storageService.getCalls(tenant?.id) : []);
+        setCustomers((cust || []).filter(item => isTenantMatch(item.companyId, tenant?.id)));
+        setUsers(liveStaff || []);
         setSiteVisits([]);
-        setBookings(storageService.getBookings ? storageService.getBookings(tenant?.id) : []);
-        setConsultations(storageService.getConsultations ? storageService.getConsultations(tenant?.id) : []);
-        setOpportunities(storageService.getOpportunities ? storageService.getOpportunities(tenant?.id) : []);
-        setCustomers(storageService.getCustomers ? storageService.getCustomers(tenant?.id) : []);
-      } catch {}
+        setBookings([]);
+      }
+    } catch (err) {
+      console.error('Failed to load report data', err);
+      setLoadError('Failed to load report data from the server. Check your connection and retry.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
+    let timer: any = null;
+    const handleUpdate = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        loadData();
+      }, 350);
+    };
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
+    };
   }, [tenant?.id]);
 
   // Currency Formatter
@@ -185,6 +194,26 @@ export const ReportsPage: React.FC = () => {
   const wonDeals = scopedDeals.filter(d => d.stage === wonStageId || d.stage === 'won' || d.stage === 'converted');
   const closedValue = wonDeals.reduce((sum, d) => sum + (d.value || 0), 0);
 
+  const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2';
+
+  const scopedSiteVisits = isExec
+    ? siteVisits.filter(s => (s.assignedAgentId && s.assignedAgentId === user?.id) || (s.assignedAgentName && s.assignedAgentName === user?.name))
+    : siteVisits;
+
+  const scopedBookings = isExec
+    ? bookings.filter((b: any) => (b.assignedAgentId && b.assignedAgentId === user?.id) || (b.assignedAgentName && b.assignedAgentName === user?.name) || (b.agentId && b.agentId === user?.id) || (b.agentName && b.agentName === user?.name))
+    : bookings;
+
+  const confirmedBookings = scopedBookings.filter((b: any) =>
+    b.status === 'Confirmed' || b.status === 'Token Paid' || b.status === 'Agreement Signed' || b.status === 'Registration Completed'
+  );
+  const bookingsClosedValue = confirmedBookings.reduce((sum: number, b: any) =>
+    sum + (b.contractValue ?? b.totalPlotPrice ?? b.totalAmount ?? 0), 0
+  );
+
+  const totalClosedValue = isJamin ? bookingsClosedValue : closedValue;
+  const closedCount = isJamin ? confirmedBookings.length : wonDeals.length;
+
   const scopedCustomers = isExec
     ? customers.filter(c => (c.assignedAgentId && c.assignedAgentId === user?.id) || (c.assignedAgentName && c.assignedAgentName === user?.name))
     : customers;
@@ -225,26 +254,40 @@ export const ReportsPage: React.FC = () => {
   });
   const followupsCount = uniquePendingFollowups.length;
 
-  // 3. Consultations (all consultations for the tenant - unscoped)
+  // 3. Consultations (for GHL/consultancy tenants)
   const consultationsCount = (consultations || []).length;
 
-  // 4. Customers 360
+  // 4. Site Visits & Bookings (for Jamin Bazaar)
+  const siteVisitsCount = (scopedSiteVisits || []).length;
+  const bookingsCount = (scopedBookings || []).length;
+
+  // 5. Customers 360
   const customersCount = (scopedCustomers || []).length;
 
-  // 5. Not-Interested
+  // 6. Not-Interested
   const notInterestedCount = (scopedLeads || []).filter(l => l.status === 'Not Interested').length;
 
-  // 6. Junk
+  // 7. Junk
   const junkCount = (scopedLeads || []).filter(l => l.status === 'Junk').length;
 
-  const stepConfigs = [
-    { label: '1. Leads', count: totalLeads, color: '#3b82f6' },
-    { label: '2. Follow-ups', count: followupsCount, color: '#f59e0b' },
-    { label: '3. Consultations', count: consultationsCount, color: '#8b5cf6' },
-    { label: '4. Customers 360', count: customersCount, color: '#10b981' },
-    { label: '5. Not-Interested', count: notInterestedCount, color: '#64748b' },
-    { label: '6. Junk', count: junkCount, color: '#ef4444' },
-  ];
+  const stepConfigs = isJamin
+    ? [
+        { label: '1. Leads', count: totalLeads, color: '#3b82f6' },
+        { label: '2. Follow-ups', count: followupsCount, color: '#f59e0b' },
+        { label: '3. Site Visits', count: siteVisitsCount, color: '#8b5cf6' },
+        { label: '4. Bookings', count: bookingsCount, color: '#10b981' },
+        { label: '5. Customers 360', count: customersCount, color: '#059669' },
+        { label: '6. Not-Interested', count: notInterestedCount, color: '#64748b' },
+        { label: '7. Junk', count: junkCount, color: '#ef4444' },
+      ]
+    : [
+        { label: '1. Leads', count: totalLeads, color: '#3b82f6' },
+        { label: '2. Follow-ups', count: followupsCount, color: '#f59e0b' },
+        { label: '3. Consultations', count: consultationsCount, color: '#8b5cf6' },
+        { label: '4. Customers 360', count: customersCount, color: '#10b981' },
+        { label: '5. Not-Interested', count: notInterestedCount, color: '#64748b' },
+        { label: '6. Junk', count: junkCount, color: '#ef4444' },
+      ];
 
   const funnelSteps = stepConfigs.map(step => {
     const rawPct = totalLeads > 0 ? (step.count / totalLeads) * 100 : 0;
@@ -299,22 +342,23 @@ export const ReportsPage: React.FC = () => {
 
   const agentMap = new Map<string, AgentPerformance>();
 
-  // Include tenant users so configured staff are visible
+  // Include authoritative tenant users from database, falling back to local storage only if offline
   const getStoredUsers = (tenantSlug?: string): any[] => {
     try {
       const raw = localStorage.getItem('nexus_users');
-      const users = raw ? JSON.parse(raw) : [];
-      return tenantSlug ? users.filter((u: any) => u.companySlug === tenantSlug) : users;
+      const stored = raw ? JSON.parse(raw) : [];
+      return tenantSlug ? stored.filter((u: any) => u.companySlug === tenantSlug) : stored;
     } catch {
       return [];
     }
   };
-  const tenantUsers = getStoredUsers(tenant?.slug);
+  const tenantUsers = users.length > 0 ? users : getStoredUsers(tenant?.slug);
   tenantUsers.forEach((u: any) => {
-    agentMap.set(u.id, {
-      id: u.id,
+    const roleTitle = typeof u.role === 'string' ? u.role : (u.role?.name || 'Sales Executive');
+    agentMap.set(String(u.id), {
+      id: String(u.id),
       name: u.name,
-      role: u.role?.name || 'Sales Executive',
+      role: roleTitle,
       calls: 0,
       totalDuration: 0,
       convertedLeads: 0,
@@ -322,13 +366,20 @@ export const ReportsPage: React.FC = () => {
     });
   });
 
-  calls.forEach(c => {
-    const key = c.agentId || c.agentName;
-    if (!key) return;
-    if (!agentMap.has(key)) {
-      agentMap.set(key, {
-        id: key,
-        name: c.agentName || 'Agent',
+  const findAgentStat = (agentId?: string | number, agentName?: string): AgentPerformance => {
+    const idKey = agentId ? String(agentId) : undefined;
+    const nameKey = agentName?.trim().toLowerCase();
+    if (idKey && agentMap.has(idKey)) return agentMap.get(idKey)!;
+    if (nameKey) {
+      for (const stat of agentMap.values()) {
+        if (stat.name.trim().toLowerCase() === nameKey) return stat;
+      }
+    }
+    const fallbackKey = idKey || agentName || 'Unknown Agent';
+    if (!agentMap.has(fallbackKey)) {
+      agentMap.set(fallbackKey, {
+        id: fallbackKey,
+        name: agentName || 'Agent',
         role: 'Sales Representative',
         calls: 0,
         totalDuration: 0,
@@ -336,57 +387,50 @@ export const ReportsPage: React.FC = () => {
         revenue: 0,
       });
     }
-    const stat = agentMap.get(key)!;
+    return agentMap.get(fallbackKey)!;
+  };
+
+  calls.forEach(c => {
+    const key = c.agentId || c.agentName;
+    if (!key) return;
+    const stat = findAgentStat(c.agentId, c.agentName);
     stat.calls += 1;
     stat.totalDuration += (c.duration || 0);
-    if (!stat.name && c.agentName) stat.name = c.agentName;
   });
 
   leads.forEach(l => {
     if (l.status === 'Converted') {
       const key = l.assignedAgentId || l.assignedAgentName;
       if (!key) return;
-      if (!agentMap.has(key)) {
-        agentMap.set(key, {
-          id: key,
-          name: l.assignedAgentName || 'Agent',
-          role: 'Sales Representative',
-          calls: 0,
-          totalDuration: 0,
-          convertedLeads: 0,
-          revenue: 0,
-        });
-      }
-      const stat = agentMap.get(key)!;
+      const stat = findAgentStat(l.assignedAgentId, l.assignedAgentName);
       stat.convertedLeads += 1;
-      if (!stat.name && l.assignedAgentName) stat.name = l.assignedAgentName;
     }
   });
 
-  deals.forEach(d => {
-    const isWon = d.stage === wonStageId || d.stage === 'won' || d.stage === 'converted';
-    const key = d.assignedAgentId || d.assignedAgentName;
-    if (!key) return;
-    if (!agentMap.has(key)) {
-      agentMap.set(key, {
-        id: key,
-        name: d.assignedAgentName || 'Agent',
-        role: 'Sales Representative',
-        calls: 0,
-        totalDuration: 0,
-        convertedLeads: 0,
-        revenue: 0,
-      });
-    }
-    const stat = agentMap.get(key)!;
-    if (isWon) {
-      stat.revenue += (d.value || 0);
-    }
-    if (!stat.name && d.assignedAgentName) stat.name = d.assignedAgentName;
-  });
+  if (tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || String(tenant?.id) === '2') {
+    bookings.forEach((b: any) => {
+      const isConfirmed = b.status === 'Confirmed' || b.status === 'Token Paid' || b.status === 'Agreement Signed' || b.status === 'Registration Completed';
+      const key = b.assignedAgentId || b.agentId || b.assignedAgentName || b.agentName;
+      if (!key) return;
+      const stat = findAgentStat(b.assignedAgentId || b.agentId, b.assignedAgentName || b.agentName);
+      if (isConfirmed) {
+        stat.revenue += (b.contractValue ?? b.totalPlotPrice ?? b.totalAmount ?? 0);
+      }
+    });
+  } else {
+    deals.forEach(d => {
+      const isWon = d.stage === wonStageId || d.stage === 'won' || d.stage === 'converted';
+      const key = d.assignedAgentId || d.assignedAgentName;
+      if (!key) return;
+      const stat = findAgentStat(d.assignedAgentId, d.assignedAgentName);
+      if (isWon) {
+        stat.revenue += (d.value || 0);
+      }
+    });
+  }
 
   const leaderboard = Array.from(agentMap.values())
-    .filter(a => a.calls > 0 || a.convertedLeads > 0 || a.revenue > 0 || tenantUsers.some((u: any) => u.id === a.id))
+    .filter(a => a.calls > 0 || a.convertedLeads > 0 || a.revenue > 0 || tenantUsers.some((u: any) => String(u.id) === String(a.id)))
     .sort((a, b) => b.revenue - a.revenue || b.calls - a.calls);
 
   const handleExport = () => {
@@ -461,6 +505,40 @@ export const ReportsPage: React.FC = () => {
         </div>
       </div>
 
+      {loadError && (
+        <div
+          className="card text-center"
+          role="alert"
+          style={{
+            padding: '12px 16px',
+            background: 'var(--danger-50, #fef2f2)',
+            border: '1px solid var(--danger-200, #fecaca)',
+            color: 'var(--danger-700, #b91c1c)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '12px',
+          }}
+        >
+          <span>{loadError}</span>
+          <button
+            type="button"
+            className="btn btn-sm btn-secondary"
+            onClick={() => void loadData()}
+            style={{ fontWeight: 600, cursor: 'pointer' }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {isLoading && (
+        <div className="card text-center" style={{ padding: '32px 16px', color: 'var(--text-secondary)' }}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)' }}>Loading analytics reports...</div>
+          <div style={{ fontSize: 13, marginTop: 4 }}>Fetching live authenticated telemetry from server</div>
+        </div>
+      )}
+
       {/* Top Aggregates */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
         {/* Total Inbound Leads */}
@@ -521,20 +599,20 @@ export const ReportsPage: React.FC = () => {
         )}
 
         {/* Closed Value */}
-        {deals.length === 0 || wonDeals.length === 0 ? (
+        {closedCount === 0 ? (
           <EmptyState
             icon={<TrendingUp size={20} />}
             title="No Closed Value"
-            description="No closed won deals recorded yet."
+            description={isJamin ? "No confirmed bookings recorded yet." : "No closed won deals recorded yet."}
           />
         ) : (
           <div className="card">
-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>{isExec ? 'MY CLOSED VALUE' : 'CLOSED VALUE'}</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>{isExec ? 'MY CLOSED VALUE' : (isJamin ? 'BOOKED VALUE' : 'CLOSED VALUE')}</div>
             <div style={{ fontSize: 28, fontWeight: 800, color: '#7c3aed', marginTop: 8 }}>
-              {formatCurrency(closedValue)}
+              {formatCurrency(totalClosedValue)}
             </div>
             <div style={{ fontSize: 12, color: '#059669', marginTop: 4, fontWeight: 600 }}>
-              {wonDeals.length} won {wonDeals.length === 1 ? 'deal' : 'deals'}
+              {closedCount} {isJamin ? (closedCount === 1 ? 'confirmed booking' : 'confirmed bookings') : (closedCount === 1 ? 'won deal' : 'won deals')}
             </div>
           </div>
         )}

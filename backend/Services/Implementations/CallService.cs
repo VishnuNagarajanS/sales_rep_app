@@ -52,26 +52,7 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
             customer.LastContactedAt = DateTime.UtcNow;
         }
 
-        // Auto-resolve customer or lead by phone if not explicitly provided
-        if (!customerId.HasValue && !leadId.HasValue && !string.IsNullOrWhiteSpace(request.ContactPhone))
-        {
-            var phone = request.ContactPhone.Trim();
-            var customer = await context.Set<Customer>().FirstOrDefaultAsync(c => c.CompanyId == companyId && c.Phone == phone, cancellationToken);
-            if (customer != null)
-            {
-                customerId = customer.Id;
-                customer.LastContactedAt = DateTime.UtcNow;
-            }
-            else
-            {
-                var lead = await context.Set<Lead>().FirstOrDefaultAsync(l => l.CompanyId == companyId && l.Phone == phone, cancellationToken);
-                if (lead != null)
-                {
-                    leadId = lead.Id;
-                    lead.UpdatedAt = DateTime.UtcNow;
-                }
-            }
-        }
+
         var record = new CallRecord
         {
             CompanyId = companyId,
@@ -108,24 +89,7 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
         int? leadId = contactWasSelected ? request.LeadId : record?.LeadId;
         int? customerId = contactWasSelected ? request.CustomerId : record?.CustomerId;
 
-        // Auto-resolve customer or lead if neither is passed
-        if (!leadId.HasValue && !customerId.HasValue && !string.IsNullOrWhiteSpace(request.ContactPhone))
-        {
-            var phone = request.ContactPhone.Trim();
-            var custMatch = await context.Set<Customer>().FirstOrDefaultAsync(c => c.CompanyId == companyId && c.Phone == phone, cancellationToken);
-            if (custMatch != null)
-            {
-                customerId = custMatch.Id;
-            }
-            else
-            {
-                var leadMatch = await context.Set<Lead>().FirstOrDefaultAsync(l => l.CompanyId == companyId && l.Phone == phone, cancellationToken);
-                if (leadMatch != null)
-                {
-                    leadId = leadMatch.Id;
-                }
-            }
-        }
+
 
         if (leadId.HasValue && !await context.Set<Lead>().AnyAsync(l => l.Id == leadId.Value && l.CompanyId == companyId, cancellationToken))
             return ApiResponse<CallRecordDto>.FailureResult("Selected lead was not found in this company.");

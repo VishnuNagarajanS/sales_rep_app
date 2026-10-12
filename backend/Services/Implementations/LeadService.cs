@@ -166,9 +166,7 @@ public class LeadService : ILeadService
 
         dto.Calls = await _context.CallRecords.AsNoTracking()
             .Include(c => c.Agent)
-            .Where(c => c.LeadId == lead.Id ||
-                        (!string.IsNullOrEmpty(last10) && c.ContactPhone.Contains(last10)) ||
-                        c.ContactPhone == lead.Phone)
+            .Where(c => c.LeadId == lead.Id)
             .OrderByDescending(c => c.Timestamp)
             .Take(50)
             .Select(c => new backend.DTOs.Calls.CallRecordResponseDto
@@ -278,9 +276,8 @@ public class LeadService : ILeadService
             lead.Status = requestedStatus;
 
             // Synchronize linked site visits when lead status changes
-            var leadPhone = lead.Phone?.Trim();
             var visits = await _context.SiteVisits
-                .Where(s => s.TenantId == lead.CompanyId && (s.LeadId == lead.Id || (!string.IsNullOrEmpty(leadPhone) && s.CustomerPhone == leadPhone)))
+                .Where(s => s.TenantId == lead.CompanyId && s.LeadId == lead.Id)
                 .ToListAsync(ct);
 
             if (string.Equals(requestedStatus, "Site Visit Completed", StringComparison.OrdinalIgnoreCase))
@@ -412,12 +409,8 @@ public class LeadService : ILeadService
 
             // Link existing call records for this lead to the customer
             var cleanLeadPhone = new string(lead.Phone.Where(char.IsDigit).ToArray());
-            var last10LeadPhone = cleanLeadPhone.Length >= 10 ? cleanLeadPhone[^10..] : cleanLeadPhone;
-
             var leadCalls = await _context.CallRecords
-                .Where(c => c.LeadId == lead.Id ||
-                            (!string.IsNullOrEmpty(last10LeadPhone) && c.ContactPhone.Contains(last10LeadPhone)) ||
-                            c.ContactPhone == lead.Phone)
+                .Where(c => c.LeadId == lead.Id)
                 .ToListAsync(ct);
             foreach (var call in leadCalls)
             {

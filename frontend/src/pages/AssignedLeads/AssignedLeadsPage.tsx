@@ -19,6 +19,8 @@ import { StatusChip } from '../../components/common/StatusChip';
 import { apiClient } from '../../services/apiClient';
 import { adminUserService } from '../../services/adminUserService';
 import { getLeads as getBackendLeads } from '../../services/ghlApiService';
+import { auditService } from '../../services/auditService';
+import { toast } from '../../context/ToastContext';
 import './AssignedLeadsPage.css';
 
 export const AssignedLeadsPage: React.FC = () => {
@@ -31,6 +33,7 @@ export const AssignedLeadsPage: React.FC = () => {
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
@@ -241,39 +244,113 @@ export const AssignedLeadsPage: React.FC = () => {
     setPendingAgent(null);
   };
 
-  const handleSaveLead = (e: React.FormEvent) => {
+  const handleSaveLead = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.phone) return;
 
-    const existingLead = leads.find(l => l.id === formData.id);
-    const leadToSave: Lead = {
-      ...(existingLead || ({} as Lead)),
-      ...(formData as Lead),
-      id: formData.id || `lead-${Date.now()}`,
-      companyId: formData.companyId || tenant?.id || 't-ghl-01',
-    };
-
-    storageService.saveLead(leadToSave);
-
-    // Keep session mock assignments in sync if tracked
+    setIsSaving(true);
     try {
-      const raw = sessionStorage.getItem('ghl_mock_agent_assignments');
-      if (raw) {
-        const assignments: Array<{ leadId: string; agentId: number | string; agentName: string }> = JSON.parse(raw);
-        const idx = assignments.findIndex(a => a.leadId === leadToSave.id);
-        if (idx >= 0) {
-          assignments[idx] = {
-            ...assignments[idx],
-            agentId: leadToSave.assignedAgentId || '',
-            agentName: leadToSave.assignedAgentName || '',
-          };
-          sessionStorage.setItem('ghl_mock_agent_assignments', JSON.stringify(assignments));
+      const existingLead = leads.find(l => l.id === formData.id);
+      const leadToSave: Lead = {
+        ...(existingLead || ({} as Lead)),
+        ...(formData as Lead),
+        id: formData.id || `lead-${Date.now()}`,
+        companyId: formData.companyId || (isJamin ? '2' : (tenant?.id || '1')),
+      };
+
+      const effectiveCompanyId = isJamin ? 2 : 1;
+
+      let parsedAgentId: number | undefined;
+      const rawAgentId = leadToSave.assignedAgentId;
+      if (typeof rawAgentId === 'number') {
+        parsedAgentId = rawAgentId;
+      } else if (typeof rawAgentId === 'string' && rawAgentId.trim() !== '') {
+        const parsed = parseInt(rawAgentId, 10);
+        if (!isNaN(parsed) && parsed > 0) {
+          parsedAgentId = parsed;
         }
       }
-    } catch { }
 
-    setIsEditDrawerOpen(false);
-    loadData();
+      // If assignedAgentName is selected but assignedAgentId is missing, resolve it from dynamicAgents
+      if (!parsedAgentId && leadToSave.assignedAgentName && leadToSave.assignedAgentName !== 'Unassigned') {
+        const match = dynamicAgents.find(a => a.name.toLowerCase() === leadToSave.assignedAgentName?.toLowerCase());
+        if (match) {
+          const parsed = parseInt(String(match.id), 10);
+          if (!isNaN(parsed) && parsed > 0) parsedAgentId = parsed;
+        }
+      }
+
+      const numericId = parseInt(String(leadToSave.id).replace(/\D/g, ''), 10);
+      if (!isNaN(numericId) && numericId > 0) {
+        const payload = {
+          name: leadToSave.name,
+          phone: leadToSave.phone,
+          companyId: effectiveCompanyId,
+          email: leadToSave.email,
+          location: leadToSave.location,
+          source: leadToSave.source,
+          status: leadToSave.status || 'New',
+          priority: leadToSave.priority || 'Medium',
+          notes: leadToSave.notes,
+          targetDevelopment: leadToSave.targetDevelopment,
+          assignedAgentId: parsedAgentId,
+          assignedAgentName: leadToSave.assignedAgentName && leadToSave.assignedAgentName !== 'Unassigned' ? leadToSave.assignedAgentName : undefined,
+          budgetRange: leadToSave.budgetRange || leadToSave.customFields?.budgetRange || '',
+          readyToRegister: leadToSave.readyToRegister || leadToSave.customFields?.readyToRegister || '',
+        };
+
+        const res = await apiClient.put<any>(`/leads/${numericId}`, payload).catch(async () => {
+          return await apiClient.put<any>(`/sales-executive/leads/${numericId}`, payload);
+        });
+
+        if (res && res.success === false) {
+          throw new Error(res.message || 'The backend rejected the lead update.');
+        }
+      }
+
+      storageService.saveLead(leadToSave);
+
+      // Keep session mock assignments in sync if tracked
+      try {
+        const raw = sessionStorage.getItem('ghl_mock_agent_assignments');
+        if (raw) {
+          const assignments: Array<{ leadId: string; agentId: number | string; agentName: string }> = JSON.parse(raw);
+          const idx = assignments.findIndex(a => a.leadId === leadToSave.id);
+          if (idx >= 0) {
+            assignments[idx] = {
+              ...assignments[idx],
+              agentId: leadToSave.assignedAgentId || '',
+              agentName: leadToSave.assignedAgentName || '',
+            };
+            sessionStorage.setItem('ghl_mock_agent_assignments', JSON.stringify(assignments));
+          }
+        }
+      } catch { }
+
+      // Log audit activity with primary key
+      if (!isNaN(numericId) && numericId > 0) {
+        void auditService.createAuditLog({
+          actorName: user?.name || 'Agent',
+          actorEmail: user?.email || '',
+          action: 'LEAD_UPDATED',
+          entityType: 'Lead',
+          entityId: String(numericId),
+          leadId: numericId,
+          details: `Updated assigned lead "${leadToSave.name}" (Status: ${leadToSave.status || 'New'}, Assigned: ${leadToSave.assignedAgentName || 'Unassigned'}).`,
+          module: 'AssignedLeads',
+        });
+      }
+
+      toast.success(`✓ Lead "${leadToSave.name}" updated successfully!`);
+      setIsEditDrawerOpen(false);
+      window.dispatchEvent(new Event('nexus_storage_updated'));
+      await loadData();
+    } catch (err: any) {
+      console.error('Failed to update lead:', err);
+      toast.error(err?.message || 'Failed to update lead on the server.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Table columns exactly matching the requested specification
@@ -555,6 +632,7 @@ export const AssignedLeadsPage: React.FC = () => {
                     { value: 'Interested', label: 'Interested' },
                     { value: 'Qualified', label: 'Qualified' },
                     { value: 'Follow-up Required', label: 'Follow-up Required' },
+                    { value: 'Follow-up Completed', label: 'Follow-up Completed' },
                     { value: 'Callback', label: 'Callback' },
                     { value: 'No Response', label: 'No Response' },
                     { value: 'Not Interested', label: 'Not Interested' },
@@ -570,6 +648,7 @@ export const AssignedLeadsPage: React.FC = () => {
                     { value: 'Negotiation', label: 'Negotiation' },
                     { value: 'Interested', label: 'Interested' },
                     { value: 'Follow-up Required', label: 'Follow-up Required' },
+                    { value: 'Follow-up Completed', label: 'Follow-up Completed' },
                     { value: 'Callback', label: 'Callback' },
                     { value: 'No Response', label: 'No Response' },
                     { value: 'Not Interested', label: 'Not Interested' },
@@ -775,11 +854,16 @@ export const AssignedLeadsPage: React.FC = () => {
             <button
               className="btn btn-secondary"
               onClick={() => setIsEditDrawerOpen(false)}
+              disabled={isSaving}
             >
               Cancel
             </button>
-            <button className="btn btn-primary" onClick={handleSaveLead}>
-              Save Changes
+            <button
+              className="btn btn-primary"
+              onClick={handleSaveLead}
+              disabled={isSaving}
+            >
+              {isSaving ? 'Saving...' : 'Save Changes'}
             </button>
           </>
         }
@@ -848,6 +932,68 @@ export const AssignedLeadsPage: React.FC = () => {
               </select>
             </div>
           </div>
+
+          <div className="form-grid-2">
+            <div className="form-group">
+              <label className="form-label">Status</label>
+              <select
+                className="form-select"
+                value={formData.status || 'New'}
+                onChange={e => setFormData({ ...formData, status: e.target.value as any })}
+              >
+                <option value="New">New</option>
+                <option value="Contacted">Contacted</option>
+                <option value="Callback">Callback</option>
+                <option value="Interested">Interested</option>
+                <option value="Follow-up Required">Follow-up Required</option>
+                <option value="Follow-up Completed">Follow-up Completed</option>
+                {isJamin && <option value="Site Visit Scheduled">Site Visit Scheduled</option>}
+                {isJamin && <option value="Site Visit Completed">Site Visit Completed</option>}
+                {isJamin && <option value="Booking In Progress">Booking In Progress</option>}
+                <option value="Converted">Converted</option>
+                <option value="Not Interested">Not Interested</option>
+                <option value="Junk">Junk</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Priority</label>
+              <select
+                className="form-select"
+                value={formData.priority || 'Medium'}
+                onChange={e => setFormData({ ...formData, priority: e.target.value as any })}
+              >
+                <option value="Low">Low</option>
+                <option value="Medium">Medium</option>
+                <option value="High">High</option>
+                <option value="Urgent">Urgent</option>
+              </select>
+            </div>
+          </div>
+
+          {isJamin && (
+            <div className="form-grid-2">
+              <div className="form-group">
+                <label className="form-label">Target Development / Project</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={formData.targetDevelopment || ''}
+                  onChange={e => setFormData({ ...formData, targetDevelopment: e.target.value })}
+                  placeholder="e.g. Jamins Erode"
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Budget Range</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={formData.budgetRange || ''}
+                  onChange={e => setFormData({ ...formData, budgetRange: e.target.value })}
+                  placeholder="e.g. ₹25L - ₹50L"
+                />
+              </div>
+            </div>
+          )}
 
           <div className="form-group">
             <label className="form-label">Assigned Agent</label>
