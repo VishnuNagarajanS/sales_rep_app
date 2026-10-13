@@ -196,64 +196,21 @@ public class SalesExecutiveCallsController : ControllerBase
             }
         }
 
-        // 2. Cross-link if only one primary key was provided:
-        // If CustomerId is set but LeadId is not, find matching converted lead
+        // Cross-link converted leads/customers strictly by booking foreign key (zero phone matching)
         if (customer != null && !leadId.HasValue)
         {
-            var custDigits = new string(customer.Phone.Where(char.IsDigit).ToArray());
-            var last10 = custDigits.Length >= 10 ? custDigits[^10..] : custDigits;
-            if (!string.IsNullOrEmpty(last10))
+            var booking = await _context.JaminBookings.FirstOrDefaultAsync(b => b.CustomerId == customer.Id && b.LeadId.HasValue, ct);
+            if (booking != null)
             {
-                lead = await _context.Leads.FirstOrDefaultAsync(l => l.CompanyId == customer.CompanyId && l.Phone.Contains(last10), ct);
-                if (lead != null)
-                {
-                    leadId = lead.Id;
-                }
+                leadId = booking.LeadId;
             }
         }
-
-        // If LeadId is set but CustomerId is not, check if this lead was converted to a Customer
-        if (lead != null && !customerId.HasValue)
+        else if (lead != null && !customerId.HasValue)
         {
-            var leadDigits = new string(lead.Phone.Where(char.IsDigit).ToArray());
-            var last10 = leadDigits.Length >= 10 ? leadDigits[^10..] : leadDigits;
-            if (!string.IsNullOrEmpty(last10))
+            var booking = await _context.JaminBookings.FirstOrDefaultAsync(b => b.LeadId == lead.Id, ct);
+            if (booking != null)
             {
-                customer = await _context.Customers.FirstOrDefaultAsync(c => c.CompanyId == lead.CompanyId && c.Phone.Contains(last10), ct);
-                if (customer != null)
-                {
-                    customerId = customer.Id;
-                    customer.LastContactedAt = DateTime.UtcNow;
-                }
-            }
-        }
-
-        // 3. Fallback lookup by normalized phone number if neither primary key was sent
-        if (!customerId.HasValue && !leadId.HasValue && !string.IsNullOrWhiteSpace(dto.ContactPhone))
-        {
-            var digits = new string(dto.ContactPhone.Where(char.IsDigit).ToArray());
-            var last10 = digits.Length >= 10 ? digits[^10..] : digits;
-
-            if (!string.IsNullOrEmpty(last10))
-            {
-                customer = await _context.Customers.FirstOrDefaultAsync(c => c.Phone.Contains(last10), ct);
-                if (customer != null)
-                {
-                    customerId = customer.Id;
-                    customer.LastContactedAt = DateTime.UtcNow;
-                    companyId = customer.CompanyId;
-                }
-
-                lead = await _context.Leads.FirstOrDefaultAsync(l => l.Phone.Contains(last10), ct);
-                if (lead != null)
-                {
-                    leadId = lead.Id;
-                    lead.UpdatedAt = DateTime.UtcNow;
-                    if (customer == null)
-                    {
-                        companyId = lead.CompanyId;
-                    }
-                }
+                customerId = booking.CustomerId;
             }
         }
 
@@ -348,7 +305,7 @@ public class SalesExecutiveCallsController : ControllerBase
             AgentName = call.Agent?.Name,
             ContactName = call.ContactName,
             ContactPhone = call.ContactPhone,
-            Direction = call.Direction,
+            Direction = call.Direction ?? "outbound",
             Duration = call.Duration,
             Disposition = call.Disposition,
             Notes = call.Notes,

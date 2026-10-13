@@ -161,8 +161,6 @@ public class LeadService : ILeadService
             return ApiResponse<LeadResponseDto>.FailureResult("Lead not found or access denied.");
 
         var dto = MapToDto(lead);
-        var cleanPhone = new string(lead.Phone.Where(char.IsDigit).ToArray());
-        var last10 = cleanPhone.Length >= 10 ? cleanPhone[^10..] : cleanPhone;
 
         dto.Calls = await _context.CallRecords.AsNoTracking()
             .Include(c => c.Agent)
@@ -366,9 +364,12 @@ public class LeadService : ILeadService
             var agentId = lead.AssignedAgentId;
             var companyId = lead.CompanyId;
 
-            // Check if customer already exists with this phone
-            customer = await _context.Customers
-                .FirstOrDefaultAsync(c => c.Phone == lead.Phone && c.CompanyId == companyId, ct);
+            // Link to existing customer strictly by primary key if provided, else create a new customer
+            if (dto.ExistingCustomerId.HasValue && dto.ExistingCustomerId.Value > 0)
+            {
+                customer = await _context.Customers
+                    .FirstOrDefaultAsync(c => c.Id == dto.ExistingCustomerId.Value && c.CompanyId == companyId, ct);
+            }
 
             if (customer == null)
             {
@@ -408,7 +409,6 @@ public class LeadService : ILeadService
             lead.UpdatedAt = DateTime.UtcNow;
 
             // Link existing call records for this lead to the customer
-            var cleanLeadPhone = new string(lead.Phone.Where(char.IsDigit).ToArray());
             var leadCalls = await _context.CallRecords
                 .Where(c => c.LeadId == lead.Id)
                 .ToListAsync(ct);

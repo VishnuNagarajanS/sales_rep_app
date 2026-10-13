@@ -131,17 +131,7 @@ public class JaminPlotService : IJaminPlotService
         {
             return ApiResponse<JaminPlotResponseDto>.FailureResult($"Cannot hold plot in '{plot.Status}' status.");
         }
-
         int? resolvedCustomerId = dto.HeldByCustomerId;
-        if (!resolvedCustomerId.HasValue && !string.IsNullOrWhiteSpace(dto.CustomerPhone))
-        {
-            var matchedCustomer = await _context.Customers
-                .FirstOrDefaultAsync(c => c.Phone == dto.CustomerPhone.Trim() && c.CompanyId == JaminTenantId, ct);
-            if (matchedCustomer != null)
-            {
-                resolvedCustomerId = matchedCustomer.Id;
-            }
-        }
 
         plot.Status = "Hold";
         plot.HeldByCustomerId = resolvedCustomerId;

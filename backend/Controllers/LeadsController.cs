@@ -286,6 +286,7 @@ public class LeadsController : ControllerBase
 
     public class ConvertLeadRequest
     {
+        public int? ExistingCustomerId { get; set; }
         public string? DealTitle { get; set; }
         public decimal? DealValue { get; set; }
         public string? Notes { get; set; }
@@ -318,7 +319,10 @@ public class LeadsController : ControllerBase
         await strategy.ExecuteAsync(async () =>
         {
             await using var transaction = await _db.Database.BeginTransactionAsync(ct);
-            customer = await _db.Customers.FirstOrDefaultAsync(c => c.Phone == lead.Phone && c.CompanyId == lead.CompanyId, ct);
+            if (dto?.ExistingCustomerId != null && dto.ExistingCustomerId > 0)
+            {
+                customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == dto.ExistingCustomerId.Value && c.CompanyId == lead.CompanyId, ct);
+            }
             if (customer == null)
             {
                 customer = new Customer
