@@ -750,7 +750,7 @@ export const FollowupsPage: React.FC = () => {
     const formattedFollowupString = new Date(
       `${rescheduleDate}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`,
     ).toISOString();
-    const targetAgent = assignableAgentOptions.find((p: any) => p.id === rescheduleAgentId || p.name === rescheduleAgentId);
+    const targetAgent = assignableAgentOptions.find((p: any) => String(p.id) === String(rescheduleAgentId));
 
     // Edit the CURRENT follow-up in-place rather than creating a duplicate
     const updatedFollowup: Followup = {

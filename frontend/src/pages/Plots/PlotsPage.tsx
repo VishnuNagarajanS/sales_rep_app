@@ -43,10 +43,7 @@ export const PlotsPage: React.FC = () => {
     const list = [...customersList];
     leadsList.forEach(l => {
       if ((l.status || '').toLowerCase() === 'converted') {
-        const exists = list.some(c =>
-          (c.phone && l.phone && c.phone.trim() === l.phone.trim()) ||
-          (String(c.id) === String(l.id))
-        );
+        const exists = list.some(c => String(c.id) === String(l.id));
         if (!exists) {
           list.push({
             id: l.id,
@@ -322,46 +319,12 @@ export const PlotsPage: React.FC = () => {
       const matched = effectiveCustomersList.find((c: any) => String(c.id) === String(plot.heldByCustomerId));
       setBookingCustomerName(matched?.name || heldName);
       setBookingCustomerPhone(matched?.phone || heldPhone);
-    } else if (heldPhone) {
-      const matchedCustomer = effectiveCustomersList.find((c: any) => c.phone && c.phone.trim() === heldPhone);
-      const matchedLead = lds.find((l: any) => l.phone && l.phone.trim() === heldPhone);
-
-      if (matchedCustomer || (matchedLead && (matchedLead.status || '').toLowerCase() === 'converted')) {
-        const person = matchedCustomer || matchedLead;
-        setBookingSourceType('customer');
-        setSelectedBookingCustomerId(String(person.id));
-        setSelectedBookingLeadId('');
-        setBookingCustomerName(person.name || heldName);
-        setBookingCustomerPhone(person.phone || heldPhone);
-      } else if (matchedLead) {
-        setBookingSourceType('lead');
-        setSelectedBookingCustomerId('');
-        setSelectedBookingLeadId(String(matchedLead.id));
-        setBookingCustomerName(matchedLead.name || heldName);
-        setBookingCustomerPhone(matchedLead.phone || heldPhone);
-      } else {
-        setBookingSourceType('custom');
-        setSelectedBookingCustomerId('');
-        setSelectedBookingLeadId('');
-        setBookingCustomerName(heldName);
-        setBookingCustomerPhone(heldPhone);
-      }
-    } else if (heldName) {
-      const matchedCustomer = effectiveCustomersList.find((c: any) => c.name && c.name.trim().toLowerCase() === heldName.toLowerCase());
-      const matchedLead = lds.find((l: any) => l.name && l.name.trim().toLowerCase() === heldName.toLowerCase());
-      if (matchedCustomer || (matchedLead && (matchedLead.status || '').toLowerCase() === 'converted')) {
-        const person = matchedCustomer || matchedLead;
-        setBookingSourceType('customer');
-        setSelectedBookingCustomerId(String(person.id));
-        setSelectedBookingLeadId('');
-        setBookingCustomerName(person.name || heldName);
-        setBookingCustomerPhone(person.phone || '');
-      } else {
-        setBookingSourceType('custom');
-        setSelectedBookingCustomerId('');
-        setSelectedBookingLeadId('');
-        setBookingCustomerName(heldName);
-      }
+    } else if (heldName || heldPhone) {
+      setBookingSourceType('custom');
+      setSelectedBookingCustomerId('');
+      setSelectedBookingLeadId('');
+      setBookingCustomerName(heldName);
+      setBookingCustomerPhone(heldPhone);
     } else {
       setBookingSourceType('customer');
       setSelectedBookingCustomerId('');

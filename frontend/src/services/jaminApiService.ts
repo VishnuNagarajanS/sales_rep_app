@@ -475,12 +475,20 @@ export const jaminApiService = {
   },
 
   // ── 3. FOLLOW-UPS ──────────────────────────────────────────────────────────
-  async getFollowups(isAdmin: boolean = false, agentId?: number, status?: string): Promise<Followup[]> {
+  async getFollowups(isAdmin: boolean = false, agentId?: number, status?: string, leadId?: number | string, customerId?: number | string): Promise<Followup[]> {
     try {
       const params = new URLSearchParams();
       params.append('companyId', '2');
       if (agentId) params.append('agentId', String(agentId));
       if (status && status !== 'All') params.append('status', status);
+      if (leadId) {
+        const numLeadId = Number(String(leadId).replace(/^(db-|lead-)/i, ''));
+        if (Number.isInteger(numLeadId) && numLeadId > 0) params.append('leadId', String(numLeadId));
+      }
+      if (customerId) {
+        const numCustId = Number(String(customerId).replace(/^(db-|customer-)/i, ''));
+        if (Number.isInteger(numCustId) && numCustId > 0) params.append('customerId', String(numCustId));
+      }
 
       const res = await apiClient.get<any>(`/sales-executive/followups?${params.toString()}`);
       const items = Array.isArray(res?.data) ? res.data : (res?.data?.items || []);

@@ -552,7 +552,7 @@ export const App: React.FC = () => {
     try {
       if (quickCreateType === 'lead') {
         let createdLead: Lead | null = null;
-        const selProj = quickProjectsList.find(p => p.name === quickPreferredLocation || String(p.id) === String(quickProjectId));
+        const selProj = quickProjectId ? quickProjectsList.find(p => String(p.id) === String(quickProjectId)) : null;
         const resolvedTargetDev = selProj?.name || quickPreferredLocation.trim();
         const resolvedLocation = quickLocation.trim() || selProj?.location || '';
 
@@ -1193,16 +1193,18 @@ export const App: React.FC = () => {
                       <label className="form-label">Preferred Micro-Market / Project</label>
                       <select
                         className="form-select"
-                        value={quickPreferredLocation}
+                        value={quickProjectId}
                         onChange={e => {
                           const val = e.target.value;
-                          setQuickPreferredLocation(val);
-                          const matching = quickProjectsList.find(p => p.name === val || String(p.id) === val);
+                          setQuickProjectId(val);
+                          const matching = quickProjectsList.find(p => String(p.id) === String(val));
                           if (matching) {
-                            setQuickProjectId(String(matching.id));
+                            setQuickPreferredLocation(matching.name);
                             if (!quickLocation && matching.location) {
                               setQuickLocation(matching.location);
                             }
+                          } else {
+                            setQuickPreferredLocation('');
                           }
                         }}
                       >
@@ -1212,7 +1214,7 @@ export const App: React.FC = () => {
                             : `— Select Project (${quickProjectsList.length} available) —`}
                         </option>
                         {quickProjectsList.map(p => (
-                          <option key={p.id} value={p.name}>
+                          <option key={p.id} value={p.id}>
                             {p.name} {p.location ? `(${p.location})` : ''}
                           </option>
                         ))}

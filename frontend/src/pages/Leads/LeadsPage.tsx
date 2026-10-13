@@ -1029,9 +1029,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     setLeadVisitTimeSlot(SITE_VISIT_TIME_SLOTS[0]);
     setLeadVisitNotes('');
     setLeadVisitHostAgent(
-      lead.assignedAgentName && lead.assignedAgentName !== 'Unassigned'
-        ? lead.assignedAgentName
-        : (user?.name || (jaminAgents[0]?.name || 'Agent'))
+      lead.assignedAgentId
+        ? String(lead.assignedAgentId)
+        : (user?.id ? String(user.id) : (jaminAgents[0]?.id ? String(jaminAgents[0].id) : ''))
     );
     setIsLeadSiteVisitModalOpen(true);
   };
@@ -1059,7 +1059,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     e.preventDefault();
     if (!selectedLead) return;
 
-    const hostAg = jaminAgents.find(a => a.name === leadVisitHostAgent || a.id === leadVisitHostAgent);
+    const hostAg = jaminAgents.find(a => String(a.id) === String(leadVisitHostAgent));
 
     const dateFormatted = formatSiteVisitSchedule(leadVisitDate, leadVisitTimeSlot);
 
@@ -4089,7 +4089,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                 onChange={e => setLeadVisitHostAgent(e.target.value)}
               >
                 {jaminAgents.map(ag => (
-                  <option key={ag.id} value={ag.name}>
+                  <option key={ag.id} value={ag.id}>
                     {ag.name} ({ag.email})
                   </option>
                 ))}

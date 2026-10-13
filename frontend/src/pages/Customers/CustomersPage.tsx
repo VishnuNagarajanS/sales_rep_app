@@ -293,19 +293,30 @@ export const CustomersPage: React.FC = () => {
 
   const fetchCustomer360 = async (targetId?: string | number, preserveExistingOnFailure = true) => {
     const rawId = targetId ?? selectedCustomer?.id;
-    if (!isJamin || !rawId) return;
-    const numericId = parseInt(String(rawId).replace(/\D/g, ''), 10);
+    if (!rawId) return;
+    const cleanIdStr = String(rawId).trim();
+    const numericId = /^\d+$/.test(cleanIdStr)
+      ? parseInt(cleanIdStr, 10)
+      : (/^(db-|customer-|cust-)(\d+)$/i.test(cleanIdStr) ? parseInt(cleanIdStr.replace(/^(db-|customer-|cust-)/i, ''), 10) : NaN);
     if (isNaN(numericId) || numericId <= 0) return;
 
     setIsLoading360(true);
     try {
-      const data = await customersApi.getCustomer360(numericId);
-      if (data && data.customer) {
-        setCustomer360Data(data);
+      if (isJamin) {
+        const data = await customersApi.getCustomer360(numericId);
+        if (data && data.customer) {
+          setCustomer360Data(data);
+        }
+      } else {
+        const [custCalls, custFollowups] = await Promise.all([
+          getCalls(tenant?.id, undefined, numericId).catch(() => null),
+          getFollowups(tenant?.id, undefined, numericId).catch(() => null),
+        ]);
+        if (custCalls) setCalls(custCalls);
+        if (custFollowups) setFollowups(custFollowups);
       }
     } catch (err) {
       console.warn(`[Customer360] Failed to fetch 360 profile for customer #${numericId}:`, err);
-      // Ensure refreshes and failed requests do not silently replace valid data with empty arrays
       if (!preserveExistingOnFailure) {
         setCustomer360Data(null);
       }
@@ -375,14 +386,14 @@ export const CustomersPage: React.FC = () => {
     }
   };
 
-  // Synchronize Customer 360 when selected customer changes in Jamin mode
+  // Synchronize Customer 360 when selected customer changes
   useEffect(() => {
-    if (isJamin && selectedCustomer?.id) {
+    if (selectedCustomer?.id) {
       void fetchCustomer360(selectedCustomer.id, false);
-    } else if (!isJamin) {
+    } else {
       setCustomer360Data(null);
     }
-  }, [isJamin, selectedCustomer?.id]);
+  }, [selectedCustomer?.id]);
 
   // Fetch backend audit events for the selected customer
   useEffect(() => {
@@ -957,8 +968,12 @@ export const CustomersPage: React.FC = () => {
     setSvPlotId('');
     setSvDate(getTomorrowDate());
     setSvTimeSlot(SITE_VISIT_TIME_SLOTS[0]);
-    setSvHostAgent(selectedCustomer?.assignedAgentName || user?.name || (jaminAgents[0]?.name || 'Agent'));
     setSvNotes('');
+    setSvHostAgent(
+      selectedCustomer?.assignedAgentId
+        ? String(selectedCustomer.assignedAgentId)
+        : (user?.id ? String(user.id) : (jaminAgents[0]?.id ? String(jaminAgents[0].id) : ''))
+    );
 
     setIsLoadingProjects(true);
     try {
@@ -1106,7 +1121,7 @@ export const CustomersPage: React.FC = () => {
       return;
     }
 
-    const hostAg = jaminAgents.find(a => a.name === svHostAgent || a.id === svHostAgent);
+    const hostAg = jaminAgents.find(a => String(a.id) === String(svHostAgent));
 
     const dateFormatted = formatSiteVisitSchedule(svDate, svTimeSlot);
 
@@ -2905,7 +2920,7 @@ export const CustomersPage: React.FC = () => {
                   onChange={e => setSvHostAgent(e.target.value)}
                 >
                   {jaminAgents.map(ag => (
-                    <option key={ag.id} value={ag.name}>
+                    <option key={ag.id} value={ag.id}>
                       {ag.name} ({ag.email})
                     </option>
                   ))}

@@ -149,10 +149,7 @@ export const BookingsPage: React.FC = () => {
     const list = [...customersList];
     leadsList.forEach(l => {
       if ((l.status || '').toLowerCase() === 'converted') {
-        const exists = list.some(c =>
-          (c.phone && l.phone && c.phone.trim() === l.phone.trim()) ||
-          (String(c.id) === String(l.id))
-        );
+        const exists = list.some(c => String(c.id) === String(l.id));
         if (!exists) {
           list.push({
             id: l.id,
@@ -235,45 +232,12 @@ export const BookingsPage: React.FC = () => {
         const matched = effectiveCustomersList.find(c => String(c.id) === String(chosenPlot.heldByCustomerId));
         setCustomerName(matched?.name || heldName);
         setCustomerPhone(matched?.phone || heldPhone);
-      } else if (heldPhone) {
-        const matchedCustomer = effectiveCustomersList.find(c => c.phone && c.phone.trim() === heldPhone);
-        const matchedLead = leadsList.find(l => l.phone && l.phone.trim() === heldPhone);
-        if (matchedCustomer || (matchedLead && (matchedLead.status || '').toLowerCase() === 'converted')) {
-          const person = matchedCustomer || matchedLead;
-          setBuyerSourceType('customer');
-          setSelectedCustomerId(String(person.id));
-          setSelectedLeadId('');
-          setCustomerName(person.name || heldName);
-          setCustomerPhone(person.phone || heldPhone);
-        } else if (matchedLead) {
-          setBuyerSourceType('lead');
-          setSelectedCustomerId('');
-          setSelectedLeadId(String(matchedLead.id));
-          setCustomerName(matchedLead.name || heldName);
-          setCustomerPhone(matchedLead.phone || heldPhone);
-        } else {
-          setBuyerSourceType('custom');
-          setSelectedCustomerId('');
-          setSelectedLeadId('');
-          setCustomerName(heldName);
-          setCustomerPhone(heldPhone);
-        }
-      } else if (heldName) {
-        const matchedCustomer = effectiveCustomersList.find(c => c.name && c.name.trim().toLowerCase() === heldName.toLowerCase());
-        const matchedLead = leadsList.find(l => l.name && l.name.trim().toLowerCase() === heldName.toLowerCase());
-        if (matchedCustomer || (matchedLead && (matchedLead.status || '').toLowerCase() === 'converted')) {
-          const person = matchedCustomer || matchedLead;
-          setBuyerSourceType('customer');
-          setSelectedCustomerId(String(person.id));
-          setSelectedLeadId('');
-          setCustomerName(person.name || heldName);
-          setCustomerPhone(person.phone || '');
-        } else {
-          setBuyerSourceType('custom');
-          setSelectedCustomerId('');
-          setSelectedLeadId('');
-          setCustomerName(heldName);
-        }
+      } else if (heldName || heldPhone) {
+        setBuyerSourceType('custom');
+        setSelectedCustomerId('');
+        setSelectedLeadId('');
+        setCustomerName(heldName);
+        setCustomerPhone(heldPhone);
       }
     }
   };
@@ -311,7 +275,7 @@ export const BookingsPage: React.FC = () => {
         // Automatically transition linked lead status to 'Booking In Progress'
         const leadObj = selectedLeadId
           ? leadsList.find(l => String(l.id) === String(selectedLeadId))
-          : leadsList.find(l => l.phone.replace(/\D/g, '').slice(-10) === customerPhone.replace(/\D/g, '').slice(-10));
+          : null;
 
         if (leadObj && leadObj.status !== 'Converted') {
           const updatedLead = { ...leadObj, status: 'Booking In Progress' as const };
@@ -631,8 +595,6 @@ export const BookingsPage: React.FC = () => {
 
   const filteredPlotsForProject = useMemo(() => {
     if (!selectedProjectId) return [];
-    const normPhone = (p?: string) => (p || '').replace(/\D/g, '').slice(-10);
-    const buyerPhone10 = normPhone(customerPhone);
     const buyerCustId = selectedCustomerId ? String(selectedCustomerId) : '';
 
     return plots.filter(p => {
@@ -643,19 +605,17 @@ export const BookingsPage: React.FC = () => {
       // Available plots are open for booking
       if (p.status === 'Available') return true;
 
-      // Plots on Hold: only selectable if held by this buyer or before buyer is selected
+      // Plots on Hold: only selectable if held by this customer (primary key) or before buyer is selected
       if (p.status === 'Hold') {
-        const heldPhone10 = normPhone(p.heldByCustomerPhone || p.holdPhone);
         const heldCustId = p.heldByCustomerId ? String(p.heldByCustomerId) : '';
         if (buyerCustId && heldCustId && buyerCustId === heldCustId) return true;
-        if (buyerPhone10 && heldPhone10 && buyerPhone10 === heldPhone10) return true;
-        if (!buyerCustId && !buyerPhone10) return true;
+        if (!buyerCustId && !heldCustId) return true;
         return false;
       }
 
       return false;
     });
-  }, [selectedProjectId, plots, customerPhone, selectedCustomerId]);
+  }, [selectedProjectId, plots, selectedCustomerId]);
 
   const filteredBookings = useMemo(() => {
     return bookings.filter(b => {

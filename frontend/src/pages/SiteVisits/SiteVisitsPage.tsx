@@ -353,28 +353,20 @@ export const SiteVisitsPage: React.FC = () => {
     setManageVisitDate(parsedDate);
     setManageVisitTimeSlot(parsedSlot);
 
-    const projId = sv.projectId
-      ? String(sv.projectId)
-      : (projects.find(p => p.name === sv.projectName)?.id
-        ? String(projects.find(p => p.name === sv.projectName).id)
-        : '');
+    const projId = sv.projectId ? String(sv.projectId) : '';
     setManageProjectId(projId);
 
     if (projId) {
       const matchedPlots = plots.filter(p => String(p.projectId) === String(projId));
       setManageFilteredPlots(matchedPlots);
-      const plt = matchedPlots.find(
-        p => String(p.id) === String(sv.plotId) || p.plotNumber === sv.plotNumber
-      );
+      const plt = matchedPlots.find(p => String(p.id) === String(sv.plotId));
       setManagePlotId(plt ? String(plt.id) : '');
     } else {
       setManageFilteredPlots([]);
       setManagePlotId('');
     }
 
-    const agId =
-      Number(sv.assignedAgentId) ||
-      (agents.find(a => a.name === sv.assignedAgentName)?.id ?? 0);
+    const agId = Number(sv.assignedAgentId) || 0;
     setManageHostAgentId(agId);
     setManageHostAgentName(sv.assignedAgentName || '');
 

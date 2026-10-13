@@ -716,7 +716,7 @@ export const ReportsPage: React.FC = () => {
               </thead>
               <tbody>
                 {leaderboard.map((agent, aIdx) => {
-                  const isCurrentUser = user?.id ? agent.id === user.id : agent.name === user?.name;
+                  const isCurrentUser = Boolean(user?.id && String(agent.id) === String(user.id));
                   return (
                     <tr key={agent.id || aIdx} style={{
                       borderBottom: '1px solid var(--border-base)',

@@ -105,34 +105,19 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
     fetchSiteVisits();
     window.addEventListener('nexus_storage_updated', fetchSiteVisits);
 
-    getFollowups(tenantId || tenant?.id).then(followupItems => {
+    const lId = contactType !== 'customer' && isValidId ? parsedContactId : undefined;
+    const cId = contactType === 'customer' && isValidId ? parsedContactId : undefined;
+
+    getFollowups(tenantId || tenant?.id, lId, cId).then(followupItems => {
       if (isMounted && followupItems) {
-        const filtered = followupItems.filter(f => {
-          if (contactType === 'customer') {
-            const fCustId = Number(String(f.customerId || f.contactId || '').replace(/^(db-|customer-)/i, ''));
-            return fCustId === parsedContactId;
-          } else {
-            const fLeadId = Number(String(f.leadId || f.contactId || '').replace(/^(db-|lead-)/i, ''));
-            return fLeadId === parsedContactId;
-          }
-        });
-        setApiFollowups(filtered);
+        setApiFollowups(followupItems);
       }
     }).catch(() => { if (isMounted) setApiFollowups([]); });
     
     const fetchCalls = () => {
-      getCalls(tenantId || tenant?.id).then(records => {
+      getCalls(tenantId || tenant?.id, lId, cId).then(records => {
         if (isMounted && records) {
-          const filtered = records.filter(c => {
-            if (contactType === 'customer') {
-              const cCustId = Number(String(c.customerId || '').replace(/^(db-|customer-)/i, ''));
-              return cCustId === parsedContactId;
-            } else {
-              const cLeadId = Number(String(c.leadId || '').replace(/^(db-|lead-)/i, ''));
-              return cLeadId === parsedContactId;
-            }
-          });
-          setApiCalls(filtered);
+          setApiCalls(records);
         }
       }).catch(() => {
         if (isMounted) setApiCalls([]);

@@ -203,23 +203,22 @@ export const AssignedLeadsPage: React.FC = () => {
   const agentOptions = useMemo<Array<{ id: string | number; name: string }>>(() => {
     const list: Array<{ id: string | number; name: string }> = [...dynamicAgents];
     if (
-      formData.assignedAgentName &&
-      formData.assignedAgentName !== 'Unassigned' &&
-      !list.some(a => a.name.toLowerCase() === formData.assignedAgentName?.toLowerCase())
+      formData.assignedAgentId &&
+      !list.some(a => String(a.id) === String(formData.assignedAgentId))
     ) {
-      list.unshift({ id: 'current', name: formData.assignedAgentName });
+      list.unshift({ id: formData.assignedAgentId, name: formData.assignedAgentName || 'Current Agent' });
     }
     return list;
-  }, [formData.assignedAgentName, dynamicAgents]);
+  }, [formData.assignedAgentId, formData.assignedAgentName, dynamicAgents]);
 
   const handleAgentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newName = e.target.value;
-    const currentName = formData.assignedAgentName || '';
+    const newId = e.target.value;
+    const currentId = formData.assignedAgentId || '';
 
     // If unchanged, do nothing
-    if (!newName || newName === currentName) return;
+    if (!newId || newId === currentId) return;
 
-    const chosenAgent = agentOptions.find(a => a.name === newName);
+    const chosenAgent = agentOptions.find(a => String(a.id) === String(newId));
     if (!chosenAgent) return;
 
     // Trigger confirmation modal; do not change form state immediately
@@ -1000,12 +999,12 @@ export const AssignedLeadsPage: React.FC = () => {
             {canManageAssignments ? (
               <select
                 className="form-select"
-                value={formData.assignedAgentName || ''}
+                value={formData.assignedAgentId || ''}
                 onChange={handleAgentChange}
               >
-                {!formData.assignedAgentName && <option value="">Select Agent</option>}
+                {!formData.assignedAgentId && <option value="">Select Agent</option>}
                 {agentOptions.map(agent => (
-                  <option key={agent.id} value={agent.name}>{agent.name}</option>
+                  <option key={agent.id} value={agent.id}>{agent.name}</option>
                 ))}
               </select>
             ) : (

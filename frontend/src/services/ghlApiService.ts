@@ -576,12 +576,20 @@ function mapFollowup(f: Record<string, any>): Followup {
   };
 }
 
-export async function getFollowups(companyId?: string): Promise<Followup[]> {
+export async function getFollowups(companyId?: string, leadId?: number | string, customerId?: number | string): Promise<Followup[]> {
   const params: Record<string, string> = {};
   if (companyId) {
     const value = String(companyId).toLowerCase();
     const cid = value === 'jamin' || value === 't-jamin-02' ? '2' : value === 'ghl' || value === 't-ghl-01' ? '1' : String(companyId).replace(/\D/g, '') || companyId;
     if (cid) params.companyId = cid;
+  }
+  if (leadId) {
+    const numLeadId = Number(String(leadId).replace(/^(db-|lead-)/i, ''));
+    if (Number.isInteger(numLeadId) && numLeadId > 0) params.leadId = String(numLeadId);
+  }
+  if (customerId) {
+    const numCustId = Number(String(customerId).replace(/^(db-|customer-)/i, ''));
+    if (Number.isInteger(numCustId) && numCustId > 0) params.customerId = String(numCustId);
   }
   const raw = await fetchAll<any>('/sales-executive/followups', params);
   return raw.map(mapFollowup);
@@ -764,11 +772,19 @@ function mapCallRecord(c: Record<string, any>): CallRecord {
   };
 }
 
-export async function getCalls(companyId?: string): Promise<CallRecord[]> {
+export async function getCalls(companyId?: string, leadId?: number | string, customerId?: number | string): Promise<CallRecord[]> {
   const params: Record<string, string> = {};
   if (companyId) {
     const cid = String(companyId).toLowerCase();
     params.tenantId = (cid === 'jamin' || cid === 't-jamin-02' || cid === '2') ? '2' : '1';
+  }
+  if (leadId) {
+    const numLeadId = Number(String(leadId).replace(/^(db-|lead-)/i, ''));
+    if (Number.isInteger(numLeadId) && numLeadId > 0) params.leadId = String(numLeadId);
+  }
+  if (customerId) {
+    const numCustId = Number(String(customerId).replace(/^(db-|customer-)/i, ''));
+    if (Number.isInteger(numCustId) && numCustId > 0) params.customerId = String(numCustId);
   }
   const raw = await fetchAll<any>('/sales-executive/calls', params);
   return raw.map(mapCallRecord);
