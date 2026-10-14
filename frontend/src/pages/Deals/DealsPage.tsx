@@ -145,10 +145,10 @@ export const DealsPage: React.FC<DealsPageProps> = ({ onNavigate }) => {
       <div className="page-header">
         <div>
           <h1 className="page-title">
-            <Briefcase size={24} color="var(--primary-600)" /> Deals Directory
+            <Briefcase size={24} color="var(--primary-600)" /> KYC Leads Directory
           </h1>
           <p className="page-subtitle">
-            Comprehensive list view of all active sales and investment opportunities for {tenant?.name}.
+            Comprehensive list view of all active KYC leads and investment opportunities for {tenant?.name}.
           </p>
         </div>
 
@@ -161,7 +161,7 @@ export const DealsPage: React.FC<DealsPageProps> = ({ onNavigate }) => {
         columns={columns}
         data={filteredDeals}
         keyExtractor={d => d.id}
-        searchPlaceholder="Search deals by title or contact..."
+        searchPlaceholder="Search KYC leads by title or contact..."
         filtersNode={
           <FilterBar
             filters={[

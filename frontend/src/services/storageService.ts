@@ -400,6 +400,76 @@ class StorageService {
     } catch {}
   }
 
+  deleteUserWithHandover(userId: string, handoverToUserId?: string, companyId?: string): void {
+    if (handoverToUserId) {
+      const users = this.getUsers();
+      const handoverUser = users.find(u => String(u.id) === String(handoverToUserId));
+      const handoverName = handoverUser?.name || 'Assigned Agent';
+
+      // 1. Reassign leads
+      const leads = this.getLeads();
+      let leadsUpdated = false;
+      leads.forEach(l => {
+        if (
+          String(l.assignedAgentId) === String(userId) ||
+          (l.assignedAgentName && handoverUser && l.assignedAgentName.toLowerCase() === handoverUser.name.toLowerCase())
+        ) {
+          l.assignedAgentId = handoverToUserId;
+          l.assignedAgentName = handoverName;
+          leadsUpdated = true;
+        }
+      });
+      if (leadsUpdated) {
+        this.set('leads', leads);
+      }
+
+      // 2. Reassign followups
+      const followups = this.getFollowups();
+      let followupsUpdated = false;
+      followups.forEach(f => {
+        if (String(f.assignedAgentId) === String(userId)) {
+          f.assignedAgentId = handoverToUserId;
+          f.assignedAgentName = handoverName;
+          f.assignedToName = handoverName;
+          followupsUpdated = true;
+        }
+      });
+      if (followupsUpdated) {
+        this.set('followups', followups);
+      }
+
+      // 3. Reassign deals
+      const deals = this.getDeals();
+      let dealsUpdated = false;
+      deals.forEach(d => {
+        if (String(d.assignedAgentId) === String(userId)) {
+          d.assignedAgentId = handoverToUserId;
+          d.assignedAgentName = handoverName;
+          dealsUpdated = true;
+        }
+      });
+      if (dealsUpdated) {
+        this.set('deals', deals);
+      }
+
+      // 4. Reassign customers
+      const customers = this.getCustomers();
+      let customersUpdated = false;
+      customers.forEach(c => {
+        if (String(c.assignedAgentId) === String(userId)) {
+          c.assignedAgentId = handoverToUserId;
+          c.assignedAgentName = handoverName;
+          customersUpdated = true;
+        }
+      });
+      if (customersUpdated) {
+        this.set('customers', customers);
+      }
+    }
+
+    this.deleteUser(userId);
+  }
+
   // Leads (Defaults to empty [] - real-time data only)
   getLeads(companyId?: string): Lead[] {
     const leads = this.get<Lead[]>('leads', []);

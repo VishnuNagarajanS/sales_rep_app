@@ -266,9 +266,9 @@ public class ReportService : IReportService
         if (string.IsNullOrEmpty(module) || module.Equals("Investors", StringComparison.OrdinalIgnoreCase) || module.Equals("All", StringComparison.OrdinalIgnoreCase))
         {
             var ws = workbook.Worksheets.Add("Investors");
-            var investors = await _db.GhlInvestors
+            var investors = await _db.Investors
                 .Where(i => i.CompanyId == companyId)
-                .Select(i => new { i.Id, i.Name, i.Email, i.Phone, i.InvestmentCapacity, i.AssignedAgentId })
+                .Select(i => new { i.Id, i.Name, i.Email, i.Phone, i.InvestmentCapacity, i.AssignedIrmId })
                 .ToListAsync(ct);
             ws.Cell(1, 1).Value = "ID";
             ws.Cell(1, 2).Value = "Name";
@@ -286,7 +286,7 @@ public class ReportService : IReportService
                 ws.Cell(r, 3).Value = inv.Email;
                 ws.Cell(r, 4).Value = inv.Phone;
                 ws.Cell(r, 5).Value = inv.InvestmentCapacity;
-                ws.Cell(r, 6).Value = inv.AssignedAgentId;
+                ws.Cell(r, 6).Value = inv.AssignedIrmId;
             }
             ws.Columns().AdjustToContents();
         }

@@ -55,6 +55,9 @@ class ApiClient {
       if (err.errors && typeof err.errors === 'object' && !Array.isArray(err.errors)) {
         const validationMsgs = Object.values(err.errors).flat().join('; ');
         if (validationMsgs) errorMsg = validationMsgs;
+      } else if (Array.isArray(err.errors) && err.errors.length > 0) {
+        const specificMsg = err.errors.slice().reverse().find((m: any) => typeof m === 'string' && !m.includes('See the inner exception for details'));
+        if (specificMsg) errorMsg = specificMsg;
       }
       const error: any = new Error(errorMsg || `HTTP Error ${res.status}`);
       error.errors = err.errors;

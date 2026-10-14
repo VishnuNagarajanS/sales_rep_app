@@ -102,7 +102,7 @@ public class LeadService : ILeadService
         }
         else if (role == "sales_executive" && agentId.HasValue)
         {
-            query = query.Where(l => l.AssignedAgentId == agentId.Value);
+            query = query.Where(l => l.AssignedAgentId == agentId.Value || l.AssignedById == agentId.Value);
         }
 
         return query;
@@ -126,11 +126,11 @@ public class LeadService : ILeadService
             query = query.Where(l => l.CompanyId == companyId.Value);
         }
 
-        // Only standard sales executives are restricted strictly to their own AssignedAgentId.
+        // Standard sales executives can access leads assigned to them or assigned/qualified by them.
         // IRMs and admins can access and update leads within their company.
         if (role == "sales_executive" && agentId.HasValue)
         {
-            query = query.Where(l => l.AssignedAgentId == agentId.Value);
+            query = query.Where(l => l.AssignedAgentId == agentId.Value || l.AssignedById == agentId.Value);
         }
 
         return await query.FirstOrDefaultAsync(ct);
@@ -264,9 +264,17 @@ public class LeadService : ILeadService
         if (_currentUser.Role == "company_admin" || _currentUser.Role == "super_admin")
         {
             if (string.Equals(filter.Assignment, "unassigned", StringComparison.OrdinalIgnoreCase))
-                query = query.Where(l => l.AssignedAgentId == null || l.AssignedAgent!.Role.Code == "company_admin" || l.AssignedAgent!.Role.Code == "super_admin");
+            {
+                query = query.Where(l => 
+                    (l.AssignedAgentId == null || l.AssignedAgent!.Role.Code == "company_admin" || l.AssignedAgent!.Role.Code == "super_admin") &&
+                    (l.CustomFieldsJson == null || (!l.CustomFieldsJson.Contains("\"assignedIrmId\"") && !l.CustomFieldsJson.Contains("\"assignedIrmName\""))));
+            }
             else if (string.Equals(filter.Assignment, "assigned", StringComparison.OrdinalIgnoreCase))
-                query = query.Where(l => l.AssignedAgentId != null && l.AssignedAgent!.Role.Code != "company_admin" && l.AssignedAgent!.Role.Code != "super_admin");
+            {
+                query = query.Where(l => 
+                    (l.AssignedAgentId != null && l.AssignedAgent!.Role.Code != "company_admin" && l.AssignedAgent!.Role.Code != "super_admin") ||
+                    (l.CustomFieldsJson != null && (l.CustomFieldsJson.Contains("\"assignedIrmId\"") || l.CustomFieldsJson.Contains("\"assignedIrmName\""))));
+            }
         }
 
         if (string.Equals(filter.Status, "all", StringComparison.OrdinalIgnoreCase))
@@ -1155,17 +1163,33 @@ public class LeadService : ILeadService
         if (lead == null)
             return ApiResponse<LeadResponseDto>.FailureResult("Lead not found or access denied.");
 
-        lead.Status = "Contacted";
+        lead.Status = "Follow-up Required";
         lead.UpdatedAt = DateTime.UtcNow;
 
         // Clear any stale sales followups for this lead
         await InterestedLeadConversion.RemoveSalesFollowupsAsync(_context, lead, ct);
 
-        // Schedule fresh followup for tomorrow
+        // Schedule fresh followup for tomorrow (10:00 AM local tomorrow or next available 30-min slot)
         var today = await _clock.GetTodayAsync(lead.CompanyId, ct);
-        var tomorrow = DateTime.SpecifyKind(today.AddDays(1).AddHours(10), DateTimeKind.Utc); // 10:00 AM local tomorrow
+        var tomorrow10am = DateTime.SpecifyKind(today.AddDays(1).AddHours(10), DateTimeKind.Utc);
         var targetAgentId = lead.AssignedAgentId ?? _currentUser.UserId ?? throw new InvalidOperationException("User ID is required");
         var agentUser = await _context.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == targetAgentId && u.CompanyId == lead.CompanyId, ct);
+
+        var candidateTime = tomorrow10am;
+        var existingAgentBookings = await _context.Followups
+            .AsNoTracking()
+            .Where(f => f.CompanyId == lead.CompanyId &&
+                        f.AssignedAgentId == targetAgentId &&
+                        f.Status == FollowupStatus.Pending &&
+                        f.ScheduledAt >= tomorrow10am.AddMinutes(-15) &&
+                        f.ScheduledAt <= tomorrow10am.AddHours(9))
+            .Select(f => f.ScheduledAt)
+            .ToListAsync(ct);
+
+        while (existingAgentBookings.Any(booked => Math.Abs((booked - candidateTime).TotalMinutes) < 15))
+        {
+            candidateTime = candidateTime.AddMinutes(30);
+        }
 
         var freshFollowup = new Followup
         {
@@ -1178,18 +1202,18 @@ public class LeadService : ILeadService
             ContactName = lead.Name,
             ContactPhone = lead.Phone,
             ContactEmail = lead.Email,
-            ScheduledAt = tomorrow,
+            ScheduledAt = candidateTime,
             Priority = "High",
             Status = FollowupStatus.Pending,
             Notes = "Re-engaged lead follow-up reminder.",
             CreatedAt = DateTime.UtcNow
         };
         _context.Followups.Add(freshFollowup);
-        lead.NextFollowupDate = tomorrow;
+        lead.NextFollowupDate = candidateTime;
 
         await _context.SaveChangesAsync(ct);
 
-        return ApiResponse<LeadResponseDto>.SuccessResult(MapToDto(lead), "Lead re-engaged and follow-up scheduled.");
+        return ApiResponse<LeadResponseDto>.SuccessResult(MapToDto(lead), "Lead re-engaged and moved to Follow-up queue.");
     }
 
     private static LeadResponseDto MapToDto(Lead lead)

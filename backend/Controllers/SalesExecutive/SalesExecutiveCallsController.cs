@@ -322,7 +322,7 @@ public class SalesExecutiveCallsController : ControllerBase
             return Unauthorized(ApiResponse<CallRecordResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
 
         var normalizedModule = IrmOtherService.NormalizeModule(dto.Module);
-        if (!string.IsNullOrWhiteSpace(dto.Module) || role == "irm")
+        if (role == "irm")
         {
             if (!string.IsNullOrWhiteSpace(normalizedModule))
             {
@@ -338,6 +338,17 @@ public class SalesExecutiveCallsController : ControllerBase
                 }
             }
 
+            if (dto.Disposition != null && dto.Disposition.Trim().Equals("Other", StringComparison.OrdinalIgnoreCase))
+            {
+                var effectiveReason = (dto.Reason ?? dto.Notes)?.Trim();
+                if (string.IsNullOrWhiteSpace(effectiveReason))
+                {
+                    return BadRequest(ApiResponse<CallRecordResponseDto>.FailureResult("Reason is required when disposition is Other."));
+                }
+            }
+        }
+        else
+        {
             if (dto.Disposition != null && dto.Disposition.Trim().Equals("Other", StringComparison.OrdinalIgnoreCase))
             {
                 var effectiveReason = (dto.Reason ?? dto.Notes)?.Trim();
@@ -587,9 +598,9 @@ public class SalesExecutiveCallsController : ControllerBase
                 ApiResponse<CallRecordDto>.FailureResult("Access denied: GHL Admin has read-only access to call disposition records."));
         }
 
-        var normalizedModule = IrmOtherService.NormalizeModule(request.Module);
-        if (!string.IsNullOrWhiteSpace(request.Module) || role == "irm")
+        if (role == "irm")
         {
+            var normalizedModule = IrmOtherService.NormalizeModule(request.Module);
             if (!string.IsNullOrWhiteSpace(normalizedModule))
             {
                 if (!IrmOtherService.ModuleOutcomes.TryGetValue(normalizedModule, out var allowedOutcomes))
@@ -604,6 +615,17 @@ public class SalesExecutiveCallsController : ControllerBase
                 }
             }
 
+            if (request.Disposition != null && request.Disposition.Trim().Equals("Other", StringComparison.OrdinalIgnoreCase))
+            {
+                var effectiveReason = (request.Reason ?? request.Notes)?.Trim();
+                if (string.IsNullOrWhiteSpace(effectiveReason))
+                {
+                    return BadRequest(ApiResponse<CallRecordDto>.FailureResult("Reason is required when disposition is Other."));
+                }
+            }
+        }
+        else
+        {
             if (request.Disposition != null && request.Disposition.Trim().Equals("Other", StringComparison.OrdinalIgnoreCase))
             {
                 var effectiveReason = (request.Reason ?? request.Notes)?.Trim();

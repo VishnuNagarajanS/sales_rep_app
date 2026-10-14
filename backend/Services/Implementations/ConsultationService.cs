@@ -178,6 +178,33 @@ public class ConsultationService : IConsultationService
 
         var consultantUser = await _context.Users.FirstOrDefaultAsync(u => u.Id == targetConsultantId && u.CompanyId == companyId.Value, ct);
 
+        var schedUtc = dto.ScheduledAt.Kind switch
+        {
+            DateTimeKind.Utc => dto.ScheduledAt,
+            DateTimeKind.Local => dto.ScheduledAt.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(dto.ScheduledAt, DateTimeKind.Utc)
+        };
+
+        // Check for time slot conflict: no consultant can have two scheduled consultations within 25 minutes
+        var slotStart = schedUtc.AddMinutes(-24.9);
+        var slotEnd = schedUtc.AddMinutes(24.9);
+
+        var conflictConsultation = await _context.Consultations.AsNoTracking()
+            .Where(c => c.CompanyId == companyId.Value &&
+                        c.ConsultantId == targetConsultantId &&
+                        c.Status == ConsultationStatus.Scheduled &&
+                        c.ScheduledAt >= slotStart &&
+                        c.ScheduledAt <= slotEnd)
+            .FirstOrDefaultAsync(ct);
+
+        if (conflictConsultation != null)
+        {
+            var conflictTime = conflictConsultation.ScheduledAt.ToString("g");
+            var suggestedTime = conflictConsultation.ScheduledAt.AddMinutes(30).ToString("t");
+            return ApiResponse<ConsultationResponseDto>.FailureResult(
+                $"This time slot is already booked for another consultation with {conflictConsultation.InvestorName} (at {conflictTime}). Please allow at least 20 to 30 minutes between sessions and schedule after {suggestedTime}.");
+        }
+
         var consultation = new Consultation
         {
             CompanyId = companyId.Value,
@@ -211,7 +238,37 @@ public class ConsultationService : IConsultationService
         if (consultation == null)
             return ApiResponse<ConsultationResponseDto>.FailureResult("Consultation not found or access denied.");
 
-        if (dto.ScheduledAt.HasValue) consultation.ScheduledAt = dto.ScheduledAt.Value;
+        if (dto.ScheduledAt.HasValue)
+        {
+            var schedUtc = dto.ScheduledAt.Value.Kind switch
+            {
+                DateTimeKind.Utc => dto.ScheduledAt.Value,
+                DateTimeKind.Local => dto.ScheduledAt.Value.ToUniversalTime(),
+                _ => DateTime.SpecifyKind(dto.ScheduledAt.Value, DateTimeKind.Utc)
+            };
+
+            var slotStart = schedUtc.AddMinutes(-24.9);
+            var slotEnd = schedUtc.AddMinutes(24.9);
+
+            var conflictConsultation = await _context.Consultations.AsNoTracking()
+                .Where(c => c.CompanyId == consultation.CompanyId &&
+                            c.Id != consultation.Id &&
+                            c.ConsultantId == consultation.ConsultantId &&
+                            c.Status == ConsultationStatus.Scheduled &&
+                            c.ScheduledAt >= slotStart &&
+                            c.ScheduledAt <= slotEnd)
+                .FirstOrDefaultAsync(ct);
+
+            if (conflictConsultation != null)
+            {
+                var conflictTime = conflictConsultation.ScheduledAt.ToString("g");
+                var suggestedTime = conflictConsultation.ScheduledAt.AddMinutes(30).ToString("t");
+                return ApiResponse<ConsultationResponseDto>.FailureResult(
+                    $"This time slot is already booked for another consultation with {conflictConsultation.InvestorName} (at {conflictTime}). Please allow at least 20 to 30 minutes between sessions and schedule after {suggestedTime}.");
+            }
+
+            consultation.ScheduledAt = schedUtc;
+        }
         if (!string.IsNullOrWhiteSpace(dto.Status) && Enum.TryParse<ConsultationStatus>(dto.Status, true, out var st))
         {
             consultation.Status = st;
@@ -249,6 +306,32 @@ public class ConsultationService : IConsultationService
     {
         var user = await _userRepo.GetByIdAsync(consultantId, ct);
         var investor = await _investorRepo.GetByIdAsync(dto.InvestorId, companyId, ct);
+
+        var schedUtc = dto.ScheduledAt.Kind switch
+        {
+            DateTimeKind.Utc => dto.ScheduledAt,
+            DateTimeKind.Local => dto.ScheduledAt.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(dto.ScheduledAt, DateTimeKind.Utc)
+        };
+
+        var slotStart = schedUtc.AddMinutes(-24.9);
+        var slotEnd = schedUtc.AddMinutes(24.9);
+
+        var conflictConsultation = await _context.Consultations.AsNoTracking()
+            .Where(c => c.CompanyId == companyId &&
+                        c.ConsultantId == consultantId &&
+                        c.Status == ConsultationStatus.Scheduled &&
+                        c.ScheduledAt >= slotStart &&
+                        c.ScheduledAt <= slotEnd)
+            .FirstOrDefaultAsync(ct);
+
+        if (conflictConsultation != null)
+        {
+            var conflictTime = conflictConsultation.ScheduledAt.ToString("g");
+            var suggestedTime = conflictConsultation.ScheduledAt.AddMinutes(30).ToString("t");
+            return ApiResponse<ConsultationDto>.ErrorResponse(
+                $"This time slot is already booked for another consultation with {conflictConsultation.InvestorName} (at {conflictTime}). Please allow at least 20 to 30 minutes between sessions and schedule after {suggestedTime}.");
+        }
 
         var consultation = new Consultation
         {

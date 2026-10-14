@@ -138,22 +138,15 @@ public class GhlOpportunitiesController : ControllerBase
         if (!companyId.HasValue || companyId.Value <= 0)
             return Unauthorized(ApiResponse<GhlOpportunityResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
 
-        // Verify investor exists (support unified Investors table and fallback to GhlInvestors)
+        // Verify investor exists
         var investor = await _db.Investors
             .FirstOrDefaultAsync(i => i.Id == dto.InvestorId && i.CompanyId == companyId.Value, ct);
 
-        int? handoverId = investor?.HandoverId;
-        int? originalOwnerId = investor?.OriginalOwnerId;
-
         if (investor == null)
-        {
-            var ghlInv = await _db.GhlInvestors
-                .FirstOrDefaultAsync(i => i.Id == dto.InvestorId && i.CompanyId == companyId.Value, ct);
-            if (ghlInv == null)
-                return BadRequest(ApiResponse<GhlOpportunityResponseDto>.FailureResult("Investor not found."));
-            handoverId = ghlInv.HandoverId;
-            originalOwnerId = ghlInv.OriginalOwnerId;
-        }
+            return BadRequest(ApiResponse<GhlOpportunityResponseDto>.FailureResult("Investor not found."));
+
+        int? handoverId = investor.HandoverId;
+        int? originalOwnerId = investor.OriginalOwnerId;
 
         var opp = new GhlInvestmentOpportunity
         {

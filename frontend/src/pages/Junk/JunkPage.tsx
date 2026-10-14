@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { getLeads, getJunkLeads, saveLead as apiSaveLead, saveFollowup as apiSaveFollowup, getCalls } from '../../services/ghlApiService';
 import { apiClient } from '../../services/apiClient';
+import { storageService } from '../../services/storageService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
@@ -109,7 +110,7 @@ export const JunkPage: React.FC = () => {
     return 'No specific reason provided';
   };
 
-  // Re-engage: move lead from Junk → Contacted and create a follow-up entry
+  // Re-engage: move lead from Junk → Follow-up Required and schedule follow-up entry
   const handleReengage = async (lead: Lead) => {
     if (!tenant || !user) return;
     setReengaging(true);
@@ -120,6 +121,7 @@ export const JunkPage: React.FC = () => {
         try {
           await apiClient.post(`/sales-executive/leads/${numId}/reengage`);
           backendSuccess = true;
+          storageService.saveLead({ ...lead, status: 'Follow-up Required' });
         } catch (e) {
           console.warn('Backend reengage error, falling back to apiSaveLead', e);
           await apiSaveLead({ ...lead, status: 'Follow-up Required' });

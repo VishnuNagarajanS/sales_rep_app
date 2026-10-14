@@ -317,6 +317,14 @@ const GhlIrmKycView: React.FC = () => {
   const { tenant, user, permissions = [] } = useAuth();
   const { initiateCall } = useCall();
 
+  const roleCode = (user?.role?.code || '').toLowerCase();
+  const isGhlAdmin =
+    roleCode === 'company_admin' ||
+    roleCode === 'admin' ||
+    roleCode === 'super_admin' ||
+    roleCode === 'ghl_admin' ||
+    Boolean(user?.role?.name?.toLowerCase().includes('admin'));
+
   const reqId = useRef(0);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -2171,6 +2179,16 @@ const GhlIrmKycView: React.FC = () => {
         );
       },
     },
+    ...(isGhlAdmin ? [{
+      key: 'assignedAgentName',
+      header: 'Assigned IRM',
+      width: '140px',
+      render: (deal: Deal) => (
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+          {deal.assignedAgentName || 'Unassigned'}
+        </span>
+      ),
+    }] : []),
     {
       key: 'preferredAssetClass',
       header: 'Preferred Asset Class',
@@ -2199,7 +2217,8 @@ const GhlIrmKycView: React.FC = () => {
           <KycStatusDropdown
             deal={deal}
             customerKycStatus={custStatus}
-            hideArrow
+            hideArrow={isGhlAdmin}
+            disablePopup={isGhlAdmin}
             onChange={(status, comment, flaggedSections, checklist) =>
               handleStatusChange(deal, status, comment, flaggedSections, checklist)
             }
@@ -2223,6 +2242,147 @@ const GhlIrmKycView: React.FC = () => {
       width: '180px',
       render: deal => {
         const status = resolveCustomerKycStatus(deal);
+
+        // For GHL Admin, render clean read-only status tags rather than operational action buttons or dropdowns
+        if (isGhlAdmin) {
+          if (status === 'Verified') {
+            return (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: '3px 10px',
+                  borderRadius: 20,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  backgroundColor: 'rgba(16,185,129,0.1)',
+                  color: '#059669',
+                  border: '1px solid rgba(16,185,129,0.3)',
+                }}
+                title="KYC verified by IRM"
+              >
+                <CheckCircle size={12} /> Verified
+              </span>
+            );
+          }
+
+          if (status === 'Assisted KYC – Submitted for Verification') {
+            return (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                  color: '#059669',
+                  border: '1px solid rgba(16, 185, 129, 0.35)',
+                  whiteSpace: 'nowrap',
+                }}
+                title="Assisted KYC submitted — awaiting IRM verification"
+              >
+                <UserCheck size={12} /> Assisted Submitted
+              </span>
+            );
+          }
+
+          if (
+            status === 'Submitted' ||
+            status === 'Under Verification' ||
+            status === 'Completed'
+          ) {
+            return (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  backgroundColor: 'rgba(99, 102, 241, 0.10)',
+                  color: '#6366f1',
+                  border: '1px solid rgba(99, 102, 241, 0.25)',
+                  whiteSpace: 'nowrap',
+                }}
+                title="Customer has submitted KYC form — awaiting IRM review"
+              >
+                <CheckCircle size={12} /> KYC Submitted
+              </span>
+            );
+          }
+
+          if (status === 'Assisted Draft') {
+            return (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  backgroundColor: 'rgba(245, 158, 11, 0.10)',
+                  color: '#d97706',
+                  border: '1px solid rgba(245, 158, 11, 0.25)',
+                  whiteSpace: 'nowrap',
+                }}
+                title="Assisted KYC is in draft state"
+              >
+                <Clock size={12} /> Assisted Draft
+              </span>
+            );
+          }
+
+          if (['Link Sent', 'In Progress', 'Needs Correction', 'Rejected'].includes(status)) {
+            return (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  backgroundColor: 'rgba(59, 130, 246, 0.10)',
+                  color: '#2563eb',
+                  border: '1px solid rgba(59, 130, 246, 0.25)',
+                  whiteSpace: 'nowrap',
+                }}
+                title={`Status: ${status}`}
+              >
+                <Send size={12} /> {status === 'Link Sent' ? 'Link Sent' : status}
+              </span>
+            );
+          }
+
+          return (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 11,
+                fontWeight: 500,
+                padding: '4px 10px',
+                borderRadius: 6,
+                backgroundColor: 'rgba(107, 114, 128, 0.10)',
+                color: '#6b7280',
+                border: '1px solid rgba(107, 114, 128, 0.20)',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Pending Submission
+            </span>
+          );
+        }
 
         // IRM-verified: show professional Verified badge with checkmark
         if (status === 'Verified') {
@@ -2397,6 +2557,7 @@ const GhlIrmKycView: React.FC = () => {
         return (
           <KycRowActionsMenu
             deal={deal}
+            isGhlAdmin={isGhlAdmin}
             onOpenReview={d => {
               const fDigits = (d.phone || '').replace(/\D/g, '').slice(-10);
               const matchLead = leads.find(l => (d.customerId && l.id === d.customerId) || (l.phone && l.phone.replace(/\D/g, '').slice(-10) === fDigits));
@@ -2407,11 +2568,11 @@ const GhlIrmKycView: React.FC = () => {
             }}
             onShowToast={msg => showToast(msg)}
             onViewProfile={d => handleOpenCustomerProfile(d)}
-            onEditKyc={d => startKycFlow(d)}
-            onAssistedKyc={d => startAssistedKycFlow(d)}
+            onEditKyc={isGhlAdmin ? undefined : (d => startKycFlow(d))}
+            onAssistedKyc={isGhlAdmin ? undefined : (d => startAssistedKycFlow(d))}
             onCallInvestor={d => initiateCall(d.customerName, d.phone || '', 'customer', d.customerId || d.id, undefined, 'kyc')}
-            // Only show "Advance to Opportunity" after KYC is fully completed
-            onAdvanceStage={normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Verified' ? d => handleAdvanceStage(d) : undefined}
+            // Only show "Advance to Opportunity" after KYC is fully completed (not available in Admin oversight mode)
+            onAdvanceStage={!isGhlAdmin && normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Verified' ? d => handleAdvanceStage(d) : undefined}
           />
         );
       },
@@ -2742,10 +2903,12 @@ const GhlIrmKycView: React.FC = () => {
           <div className="page-header" style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <h1 className="page-title">
-                <FileCheck size={24} color="#06b6d4" /> Qualified Investor &amp; KYC Verification
+                <FileCheck size={24} color="#06b6d4" /> {isGhlAdmin ? 'KYC Leads & Verification Directory' : 'Qualified Investor & KYC Verification'}
               </h1>
               <p className="page-subtitle">
-                SEBI compliance checked, ticket size verified, KYC validated investors ready for investment opportunities.
+                {isGhlAdmin
+                  ? 'Company-wide oversight of leads undergoing KYC verification across all IRMs before moving to Opportunities.'
+                  : 'SEBI compliance checked, ticket size verified, KYC validated investors ready for investment opportunities.'}
               </p>
             </div>
           </div>
@@ -4901,18 +5064,20 @@ export const KYCPage: React.FC = () => {
   const isGhl =
     tenant?.slug === 'ghl' ||
     tenant?.id === 't-ghl-01' ||
+    tenant?.id === '1' ||
     tenant?.name === 'GHL India Ventures' ||
     user?.companySlug === 'ghl' ||
     user?.companyName === 'GHL India Ventures';
 
-  const isIrm = user?.role?.code === 'irm';
+  const roleCode = (user?.role?.code || '').toLowerCase();
+  const isIrm = roleCode === 'irm';
+  const isGhlAdmin = isGhl && (roleCode === 'company_admin' || roleCode === 'admin' || roleCode === 'super_admin');
   const isGhlIrm = isGhl && isIrm;
 
-  // STRICT REQUIREMENT: Only GHL India Ventures IRM receives the new 5-step KYC & Documents flow.
-  // Every other persona, role, or tenant retains the exact existing KYC implementation.
-  if (!isGhlIrm) {
-    return <OriginalKYCView />;
+  // GHL IRM and GHL Admin use the GHL IRM KYC pipeline view (Admin has read-only oversight)
+  if (isGhlIrm || isGhlAdmin) {
+    return <GhlIrmKycView />;
   }
 
-  return <GhlIrmKycView />;
+  return <OriginalKYCView />;
 };

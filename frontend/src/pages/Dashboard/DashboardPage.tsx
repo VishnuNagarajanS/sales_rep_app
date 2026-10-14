@@ -147,9 +147,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
     return true;
   });
 
-  const scopedPendingLeads = isExec
-    ? allPendingLeads.filter(l => (isUserMatch(l.assignedAgentId, l.assignedAgentName) || !l.assignedAgentId) && l.status === 'New')
-    : isIrm
+  const scopedPendingLeads = isIrm
     ? allPendingLeads.filter(l => isUserMatch(l.assignedAgentId, l.assignedAgentName) && l.status === 'Interested')
     : allPendingLeads;
 
@@ -283,7 +281,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
   // ── Task 3 & IRM — label helpers ─────────────────────────────────────────
   const label = {
     activeleads: isExec ? 'MY ACTIVE LEADS' : 'ACTIVE LEADS',
-    pendingleads: isExec ? 'MY PENDING LEADS' : 'PENDING LEADS',
+    pendingleads: 'PENDING LEADS',
     pendingfollowups: isExec ? 'MY FOLLOW-UPS' : 'FOLLOW-UPS',
     callslogged: isExec ? 'MY CALLS LOGGED' : 'CALLS LOGGED',
     pipelinevalue: isExec ? 'MY PIPELINE VALUE' : 'PIPELINE VALUE',
@@ -441,21 +439,23 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
               </div>
             </div>
 
-            {/* Card 2: Pending Leads */}
-            <div className="card card-hover dashboard-kpi-card" onClick={() => onNavigate('pending-leads')}>
-              <div className="dashboard-kpi-header">
-                <span className="dashboard-kpi-label">{label.pendingleads}</span>
-                <div className="dashboard-kpi-icon-box" style={{ backgroundColor: 'rgba(245, 158, 11, 0.12)', color: '#d97706' }}>
-                  <Clock size={18} />
+            {/* Card 2: Pending Leads (Admin only - not for Sales Executive) */}
+            {!isExec && (
+              <div className="card card-hover dashboard-kpi-card" onClick={() => onNavigate('pending-leads')}>
+                <div className="dashboard-kpi-header">
+                  <span className="dashboard-kpi-label">{label.pendingleads}</span>
+                  <div className="dashboard-kpi-icon-box" style={{ backgroundColor: 'rgba(245, 158, 11, 0.12)', color: '#d97706' }}>
+                    <Clock size={18} />
+                  </div>
+                </div>
+                <div className="dashboard-kpi-value">
+                  {scopedPendingLeads.length}
+                </div>
+                <div className="dashboard-kpi-subtext" style={{ fontSize: 12, color: scopedPendingLeads.length > 0 ? '#d97706' : 'var(--text-muted)' }}>
+                  {scopedPendingLeads.length > 0 ? 'Awaiting first action / call' : 'All leads in progress'}
                 </div>
               </div>
-              <div className="dashboard-kpi-value">
-                {scopedPendingLeads.length}
-              </div>
-              <div className="dashboard-kpi-subtext" style={{ fontSize: 12, color: scopedPendingLeads.length > 0 ? '#d97706' : 'var(--text-muted)' }}>
-                {scopedPendingLeads.length > 0 ? 'Awaiting first action / call' : 'All leads in progress'}
-              </div>
-            </div>
+            )}
 
             {/* Card 3: Follow-ups */}
             <div className="card card-hover dashboard-kpi-card" onClick={() => onNavigate('followups')}>

@@ -81,13 +81,20 @@ export const OpportunitiesPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
 
-  const roleCode = user?.role?.code;
+  const roleCode = (user?.role?.code || '').toLowerCase();
   const isExec = roleCode === 'sales_executive';
   const isIrm = roleCode === 'irm';
-  const isGhlIrm = isIrm && tenant?.slug === 'ghl';
+  const isGhl =
+    tenant?.slug === 'ghl' ||
+    tenant?.id === 't-ghl-01' ||
+    tenant?.id === '1' ||
+    tenant?.name === 'GHL India Ventures' ||
+    user?.companySlug === 'ghl' ||
+    user?.companyName === 'GHL India Ventures';
+  const isGhlIrm = isIrm && isGhl;
   const isGhlAdmin =
-    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1') &&
-    ['company_admin', 'admin', 'super_admin', 'ghl_admin'].includes(roleCode as string);
+    isGhl &&
+    ['company_admin', 'admin', 'super_admin', 'ghl_admin'].includes(roleCode);
 
   // ── Core data ─────────────────────────────────────────────────────────────
   const [opps, setOpps] = useState<InvestmentOpportunity[]>([]);
@@ -815,28 +822,30 @@ export const OpportunitiesPage: React.FC = () => {
                 <Phone size={14} color="#059669" />
               </button>
             )}
-            <button
-              type="button"
-              className="irm-convert-btn"
-              title={
-                isConfirmed
-                  ? 'Convert deal (Mandate executed & funds committed)'
-                  : 'Set the investment amount before converting.'
-              }
-              disabled={!isConfirmed}
-              onClick={e => {
-                e.stopPropagation();
-                if (isConfirmed) {
-                  handleAdvanceToConverted(deal);
+            {!isGhlAdmin && (
+              <button
+                type="button"
+                className="irm-convert-btn"
+                title={
+                  isConfirmed
+                    ? 'Convert deal (Mandate executed & funds committed)'
+                    : 'Set the investment amount before converting.'
                 }
-              }}
-              style={{
-                opacity: isConfirmed ? 1 : 0.45,
-                cursor: isConfirmed ? 'pointer' : 'not-allowed',
-              }}
-            >
-              <CheckCircle size={13} /> Convert
-            </button>
+                disabled={!isConfirmed}
+                onClick={e => {
+                  e.stopPropagation();
+                  if (isConfirmed) {
+                    handleAdvanceToConverted(deal);
+                  }
+                }}
+                style={{
+                  opacity: isConfirmed ? 1 : 0.45,
+                  cursor: isConfirmed ? 'pointer' : 'not-allowed',
+                }}
+              >
+                <CheckCircle size={13} /> Convert
+              </button>
+            )}
           </div>
         );
       },
@@ -873,11 +882,13 @@ export const OpportunitiesPage: React.FC = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">
-            <Briefcase size={24} color={isGhlIrm ? '#ec4899' : '#0284c7'} />{' '}
-            {isGhlIrm ? 'Investment Opportunities & Term Sheets' : 'Investment Opportunities Syndicate'}
+            <Briefcase size={24} color={(isGhlIrm || isGhlAdmin) ? '#ec4899' : '#0284c7'} />{' '}
+            {(isGhlIrm || isGhlAdmin) ? 'Investment Opportunities & Term Sheets' : 'Investment Opportunities Syndicate'}
           </h1>
           <p className="page-subtitle">
-            {isGhlIrm
+            {isGhlAdmin
+              ? 'Company-wide oversight of active investment opportunities across all IRMs before mandate execution and investor conversion.'
+              : isGhlIrm
               ? 'Pitch deck shared, term sheet under review, legal team active.'
               : `Commercial real-estate fractional tranches, warehousing yields, and capital commitments for ${tenant?.name}.`}
           </p>
@@ -915,7 +926,7 @@ export const OpportunitiesPage: React.FC = () => {
       )}
 
       {/* ── Data table ───────────────────────────────────────────────────── */}
-      {isGhlIrm ? (
+      {(isGhlIrm || isGhlAdmin) ? (
         <DataTable
           columns={irmColumns}
           data={irmDeals}
@@ -1375,7 +1386,30 @@ export const OpportunitiesPage: React.FC = () => {
                       )}
                     </div>
 
-                    {isConfirmed ? (
+                    {isGhlAdmin ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ flex: 1, position: 'relative' }}>
+                          <input
+                            id="opp-admin-amount"
+                            name="adminAmount"
+                            aria-label="Investment Amount"
+                            type="text"
+                            readOnly
+                            className="form-input"
+                            value={detailDeal.value && Number(detailDeal.value) > 0 ? formatCurrency(detailDeal.value) : 'Not Specified'}
+                            style={{
+                              width: '100%',
+                              fontSize: 14,
+                              fontWeight: 700,
+                              color: detailDeal.value && Number(detailDeal.value) > 0 ? '#10b981' : 'var(--text-muted)',
+                              height: 38,
+                              backgroundColor: 'var(--bg-surface-hover, #f8fafc)',
+                              cursor: 'default',
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ) : isConfirmed ? (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <div style={{ flex: 1, position: 'relative' }}>
                           <input

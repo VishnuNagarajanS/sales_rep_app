@@ -229,7 +229,7 @@ export function DataTable<T>({
               </div>
             )}
             {filtersNode && (
-              <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 {filtersNode}
               </span>
             )}

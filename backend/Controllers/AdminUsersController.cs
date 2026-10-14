@@ -119,12 +119,12 @@ public class AdminUsersController : ControllerBase
 
     [HttpDelete("{id}")]
     [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> DeleteUser(int id, CancellationToken cancellationToken)
+    public async Task<IActionResult> DeleteUser(int id, [FromQuery] int? handoverToUserId, CancellationToken cancellationToken)
     {
         var companyId = GetCompanyId();
         if (companyId == 0) return Forbid();
 
-        var result = await _adminUserService.DeleteUserAsync(companyId, id, cancellationToken);
+        var result = await _adminUserService.DeleteUserAsync(companyId, id, handoverToUserId, cancellationToken);
         if (!result.Success) return BadRequest(result);
 
         return Ok(result);

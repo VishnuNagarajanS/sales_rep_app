@@ -5,6 +5,7 @@ import { CallRecord, User, Consultation } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
+import { adminUserService } from '../../services/adminUserService';
 import { getCalls, getConsultations, getCallById } from '../../services/ghlApiService';
 import { isMockMode } from '../../config/environment';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
@@ -38,21 +39,23 @@ export const CallHistoryPage: React.FC = () => {
       return;
     }
     try {
-      const [callsData, consultationsData] = await Promise.all([
+      const [callsData, consultationsData, fetchedUsers] = await Promise.all([
         getCalls(tenant?.id),
         getConsultations(tenant?.id),
+        adminUserService.getUsers(tenant?.id || tenant?.slug || '1').catch(() => []),
       ]);
       setCalls(callsData || []);
       setConsultations(consultationsData || []);
+      if (fetchedUsers && fetchedUsers.length > 0) {
+        setUsers(fetchedUsers);
+      } else {
+        const rawUsers = localStorage.getItem('nexus_users');
+        const allUsers: User[] = rawUsers ? JSON.parse(rawUsers) : storageService.getUsers(tenant?.slug);
+        setUsers(tenant?.slug ? allUsers.filter(u => !u.companySlug || u.companySlug === tenant.slug) : allUsers);
+      }
     } catch (err) {
       console.error('Failed to load call history', err);
       setCalls(storageService.getCalls(tenant?.id));
-    }
-    try {
-      const rawUsers = localStorage.getItem('nexus_users');
-      const allUsers: User[] = rawUsers ? JSON.parse(rawUsers) : storageService.getUsers(tenant?.slug);
-      setUsers(tenant?.slug ? allUsers.filter(u => !u.companySlug || u.companySlug === tenant.slug) : allUsers);
-    } catch {
       setUsers(storageService.getUsers(tenant?.slug));
     }
   };
@@ -146,6 +149,15 @@ export const CallHistoryPage: React.FC = () => {
       }
       const d = new Date(ts);
       if (!isNaN(d.getTime())) return formatDateYMD(d);
+
+      const match = ts.match(/^(\d{1,2})\s+([A-Za-z]{3})(?:[,\s]+(\d{4}))?/);
+      if (match) {
+        const day = match[1];
+        const month = match[2];
+        const year = match[3] || new Date().getFullYear().toString();
+        const parsed = new Date(`${day} ${month} ${year}`);
+        if (!isNaN(parsed.getTime())) return formatDateYMD(parsed);
+      }
       return '';
     };
 
@@ -160,37 +172,165 @@ export const CallHistoryPage: React.FC = () => {
       )
       : calls;
 
-    const agentRoleMap = React.useMemo(() => {
-      const map = new Map<string, string>();
-      users.forEach(u => map.set(u.id, u.role?.name || 'Unknown'));
-      return map;
-    }, [users]);
+    const isIrmConnectedCall = (c: CallRecord | null): boolean =>
+      !!(c && (c.notes || '').trim().startsWith('Connected to IRM:'));
+
+    const normalizeRoleName = (rawRole?: string, rawCode?: string): string => {
+      const r = (rawRole || '').trim().toLowerCase();
+      const c = (rawCode || '').trim().toLowerCase();
+      if (c === 'irm' || r === 'irm' || r.includes('institutional') || r.includes('investor')) {
+        return 'IRM';
+      }
+      if (c === 'sales_executive' || r.includes('sales') || c === 'agent' || r === 'agent') {
+        return 'Sales Executive';
+      }
+      if (c === 'company_admin' || c === 'admin' || r.includes('admin') || c === 'super_admin') {
+        return 'Company Admin';
+      }
+      return rawRole || 'Sales Executive';
+    };
+
+    const findUserForCall = (c: CallRecord): User | undefined => {
+      if (c.agentId) {
+        const byId = users.find(u => String(u.id) === String(c.agentId) || u.id === c.agentId);
+        if (byId) return byId;
+      }
+      if (c.agentName) {
+        const trimmed = c.agentName.trim().toLowerCase();
+        const byName = users.find(u => u.name && u.name.trim().toLowerCase() === trimmed);
+        if (byName) return byName;
+      }
+      return undefined;
+    };
+
+    const isIrmCall = (c: CallRecord): boolean => {
+      if (isIrmConnectedCall(c)) return true;
+      if (c.callerType === 'IRM' || c.agentRole === 'IRM' || (c.source || '').toLowerCase() === 'irm') return true;
+      if (
+        (c.notes || '').includes('IRM') ||
+        (c.notes || '').includes('Connect via IRM') ||
+        (c.notes || '').includes('[Source: irm]') ||
+        Boolean(c.investorId)
+      ) {
+        return true;
+      }
+      const u = findUserForCall(c);
+      if (u?.role) {
+        const r = normalizeRoleName(u.role.name, u.role.code);
+        return r === 'IRM';
+      }
+      return false;
+    };
+
+    const getCallRole = (c: CallRecord): string => {
+      const u = findUserForCall(c);
+      if (u?.role?.name || u?.role?.code) {
+        return normalizeRoleName(u.role.name, u.role.code);
+      }
+      if (isIrmCall(c)) return 'IRM';
+      if (c.agentRole) return normalizeRoleName(c.agentRole);
+      if (c.callerType === 'IRM') return 'IRM';
+      if (c.callerType === 'Agent') return 'Sales Executive';
+      return 'Sales Executive';
+    };
+
+    const getAgentRole = (agentName: string): string => {
+      const trimmed = agentName.trim().toLowerCase();
+      const u = users.find(user => user.name && user.name.trim().toLowerCase() === trimmed);
+      if (u?.role?.name || u?.role?.code) {
+        return normalizeRoleName(u.role.name, u.role.code);
+      }
+      const call = scopedCalls.find(c => c.agentName && c.agentName.trim().toLowerCase() === trimmed);
+      if (call) {
+        return getCallRole(call);
+      }
+      return 'Sales Executive';
+    };
 
     const roleOptions = React.useMemo(() => {
       const roles = new Set<string>();
       scopedCalls.forEach(c => {
-        roles.add(agentRoleMap.get(c.agentId) || 'Unknown');
+        roles.add(getCallRole(c));
       });
-      return Array.from(roles).filter(Boolean).map(r => ({ value: r, label: r }));
-    }, [scopedCalls, agentRoleMap]);
+      users.forEach(u => {
+        if (u.role?.name || u.role?.code) {
+          const r = normalizeRoleName(u.role.name, u.role.code);
+          if (r === 'Sales Executive' || r === 'IRM') {
+            roles.add(r);
+          }
+        }
+      });
+      if (roles.size === 0) {
+        roles.add('Sales Executive');
+        roles.add('IRM');
+      }
+      return Array.from(roles).sort().map(r => ({ value: r, label: r }));
+    }, [scopedCalls, users]);
 
     const agentOptions = React.useMemo(() => {
       const agents = new Set<string>();
       scopedCalls.forEach(c => {
-        if (c.agentName) agents.add(c.agentName);
+        if (!c.agentName) return;
+        const callRole = getCallRole(c);
+        if (roleFilter === 'All' || callRole === roleFilter) {
+          agents.add(c.agentName);
+        }
       });
-      return Array.from(agents).filter(Boolean).map(a => ({ value: a, label: a }));
-    }, [scopedCalls]);
+      users.forEach(u => {
+        if (!u.name) return;
+        const uRole = normalizeRoleName(u.role?.name, u.role?.code);
+        if (roleFilter === 'All' || uRole === roleFilter) {
+          if (uRole === 'Sales Executive' || uRole === 'IRM') {
+            const hasCall = scopedCalls.some(c =>
+              (c.agentName && c.agentName.trim().toLowerCase() === u.name.trim().toLowerCase()) ||
+              (c.agentId && (String(c.agentId) === String(u.id) || c.agentId === u.id))
+            );
+            if (hasCall) {
+              agents.add(u.name);
+            }
+          }
+        }
+      });
+      return Array.from(agents).sort((a, b) => a.localeCompare(b)).map(a => ({ value: a, label: a }));
+    }, [scopedCalls, users, roleFilter]);
+
+    const handleRoleChange = (newRole: string) => {
+      setRoleFilter(newRole);
+      if (agentFilter !== 'All' && newRole !== 'All') {
+        const agentRole = getAgentRole(agentFilter);
+        if (agentRole !== newRole) {
+          setAgentFilter('All');
+        }
+      }
+    };
+
+    useEffect(() => {
+      if (agentFilter !== 'All') {
+        const exists = agentOptions.some(opt => opt.value === agentFilter);
+        if (!exists) {
+          setAgentFilter('All');
+        }
+      }
+    }, [agentOptions, agentFilter]);
 
     // ── Filters applied on top of role-scoped calls ───────────────────────────
     const filteredCalls = scopedCalls.filter(c => {
-      if (agentFilter !== 'All' && c.agentName !== agentFilter) return false;
-      if (roleFilter !== 'All' && (agentRoleMap.get(c.agentId) || 'Unknown') !== roleFilter) return false;
+      if (roleFilter !== 'All') {
+        const callRole = getCallRole(c);
+        if (callRole !== roleFilter) return false;
+      }
 
-      if (datePreset !== 'all' && dateFrom && dateTo) {
+      if (agentFilter !== 'All') {
+        if (!c.agentName || c.agentName.trim().toLowerCase() !== agentFilter.trim().toLowerCase()) {
+          return false;
+        }
+      }
+
+      if (datePreset !== 'all') {
         const callDate = parseDateFromTimestamp(c.timestamp);
         if (callDate) {
-          if (callDate < dateFrom || callDate > dateTo) return false;
+          if (dateFrom && callDate < dateFrom) return false;
+          if (dateTo && callDate > dateTo) return false;
         }
       }
       return true;
@@ -235,9 +375,6 @@ export const CallHistoryPage: React.FC = () => {
       link.click();
       URL.revokeObjectURL(url);
     };
-
-    const isIrmConnectedCall = (c: CallRecord | null): boolean =>
-      !!(c && (c.notes || '').trim().startsWith('Connected to IRM:'));
 
     // ── Table columns ─────────────────────────────────────────────────────────
     const columns: Column<CallRecord>[] = [
@@ -324,10 +461,7 @@ export const CallHistoryPage: React.FC = () => {
       (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1') &&
       ['company_admin', 'admin', 'super_admin', 'ghl_admin'].includes(user?.role?.code as string);
 
-    const isIrmCall = (c: CallRecord): boolean => {
-      const agentRole = (agentRoleMap.get(c.agentId) || '').toLowerCase();
-      return isIrmConnectedCall(c) || agentRole.includes('irm') || (c.notes || '').includes('IRM') || Boolean(c.investorId);
-    };
+
 
     // ── Row actions ───────────────────────────────────────────────────────────
     const rowActions: RowAction<CallRecord>[] = [
@@ -403,29 +537,13 @@ export const CallHistoryPage: React.FC = () => {
             <FilterBar
               filters={
                 isScopedUser
-                  ? [
-                    {
-                      key: 'dateRange',
-                      label: 'Date Range',
-                      value: datePreset,
-                      onChange: handleDatePresetChange,
-                      options: [
-                        { value: 'all', label: 'All Time' },
-                        { value: 'today', label: 'Today' },
-                        { value: 'yesterday', label: 'Yesterday' },
-                        { value: 'this_week', label: 'This Week' },
-                        { value: 'this_month', label: 'This Month' },
-                        { value: 'last_30_days', label: 'Last 30 Days' },
-                        { value: 'custom', label: 'Custom Range' },
-                      ],
-                    },
-                  ]
+                  ? []
                   : [
                     {
                       key: 'role',
                       label: 'Role',
                       value: roleFilter,
-                      onChange: setRoleFilter,
+                      onChange: handleRoleChange,
                       options: roleOptions,
                     },
                     {
@@ -435,23 +553,28 @@ export const CallHistoryPage: React.FC = () => {
                       onChange: setAgentFilter,
                       options: agentOptions,
                     },
-                    {
-                      key: 'dateRange',
-                      label: 'Date Range',
-                      value: datePreset,
-                      onChange: handleDatePresetChange,
-                      options: [
-                        { value: 'all', label: 'All Time' },
-                        { value: 'today', label: 'Today' },
-                        { value: 'yesterday', label: 'Yesterday' },
-                        { value: 'this_week', label: 'This Week' },
-                        { value: 'this_month', label: 'This Month' },
-                        { value: 'last_30_days', label: 'Last 30 Days' },
-                        { value: 'custom', label: 'Custom Range' },
-                      ],
-                    },
                   ]
               }
+              dateRange={{
+                preset: datePreset,
+                onPresetChange: handleDatePresetChange,
+                from: dateFrom,
+                to: dateTo,
+                onChange: (from, to) => {
+                  setDatePreset('custom');
+                  setDateFrom(from);
+                  setDateTo(to);
+                },
+                presetOptions: [
+                  { value: 'all', label: 'All' },
+                  { value: 'today', label: 'Today' },
+                  { value: 'yesterday', label: 'Yesterday' },
+                  { value: 'this_week', label: 'This Week' },
+                  { value: 'this_month', label: 'This Month' },
+                  { value: 'last_30_days', label: 'Last 30 Days' },
+                  { value: 'custom', label: 'Custom Range' },
+                ],
+              }}
               onClearAll={() => {
                 setRoleFilter('All');
                 setAgentFilter('All');
@@ -462,30 +585,6 @@ export const CallHistoryPage: React.FC = () => {
             />
           }
         />
-
-        {datePreset === 'custom' && (
-          <div style={{ padding: '0 24px', display: 'flex', gap: 12, alignItems: 'center', marginTop: '-12px', marginBottom: 12 }}>
-            <input
-              id="callhistory-date-from"
-              name="dateFrom"
-              aria-label="Start date"
-              type="date"
-              className="form-input"
-              value={dateFrom}
-              onChange={e => setDateFrom(e.target.value)}
-            />
-            <span style={{ color: 'var(--text-muted)' }}>to</span>
-            <input
-              id="callhistory-date-to"
-              name="dateTo"
-              aria-label="End date"
-              type="date"
-              className="form-input"
-              value={dateTo}
-              onChange={e => setDateTo(e.target.value)}
-            />
-          </div>
-        )}
 
         {/* Contact Profile Drawer (opened on row click) */}
         <Drawer

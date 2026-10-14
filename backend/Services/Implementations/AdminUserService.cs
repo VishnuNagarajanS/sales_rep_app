@@ -311,62 +311,121 @@ public class AdminUserService : IAdminUserService
         }
     }
 
-    public async Task<ApiResponse<bool>> DeleteUserAsync(int companyId, int userId, CancellationToken cancellationToken = default)
+    public async Task<ApiResponse<bool>> DeleteUserAsync(int companyId, int userId, int? handoverToUserId = null, CancellationToken cancellationToken = default)
     {
         var user = await _context.Users
+            .Include(u => u.Role)
             .FirstOrDefaultAsync(u => u.CompanyId == companyId && u.Id == userId, cancellationToken);
 
         if (user == null)
             return ApiResponse<bool>.FailureResult("User not found.");
 
+        if (user.RoleId == 2) // Company Admin
+            return ApiResponse<bool>.FailureResult("Primary Company Admin account cannot be deleted.");
+
+        // Check active workloads
+        var leads = await _context.Leads
+            .Where(l => l.CompanyId == companyId && l.AssignedAgentId == userId)
+            .ToListAsync(cancellationToken);
+
+        var followups = await _context.Followups
+            .Where(f => f.CompanyId == companyId && f.AssignedAgentId == userId)
+            .ToListAsync(cancellationToken);
+
+        var customers = await _context.Customers
+            .Where(c => c.CompanyId == companyId && c.AssignedAgentId == userId)
+            .ToListAsync(cancellationToken);
+
+        var totalActive = leads.Count + followups.Count + customers.Count;
+
+        backend.Models.Entities.User? handoverUser = null;
+        if (handoverToUserId.HasValue && handoverToUserId.Value > 0)
+        {
+            if (handoverToUserId.Value == userId)
+                return ApiResponse<bool>.FailureResult("Handover recipient cannot be the user being deleted.");
+
+            handoverUser = await _context.Users
+                .Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.CompanyId == companyId && u.Id == handoverToUserId.Value && u.Status == backend.Models.Enums.UserStatus.Active, cancellationToken);
+
+            if (handoverUser == null)
+                return ApiResponse<bool>.FailureResult("Selected handover recipient user not found or is inactive.");
+        }
+        else if (totalActive > 0)
+        {
+            return ApiResponse<bool>.FailureResult($"Cannot delete '{user.Name}' without reassigning active work. This user currently has {leads.Count} assigned leads, {followups.Count} follow-ups, and {customers.Count} customers. Please select an active team member to hand over these items.");
+        }
+
         using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            // 1. Reassign customers to active company admin/agent
-            var fallbackUser = await _context.Users
+            // 1. Reassign customers to handoverUser or fallback admin
+            var customerTargetUser = handoverUser ?? await _context.Users
                 .Where(u => u.CompanyId == companyId && u.Id != userId && u.Status == backend.Models.Enums.UserStatus.Active)
                 .OrderBy(u => u.RoleId == 2 ? 0 : 1) // Prefer Company Admin
                 .FirstOrDefaultAsync(cancellationToken);
 
-            var customers = await _context.Customers
-                .Where(c => c.CompanyId == companyId && c.AssignedAgentId == userId)
-                .ToListAsync(cancellationToken);
-            if (fallbackUser != null)
+            if (customerTargetUser != null)
             {
                 foreach (var c in customers)
                 {
-                    c.AssignedAgentId = fallbackUser.Id;
+                    c.AssignedAgentId = customerTargetUser.Id;
                 }
             }
 
-            // 2. Unlink assigned leads
-            var leads = await _context.Leads
-                .Where(l => l.CompanyId == companyId && l.AssignedAgentId == userId)
-                .ToListAsync(cancellationToken);
-            foreach (var l in leads)
+            // 2. Reassign Leads or unlink if none
+            if (handoverUser != null)
             {
-                l.AssignedAgentId = null;
+                foreach (var l in leads)
+                {
+                    l.AssignedAgentId = handoverUser.Id;
+
+                    _context.LeadAssignmentHistories.Add(new backend.Models.Entities.LeadAssignmentHistory
+                    {
+                        LeadId = l.Id,
+                        FromAgentId = userId,
+                        ToAgentId = handoverUser.Id,
+                        AssignedById = userId,
+                        Method = "user_deletion_handover",
+                        AssignedAt = DateTime.UtcNow
+                    });
+                }
+            }
+            else
+            {
+                foreach (var l in leads)
+                {
+                    l.AssignedAgentId = null;
+                }
             }
 
-            // 3. Remove pending followups for this user
-            var followups = await _context.Followups
-                .Where(f => f.CompanyId == companyId && f.AssignedAgentId == userId)
-                .ToListAsync(cancellationToken);
-            _context.Followups.RemoveRange(followups);
+            // 3. Reassign Followups if handoverUser exists, preserving them; otherwise remove
+            if (handoverUser != null)
+            {
+                foreach (var f in followups)
+                {
+                    f.AssignedAgentId = handoverUser.Id;
+                    f.AssignedToName = handoverUser.Name;
+                    f.AssignedToRole = handoverUser.Role?.Code ?? "sales_executive";
+                    f.UpdatedAt = DateTime.UtcNow;
+                }
+            }
+            else
+            {
+                _context.Followups.RemoveRange(followups);
+            }
 
-            // 4. Clean up lead assignment history references
-            var historyRecords = await _context.LeadAssignmentHistories
-                .Where(h => h.FromAgentId == userId || h.ToAgentId == userId || h.AssignedById == userId)
-                .ToListAsync(cancellationToken);
-            _context.LeadAssignmentHistories.RemoveRange(historyRecords);
-
-            // 5. Remove user
+            // 4. Remove user
             _context.Users.Remove(user);
 
             await _context.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
-            return ApiResponse<bool>.SuccessResult(true, "User deleted successfully.");
+            var message = handoverUser != null
+                ? $"User '{user.Name}' deleted. All {totalActive} active items were successfully handed over to {handoverUser.Name}."
+                : $"User '{user.Name}' deleted successfully.";
+
+            return ApiResponse<bool>.SuccessResult(true, message);
         }
         catch (Exception ex)
         {

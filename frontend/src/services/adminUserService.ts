@@ -154,8 +154,11 @@ export const adminUserService = {
     return mapDtoToUser(res.data);
   },
 
-  deleteUser: async (id: string, companyId: string): Promise<void> => {
-    const res = await apiClient.delete<ApiResponse<boolean>>(`/AdminUsers/${id}?companyId=${companyId}`);
+  deleteUser: async (id: string, companyId: string, handoverToUserId?: string): Promise<void> => {
+    const url = handoverToUserId
+      ? `/AdminUsers/${id}?companyId=${companyId}&handoverToUserId=${handoverToUserId}`
+      : `/AdminUsers/${id}?companyId=${companyId}`;
+    const res = await apiClient.delete<ApiResponse<boolean>>(url);
     if (!res.success) throw new Error(res.message);
     window.dispatchEvent(new Event('nexus_admin_updated'));
   }

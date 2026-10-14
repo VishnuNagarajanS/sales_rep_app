@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Download,
   XCircle,
+  AlertTriangle,
 } from 'lucide-react';
 import { Consultation, Investor, IrmProfile, Lead, Followup } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -128,6 +129,19 @@ export const ConsultationsPage: React.FC = () => {
   const [isRescheduleMode, setIsRescheduleMode] = useState(false);
   const [form, setForm] = useState<ConsultationForm>(BLANK_FORM);
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof ConsultationForm, string>>>({});
+  const [slotConflictModal, setSlotConflictModal] = useState<{
+    isOpen: boolean;
+    conflictTime: string;
+    contactName: string;
+    suggestedTime: string;
+    suggestedDateIso: string;
+  }>({
+    isOpen: false,
+    conflictTime: '',
+    contactName: '',
+    suggestedTime: '',
+    suggestedDateIso: '',
+  });
 
   // ── Data loading ──────────────────────────────────────────────────────────
   const loadData = async () => {
@@ -589,6 +603,45 @@ export const ConsultationsPage: React.FC = () => {
       return;
     }
 
+    const targetMs = new Date(form.scheduledAt).getTime();
+    if (!isNaN(targetMs)) {
+      const targetConsultantId = form.consultantId.trim() || (user?.id ?? '');
+      const targetConsultantName = form.consultantName.trim() || (user?.name ?? '');
+
+      const conflict = consultations.find(c => {
+        if (editingConsultation && String(c.id) === String(editingConsultation.id)) return false;
+        if (c.status === 'Cancelled' || c.status === 'Completed' || c.status === 'No-show') return false;
+
+        const cId = c.consultantId ? String(c.consultantId) : '';
+        const cName = c.consultantName ? c.consultantName.toLowerCase() : '';
+        if (targetConsultantId && cId && cId !== targetConsultantId) return false;
+        if (!cId && targetConsultantName && cName && cName !== targetConsultantName.toLowerCase()) return false;
+
+        const cTime = new Date(c.scheduledAt).getTime();
+        if (isNaN(cTime)) return false;
+
+        return Math.abs(targetMs - cTime) / (60 * 1000) < 25;
+      });
+
+      if (conflict) {
+        const conflictDateObj = new Date(conflict.scheduledAt);
+        const formattedConflictTime = conflictDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + conflictDateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+        const suggestedDate = new Date(conflictDateObj.getTime() + 30 * 60 * 1000);
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        const suggestedIso = `${suggestedDate.getFullYear()}-${pad(suggestedDate.getMonth() + 1)}-${pad(suggestedDate.getDate())}T${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
+        const formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+
+        setSlotConflictModal({
+          isOpen: true,
+          conflictTime: formattedConflictTime,
+          contactName: conflict.investorName || 'Another Investor',
+          suggestedTime: formattedSuggestedTime,
+          suggestedDateIso: suggestedIso,
+        });
+        return;
+      }
+    }
+
     const isEdit = !!editingConsultation;
     const cons: Consultation = {
       id: editingConsultation ? editingConsultation.id : `cns-${Date.now()}`,
@@ -605,36 +658,59 @@ export const ConsultationsPage: React.FC = () => {
       referredByAgentName: form.referredByAgentName.trim() || (isExec ? (user?.name ?? undefined) : undefined),
     };
 
-    apiSaveConsultation(cons).then(loadData).catch(console.error);
+    apiSaveConsultation(cons)
+      .then(async () => {
+        await loadData();
+        try {
+          const raw = localStorage.getItem('nexus_audit_logs');
+          const logs = raw ? JSON.parse(raw) : [];
+          logs.unshift({
+            id: `aud-${Date.now()}`,
+            timestamp: 'Just now',
+            actorName: user?.name || 'Advisor',
+            actorEmail: user?.email || 'advisor@ghl.com',
+            action: isEdit
+              ? isRescheduleMode
+                ? 'CONSULTATION_RESCHEDULED'
+                : 'CONSULTATION_UPDATED'
+              : 'CONSULTATION_SCHEDULED',
+            entityType: 'Consultation',
+            entityId: cons.id,
+            companyId: tenant?.id,
+            companyName: tenant?.name,
+            details: isEdit
+              ? isRescheduleMode
+                ? `Rescheduled consultation with ${cons.investorName} to ${cons.scheduledAt}.`
+                : `Updated consultation with ${cons.investorName} (Status: ${cons.status}).`
+              : `Scheduled wealth advisory consultation with ${cons.investorName}.`,
+          });
+          localStorage.setItem('nexus_audit_logs', JSON.stringify(logs));
+          window.dispatchEvent(new Event('nexus_storage_updated'));
+        } catch {}
+        closeModal();
+      })
+      .catch((err: any) => {
+        console.error('Failed to save consultation', err);
+        const errMsg = err?.message || '';
+        if (errMsg.includes('already booked') || errMsg.includes('time slot') || errMsg.includes('between sessions')) {
+          const conflictDateObj = new Date(form.scheduledAt);
+          const formattedConflictTime = conflictDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + conflictDateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+          const suggestedDate = new Date(conflictDateObj.getTime() + 30 * 60 * 1000);
+          const pad = (n: number) => n.toString().padStart(2, '0');
+          const suggestedIso = `${suggestedDate.getFullYear()}-${pad(suggestedDate.getMonth() + 1)}-${pad(suggestedDate.getDate())}T${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
+          const formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
 
-    try {
-      const raw = localStorage.getItem('nexus_audit_logs');
-      const logs = raw ? JSON.parse(raw) : [];
-      logs.unshift({
-        id: `aud-${Date.now()}`,
-        timestamp: 'Just now',
-        actorName: user?.name || 'Advisor',
-        actorEmail: user?.email || 'advisor@ghl.com',
-        action: isEdit
-          ? isRescheduleMode
-            ? 'CONSULTATION_RESCHEDULED'
-            : 'CONSULTATION_UPDATED'
-          : 'CONSULTATION_SCHEDULED',
-        entityType: 'Consultation',
-        entityId: cons.id,
-        companyId: tenant?.id,
-        companyName: tenant?.name,
-        details: isEdit
-          ? isRescheduleMode
-            ? `Rescheduled consultation with ${cons.investorName} to ${cons.scheduledAt}.`
-            : `Updated consultation with ${cons.investorName} (Status: ${cons.status}).`
-          : `Scheduled wealth advisory consultation with ${cons.investorName}.`,
+          setSlotConflictModal({
+            isOpen: true,
+            conflictTime: formattedConflictTime,
+            contactName: 'Another Investor',
+            suggestedTime: formattedSuggestedTime,
+            suggestedDateIso: suggestedIso,
+          });
+        } else {
+          alert(errMsg || 'Failed to save consultation. Please try again.');
+        }
       });
-      localStorage.setItem('nexus_audit_logs', JSON.stringify(logs));
-      window.dispatchEvent(new Event('nexus_storage_updated'));
-    } catch {}
-
-    closeModal();
   };
 
   // ── Format Date Helper ────────────────────────────────────────────────────
@@ -1294,6 +1370,119 @@ export const ConsultationsPage: React.FC = () => {
             />
           </div>
         </form>
+      </Modal>
+
+      {/* ── Slot Conflict Modal ── */}
+      <Modal
+        isOpen={slotConflictModal.isOpen}
+        onClose={() => setSlotConflictModal(prev => ({ ...prev, isOpen: false }))}
+        title="Time Slot Conflict Detected"
+        maxWidth="460px"
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, width: '100%' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setSlotConflictModal(prev => ({ ...prev, isOpen: false }))}
+            >
+              Choose Another Time
+            </button>
+            {slotConflictModal.suggestedDateIso && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ backgroundColor: '#059669', borderColor: '#059669' }}
+                onClick={() => {
+                  if (slotConflictModal.suggestedDateIso) {
+                    setField('scheduledAt', slotConflictModal.suggestedDateIso.slice(0, 16));
+                  }
+                  setSlotConflictModal(prev => ({ ...prev, isOpen: false }));
+                }}
+              >
+                Use Suggested Slot (+30m)
+              </button>
+            )}
+          </div>
+        }
+      >
+        <div style={{ textAlign: 'center', padding: '6px 0 4px' }}>
+          <div style={{
+            width: 50,
+            height: 50,
+            borderRadius: '50%',
+            background: 'rgba(239, 68, 68, 0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 26,
+            margin: '0 auto 14px'
+          }}>
+            <AlertTriangle size={28} color="#dc2626" />
+          </div>
+          <h4 style={{ margin: '0 0 8px', fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary, #0f172a)' }}>
+            This Time Slot is Already Booked
+          </h4>
+          <p style={{ margin: '0 0 14px', color: 'var(--text-secondary, #64748b)', fontSize: '0.9rem', lineHeight: 1.5 }}>
+            An advisory consultation is already scheduled near this time:
+          </p>
+          <div style={{
+            background: 'var(--bg-surface-hover, #f8fafc)',
+            border: '1px solid var(--border-base, #e2e8f0)',
+            borderRadius: 8,
+            padding: '12px 16px',
+            marginBottom: 14,
+            textAlign: 'left'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary, #64748b)' }}>Investor:</span>
+              <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-primary, #1e293b)' }}>
+                {slotConflictModal.contactName}
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary, #64748b)' }}>Scheduled Slot:</span>
+              <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#ef4444' }}>
+                {slotConflictModal.conflictTime}
+              </span>
+            </div>
+          </div>
+
+          {/* Meaningful scheduling advice box */}
+          <div style={{
+            background: 'rgba(59, 130, 246, 0.08)',
+            border: '1px solid rgba(59, 130, 246, 0.25)',
+            borderRadius: 8,
+            padding: '12px 14px',
+            marginBottom: 14,
+            textAlign: 'left'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, color: '#2563eb', fontWeight: 600, fontSize: '0.85rem' }}>
+              <Clock size={15} />
+              Scheduling Buffer Advice
+            </div>
+            <p style={{ margin: 0, fontSize: '0.83rem', color: 'var(--text-primary, #334155)', lineHeight: 1.5 }}>
+              Consultations require focused advisory time. To avoid back-to-back overlaps (e.g. 10:00 AM and 10:01 AM), <strong>please allow at least 20 to 30 minutes between sessions and schedule this appointment afterwards</strong>.
+            </p>
+          </div>
+
+          {slotConflictModal.suggestedTime && (
+            <div style={{
+              background: 'rgba(16, 185, 129, 0.08)',
+              border: '1px solid rgba(16, 185, 129, 0.25)',
+              borderRadius: 8,
+              padding: '10px 14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 4
+            }}>
+              <span style={{ fontSize: '0.82rem', color: '#059669', fontWeight: 600 }}>Suggested Next Slot:</span>
+              <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#059669' }}>
+                {slotConflictModal.suggestedTime}
+              </span>
+            </div>
+          )}
+        </div>
       </Modal>
 
       {/* ── Detail Drawer ────────────────────────────────────────────────── */}

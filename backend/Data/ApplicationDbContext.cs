@@ -54,9 +54,6 @@ public class ApplicationDbContext : DbContext
     public DbSet<InvestmentOpportunity> InvestmentOpportunities => Set<InvestmentOpportunity>();
     public DbSet<KycOtpVerification> KycOtpVerifications => Set<KycOtpVerification>();
     public DbSet<IrmCoverageAssignment> IrmCoverageAssignments => Set<IrmCoverageAssignment>();
-    public DbSet<GhlInvestor> GhlInvestors => Set<GhlInvestor>();
-    public DbSet<OpportunityPitch> OpportunityPitches => Set<OpportunityPitch>();
-    public DbSet<InvestorCall> InvestorCalls => Set<InvestorCall>();
     public DbSet<IrmPipelineCard> IrmPipelineCards => Set<IrmPipelineCard>();
     public DbSet<WorkHandover> WorkHandovers => Set<WorkHandover>();
     public DbSet<WorkHandoverItem> WorkHandoverItems => Set<WorkHandoverItem>();
@@ -128,11 +125,6 @@ public class ApplicationDbContext : DbContext
             b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<GhlDeal>(b =>
-        {
-            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
-            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
-        });
-        modelBuilder.Entity<GhlInvestor>(b =>
         {
             b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
             b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
@@ -209,7 +201,6 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Ignore<GhlInvestor>();
         modelBuilder.Ignore<InvestorCall>();
         modelBuilder.Ignore<OpportunityPitch>();
-        modelBuilder.Ignore<IrmPipelineCard>();
     }
 
     private static void SeedData(ModelBuilder modelBuilder)

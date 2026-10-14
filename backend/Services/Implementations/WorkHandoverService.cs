@@ -268,26 +268,7 @@ public class WorkHandoverService : IWorkHandoverService
             });
         }
 
-        // 5. GhlInvestors
-        var ghlInvestors = await _db.GhlInvestors
-            .Where(i => i.CompanyId == companyId && i.AssignedAgentId == fromUser.Id)
-            .ToListAsync(ct);
-        foreach (var inv in ghlInvestors)
-        {
-            inv.AssignedAgentId = toUser.Id;
-            inv.HandoverId = handover.Id;
-            inv.OriginalOwnerId = fromUser.Id;
-            items.Add(new WorkHandoverItem
-            {
-                HandoverId = handover.Id,
-                EntityType = "GhlInvestor",
-                EntityId = inv.Id,
-                Origin = "included_at_start",
-                CreatedAt = DateTime.UtcNow
-            });
-        }
-
-        // 6. Open GhlInvestmentOpportunities
+        // 5. Open GhlInvestmentOpportunities
         var openOpps = await _db.GhlInvestmentOpportunities
             .Where(o => o.CompanyId == companyId && o.AssignedAgentId == fromUser.Id &&
                         (handover.RoleCode == "irm" || (o.Stage != "Closed Won" && o.Stage != "Closed Lost")))
@@ -697,30 +678,8 @@ public class WorkHandoverService : IWorkHandoverService
                     break;
 
                 case "GhlInvestor":
-                    var ghlInv = await _db.GhlInvestors.FirstOrDefaultAsync(i => i.Id == item.EntityId, ct);
-                    if (ghlInv != null)
-                    {
-                        if (ghlInv.AssignedAgentId == handover.CoveringUserId)
-                        {
-                            ghlInv.AssignedAgentId = handover.OriginalUserId;
-                            ghlInv.HandoverId = null;
-                            ghlInv.OriginalOwnerId = null;
-                            item.ReturnedAt = DateTime.UtcNow;
-                            item.ReturnOutcome = "returned";
-                            returnedCount++;
-                        }
-                        else
-                        {
-                            isReassigned = true;
-                            ghlInv.HandoverId = null;
-                            ghlInv.OriginalOwnerId = null;
-                        }
-                    }
-                    else
-                    {
-                        item.ReturnedAt = DateTime.UtcNow;
-                        item.ReturnOutcome = "missing";
-                    }
+                    item.ReturnedAt = DateTime.UtcNow;
+                    item.ReturnOutcome = "missing";
                     break;
 
                 case "GhlInvestmentOpportunity":
@@ -1094,16 +1053,8 @@ public class WorkHandoverService : IWorkHandoverService
                     break;
 
                 case "GhlInvestor":
-                    var ghlInv = await _db.GhlInvestors.FirstOrDefaultAsync(i => i.Id == item.EntityId, ct);
-                    if (ghlInv != null && ghlInv.AssignedAgentId == handover.CoveringUserId)
-                    {
-                        ghlInv.AssignedAgentId = handover.OriginalUserId;
-                        ghlInv.HandoverId = null;
-                        ghlInv.OriginalOwnerId = null;
-                        item.ReturnedAt = DateTime.UtcNow;
-                        item.ReturnOutcome = "returned";
-                        returnedCount++;
-                    }
+                    item.ReturnedAt = DateTime.UtcNow;
+                    item.ReturnOutcome = "missing";
                     break;
 
                 case "GhlInvestmentOpportunity":
@@ -1241,7 +1192,6 @@ public class WorkHandoverService : IWorkHandoverService
         var followups = await _db.Followups.CountAsync(f => f.CompanyId == companyId && f.AssignedAgentId == userId && f.Status == FollowupStatus.Pending, ct);
         var deals = await _db.GhlDeals.CountAsync(d => d.CompanyId == companyId && d.AssignedAgentId == userId &&
             (isIrm || (d.Stage != "won" && d.Stage != "lost" && d.Stage != "converted")), ct);
-        var ghlInvestors = await _db.GhlInvestors.CountAsync(i => i.CompanyId == companyId && i.AssignedAgentId == userId, ct);
         var opps = await _db.GhlInvestmentOpportunities.CountAsync(o => o.CompanyId == companyId && o.AssignedAgentId == userId &&
             (isIrm || (o.Stage != "Closed Won" && o.Stage != "Closed Lost")), ct);
         var consults = await _db.Consultations.CountAsync(c => c.CompanyId == companyId && c.ConsultantId == userId && c.Status == ConsultationStatus.Scheduled, ct);
@@ -1256,7 +1206,7 @@ public class WorkHandoverService : IWorkHandoverService
             CustomersCount = customers,
             FollowupsCount = followups,
             DealsCount = deals,
-            InvestorsCount = investors + ghlInvestors,
+            InvestorsCount = investors,
             KycsCount = kycs,
             OpportunitiesCount = opps,
             ConsultationsCount = consults,
@@ -1293,30 +1243,6 @@ public class WorkHandoverService : IWorkHandoverService
                 Description = $"Duration: {dur} | Disposition: {call.Disposition ?? "Completed"}{(string.IsNullOrWhiteSpace(call.Notes) ? "" : $" | Notes: {call.Notes}")}",
                 Timestamp = call.Timestamp.ToString("o"),
                 Outcome = call.Disposition ?? "Completed"
-            });
-        }
-
-        var investorCalls = await _db.InvestorCalls
-            .Include(c => c.Investor)
-            .Where(c => c.CompanyId == handover.CompanyId && c.IrmId == handover.CoveringUserId &&
-                        c.CalledAt >= startTime && c.CalledAt <= endTime)
-            .OrderByDescending(c => c.CalledAt)
-            .Take(50)
-            .ToListAsync(ct);
-        var investorCallsCount = await _db.InvestorCalls
-            .CountAsync(c => c.CompanyId == handover.CompanyId && c.IrmId == handover.CoveringUserId &&
-                             c.CalledAt >= startTime && c.CalledAt <= endTime, ct);
-
-        foreach (var ic in investorCalls)
-        {
-            var dur = ic.DurationSeconds > 0 ? $"{ic.DurationSeconds / 60}m {ic.DurationSeconds % 60}s" : "0s";
-            activities.Add(new HandoverActivityDetailDto
-            {
-                Category = "Call",
-                Title = $"Investor Call with {ic.Investor?.Name ?? (string.IsNullOrWhiteSpace(ic.InvestorName) ? "Investor" : ic.InvestorName)}",
-                Description = $"Duration: {dur} | Outcome: {ic.Outcome}{(string.IsNullOrWhiteSpace(ic.Notes) ? "" : $" | Notes: {ic.Notes}")}",
-                Timestamp = ic.CalledAt.ToString("o"),
-                Outcome = ic.Outcome.ToString()
             });
         }
 
@@ -1420,7 +1346,7 @@ public class WorkHandoverService : IWorkHandoverService
             .ToList();
 
         var highlights = new List<string>();
-        if (callsCount + investorCallsCount > 0) highlights.Add($"{callsCount + investorCallsCount} calls connected");
+        if (callsCount > 0) highlights.Add($"{callsCount} calls connected");
         if (followupsCompleted > 0) highlights.Add($"{followupsCompleted} follow-ups completed");
         if (closedDeals > 0) highlights.Add($"{closedDeals} deals won/converted");
         if (convertedLeads > 0) highlights.Add($"{convertedLeads} leads processed/converted");
@@ -1434,7 +1360,7 @@ public class WorkHandoverService : IWorkHandoverService
 
         return new WorkHandoverProgressDto
         {
-            CallsMadeCount = callsCount + investorCallsCount,
+            CallsMadeCount = callsCount,
             FollowupsCompletedCount = followupsCompleted,
             StatusChangesCount = convertedLeads + closedDeals,
             NewRecordsCreatedCount = createdCount,

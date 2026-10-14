@@ -784,13 +784,7 @@ export async function saveCustomer(customer: Customer): Promise<Customer> {
   };
 
   if (isNew) {
-    const res: ApiResponse<any> = await apiClient.post(
-      '/sales-executive/customers',
-      payload
-    );
-    if (!res.success || !res.data) throw new Error(res.message);
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-    return mapCustomer(res.data);
+    throw new Error('Manual customer creation is disabled. Customers are created via lead conversion.');
   } else {
     const res: ApiResponse<any> = await apiClient.put(
       `/sales-executive/customers/${nid(customer.id)}`,

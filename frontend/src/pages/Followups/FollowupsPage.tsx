@@ -12,6 +12,7 @@ import {
   Pencil,
   X,
   CalendarRange,
+  Clock,
 } from 'lucide-react';
 import { Followup, CallRecord, Deal, Lead, Customer } from '../../types';
 import { storageService } from '../../services/storageService';
@@ -34,7 +35,7 @@ import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { Drawer } from '../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
-type FollowupRoleFilter = 'sales_executive' | 'irm';
+type FollowupRoleFilter = 'all' | 'sales_executive' | 'irm';
 import { DateRangePreset } from '../../types/kanban';
 import { adminUserService } from '../../services/adminUserService';
 import { fetchIrmAllLeads, IrmAllLeadsSummary } from '../../services/irmAllLeadsService';
@@ -43,6 +44,79 @@ import { getAgentRoleInfo, getAssigningSalesAgentInfo } from '../../utils/agentR
 import { formatSmartScheduleDate, isDateToday, isDateOverdue } from '../../utils/dateUtils';
 import './FollowupsPage.css';
 import '../Leads/LeadsPage.css';
+
+export const getFollowupSortTimestamp = (f: Followup): number => {
+  const schedStr = (f.scheduledAt || '').trim();
+  const dateStr = (f.scheduledDate || '').trim();
+  const timeStr = (f.scheduledTime || '').trim();
+
+  // 1. Try direct Date.parse (handles ISO strings like "2026-10-14T10:00:00.000Z")
+  if (schedStr) {
+    const directParsed = Date.parse(schedStr);
+    if (!isNaN(directParsed)) return directParsed;
+  }
+
+  // 2. Combined scheduledDate + scheduledTime
+  if (dateStr) {
+    if (timeStr) {
+      let combinedParsed = Date.parse(`${dateStr}T${timeStr}`);
+      if (isNaN(combinedParsed)) {
+        combinedParsed = Date.parse(`${dateStr} ${timeStr}`);
+      }
+      if (!isNaN(combinedParsed)) return combinedParsed;
+    }
+    const dParsed = Date.parse(dateStr);
+    if (!isNaN(dParsed)) return dParsed;
+  }
+
+  // 3. Smart date strings: "Today • 11:00 AM", "Tomorrow • 10:00 AM", "Yesterday • 4:00 PM"
+  if (schedStr) {
+    const now = new Date();
+    const lower = schedStr.toLowerCase();
+
+    const extractTime = (str: string): { hours: number; minutes: number } => {
+      const match = str.match(/(\d{1,2}):(\d{2})(?:\s*(am|pm))?/i);
+      if (match) {
+        let h = parseInt(match[1], 10);
+        const m = parseInt(match[2], 10);
+        const ampm = match[3]?.toLowerCase();
+        if (ampm === 'pm' && h < 12) h += 12;
+        if (ampm === 'am' && h === 12) h = 0;
+        return { hours: h, minutes: m };
+      }
+      return { hours: 10, minutes: 0 };
+    };
+
+    if (lower.includes('today')) {
+      const { hours, minutes } = extractTime(schedStr);
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes).getTime();
+    }
+    if (lower.includes('tomorrow')) {
+      const { hours, minutes } = extractTime(schedStr);
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      return new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), hours, minutes).getTime();
+    }
+    if (lower.includes('yesterday')) {
+      const { hours, minutes } = extractTime(schedStr);
+      const yesterday = new Date(now);
+      yesterday.setDate(yesterday.getDate() - 1);
+      return new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), hours, minutes).getTime();
+    }
+
+    const cleaned = schedStr.replace(/•/g, ' ').replace(/\s+/g, ' ').replace(/\(overdue\)/i, '').trim();
+    const cleanedParsed = Date.parse(cleaned);
+    if (!isNaN(cleanedParsed)) return cleanedParsed;
+  }
+
+  const cf = f.customFields;
+  if (cf?.scheduledAt) {
+    const cfParsed = Date.parse(cf.scheduledAt);
+    if (!isNaN(cfParsed)) return cfParsed;
+  }
+
+  return Number.MAX_SAFE_INTEGER;
+};
 
 export const isFollowupReturned = (f: Followup, matchingLead?: Lead | null): boolean => {
   if (f.isReturnedFromHandover) return true;
@@ -198,6 +272,32 @@ export const FollowupsPage: React.FC = () => {
   }, [followups]);
   const [rescheduleItem, setRescheduleItem] = useState<Followup | null>(null);
   const [newDate, setNewDate] = useState('');
+  const [conflictModalData, setConflictModalData] = useState<{
+    conflictTime: string;
+    contactName: string;
+    agentName?: string;
+    suggestedTime?: string;
+    suggestedDateIso?: string;
+  } | null>(null);
+
+  const openRescheduleModal = (f: Followup) => {
+    setRescheduleItem(f);
+    try {
+      if (f.scheduledAt) {
+        const d = new Date(f.scheduledAt);
+        if (!isNaN(d.getTime())) {
+          const pad = (n: number) => n.toString().padStart(2, '0');
+          setNewDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+          return;
+        }
+      }
+    } catch {}
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    d.setHours(10, 0, 0, 0);
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    setNewDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T10:00`);
+  };
 
   // Profile Drawer state for GHL Sales Exec & Admin
   const [drawerFollowup, setDrawerFollowup] = useState<Followup | null>(null);
@@ -238,7 +338,7 @@ export const FollowupsPage: React.FC = () => {
   const canOpenDrawer = isGhlSalesExec || isExec || isAdmin || isIrm;
 
   // ── Admin Filter States ──────────────────────────────────────────────────
-  const [selectedRole, setSelectedRole] = useState<FollowupRoleFilter>('sales_executive');
+  const [selectedRole, setSelectedRole] = useState<FollowupRoleFilter>('all');
   const [selectedPerson, setSelectedPerson] = useState<string>('All');
   const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>('all');
   const [customStartDate, setCustomStartDate] = useState<string>(() => {
@@ -264,7 +364,7 @@ export const FollowupsPage: React.FC = () => {
           return code === 'sales_executive' || roleId === '3' || roleName.includes('sales');
         });
         if (sales.length > 0) return sales;
-      } else {
+      } else if (selectedRole === 'irm') {
         const irms = users.filter(u => {
           const code = (u.role?.code || '').toLowerCase();
           const roleId = String(u.role?.id || '');
@@ -272,17 +372,50 @@ export const FollowupsPage: React.FC = () => {
           return code === 'irm' || roleId === '4' || roleName.includes('irm') || roleName.includes('investor');
         });
         if (irms.length > 0) return irms;
+      } else {
+        // 'all': Show both Sales Executives and IRMs
+        const team = users.filter(u => {
+          const code = (u.role?.code || '').toLowerCase();
+          const roleId = String(u.role?.id || '');
+          const roleName = (u.role?.name || '').toLowerCase();
+          return (
+            code === 'sales_executive' || roleId === '3' || roleName.includes('sales') ||
+            code === 'irm' || roleId === '4' || roleName.includes('irm') || roleName.includes('investor')
+          );
+        });
+        if (team.length > 0) {
+          const seen = new Set<string>();
+          return team.filter(u => {
+            const key = (u.name || '').trim().toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+        }
       }
     }
+    const storageAgents = storageService.getAgents ? storageService.getAgents(tenant?.id) : [];
+    const storageIrms = storageService.getIrms ? storageService.getIrms(tenant?.id) : [];
     if (selectedRole === 'sales_executive') {
-      const storageAgents = storageService.getAgents(tenant?.id);
       if (storageAgents && storageAgents.length > 0) return storageAgents;
       return [{ id: '3', name: 'Naveen' }];
+    } else if (selectedRole === 'irm') {
+      if (storageIrms && storageIrms.length > 0) return storageIrms;
+      return [{ id: '5', name: 'Dhinakaran' }];
+    } else {
+      const combined = [...(storageAgents || []), ...(storageIrms || [])];
+      if (combined.length > 0) {
+        const seen = new Set<string>();
+        return combined.filter(u => {
+          const key = (u.name || '').trim().toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      }
+      return [{ id: '3', name: 'Naveen' }, { id: '5', name: 'Dhinakaran' }];
     }
-    const storageIrms = storageService.getIrms(tenant?.id);
-    if (storageIrms && storageIrms.length > 0) return storageIrms;
-    return [{ id: '5', name: 'Dhinakaran' }];
-  }, [selectedRole, users]);
+  }, [selectedRole, users, tenant?.id]);
 
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -781,21 +914,6 @@ export const FollowupsPage: React.FC = () => {
     }
   };
 
-  const handleSaveReschedule = async () => {
-    if (rescheduleItem && newDate) {
-      try {
-        await apiSaveFollowup({ ...rescheduleItem, scheduledAt: newDate, status: 'Pending' });
-        setRescheduleItem(null);
-        setNewDate('');
-        loadData();
-        showToast('✓ Follow-up rescheduled successfully');
-      } catch (err: any) {
-        console.error('[FollowupsPage] API reschedule failed:', err);
-        showToast(`Failed to reschedule follow-up: ${err?.message || 'Server error'}`);
-      }
-    }
-  };
-
   // Helper to determine the assigned role of any followup
   const getFollowupRole = (f: Followup): 'Sales Executive' | 'IRM' => {
     if (f.assignedRole) {
@@ -842,6 +960,85 @@ export const FollowupsPage: React.FC = () => {
     }
 
     return 'Sales Executive';
+  };
+
+  const handleSaveReschedule = async () => {
+    if (rescheduleItem && newDate) {
+      const parsedDate = new Date(newDate);
+      if (isNaN(parsedDate.getTime())) {
+        showToast('Please enter a valid date and time.');
+        return;
+      }
+
+      // Check for time slot conflict: no two schedules can be booked at the same time for the same representative.
+      // Both roles (Sales Executive and IRM) are considered individually.
+      const targetMs = parsedDate.getTime();
+      const currentAgentId = rescheduleItem.assignedAgentId ? String(rescheduleItem.assignedAgentId) : (user?.id ? String(user.id) : '');
+      const rescheduleItemRole = getFollowupRole(rescheduleItem);
+
+      const conflict = followups.find(f => {
+        if (f.status !== 'Pending') return false;
+        if (String(f.id) === String(rescheduleItem.id)) return false;
+
+        // Must be the same representative: Sales Executive 1 only conflicts with Sales Executive 1; IRM only conflicts with that same IRM!
+        const fAgentId = f.assignedAgentId ? String(f.assignedAgentId) : '';
+        if (currentAgentId && fAgentId && fAgentId !== currentAgentId) return false;
+
+        const fRole = getFollowupRole(f);
+        if (fRole !== rescheduleItemRole) return false;
+
+        const fTime = new Date(f.scheduledAt).getTime();
+        if (isNaN(fTime)) return false;
+
+        // Overlapping 20-minute slot window
+        return Math.abs(targetMs - fTime) / (60 * 1000) < 20;
+      });
+
+      if (conflict) {
+        const conflictDateObj = new Date(conflict.scheduledAt);
+        const formattedConflictTime = conflictDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + conflictDateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+        const suggestedDate = new Date(conflictDateObj.getTime() + 20 * 60 * 1000);
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        const suggestedDateIso = `${suggestedDate.getFullYear()}-${pad(suggestedDate.getMonth() + 1)}-${pad(suggestedDate.getDate())}T${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
+        const formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+
+        setConflictModalData({
+          conflictTime: formattedConflictTime,
+          contactName: conflict.contactName || 'Another Contact',
+          suggestedTime: formattedSuggestedTime,
+          suggestedDateIso,
+        });
+        return;
+      }
+
+      try {
+        await apiSaveFollowup({ ...rescheduleItem, scheduledAt: parsedDate.toISOString(), status: 'Pending' });
+        setRescheduleItem(null);
+        setNewDate('');
+        loadData();
+        showToast('✓ Follow-up rescheduled successfully');
+      } catch (err: any) {
+        console.error('[FollowupsPage] API reschedule failed:', err);
+        const msg = err?.message || '';
+        if (msg.includes('already booked') || msg.includes('time slot') || msg.includes('between calls')) {
+          const conflictDateObj = parsedDate;
+          const formattedConflictTime = conflictDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + conflictDateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+          const suggestedDate = new Date(conflictDateObj.getTime() + 20 * 60 * 1000);
+          const pad = (n: number) => n.toString().padStart(2, '0');
+          const suggestedDateIso = `${suggestedDate.getFullYear()}-${pad(suggestedDate.getMonth() + 1)}-${pad(suggestedDate.getDate())}T${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
+          const formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+
+          setConflictModalData({
+            conflictTime: formattedConflictTime,
+            contactName: 'Existing Appointment',
+            suggestedTime: formattedSuggestedTime,
+            suggestedDateIso,
+          });
+        } else {
+          showToast(`Failed to reschedule follow-up: ${msg || 'Server error'}`);
+        }
+      }
+    }
   };
 
   // Helper to determine the display agent and role for a followup card or drawer
@@ -951,16 +1148,18 @@ export const FollowupsPage: React.FC = () => {
   let scopedFollowups: Followup[];
   if (isAdmin) {
     scopedFollowups = followups.filter(f => {
-      // 1. Role match
-      const role = getFollowupRole(f);
-      const expectedRole = selectedRole === 'irm' ? 'IRM' : 'Sales Executive';
-      if (role !== expectedRole) return false;
+      // 1. Role match (skip when 'all' is selected to show both Sales Exec and IRM followups)
+      if (selectedRole !== 'all') {
+        const role = getFollowupRole(f);
+        const expectedRole = selectedRole === 'irm' ? 'IRM' : 'Sales Executive';
+        if (role !== expectedRole) return false;
+      }
 
       // 2. Person match
       if (selectedPerson !== 'All') {
-        const matchesName =
-          (f.assignedAgentName || '').toLowerCase() === selectedPerson.toLowerCase();
-        const matchesId = f.assignedAgentId === selectedPerson;
+        const pLower = selectedPerson.toLowerCase().trim();
+        const matchesName = (f.assignedAgentName || '').toLowerCase().trim() === pLower;
+        const matchesId = String(f.assignedAgentId || '').trim() === String(selectedPerson).trim();
         if (!matchesName && !matchesId) return false;
       }
 
@@ -1339,17 +1538,32 @@ export const FollowupsPage: React.FC = () => {
     return activePendingFollowups.filter(isFollowupInIrmDateRange);
   }, [isIrm, activePendingFollowups, irmDatePreset, irmStartDate, irmEndDate]);
 
-  const filteredFollowups = dateScopedFollowups.filter(f => {
-    if (!isIrm) {
-      if (activeTab === 'due') {
-        return isFollowupToday(f);
+  const filteredFollowups = useMemo(() => {
+    const list = dateScopedFollowups.filter(f => {
+      if (!isIrm) {
+        if (activeTab === 'due') {
+          return isFollowupToday(f);
+        }
+        if (activeTab === 'overdue') {
+          return isFollowupOverdue(f) && !isFollowupToday(f);
+        }
       }
-      if (activeTab === 'overdue') {
-        return isFollowupOverdue(f) && !isFollowupToday(f);
-      }
-    }
-    return true;
-  });
+      return true;
+    });
+
+    return list.sort((a, b) => {
+      const timeA = getFollowupSortTimestamp(a);
+      const timeB = getFollowupSortTimestamp(b);
+      if (timeA !== timeB) return timeA - timeB;
+
+      const priorityOrder: Record<string, number> = { High: 1, Medium: 2, Low: 3 };
+      const pA = priorityOrder[a.priority] || 4;
+      const pB = priorityOrder[b.priority] || 4;
+      if (pA !== pB) return pA - pB;
+
+      return (a.contactName || '').localeCompare(b.contactName || '');
+    });
+  }, [dateScopedFollowups, isIrm, activeTab]);
 
   const drawerFollowupRole = drawerFollowup ? getFollowupRole(drawerFollowup) : '';
 
@@ -1403,6 +1617,7 @@ export const FollowupsPage: React.FC = () => {
                 value={selectedRole}
                 onChange={e => handleRoleChange(e.target.value as FollowupRoleFilter)}
               >
+                <option value="all">All</option>
                 <option value="sales_executive">Sales Executive</option>
                 <option value="irm">IRM (Investor Relations)</option>
               </select>
@@ -1422,7 +1637,11 @@ export const FollowupsPage: React.FC = () => {
                 onChange={e => setSelectedPerson(e.target.value)}
               >
                 <option value="All">
-                  {selectedRole === 'sales_executive' ? 'All Sales Executives' : 'All IRMs'}
+                  {selectedRole === 'sales_executive'
+                    ? 'All Sales Executives'
+                    : selectedRole === 'irm'
+                    ? 'All IRMs'
+                    : 'All Persons'}
                 </option>
                 {(personOptions || []).map((p: any) => (
                   <option key={p.id} value={p.name}>
@@ -1484,10 +1703,19 @@ export const FollowupsPage: React.FC = () => {
           {/* Right Section: Role Mode Tag & Total Count */}
           <div className="admin-followup-meta-group">
             <span
-              className={`followup-role-tag ${selectedRole === 'sales_executive' ? 'tag-sales-exec' : 'tag-irm'
-                }`}
+              className={`followup-role-tag ${
+                selectedRole === 'all'
+                  ? 'tag-all'
+                  : selectedRole === 'sales_executive'
+                  ? 'tag-sales-exec'
+                  : 'tag-irm'
+              }`}
             >
-              {selectedRole === 'sales_executive' ? (
+              {selectedRole === 'all' ? (
+                <>
+                  <CalendarCheck size={13} /> All Follow-ups (Sales & IRM)
+                </>
+              ) : selectedRole === 'sales_executive' ? (
                 <>
                   <Briefcase size={13} /> Sales Executive Follow-ups
                 </>
@@ -1850,7 +2078,7 @@ export const FollowupsPage: React.FC = () => {
                       className="btn btn-secondary btn-sm"
                       onClick={e => {
                         e.stopPropagation();
-                        setRescheduleItem(f);
+                        openRescheduleModal(f);
                       }}
                     >
                       Reschedule
@@ -1897,16 +2125,137 @@ export const FollowupsPage: React.FC = () => {
         }
       >
         <div className="form-group">
-          <label htmlFor="followup-reschedule-datetime" className="form-label">New Date & Time</label>
+          <label htmlFor="followup-reschedule-datetime" className="form-label" style={{ fontWeight: 600, marginBottom: 8, display: 'block' }}>
+            New Date & Time
+          </label>
           <input
             id="followup-reschedule-datetime"
             name="newDateTime"
-            type="text"
+            type="datetime-local"
             className="form-input"
             value={newDate}
             onChange={e => setNewDate(e.target.value)}
-            placeholder="e.g. Next Monday, 10:00 AM"
+            style={{ width: '100%', padding: '10px 12px', fontSize: '0.95rem' }}
           />
+          <small style={{ display: 'block', marginTop: 8, color: '#64748b' }}>
+            Select an available date and time. No two follow-ups can be booked at the same time.
+          </small>
+        </div>
+      </Modal>
+
+      {/* Time Slot Conflict Alert Popup */}
+      <Modal
+        isOpen={!!conflictModalData}
+        onClose={() => setConflictModalData(null)}
+        title="Time Slot Already Booked"
+        subtitle="Schedule Spacing & Conflict Warning"
+        maxWidth={490}
+        footer={
+          <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setConflictModalData(null)}
+              style={{ flex: 1 }}
+            >
+              Choose Another Time
+            </button>
+            {conflictModalData?.suggestedDateIso && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  if (conflictModalData.suggestedDateIso) {
+                    setNewDate(conflictModalData.suggestedDateIso.slice(0, 16));
+                  }
+                  setConflictModalData(null);
+                }}
+                style={{ flex: 1.2 }}
+              >
+                Use Suggested (+20m)
+              </button>
+            )}
+          </div>
+        }
+      >
+        <div style={{ textAlign: 'center', padding: '10px 4px' }}>
+          <div style={{
+            width: 52,
+            height: 52,
+            borderRadius: '50%',
+            background: 'rgba(239, 68, 68, 0.1)',
+            color: '#dc2626',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 26,
+            margin: '0 auto 14px'
+          }}>
+            <AlertTriangle size={28} color="#dc2626" />
+          </div>
+          <h4 style={{ margin: '0 0 8px', fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary, #0f172a)' }}>
+            This Time Slot is Already Booked
+          </h4>
+          <p style={{ margin: '0 0 14px', color: 'var(--text-secondary, #64748b)', fontSize: '0.9rem', lineHeight: 1.5 }}>
+            You already have a scheduled follow-up near this time:
+          </p>
+          <div style={{
+            background: 'var(--bg-surface-hover, #f8fafc)',
+            border: '1px solid var(--border-base, #e2e8f0)',
+            borderRadius: 8,
+            padding: '12px 16px',
+            marginBottom: 14,
+            textAlign: 'left'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary, #64748b)' }}>Contact:</span>
+              <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-primary, #1e293b)' }}>
+                {conflictModalData?.contactName}
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary, #64748b)' }}>Scheduled Time:</span>
+              <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#ef4444' }}>
+                {conflictModalData?.conflictTime}
+              </span>
+            </div>
+          </div>
+
+          {/* Meaningful scheduling advice box */}
+          <div style={{
+            background: 'rgba(59, 130, 246, 0.08)',
+            border: '1px solid rgba(59, 130, 246, 0.25)',
+            borderRadius: 8,
+            padding: '12px 14px',
+            marginBottom: 14,
+            textAlign: 'left'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, color: '#2563eb', fontWeight: 600, fontSize: '0.85rem' }}>
+              <Clock size={15} />
+              Scheduling Buffer Advice
+            </div>
+            <p style={{ margin: 0, fontSize: '0.83rem', color: 'var(--text-primary, #334155)', lineHeight: 1.5 }}>
+              To ensure sufficient time for each call and avoid overlapping appointments (e.g. 10:00 AM and 10:01 AM), <strong>please schedule your follow-up 15 to 20 minutes afterwards (or 20–30 minutes later)</strong>.
+            </p>
+          </div>
+
+          {conflictModalData?.suggestedTime && (
+            <div style={{
+              background: 'rgba(16, 185, 129, 0.08)',
+              border: '1px solid rgba(16, 185, 129, 0.25)',
+              borderRadius: 8,
+              padding: '10px 14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 4
+            }}>
+              <span style={{ fontSize: '0.82rem', color: '#059669', fontWeight: 600 }}>Suggested Next Slot:</span>
+              <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#059669' }}>
+                {conflictModalData.suggestedTime}
+              </span>
+            </div>
+          )}
         </div>
       </Modal>
 
@@ -1956,7 +2305,7 @@ export const FollowupsPage: React.FC = () => {
                     <button
                       className="btn btn-secondary"
                       onClick={() => {
-                        setRescheduleItem(drawerFollowup);
+                        openRescheduleModal(drawerFollowup);
                         setDrawerFollowup(null);
                       }}
                     >

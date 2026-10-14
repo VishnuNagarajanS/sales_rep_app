@@ -25,6 +25,7 @@ interface KycRowActionsMenuProps {
   onAssistedKyc?: (deal: Deal) => void;
   onCallInvestor?: (deal: Deal) => void;
   onAdvanceStage?: (deal: Deal) => void;
+  isGhlAdmin?: boolean;
 }
 
 export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
@@ -36,6 +37,7 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
   onAssistedKyc,
   onCallInvestor,
   onAdvanceStage,
+  isGhlAdmin = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
@@ -284,35 +286,39 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
             <span>Review Submission</span>
           </button>
 
-          <button
-            type="button"
-            className="kyc-link-menu-item"
-            role="menuitem"
-            onClick={handleCopy}
-          >
-            <Copy size={14} color="#64748b" />
-            <span>Copy Link</span>
-          </button>
+          {!isGhlAdmin && (
+            <>
+              <button
+                type="button"
+                className="kyc-link-menu-item"
+                role="menuitem"
+                onClick={handleCopy}
+              >
+                <Copy size={14} color="#64748b" />
+                <span>Copy Link</span>
+              </button>
 
-          <button
-            type="button"
-            className="kyc-link-menu-item"
-            role="menuitem"
-            onClick={handleResend}
-          >
-            <RotateCw size={14} color="#3b82f6" />
-            <span>Resend Link</span>
-          </button>
+              <button
+                type="button"
+                className="kyc-link-menu-item"
+                role="menuitem"
+                onClick={handleResend}
+              >
+                <RotateCw size={14} color="#3b82f6" />
+                <span>Resend Link</span>
+              </button>
 
-          <button
-            type="button"
-            className="kyc-link-menu-item kyc-link-menu-item-danger"
-            role="menuitem"
-            onClick={handleRevoke}
-          >
-            <Ban size={14} />
-            <span>Revoke Link</span>
-          </button>
+              <button
+                type="button"
+                className="kyc-link-menu-item kyc-link-menu-item-danger"
+                role="menuitem"
+                onClick={handleRevoke}
+              >
+                <Ban size={14} />
+                <span>Revoke Link</span>
+              </button>
+            </>
+          )}
 
           {(onViewProfile || onEditKyc || onCallInvestor || onAdvanceStage) && (
             <div className="kyc-link-menu-divider" />

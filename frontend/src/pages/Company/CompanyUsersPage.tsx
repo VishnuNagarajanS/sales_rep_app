@@ -13,6 +13,8 @@ import {
   Trash2,
   Copy,
   Check,
+  AlertTriangle,
+  ArrowRight,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { SYSTEM_ROLES } from '../../constants/roles';
@@ -22,6 +24,7 @@ import { Modal } from '../../components/common/Modal';
 import { User, RoleCode } from '../../types';
 import './CompanyUsersPage.css';
 import { adminUserService } from '../../services/adminUserService';
+import { storageService } from '../../services/storageService';
 
 const addStoredAuditLog = (log: any) => {
   try {
@@ -81,7 +84,6 @@ export const CompanyUsersPage: React.FC = () => {
   const [inviteName, setInviteName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [invitePhone, setInvitePhone] = useState('+91 98450 ');
-  const [inviteDesignation, setInviteDesignation] = useState('Wealth Advisory Consultant');
   const [inviteRole, setInviteRole] = useState<RoleCode>('sales_executive');
   const [creationMode, setCreationMode] = useState<'invite' | 'instant_password'>('invite');
   const [generatedNewPassword, setGeneratedNewPassword] = useState<string | null>(null);
@@ -93,7 +95,6 @@ export const CompanyUsersPage: React.FC = () => {
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
-  const [editDesignation, setEditDesignation] = useState('');
   const [editRoleCode, setEditRoleCode] = useState<RoleCode>('sales_executive');
 
   const [transferModalOpen, setTransferModalOpen] = useState(false);
@@ -106,12 +107,24 @@ export const CompanyUsersPage: React.FC = () => {
   const [tempPassword, setTempPassword] = useState('');
   const [hasCopiedTempPassword, setHasCopiedTempPassword] = useState(false);
 
+  // ── Safe User Deletion & Work Handover Modal State ─────────────────────────
+  const [deleteModalUser, setDeleteModalUser] = useState<User | null>(null);
+  const [deleteWorkload, setDeleteWorkload] = useState<{
+    leadsCount: number;
+    followupsCount: number;
+    dealsCount: number;
+    customersCount: number;
+    total: number;
+  }>({ leadsCount: 0, followupsCount: 0, dealsCount: 0, customersCount: 0, total: 0 });
+  const [deleteSuccessorUserId, setDeleteSuccessorUserId] = useState<string>('');
+  const [deleteConfirmAck, setDeleteConfirmAck] = useState<boolean>(false);
+  const [isDeletingUser, setIsDeletingUser] = useState<boolean>(false);
+
   // ── Invite / Add Handlers ─────────────────────────────────────────────────
   const handleOpenInvite = () => {
     setInviteName('');
     setInviteEmail('');
     setInvitePhone('+91 98450 ');
-    setInviteDesignation('Wealth Advisory Consultant');
     setInviteRole('sales_executive');
     setCreationMode('invite');
     setGeneratedNewPassword(null);
@@ -153,7 +166,6 @@ export const CompanyUsersPage: React.FC = () => {
       companyId: tenant?.id,
       companySlug: tenant?.slug,
       companyName: tenant?.name,
-      designation: inviteDesignation.trim() || undefined,
       status: isInstant ? 'Active' : 'Invited',
       lastLogin: isInstant ? 'Pending First Login' : 'Never',
     };
@@ -181,7 +193,7 @@ export const CompanyUsersPage: React.FC = () => {
       entityId: createdUser?.id || newUser.id,
       companyId: tenant?.id,
       companyName: tenant?.name,
-      details: `${isInstant ? 'Provisioned' : 'Invited'} ${newUser.name} (${newUser.email}) as ${newUser.role.name} with designation [${newUser.designation || 'None'}].`,
+      details: `${isInstant ? 'Provisioned' : 'Invited'} ${newUser.name} (${newUser.email}) as ${newUser.role.name}.`,
     });
 
     if (isInstant) {
@@ -208,7 +220,6 @@ export const CompanyUsersPage: React.FC = () => {
     setEditingUser(u);
     setEditName(u.name);
     setEditPhone(u.phone || '');
-    setEditDesignation(u.designation || '');
     setEditRoleCode(u.role.code);
   };
 
@@ -230,7 +241,6 @@ export const CompanyUsersPage: React.FC = () => {
       ...editingUser,
       name: editName.trim() || editingUser.name,
       phone: editPhone.trim() || editingUser.phone,
-      designation: editDesignation.trim() || editingUser.designation,
       role: updatedRole,
     };
 
@@ -406,30 +416,123 @@ export const CompanyUsersPage: React.FC = () => {
     showToast('success', `User account for ${u.name} reactivated.`);
   };
 
-  const handleDeleteUser = async (u: User) => {
-    if (!window.confirm(`Permanently remove ${u.name} (${u.email}) from ${tenant?.name}? This cannot be undone.`)) return;
-
-    try {
-      await adminUserService.deleteUser(u.id, tenant?.id || '');
-      loadData();
-    } catch (err) {
-      showToast('error', 'Failed to delete user.');
+  const handleInitiateDeleteUser = (u: User) => {
+    if (String(u.id) === String(user?.id)) {
+      showToast('error', 'You cannot delete your own account.');
+      return;
+    }
+    if (u.role.code === 'company_admin') {
+      showToast('error', 'Company Admin accounts cannot be deleted.');
       return;
     }
 
-    addStoredAuditLog({
-      id: `aud-${Date.now()}`,
-      timestamp: 'Just now',
-      actorName: user?.name || 'Company Admin',
-      actorEmail: user?.email || 'admin@nexus.com',
-      action: 'USER_DELETED',
-      entityType: 'User',
-      entityId: u.id,
-      companyId: tenant?.id,
-      companyName: tenant?.name,
-      details: `Deleted team member record for ${u.name} (${u.email}).`,
+    const allLeads = storageService.getLeads(tenant?.id) || [];
+    const allFollowups = storageService.getFollowups(tenant?.id) || [];
+    const allDeals = storageService.getDeals(tenant?.id) || [];
+    const allCustomers = storageService.getCustomers(tenant?.id) || [];
+
+    const uId = String(u.id);
+    const uNameLower = (u.name || '').toLowerCase().trim();
+
+    const userLeads = allLeads.filter(l =>
+      (String(l.assignedAgentId) === uId || (l.assignedAgentName && l.assignedAgentName.toLowerCase().trim() === uNameLower)) &&
+      l.status !== 'Lost' && l.status !== 'Junk'
+    );
+
+    const userFollowups = allFollowups.filter(f =>
+      (String(f.assignedAgentId) === uId || (f.assignedAgentName && f.assignedAgentName.toLowerCase().trim() === uNameLower)) &&
+      f.status === 'Pending'
+    );
+
+    const userDeals = allDeals.filter(d =>
+      (String(d.assignedAgentId) === uId || (d.assignedAgentName && d.assignedAgentName.toLowerCase().trim() === uNameLower)) &&
+      d.stage !== 'Closed Won' && d.stage !== 'Closed Lost'
+    );
+
+    const userCustomers = allCustomers.filter(c =>
+      String(c.assignedAgentId) === uId || (c.assignedAgentName && c.assignedAgentName.toLowerCase().trim() === uNameLower)
+    );
+
+    const leadsCount = userLeads.length;
+    const followupsCount = userFollowups.length;
+    const dealsCount = userDeals.length;
+    const customersCount = userCustomers.length;
+    const total = leadsCount + followupsCount + dealsCount + customersCount;
+
+    setDeleteWorkload({
+      leadsCount,
+      followupsCount,
+      dealsCount,
+      customersCount,
+      total,
     });
-    showToast('success', `User ${u.name} permanently removed.`);
+
+    // Automatically suggest default successor of the same role if available
+    const sameRoleCandidate = usersList.find(
+      other => String(other.id) !== uId && other.role.code === u.role.code && other.status === 'Active'
+    );
+    const fallbackCandidate = usersList.find(
+      other => String(other.id) !== uId && other.status === 'Active'
+    );
+
+    setDeleteSuccessorUserId(sameRoleCandidate ? String(sameRoleCandidate.id) : (fallbackCandidate ? String(fallbackCandidate.id) : ''));
+    setDeleteConfirmAck(false);
+    setDeleteModalUser(u);
+  };
+
+  const handleConfirmDeleteUser = async () => {
+    if (!deleteModalUser) return;
+
+    if (deleteWorkload.total > 0 && !deleteSuccessorUserId) {
+      showToast('error', 'Please select a successor agent to hand over active work before deleting.');
+      return;
+    }
+
+    if (deleteWorkload.total > 0 && !deleteConfirmAck) {
+      showToast('error', 'Please check the confirmation box to proceed.');
+      return;
+    }
+
+    const successorUser = usersList.find(u => String(u.id) === String(deleteSuccessorUserId));
+    setIsDeletingUser(true);
+
+    try {
+      // 1. Call backend API with handoverToUserId
+      await adminUserService.deleteUser(deleteModalUser.id, tenant?.id || '', deleteSuccessorUserId || undefined);
+
+      // 2. Safely reassign in localStorage/storageService so local state is also kept consistent
+      storageService.deleteUserWithHandover(deleteModalUser.id, deleteSuccessorUserId || undefined, tenant?.id);
+
+      // 3. Record audit log
+      addStoredAuditLog({
+        id: `aud-${Date.now()}`,
+        timestamp: 'Just now',
+        actorName: user?.name || 'Company Admin',
+        actorEmail: user?.email || 'admin@nexus.com',
+        action: deleteSuccessorUserId ? 'USER_DELETED_WITH_HANDOVER' : 'USER_DELETED',
+        entityType: 'User',
+        entityId: deleteModalUser.id,
+        companyId: tenant?.id,
+        companyName: tenant?.name,
+        details: deleteSuccessorUserId && successorUser
+          ? `Deleted user ${deleteModalUser.name} (${deleteModalUser.email}) and handed over ${deleteWorkload.total} active assignments (${deleteWorkload.leadsCount} leads, ${deleteWorkload.followupsCount} follow-ups, ${deleteWorkload.dealsCount} deals, ${deleteWorkload.customersCount} customers) to ${successorUser.name} (${successorUser.email}).`
+          : `Permanently deleted user record for ${deleteModalUser.name} (${deleteModalUser.email}).`,
+      });
+
+      setDeleteModalUser(null);
+      await loadData();
+
+      if (deleteSuccessorUserId && successorUser) {
+        showToast('success', `✓ User ${deleteModalUser.name} deleted. All ${deleteWorkload.total} assignments were successfully handed over to ${successorUser.name}.`);
+      } else {
+        showToast('success', `✓ User ${deleteModalUser.name} permanently removed.`);
+      }
+    } catch (err: any) {
+      console.error('Failed to delete user:', err);
+      showToast('error', err?.message || 'Failed to delete user.');
+    } finally {
+      setIsDeletingUser(false);
+    }
   };
 
   // ── Filtered Dataset ──────────────────────────────────────────────────────
@@ -458,15 +561,6 @@ export const CompanyUsersPage: React.FC = () => {
       sortable: true,
       render: u => (
         <span className="company-user-role">{u.role.name}</span>
-      ),
-    },
-    {
-      key: 'designation',
-      header: 'Designation / Title',
-      render: u => (
-        <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-          {u.designation || '—'}
-        </span>
       ),
     },
     {
@@ -534,7 +628,7 @@ export const CompanyUsersPage: React.FC = () => {
       label: 'Delete User',
       icon: <Trash2 size={14} color="#dc2626" style={{ marginRight: 6 }} />,
       hidden: u => u.id === user?.id || u.role.code === 'company_admin',
-      onClick: u => handleDeleteUser(u),
+      onClick: u => handleInitiateDeleteUser(u),
     },
   ];
 
@@ -656,7 +750,7 @@ export const CompanyUsersPage: React.FC = () => {
         data={filteredUsersList}
         keyExtractor={u => u.id}
         rowActions={rowActions}
-        searchPlaceholder="Search team members by name, email, or designation..."
+        searchPlaceholder="Search team members by name or email..."
       />
 
       {/* ── Add / Invite Member Modal ────────────────────────────────────── */}
@@ -757,28 +851,15 @@ export const CompanyUsersPage: React.FC = () => {
             </div>
             {inviteError && <div className="form-error">{inviteError}</div>}
 
-            <div className="company-user-form-row">
-              <div className="form-group">
-                <label className="form-label">Contact Phone</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={invitePhone}
-                  onChange={e => setInvitePhone(e.target.value)}
-                  placeholder="+91 98450 00000"
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Designation / Title</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={inviteDesignation}
-                  onChange={e => setInviteDesignation(e.target.value)}
-                  placeholder="e.g. Senior Wealth Partner"
-                />
-              </div>
+            <div className="form-group">
+              <label className="form-label">Contact Phone</label>
+              <input
+                type="text"
+                className="form-input"
+                value={invitePhone}
+                onChange={e => setInvitePhone(e.target.value)}
+                placeholder="+91 98450 00000"
+              />
             </div>
 
             <div className="form-group">
@@ -883,26 +964,14 @@ export const CompanyUsersPage: React.FC = () => {
               />
             </div>
 
-            <div className="company-user-form-row">
-              <div className="form-group">
-                <label className="form-label">Contact Phone</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={editPhone}
-                  onChange={e => setEditPhone(e.target.value)}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Designation / Title</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={editDesignation}
-                  onChange={e => setEditDesignation(e.target.value)}
-                />
-              </div>
+            <div className="form-group">
+              <label className="form-label">Contact Phone</label>
+              <input
+                type="text"
+                className="form-input"
+                value={editPhone}
+                onChange={e => setEditPhone(e.target.value)}
+              />
             </div>
 
             <div className="form-group">
@@ -1022,6 +1091,194 @@ export const CompanyUsersPage: React.FC = () => {
             </select>
           </div>
         </div>
+      </Modal>
+
+      {/* ── Safe User Deletion & Work Handover Modal ── */}
+      <Modal
+        isOpen={!!deleteModalUser}
+        onClose={() => !isDeletingUser && setDeleteModalUser(null)}
+        title={deleteWorkload.total > 0 ? "Handover Work & Delete User" : "Confirm User Deletion"}
+        maxWidth={540}
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setDeleteModalUser(null)}
+              disabled={isDeletingUser}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{
+                backgroundColor: '#dc2626',
+                borderColor: '#dc2626',
+                color: '#ffffff',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+              onClick={handleConfirmDeleteUser}
+              disabled={
+                isDeletingUser ||
+                (deleteWorkload.total > 0 && (!deleteSuccessorUserId || !deleteConfirmAck))
+              }
+            >
+              {isDeletingUser ? (
+                'Processing...'
+              ) : deleteWorkload.total > 0 ? (
+                <>
+                  <UserCheck size={14} /> Handover & Delete User
+                </>
+              ) : (
+                <>
+                  <Trash2 size={14} /> Permanently Delete User
+                </>
+              )}
+            </button>
+          </>
+        }
+      >
+        {deleteModalUser && (
+          <div className="company-delete-modal-content">
+            {deleteWorkload.total > 0 ? (
+              <>
+                {/* Warning Alert Box */}
+                <div className="company-delete-warning-box">
+                  <div className="company-delete-warning-icon">
+                    <AlertTriangle size={20} color="#d97706" />
+                  </div>
+                  <div>
+                    <div className="company-delete-warning-title">
+                      Active Responsibilities Detected ({deleteWorkload.total} Items)
+                    </div>
+                    <div className="company-delete-warning-text">
+                      <strong>{deleteModalUser.name}</strong> currently has active tasks assigned.
+                      Deleting this account directly will cause dropped follow-ups and unassigned leads.
+                      Please select an active team member below to receive their entire workload before deleting.
+                    </div>
+                  </div>
+                </div>
+
+                {/* Workload Breakdown Pills */}
+                <div className="company-delete-workload-grid">
+                  <div className="company-delete-workload-card card-leads">
+                    <span className="card-val">{deleteWorkload.leadsCount}</span>
+                    <span className="card-lbl">Active Leads</span>
+                  </div>
+                  <div className="company-delete-workload-card card-followups">
+                    <span className="card-val">{deleteWorkload.followupsCount}</span>
+                    <span className="card-lbl">Pending Follow-ups</span>
+                  </div>
+                  <div className="company-delete-workload-card card-deals">
+                    <span className="card-val">{deleteWorkload.dealsCount}</span>
+                    <span className="card-lbl">Active Deals</span>
+                  </div>
+                  <div className="company-delete-workload-card card-customers">
+                    <span className="card-val">{deleteWorkload.customersCount}</span>
+                    <span className="card-lbl">Assigned Customers</span>
+                  </div>
+                </div>
+
+                {/* Successor Selection Form */}
+                <div className="form-group" style={{ marginTop: 16 }}>
+                  <label htmlFor="delete-user-successor-select" className="form-label" style={{ fontWeight: 600 }}>
+                    Select Successor Agent (Handover Recipient) <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <select
+                    id="delete-user-successor-select"
+                    className="form-select"
+                    value={deleteSuccessorUserId}
+                    onChange={e => setDeleteSuccessorUserId(e.target.value)}
+                  >
+                    <option value="">Choose an active agent...</option>
+                    {usersList
+                      .filter(u => String(u.id) !== String(deleteModalUser.id) && u.status === 'Active')
+                      .sort((a, b) => {
+                        const aSameRole = a.role.code === deleteModalUser.role.code ? 0 : 1;
+                        const bSameRole = b.role.code === deleteModalUser.role.code ? 0 : 1;
+                        if (aSameRole !== bSameRole) return aSameRole - bSameRole;
+                        return a.name.localeCompare(b.name);
+                      })
+                      .map(u => (
+                        <option key={u.id} value={u.id}>
+                          {u.name} ({u.role.name})
+                          {u.role.code === deleteModalUser.role.code ? ' — Recommended (Same Role)' : ''}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                {/* Handover summary info */}
+                {deleteSuccessorUserId && (
+                  <div
+                    style={{
+                      background: 'rgba(59, 130, 246, 0.08)',
+                      border: '1px solid rgba(59, 130, 246, 0.25)',
+                      borderRadius: 8,
+                      padding: '10px 14px',
+                      fontSize: '0.85rem',
+                      color: 'var(--text-primary)',
+                      marginTop: 12,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <ArrowRight size={15} color="#3b82f6" />
+                    <span>
+                      All <strong>{deleteWorkload.total}</strong> active items will be transferred to{' '}
+                      <strong>{usersList.find(u => String(u.id) === String(deleteSuccessorUserId))?.name}</strong>.
+                    </span>
+                  </div>
+                )}
+
+                {/* Confirmation Checkbox */}
+                <label className="company-delete-ack-label" style={{ marginTop: 14 }}>
+                  <input
+                    type="checkbox"
+                    checked={deleteConfirmAck}
+                    onChange={e => setDeleteConfirmAck(e.target.checked)}
+                    style={{ cursor: 'pointer', width: 16, height: 16 }}
+                  />
+                  <span>
+                    I confirm that all active leads, follow-ups, and deals will be handed over, and{' '}
+                    <strong>{deleteModalUser.name}</strong> will be permanently deleted.
+                  </span>
+                </label>
+              </>
+            ) : (
+              /* No active workload */
+              <div style={{ textAlign: 'center', padding: '12px 6px' }}>
+                <div
+                  style={{
+                    width: 48,
+                    height: 48,
+                    borderRadius: '50%',
+                    background: 'rgba(239, 68, 68, 0.12)',
+                    color: '#dc2626',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto 14px',
+                  }}
+                >
+                  <Trash2 size={24} color="#dc2626" />
+                </div>
+                <h4 style={{ margin: '0 0 8px', fontSize: '1.05rem', fontWeight: 600 }}>
+                  Permanently delete {deleteModalUser.name}?
+                </h4>
+                <p style={{ margin: '0 0 16px', color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                  This user currently has <strong>0 active leads, follow-ups, or deals assigned</strong>.
+                  Are you sure you want to remove their user account ({deleteModalUser.email}) from {tenant?.name}?
+                  This action cannot be undone.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
     </div>
   );

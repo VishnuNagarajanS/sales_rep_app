@@ -10,5 +10,5 @@ public interface IAdminUserService
     Task<ApiResponse<AdminUserDto>> CreateUserAsync(int companyId, CreateUserRequestDto request, CancellationToken cancellationToken = default);
     Task<ApiResponse<AdminUserDto>> UpdateUserAsync(int companyId, int userId, UpdateUserRequestDto request, CancellationToken cancellationToken = default);
     Task<ApiResponse<AdminUserDto>> TransferDataAndUpdateRoleAsync(int companyId, int oldUserId, TransferRoleRequestDto request, CancellationToken cancellationToken = default);
-    Task<ApiResponse<bool>> DeleteUserAsync(int companyId, int userId, CancellationToken cancellationToken = default);
+    Task<ApiResponse<bool>> DeleteUserAsync(int companyId, int userId, int? handoverToUserId = null, CancellationToken cancellationToken = default);
 }

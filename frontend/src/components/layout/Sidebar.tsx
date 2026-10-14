@@ -193,10 +193,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
     {
       header: 'Investors', // GHL specific
       items: [
-        { id: 'investors', label: 'Investors 360', icon: <TrendingUp size={18} />, feature: FEATURES.INVESTORS, permission: PERMISSIONS.INVESTORS_VIEW },
         { id: 'consultations', label: 'Consultations', icon: <Calendar size={18} />, feature: FEATURES.CONSULTATIONS, permission: PERMISSIONS.CONSULTATIONS_VIEW },
+        { id: 'kyc', label: 'KYC Leads', icon: <FileCheck size={18} />, feature: FEATURES.INVESTORS, permission: PERMISSIONS.INVESTORS_VIEW },
         { id: 'opportunities', label: 'Opportunities', icon: <Briefcase size={18} />, feature: FEATURES.INVESTMENT_OPPORTUNITIES, permission: PERMISSIONS.OPPORTUNITIES_VIEW },
-        { id: 'deals', label: 'Deals', icon: <Briefcase size={18} />, feature: FEATURES.DEALS, permission: PERMISSIONS.DEALS_VIEW },
+        { id: 'investors', label: 'Investors 360', icon: <TrendingUp size={18} />, feature: FEATURES.INVESTORS, permission: PERMISSIONS.INVESTORS_VIEW },
       ],
     },
     {

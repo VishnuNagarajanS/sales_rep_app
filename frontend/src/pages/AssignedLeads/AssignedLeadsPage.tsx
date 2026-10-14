@@ -221,8 +221,13 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
       lead.assignedAgentRole === 'irm' ||
       companyIrms.some(i => i.name.toLowerCase() === (lead.assignedAgentName || '').toLowerCase());
 
+    const isAdminAgent =
+      lead.assignedAgentRole === 'company_admin' ||
+      lead.assignedAgentRole === 'super_admin' ||
+      (lead.assignedAgentId && adminIds.has(String(lead.assignedAgentId)));
+
     if (!salesExecutiveName) {
-      if (lead.assignedAgentName && !isAgentIrm) {
+      if (lead.assignedAgentName && !isAgentIrm && !isAdminAgent) {
         salesExecutiveName = lead.assignedAgentName;
         salesExecutiveDate = lead.assignedSalesExecutiveAt || lead.assignedAt || lead.createdAt;
       } else if (custom.qualifiedByAgentName) {
@@ -371,7 +376,7 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
 
     try {
       setLoadError(null);
-      const res = await apiClient.get<any>('/sales-executive/leads?page=1&pageSize=1000&status=all&assignment=all');
+      const res = await apiClient.get<any>('/sales-executive/leads?page=1&pageSize=1000&status=all&assignment=assigned');
       if (res.success && res.data && res.data.items) {
         const apiLeads = res.data.items.map((item: any) => ({
           ...item,
@@ -821,6 +826,12 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
     return leads.filter(l => {
       const info = resolveLeadOwnership(l);
 
+      // Only show leads that are actively assigned to either a Sales Executive or an IRM
+      const isAssigned = Boolean(info.salesExecutiveName || info.irmName);
+      if (!isAssigned) {
+        return false;
+      }
+
       // 1. Sales Executive filter
       if (agentFilter && agentFilter !== 'All') {
         if (agentFilter === 'Unassigned') {
@@ -864,7 +875,7 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
 
       return true;
     });
-  }, [leads, agentFilter, irmFilter, datePreset, dateFrom, dateTo, activeCoverages]);
+  }, [leads, agentFilter, irmFilter, datePreset, dateFrom, dateTo, activeCoverages, adminIds]);
 
   if (!isGhlAdmin) {
     return (

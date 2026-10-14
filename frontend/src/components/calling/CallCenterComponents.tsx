@@ -1139,6 +1139,12 @@ export const DispositionModal: React.FC = () => {
   const [followupPriority, setFollowupPriority] = useState<'Low' | 'Medium' | 'High'>('High');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
+  const [slotConflictData, setSlotConflictData] = useState<{
+    conflictTime: string;
+    contactName: string;
+    suggestedTime?: string;
+    suggestedTimeValue?: string;
+  } | null>(null);
 
   // No Response customized customer message state
   const [customerMessage, setCustomerMessage] = useState('');
@@ -1321,9 +1327,51 @@ export const DispositionModal: React.FC = () => {
       d.setDate(d.getDate() + 1);
       return d.toISOString().slice(0, 10);
     })();
+    const targetTime = followupTime || '11:00';
     const combinedDateTime = (scheduleFollowup || disposition === 'Follow-up Required' || disposition === 'No Response')
-      ? new Date(`${targetDate}T${followupTime || '11:00'}:00`).toISOString()
+      ? new Date(`${targetDate}T${targetTime}:00`).toISOString()
       : '';
+
+    // Check time slot conflict for the active agent before submitting
+    if (combinedDateTime) {
+      const allFollowups = storageService.getFollowups(tenant?.id) || [];
+      const targetMs = new Date(combinedDateTime).getTime();
+      const currentUserId = user?.id ? String(user.id) : '';
+      const currentContactId = String(lastCallRecord?.matchedRecord?.id || lastCallRecord?.sourceFollowupId || '');
+      const currentPhone10 = (lastCallRecord?.contactPhone || '').replace(/\D/g, '').slice(-10);
+
+      const conflict = allFollowups.find(f => {
+        if (f.status !== 'Pending') return false;
+        // Don't conflict with the exact same contact if updating their follow-up
+        if (f.contactId && currentContactId && (f.contactId === currentContactId || f.contactId === `lead-${currentContactId}`)) return false;
+        if (currentPhone10 && f.contactPhone && f.contactPhone.replace(/\D/g, '').includes(currentPhone10)) return false;
+
+        // Same agent check: Sales Executive 1 only conflicts with Sales Executive 1; IRM only conflicts with that same IRM!
+        const fAgentId = f.assignedAgentId ? String(f.assignedAgentId) : '';
+        if (currentUserId && fAgentId && fAgentId !== currentUserId) return false;
+
+        const fTime = new Date(f.scheduledAt).getTime();
+        if (isNaN(fTime)) return false;
+        return Math.abs(targetMs - fTime) / (60 * 1000) < 20;
+      });
+
+      if (conflict) {
+        const conflictDateObj = new Date(conflict.scheduledAt);
+        const formattedConflictTime = conflictDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + conflictDateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+        const suggestedDate = new Date(conflictDateObj.getTime() + 20 * 60 * 1000);
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        const suggestedTimeValue = `${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
+        const formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+
+        setSlotConflictData({
+          conflictTime: formattedConflictTime,
+          contactName: conflict.contactName || 'Another Contact',
+          suggestedTime: formattedSuggestedTime,
+          suggestedTimeValue,
+        });
+        return;
+      }
+    }
 
     setIsSubmitting(true);
     try {
@@ -1376,6 +1424,23 @@ export const DispositionModal: React.FC = () => {
         reason.trim() ? reason.trim() : undefined
       );
     } catch (err: any) {
+      const errMsg = err?.message || '';
+      if (errMsg.includes('already booked') || errMsg.includes('time slot') || errMsg.includes('between calls')) {
+        const conflictDateObj = new Date(combinedDateTime);
+        const formattedConflictTime = conflictDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + conflictDateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+        const suggestedDate = new Date(conflictDateObj.getTime() + 20 * 60 * 1000);
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        const suggestedTimeValue = `${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
+        const formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+
+        setSlotConflictData({
+          conflictTime: formattedConflictTime,
+          contactName: 'Existing Appointment',
+          suggestedTime: formattedSuggestedTime,
+          suggestedTimeValue,
+        });
+        return;
+      }
       if (disposition === 'No Response') {
         setSendDeliveryNotice({
           type: 'error',
@@ -1389,7 +1454,8 @@ export const DispositionModal: React.FC = () => {
   };
 
   return (
-    <Modal
+    <>
+      <Modal
       isOpen={showDispositionModal}
       onClose={() => {
         // Modal must not close until disposition is saved
@@ -1786,6 +1852,123 @@ export const DispositionModal: React.FC = () => {
             </div>
           )}
         </div>
-    </Modal>
+      </Modal>
+
+      {/* Time Slot Conflict Alert Popup Modal */}
+      <Modal
+        isOpen={!!slotConflictData}
+        onClose={() => setSlotConflictData(null)}
+        title="Time Slot Already Booked"
+        subtitle="Schedule Spacing & Conflict Warning"
+        maxWidth={490}
+        footer={
+          <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setSlotConflictData(null)}
+              style={{ flex: 1 }}
+            >
+              Choose Another Time
+            </button>
+            {slotConflictData?.suggestedTimeValue && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  if (slotConflictData.suggestedTimeValue) {
+                    setFollowupTime(slotConflictData.suggestedTimeValue);
+                  }
+                  setSlotConflictData(null);
+                }}
+                style={{ flex: 1.2 }}
+              >
+                Use Suggested (+20m)
+              </button>
+            )}
+          </div>
+        }
+      >
+        <div style={{ textAlign: 'center', padding: '10px 4px' }}>
+          <div style={{
+            width: 52,
+            height: 52,
+            borderRadius: '50%',
+            background: 'rgba(239, 68, 68, 0.1)',
+            color: '#dc2626',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 26,
+            margin: '0 auto 14px'
+          }}>
+            <AlertCircle size={28} color="#dc2626" />
+          </div>
+          <h4 style={{ margin: '0 0 8px', fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary, #0f172a)' }}>
+            This Time Slot is Already Booked
+          </h4>
+          <p style={{ margin: '0 0 14px', color: 'var(--text-secondary, #64748b)', fontSize: '0.9rem', lineHeight: 1.5 }}>
+            You already have a scheduled follow-up near this time:
+          </p>
+          <div style={{
+            background: 'var(--bg-surface-hover, #f8fafc)',
+            border: '1px solid var(--border-base, #e2e8f0)',
+            borderRadius: 8,
+            padding: '12px 16px',
+            marginBottom: 14,
+            textAlign: 'left'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary, #64748b)' }}>Contact:</span>
+              <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-primary, #1e293b)' }}>
+                {slotConflictData?.contactName}
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary, #64748b)' }}>Scheduled Time:</span>
+              <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#ef4444' }}>
+                {slotConflictData?.conflictTime}
+              </span>
+            </div>
+          </div>
+
+          {/* Meaningful scheduling advice box */}
+          <div style={{
+            background: 'rgba(59, 130, 246, 0.08)',
+            border: '1px solid rgba(59, 130, 246, 0.25)',
+            borderRadius: 8,
+            padding: '12px 14px',
+            marginBottom: 14,
+            textAlign: 'left'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, color: '#2563eb', fontWeight: 600, fontSize: '0.85rem' }}>
+              <Clock size={15} />
+              Scheduling Buffer Advice
+            </div>
+            <p style={{ margin: 0, fontSize: '0.83rem', color: 'var(--text-primary, #334155)', lineHeight: 1.5 }}>
+              To ensure sufficient time for each call and avoid overlapping appointments (e.g. 10:00 AM and 10:01 AM), <strong>please schedule your follow-up 15 to 20 minutes afterwards (or 20–30 minutes later)</strong>.
+            </p>
+          </div>
+
+          {slotConflictData?.suggestedTime && (
+            <div style={{
+              background: 'rgba(16, 185, 129, 0.08)',
+              border: '1px solid rgba(16, 185, 129, 0.25)',
+              borderRadius: 8,
+              padding: '10px 14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 4
+            }}>
+              <span style={{ fontSize: '0.82rem', color: '#059669', fontWeight: 600 }}>Suggested Next Slot:</span>
+              <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#059669' }}>
+                {slotConflictData.suggestedTime}
+              </span>
+            </div>
+          )}
+        </div>
+      </Modal>
+    </>
   );
 };

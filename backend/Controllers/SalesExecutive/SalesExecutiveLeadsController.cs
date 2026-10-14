@@ -157,7 +157,7 @@ public class SalesExecutiveLeadsController : ControllerBase
     }
 
     /// <summary>
-    /// Re-engage a Not-Interested or Junk lead back to 'Contacted', clearing stale tasks and scheduling next followup.
+    /// Re-engage a Not-Interested or Junk lead back to 'Follow-up Required', clearing stale tasks and scheduling next followup.
     /// </summary>
     [HttpPost("{id:int}/reengage")]
     public async Task<ActionResult<ApiResponse<LeadResponseDto>>> ReengageLead(

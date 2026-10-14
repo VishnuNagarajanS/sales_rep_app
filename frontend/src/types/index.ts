@@ -213,6 +213,10 @@ export interface Customer {
   isReturnedFromHandover?: boolean;
   returnedFromCoveringUserName?: string;
   returnedAt?: string;
+  assignedById?: string | number;
+  assignedByName?: string;
+  assignedSalesExecutiveId?: string;
+  assignedSalesExecutiveName?: string;
   /** Set only for virtual Customer 360 entries built from an 'Interested' lead (not a row in the Customers table). */
   isLeadRecord?: boolean;
   sourceLeadId?: string;

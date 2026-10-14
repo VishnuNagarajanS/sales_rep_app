@@ -11,6 +11,7 @@ import {
   getCalls,
 } from '../../services/ghlApiService';
 import { apiClient } from '../../services/apiClient';
+import { storageService } from '../../services/storageService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { Drawer } from '../../components/common/Drawer';
 import { Timeline, TimelineEvent } from '../../components/common/Timeline';
@@ -69,7 +70,7 @@ export const NotInterestedPage: React.FC = () => {
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id, user?.id, isExec]);
 
-  // Re-engage: move lead from Not Interested → Contacted and create a follow-up entry
+  // Re-engage: move lead from Not Interested → Follow-up Required and schedule follow-up entry
   const handleReengage = async (lead: Lead) => {
     if (!tenant || !user) return;
     setReengaging(true);
@@ -80,6 +81,7 @@ export const NotInterestedPage: React.FC = () => {
         try {
           await apiClient.post(`/sales-executive/leads/${numId}/reengage`);
           backendSuccess = true;
+          storageService.saveLead({ ...lead, status: 'Follow-up Required' });
         } catch (e) {
           console.warn('Backend reengage error, falling back to apiSaveLead', e);
           await apiSaveLead({ ...lead, status: 'Follow-up Required' });

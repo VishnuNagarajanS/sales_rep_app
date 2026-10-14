@@ -456,6 +456,7 @@ public class GhlLeadAssignmentController : ControllerBase
         var companyId = GetCompanyId();
         var query = _context.Leads
             .Include(l => l.AssignedAgent)
+                .ThenInclude(u => u!.Role)
             .Where(l => l.CompanyId == companyId && (l.Status == "Junk" || l.Status == "Wrong Number" || l.Status == "Not Interested"));
 
         if (agentId.HasValue && agentId.Value > 0)
@@ -489,6 +490,9 @@ public class GhlLeadAssignmentController : ControllerBase
                 source = l.Source,
                 assignedAgentId = l.AssignedAgentId,
                 assignedAgentName = l.AssignedAgent?.Name,
+                assignedAgentRole = l.AssignedAgent?.Role?.Code,
+                assignedIrmId = cf.GetValueOrDefault("assignedIrmId"),
+                assignedIrmName = cf.GetValueOrDefault("assignedIrmName"),
                 updatedAt = l.UpdatedAt,
                 notes = l.Notes,
                 customFields = cf

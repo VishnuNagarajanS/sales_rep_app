@@ -152,6 +152,12 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     assignedAgentName: string;
   }
   const [duplicateCustomerModal, setDuplicateCustomerModal] = useState<DuplicateCustomerModalData | null>(null);
+  const [slotConflictModal, setSlotConflictModal] = useState<{
+    conflictTime: string;
+    contactName: string;
+    suggestedTime?: string;
+    suggestedDateIso?: string;
+  } | null>(null);
   const [formErrorMessage, setFormErrorMessage] = useState<string | null>(null);
 
   const [companyIrms, setCompanyIrms] = useState<IrmProfile[]>([]);
@@ -551,7 +557,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1' || tenant?.name?.toLowerCase().includes('ghl') || user?.companySlug === 'ghl') &&
     user?.role?.code === 'sales_executive';
   const ghlPendingFollowups = isGhlSalesExec
-    ? (storageService.getFollowups(tenant?.id) || []).filter(f => f.status === 'Pending')
+    ? (!apiClient.isMockMode()
+        ? (allFollowups || []).filter((f: any) => f.status === 'Pending')
+        : (storageService.getFollowups(tenant?.id) || []).filter(f => f.status === 'Pending'))
     : [];
 
   const matchCapacity = (lead: Lead, filterRange: string): boolean => {
@@ -883,6 +891,37 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     contactName: string,
     contactPhone: string
   ) => {
+    const targetIso = followupDate ? new Date(followupDate).toISOString() : new Date(Date.now() + 86400000).toISOString();
+    const targetMs = new Date(targetIso).getTime();
+    const currentAgentId = String(user?.id || 'usr-exec');
+
+    // Check time slot conflict for this representative
+    const conflict = (allFollowups || []).find((f: any) => {
+      if (f.status !== 'Pending') return false;
+      const fAgentId = f.assignedAgentId ? String(f.assignedAgentId) : '';
+      if (fAgentId && currentAgentId && fAgentId !== currentAgentId) return false;
+      const fTime = new Date(f.scheduledAt).getTime();
+      if (isNaN(fTime)) return false;
+      return Math.abs(targetMs - fTime) / (60 * 1000) < 20;
+    });
+
+    if (conflict) {
+      const conflictDateObj = new Date(conflict.scheduledAt);
+      const formattedConflictTime = conflictDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + conflictDateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+      const suggestedDate = new Date(conflictDateObj.getTime() + 20 * 60 * 1000);
+      const pad = (n: number) => n.toString().padStart(2, '0');
+      const suggestedDateIso = `${suggestedDate.getFullYear()}-${pad(suggestedDate.getMonth() + 1)}-${pad(suggestedDate.getDate())}T${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
+      const formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+
+      setSlotConflictModal({
+        conflictTime: formattedConflictTime,
+        contactName: conflict.contactName || 'Another Contact',
+        suggestedTime: formattedSuggestedTime,
+        suggestedDateIso,
+      });
+      return;
+    }
+
     setIsSavingFollowupActivity(true);
     try {
       await apiSaveFollowup({
@@ -892,11 +931,11 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         contactType,
         contactName,
         contactPhone,
-        scheduledAt: followupDate ? new Date(followupDate).toISOString() : new Date(Date.now() + 86400000).toISOString(),
+        scheduledAt: targetIso,
         priority: followupPriority as any,
         notes: followupNotes || `Follow-up activity created for existing ${contactType}.`,
         status: 'Pending',
-        assignedAgentId: String(user?.id || 'usr-exec'),
+        assignedAgentId: currentAgentId,
         assignedAgentName: user?.name || 'Agent',
       });
       showToast(`Follow-up activity successfully scheduled for "${contactName}".`);
@@ -907,7 +946,24 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       await loadData();
     } catch (err: any) {
       console.error('Failed to schedule follow-up activity:', err);
-      showToast(`⚠️ Failed to schedule follow-up activity: ${err.message || 'Unknown error'}`);
+      const msg = err.message || '';
+      if (msg.includes('already booked') || msg.includes('time slot') || msg.includes('between calls')) {
+        const conflictDateObj = new Date(targetIso);
+        const formattedConflictTime = conflictDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + conflictDateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+        const suggestedDate = new Date(conflictDateObj.getTime() + 20 * 60 * 1000);
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        const suggestedDateIso = `${suggestedDate.getFullYear()}-${pad(suggestedDate.getMonth() + 1)}-${pad(suggestedDate.getDate())}T${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
+        const formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+
+        setSlotConflictModal({
+          conflictTime: formattedConflictTime,
+          contactName: 'Existing Appointment',
+          suggestedTime: formattedSuggestedTime,
+          suggestedDateIso,
+        });
+        return;
+      }
+      showToast(`⚠️ Failed to schedule follow-up activity: ${msg || 'Unknown error'}`);
     } finally {
       setIsSavingFollowupActivity(false);
     }
@@ -3015,6 +3071,122 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
           </div>
         </Modal>
       )}
+
+      {/* ── Time Slot Conflict Alert Popup Modal ── */}
+      <Modal
+        isOpen={!!slotConflictModal}
+        onClose={() => setSlotConflictModal(null)}
+        title="Time Slot Already Booked"
+        subtitle="Schedule Spacing & Conflict Warning"
+        maxWidth={490}
+        footer={
+          <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setSlotConflictModal(null)}
+              style={{ flex: 1 }}
+            >
+              Choose Another Time
+            </button>
+            {slotConflictModal?.suggestedDateIso && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  if (slotConflictModal.suggestedDateIso) {
+                    setFollowupDate(slotConflictModal.suggestedDateIso.slice(0, 16));
+                  }
+                  setSlotConflictModal(null);
+                }}
+                style={{ flex: 1.2 }}
+              >
+                Use Suggested (+20m)
+              </button>
+            )}
+          </div>
+        }
+      >
+        <div style={{ textAlign: 'center', padding: '10px 4px' }}>
+          <div style={{
+            width: 52,
+            height: 52,
+            borderRadius: '50%',
+            background: 'rgba(239, 68, 68, 0.1)',
+            color: '#dc2626',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 26,
+            margin: '0 auto 14px'
+          }}>
+            <AlertTriangle size={28} color="#dc2626" />
+          </div>
+          <h4 style={{ margin: '0 0 8px', fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary, #0f172a)' }}>
+            This Time Slot is Already Booked
+          </h4>
+          <p style={{ margin: '0 0 14px', color: 'var(--text-secondary, #64748b)', fontSize: '0.9rem', lineHeight: 1.5 }}>
+            You already have a scheduled follow-up near this time:
+          </p>
+          <div style={{
+            background: 'var(--bg-surface-hover, #f8fafc)',
+            border: '1px solid var(--border-base, #e2e8f0)',
+            borderRadius: 8,
+            padding: '12px 16px',
+            marginBottom: 14,
+            textAlign: 'left'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary, #64748b)' }}>Contact:</span>
+              <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-primary, #1e293b)' }}>
+                {slotConflictModal?.contactName}
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary, #64748b)' }}>Scheduled Time:</span>
+              <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#ef4444' }}>
+                {slotConflictModal?.conflictTime}
+              </span>
+            </div>
+          </div>
+
+          {/* Meaningful scheduling advice box */}
+          <div style={{
+            background: 'rgba(59, 130, 246, 0.08)',
+            border: '1px solid rgba(59, 130, 246, 0.25)',
+            borderRadius: 8,
+            padding: '12px 14px',
+            marginBottom: 14,
+            textAlign: 'left'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, color: '#2563eb', fontWeight: 600, fontSize: '0.85rem' }}>
+              <Clock size={15} />
+              Scheduling Buffer Advice
+            </div>
+            <p style={{ margin: 0, fontSize: '0.83rem', color: 'var(--text-primary, #334155)', lineHeight: 1.5 }}>
+              To ensure sufficient time for each call and avoid overlapping appointments (e.g. 10:00 AM and 10:01 AM), <strong>please schedule your follow-up 15 to 20 minutes afterwards (or 20–30 minutes later)</strong>.
+            </p>
+          </div>
+
+          {slotConflictModal?.suggestedTime && (
+            <div style={{
+              background: 'rgba(16, 185, 129, 0.08)',
+              border: '1px solid rgba(16, 185, 129, 0.25)',
+              borderRadius: 8,
+              padding: '10px 14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 4
+            }}>
+              <span style={{ fontSize: '0.82rem', color: '#059669', fontWeight: 600 }}>Suggested Next Slot:</span>
+              <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#059669' }}>
+                {slotConflictModal.suggestedTime}
+              </span>
+            </div>
+          )}
+        </div>
+      </Modal>
 
       {/* ── Assign IRM Modal ── */}
       <Modal

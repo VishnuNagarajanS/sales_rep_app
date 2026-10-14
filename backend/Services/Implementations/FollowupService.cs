@@ -483,10 +483,31 @@ public class FollowupService : IFollowupService
                  (cleanPhone10 != "" && f.ContactPhone != null && f.ContactPhone.Contains(cleanPhone10))))
             .ToListAsync(ct);
 
+        // Check for time slot conflict: no agent can have two pending follow-ups within 20 minutes
+        var slotStart = scheduledAtUtc.AddMinutes(-19.9);
+        var slotEnd = scheduledAtUtc.AddMinutes(19.9);
+        var conflictFollowup = await _context.Followups.AsNoTracking()
+            .Where(f => f.CompanyId == companyId.Value &&
+                        f.AssignedAgentId == targetAgentId &&
+                        f.Status == FollowupStatus.Pending &&
+                        f.ScheduledAt >= slotStart &&
+                        f.ScheduledAt <= slotEnd &&
+                        f.ContactId != cleanContactId &&
+                        (!string.IsNullOrEmpty(cleanPhone10) ? !f.ContactPhone.Contains(cleanPhone10) : true))
+            .FirstOrDefaultAsync(ct);
+
+        if (conflictFollowup != null)
+        {
+            var conflictTime = conflictFollowup.ScheduledAt.ToString("g");
+            var suggestedTime = conflictFollowup.ScheduledAt.AddMinutes(20).ToString("t");
+            return ApiResponse<FollowupResponseDto>.FailureResult(
+                $"This time slot is already booked for another follow-up with {conflictFollowup.ContactName} (at {conflictTime}). Please allow at least 15 to 20 minutes between calls and schedule after {suggestedTime}.");
+        }
+
         if (existingOldPending.Count > 0)
         {
             var primaryFollowup = existingOldPending.First();
-            primaryFollowup.ScheduledAt = dto.ScheduledAt;
+            primaryFollowup.ScheduledAt = scheduledAtUtc;
             if (!string.IsNullOrWhiteSpace(dto.Priority)) primaryFollowup.Priority = dto.Priority.Trim();
             if (!string.IsNullOrWhiteSpace(dto.Notes)) primaryFollowup.Notes = dto.Notes.Trim();
             if (!string.IsNullOrWhiteSpace(resolvedEmail)) primaryFollowup.ContactEmail = resolvedEmail;
@@ -591,6 +612,28 @@ public class FollowupService : IFollowupService
                 DateTimeKind.Local => dto.ScheduledAt.Value.ToUniversalTime(),
                 _ => DateTime.SpecifyKind(dto.ScheduledAt.Value, DateTimeKind.Utc)
             };
+
+            // Check for time slot conflict: no agent can have two pending follow-ups within 20 minutes
+            var slotStart = schedUtc.AddMinutes(-19.9);
+            var slotEnd = schedUtc.AddMinutes(19.9);
+
+            var conflictFollowup = await _context.Followups.AsNoTracking()
+                .Where(f => f.CompanyId == followup.CompanyId &&
+                            f.Id != followup.Id &&
+                            f.AssignedAgentId == followup.AssignedAgentId &&
+                            f.Status == FollowupStatus.Pending &&
+                            f.ScheduledAt >= slotStart &&
+                            f.ScheduledAt <= slotEnd)
+                .FirstOrDefaultAsync(ct);
+
+            if (conflictFollowup != null)
+            {
+                var conflictTime = conflictFollowup.ScheduledAt.ToString("g");
+                var suggestedTime = conflictFollowup.ScheduledAt.AddMinutes(20).ToString("t");
+                return ApiResponse<FollowupResponseDto>.FailureResult(
+                    $"This time slot is already booked for another follow-up with {conflictFollowup.ContactName} (at {conflictTime}). Please allow at least 15 to 20 minutes between calls and schedule after {suggestedTime}.");
+            }
+
             followup.ScheduledAt = schedUtc;
         }
         if (!string.IsNullOrWhiteSpace(dto.Priority)) followup.Priority = dto.Priority.Trim();
