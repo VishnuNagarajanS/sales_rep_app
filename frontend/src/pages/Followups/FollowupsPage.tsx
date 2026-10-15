@@ -1597,6 +1597,22 @@ export const FollowupsPage: React.FC = () => {
           }}
         >
           <span>{loadError}</span>
+          <button
+            onClick={() => loadData()}
+            style={{
+              background: '#ef4444',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '6px 14px',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              marginLeft: '12px',
+            }}
+          >
+            Retry
+          </button>
         </div>
       )}
 

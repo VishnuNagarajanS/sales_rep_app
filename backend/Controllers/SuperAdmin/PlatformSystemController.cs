@@ -858,6 +858,10 @@ public class PlatformSystemController : ControllerBase
         string message;
         int activeConnections = 1;
         int maxPool = 100;
+        int totalConnections = 0;
+        int idleConnections = 0;
+        string maxConnectionsStr = "unknown";
+        var connectionList = new List<string>();
 
         try
         {
@@ -872,6 +876,50 @@ public class PlatformSystemController : ControllerBase
                         var csb = new Npgsql.NpgsqlConnectionStringBuilder(connStr);
                         maxPool = csb.MaxPoolSize;
                     }
+
+                    try
+                    {
+                        var maxConnObj = await _context.Database.SqlQueryRaw<string>("SHOW max_connections").FirstOrDefaultAsync(ct);
+                        if (!string.IsNullOrWhiteSpace(maxConnObj)) maxConnectionsStr = maxConnObj;
+
+                        totalConnections = await _context.Database
+                            .SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM pg_stat_activity")
+                            .SingleOrDefaultAsync(ct);
+
+                        idleConnections = await _context.Database
+                            .SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM pg_stat_activity WHERE state = 'idle'")
+                            .SingleOrDefaultAsync(ct);
+
+                        // If reap is requested or connection count is dangerously high (>14), terminate idle connections older than 15s
+                        var reapParam = HttpContext.Request.Query["reapIdle"].ToString();
+                        if (string.Equals(reapParam, "true", StringComparison.OrdinalIgnoreCase) || totalConnections >= 15)
+                        {
+                            var killed = await _context.Database.ExecuteSqlRawAsync(
+                                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state = 'idle' AND pid <> pg_backend_pid() AND (state_change < NOW() - INTERVAL '15 seconds' OR state_change IS NULL)", ct);
+                            _logger.LogInformation("[DatabaseDiagnostics] Reaped {Killed} idle PostgreSQL connections.", killed);
+                        }
+
+                        using var conn = _context.Database.GetDbConnection();
+                        await conn.OpenAsync(ct);
+                        using var cmd = conn.CreateCommand();
+                        cmd.CommandText = "SELECT pid, usename, client_addr::text, application_name, state, (NOW() - state_change)::text AS age FROM pg_stat_activity ORDER BY state_change DESC LIMIT 30;";
+                        using var reader = await cmd.ExecuteReaderAsync(ct);
+                        while (await reader.ReadAsync(ct))
+                        {
+                            var pid = reader[0]?.ToString();
+                            var user = reader[1]?.ToString();
+                            var addr = reader[2]?.ToString();
+                            var appName = reader[3]?.ToString();
+                            var state = reader[4]?.ToString();
+                            var age = reader[5]?.ToString();
+                            connectionList.Add($"PID {pid} | {user}@{addr} | App: {appName} | State: {state} | Age: {age}");
+                        }
+                    }
+                    catch (Exception exConn)
+                    {
+                        _logger.LogWarning(exConn, "[DatabaseDiagnostics] Failed to collect detailed connection list.");
+                    }
+
                     activeConnections = await _context.Database
                         .SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM pg_stat_activity WHERE datname = current_database() AND state = 'active'")
                         .SingleOrDefaultAsync(ct);
@@ -920,8 +968,12 @@ public class PlatformSystemController : ControllerBase
             Details = new Dictionary<string, object>
             {
                 ["ActiveConnections"] = activeConnections,
+                ["TotalConnections"] = totalConnections,
+                ["IdleConnections"] = idleConnections,
+                ["MaxPostgresConnections"] = maxConnectionsStr,
                 ["MaxPoolSize"] = maxPool,
-                ["Engine"] = "PostgreSQL"
+                ["Engine"] = "PostgreSQL",
+                ["ConnectionList"] = connectionList
             },
             TestedAt = DateTime.UtcNow
         };
