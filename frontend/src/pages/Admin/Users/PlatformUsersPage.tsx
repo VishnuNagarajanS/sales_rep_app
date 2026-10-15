@@ -889,7 +889,7 @@ export const PlatformUsersPage: React.FC = () => {
           <div className="reset-modal-content">
             <p className="reset-desc">
               A temporary password has been generated for <strong>{resettingUser.email}</strong>. Share this secure key
-              with the user. They will be prompted to reset upon next login.
+              with the user. They can now log in immediately with this credential. Previous credentials and active sessions have been invalidated.
             </p>
 
             <div className="password-display-card">

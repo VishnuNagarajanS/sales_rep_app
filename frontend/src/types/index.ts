@@ -378,6 +378,7 @@ export interface Followup {
   notes: string;
   assignedAgentId: string;
   assignedAgentName: string;
+  assignedToName?: string;
   assignedRole?: string;
   assignedById?: string | number;
   assignedByName?: string;

@@ -77,9 +77,10 @@ export const ArchivedLeadsPage: React.FC = () => {
   const getLeadRoleAndPerson = (lead: Lead) => {
     const irmName = (lead.assignedIrmName || lead.customFields?.assignedIrmName || '').toString().trim();
     const agentName = (lead.assignedAgentName || '').trim();
-    const agentRole = (lead as any).assignedAgentRole || (lead as any).assignedRole;
+    const agentRole = ((lead as any).assignedAgentRole || (lead as any).assignedRole || '').toLowerCase();
 
-    if (agentRole === 'irm') {
+    // 1. Explicit IRM indicator
+    if (agentRole === 'irm' || agentRole.includes('investor')) {
       return { role: 'irm' as const, personName: agentName || irmName || '—', personId: String(lead.assignedAgentId || '') };
     }
 
@@ -87,34 +88,50 @@ export const ArchivedLeadsPage: React.FC = () => {
       return { role: 'irm' as const, personName: irmName, personId: String(lead.assignedIrmId || lead.customFields?.assignedIrmId || '') };
     }
 
-    // Match with known users
-    const matchUser = usersList.find(u =>
-      (lead.assignedAgentId && String(u.id) === String(lead.assignedAgentId)) ||
-      (agentName && u.name.toLowerCase().trim() === agentName.toLowerCase())
-    );
-    if (matchUser) {
-      const code = (matchUser.role?.code || '').toLowerCase();
-      const isIrm = code === 'irm' || (matchUser.role?.name || '').toLowerCase().includes('irm') || (matchUser.role?.name || '').toLowerCase().includes('investor');
+    // 2. Explicit Sales indicator
+    if (agentRole === 'sales_executive' || agentRole.includes('sales')) {
+      return { role: 'sales_executive' as const, personName: agentName || '—', personId: String(lead.assignedAgentId || '') };
+    }
+
+    // 3. Match with known users
+    if (lead.assignedAgentId || agentName) {
+      const matchUser = usersList.find(u =>
+        (lead.assignedAgentId && String(u.id) === String(lead.assignedAgentId)) ||
+        (agentName && u.name.toLowerCase().trim() === agentName.toLowerCase())
+      );
+      if (matchUser) {
+        const code = (matchUser.role?.code || '').toLowerCase();
+        const roleName = (matchUser.role?.name || '').toLowerCase();
+        const isIrm = code === 'irm' || roleName.includes('irm') || roleName.includes('investor');
+        return {
+          role: (isIrm ? 'irm' : 'sales_executive') as 'sales_executive' | 'irm',
+          personName: matchUser.name,
+          personId: String(matchUser.id)
+        };
+      }
+
+      // 4. Match with company IRMs
+      const matchIrm = companyIrms.find(i =>
+        (lead.assignedAgentId && String(i.id) === String(lead.assignedAgentId)) ||
+        (agentName && i.name.toLowerCase().trim() === agentName.toLowerCase())
+      );
+      if (matchIrm) {
+        return { role: 'irm' as const, personName: matchIrm.name, personId: String(matchIrm.id) };
+      }
+
+      // Default with agent name to sales_executive
       return {
-        role: (isIrm ? 'irm' : 'sales_executive') as 'sales_executive' | 'irm',
-        personName: matchUser.name,
-        personId: String(matchUser.id)
+        role: 'sales_executive' as const,
+        personName: agentName,
+        personId: String(lead.assignedAgentId || '')
       };
     }
 
-    // Match with company IRMs
-    const matchIrm = companyIrms.find(i =>
-      (lead.assignedAgentId && String(i.id) === String(lead.assignedAgentId)) ||
-      (agentName && i.name.toLowerCase().trim() === agentName.toLowerCase())
-    );
-    if (matchIrm) {
-      return { role: 'irm' as const, personName: matchIrm.name, personId: String(matchIrm.id) };
-    }
-
+    // Completely unassigned lead
     return {
-      role: 'sales_executive' as const,
-      personName: agentName || '—',
-      personId: String(lead.assignedAgentId || '')
+      role: 'unassigned' as const,
+      personName: 'Unassigned',
+      personId: ''
     };
   };
 
@@ -159,14 +176,14 @@ export const ArchivedLeadsPage: React.FC = () => {
       const irmName = (l.assignedIrmName || l.customFields?.assignedIrmName || '').toString().trim();
       const agentRole = (l as any).assignedAgentRole || (l as any).assignedRole;
 
-      if (agentName && !personMap.has(agentName.toLowerCase())) {
+      if (agentName && agentName !== '—' && agentName.toLowerCase() !== 'unassigned' && !personMap.has(agentName.toLowerCase())) {
         personMap.set(agentName.toLowerCase(), {
           id: String(l.assignedAgentId || agentName),
           name: agentName,
           role: agentRole === 'irm' ? 'irm' : 'sales_executive'
         });
       }
-      if (irmName && !personMap.has(irmName.toLowerCase())) {
+      if (irmName && irmName !== '—' && irmName.toLowerCase() !== 'unassigned' && !personMap.has(irmName.toLowerCase())) {
         personMap.set(irmName.toLowerCase(), {
           id: String(l.assignedIrmId || l.customFields?.assignedIrmId || irmName),
           name: irmName,
@@ -248,11 +265,14 @@ export const ArchivedLeadsPage: React.FC = () => {
       key: 'assignedAgentName',
       render: (row: any) => {
         const { role, personName } = getLeadRoleAndPerson(row);
-        const displayName = personName && personName !== '—' ? personName : (row.assignedAgentName || 'Unassigned');
+        const displayName = personName && personName !== '—' && personName !== 'Unassigned' ? personName : (row.assignedAgentName || 'Unassigned');
+        const isAssigned = displayName !== 'Unassigned' && role !== 'unassigned';
         return (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span className="lead-agent-name">{displayName}</span>
-            {displayName !== 'Unassigned' && (
+            <span className={isAssigned ? 'lead-agent-name' : 'lead-text-muted'} style={!isAssigned ? { fontStyle: 'italic' } : undefined}>
+              {displayName}
+            </span>
+            {isAssigned && (
               <span
                 style={{
                   fontSize: 10,

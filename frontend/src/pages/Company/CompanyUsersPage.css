@@ -262,6 +262,16 @@
   gap: 10px;
 }
 
+.company-delete-workload-grid.grid-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+@media (max-width: 520px) {
+  .company-delete-workload-grid.grid-3 {
+    grid-template-columns: 1fr;
+  }
+}
+
 .company-delete-workload-card {
   display: flex;
   flex-direction: column;

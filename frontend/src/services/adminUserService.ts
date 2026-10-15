@@ -77,6 +77,23 @@ const mapDtoToUser = (dto: AdminUserDto, companyId?: string): User => {
   };
 };
 
+export interface UserWorkloadDto {
+  userId: number;
+  userName: string;
+  roleCode?: string;
+  leadsCount: number;
+  followupsCount: number;
+  dealsCount: number;
+  customersCount: number;
+  consultationsCount?: number;
+  myLeadsCount?: number;
+  inFollowupCount?: number;
+  kycCount?: number;
+  opportunitiesCount?: number;
+  convertedCount?: number;
+  total: number;
+}
+
 export const adminUserService = {
   getUsers: async (companyId: string): Promise<User[]> => {
     const res = await apiClient.get<ApiResponse<AdminUserDto[]>>(`/AdminUsers?companyId=${companyId}`);
@@ -87,6 +104,12 @@ export const adminUserService = {
       localStorage.setItem('nexus_users', JSON.stringify(users));
     } catch {}
     return users;
+  },
+
+  getUserWorkload: async (id: string, companyId: string): Promise<UserWorkloadDto> => {
+    const res = await apiClient.get<ApiResponse<UserWorkloadDto>>(`/AdminUsers/${id}/workload?companyId=${companyId}`);
+    if (!res.success) throw new Error(res.message);
+    return res.data;
   },
 
   getUserById: async (id: string, companyId: string): Promise<User> => {
@@ -161,5 +184,17 @@ export const adminUserService = {
     const res = await apiClient.delete<ApiResponse<boolean>>(url);
     if (!res.success) throw new Error(res.message);
     window.dispatchEvent(new Event('nexus_admin_updated'));
+  },
+
+  resetUserPassword: async (id: string, companyId?: string, newPassword?: string): Promise<{ userId: number; email: string; tempPassword: string }> => {
+    const url = companyId
+      ? `/AdminUsers/${id}/reset-password?companyId=${companyId}`
+      : `/AdminUsers/${id}/reset-password`;
+    const res = await apiClient.post<ApiResponse<{ userId: number; email: string; tempPassword: string }>>(url, {
+      newPassword: newPassword || undefined,
+    });
+    if (!res.success) throw new Error(res.message);
+    window.dispatchEvent(new Event('nexus_admin_updated'));
+    return res.data;
   }
 };

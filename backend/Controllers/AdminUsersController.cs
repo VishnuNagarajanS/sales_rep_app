@@ -78,6 +78,19 @@ public class AdminUsersController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("{id}/workload")]
+    [ProducesResponseType(typeof(ApiResponse<UserWorkloadDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetUserWorkload(int id, CancellationToken cancellationToken)
+    {
+        var companyId = GetCompanyId();
+        if (companyId == 0) return Forbid();
+
+        var result = await _adminUserService.GetUserWorkloadAsync(companyId, id, cancellationToken);
+        if (!result.Success) return NotFound(result);
+
+        return Ok(result);
+    }
+
     [HttpPost]
     [ProducesResponseType(typeof(ApiResponse<AdminUserDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> CreateUser([FromBody] CreateUserRequestDto request, CancellationToken cancellationToken)
@@ -99,6 +112,19 @@ public class AdminUsersController : ControllerBase
         if (companyId == 0) return Forbid();
 
         var result = await _adminUserService.UpdateUserAsync(companyId, id, request, cancellationToken);
+        if (!result.Success) return BadRequest(result);
+
+        return Ok(result);
+    }
+
+    [HttpPost("{id}/reset-password")]
+    [ProducesResponseType(typeof(ApiResponse<ResetPasswordResponseDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ResetPassword(int id, [FromBody] AdminResetPasswordRequestDto? request, [FromQuery] int? companyId, CancellationToken cancellationToken)
+    {
+        var targetCompanyId = GetCompanyId(companyId);
+        if (targetCompanyId == 0) return Forbid();
+
+        var result = await _adminUserService.ResetUserPasswordAsync(targetCompanyId, id, request?.NewPassword, cancellationToken);
         if (!result.Success) return BadRequest(result);
 
         return Ok(result);

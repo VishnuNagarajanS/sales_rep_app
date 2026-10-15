@@ -505,11 +505,14 @@ public class PlatformUsersController : ControllerBase
         if (user == null)
             return NotFound(ApiResponse<object>.FailureResult($"User with ID {id} not found."));
 
+        if (!string.IsNullOrWhiteSpace(req?.NewPassword) && req.NewPassword.Trim().Length < 6)
+            return BadRequest(ApiResponse<object>.FailureResult("Password must be at least 6 characters long."));
+
         var tempPassword = !string.IsNullOrWhiteSpace(req?.NewPassword)
             ? req.NewPassword.Trim()
             : backend.Helpers.PasswordHasher.GenerateTemporaryPassword();
         user.PasswordHash = backend.Helpers.PasswordHasher.HashPassword(tempPassword);
-        user.MustChangePassword = true;
+        user.MustChangePassword = false;
         user.UpdatedAt = DateTime.UtcNow;
 
         // Invalidate active sessions for this user

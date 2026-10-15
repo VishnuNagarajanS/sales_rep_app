@@ -106,6 +106,9 @@ export const CompanyUsersPage: React.FC = () => {
   const [resettingUser, setResettingUser] = useState<User | null>(null);
   const [tempPassword, setTempPassword] = useState('');
   const [hasCopiedTempPassword, setHasCopiedTempPassword] = useState(false);
+  const [isResettingPwd, setIsResettingPwd] = useState(false);
+  const [customPasswordInput, setCustomPasswordInput] = useState('');
+  const [isSubmittingCustomPwd, setIsSubmittingCustomPwd] = useState(false);
 
   // ── Safe User Deletion & Work Handover Modal State ─────────────────────────
   const [deleteModalUser, setDeleteModalUser] = useState<User | null>(null);
@@ -114,11 +117,31 @@ export const CompanyUsersPage: React.FC = () => {
     followupsCount: number;
     dealsCount: number;
     customersCount: number;
+    consultationsCount?: number;
+    myLeadsCount?: number;
+    inFollowupCount?: number;
+    kycCount?: number;
+    opportunitiesCount?: number;
+    convertedCount?: number;
+    roleCode?: string;
     total: number;
-  }>({ leadsCount: 0, followupsCount: 0, dealsCount: 0, customersCount: 0, total: 0 });
+  }>({
+    leadsCount: 0,
+    followupsCount: 0,
+    dealsCount: 0,
+    customersCount: 0,
+    consultationsCount: 0,
+    myLeadsCount: 0,
+    inFollowupCount: 0,
+    kycCount: 0,
+    opportunitiesCount: 0,
+    convertedCount: 0,
+    total: 0,
+  });
   const [deleteSuccessorUserId, setDeleteSuccessorUserId] = useState<string>('');
   const [deleteConfirmAck, setDeleteConfirmAck] = useState<boolean>(false);
   const [isDeletingUser, setIsDeletingUser] = useState<boolean>(false);
+  const [isLoadingWorkload, setIsLoadingWorkload] = useState<boolean>(false);
 
   // ── Invite / Add Handlers ─────────────────────────────────────────────────
   const handleOpenInvite = () => {
@@ -287,20 +310,22 @@ export const CompanyUsersPage: React.FC = () => {
 
   // ── Password Reset Handlers ───────────────────────────────────────────────
   const handleOpenResetPassword = async (u: User) => {
-    const generated = `Nexus#${Math.floor(1000 + Math.random() * 9000)}`;
     setResettingUser(u);
-    setTempPassword(generated);
+    setTempPassword('');
+    setCustomPasswordInput('');
     setHasCopiedTempPassword(false);
+    setIsResettingPwd(true);
 
     try {
-      await adminUserService.updateUser(u.id, {
-        ...u,
-        password: generated
-      });
-      showToast('success', `New password generated and saved for ${u.name}.`);
-    } catch (err) {
-      console.error('Failed to sync new password to backend:', err);
-      showToast('error', 'Failed to save updated password to database.');
+      const res = await adminUserService.resetUserPassword(u.id, tenant?.id);
+      setTempPassword(res.tempPassword);
+      showToast('success', `Password successfully reset for ${u.name}.`);
+    } catch (err: any) {
+      console.error('Failed to reset password:', err);
+      showToast('error', err.message || 'Failed to reset password in database.');
+      setResettingUser(null);
+    } finally {
+      setIsResettingPwd(false);
     }
 
     addStoredAuditLog({
@@ -315,6 +340,29 @@ export const CompanyUsersPage: React.FC = () => {
       companyName: tenant?.name,
       details: `Generated temporary login password for ${u.name} (${u.email}).`,
     });
+  };
+
+  const handleApplyCustomPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resettingUser || !customPasswordInput.trim()) return;
+    if (customPasswordInput.trim().length < 6) {
+      showToast('error', 'Password must be at least 6 characters long.');
+      return;
+    }
+
+    setIsSubmittingCustomPwd(true);
+    try {
+      const res = await adminUserService.resetUserPassword(resettingUser.id, tenant?.id, customPasswordInput.trim());
+      setTempPassword(res.tempPassword);
+      setCustomPasswordInput('');
+      setHasCopiedTempPassword(false);
+      showToast('success', `Custom password set successfully for ${resettingUser.name}.`);
+    } catch (err: any) {
+      console.error('Failed to set custom password:', err);
+      showToast('error', err.message || 'Failed to update custom password in database.');
+    } finally {
+      setIsSubmittingCustomPwd(false);
+    }
   };
 
   const handleCopyPassword = (textToCopy: string, setCopiedState: (v: boolean) => void) => {
@@ -416,7 +464,7 @@ export const CompanyUsersPage: React.FC = () => {
     showToast('success', `User account for ${u.name} reactivated.`);
   };
 
-  const handleInitiateDeleteUser = (u: User) => {
+  const handleInitiateDeleteUser = async (u: User) => {
     if (String(u.id) === String(user?.id)) {
       showToast('error', 'You cannot delete your own account.');
       return;
@@ -426,58 +474,92 @@ export const CompanyUsersPage: React.FC = () => {
       return;
     }
 
-    const allLeads = storageService.getLeads(tenant?.id) || [];
-    const allFollowups = storageService.getFollowups(tenant?.id) || [];
-    const allDeals = storageService.getDeals(tenant?.id) || [];
-    const allCustomers = storageService.getCustomers(tenant?.id) || [];
-
     const uId = String(u.id);
-    const uNameLower = (u.name || '').toLowerCase().trim();
 
-    const userLeads = allLeads.filter(l =>
-      (String(l.assignedAgentId) === uId || (l.assignedAgentName && l.assignedAgentName.toLowerCase().trim() === uNameLower)) &&
-      l.status !== 'Lost' && l.status !== 'Junk'
-    );
-
-    const userFollowups = allFollowups.filter(f =>
-      (String(f.assignedAgentId) === uId || (f.assignedAgentName && f.assignedAgentName.toLowerCase().trim() === uNameLower)) &&
-      f.status === 'Pending'
-    );
-
-    const userDeals = allDeals.filter(d =>
-      (String(d.assignedAgentId) === uId || (d.assignedAgentName && d.assignedAgentName.toLowerCase().trim() === uNameLower)) &&
-      d.stage !== 'Closed Won' && d.stage !== 'Closed Lost'
-    );
-
-    const userCustomers = allCustomers.filter(c =>
-      String(c.assignedAgentId) === uId || (c.assignedAgentName && c.assignedAgentName.toLowerCase().trim() === uNameLower)
-    );
-
-    const leadsCount = userLeads.length;
-    const followupsCount = userFollowups.length;
-    const dealsCount = userDeals.length;
-    const customersCount = userCustomers.length;
-    const total = leadsCount + followupsCount + dealsCount + customersCount;
-
-    setDeleteWorkload({
-      leadsCount,
-      followupsCount,
-      dealsCount,
-      customersCount,
-      total,
-    });
-
-    // Automatically suggest default successor of the same role if available
-    const sameRoleCandidate = usersList.find(
+    // Strictly suggest successor of the exact same role (IRM -> IRM, Sales Exec -> Sales Exec)
+    const sameRoleCandidates = usersList.filter(
       other => String(other.id) !== uId && other.role.code === u.role.code && other.status === 'Active'
     );
-    const fallbackCandidate = usersList.find(
-      other => String(other.id) !== uId && other.status === 'Active'
-    );
 
-    setDeleteSuccessorUserId(sameRoleCandidate ? String(sameRoleCandidate.id) : (fallbackCandidate ? String(fallbackCandidate.id) : ''));
+    setDeleteSuccessorUserId(sameRoleCandidates.length > 0 ? String(sameRoleCandidates[0].id) : '');
     setDeleteConfirmAck(false);
     setDeleteModalUser(u);
+    setIsLoadingWorkload(true);
+
+    try {
+      const workload = await adminUserService.getUserWorkload(u.id, tenant?.id || '1');
+      setDeleteWorkload({
+        leadsCount: workload.leadsCount,
+        followupsCount: workload.followupsCount,
+        dealsCount: workload.dealsCount,
+        customersCount: workload.customersCount,
+        consultationsCount: workload.consultationsCount ?? 0,
+        myLeadsCount: workload.myLeadsCount ?? 0,
+        inFollowupCount: workload.inFollowupCount ?? 0,
+        kycCount: workload.kycCount ?? 0,
+        opportunitiesCount: workload.opportunitiesCount ?? 0,
+        convertedCount: workload.convertedCount ?? 0,
+        roleCode: workload.roleCode || u.role.code,
+        total: workload.total,
+      });
+    } catch (err) {
+      console.warn('Failed to fetch workload from backend, calculating from local cache:', err);
+      const allLeads = storageService.getLeads(tenant?.id) || [];
+      const allFollowups = storageService.getFollowups(tenant?.id) || [];
+      const allDeals = storageService.getDeals(tenant?.id) || [];
+      const allCustomers = storageService.getCustomers(tenant?.id) || [];
+      const allConsultations = (storageService as any).getConsultations ? (storageService as any).getConsultations(tenant?.id) || [] : [];
+      const uNameLower = (u.name || '').toLowerCase().trim();
+
+      const userLeads = allLeads.filter(l =>
+        (String(l.assignedAgentId) === uId || (l.assignedAgentName && l.assignedAgentName.toLowerCase().trim() === uNameLower)) &&
+        l.status !== 'Lost' && l.status !== 'Junk' && l.status !== 'Not Interested' && l.status !== 'Converted'
+      );
+
+      const userFollowups = allFollowups.filter(f =>
+        (String(f.assignedAgentId) === uId || (f.assignedAgentName && f.assignedAgentName.toLowerCase().trim() === uNameLower)) &&
+        (f.status === 'Pending' || (f as any).status === 0)
+      );
+
+      const userDeals = allDeals.filter(d =>
+        (String(d.assignedAgentId) === uId || (d.assignedAgentName && d.assignedAgentName.toLowerCase().trim() === uNameLower)) &&
+        d.stage !== 'converted' && d.stage !== 'lost' && d.stage !== 'Closed Won' && d.stage !== 'Closed Lost'
+      );
+
+      const userCustomers = allCustomers.filter(c =>
+        (String(c.assignedAgentId) === uId || (c.assignedAgentName && c.assignedAgentName.toLowerCase().trim() === uNameLower)) &&
+        c.status !== 'Inactive'
+      );
+
+      const userConsultations = allConsultations.filter((c: any) =>
+        (String(c.consultantId) === uId || (c.consultantName && c.consultantName.toLowerCase().trim() === uNameLower) || (c.referredByAgentName && c.referredByAgentName.toLowerCase().trim() === uNameLower)) &&
+        c.status === 'Scheduled'
+      );
+
+      const isSalesExec = u.role.code === 'sales_executive';
+      const fallbackTotal = u.role.code === 'irm'
+        ? (userLeads.length + userFollowups.length)
+        : isSalesExec
+          ? (userLeads.length + userFollowups.length + userConsultations.length)
+          : (userLeads.length + userFollowups.length + userDeals.length + userCustomers.length);
+
+      setDeleteWorkload({
+        leadsCount: userLeads.length,
+        followupsCount: userFollowups.length,
+        dealsCount: userDeals.length,
+        customersCount: userCustomers.length,
+        consultationsCount: userConsultations.length,
+        myLeadsCount: userLeads.length,
+        inFollowupCount: userFollowups.length,
+        kycCount: 0,
+        opportunitiesCount: userDeals.length,
+        convertedCount: 0,
+        roleCode: u.role.code,
+        total: fallbackTotal,
+      });
+    } finally {
+      setIsLoadingWorkload(false);
+    }
   };
 
   const handleConfirmDeleteUser = async () => {
@@ -997,10 +1079,10 @@ export const CompanyUsersPage: React.FC = () => {
       <Modal
         isOpen={!!resettingUser}
         onClose={() => setResettingUser(null)}
-        title="Reset Temporary Password"
+        title="Reset Password"
         subtitle={
           resettingUser
-            ? `New temporary credential generated for ${resettingUser.name} (${resettingUser.email})`
+            ? `Credentials for ${resettingUser.name} (${resettingUser.email})`
             : ''
         }
         footer={
@@ -1015,26 +1097,69 @@ export const CompanyUsersPage: React.FC = () => {
       >
         {resettingUser && (
           <div>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-              Provide this temporary password to <strong>{resettingUser.name}</strong>. They will be prompted to
-              create a permanent password upon first login.
-            </p>
+            {isResettingPwd ? (
+              <div style={{ textAlign: 'center', padding: '24px 0' }}>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
+                  Updating credentials in database and invalidating old sessions...
+                </p>
+              </div>
+            ) : (
+              <>
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+                  The password has been securely updated in the database. Provide this active password to <strong>{resettingUser.name}</strong>. Their previous password and active sessions have been invalidated.
+                </p>
 
-            <div className="company-temp-password-box">
-              <span className="company-temp-password-text">{tempPassword}</span>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => handleCopyPassword(tempPassword, setHasCopiedTempPassword)}
-              >
-                {hasCopiedTempPassword ? <Check size={14} color="#059669" /> : <Copy size={14} />}
-                {hasCopiedTempPassword ? 'Copied!' : 'Copy Password'}
-              </button>
-            </div>
+                {tempPassword && (
+                  <div className="company-temp-password-box">
+                    <div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600, marginBottom: 2 }}>
+                        Current Active Password
+                      </div>
+                      <span className="company-temp-password-text">{tempPassword}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleCopyPassword(tempPassword, setHasCopiedTempPassword)}
+                    >
+                      {hasCopiedTempPassword ? <Check size={14} color="#059669" /> : <Copy size={14} />}
+                      {hasCopiedTempPassword ? 'Copied!' : 'Copy Password'}
+                    </button>
+                  </div>
+                )}
 
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '12px' }}>
-              This action has been securely recorded in the platform audit log.
-            </p>
+                <div style={{ marginTop: '20px', borderTop: '1px solid var(--border-base)', paddingTop: '16px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', display: 'block', marginBottom: '6px' }}>
+                    Or Set a Custom Password
+                  </label>
+                  <form onSubmit={handleApplyCustomPassword} style={{ display: 'flex', gap: '8px' }}>
+                    <input
+                      type="text"
+                      className="form-input"
+                      style={{ flex: 1, fontSize: '13px', fontFamily: 'var(--font-mono, monospace)' }}
+                      placeholder="Enter new custom password..."
+                      value={customPasswordInput}
+                      onChange={e => setCustomPasswordInput(e.target.value)}
+                      minLength={6}
+                    />
+                    <button
+                      type="submit"
+                      className="btn btn-secondary btn-sm"
+                      disabled={isSubmittingCustomPwd || !customPasswordInput.trim()}
+                    >
+                      {isSubmittingCustomPwd ? 'Saving...' : 'Set Password'}
+                    </button>
+                  </form>
+                  <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    Must be at least 6 characters. Saving immediately updates the database.
+                  </p>
+                </div>
+
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '16px' }}>
+                  This action has been securely recorded in the platform audit log.
+                </p>
+              </>
+            )}
           </div>
         )}
       </Modal>
@@ -1123,11 +1248,14 @@ export const CompanyUsersPage: React.FC = () => {
               onClick={handleConfirmDeleteUser}
               disabled={
                 isDeletingUser ||
+                isLoadingWorkload ||
                 (deleteWorkload.total > 0 && (!deleteSuccessorUserId || !deleteConfirmAck))
               }
             >
               {isDeletingUser ? (
                 'Processing...'
+              ) : isLoadingWorkload ? (
+                'Loading Workload...'
               ) : deleteWorkload.total > 0 ? (
                 <>
                   <UserCheck size={14} /> Handover & Delete User
@@ -1141,144 +1269,274 @@ export const CompanyUsersPage: React.FC = () => {
           </>
         }
       >
-        {deleteModalUser && (
-          <div className="company-delete-modal-content">
-            {deleteWorkload.total > 0 ? (
-              <>
-                {/* Warning Alert Box */}
-                <div className="company-delete-warning-box">
-                  <div className="company-delete-warning-icon">
-                    <AlertTriangle size={20} color="#d97706" />
-                  </div>
-                  <div>
-                    <div className="company-delete-warning-title">
-                      Active Responsibilities Detected ({deleteWorkload.total} Items)
-                    </div>
-                    <div className="company-delete-warning-text">
-                      <strong>{deleteModalUser.name}</strong> currently has active tasks assigned.
-                      Deleting this account directly will cause dropped follow-ups and unassigned leads.
-                      Please select an active team member below to receive their entire workload before deleting.
-                    </div>
-                  </div>
-                </div>
+        {deleteModalUser && (() => {
+          const roleCode = deleteModalUser.role?.code || deleteWorkload.roleCode;
+          const isIrm = roleCode === 'irm';
+          const isSalesExec = roleCode === 'sales_executive';
 
-                {/* Workload Breakdown Pills */}
-                <div className="company-delete-workload-grid">
-                  <div className="company-delete-workload-card card-leads">
-                    <span className="card-val">{deleteWorkload.leadsCount}</span>
-                    <span className="card-lbl">Active Leads</span>
-                  </div>
-                  <div className="company-delete-workload-card card-followups">
-                    <span className="card-val">{deleteWorkload.followupsCount}</span>
-                    <span className="card-lbl">Pending Follow-ups</span>
-                  </div>
-                  <div className="company-delete-workload-card card-deals">
-                    <span className="card-val">{deleteWorkload.dealsCount}</span>
-                    <span className="card-lbl">Active Deals</span>
-                  </div>
-                  <div className="company-delete-workload-card card-customers">
-                    <span className="card-val">{deleteWorkload.customersCount}</span>
-                    <span className="card-lbl">Assigned Customers</span>
-                  </div>
-                </div>
+          // Strictly filter successors to ONLY users of the exact same role
+          const eligibleSuccessors = usersList.filter(
+            u => String(u.id) !== String(deleteModalUser.id) &&
+                 u.status === 'Active' &&
+                 u.role.code === deleteModalUser.role.code
+          );
 
-                {/* Successor Selection Form */}
-                <div className="form-group" style={{ marginTop: 16 }}>
-                  <label htmlFor="delete-user-successor-select" className="form-label" style={{ fontWeight: 600 }}>
-                    Select Successor Agent (Handover Recipient) <span style={{ color: '#ef4444' }}>*</span>
+          return (
+            <div className="company-delete-modal-content">
+              {isLoadingWorkload ? (
+                <div style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--text-secondary)' }}>
+                  <div style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 6, color: 'var(--text-primary)' }}>
+                    Loading assigned workload...
+                  </div>
+                  <div style={{ fontSize: '0.85rem' }}>Fetching live active responsibilities from database</div>
+                </div>
+              ) : deleteWorkload.total > 0 ? (
+                <>
+                  {/* Warning Alert Box */}
+                  <div className="company-delete-warning-box">
+                    <div className="company-delete-warning-icon">
+                      <AlertTriangle size={20} color="#d97706" />
+                    </div>
+                    <div>
+                      <div className="company-delete-warning-title">
+                        Active Responsibilities Detected ({deleteWorkload.total} Items)
+                      </div>
+                      <div className="company-delete-warning-text">
+                        {isIrm ? (
+                          <>
+                            <strong>{deleteModalUser.name}</strong> currently has active IRM responsibilities assigned.
+                            Deleting this account directly will disrupt investor relationships, KYC verifications, and follow-ups.
+                            Please select an active IRM below to receive their entire workload before deleting.
+                          </>
+                        ) : isSalesExec ? (
+                          <>
+                            <strong>{deleteModalUser.name}</strong> currently has active sales tasks assigned.
+                            Deleting this account directly will cause dropped leads, follow-ups, and scheduled consultations.
+                            Please select an active Sales Executive below to receive their entire workload before deleting.
+                          </>
+                        ) : (
+                          <>
+                            <strong>{deleteModalUser.name}</strong> currently has active tasks assigned.
+                            Deleting this account directly will cause dropped follow-ups and unassigned leads.
+                            Please select an active team member below to receive their entire workload before deleting.
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Workload Breakdown Pills */}
+                  {isIrm ? (
+                    <div className="company-delete-workload-grid">
+                      <div className="company-delete-workload-card card-leads">
+                        <span className="card-val">{deleteWorkload.myLeadsCount ?? 0}</span>
+                        <span className="card-lbl">In "My Leads"</span>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: 2 }}>
+                          Initial / Interested
+                        </span>
+                      </div>
+                      <div className="company-delete-workload-card card-followups">
+                        <span className="card-val">{deleteWorkload.inFollowupCount ?? 0}</span>
+                        <span className="card-lbl">In Follow-up</span>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: 2 }}>
+                          Scheduled calls
+                        </span>
+                      </div>
+                      <div className="company-delete-workload-card card-deals">
+                        <span className="card-val">{deleteWorkload.kycCount ?? 0}</span>
+                        <span className="card-lbl">In KYC Stage</span>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: 2 }}>
+                          Documents / Verification
+                        </span>
+                      </div>
+                      <div className="company-delete-workload-card card-customers">
+                        <span className="card-val">{deleteWorkload.opportunitiesCount ?? 0}</span>
+                        <span className="card-lbl">In Opportunities</span>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: 2 }}>
+                          Deals in pipeline
+                        </span>
+                      </div>
+                    </div>
+                  ) : isSalesExec ? (
+                    <div className="company-delete-workload-grid grid-3">
+                      <div className="company-delete-workload-card card-leads">
+                        <span className="card-val">{deleteWorkload.leadsCount}</span>
+                        <span className="card-lbl">Active Leads</span>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: 2 }}>
+                          In Leads page
+                        </span>
+                      </div>
+                      <div className="company-delete-workload-card card-followups">
+                        <span className="card-val">{deleteWorkload.followupsCount}</span>
+                        <span className="card-lbl">Pending Follow-ups</span>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: 2 }}>
+                          In Follow-ups page
+                        </span>
+                      </div>
+                      <div className="company-delete-workload-card card-deals">
+                        <span className="card-val">{deleteWorkload.consultationsCount ?? 0}</span>
+                        <span className="card-lbl">Scheduled Consultations</span>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: 2 }}>
+                          In Consultations page
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="company-delete-workload-grid">
+                      <div className="company-delete-workload-card card-leads">
+                        <span className="card-val">{deleteWorkload.leadsCount}</span>
+                        <span className="card-lbl">Active Leads</span>
+                      </div>
+                      <div className="company-delete-workload-card card-followups">
+                        <span className="card-val">{deleteWorkload.followupsCount}</span>
+                        <span className="card-lbl">Pending Follow-ups</span>
+                      </div>
+                      <div className="company-delete-workload-card card-deals">
+                        <span className="card-val">{deleteWorkload.dealsCount}</span>
+                        <span className="card-lbl">Active Deals</span>
+                      </div>
+                      <div className="company-delete-workload-card card-customers">
+                        <span className="card-val">{deleteWorkload.customersCount}</span>
+                        <span className="card-lbl">Assigned Customers</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Successor Selection Form */}
+                  <div className="form-group" style={{ marginTop: 16 }}>
+                    <label htmlFor="delete-user-successor-select" className="form-label" style={{ fontWeight: 600 }}>
+                      Select Successor {deleteModalUser.role.name} (Handover Recipient) <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <select
+                      id="delete-user-successor-select"
+                      className="form-select"
+                      value={deleteSuccessorUserId}
+                      onChange={e => setDeleteSuccessorUserId(e.target.value)}
+                      disabled={eligibleSuccessors.length === 0}
+                    >
+                      {eligibleSuccessors.length === 0 ? (
+                        <option value="">No other active {deleteModalUser.role.name} available</option>
+                      ) : (
+                        <>
+                          <option value="">Choose an active {deleteModalUser.role.name}...</option>
+                          {eligibleSuccessors.map(u => (
+                            <option key={u.id} value={u.id}>
+                              {u.name} ({u.email})
+                            </option>
+                          ))}
+                        </>
+                      )}
+                    </select>
+
+                    {eligibleSuccessors.length === 0 && (
+                      <div
+                        style={{
+                          background: 'rgba(239, 68, 68, 0.08)',
+                          border: '1px solid rgba(239, 68, 68, 0.25)',
+                          borderRadius: 8,
+                          padding: '10px 14px',
+                          fontSize: '0.85rem',
+                          color: '#ef4444',
+                          marginTop: 10,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                        }}
+                      >
+                        <AlertTriangle size={16} color="#ef4444" />
+                        <span>
+                          Cannot delete <strong>{deleteModalUser.name}</strong> because they have active items and there is no other active{' '}
+                          <strong>{deleteModalUser.role.name}</strong> in {tenant?.name} to receive the workload. Please invite or activate another{' '}
+                          <strong>{deleteModalUser.role.name}</strong> first.
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Handover summary info */}
+                  {deleteSuccessorUserId && (
+                    <div
+                      style={{
+                        background: 'rgba(59, 130, 246, 0.08)',
+                        border: '1px solid rgba(59, 130, 246, 0.25)',
+                        borderRadius: 8,
+                        padding: '10px 14px',
+                        fontSize: '0.85rem',
+                        color: 'var(--text-primary)',
+                        marginTop: 12,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                      }}
+                    >
+                      <ArrowRight size={15} color="#3b82f6" />
+                      <span>
+                        All <strong>{deleteWorkload.total}</strong> active items will be transferred to{' '}
+                        <strong>{usersList.find(u => String(u.id) === String(deleteSuccessorUserId))?.name}</strong>.
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Confirmation Checkbox */}
+                  <label className="company-delete-ack-label" style={{ marginTop: 14 }}>
+                    <input
+                      type="checkbox"
+                      checked={deleteConfirmAck}
+                      onChange={e => setDeleteConfirmAck(e.target.checked)}
+                      disabled={eligibleSuccessors.length === 0}
+                      style={{ cursor: eligibleSuccessors.length === 0 ? 'not-allowed' : 'pointer', width: 16, height: 16 }}
+                    />
+                    <span>
+                      {isIrm ? (
+                        <>
+                          I confirm that all active leads, follow-ups, KYC verifications, and deals will be handed over, and{' '}
+                          <strong>{deleteModalUser.name}</strong> will be permanently deleted.
+                        </>
+                      ) : isSalesExec ? (
+                        <>
+                          I confirm that all active leads, follow-ups, and scheduled consultations will be handed over, and{' '}
+                          <strong>{deleteModalUser.name}</strong> will be permanently deleted.
+                        </>
+                      ) : (
+                        <>
+                          I confirm that all active leads, follow-ups, and deals will be handed over, and{' '}
+                          <strong>{deleteModalUser.name}</strong> will be permanently deleted.
+                        </>
+                      )}
+                    </span>
                   </label>
-                  <select
-                    id="delete-user-successor-select"
-                    className="form-select"
-                    value={deleteSuccessorUserId}
-                    onChange={e => setDeleteSuccessorUserId(e.target.value)}
-                  >
-                    <option value="">Choose an active agent...</option>
-                    {usersList
-                      .filter(u => String(u.id) !== String(deleteModalUser.id) && u.status === 'Active')
-                      .sort((a, b) => {
-                        const aSameRole = a.role.code === deleteModalUser.role.code ? 0 : 1;
-                        const bSameRole = b.role.code === deleteModalUser.role.code ? 0 : 1;
-                        if (aSameRole !== bSameRole) return aSameRole - bSameRole;
-                        return a.name.localeCompare(b.name);
-                      })
-                      .map(u => (
-                        <option key={u.id} value={u.id}>
-                          {u.name} ({u.role.name})
-                          {u.role.code === deleteModalUser.role.code ? ' — Recommended (Same Role)' : ''}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-
-                {/* Handover summary info */}
-                {deleteSuccessorUserId && (
+                </>
+              ) : (
+                /* No active workload */
+                <div style={{ textAlign: 'center', padding: '12px 6px' }}>
                   <div
                     style={{
-                      background: 'rgba(59, 130, 246, 0.08)',
-                      border: '1px solid rgba(59, 130, 246, 0.25)',
-                      borderRadius: 8,
-                      padding: '10px 14px',
-                      fontSize: '0.85rem',
-                      color: 'var(--text-primary)',
-                      marginTop: 12,
+                      width: 48,
+                      height: 48,
+                      borderRadius: '50%',
+                      background: 'rgba(239, 68, 68, 0.12)',
+                      color: '#dc2626',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: 8,
+                      justifyContent: 'center',
+                      margin: '0 auto 14px',
                     }}
                   >
-                    <ArrowRight size={15} color="#3b82f6" />
-                    <span>
-                      All <strong>{deleteWorkload.total}</strong> active items will be transferred to{' '}
-                      <strong>{usersList.find(u => String(u.id) === String(deleteSuccessorUserId))?.name}</strong>.
-                    </span>
+                    <Trash2 size={24} color="#dc2626" />
                   </div>
-                )}
-
-                {/* Confirmation Checkbox */}
-                <label className="company-delete-ack-label" style={{ marginTop: 14 }}>
-                  <input
-                    type="checkbox"
-                    checked={deleteConfirmAck}
-                    onChange={e => setDeleteConfirmAck(e.target.checked)}
-                    style={{ cursor: 'pointer', width: 16, height: 16 }}
-                  />
-                  <span>
-                    I confirm that all active leads, follow-ups, and deals will be handed over, and{' '}
-                    <strong>{deleteModalUser.name}</strong> will be permanently deleted.
-                  </span>
-                </label>
-              </>
-            ) : (
-              /* No active workload */
-              <div style={{ textAlign: 'center', padding: '12px 6px' }}>
-                <div
-                  style={{
-                    width: 48,
-                    height: 48,
-                    borderRadius: '50%',
-                    background: 'rgba(239, 68, 68, 0.12)',
-                    color: '#dc2626',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    margin: '0 auto 14px',
-                  }}
-                >
-                  <Trash2 size={24} color="#dc2626" />
+                  <h4 style={{ margin: '0 0 8px', fontSize: '1.05rem', fontWeight: 600 }}>
+                    Permanently delete {deleteModalUser.name}?
+                  </h4>
+                  <p style={{ margin: '0 0 16px', color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                    This user currently has <strong>0 active {isIrm ? 'leads, follow-ups, KYC submissions, or deals' : isSalesExec ? 'leads, follow-ups, or scheduled consultations' : 'leads, follow-ups, or deals'} assigned</strong>.
+                    Are you sure you want to remove their user account ({deleteModalUser.email}) from {tenant?.name}?
+                    This action cannot be undone.
+                  </p>
                 </div>
-                <h4 style={{ margin: '0 0 8px', fontSize: '1.05rem', fontWeight: 600 }}>
-                  Permanently delete {deleteModalUser.name}?
-                </h4>
-                <p style={{ margin: '0 0 16px', color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: 1.5 }}>
-                  This user currently has <strong>0 active leads, follow-ups, or deals assigned</strong>.
-                  Are you sure you want to remove their user account ({deleteModalUser.email}) from {tenant?.name}?
-                  This action cannot be undone.
-                </p>
-              </div>
-            )}
-          </div>
-        )}
+              )}
+            </div>
+          );
+        })()}
       </Modal>
     </div>
   );

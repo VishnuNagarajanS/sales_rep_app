@@ -13,12 +13,18 @@ public class AdminUserService : IAdminUserService
     private readonly ApplicationDbContext _context;
     private readonly backend.Services.Email.IEmailService _emailService;
     private readonly backend.Services.Interfaces.ICompanyClock _clock;
+    private readonly Microsoft.AspNetCore.SignalR.IHubContext<backend.Hubs.PlatformHub, backend.Hubs.IPlatformHubClient>? _hubContext;
 
-    public AdminUserService(ApplicationDbContext context, backend.Services.Email.IEmailService emailService, backend.Services.Interfaces.ICompanyClock clock)
+    public AdminUserService(
+        ApplicationDbContext context,
+        backend.Services.Email.IEmailService emailService,
+        backend.Services.Interfaces.ICompanyClock clock,
+        Microsoft.AspNetCore.SignalR.IHubContext<backend.Hubs.PlatformHub, backend.Hubs.IPlatformHubClient>? hubContext = null)
     {
         _context = context;
         _emailService = emailService;
         _clock = clock;
+        _hubContext = hubContext;
     }
 
     public async Task<ApiResponse<List<AdminUserDto>>> GetUsersByCompanyAsync(int companyId, CancellationToken cancellationToken = default)
@@ -198,7 +204,19 @@ public class AdminUserService : IAdminUserService
         user.Status = request.Status;
         if (!string.IsNullOrWhiteSpace(request.Password))
         {
-            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password);
+            user.PasswordHash = backend.Helpers.PasswordHasher.HashPassword(request.Password);
+            user.MustChangePassword = false;
+
+            var activeSessions = await _context.UserSessions
+                .Where(s => s.UserId == user.Id && s.IsActive)
+                .ToListAsync(cancellationToken);
+
+            foreach (var session in activeSessions)
+            {
+                session.IsActive = false;
+                session.RevokedAt = DateTime.UtcNow;
+                session.RevokedReason = "Administrator updated account password.";
+            }
         }
         user.UpdatedAt = DateTime.UtcNow;
 
@@ -311,6 +329,209 @@ public class AdminUserService : IAdminUserService
         }
     }
 
+    public async Task<ApiResponse<UserWorkloadDto>> GetUserWorkloadAsync(int companyId, int userId, CancellationToken cancellationToken = default)
+    {
+        var user = await _context.Users
+            .Include(u => u.Role)
+            .FirstOrDefaultAsync(u => u.CompanyId == companyId && u.Id == userId, cancellationToken);
+
+        if (user == null)
+            return ApiResponse<UserWorkloadDto>.FailureResult("User not found.");
+
+        var roleCode = user.Role?.Code?.ToLowerInvariant() ?? string.Empty;
+        var isIrm = roleCode == "irm";
+
+        // 1. General Active Leads: assigned to this user and not terminal (Lost, Junk, Not Interested, Converted)
+        var leads = await _context.Leads
+            .Where(l => l.CompanyId == companyId && l.AssignedAgentId == userId)
+            .ToListAsync(cancellationToken);
+        var activeLeadsCount = leads.Count(l =>
+            !string.Equals(l.Status, "Lost", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(l.Status, "Junk", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(l.Status, "Not Interested", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(l.Status, "Converted", StringComparison.OrdinalIgnoreCase));
+
+        // 2. Pending Follow-ups: assigned to this user and Pending
+        var followups = await _context.Followups
+            .Where(f => f.CompanyId == companyId && f.AssignedAgentId == userId)
+            .ToListAsync(cancellationToken);
+        var pendingFollowupsCount = followups.Count(f =>
+            f.Status == backend.Models.Enums.FollowupStatus.Pending);
+
+        // 3. Active Deals: assigned to this user in GhlDeals and not terminal (converted, lost, Closed Won, Closed Lost)
+        var deals = await _context.GhlDeals
+            .Where(d => d.CompanyId == companyId && d.AssignedAgentId == userId)
+            .ToListAsync(cancellationToken);
+        var activeDealsCount = deals.Count(d =>
+            !string.Equals(d.Stage, "converted", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(d.Stage, "lost", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(d.Stage, "Closed Won", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(d.Stage, "Closed Lost", StringComparison.OrdinalIgnoreCase));
+
+        // 4. Assigned Customers: assigned to this user and active
+        var customers = await _context.Customers
+            .Where(c => c.CompanyId == companyId && c.AssignedAgentId == userId)
+            .ToListAsync(cancellationToken);
+        var assignedCustomersCount = customers.Count(c =>
+            !string.Equals(c.Status, "Inactive", StringComparison.OrdinalIgnoreCase));
+
+        // 5. Scheduled Consultations: assigned or referred to this user with Status == Scheduled
+        var scheduledConsultationsCount = await _context.Consultations
+            .Where(c => c.CompanyId == companyId &&
+                        (c.ConsultantId == userId || (user.Name != null && c.ReferredByAgentName != null && EF.Functions.ILike(c.ReferredByAgentName, user.Name))) &&
+                        c.Status == backend.Models.Enums.ConsultationStatus.Scheduled)
+            .CountAsync(cancellationToken);
+
+        // 6. IRM Specific Stage Classification (matches IRM All Leads / My Leads / Follow-up / KYC / Opportunities ledger)
+        int myLeadsCount = 0;
+        int inFollowupCount = 0;
+        int kycCount = 0;
+        int opportunitiesCount = 0;
+        int convertedCount = 0;
+
+        if (isIrm)
+        {
+            var pendingFollowupList = await _context.Followups
+                .AsNoTracking()
+                .Where(f => f.CompanyId == companyId && f.Status == backend.Models.Enums.FollowupStatus.Pending)
+                .Select(f => new { f.ContactId, f.ContactPhone })
+                .ToListAsync(cancellationToken);
+
+            var kycRecords = await _context.InvestorKycs
+                .AsNoTracking()
+                .Where(k => k.CompanyId == companyId)
+                .Select(k => new { k.Phone, k.Email, k.InvestorName, Status = k.Status.ToString() })
+                .ToListAsync(cancellationToken);
+
+            var investorsList = await _context.Investors
+                .AsNoTracking()
+                .Where(i => i.CompanyId == companyId)
+                .Select(i => new { i.Id, i.Phone, i.Email, i.Name, Status = i.Status.ToString() })
+                .ToListAsync(cancellationToken);
+
+            var customersList = await _context.Customers
+                .AsNoTracking()
+                .Where(c => c.CompanyId == companyId)
+                .Select(c => new { c.Id, c.Phone, c.Email, c.Name })
+                .ToListAsync(cancellationToken);
+
+            var dealsList = await _context.GhlDeals
+                .AsNoTracking()
+                .Include(d => d.Customer)
+                .Where(d => d.CompanyId == companyId)
+                .Select(d => new {
+                    d.CustomerId,
+                    d.CustomerName,
+                    CustomerPhone = d.Customer != null ? d.Customer.Phone : null,
+                    CustomerEmail = d.Customer != null ? d.Customer.Email : null,
+                    d.Stage,
+                    d.Value
+                })
+                .ToListAsync(cancellationToken);
+
+            foreach (var l in leads)
+            {
+                var phoneDigits = new string((l.Phone ?? string.Empty).Where(char.IsDigit).ToArray());
+                var phoneLast10 = phoneDigits.Length >= 10 ? phoneDigits[^10..] : phoneDigits;
+                var leadEmailLower = (l.Email ?? string.Empty).Trim().ToLower();
+                var leadNameLower = (l.Name ?? string.Empty).Trim().ToLower();
+
+                var matchedCustomer = customersList.FirstOrDefault(c =>
+                    (!string.IsNullOrWhiteSpace(phoneLast10) && (new string((c.Phone ?? string.Empty).Where(char.IsDigit).ToArray()).EndsWith(phoneLast10))) ||
+                    (!string.IsNullOrWhiteSpace(leadEmailLower) && !string.IsNullOrWhiteSpace(c.Email) && c.Email.Trim().ToLower() == leadEmailLower) ||
+                    (!string.IsNullOrWhiteSpace(leadNameLower) && c.Name.Trim().ToLower() == leadNameLower));
+
+                var matchedInvestor = investorsList.FirstOrDefault(i =>
+                    (!string.IsNullOrWhiteSpace(phoneLast10) && (new string((i.Phone ?? string.Empty).Where(char.IsDigit).ToArray()).EndsWith(phoneLast10))) ||
+                    (!string.IsNullOrWhiteSpace(leadEmailLower) && !string.IsNullOrWhiteSpace(i.Email) && i.Email.Trim().ToLower() == leadEmailLower) ||
+                    (!string.IsNullOrWhiteSpace(leadNameLower) && i.Name.Trim().ToLower() == leadNameLower));
+
+                var matchedDeal = dealsList.FirstOrDefault(d =>
+                    (matchedCustomer != null && d.CustomerId == matchedCustomer.Id) ||
+                    (!string.IsNullOrWhiteSpace(phoneLast10) && (new string((d.CustomerPhone ?? string.Empty).Where(char.IsDigit).ToArray()).EndsWith(phoneLast10))) ||
+                    (!string.IsNullOrWhiteSpace(leadEmailLower) && !string.IsNullOrWhiteSpace(d.CustomerEmail) && d.CustomerEmail.Trim().ToLower() == leadEmailLower) ||
+                    (!string.IsNullOrWhiteSpace(leadNameLower) && d.CustomerName.Trim().ToLower() == leadNameLower));
+
+                var matchedKyc = kycRecords.FirstOrDefault(k =>
+                    (!string.IsNullOrWhiteSpace(phoneLast10) && (new string((k.Phone ?? string.Empty).Where(char.IsDigit).ToArray()).EndsWith(phoneLast10))) ||
+                    (!string.IsNullOrWhiteSpace(leadEmailLower) && !string.IsNullOrWhiteSpace(k.Email) && k.Email.Trim().ToLower() == leadEmailLower) ||
+                    (!string.IsNullOrWhiteSpace(leadNameLower) && k.InvestorName.Trim().ToLower() == leadNameLower));
+
+                var matchedFollowup = pendingFollowupList.FirstOrDefault(f =>
+                    (f.ContactId != null && f.ContactId == l.Id.ToString()) ||
+                    (!string.IsNullOrWhiteSpace(phoneLast10) && (new string((f.ContactPhone ?? string.Empty).Where(char.IsDigit).ToArray()).EndsWith(phoneLast10))));
+
+                string currentStage = "My Leads";
+                if (matchedDeal != null)
+                {
+                    var dStage = (matchedDeal.Stage ?? string.Empty).Trim().ToLowerInvariant();
+                    if (dStage == "qualified_investor" || dStage == "qualified")
+                        currentStage = "KYC";
+                    else if (dStage == "investment_opportunity" || dStage == "opportunity" || dStage == "term_sheet" || dStage == "committed")
+                        currentStage = "Opportunities";
+                    else if (dStage == "converted" || dStage == "won")
+                        currentStage = "Converted";
+                    else if (dStage == "followup")
+                        currentStage = "Follow-up";
+                    else
+                        currentStage = "My Leads";
+                }
+                else if (matchedInvestor != null || (matchedKyc != null && matchedKyc.Status.Equals("Approved", StringComparison.OrdinalIgnoreCase)))
+                {
+                    currentStage = "Investor 360";
+                }
+                else if (matchedKyc != null || (!string.IsNullOrWhiteSpace(l.CustomFieldsJson) && l.CustomFieldsJson.Contains("kyc", StringComparison.OrdinalIgnoreCase)))
+                {
+                    currentStage = "KYC";
+                }
+                else if (matchedFollowup != null || l.Status.Equals("Follow-up Required", StringComparison.OrdinalIgnoreCase) || l.Status.Equals("Callback", StringComparison.OrdinalIgnoreCase))
+                {
+                    currentStage = "Follow-up";
+                }
+                else if (l.Status.Equals("Converted", StringComparison.OrdinalIgnoreCase))
+                {
+                    currentStage = "Converted";
+                }
+                else if (!l.Status.Equals("Lost", StringComparison.OrdinalIgnoreCase) && !l.Status.Equals("Junk", StringComparison.OrdinalIgnoreCase))
+                {
+                    currentStage = "My Leads";
+                }
+
+                if (currentStage == "My Leads") myLeadsCount++;
+                else if (currentStage == "Follow-up") inFollowupCount++;
+                else if (currentStage == "KYC") kycCount++;
+                else if (currentStage == "Opportunities") opportunitiesCount++;
+                else if (currentStage == "Converted") convertedCount++;
+            }
+        }
+
+        var total = isIrm 
+            ? (myLeadsCount + inFollowupCount + kycCount + opportunitiesCount)
+            : (roleCode == "sales_executive"
+                ? (activeLeadsCount + pendingFollowupsCount + scheduledConsultationsCount)
+                : (activeLeadsCount + pendingFollowupsCount + activeDealsCount + assignedCustomersCount));
+
+        var dto = new UserWorkloadDto
+        {
+            UserId = user.Id,
+            UserName = user.Name,
+            RoleCode = roleCode,
+            LeadsCount = activeLeadsCount,
+            FollowupsCount = pendingFollowupsCount,
+            DealsCount = activeDealsCount,
+            CustomersCount = assignedCustomersCount,
+            ConsultationsCount = scheduledConsultationsCount,
+            MyLeadsCount = myLeadsCount,
+            InFollowupCount = inFollowupCount,
+            KycCount = kycCount,
+            OpportunitiesCount = opportunitiesCount,
+            ConvertedCount = convertedCount,
+            Total = total
+        };
+
+        return ApiResponse<UserWorkloadDto>.SuccessResult(dto);
+    }
+
     public async Task<ApiResponse<bool>> DeleteUserAsync(int companyId, int userId, int? handoverToUserId = null, CancellationToken cancellationToken = default)
     {
         var user = await _context.Users
@@ -336,7 +557,24 @@ public class AdminUserService : IAdminUserService
             .Where(c => c.CompanyId == companyId && c.AssignedAgentId == userId)
             .ToListAsync(cancellationToken);
 
-        var totalActive = leads.Count + followups.Count + customers.Count;
+        var deals = await _context.GhlDeals
+            .Where(d => d.CompanyId == companyId && d.AssignedAgentId == userId)
+            .ToListAsync(cancellationToken);
+
+        var investors = await _context.Investors
+            .Where(i => i.CompanyId == companyId && i.AssignedIrmId == userId)
+            .ToListAsync(cancellationToken);
+
+        var irmCards = await _context.IrmPipelineCards
+            .Where(c => c.CompanyId == companyId && c.AssignedIrmId == userId)
+            .ToListAsync(cancellationToken);
+
+        var consultations = await _context.Consultations
+            .Where(c => c.CompanyId == companyId &&
+                        (c.ConsultantId == userId || (user.Name != null && c.ReferredByAgentName != null && EF.Functions.ILike(c.ReferredByAgentName, user.Name))))
+            .ToListAsync(cancellationToken);
+
+        var totalActive = leads.Count + followups.Count + customers.Count + deals.Count + investors.Count + irmCards.Count + consultations.Count;
 
         backend.Models.Entities.User? handoverUser = null;
         if (handoverToUserId.HasValue && handoverToUserId.Value > 0)
@@ -350,10 +588,14 @@ public class AdminUserService : IAdminUserService
 
             if (handoverUser == null)
                 return ApiResponse<bool>.FailureResult("Selected handover recipient user not found or is inactive.");
+
+            // Strict role matching check: IRM -> IRM, Sales Executive -> Sales Executive
+            if (handoverUser.RoleId != user.RoleId)
+                return ApiResponse<bool>.FailureResult($"Successor agent must have the same role ({user.Role?.Name ?? "Same Role"}). Cannot hand over work across different roles.");
         }
         else if (totalActive > 0)
         {
-            return ApiResponse<bool>.FailureResult($"Cannot delete '{user.Name}' without reassigning active work. This user currently has {leads.Count} assigned leads, {followups.Count} follow-ups, and {customers.Count} customers. Please select an active team member to hand over these items.");
+            return ApiResponse<bool>.FailureResult($"Cannot delete '{user.Name}' without reassigning active work. This user currently has {leads.Count} assigned leads, {followups.Count} follow-ups, {deals.Count} deals, and {customers.Count} customers. Please select an active team member to hand over these items.");
         }
 
         using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
@@ -415,14 +657,53 @@ public class AdminUserService : IAdminUserService
                 _context.Followups.RemoveRange(followups);
             }
 
-            // 4. Remove user
+            // 4. Reassign GhlDeals
+            if (handoverUser != null)
+            {
+                foreach (var d in deals)
+                {
+                    d.AssignedAgentId = handoverUser.Id;
+                }
+            }
+
+            // 5. Reassign Investors & IrmPipelineCards
+            if (handoverUser != null)
+            {
+                foreach (var inv in investors)
+                {
+                    inv.AssignedIrmId = handoverUser.Id;
+                    inv.AssignedIrmName = handoverUser.Name;
+                }
+
+                foreach (var card in irmCards)
+                {
+                    card.AssignedIrmId = handoverUser.Id;
+                    card.AssignedIrmName = handoverUser.Name;
+                }
+
+                // 6. Reassign Consultations
+                foreach (var c in consultations)
+                {
+                    if (c.ConsultantId == userId)
+                    {
+                        c.ConsultantId = handoverUser.Id;
+                        c.ConsultantName = handoverUser.Name;
+                    }
+                    if (!string.IsNullOrWhiteSpace(c.ReferredByAgentName) && user.Name != null && c.ReferredByAgentName.Equals(user.Name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        c.ReferredByAgentName = handoverUser.Name;
+                    }
+                }
+            }
+
+            // 7. Remove user
             _context.Users.Remove(user);
 
             await _context.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
             var message = handoverUser != null
-                ? $"User '{user.Name}' deleted. All {totalActive} active items were successfully handed over to {handoverUser.Name}."
+                ? $"User '{user.Name}' deleted. All active items were successfully handed over to {handoverUser.Name}."
                 : $"User '{user.Name}' deleted successfully.";
 
             return ApiResponse<bool>.SuccessResult(true, message);
@@ -432,5 +713,93 @@ public class AdminUserService : IAdminUserService
             await transaction.RollbackAsync(cancellationToken);
             return ApiResponse<bool>.FailureResult($"Failed to delete user: {ex.Message}");
         }
+    }
+
+    public async Task<ApiResponse<ResetPasswordResponseDto>> ResetUserPasswordAsync(
+        int companyId,
+        int userId,
+        string? customPassword = null,
+        CancellationToken cancellationToken = default)
+    {
+        var user = await _context.Users
+            .Include(u => u.Role)
+            .FirstOrDefaultAsync(u => (companyId == 0 || u.CompanyId == companyId) && u.Id == userId, cancellationToken);
+
+        if (user == null)
+            return ApiResponse<ResetPasswordResponseDto>.FailureResult("User not found.");
+
+        if (user.RoleId == 1) // super_admin
+            return ApiResponse<ResetPasswordResponseDto>.FailureResult("Cannot reset credentials for a platform super administrator.");
+
+        if (!string.IsNullOrWhiteSpace(customPassword) && customPassword.Trim().Length < 6)
+        {
+            return ApiResponse<ResetPasswordResponseDto>.FailureResult("Password must be at least 6 characters long.");
+        }
+
+        var newPassword = !string.IsNullOrWhiteSpace(customPassword)
+            ? customPassword.Trim()
+            : backend.Helpers.PasswordHasher.GenerateTemporaryPassword();
+
+        user.PasswordHash = backend.Helpers.PasswordHasher.HashPassword(newPassword);
+        user.MustChangePassword = false;
+        user.UpdatedAt = DateTime.UtcNow;
+
+        // Invalidate all active user sessions for this user so old sessions cannot linger
+        var sessions = await _context.UserSessions
+            .Where(s => s.UserId == user.Id && s.IsActive)
+            .ToListAsync(cancellationToken);
+
+        foreach (var s in sessions)
+        {
+            s.IsActive = false;
+            s.RevokedAt = DateTime.UtcNow;
+            s.RevokedReason = "Administrator reset account credentials.";
+        }
+
+        // Record security event
+        _context.SecurityEvents.Add(new SecurityEvent
+        {
+            EventType = "PASSWORD_RESET_ADMIN",
+            Severity = "WARNING",
+            Description = $"Administrator reset password for user '{user.Email}' (ID: {user.Id}).",
+            UserEmail = user.Email,
+            UserId = user.Id,
+            Timestamp = DateTime.UtcNow
+        });
+
+        // Audit log entry
+        _context.AuditLogs.Add(new AuditLog
+        {
+            Action = "USER_PASSWORD_RESET",
+            EntityType = "User",
+            EntityId = user.Id.ToString(),
+            CompanyId = user.CompanyId,
+            ActorName = "Administrator",
+            ActorEmail = "admin@nexus.com",
+            Details = $"Administrator reset password for user '{user.Name}' ({user.Email}). Active sessions revoked.",
+            Module = "Users",
+            Status = "success",
+            Timestamp = DateTime.UtcNow
+        });
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        if (_hubContext != null)
+        {
+            try
+            {
+                await _hubContext.Clients.Group($"user_{user.Id}").SessionRevoked("ALL", user.Id);
+            }
+            catch { }
+        }
+
+        var responseDto = new ResetPasswordResponseDto
+        {
+            UserId = user.Id,
+            Email = user.Email,
+            TempPassword = newPassword
+        };
+
+        return ApiResponse<ResetPasswordResponseDto>.SuccessResult(responseDto, "Password reset successfully.");
     }
 }
