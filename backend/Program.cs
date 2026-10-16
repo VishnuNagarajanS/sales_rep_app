@@ -272,8 +272,13 @@ using (var scope = app.Services.CreateScope())
                         END IF;
                     END IF;
 
-                    -- Leads columns (CustomFieldsJson, NormalizedPhone, NormalizedEmail, HandoverId, etc.)
+                    -- Leads columns (Location, Source, Priority, Notes, CustomFieldsJson, NormalizedPhone, NormalizedEmail, HandoverId, etc.)
                     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'leads') THEN
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Location"" character varying(255) NOT NULL DEFAULT '';
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Source"" character varying(100) NOT NULL DEFAULT 'Website Inbound';
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Priority"" character varying(50) NOT NULL DEFAULT 'Medium';
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Status"" character varying(50) NOT NULL DEFAULT 'New';
                         ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""CustomFieldsJson"" text;
                         ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""NormalizedPhone"" text;
                         ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""NormalizedEmail"" text;
@@ -283,44 +288,83 @@ using (var scope = app.Services.CreateScope())
                         ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""AssignedAt"" timestamp with time zone;
                         ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
                         ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'leads' AND column_name = 'city') THEN
+                            UPDATE leads SET ""Location"" = city WHERE ""Location"" = '';
+                        END IF;
                     END IF;
 
                     -- Followups columns
                     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'followups') THEN
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ContactId"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ContactType"" character varying(50) NOT NULL DEFAULT 'lead';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ContactName"" character varying(150) NOT NULL DEFAULT '';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ContactPhone"" character varying(50) NOT NULL DEFAULT '';
                         ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ContactEmail"" text;
                         ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""InvestorId"" integer;
                         ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""InvestorName"" text;
                         ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""AssignedToName"" text NOT NULL DEFAULT '';
                         ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""AssignedToRole"" text NOT NULL DEFAULT '';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Priority"" character varying(50) NOT NULL DEFAULT 'Medium';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Status"" character varying(50) NOT NULL DEFAULT 'Pending';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Agenda"" text;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""OutcomeNotes"" text;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ScheduledAt"" timestamp with time zone NOT NULL DEFAULT NOW();
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""CompletedAt"" timestamp with time zone;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""RescheduledTo"" timestamp with time zone;
                         ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""OverdueNotifiedAt"" timestamp with time zone;
                         ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
                         ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
                     END IF;
 
-                    -- Customers columns (CustomFieldsJson, NormalizedPhone, NormalizedEmail, etc.)
+                    -- Customers columns (Location, Notes, Status, TotalValue, CustomFieldsJson, etc.)
                     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'customers') THEN
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""Location"" character varying(255) NOT NULL DEFAULT '';
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""Status"" character varying(50) NOT NULL DEFAULT 'Active';
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""TotalValue"" numeric(18,2) NOT NULL DEFAULT 0;
                         ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""CustomFieldsJson"" text;
                         ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""NormalizedPhone"" text;
                         ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""NormalizedEmail"" text;
                         ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""IsDuplicate"" boolean NOT NULL DEFAULT FALSE;
                         ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""LastContactedAt"" timestamp with time zone;
-                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""TotalValue"" numeric NOT NULL DEFAULT 0;
                         ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
                         ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'customers' AND column_name = 'city') THEN
+                            UPDATE customers SET ""Location"" = city WHERE ""Location"" = '';
+                        END IF;
                     END IF;
 
                     -- Consultations columns
                     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'consultations') THEN
                         ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""IrmUserId"" integer;
-                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""IrmUserName"" text;
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""IrmUserName"" text NOT NULL DEFAULT '';
                         ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""AssetClass"" text;
                         ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""InvestmentCapacity"" text;
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""ScheduledAt"" timestamp with time zone NOT NULL DEFAULT NOW();
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""Status"" character varying(50) NOT NULL DEFAULT 'Scheduled';
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""MeetingType"" character varying(50) NOT NULL DEFAULT 'Virtual';
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""MeetingLink"" text;
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""Feedback"" text;
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""CompletedAt"" timestamp with time zone;
                         ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
                         ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
                     END IF;
 
                     -- Deals columns
                     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'GhlDeals') THEN
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""Title"" character varying(200) NOT NULL DEFAULT '';
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""CustomerName"" character varying(150) NOT NULL DEFAULT '';
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""Stage"" character varying(100) NOT NULL DEFAULT 'new';
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""Value"" numeric(18,2) NOT NULL DEFAULT 0;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""ExpectedCloseDate"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""LostReason"" text;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""InvestorType"" character varying(50);
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""InvestmentRange"" character varying(100);
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""PreferredAssetClass"" character varying(100);
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""Priority"" character varying(50) NOT NULL DEFAULT 'Medium';
                         ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""StageEnteredAt"" timestamp with time zone;
                         ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""DealAmountConfirmed"" boolean NOT NULL DEFAULT FALSE;
                         ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""KycStatus"" text;
@@ -328,6 +372,17 @@ using (var scope = app.Services.CreateScope())
                         ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
                     END IF;
                     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'ghl_deals') THEN
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""Title"" character varying(200) NOT NULL DEFAULT '';
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""CustomerName"" character varying(150) NOT NULL DEFAULT '';
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""Stage"" character varying(100) NOT NULL DEFAULT 'new';
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""Value"" numeric(18,2) NOT NULL DEFAULT 0;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""ExpectedCloseDate"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""LostReason"" text;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""InvestorType"" character varying(50);
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""InvestmentRange"" character varying(100);
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""PreferredAssetClass"" character varying(100);
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""Priority"" character varying(50) NOT NULL DEFAULT 'Medium';
                         ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""StageEnteredAt"" timestamp with time zone;
                         ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""DealAmountConfirmed"" boolean NOT NULL DEFAULT FALSE;
                         ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""KycStatus"" text;
@@ -336,7 +391,29 @@ using (var scope = app.Services.CreateScope())
                     END IF;
 
                     -- Investors & Opportunities columns
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'investors') THEN
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""InvestmentCapacity"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""PreferredAssetClass"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""RiskTolerance"" text;
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""InvestmentMandate"" text;
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""CommittedAum"" text;
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""ReferralSource"" text;
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""AssignedIrmId"" integer;
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""AssignedIrmName"" character varying(150) NOT NULL DEFAULT '';
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                    END IF;
                     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'Investors') THEN
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""InvestmentCapacity"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""PreferredAssetClass"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""RiskTolerance"" text;
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""InvestmentMandate"" text;
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""CommittedAum"" text;
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""ReferralSource"" text;
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""AssignedIrmId"" integer;
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""AssignedIrmName"" character varying(150) NOT NULL DEFAULT '';
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
                         ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
                         ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
                     END IF;
