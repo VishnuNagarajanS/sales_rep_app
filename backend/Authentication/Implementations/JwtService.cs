@@ -91,12 +91,15 @@ public class JwtService : IJwtService
         }
 
         var expiresAt = DateTime.UtcNow.AddMinutes(_jwtSettings.ExpirationMinutes);
+        var issuer = !string.IsNullOrWhiteSpace(_jwtSettings.Issuer) ? _jwtSettings.Issuer : "NexusSalesApi";
+        var audience = !string.IsNullOrWhiteSpace(_jwtSettings.Audience) ? _jwtSettings.Audience : "NexusSalesClient";
+
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
             Expires = expiresAt,
-            Issuer = _jwtSettings.Issuer,
-            Audience = _jwtSettings.Audience,
+            Issuer = issuer,
+            Audience = audience,
             SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
         };
 

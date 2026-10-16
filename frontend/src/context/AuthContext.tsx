@@ -489,7 +489,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     const handleUnauthorized = () => {
-      logout('Your account has been suspended by an administrator.');
+      logout('Your session has expired. Please sign in again.');
     };
 
     const handleRevalidate = () => {

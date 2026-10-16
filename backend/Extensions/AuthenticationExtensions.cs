@@ -21,6 +21,9 @@ public static class AuthenticationExtensions
 
         var key = Encoding.UTF8.GetBytes(jwtSettings.SecretKey);
 
+        var issuer = !string.IsNullOrWhiteSpace(jwtSettings.Issuer) ? jwtSettings.Issuer : "NexusSalesApi";
+        var audience = !string.IsNullOrWhiteSpace(jwtSettings.Audience) ? jwtSettings.Audience : "NexusSalesClient";
+
         services.AddAuthentication(options =>
         {
             options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -35,11 +38,11 @@ public static class AuthenticationExtensions
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKey = new SymmetricSecurityKey(key),
                 ValidateIssuer = true,
-                ValidIssuer = jwtSettings.Issuer,
+                ValidIssuer = issuer,
                 ValidateAudience = true,
-                ValidAudience = jwtSettings.Audience,
+                ValidAudience = audience,
                 ValidateLifetime = true,
-                ClockSkew = TimeSpan.Zero
+                ClockSkew = TimeSpan.FromMinutes(5)
             };
             options.Events = new JwtBearerEvents
             {
@@ -92,7 +95,7 @@ public static class AuthenticationExtensions
                         if (user.CompanyId.HasValue && roleCode != "super_admin")
                         {
                             var tenant = user.Company;
-                            if (tenant == null || !tenant.IsActive || tenant.Status == "Suspended")
+                            if (tenant != null && tenant.Status == "Suspended")
                             {
                                 context.Fail("Your organization account has been suspended or is inactive.");
                                 return;

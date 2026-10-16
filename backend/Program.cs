@@ -246,6 +246,7 @@ using (var scope = app.Services.CreateScope())
                     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'tenants') THEN
                         ALTER TABLE tenants ADD COLUMN IF NOT EXISTS ""IsProtected"" boolean NOT NULL DEFAULT FALSE;
                         UPDATE tenants SET ""IsProtected"" = TRUE WHERE ""Id"" IN (1, 2) OR ""Slug"" IN ('ghl', 'jamin');
+                        UPDATE tenants SET ""IsActive"" = TRUE, ""Status"" = 'Active' WHERE ""Id"" IN (1, 2) OR ""Slug"" IN ('ghl', 'jamin');
                         UPDATE tenants SET ""SubscriptionPlan"" = 'Wealth Advisory Enterprise Suite' WHERE ""Id"" IN (1, 2) OR ""Slug"" IN ('ghl', 'jamin');
                     END IF;
 
