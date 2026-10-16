@@ -122,6 +122,25 @@ using (var scope = app.Services.CreateScope())
         Console.WriteLine($"[Database] Connected to persistent database provider: {db.Database.ProviderName}");
         try
         {
+            var pendingMigrations = db.Database.GetPendingMigrations().ToList();
+            if (pendingMigrations.Any())
+            {
+                Console.WriteLine($"[Database] Applying {pendingMigrations.Count} pending EF Core migration(s)...");
+                db.Database.Migrate();
+                Console.WriteLine("[Database] All EF Core migrations applied successfully.");
+            }
+            else
+            {
+                Console.WriteLine("[Database] All EF Core migrations are up to date.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Database Migration Warning] {ex.Message}");
+        }
+
+        try
+        {
             db.Database.ExecuteSqlRaw(@"
                 DO $$
                 BEGIN
@@ -840,33 +859,6 @@ using (var scope = app.Services.CreateScope())
 
         try
         {
-            var pendingMigrations = db.Database.GetPendingMigrations().ToList();
-            if (pendingMigrations.Any())
-            {
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine("================================================================================");
-                Console.WriteLine($"[WARNING] There are {pendingMigrations.Count} pending EF Core migration(s) not yet applied to the database:");
-                foreach (var m in pendingMigrations)
-                {
-                    Console.WriteLine($"  - {m}");
-                }
-                Console.WriteLine("Run 'dotnet ef database update' in backend/ to apply pending migrations.");
-                Console.WriteLine("================================================================================");
-                Console.ResetColor();
-            }
-            else
-            {
-                Console.WriteLine("[Database] All EF Core migrations are up to date.");
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[Database Migration Check Warning] {ex.Message}");
-
-        }
-
-        try
-        {
             var superAdmin = db.Users.FirstOrDefault(u => u.Id == 1 || u.Email == "yanosh@ghlindiaventures.com");
             if (superAdmin != null && string.IsNullOrWhiteSpace(superAdmin.PasswordHash))
             {
@@ -882,10 +874,17 @@ using (var scope = app.Services.CreateScope())
         }
     }
 
-    var helpMeDecide = db.Leads.Count(l => l.CustomFieldsJson != null && l.CustomFieldsJson.Contains("help me decide"));
-    var notConfirmed = db.Leads.Count(l => l.CustomFieldsJson != null && (l.CustomFieldsJson.Contains("\"assetClass\":\"") || l.CustomFieldsJson.Contains("\"preferredAssetClass\":\"")) && !l.CustomFieldsJson.Contains("\"irmPreferencesConfirmed\":true"));
-    Console.WriteLine($"[DIAGNOSTIC] Count with help me decide: {helpMeDecide}");
-    Console.WriteLine($"[DIAGNOSTIC] Count with asset class but not confirmed: {notConfirmed}");
+    try
+    {
+        var helpMeDecide = db.Leads.Count(l => l.CustomFieldsJson != null && l.CustomFieldsJson.Contains("help me decide"));
+        var notConfirmed = db.Leads.Count(l => l.CustomFieldsJson != null && (l.CustomFieldsJson.Contains("\"assetClass\":\"") || l.CustomFieldsJson.Contains("\"preferredAssetClass\":\"")) && !l.CustomFieldsJson.Contains("\"irmPreferencesConfirmed\":true"));
+        Console.WriteLine($"[DIAGNOSTIC] Count with help me decide: {helpMeDecide}");
+        Console.WriteLine($"[DIAGNOSTIC] Count with asset class but not confirmed: {notConfirmed}");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[Diagnostic Count Warning] {ex.Message}");
+    }
 }
 
 app.UseForwardedHeaders(new ForwardedHeadersOptions
