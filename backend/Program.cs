@@ -40,6 +40,12 @@ builder.Services.AddControllers()
 // 2. Add Layered Application Services & DbContext
 builder.Services.AddApplicationServices(builder.Configuration);
 
+// 2b. Prevent transient background service errors from stopping the application host
+builder.Services.Configure<HostOptions>(options =>
+{
+    options.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore;
+});
+
 // 3. Add JWT Authentication & Authorization
 builder.Services.AddJwtAuthentication(builder.Configuration);
 builder.Services.AddAuthorization();
@@ -53,10 +59,21 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("DefaultCorsPolicy", policy =>
     {
-        policy.WithOrigins(allowedOrigins)
-              .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials();
+        var hasWildcard = allowedOrigins.Length == 0 || allowedOrigins.Any(o => o == "*" || string.IsNullOrWhiteSpace(o));
+        if (hasWildcard)
+        {
+            policy.SetIsOriginAllowed(_ => true)
+                  .AllowAnyHeader()
+                  .AllowAnyMethod()
+                  .AllowCredentials();
+        }
+        else
+        {
+            policy.WithOrigins(allowedOrigins)
+                  .AllowAnyHeader()
+                  .AllowAnyMethod()
+                  .AllowCredentials();
+        }
     });
 });
 
@@ -132,7 +149,16 @@ using (var scope = app.Services.CreateScope())
                         DO $$
                         BEGIN
                             IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'roles') THEN
-                                UPDATE roles SET ""Code"" = 'temp_' || ""Id"" WHERE ""Id"" IN (3, 4, 5);
+                                UPDATE roles SET ""Code"" = 'temp_' || ""Id"" WHERE ""Id"" IN (1, 2, 3, 4, 5);
+
+                                INSERT INTO roles (""Id"", ""Code"", ""Name"", ""CreatedAt"", ""Permissions"")
+                                VALUES
+                                    (1, 'temp_1', 'Super Admin', NOW(), '{}'),
+                                    (2, 'temp_2', 'Company Admin', NOW(), '{}'),
+                                    (3, 'temp_3', 'Sales Executive', NOW(), '{}'),
+                                    (4, 'temp_4', 'IRM', NOW(), '{}'),
+                                    (5, 'temp_5', 'Sales Manager', NOW(), '{}')
+                                ON CONFLICT (""Id"") DO NOTHING;
                             END IF;
                         END $$;
                     ");
@@ -507,81 +533,86 @@ using (var scope = app.Services.CreateScope())
         try
         {
             var reconcileSql = @"
-                -- 1. Active Opportunities
-                UPDATE leads
-                SET ""Status"" = 'In Opportunity', ""UpdatedAt"" = NOW()
-                WHERE ""Status"" != 'In Opportunity'
-                  AND EXISTS (
-                    SELECT 1 FROM ghl_deals d
-                    WHERE d.""CompanyId"" = leads.""CompanyId""
-                      AND LOWER(TRIM(d.""Stage"")) IN ('investment_opportunity', 'opportunity', 'term_sheet', 'committed')
-                      AND (
-                        (d.""CustomerId"" IS NOT NULL AND d.""CustomerId"" = leads.""Id"")
-                        OR LOWER(TRIM(d.""CustomerName"")) = LOWER(TRIM(leads.""Name""))
-                      )
-                  );
+                DO $$
+                BEGIN
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'ghl_deals') THEN
+                        -- 1. Active Opportunities
+                        UPDATE leads
+                        SET ""Status"" = 'In Opportunity', ""UpdatedAt"" = NOW()
+                        WHERE ""Status"" != 'In Opportunity'
+                          AND EXISTS (
+                            SELECT 1 FROM ghl_deals d
+                            WHERE d.""CompanyId"" = leads.""CompanyId""
+                              AND LOWER(TRIM(d.""Stage"")) IN ('investment_opportunity', 'opportunity', 'term_sheet', 'committed')
+                              AND (
+                                (d.""CustomerId"" IS NOT NULL AND d.""CustomerId"" = leads.""Id"")
+                                OR LOWER(TRIM(d.""CustomerName"")) = LOWER(TRIM(leads.""Name""))
+                              )
+                          );
 
-                -- 2. Active KYC In Progress
-                UPDATE leads
-                SET ""Status"" = 'KYC In Progress', ""UpdatedAt"" = NOW()
-                WHERE ""Status"" NOT IN ('In Opportunity', 'Converted', 'KYC In Progress')
-                  AND (
-                    EXISTS (
-                        SELECT 1 FROM ghl_deals d
-                        WHERE d.""CompanyId"" = leads.""CompanyId""
-                          AND LOWER(TRIM(d.""Stage"")) IN ('qualified_investor', 'qualified')
+                        -- 2. Active KYC In Progress
+                        UPDATE leads
+                        SET ""Status"" = 'KYC In Progress', ""UpdatedAt"" = NOW()
+                        WHERE ""Status"" NOT IN ('In Opportunity', 'Converted', 'KYC In Progress')
                           AND (
-                            (d.""CustomerId"" IS NOT NULL AND d.""CustomerId"" = leads.""Id"")
-                            OR LOWER(TRIM(d.""CustomerName"")) = LOWER(TRIM(leads.""Name""))
-                          )
-                    )
-                    OR EXISTS (
-                        SELECT 1 FROM ""InvestorKycs"" k
-                        WHERE k.""CompanyId"" = leads.""CompanyId""
-                          AND k.""Status"" IN (0, 1, 2)
-                          AND (
-                            (k.""Phone"" IS NOT NULL AND RIGHT(REGEXP_REPLACE(k.""Phone"", '\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(leads.""Phone"", '\D', '', 'g'), 10))
-                            OR (k.""Email"" IS NOT NULL AND LOWER(TRIM(k.""Email"")) = LOWER(TRIM(leads.""Email"")))
-                            OR LOWER(TRIM(k.""InvestorName"")) = LOWER(TRIM(leads.""Name""))
-                          )
-                    )
-                  );
+                            EXISTS (
+                                SELECT 1 FROM ghl_deals d
+                                WHERE d.""CompanyId"" = leads.""CompanyId""
+                                  AND LOWER(TRIM(d.""Stage"")) IN ('qualified_investor', 'qualified')
+                                  AND (
+                                    (d.""CustomerId"" IS NOT NULL AND d.""CustomerId"" = leads.""Id"")
+                                    OR LOWER(TRIM(d.""CustomerName"")) = LOWER(TRIM(leads.""Name""))
+                                  )
+                            )
+                            OR EXISTS (
+                                SELECT 1 FROM ""InvestorKycs"" k
+                                WHERE k.""CompanyId"" = leads.""CompanyId""
+                                  AND k.""Status"" IN (0, 1, 2)
+                                  AND (
+                                    (k.""Phone"" IS NOT NULL AND RIGHT(REGEXP_REPLACE(k.""Phone"", '\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(leads.""Phone"", '\D', '', 'g'), 10))
+                                    OR (k.""Email"" IS NOT NULL AND LOWER(TRIM(k.""Email"")) = LOWER(TRIM(leads.""Email"")))
+                                    OR LOWER(TRIM(k.""InvestorName"")) = LOWER(TRIM(leads.""Name""))
+                                  )
+                            )
+                          );
 
-                -- 3. Won / Converted Investors (without active opportunity)
-                UPDATE leads
-                SET ""Status"" = 'Converted', ""UpdatedAt"" = NOW()
-                WHERE ""Status"" NOT IN ('In Opportunity', 'Converted')
-                  AND (
-                    EXISTS (
-                        SELECT 1 FROM ghl_deals d
-                        WHERE d.""CompanyId"" = leads.""CompanyId""
-                          AND LOWER(TRIM(d.""Stage"")) IN ('converted', 'won')
+                        -- 3. Won / Converted Investors (without active opportunity)
+                        UPDATE leads
+                        SET ""Status"" = 'Converted', ""UpdatedAt"" = NOW()
+                        WHERE ""Status"" NOT IN ('In Opportunity', 'Converted')
                           AND (
-                            (d.""CustomerId"" IS NOT NULL AND d.""CustomerId"" = leads.""Id"")
-                            OR LOWER(TRIM(d.""CustomerName"")) = LOWER(TRIM(leads.""Name""))
-                          )
-                    )
-                    OR EXISTS (
-                        SELECT 1 FROM ""Investors"" i
-                        WHERE i.""CompanyId"" = leads.""CompanyId""
-                          AND i.""Status"" = 1
-                          AND (
-                            (i.""Phone"" IS NOT NULL AND RIGHT(REGEXP_REPLACE(i.""Phone"", '\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(leads.""Phone"", '\D', '', 'g'), 10))
-                            OR (i.""Email"" IS NOT NULL AND LOWER(TRIM(i.""Email"")) = LOWER(TRIM(leads.""Email"")))
-                            OR LOWER(TRIM(i.""Name"")) = LOWER(TRIM(leads.""Name""))
-                          )
-                    )
-                    OR EXISTS (
-                        SELECT 1 FROM ""InvestorKycs"" k
-                        WHERE k.""CompanyId"" = leads.""CompanyId""
-                          AND k.""Status"" = 3
-                          AND (
-                            (k.""Phone"" IS NOT NULL AND RIGHT(REGEXP_REPLACE(k.""Phone"", '\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(leads.""Phone"", '\D', '', 'g'), 10))
-                            OR (k.""Email"" IS NOT NULL AND LOWER(TRIM(k.""Email"")) = LOWER(TRIM(leads.""Email"")))
-                            OR LOWER(TRIM(k.""InvestorName"")) = LOWER(TRIM(leads.""Name""))
-                          )
-                    )
-                  );
+                            EXISTS (
+                                SELECT 1 FROM ghl_deals d
+                                WHERE d.""CompanyId"" = leads.""CompanyId""
+                                  AND LOWER(TRIM(d.""Stage"")) IN ('converted', 'won')
+                                  AND (
+                                    (d.""CustomerId"" IS NOT NULL AND d.""CustomerId"" = leads.""Id"")
+                                    OR LOWER(TRIM(d.""CustomerName"")) = LOWER(TRIM(leads.""Name""))
+                                  )
+                            )
+                            OR EXISTS (
+                                SELECT 1 FROM ""Investors"" i
+                                WHERE i.""CompanyId"" = leads.""CompanyId""
+                                  AND i.""Status"" = 1
+                                  AND (
+                                    (i.""Phone"" IS NOT NULL AND RIGHT(REGEXP_REPLACE(i.""Phone"", '\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(leads.""Phone"", '\D', '', 'g'), 10))
+                                    OR (i.""Email"" IS NOT NULL AND LOWER(TRIM(i.""Email"")) = LOWER(TRIM(leads.""Email"")))
+                                    OR LOWER(TRIM(i.""Name"")) = LOWER(TRIM(leads.""Name""))
+                                  )
+                            )
+                            OR EXISTS (
+                                SELECT 1 FROM ""InvestorKycs"" k
+                                WHERE k.""CompanyId"" = leads.""CompanyId""
+                                  AND k.""Status"" = 3
+                                  AND (
+                                    (k.""Phone"" IS NOT NULL AND RIGHT(REGEXP_REPLACE(k.""Phone"", '\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(leads.""Phone"", '\D', '', 'g'), 10))
+                                    OR (k.""Email"" IS NOT NULL AND LOWER(TRIM(k.""Email"")) = LOWER(TRIM(leads.""Email"")))
+                                    OR LOWER(TRIM(k.""InvestorName"")) = LOWER(TRIM(leads.""Name""))
+                                  )
+                            )
+                          );
+                    END IF;
+                END $$;
             ";
             db.Database.ExecuteSqlRaw(reconcileSql);
         }
@@ -649,9 +680,9 @@ using (var scope = app.Services.CreateScope())
 
                 if (salesManagerRole != null)
                 {
-                    db.Roles.Remove(salesManagerRole);
+                    salesManagerRole.IsActive = false;
                     db.SaveChanges();
-                    Console.WriteLine("[Role Migration] Removed obsolete 'sales_manager' role from database.");
+                    Console.WriteLine("[Role Migration] Deactivated obsolete 'sales_manager' role in database.");
                 }
             }
         }
