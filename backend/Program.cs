@@ -150,15 +150,13 @@ using (var scope = app.Services.CreateScope())
                         DO $$
                         BEGIN
                             IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'roles') THEN
-                                UPDATE roles SET ""Code"" = 'temp_' || ""Id"" WHERE ""Id"" IN (1, 2, 3, 4, 5);
-
                                 INSERT INTO roles (""Id"", ""Code"", ""Name"", ""CreatedAt"", ""Permissions"")
                                 VALUES
-                                    (1, 'temp_1', 'Super Admin', NOW(), '{}'),
-                                    (2, 'temp_2', 'Company Admin', NOW(), '{}'),
-                                    (3, 'temp_3', 'Sales Executive', NOW(), '{}'),
-                                    (4, 'temp_4', 'IRM', NOW(), '{}'),
-                                    (5, 'temp_5', 'Sales Manager', NOW(), '{}')
+                                    (1, 'super_admin', 'Super Admin', NOW(), '{}'),
+                                    (2, 'company_admin', 'Company Admin', NOW(), '{}'),
+                                    (3, 'sales_executive', 'Sales Executive', NOW(), '{}'),
+                                    (4, 'irm', 'IRM', NOW(), '{}'),
+                                    (5, 'sales_manager', 'Sales Manager', NOW(), '{}')
                                 ON CONFLICT (""Id"") DO NOTHING;
                             END IF;
 
@@ -203,6 +201,13 @@ using (var scope = app.Services.CreateScope())
                 DO $$
                 BEGIN
                     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'roles') THEN
+                        -- Restore system role codes if they were corrupted with temp_ prefixes
+                        UPDATE roles SET ""Code"" = 'super_admin' WHERE ""Id"" = 1 OR ""Code"" = 'temp_1';
+                        UPDATE roles SET ""Code"" = 'company_admin' WHERE ""Id"" = 2 OR ""Code"" = 'temp_2';
+                        UPDATE roles SET ""Code"" = 'sales_executive' WHERE ""Id"" = 3 OR ""Code"" = 'temp_3';
+                        UPDATE roles SET ""Code"" = 'irm' WHERE ""Id"" = 4 OR ""Code"" = 'temp_4';
+                        UPDATE roles SET ""Code"" = 'sales_manager' WHERE ""Id"" = 5 OR ""Code"" = 'temp_5';
+
                         ALTER TABLE roles ADD COLUMN IF NOT EXISTS ""Description"" text;
                         ALTER TABLE roles ADD COLUMN IF NOT EXISTS ""IsSystemRole"" boolean NOT NULL DEFAULT FALSE;
                         ALTER TABLE roles ADD COLUMN IF NOT EXISTS ""IsActive"" boolean NOT NULL DEFAULT TRUE;

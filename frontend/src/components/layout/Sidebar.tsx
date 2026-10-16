@@ -66,13 +66,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
   const [isCollapseHovered, setIsCollapseHovered] = useState(false);
 
   const roleCode = user?.role?.code;
-  const isSuperAdminUser = isSuperAdmin || roleCode === 'super_admin';
-  const isIrm = roleCode === 'irm';
+  const roleName = (user?.role?.name || '').toLowerCase();
+  const isSuperAdminUser = isSuperAdmin || roleCode === 'super_admin' || roleCode === 'temp_1' || roleName === 'super admin';
+  const isIrm = roleCode === 'irm' || roleCode === 'temp_4' || roleName === 'irm';
   const isGhlIrm = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1' || tenant?.name?.toLowerCase().includes('ghl') || user?.companySlug === 'ghl' || user?.companyName?.toLowerCase().includes('ghl')) && isIrm;
-  const isSalesExec = roleCode === 'sales_executive';
+  const isSalesExec = roleCode === 'sales_executive' || roleCode === 'temp_3' || roleName === 'sales executive';
   const isGhlAdmin =
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1' || tenant?.name?.toLowerCase().includes('ghl') || user?.companySlug === 'ghl' || user?.companyName?.toLowerCase().includes('ghl')) &&
-    (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
+    (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin' || roleCode === 'temp_2' || roleName.includes('admin'));
 
   const [pendingFollowupsCount, setPendingFollowupsCount] = useState(0);
 

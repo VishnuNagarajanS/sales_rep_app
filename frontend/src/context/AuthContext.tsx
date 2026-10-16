@@ -64,6 +64,22 @@ export function isJwtExpired(token: string | null | undefined): boolean {
   }
 }
 
+export const normalizeUserRole = (u: any): User | null => {
+  if (!u) return null;
+  const userObj = { ...u };
+  if (userObj.role) {
+    let code = userObj.role.code;
+    const name = (userObj.role.name || '').toLowerCase();
+    if (code === 'temp_1' || name === 'super admin') code = 'super_admin';
+    else if (code === 'temp_2' || name === 'company admin') code = 'company_admin';
+    else if (code === 'temp_3' || name === 'sales executive') code = 'sales_executive';
+    else if (code === 'temp_4' || name === 'irm') code = 'irm';
+    else if (code === 'temp_5' || name === 'sales manager') code = 'sales_manager';
+    userObj.role = { ...userObj.role, code };
+  }
+  return userObj;
+};
+
 export { getStoredTenants, getStoredUsers, saveStoredUser };
 
 interface AuthContextType {
@@ -108,7 +124,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (saved) {
       try {
         const rawParsed = JSON.parse(saved);
-        const parsed = rawParsed?.user && (rawParsed.user.id || rawParsed.user.email) ? rawParsed.user : rawParsed;
+        let parsed = rawParsed?.user && (rawParsed.user.id || rawParsed.user.email) ? rawParsed.user : rawParsed;
+        parsed = normalizeUserRole(parsed);
         if (parsed?.role?.code && SYSTEM_ROLES[parsed.role.code]) {
           parsed.role.permissions = Array.from(
             new Set([...(parsed.role.permissions || []), ...SYSTEM_ROLES[parsed.role.code].permissions])
@@ -227,7 +244,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         if (userData) {
-          setUser(userData);
+          setUser(normalizeUserRole(userData));
         }
 
         if (tenantData) {
@@ -260,7 +277,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           sessionStorage.setItem('nexus_auth_token', token);
           localStorage.setItem('nexus_auth_token', token);
         }
-        if (userData) setUser(userData);
+        if (userData) setUser(normalizeUserRole(userData));
         if (tenantData) setTenant(tenantData);
         setMfaChallenge(null);
         return true;
@@ -288,7 +305,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           sessionStorage.setItem('nexus_auth_token', token);
           localStorage.setItem('nexus_auth_token', token);
         }
-        if (userData) setUser(userData);
+        if (userData) setUser(normalizeUserRole(userData));
         if (tenantData) setTenant(tenantData);
         setMfaChallenge(null);
         return true;
