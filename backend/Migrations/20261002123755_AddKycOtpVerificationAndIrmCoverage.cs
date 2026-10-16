@@ -66,6 +66,8 @@ namespace backend.Migrations
                 type: "timestamp with time zone",
                 nullable: true);
 
+            migrationBuilder.Sql(@"ALTER TABLE followups DROP COLUMN IF EXISTS ""ContactEmail"";");
+
             migrationBuilder.AddColumn<string>(
                 name: "ContactEmail",
                 table: "followups",

@@ -160,6 +160,24 @@ using (var scope = app.Services.CreateScope())
                                     (5, 'temp_5', 'Sales Manager', NOW(), '{}')
                                 ON CONFLICT (""Id"") DO NOTHING;
                             END IF;
+
+                            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'followups' AND column_name = 'ContactEmail') THEN
+                                IF NOT EXISTS (SELECT 1 FROM ""__EFMigrationsHistory"" WHERE ""MigrationId"" LIKE '%AddKycOtpVerificationAndIrmCoverage%') THEN
+                                    ALTER TABLE followups DROP COLUMN ""ContactEmail"";
+                                END IF;
+                            END IF;
+
+                            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'call_records' AND column_name = 'CallModule') THEN
+                                IF NOT EXISTS (SELECT 1 FROM ""__EFMigrationsHistory"" WHERE ""MigrationId"" LIKE '%AddCallModuleAndReasonToCallRecords%') THEN
+                                    ALTER TABLE call_records DROP COLUMN ""CallModule"";
+                                END IF;
+                            END IF;
+
+                            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'call_records' AND column_name = 'Reason') THEN
+                                IF NOT EXISTS (SELECT 1 FROM ""__EFMigrationsHistory"" WHERE ""MigrationId"" LIKE '%AddCallModuleAndReasonToCallRecords%') THEN
+                                    ALTER TABLE call_records DROP COLUMN ""Reason"";
+                                END IF;
+                            END IF;
                         END $$;
                     ");
                 }
@@ -990,5 +1008,9 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<backend.Hubs.PlatformHub>("/hubs/platform");
+
+// Redirect root to Swagger UI and add health probe
+app.MapGet("/", () => Results.Redirect("/swagger"));
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "NexusSales Platform API", timestamp = DateTime.UtcNow }));
 
 app.Run();

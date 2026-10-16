@@ -10,6 +10,11 @@ namespace backend.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.Sql(@"
+                ALTER TABLE call_records DROP COLUMN IF EXISTS ""CallModule"";
+                ALTER TABLE call_records DROP COLUMN IF EXISTS ""Reason"";
+            ");
+
             migrationBuilder.AddColumn<string>(
                 name: "CallModule",
                 table: "call_records",
