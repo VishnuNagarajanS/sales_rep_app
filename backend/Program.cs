@@ -436,8 +436,17 @@ using (var scope = app.Services.CreateScope())
                         ""Status"" character varying(50) NOT NULL DEFAULT 'active',
                         ""EndedAt"" timestamp with time zone NULL,
                         ""EndedById"" integer NULL,
-                        ""ReturnSummaryJson"" text NULL
+                        ""ReturnSummaryJson"" text NULL,
+                        ""LeaveRequestId"" integer NULL,
+                        ""OverdueNotifiedAt"" timestamp with time zone NULL
                     );
+
+                    -- Ensure work_handovers columns exist if table was created in earlier version
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'work_handovers') THEN
+                        ALTER TABLE work_handovers ADD COLUMN IF NOT EXISTS ""LeaveRequestId"" integer NULL;
+                        ALTER TABLE work_handovers ADD COLUMN IF NOT EXISTS ""OverdueNotifiedAt"" timestamp with time zone NULL;
+                        ALTER TABLE work_handovers ADD COLUMN IF NOT EXISTS ""ReturnSummaryJson"" text NULL;
+                    END IF;
 
                     -- Create work_handover_items table if not exists
                     CREATE TABLE IF NOT EXISTS work_handover_items (
@@ -462,9 +471,32 @@ using (var scope = app.Services.CreateScope())
                         ""Status"" character varying(20) NOT NULL DEFAULT 'Pending',
                         ""WorkHandoverId"" integer NULL,
                         ""ApprovedById"" integer NULL,
+                        ""DecidedById"" integer NULL,
+                        ""DecisionAt"" timestamp with time zone NULL,
+                        ""DecisionNote"" character varying(500) NULL,
+                        ""CancelledById"" integer NULL,
+                        ""CancelledAt"" timestamp with time zone NULL,
+                        ""LeaveType"" character varying(50) NOT NULL DEFAULT 'Casual',
+                        ""IsHalfDay"" boolean NOT NULL DEFAULT FALSE,
+                        ""HalfDaySession"" character varying(20) NULL,
+                        ""Days"" numeric(4,1) NOT NULL DEFAULT 1.0,
                         ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
                         ""UpdatedAt"" timestamp with time zone NULL
                     );
+
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'LeaveRequests') THEN
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""LeaveType"" character varying(50) NOT NULL DEFAULT 'Casual';
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""IsHalfDay"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""HalfDaySession"" character varying(20) NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""Days"" numeric(4,1) NOT NULL DEFAULT 1.0;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""WorkHandoverId"" integer NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""ApprovedById"" integer NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""DecidedById"" integer NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""DecisionAt"" timestamp with time zone NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""DecisionNote"" character varying(500) NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""CancelledById"" integer NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""CancelledAt"" timestamp with time zone NULL;
+                    END IF;
 
                     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'roles') THEN
                         UPDATE roles SET ""IsActive"" = FALSE WHERE ""Code"" IN ('sales_manager', 'presales_rep');
