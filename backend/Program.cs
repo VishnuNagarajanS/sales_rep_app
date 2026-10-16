@@ -21,6 +21,13 @@ if (!Directory.Exists(wwwrootDirectory))
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddUserSecrets<Program>(optional: true);
 
+// Support dynamic port for Render / cloud containers
+var renderPort = Environment.GetEnvironmentVariable("PORT");
+if (!string.IsNullOrEmpty(renderPort))
+{
+    builder.WebHost.UseUrls($"http://+:{renderPort}");
+}
+
 
 // 1. Add Controllers
 builder.Services.AddControllers()

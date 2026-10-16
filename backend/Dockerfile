@@ -15,9 +15,10 @@ FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
 WORKDIR /app
 COPY --from=build /app/publish .
 
-# Expose default HTTP port
-EXPOSE 8080
-ENV ASPNETCORE_URLS=http://+:8080
+# Expose HTTP port (Render uses 10000 by default)
+EXPOSE 10000 8080
+ENV PORT=10000
+ENV ASPNETCORE_URLS=http://+:10000;http://+:8080
 ENV ASPNETCORE_ENVIRONMENT=Production
 
 ENTRYPOINT ["dotnet", "backend.dll"]
