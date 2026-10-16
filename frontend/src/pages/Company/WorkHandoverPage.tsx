@@ -113,10 +113,13 @@ export const WorkHandoverPage: React.FC<WorkHandoverPageProps> = ({ initialParam
   const loadCandidates = useCallback(async (role: string) => {
     try {
       setLoadingCandidates(true);
+      setCandidates([]);
       const res = await workHandoverService.getCandidates(role);
-      setCandidates(res || []);
+      const filtered = (res || []).filter(u => !u.roleCode || u.roleCode.toLowerCase() === role.toLowerCase());
+      setCandidates(filtered);
     } catch (err: any) {
       console.error('Failed to load handover candidates:', err);
+      setCandidates([]);
     } finally {
       setLoadingCandidates(false);
     }
@@ -172,6 +175,7 @@ export const WorkHandoverPage: React.FC<WorkHandoverPageProps> = ({ initialParam
       loadHandovers(selectedRole);
       return;
     }
+    setCandidates([]);
     setSourceUserId('');
     setCoveringUserId('');
     setPreview(null);
@@ -306,8 +310,9 @@ export const WorkHandoverPage: React.FC<WorkHandoverPageProps> = ({ initialParam
     }
   };
 
-  // Eligible covering users filter
+  // Eligible covering users filter (strictly isolated to selected role)
   const eligibleCoveringUsers = candidates.filter(u => {
+    if (u.roleCode && u.roleCode.toLowerCase() !== selectedRole.toLowerCase()) return false;
     if (sourceUserId && u.userId === Number(sourceUserId)) return false;
     if (u.isCovering) return false;
     if (u.isCovered) return false;
@@ -494,18 +499,20 @@ export const WorkHandoverPage: React.FC<WorkHandoverPageProps> = ({ initialParam
                     required
                   >
                     <option value="">-- Select Member Going on Leave --</option>
-                    {candidates.map(u => {
-                      const isUnavailable = u.isCovering || u.isCovered;
-                      let labelTag = '';
-                      if (u.isCovered) labelTag = ' (Already covered)';
-                      else if (u.isCovering) labelTag = ' (Currently covering someone)';
+                    {candidates
+                      .filter(u => !u.roleCode || u.roleCode.toLowerCase() === selectedRole.toLowerCase())
+                      .map(u => {
+                        const isUnavailable = u.isCovering || u.isCovered;
+                        let labelTag = '';
+                        if (u.isCovered) labelTag = ' (Already covered)';
+                        else if (u.isCovering) labelTag = ' (Currently covering someone)';
 
-                      return (
-                        <option key={u.userId} value={u.userId} disabled={isUnavailable}>
-                          {u.name} ({u.openItemsCount} open items){labelTag}
-                        </option>
-                      );
-                    })}
+                        return (
+                          <option key={u.userId} value={u.userId} disabled={isUnavailable}>
+                            {u.name} ({u.openItemsCount} open items){labelTag}
+                          </option>
+                        );
+                      })}
                   </select>
                 </div>
 

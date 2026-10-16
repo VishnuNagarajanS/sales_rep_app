@@ -185,7 +185,8 @@ export const IrmOtherPage: React.FC<IrmOtherPageProps> = ({ onNavigate }) => {
         recordType,
         recordId,
         undefined,
-        (record.callModule as any) || undefined
+        (record.callModule as any) || 'other',
+        true
       );
     },
     [initiateCall]

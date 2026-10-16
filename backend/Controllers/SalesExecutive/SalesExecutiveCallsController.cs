@@ -321,14 +321,14 @@ public class SalesExecutiveCallsController : ControllerBase
         if (!companyId.HasValue || companyId.Value <= 0)
             return Unauthorized(ApiResponse<CallRecordResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
 
-        var normalizedModule = IrmOtherService.NormalizeModule(dto.Module);
+        var normalizedModule = (role == "irm") ? IrmOtherService.NormalizeModule(dto.Module) : null;
         if (role == "irm")
         {
             if (!string.IsNullOrWhiteSpace(normalizedModule))
             {
                 if (!IrmOtherService.ModuleOutcomes.TryGetValue(normalizedModule, out var allowedOutcomes))
                 {
-                    return BadRequest(ApiResponse<CallRecordResponseDto>.FailureResult($"Invalid module '{dto.Module}'. Allowed IRM modules are: my_leads, follow_up, kyc, opportunities, investor_360, all_leads."));
+                    return BadRequest(ApiResponse<CallRecordResponseDto>.FailureResult($"Invalid module '{dto.Module}'. Allowed IRM modules are: my_leads, follow_up, kyc, opportunities, investor_360, all_leads, other."));
                 }
 
                 var dispo = dto.Disposition?.Trim() ?? string.Empty;
@@ -605,7 +605,7 @@ public class SalesExecutiveCallsController : ControllerBase
             {
                 if (!IrmOtherService.ModuleOutcomes.TryGetValue(normalizedModule, out var allowedOutcomes))
                 {
-                    return BadRequest(ApiResponse<CallRecordDto>.FailureResult($"Invalid module '{request.Module}'. Allowed IRM modules are: my_leads, follow_up, kyc, opportunities, investor_360, all_leads."));
+                    return BadRequest(ApiResponse<CallRecordDto>.FailureResult($"Invalid module '{request.Module}'. Allowed IRM modules are: my_leads, follow_up, kyc, opportunities, investor_360, all_leads, other."));
                 }
 
                 var dispo = request.Disposition?.Trim() ?? string.Empty;
@@ -626,6 +626,7 @@ public class SalesExecutiveCallsController : ControllerBase
         }
         else
         {
+            request.Module = null;
             if (request.Disposition != null && request.Disposition.Trim().Equals("Other", StringComparison.OrdinalIgnoreCase))
             {
                 var effectiveReason = (request.Reason ?? request.Notes)?.Trim();
@@ -681,16 +682,49 @@ public class SalesExecutiveCallsController : ControllerBase
         [FromServices] IIrmOtherService otherService,
         [FromQuery] string? module)
     {
-        var result = otherService.GetCallOutcomes();
+        var role = (_currentUser.Role ?? User.GetUserRole()).ToLowerInvariant();
+        if (role == "sales_executive")
+        {
+            var salesExecOutcomes = new List<string>
+            {
+                "Interested",
+                "Follow-up Required",
+                "Call Back",
+                "Not Interested",
+                "Wrong Number",
+                "No Response"
+            };
+            return Ok(ApiResponse<List<string>>.SuccessResponse(salesExecOutcomes, "Sales Executive call outcomes retrieved successfully."));
+        }
+
         if (!string.IsNullOrWhiteSpace(module))
         {
             var normalized = IrmOtherService.NormalizeModule(module);
-            if (normalized != null && result.Data != null && result.Data.TryGetValue(normalized, out var list))
+            if (normalized != null)
             {
-                return Ok(ApiResponse<List<string>>.SuccessResponse(list, $"Call outcomes for module {normalized} retrieved."));
+                var irmOutcomes = otherService.GetCallOutcomes();
+                if (irmOutcomes.Data != null && irmOutcomes.Data.TryGetValue(normalized, out var list))
+                {
+                    return Ok(ApiResponse<List<string>>.SuccessResponse(list, $"Call outcomes for module {normalized} retrieved."));
+                }
             }
         }
-        return Ok(result);
+
+        if (role == "irm")
+        {
+            return Ok(otherService.GetCallOutcomes());
+        }
+
+        var defaultOutcomes = new List<string>
+        {
+            "Interested",
+            "Follow-up Required",
+            "Call Back",
+            "Not Interested",
+            "Wrong Number",
+            "No Response"
+        };
+        return Ok(ApiResponse<List<string>>.SuccessResponse(defaultOutcomes, "Sales Executive call outcomes retrieved successfully."));
     }
 
     [HttpPost("send-customer-message")]

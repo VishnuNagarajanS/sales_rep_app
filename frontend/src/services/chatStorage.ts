@@ -1,4 +1,7 @@
-import { ChatConversation, ChatMessage, ChatMember, ChatAttachment } from '../types';
+import { ChatConversation, ChatMessage, ChatMember, ChatAttachment, ChatSettings } from '../types';
+import { chatApiService } from './chatApiService';
+import { signalRService } from './signalRService';
+import { playChatNotificationChime, showDesktopNotification } from '../utils/chatNotificationSound';
 
 // ── Storage keys ──────────────────────────────────────────────────────────────
 const getPrefix = () => 'nexus_dev_';
@@ -12,12 +15,178 @@ function emit() {
   window.dispatchEvent(new CustomEvent('nexus_chat_updated'));
 }
 
+// ── Real-Time SignalR Synchronization ─────────────────────────────────────────
+let isSyncInitialized = false;
+
+function getCurrentAuthUser(): { id: string; name: string; companyId: string } | null {
+  try {
+    const raw = sessionStorage.getItem('nexus_current_user') || localStorage.getItem('nexus_current_user');
+    if (!raw) return null;
+    const u = JSON.parse(raw);
+    return {
+      id: String(u.id || ''),
+      name: u.name || '',
+      companyId: String(u.companyId || '1'),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function initChatRealtimeSync(): void {
+  if (isSyncInitialized || typeof window === 'undefined') return;
+  isSyncInitialized = true;
+
+  signalRService.startConnection().catch(() => {});
+
+  // 1. New incoming message
+  signalRService.on('ReceiveChatMessage', (msg: ChatMessage) => {
+    if (!msg || !msg.conversationId) return;
+
+    const me = getCurrentAuthUser();
+    const isFromMe = me && String(msg.senderId) === me.id;
+
+    // Check notification preferences if message is from colleague
+    if (!isFromMe && me) {
+      const settings = getChatSettings(me.companyId, me.id);
+      const conv = getConversation(msg.conversationId);
+      const isMuted = conv?.isMuted ?? false;
+
+      // Audio notification chime
+      if (settings?.notifications?.sound !== false && !isMuted) {
+        playChatNotificationChime();
+      }
+
+      // Desktop push notification
+      if (settings?.notifications?.desktopPush !== false && !isMuted) {
+        const preview = settings?.notifications?.showPreview !== false ? msg.content : 'New message received';
+        showDesktopNotification(msg.senderName || 'Team Chat', preview);
+      }
+    }
+
+    // Merge into local messages
+    const msgs = getMessages(msg.conversationId);
+    const existingIndex = msgs.findIndex(m => m.id === msg.id);
+    if (existingIndex >= 0) {
+      msgs[existingIndex] = msg;
+    } else {
+      msgs.push(msg);
+    }
+    localStorage.setItem(getMsgKey(msg.conversationId), JSON.stringify(msgs));
+
+    // Update conversation preview and unread count
+    try {
+      const raw = localStorage.getItem(getConvsKey());
+      if (raw) {
+        const all: ChatConversation[] = JSON.parse(raw);
+        const ci = all.findIndex(c => c.id === msg.conversationId);
+        if (ci >= 0) {
+          all[ci].lastMessage = {
+            content: msg.content || (msg.attachments && msg.attachments.length > 0 ? `📎 ${msg.attachments[0].name}` : ''),
+            senderName: msg.senderName,
+            isDeleted: msg.isDeleted,
+          };
+          all[ci].updatedAt = msg.createdAt;
+          if (!isFromMe) {
+            all[ci].unreadCount = (all[ci].unreadCount || 0) + 1;
+          }
+          localStorage.setItem(getConvsKey(), JSON.stringify(all));
+        } else {
+          chatApiService.getConversations().then(remoteConvs => {
+            if (Array.isArray(remoteConvs) && remoteConvs.length > 0) {
+              localStorage.setItem(getConvsKey(), JSON.stringify(remoteConvs));
+              emit();
+            }
+          }).catch(() => {});
+        }
+      }
+    } catch { }
+
+    emit();
+  });
+
+  // 2. Typing indicator broadcast
+  signalRService.on('ChatUserTyping', (data: { convId: string; userId: number; userName: string; isTyping: boolean }) => {
+    if (!data || !data.convId) return;
+    const me = getCurrentAuthUser();
+    if (me && String(data.userId) === me.id) return;
+
+    if (data.isTyping) {
+      setLocalTyping(data.convId, {
+        userId: String(data.userId),
+        userName: data.userName,
+        ts: Date.now(),
+      });
+    } else {
+      setLocalTyping(data.convId, null);
+    }
+    emit();
+  });
+
+  // 3. Conversation modified (pinned, renamed, created, history cleared)
+  signalRService.on('ChatConversationUpdated', (data: { conversationId: string }) => {
+    // Refresh conversations in background
+    chatApiService.getConversations().then(remoteConvs => {
+      if (Array.isArray(remoteConvs) && remoteConvs.length > 0) {
+        localStorage.setItem(getConvsKey(), JSON.stringify(remoteConvs));
+        emit();
+      }
+    }).catch(() => {});
+  });
+
+  // 4. Message read broadcast
+  signalRService.on('ChatMessageRead', (data: { conversationId: string; userId: number; messageId: string }) => {
+    emit();
+  });
+}
+
+export function isMatchingCompany(cCompId?: string | number, targetCompId?: string | number): boolean {
+  if (!cCompId || !targetCompId) return true;
+  const c1 = String(cCompId).toLowerCase();
+  const c2 = String(targetCompId).toLowerCase();
+  if (c1 === c2) return true;
+  if ((c1 === '1' || c1 === 'ghl' || c1 === 't-ghl-01') && (c2 === '1' || c2 === 'ghl' || c2 === 't-ghl-01')) return true;
+  if ((c1 === '2' || c1 === 'jamin' || c1 === 't-jamin-02') && (c2 === '2' || c2 === 'jamin' || c2 === 't-jamin-02')) return true;
+  return false;
+}
+
 // ── Conversations ─────────────────────────────────────────────────────────────
 export function getConversations(companyId: string): ChatConversation[] {
+  // Trigger realtime init on first fetch
+  initChatRealtimeSync();
+
+  // 1. Sync from backend in background
+  chatApiService.getConversations().then(remoteConvs => {
+    if (Array.isArray(remoteConvs)) {
+      const raw = localStorage.getItem(getConvsKey());
+      const currentList: ChatConversation[] = raw ? JSON.parse(raw) : [];
+
+      const map = new Map<string, ChatConversation>();
+      currentList.forEach(c => map.set(c.id, c));
+      remoteConvs.forEach(rc => {
+        const existing = map.get(rc.id);
+        map.set(rc.id, {
+          ...rc,
+          isPinned: existing?.isPinned ?? rc.isPinned,
+          isMuted: existing?.isMuted ?? rc.isMuted,
+        });
+      });
+
+      const merged = Array.from(map.values());
+      const currentStr = raw || '[]';
+      const newStr = JSON.stringify(merged);
+      if (currentStr !== newStr) {
+        localStorage.setItem(getConvsKey(), newStr);
+        emit();
+      }
+    }
+  }).catch(() => {});
+
+  // 2. Return local cached conversations
   try {
     const raw = localStorage.getItem(getConvsKey());
     const all: ChatConversation[] = raw ? JSON.parse(raw) : [];
-    return all.filter(c => c.companyId === companyId);
+    return all.filter(c => isMatchingCompany(c.companyId, companyId));
   } catch {
     return [];
   }
@@ -49,13 +218,27 @@ export function saveConversation(conv: ChatConversation): void {
 }
 
 export function getOrCreateDm(companyId: string, meId: string, them: ChatMember, me: ChatMember): ChatConversation {
+  const meNum = parseInt(meId, 10);
+  const themNum = parseInt(them.id, 10);
+  const safeCompId = companyId && !isNaN(parseInt(companyId, 10)) ? companyId : '1';
+  const deterministicId = (!isNaN(meNum) && !isNaN(themNum))
+    ? `conv-dm-${safeCompId}-${Math.min(meNum, themNum)}-${Math.max(meNum, themNum)}`
+    : `conv-dm-${safeCompId}-${meId}-${them.id}`;
+
   const existing = getConversations(companyId).find(
-    c => c.type === 'dm' && c.memberIds.includes(meId) && c.memberIds.includes(them.id),
+    c => c.id === deterministicId || (c.type === 'dm' && c.memberIds.includes(meId) && c.memberIds.includes(them.id)),
   );
-  if (existing) return existing;
+  if (existing) {
+    if (existing.id !== deterministicId) {
+      existing.id = deterministicId;
+      saveConversation(existing);
+    }
+    return existing;
+  }
+
   const conv: ChatConversation = {
-    id: `conv-dm-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    companyId,
+    id: deterministicId,
+    companyId: safeCompId,
     type: 'dm',
     memberIds: [meId, them.id],
     members: [me, them],
@@ -64,6 +247,20 @@ export function getOrCreateDm(companyId: string, meId: string, them: ChatMember,
     updatedAt: new Date().toISOString(),
   };
   saveConversation(conv);
+
+  // Sync to PostgreSQL backend
+  if (!isNaN(meNum) && !isNaN(themNum)) {
+    chatApiService.createConversation({
+      id: deterministicId,
+      type: 'dm',
+      memberUserIds: [meNum, themNum],
+    }).then(created => {
+      if (created && created.id) {
+        saveConversation(created);
+      }
+    }).catch(() => {});
+  }
+
   return conv;
 }
 
@@ -80,11 +277,37 @@ export function createGroup(companyId: string, name: string, members: ChatMember
     updatedAt: new Date().toISOString(),
   };
   saveConversation(conv);
+
+  // Sync to PostgreSQL backend
+  const memberIdsNum = members.map(m => parseInt(m.id, 10)).filter(id => !isNaN(id));
+  chatApiService.createConversation({
+    type: 'group',
+    name,
+    memberUserIds: memberIdsNum,
+  }).then(created => {
+    if (created && created.id) {
+      saveConversation(created);
+    }
+  }).catch(() => {});
+
   return conv;
 }
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 export function getMessages(conversationId: string): ChatMessage[] {
+  // Background fetch from backend
+  chatApiService.getMessages(conversationId).then(remoteMsgs => {
+    if (Array.isArray(remoteMsgs) && remoteMsgs.length > 0) {
+      const raw = localStorage.getItem(getMsgKey(conversationId));
+      const currentStr = raw || '[]';
+      const newStr = JSON.stringify(remoteMsgs);
+      if (currentStr !== newStr) {
+        localStorage.setItem(getMsgKey(conversationId), newStr);
+        emit();
+      }
+    }
+  }).catch(() => {});
+
   try {
     const raw = localStorage.getItem(getMsgKey(conversationId));
     return raw ? JSON.parse(raw) : [];
@@ -113,6 +336,8 @@ export function sendMessage(
     reactions: [],
     attachments: attachments && attachments.length > 0 ? attachments : undefined,
   };
+
+  // 1. Optimistic local cache update
   const msgs = getMessages(conversationId);
   msgs.push(msg);
   localStorage.setItem(getMsgKey(conversationId), JSON.stringify(msgs));
@@ -133,6 +358,26 @@ export function sendMessage(
   } catch { }
 
   emit();
+
+  // 2. Dispatch to backend REST API & SignalR
+  chatApiService.sendMessage(conversationId, {
+    content: msg.content,
+    attachments,
+  }).then(saved => {
+    if (saved && saved.id) {
+      // Reconcile client generated ID with server ID
+      const updatedMsgs = getMessages(conversationId);
+      const localIdx = updatedMsgs.findIndex(m => m.id === msg.id);
+      if (localIdx >= 0) {
+        updatedMsgs[localIdx] = saved;
+        localStorage.setItem(getMsgKey(conversationId), JSON.stringify(updatedMsgs));
+        emit();
+      }
+    }
+  }).catch(err => {
+    console.warn('[chatStorage] sendMessage backend dispatch error:', err);
+  });
+
   return msg;
 }
 
@@ -158,16 +403,19 @@ export function toggleReaction(conversationId: string, messageId: string, emoji:
   const msgs = getMessages(conversationId);
   const idx = msgs.findIndex(m => m.id === messageId);
   if (idx < 0) return;
-  const msg = { ...msgs[idx], reactions: [...msgs[idx].reactions] };
-  const rxIdx = msg.reactions.findIndex(r => r.emoji === emoji && r.userId === userId);
+  const reactions = [...(msgs[idx].reactions || [])];
+  const rxIdx = reactions.findIndex(r => r.emoji === emoji && r.userId === userId);
   if (rxIdx >= 0) {
-    msg.reactions.splice(rxIdx, 1);
+    reactions.splice(rxIdx, 1);
   } else {
-    msg.reactions.push({ emoji, userId, userName });
+    reactions.push({ emoji, userId, userName });
   }
-  msgs[idx] = { ...msg, updatedAt: new Date().toISOString() };
+  msgs[idx] = { ...msgs[idx], reactions, updatedAt: new Date().toISOString() };
   localStorage.setItem(getMsgKey(conversationId), JSON.stringify(msgs));
   emit();
+
+  // Sync to PostgreSQL backend
+  chatApiService.toggleReaction(conversationId, messageId, emoji).catch(() => {});
 }
 
 export function markRead(conversationId: string, companyId: string): void {
@@ -182,6 +430,8 @@ export function markRead(conversationId: string, companyId: string): void {
       emit();
     }
   } catch { }
+
+  chatApiService.markAsRead(conversationId).catch(() => {});
 }
 
 // ── Presence ──────────────────────────────────────────────────────────────────
@@ -207,7 +457,7 @@ export interface TypingEntry {
   ts: number;
 }
 
-export function setTyping(conversationId: string, entry: TypingEntry | null): void {
+function setLocalTyping(conversationId: string, entry: TypingEntry | null): void {
   try {
     const raw = localStorage.getItem(getTypingKey());
     const map: Record<string, TypingEntry | null> = raw ? JSON.parse(raw) : {};
@@ -218,6 +468,21 @@ export function setTyping(conversationId: string, entry: TypingEntry | null): vo
     }
     localStorage.setItem(getTypingKey(), JSON.stringify(map));
   } catch { }
+}
+
+export function setTyping(conversationId: string, entry: TypingEntry | null, companyId?: string, currentUserId?: string): void {
+  setLocalTyping(conversationId, entry);
+
+  // Check user privacy settings: respect typingIndicator toggle
+  if (companyId && currentUserId) {
+    const settings = getChatSettings(companyId, currentUserId);
+    if (settings?.privacy?.typingIndicator === false) {
+      return; // Suppress sending typing status to colleagues
+    }
+  }
+
+  // Broadcast to backend via SignalR
+  chatApiService.sendTyping(conversationId, entry !== null).catch(() => {});
 }
 
 export function getTyping(conversationId: string, currentUserId: string): TypingEntry | null {
@@ -253,14 +518,12 @@ export function buildDirectory(
       roleCode: u.role?.code || 'sales_executive',
       roleName: u.role?.name || 'Sales Executive',
       companyId,
-      status: (presence[u.id] ?? 'offline') as 'online' | 'offline',
+      status: (presence[u.id] ?? 'online') as 'online' | 'offline',
     }));
 }
 
-
-
 // ── Conversation Settings & Organization ──────────────────────────────────────
-export function getChatSettings(companyId: string, userId: string): any {
+export function getChatSettings(companyId: string, userId: string): ChatSettings | null {
   try {
     const raw = localStorage.getItem(getSettingsKey(companyId, userId));
     return raw ? JSON.parse(raw) : null;
@@ -269,7 +532,7 @@ export function getChatSettings(companyId: string, userId: string): any {
   }
 }
 
-export function saveChatSettings(companyId: string, userId: string, settings: any): void {
+export function saveChatSettings(companyId: string, userId: string, settings: ChatSettings): void {
   try {
     localStorage.setItem(getSettingsKey(companyId, userId), JSON.stringify(settings));
     emit();
@@ -277,6 +540,7 @@ export function saveChatSettings(companyId: string, userId: string, settings: an
 }
 
 export function togglePinConversation(conversationId: string): void {
+  let isPinned = false;
   try {
     const raw = localStorage.getItem(getConvsKey());
     if (!raw) return;
@@ -284,13 +548,17 @@ export function togglePinConversation(conversationId: string): void {
     const conv = all.find(c => c.id === conversationId);
     if (conv) {
       conv.isPinned = !conv.isPinned;
+      isPinned = Boolean(conv.isPinned);
       localStorage.setItem(getConvsKey(), JSON.stringify(all));
       emit();
     }
   } catch { }
+
+  chatApiService.updateConversation(conversationId, { isPinned }).catch(() => {});
 }
 
 export function toggleMuteConversation(conversationId: string): void {
+  let isMuted = false;
   try {
     const raw = localStorage.getItem(getConvsKey());
     if (!raw) return;
@@ -298,10 +566,13 @@ export function toggleMuteConversation(conversationId: string): void {
     const conv = all.find(c => c.id === conversationId);
     if (conv) {
       conv.isMuted = !conv.isMuted;
+      isMuted = Boolean(conv.isMuted);
       localStorage.setItem(getConvsKey(), JSON.stringify(all));
       emit();
     }
   } catch { }
+
+  chatApiService.updateConversation(conversationId, { isMuted }).catch(() => {});
 }
 
 export function renameConversation(conversationId: string, newName: string): void {
@@ -317,6 +588,8 @@ export function renameConversation(conversationId: string, newName: string): voi
       emit();
     }
   } catch { }
+
+  chatApiService.updateConversation(conversationId, { name: newName }).catch(() => {});
 }
 
 export function clearConversationMessages(conversationId: string): void {
@@ -333,6 +606,8 @@ export function clearConversationMessages(conversationId: string): void {
     }
     emit();
   } catch { }
+
+  chatApiService.clearHistory(conversationId).catch(() => {});
 }
 
 export function leaveConversation(conversationId: string, userId: string): void {
@@ -348,6 +623,8 @@ export function leaveConversation(conversationId: string, userId: string): void 
       emit();
     }
   } catch { }
+
+  chatApiService.leaveGroup(conversationId).catch(() => {});
 }
 
 // ── Call Cards ────────────────────────────────────────────────────────────────

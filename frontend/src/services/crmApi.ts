@@ -401,13 +401,29 @@ export const callsApi = {
     }
   },
 
+  async getSalesExecutiveCallOutcomes(): Promise<string[]> {
+    try {
+      const res = await apiClient.get<ApiResponse<string[]>>('/sales-executive/calls/outcomes');
+      return res.data || [];
+    } catch {
+      return ['Interested', 'Follow-up Required', 'Call Back', 'Not Interested', 'Wrong Number', 'No Response'];
+    }
+  },
+
   async getIrmCallOutcomes(module?: string): Promise<Record<string, string[]>> {
     try {
       const res = await apiClient.get<ApiResponse<Record<string, string[]>>>('/irm/call-outcomes', module ? { module } : undefined);
       return res.data || {};
     } catch {
-      const fallbackRes = await apiClient.get<ApiResponse<Record<string, string[]>>>('/sales-executive/calls/outcomes', module ? { module } : undefined);
-      return fallbackRes.data || {};
+      return {
+        my_leads: ['Follow-up Required', 'No Response', 'Call Back'],
+        follow_up: ['Follow-up Required', 'Other', 'No Response', 'Call Back', 'Ready for KYC'],
+        kyc: ['Contacted', 'Other', 'No Response', 'Call Back'],
+        opportunities: ['Contacted', 'Other', 'No Response', 'Call Back'],
+        investor_360: ['Contacted', 'Other', 'No Response', 'Call Back'],
+        all_leads: ['Follow-up Required', 'Call Back', 'Ready for KYC', 'Other', 'No Response'],
+        other: ['Call Back', 'Other', 'No Response', 'Follow-up Required', 'Ready for KYC'],
+      };
     }
   },
 };

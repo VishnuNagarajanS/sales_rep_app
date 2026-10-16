@@ -93,12 +93,11 @@ public class LeadService : ILeadService
         if (role == "irm" && agentId.HasValue)
         {
             var irmIdStr = agentId.Value.ToString();
-            // In IRM My Leads, show a lead when its status is Interested and assigned to this IRM
-            query = query.Where(l => (l.AssignedAgentId == agentId.Value ||
+            // In IRM My Leads, show leads assigned to this IRM
+            query = query.Where(l => l.AssignedAgentId == agentId.Value ||
                                       (l.CustomFieldsJson != null &&
                                        (l.CustomFieldsJson.Contains($"\"assignedIrmId\":\"{irmIdStr}\"") ||
-                                        l.CustomFieldsJson.Contains($"\"assignedIrmId\":{irmIdStr}")))) &&
-                                     l.Status == "Interested");
+                                        l.CustomFieldsJson.Contains($"\"assignedIrmId\":{irmIdStr}"))));
         }
         else if (role == "sales_executive" && agentId.HasValue)
         {
@@ -1295,7 +1294,7 @@ public class LeadService : ILeadService
                 ? lead.AssignedBy.Name
                 : (lead.CustomFieldsJson != null && lead.CustomFieldsJson.Contains("qualifiedByAgentName")
                     ? DeserializeCustomFields(lead.CustomFieldsJson).GetValueOrDefault("qualifiedByAgentName")
-                    : null),
+                    : (agentRole == "irm" ? "Created by IRM" : null)),
             Name = lead.Name,
             Phone = lead.Phone,
             Email = lead.Email,

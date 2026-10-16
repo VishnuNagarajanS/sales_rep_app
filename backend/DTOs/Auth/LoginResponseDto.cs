@@ -6,7 +6,9 @@ public class LoginResponseDto
     public UserDto? User { get; set; }
     public TenantDto? Tenant { get; set; }
     public bool RequiresTwoFactor { get; set; }
+    public bool RequiresMfa { get; set; }
     public string? TempToken { get; set; }
+    public string? ChallengeToken { get; set; }
     public bool MustEnrollTwoFactor { get; set; }
     public bool MustChangePassword { get; set; }
 }

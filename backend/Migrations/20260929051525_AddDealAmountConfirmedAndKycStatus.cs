@@ -14,6 +14,8 @@ namespace backend.Migrations
             // Idempotent: columns may already exist if added via direct SQL previously
             migrationBuilder.Sql(@"ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""InvestmentAmountConfirmed"" BOOLEAN NOT NULL DEFAULT FALSE;");
             migrationBuilder.Sql(@"ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""KycStatus"" TEXT NULL;");
+            migrationBuilder.Sql(@"ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Priority"" character varying(50) NOT NULL DEFAULT 'Medium';");
+            migrationBuilder.Sql(@"ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Status"" character varying(50) NOT NULL DEFAULT 'Pending';");
 
             migrationBuilder.AlterColumn<string>(
                 name: "Status",

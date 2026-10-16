@@ -26,6 +26,7 @@ public class AuthService : IAuthService
     private readonly IEmailService _emailService;
     private readonly IOptionsMonitor<SmtpSettings> _smtpOptions;
     private readonly ITotpService _totpService;
+    private readonly IMfaService _mfaService;
 
     public AuthService(
         IUserRepository userRepository,
@@ -35,7 +36,8 @@ public class AuthService : IAuthService
         ICurrentUserService currentUser,
         IEmailService emailService,
         IOptionsMonitor<SmtpSettings> smtpOptions,
-        ITotpService totpService)
+        ITotpService totpService,
+        IMfaService mfaService)
     {
         _userRepository = userRepository;
         _jwtService = jwtService;
@@ -45,6 +47,7 @@ public class AuthService : IAuthService
         _emailService = emailService;
         _smtpOptions = smtpOptions;
         _totpService = totpService;
+        _mfaService = mfaService;
     }
 
     public async Task<ApiResponse<LoginResponseDto>> LoginAsync(
@@ -142,17 +145,18 @@ public class AuthService : IAuthService
             return ApiResponse<LoginResponseDto>.FailureResult("Your organization account is inactive or suspended.");
         }
 
-        // Two-factor authentication challenge
-        if (user.IsTwoFactorEnabled && !string.IsNullOrWhiteSpace(user.TwoFactorSecret))
+        // Multi-factor authentication check
+        var isMfaRequired = await _mfaService.IsMfaRequiredAsync(user.Id, cancellationToken);
+        if (isMfaRequired)
         {
-            var tempPayload = $"{user.Id}:{DateTime.UtcNow.AddMinutes(5).Ticks}:{Hash(user.PasswordHash + user.TwoFactorSecret)}";
-            var tempToken = Convert.ToBase64String(Encoding.UTF8.GetBytes(tempPayload));
-
-            _logger.LogInformation("2FA challenge required for user: {Email}", user.Email);
+            var challenge = await _mfaService.CreateLoginChallengeAsync(user.Id, ipAddress, userAgent, cancellationToken);
+            _logger.LogInformation("MFA login challenge issued for user: {Email}", user.Email);
             return ApiResponse<LoginResponseDto>.SuccessResult(new LoginResponseDto
             {
                 RequiresTwoFactor = true,
-                TempToken = tempToken,
+                RequiresMfa = true,
+                ChallengeToken = challenge.ChallengeToken,
+                TempToken = challenge.ChallengeToken,
                 User = null,
                 Token = string.Empty
             }, "Two-factor authentication required. Please enter your 6-digit authenticator code.");
@@ -216,108 +220,27 @@ public class AuthService : IAuthService
             return ApiResponse<LoginResponseDto>.FailureResult("Temporary challenge token and verification code are required.");
         }
 
-        int userId;
-        try
+        var token = request.TempToken.Trim();
+        var code = request.Code.Trim();
+
+        // 1. First attempt standard TOTP code verification
+        var result = await _mfaService.VerifyLoginChallengeAsync(token, code, ipAddress, userAgent, cancellationToken);
+        if (result.Success)
         {
-            var raw = Encoding.UTF8.GetString(Convert.FromBase64String(request.TempToken));
-            var parts = raw.Split(':');
-            if (parts.Length < 3) return ApiResponse<LoginResponseDto>.FailureResult("Invalid 2FA challenge token.");
-            userId = int.Parse(parts[0]);
-            var expiryTicks = long.Parse(parts[1]);
-            if (DateTime.UtcNow.Ticks > expiryTicks)
+            return result;
+        }
+
+        // 2. If TOTP verification failed, check if the input is an emergency recovery code
+        if (code.Contains("-") || code.Length >= 8)
+        {
+            var recoveryResult = await _mfaService.VerifyRecoveryLoginAsync(token, code, ipAddress, userAgent, cancellationToken);
+            if (recoveryResult.Success)
             {
-                return ApiResponse<LoginResponseDto>.FailureResult("2FA challenge session expired. Please log in again.");
+                return recoveryResult;
             }
         }
-        catch
-        {
-            return ApiResponse<LoginResponseDto>.FailureResult("Invalid 2FA challenge token.");
-        }
 
-        var user = await _context.Users
-            .Include(u => u.Role)
-            .Include(u => u.Company)
-            .FirstOrDefaultAsync(u => u.Id == userId && u.Status == UserStatus.Active, cancellationToken);
-
-        if (user == null || !user.IsTwoFactorEnabled || string.IsNullOrWhiteSpace(user.TwoFactorSecret))
-        {
-            return ApiResponse<LoginResponseDto>.FailureResult("2FA is not enabled or user account is not active.");
-        }
-
-        var cleanCode = request.Code.Trim().Replace(" ", "").Replace("-", "");
-        var isTotpValid = _totpService.ValidateTotp(user.TwoFactorSecret, cleanCode);
-        var isRecoveryUsed = false;
-
-        if (!isTotpValid && !string.IsNullOrWhiteSpace(user.TwoFactorRecoveryCodesJson))
-        {
-            try
-            {
-                var codes = System.Text.Json.JsonSerializer.Deserialize<List<string>>(user.TwoFactorRecoveryCodesJson);
-                if (codes != null && codes.Contains(cleanCode.ToUpperInvariant()))
-                {
-                    codes.Remove(cleanCode.ToUpperInvariant());
-                    user.TwoFactorRecoveryCodesJson = System.Text.Json.JsonSerializer.Serialize(codes);
-                    isRecoveryUsed = true;
-                    isTotpValid = true;
-                }
-            }
-            catch { }
-        }
-
-        if (!isTotpValid)
-        {
-            _context.SecurityEvents.Add(new SecurityEvent
-            {
-                EventType = "MFA_FAILURE",
-                Severity = "WARNING",
-                Description = $"Invalid 2FA verification attempt for user: {user.Email}",
-                IpAddress = string.IsNullOrWhiteSpace(ipAddress) ? "127.0.0.1" : ipAddress,
-                UserEmail = user.Email,
-                UserId = user.Id,
-                Timestamp = DateTime.UtcNow
-            });
-            await _context.SaveChangesAsync(cancellationToken);
-            return ApiResponse<LoginResponseDto>.FailureResult("Invalid authentication code. Please check your authenticator app.");
-        }
-
-        // Generate JWT token with Jti details
-        var (token, jti, _) = _jwtService.GenerateTokenWithDetails(user);
-
-        // Create persistent UserSession
-        var session = new UserSession
-        {
-            UserId = user.Id,
-            TokenId = jti,
-            IpAddress = string.IsNullOrWhiteSpace(ipAddress) ? "127.0.0.1" : ipAddress,
-            UserAgent = string.IsNullOrWhiteSpace(userAgent) ? "Unknown" : userAgent,
-            Device = DetectDevice(userAgent),
-            Location = "India (IST)",
-            IsActive = true,
-            CreatedAt = DateTime.UtcNow,
-            LastActivityAt = DateTime.UtcNow
-        };
-        _context.UserSessions.Add(session);
-
-        _context.SecurityEvents.Add(new SecurityEvent
-        {
-            EventType = isRecoveryUsed ? "LOGIN_SUCCESS_RECOVERY_CODE" : "LOGIN_SUCCESS_MFA",
-            Severity = "INFO",
-            Description = $"User {user.Email} authenticated successfully via {(isRecoveryUsed ? "Recovery Code" : "2FA TOTP")}.",
-            IpAddress = session.IpAddress,
-            UserEmail = user.Email,
-            UserId = user.Id,
-            Timestamp = DateTime.UtcNow
-        });
-        await _context.SaveChangesAsync(cancellationToken);
-
-        var responseDto = new LoginResponseDto
-        {
-            Token = token,
-            User = MapToUserDto(user),
-            Tenant = user.Company != null ? MapToTenantDto(user.Company) : null
-        };
-
-        return ApiResponse<LoginResponseDto>.SuccessResult(responseDto, "Two-factor verification successful.");
+        return result;
     }
 
     public async Task<ApiResponse<object>> ChangePasswordAsync(ChangePasswordRequestDto request, CancellationToken cancellationToken = default)

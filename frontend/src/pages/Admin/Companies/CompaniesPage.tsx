@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { useUnsavedChanges } from '../../../context/NavigationGuardContext';
-import { Tenant, User, SubscriptionPackage } from '../../../types';
+import { Tenant, User, SubscriptionPackage, TenantDidMapping } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
 import { storageService } from '../../../services/storageService';
 import { FEATURES } from '../../../constants/features';
@@ -79,7 +79,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
   const [wizardAdminName, setWizardAdminName] = useState('');
   const [wizardAdminEmail, setWizardAdminEmail] = useState('');
   const [wizardAdminPhone, setWizardAdminPhone] = useState('+91 98450 ');
-  const [wizardDidNumber, setWizardDidNumber] = useState('+91 80 4700 8003');
+  const [wizardDidNumber, setWizardDidNumber] = useState('');
   const [wizardRoutingStrategy, setWizardRoutingStrategy] = useState('Round-Robin');
 
   // Detail Drawer state
@@ -88,6 +88,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
   const [drawerTab, setDrawerTab] = useState<'profile' | 'features' | 'users' | 'telephony' | 'danger'>('profile');
   const [drawerTenantEdit, setDrawerTenantEdit] = useState<Tenant | null>(null);
   const [drawerUsers, setDrawerUsers] = useState<User[]>([]);
+  const [didMappings, setDidMappings] = useState<TenantDidMapping[]>([]);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
 
   // Add User to Company Modal
@@ -100,6 +101,11 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
   const [isDeployingWizard, setIsDeployingWizard] = useState(false);
   const [isActionInProgress, setIsActionInProgress] = useState(false);
   const [isAddingUser, setIsAddingUser] = useState(false);
+
+  // Tenant Impersonation State
+  const [impersonatingTenant, setImpersonatingTenant] = useState<Tenant | null>(null);
+  const [isImpersonatingLoading, setIsImpersonatingLoading] = useState(false);
+  const [impersonateError, setImpersonateError] = useState<string | null>(null);
 
   // Unsaved changes check
   const isWizardDirty = isWizardOpen && (wizardName.trim() !== '' || wizardSlug.trim() !== '' || wizardAdminEmail.trim() !== '');
@@ -145,6 +151,17 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
     const id = String(tenant.id || '').toLowerCase().trim();
     const name = (tenant.name || '').toLowerCase().trim();
     return slug === 'jamin' || id === '2' || id === 't-jamin-02' || name.includes('jamin');
+  };
+
+  const getTenantDid = (t?: Tenant | null): string => {
+    if (!t) return '—';
+    const found = didMappings.find(
+      d => (d.tenantId && String(d.tenantId) === String(t.id)) ||
+           (d.tenantSlug && d.tenantSlug.toLowerCase() === (t.slug || '').toLowerCase())
+    );
+    if (found?.phoneNumber) return found.phoneNumber;
+    if (t.phone) return t.phone;
+    return 'Pending DID';
   };
 
   const isGhlUser = (u: User): boolean => {
@@ -270,12 +287,14 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
     setIsLoading(true);
     setLoadError(null);
     try {
-      const [allTenants, allPackages] = await Promise.all([
+      const [allTenants, allPackages, allDids] = await Promise.all([
         superAdminService.fetchTenantsFromApi(),
         superAdminService.fetchPackagesFromApi(),
+        superAdminService.fetchDidMappingsFromApi().catch(() => superAdminService.getDidMappings()),
       ]);
       setTenants(allTenants);
       setPackages(allPackages);
+      setDidMappings(allDids || []);
 
       if (selectedTenantId) {
         const match = allTenants.find(t => t.id === selectedTenantId || t.slug === selectedTenantId);
@@ -315,9 +334,65 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
   }, [selectedTenant, isDetailDrawerOpen]);
 
   const handleViewAsCompany = (t: Tenant) => {
-    sessionStorage.setItem('nexus_support_mode_active', 'true');
-    sessionStorage.setItem('nexus_support_company_name', t.name);
-    switchPersona('company_admin', t.slug);
+    setImpersonateError(null);
+    setImpersonatingTenant(t);
+  };
+
+  const handleConfirmImpersonate = async () => {
+    if (!impersonatingTenant || isImpersonatingLoading) return;
+    setIsImpersonatingLoading(true);
+    setImpersonateError(null);
+
+    try {
+      const res = await superAdminService.impersonateTenantApi(impersonatingTenant.id);
+
+      // 1. Backup current Super Admin credentials
+      const currentAdminToken = sessionStorage.getItem('nexus_auth_token') || localStorage.getItem('nexus_auth_token');
+      const currentAdminUser = sessionStorage.getItem('nexus_current_user') || localStorage.getItem('nexus_current_user');
+
+      const backup = {
+        token: currentAdminToken,
+        user: currentAdminUser,
+        tenantName: impersonatingTenant.name,
+        tenantSlug: impersonatingTenant.slug,
+        impersonatedAt: new Date().toISOString(),
+      };
+
+      localStorage.setItem('nexus_impersonation_backup', JSON.stringify(backup));
+
+      // 2. Set new impersonated session credentials
+      if (res.token) {
+        sessionStorage.setItem('nexus_auth_token', res.token);
+        localStorage.setItem('nexus_auth_token', res.token);
+      }
+
+      if (res.user) {
+        const userStr = typeof res.user === 'string' ? res.user : JSON.stringify(res.user);
+        sessionStorage.setItem('nexus_current_user', userStr);
+        localStorage.setItem('nexus_current_user', userStr);
+      }
+
+      if (res.tenant) {
+        const tenantStr = typeof res.tenant === 'string' ? res.tenant : JSON.stringify(res.tenant);
+        sessionStorage.setItem('nexus_current_tenant', tenantStr);
+        localStorage.setItem('nexus_current_tenant', tenantStr);
+      }
+
+      // 3. Clear support mode artifacts
+      sessionStorage.removeItem('nexus_support_mode_active');
+      sessionStorage.removeItem('nexus_support_company_name');
+
+      // 4. Notify app listeners
+      window.dispatchEvent(new Event('nexus_impersonation_changed'));
+      window.dispatchEvent(new Event('nexus_auth_updated'));
+
+      // 5. Navigate to tenant dashboard
+      window.location.href = res.targetRoute || '/dashboard';
+    } catch (err: any) {
+      setImpersonateError(err.message || 'Failed to establish impersonation session.');
+    } finally {
+      setIsImpersonatingLoading(false);
+    }
   };
 
   const handleSaveDrawerTenant = async () => {
@@ -434,6 +509,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       // Reset fields
       setWizardName('');
       setWizardAdminEmail('');
+      setWizardDidNumber('');
     } catch (err: any) {
       alert(err.message || 'Failed to deploy new organization.');
     } finally {
@@ -650,7 +726,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   <div className="meta-spec-item">
                     <span className="spec-label">Inbound DID</span>
                     <span className="spec-value font-mono">
-                      +91 80 4700 800{t.slug === 'ghl' ? '1' : t.slug === 'jamin' ? '2' : '9'}
+                      {getTenantDid(t)}
                     </span>
                   </div>
                 </div>
@@ -665,10 +741,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                 <div className="tenant-card-footer">
                   <button
                     className="btn btn-secondary btn-sm btn-support-mode"
-                    title="Inspect tenant CRM in safe read-only mode"
+                    title={`Log in as ${t.name} Company Admin`}
                     onClick={() => handleViewAsCompany(t)}
                   >
-                    <ExternalLink size={13} /> View as Company
+                    <ExternalLink size={13} /> Login as Admin
                   </button>
 
                   <button
@@ -728,7 +804,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                     </td>
                     <td>{stats.usersCount}</td>
                     <td>
-                      <code>+91 80 4700 800{t.slug === 'ghl' ? '1' : t.slug === 'jamin' ? '2' : '9'}</code>
+                      <code>{getTenantDid(t)}</code>
                     </td>
                     <td>
                       <span className={`tenant-status-chip ${t.status?.toLowerCase() || 'active'}`}>
@@ -740,9 +816,9 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                         <button
                           className="btn btn-secondary btn-xs"
                           onClick={() => handleViewAsCompany(t)}
-                          title="View as Company in Read-Only Mode"
+                          title={`Log in as ${t.name} Company Admin`}
                         >
-                          <ExternalLink size={12} /> View As
+                          <ExternalLink size={12} /> Login As
                         </button>
                         <button
                           className="btn btn-primary btn-xs"
@@ -1274,9 +1350,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
               <div className="banner-right">
                 <button
                   className="btn btn-secondary btn-sm"
+                  title={`Log in as ${selectedTenant.name} Company Admin`}
                   onClick={() => handleViewAsCompany(selectedTenant)}
                 >
-                  <ExternalLink size={13} /> View as Company
+                  <ExternalLink size={13} /> Login as Admin
                 </button>
                 <button
                   className="btn btn-primary btn-sm"
@@ -1516,7 +1593,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                       name="phone"
                       type="text"
                       className="form-control"
-                      value={drawerTenantEdit.phone || '+91 80 4700 8001'}
+                      value={drawerTenantEdit.phone || getTenantDid(drawerTenantEdit) || ''}
                       onChange={e => setDrawerTenantEdit({ ...drawerTenantEdit, phone: e.target.value })}
                     />
                   </div>
@@ -1688,6 +1765,80 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
           </div>
         </Modal>
       )}
+
+      {/* Impersonation Confirmation Modal */}
+      {impersonatingTenant && (
+        <Modal
+          isOpen={!!impersonatingTenant}
+          onClose={() => {
+            if (!isImpersonatingLoading) {
+              setImpersonatingTenant(null);
+              setImpersonateError(null);
+            }
+          }}
+          title={`🕵️ Tenant Workspace Impersonation`}
+          size="md"
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', padding: 14, borderRadius: 8 }}>
+              <AlertTriangle size={22} style={{ color: '#f59e0b', flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <strong style={{ color: '#d97706', display: 'block', marginBottom: 4, fontSize: 14 }}>
+                  Audited Platform Administrative Action
+                </strong>
+                <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary, #6b7280)', lineHeight: 1.5 }}>
+                  You are about to securely log into <strong>{impersonatingTenant.name}</strong> as an authenticated Company Admin without needing passwords.
+                </p>
+              </div>
+            </div>
+
+            <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-primary, #374151)' }}>
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                <li>No password required — credentials are dynamically generated and verified.</li>
+                <li>This administrative session is logged in the <strong>Platform Audit Trail</strong>.</li>
+                <li>You can return to the Super Admin console anytime using the top exit banner.</li>
+              </ul>
+            </div>
+
+            {impersonateError && (
+              <div style={{ padding: '10px 14px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', borderRadius: 6, color: '#dc2626', fontSize: 13 }}>
+                {impersonateError}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={isImpersonatingLoading}
+                onClick={() => {
+                  setImpersonatingTenant(null);
+                  setImpersonateError(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-warning btn-sm"
+                style={{ background: '#d97706', borderColor: '#d97706', color: '#fff', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                disabled={isImpersonatingLoading}
+                onClick={handleConfirmImpersonate}
+              >
+                {isImpersonatingLoading ? (
+                  <>
+                    <RefreshCw size={13} className="spin" /> Launching Session...
+                  </>
+                ) : (
+                  <>
+                    <ExternalLink size={13} /> Launch Impersonation Session
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
-};
+};

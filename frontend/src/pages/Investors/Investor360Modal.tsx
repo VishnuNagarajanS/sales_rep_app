@@ -193,41 +193,45 @@ export const Investor360Modal: React.FC<Investor360ModalProps> = ({
     const fetchKyc = async () => {
       setLoadingKyc(true);
       try {
-        // 1. Try by investor.id
-        if (investor.id) {
-          const res = await fetch(apiUrl(`/irm/kyc/${investor.id}`), {
-            headers: getAuthHeaders(),
-          });
-          if (res.ok) {
-            const json = await res.json();
-            if (json.success && json.data) {
-              if (isMounted) {
-                setKycData(json.data);
-                setLoadingKyc(false);
+        // 1. Try by phone first (primary identifier across CRM and KYC)
+        if (investor.phone && investor.phone.trim()) {
+          try {
+            const res = await fetch(apiUrl(`/irm/kyc/by-phone?phone=${encodeURIComponent(investor.phone.trim())}`), {
+              headers: getAuthHeaders(),
+            });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success && json.data) {
+                if (isMounted) {
+                  setKycData(json.data);
+                  setLoadingKyc(false);
+                }
+                return;
               }
-              return;
             }
-          }
+          } catch {}
         }
 
         // 2. Try by email
-        if (investor.email) {
-          const res = await fetch(apiUrl(`/irm/kyc/by-email?email=${encodeURIComponent(investor.email)}`), {
-            headers: getAuthHeaders(),
-          });
-          if (res.ok) {
-            const json = await res.json();
-            if (json.success && json.data) {
-              if (isMounted) {
-                setKycData(json.data);
-                setLoadingKyc(false);
+        if (investor.email && investor.email.trim()) {
+          try {
+            const res = await fetch(apiUrl(`/irm/kyc/by-email?email=${encodeURIComponent(investor.email.trim())}`), {
+              headers: getAuthHeaders(),
+            });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success && json.data) {
+                if (isMounted) {
+                  setKycData(json.data);
+                  setLoadingKyc(false);
+                }
+                return;
               }
-              return;
             }
-          }
+          } catch {}
         }
 
-        // 3. Fallback: Matching deal's kycId or customerId
+        // 3. Try matching deal's kycId or kycRecordId
         const fDigits = (investor.phone || '').replace(/\D/g, '').slice(-10);
         const matchingDeal = deals.find(d => {
           if (d.customerId && String(d.customerId) === String(investor.id)) return true;
@@ -239,20 +243,84 @@ export const Investor360Modal: React.FC<Investor360ModalProps> = ({
 
         const altId = (matchingDeal as any)?.kycId || (matchingDeal as any)?.kycRecordId;
         if (altId) {
-          const res = await fetch(apiUrl(`/irm/kyc/${altId}`), {
+          try {
+            const res = await fetch(apiUrl(`/irm/kyc/${altId}`), {
+              headers: getAuthHeaders(),
+            });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success && json.data) {
+                if (isMounted) {
+                  setKycData(json.data);
+                  setLoadingKyc(false);
+                }
+                return;
+              }
+            }
+          } catch {}
+        }
+
+        // 4. Try by investor ID via dedicated endpoint
+        if (investor.id) {
+          try {
+            const res = await fetch(apiUrl(`/irm/kyc/by-investor/${investor.id}`), {
+              headers: getAuthHeaders(),
+            });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success && json.data) {
+                if (isMounted) {
+                  setKycData(json.data);
+                  setLoadingKyc(false);
+                }
+                return;
+              }
+            }
+          } catch {}
+        }
+
+        // 5. Fallback: query all KYCs and match by phone digits, email, or name
+        try {
+          const res = await fetch(apiUrl('/irm/kyc/all'), {
             headers: getAuthHeaders(),
           });
           if (res.ok) {
             const json = await res.json();
-            if (json.success && json.data) {
-              if (isMounted) {
-                setKycData(json.data);
-                setLoadingKyc(false);
+            if (json.success && Array.isArray(json.data)) {
+              const cleanMail = (investor.email || '').trim().toLowerCase();
+              const cleanName = (investor.name || '').trim().toLowerCase();
+
+              const candidates = json.data.filter((k: any) => {
+                const kp = (k.phone || '').replace(/\D/g, '').slice(-10);
+                if (fDigits && kp && fDigits === kp) return true;
+                const km = (k.email || '').trim().toLowerCase();
+                if (cleanMail && km && cleanMail === km) return true;
+                const kn = (k.investorName || '').trim().toLowerCase();
+                if (cleanName && kn && cleanName === kn) return true;
+                return false;
+              });
+
+              // Prioritize approved/verified record or one with PAN number over empty draft
+              const bestCandidate = candidates.find((c: any) => c.status === 'Approved' || c.status === 'Verified' || c.panNumber) || candidates[0];
+
+              if (bestCandidate?.id) {
+                const detailRes = await fetch(apiUrl(`/irm/kyc/${bestCandidate.id}`), {
+                  headers: getAuthHeaders(),
+                });
+                if (detailRes.ok) {
+                  const detailJson = await detailRes.json();
+                  if (detailJson.success && detailJson.data) {
+                    if (isMounted) {
+                      setKycData(detailJson.data);
+                      setLoadingKyc(false);
+                    }
+                    return;
+                  }
+                }
               }
-              return;
             }
           }
-        }
+        } catch {}
 
         if (isMounted) {
           setKycData(null);
@@ -327,12 +395,12 @@ export const Investor360Modal: React.FC<Investor360ModalProps> = ({
   // Initials for avatar
   const initials = investor.name
     ? investor.name
-        .split(' ')
-        .map(w => w[0])
-        .filter(Boolean)
-        .slice(0, 2)
-        .join('')
-        .toUpperCase()
+      .split(' ')
+      .map(w => w[0])
+      .filter(Boolean)
+      .slice(0, 2)
+      .join('')
+      .toUpperCase()
     : 'IN';
 
   // Parse nominees
@@ -593,7 +661,7 @@ export const Investor360Modal: React.FC<Investor360ModalProps> = ({
                     <div className="iv-advisor-name">
                       {investor.assignedAgentName && investor.assignedAgentName !== '—' ? investor.assignedAgentName : 'Unassigned Advisor'}
                     </div>
-                    <div className="iv-advisor-role">Primary Wealth Consultant</div>
+                    <div className="iv-advisor-role"></div>
                   </div>
                 </div>
               </div>
@@ -1073,8 +1141,8 @@ export const Investor360Modal: React.FC<Investor360ModalProps> = ({
                         {opp.committedAmount
                           ? `₹${Number(opp.committedAmount).toLocaleString('en-IN')}`
                           : opp.targetAmount
-                          ? `₹${Number(opp.targetAmount).toLocaleString('en-IN')} (Target)`
-                          : '—'}
+                            ? `₹${Number(opp.targetAmount).toLocaleString('en-IN')} (Target)`
+                            : '—'}
                       </b>
                     </div>
                     <div className="iv-grid-item">

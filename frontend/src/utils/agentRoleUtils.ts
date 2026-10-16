@@ -208,11 +208,20 @@ export function getAssigningSalesAgentInfo(
     return getAgentRoleInfo('Rajesh Sharma', '6');
   }
 
-  // Pure IRM lead: created directly by Dhinakaran with no sales person handover
+  // Pure IRM lead: created directly by Dhinakaran or owned by IRM with no sales person handover
   const isPureIrm =
-    (lead?.assignedByName === 'Created by IRM' || lead?.createdBy?.toLowerCase().includes('dhin')) &&
-    !lead?.assignedIrmAt &&
-    !matchBy;
+    !matchBy && (
+      lead?.assignedByName === 'Created by IRM' ||
+      followup?.assignedByName === 'Created by IRM' ||
+      Boolean(lead?.createdBy && lead.createdBy.toLowerCase().includes('dhin')) ||
+      Boolean(lead?.assignedAgentName && lead.assignedAgentName.toLowerCase().includes('dhin')) ||
+      Boolean(followup?.assignedAgentName && followup.assignedAgentName.toLowerCase().includes('dhin')) ||
+      Boolean(lead?.assignedIrmName && lead.assignedIrmName.toLowerCase().includes('dhin')) ||
+      String((followup as any)?.assignedRole || (followup as any)?.assignedToRole || '').toLowerCase() === 'irm' ||
+      String(lead?.assignedAgentId) === '5' ||
+      String(followup?.assignedAgentId) === '5' ||
+      String((lead as any)?.assignedIrmId) === '5'
+    );
 
   if (isPureIrm) {
     return getAgentRoleInfo('Dhinakaran', '5', 'IRM');

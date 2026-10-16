@@ -20,15 +20,18 @@ public class PlatformTenantsController : ControllerBase
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
     private readonly IHubContext<PlatformHub, IPlatformHubClient> _hubContext;
+    private readonly IJwtService _jwtService;
 
     public PlatformTenantsController(
         ApplicationDbContext context,
         ICurrentUserService currentUser,
-        IHubContext<PlatformHub, IPlatformHubClient> hubContext)
+        IHubContext<PlatformHub, IPlatformHubClient> hubContext,
+        IJwtService jwtService)
     {
         _context = context;
         _currentUser = currentUser;
         _hubContext = hubContext;
+        _jwtService = jwtService;
     }
 
     [HttpGet]
@@ -424,6 +427,115 @@ public class PlatformTenantsController : ControllerBase
         catch { }
 
         return Ok(ApiResponse<bool>.SuccessResult(true, $"Tenant '{tenantName}' deleted successfully."));
+    }
+
+    /// <summary>
+    /// Generates an authenticated impersonation session for the Super Admin to log into a tenant workspace.
+    /// Strictly restricted to Super Admin and audited in immutable platform logs.
+    /// </summary>
+    [HttpPost("{id}/impersonate")]
+    public async Task<ActionResult<ApiResponse<ImpersonateTenantResponseDto>>> ImpersonateTenant(string id, CancellationToken ct = default)
+    {
+        var tenant = await FindTenantAsync(id, ct);
+        if (tenant == null)
+            return NotFound(ApiResponse<ImpersonateTenantResponseDto>.FailureResult("Tenant organization not found."));
+
+        if (!tenant.IsActive && tenant.Status?.ToLowerInvariant() == "suspended")
+            return BadRequest(ApiResponse<ImpersonateTenantResponseDto>.FailureResult($"Tenant '{tenant.Name}' is suspended. Please activate the organization first before impersonating."));
+
+        // Find primary company_admin or admin user for this tenant
+        var targetUser = await _context.Users
+            .Include(u => u.Role)
+            .Include(u => u.Company)
+            .Where(u => u.CompanyId == tenant.Id && (u.Role.Code == "company_admin" || u.Role.Code == "admin"))
+            .OrderByDescending(u => u.Status == UserStatus.Active)
+            .ThenBy(u => u.Id)
+            .FirstOrDefaultAsync(ct);
+
+        // Fallback: any active user in this tenant
+        if (targetUser == null)
+        {
+            targetUser = await _context.Users
+                .Include(u => u.Role)
+                .Include(u => u.Company)
+                .Where(u => u.CompanyId == tenant.Id)
+                .OrderByDescending(u => u.Status == UserStatus.Active)
+                .ThenBy(u => u.Id)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        if (targetUser == null)
+        {
+            return NotFound(ApiResponse<ImpersonateTenantResponseDto>.FailureResult(
+                $"No user accounts exist in organization '{tenant.Name}'. Please provision a Company Admin before logging in as this tenant."));
+        }
+
+        var token = _jwtService.GenerateToken(targetUser);
+        var actorEmail = _currentUser.Email ?? "Super Admin";
+
+        // Immutable Audit Log entry
+        _context.AuditLogs.Add(new AuditLog
+        {
+            Action = "IMPERSONATE_TENANT",
+            EntityType = "Tenant",
+            EntityId = tenant.Id.ToString(),
+            ActorName = actorEmail,
+            ActorEmail = actorEmail,
+            Details = $"Super Admin initiated impersonation session for tenant '{tenant.Name}' (ID: {tenant.Id}) as user '{targetUser.Name}' ({targetUser.Email}, Role: {targetUser.Role.Code}).",
+            Module = "Companies",
+            Status = "success",
+            Timestamp = DateTime.UtcNow
+        });
+
+        await _context.SaveChangesAsync(ct);
+
+        var userDto = new backend.DTOs.Auth.UserDto
+        {
+            Id = targetUser.Id.ToString(),
+            Name = targetUser.Name,
+            Email = targetUser.Email,
+            Phone = targetUser.Phone,
+            Status = targetUser.Status.ToString(),
+            CompanyId = tenant.Id.ToString(),
+            CompanySlug = tenant.Slug,
+            CompanyName = tenant.Name,
+            LastLogin = targetUser.LastLoginAt?.ToString("o"),
+            Avatar = targetUser.AvatarUrl,
+            MustChangePassword = targetUser.MustChangePassword,
+            Role = new backend.DTOs.Auth.RoleDto
+            {
+                Id = targetUser.Role.Id.ToString(),
+                Name = targetUser.Role.Name,
+                Code = targetUser.Role.Code,
+                Permissions = targetUser.Role.Permissions ?? new List<string>()
+            }
+        };
+
+        var tenantDto = new backend.DTOs.Auth.TenantDto
+        {
+            Id = tenant.Id.ToString(),
+            Name = tenant.Name,
+            Slug = tenant.Slug,
+            BrandColor = tenant.BrandColor,
+            Logo = tenant.Logo,
+            Tagline = tenant.Tagline,
+            EnabledFeatures = tenant.EnabledFeatures ?? new List<string>(),
+            Timezone = tenant.Timezone,
+            Currency = tenant.Currency,
+            BusinessHours = tenant.BusinessHours
+        };
+
+        var responseDto = new ImpersonateTenantResponseDto
+        {
+            Token = token,
+            User = userDto,
+            Tenant = tenantDto,
+            OriginalAdminEmail = actorEmail,
+            IsImpersonated = true,
+            TargetRoute = "/dashboard"
+        };
+
+        return Ok(ApiResponse<ImpersonateTenantResponseDto>.SuccessResult(responseDto, $"Impersonation session established for {tenant.Name}."));
     }
 
     private async Task<Tenant?> FindTenantAsync(string id, CancellationToken ct)

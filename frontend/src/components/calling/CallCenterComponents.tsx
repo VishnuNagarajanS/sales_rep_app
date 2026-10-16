@@ -19,9 +19,9 @@ const getPopupPosition = (): PopupPosition => {
         if (['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(parsed)) {
           return parsed as PopupPosition;
         }
-      } catch {}
+      } catch { }
     }
-  } catch {}
+  } catch { }
   return 'top-right';
 };
 
@@ -284,12 +284,12 @@ export const InCallBar: React.FC = () => {
 
   const connectOptions = isIrm
     ? (() => {
-        const base = storageService.getAgents(tenant?.id).map((a: { id: string | number; name: string }) => ({ name: a.name, status: 'Available' as const }));
-        if (!previousAgentName) return base;
-        // Move the previously-assigned agent to the top of the list as the default
-        const rest = base.filter((a: { name: string }) => a.name !== previousAgentName);
-        return [{ name: previousAgentName, status: 'Available' as const, isPrevious: true }, ...rest];
-      })()
+      const base = storageService.getAgents(tenant?.id).map((a: { id: string | number; name: string }) => ({ name: a.name, status: 'Available' as const }));
+      if (!previousAgentName) return base;
+      // Move the previously-assigned agent to the top of the list as the default
+      const rest = base.filter((a: { name: string }) => a.name !== previousAgentName);
+      return [{ name: previousAgentName, status: 'Available' as const, isPrevious: true }, ...rest];
+    })()
     : storageService.getIrms(tenant?.id);
 
   const filteredConnectOptions = connectOptions.filter((o: any) =>
@@ -559,15 +559,15 @@ export const InCallBar: React.FC = () => {
                 activeCall.status === 'ringing'
                   ? { color: '#38bdf8', fontSize: 11, fontWeight: 600 }
                   : activeCall.isSimulated
-                  ? { color: '#f59e0b', fontSize: 11 }
-                  : undefined
+                    ? { color: '#f59e0b', fontSize: 11 }
+                    : undefined
               }
             >
               {activeCall.status === 'ringing'
                 ? 'Dialing...'
                 : activeCall.isSimulated
-                ? `Simulated (${formatDuration(activeCall.duration)})`
-                : formatDuration(activeCall.duration)}
+                  ? `Simulated (${formatDuration(activeCall.duration)})`
+                  : formatDuration(activeCall.duration)}
             </div>
           </div>
 
@@ -684,15 +684,15 @@ export const InCallBar: React.FC = () => {
                 activeCall.status === 'ringing'
                   ? { color: '#38bdf8', fontWeight: 600 }
                   : activeCall.isSimulated
-                  ? { color: '#f59e0b', fontWeight: 600 }
-                  : undefined
+                    ? { color: '#f59e0b', fontWeight: 600 }
+                    : undefined
               }
             >
               {activeCall.status === 'ringing'
                 ? 'Outbound call initiating • Ringing softphone carrier...'
                 : activeCall.isSimulated
-                ? (activeCall.providerStatus || 'Carrier trunk offline • Simulated Sandbox Mode')
-                : 'Live audio call in progress'}
+                  ? (activeCall.providerStatus || 'Carrier trunk offline • Simulated Sandbox Mode')
+                  : 'Live audio call in progress'}
             </span>
           </div>
 
@@ -1166,16 +1166,18 @@ export const DispositionModal: React.FC = () => {
     if (clean === 'followup' || clean === 'followups') return 'follow_up';
     if (clean === 'investor360' || clean === 'investors' || clean === 'investor') return 'investor_360';
     if (clean === 'opportunity' || clean === 'opps') return 'opportunities';
+    if (clean === 'other' || clean === 'others' || clean === 'other_follow_up' || clean === 'other_followup') return 'other';
     return clean;
   };
 
   const IRM_MODULE_OUTCOMES: Record<string, CallDisposition[]> = {
-    all_leads: ['Follow-up Required', 'Call Back', 'Ready for KYC', 'Other', 'No Response', 'Contacted'],
+    all_leads: ['Follow-up Required', 'Call Back', 'Ready for KYC', 'Other', 'No Response'],
     my_leads: ['Follow-up Required', 'No Response', 'Call Back'],
     follow_up: ['Follow-up Required', 'Other', 'No Response', 'Call Back', 'Ready for KYC'],
     kyc: ['Contacted', 'Other', 'No Response', 'Call Back'],
     opportunities: ['Contacted', 'Other', 'No Response', 'Call Back'],
     investor_360: ['Contacted', 'Other', 'No Response', 'Call Back'],
+    other: ['Call Back', 'Other', 'No Response', 'Follow-up Required', 'Ready for KYC'],
   };
 
   // Reset all form state fresh for every new call
@@ -1185,24 +1187,28 @@ export const DispositionModal: React.FC = () => {
     d.setDate(d.getDate() + 1);
     const freshTomorrow = d.toISOString().slice(0, 10);
     const isFollowup = !!lastCallRecord.sourceFollowupId;
-    const isIrm = user?.role?.code === 'irm';
+    const isIrm = user?.role?.code === 'irm' || (user as any)?.roleCode === 'irm';
     const isIrmLead = isIrm && lastCallRecord.matchedRecord?.type === 'lead';
     const isSimulated = !!lastCallRecord.isSimulated;
     const isNotConnected = !isSimulated && lastCallRecord.duration === 0;
 
-    const currentModule = normalizeModule(lastCallRecord.callModule) ||
-      (lastCallRecord.sourceFollowupId ? 'follow_up' : (lastCallRecord.matchedRecord?.type === 'lead' ? 'my_leads' : 'investor_360'));
+    const currentModule = isIrm
+      ? (normalizeModule(lastCallRecord.callModule) ||
+        (lastCallRecord.sourceFollowupId ? 'follow_up' : (lastCallRecord.matchedRecord?.type === 'lead' ? 'my_leads' : 'investor_360')))
+      : undefined;
+    const isFromOther = isIrm && (!!(lastCallRecord as any)?.isFromOther || currentModule === 'other' || (typeof window !== 'undefined' && window.location?.pathname?.includes('/other')));
 
     let defaultDispo: CallDisposition;
-    if (isIrm) {
-      const allowed = IRM_MODULE_OUTCOMES[currentModule] || ['Contacted', 'Other', 'No Response', 'Call Back'];
+    if (isIrm && currentModule) {
+      const rawAllowed = IRM_MODULE_OUTCOMES[currentModule] || ['Call Back', 'Other', 'No Response'];
+      const allowed = isFromOther ? rawAllowed.filter(d => d !== 'Contacted') : rawAllowed;
       if (isSimulated || isNotConnected) {
         defaultDispo = allowed.includes('No Response') ? 'No Response' : allowed[0];
       } else {
         defaultDispo = allowed.includes('Follow-up Required') ? 'Follow-up Required' : (allowed.includes('Contacted') ? 'Contacted' : allowed[0]);
       }
     } else {
-      defaultDispo = 'Interested';
+      defaultDispo = (isSimulated || isNotConnected) ? 'No Response' : 'Interested';
     }
 
     setDisposition(defaultDispo);
@@ -1237,24 +1243,26 @@ export const DispositionModal: React.FC = () => {
     getMessagingChannels().then(ch => {
       if (ch && ch.length) setChannelsStatus(ch);
     }).catch(console.error);
-  }, [lastCallRecord?.id, lastCallRecord?.matchedRecord?.type, lastCallRecord?.sourceFollowupId, lastCallRecord?.callModule, user?.role?.code, tenant?.id]);
+  }, [lastCallRecord?.id, lastCallRecord?.matchedRecord?.type, lastCallRecord?.sourceFollowupId, lastCallRecord?.callModule, (lastCallRecord as any)?.isFromOther, user?.role?.code, tenant?.id]);
 
   if (!showDispositionModal || !lastCallRecord) return null;
 
-  const isGhlSalesExec = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1' || tenant?.name?.toLowerCase().includes('ghl') || user?.companySlug === 'ghl') && user?.role?.code === 'sales_executive';
+  const roleCode = user?.role?.code || (user as any)?.roleCode;
+  const isIrm = roleCode === 'irm';
   const isFollowupCall = !!lastCallRecord.sourceFollowupId;
-  const isIrm = user?.role?.code === 'irm';
   const isSimulated = !!lastCallRecord.isSimulated;
   const isNotConnected = !isSimulated && lastCallRecord.duration === 0;
 
-  const currentModule = normalizeModule(lastCallRecord.callModule) ||
-    (lastCallRecord.sourceFollowupId ? 'follow_up' : (lastCallRecord.matchedRecord?.type === 'lead' ? 'my_leads' : 'investor_360'));
+  const currentModule = isIrm
+    ? (normalizeModule(lastCallRecord.callModule) ||
+      (lastCallRecord.sourceFollowupId ? 'follow_up' : (lastCallRecord.matchedRecord?.type === 'lead' ? 'my_leads' : 'investor_360')))
+    : undefined;
+  const isFromOther = isIrm && (!!(lastCallRecord as any)?.isFromOther || currentModule === 'other' || (typeof window !== 'undefined' && window.location?.pathname?.includes('/other')));
 
-  const allDispositions: CallDisposition[] = [
+  const SALES_EXEC_DISPOSITIONS: CallDisposition[] = [
     'Interested',
     'Follow-up Required',
     'Call Back',
-    'Converted',
     'Not Interested',
     'Wrong Number',
     'No Response',
@@ -1262,13 +1270,16 @@ export const DispositionModal: React.FC = () => {
 
   const FOLLOWUP_CALL_OUTCOMES: CallDisposition[] = ['Interested', 'Follow-up Required', 'Call Back', 'Not Interested', 'No Response'];
 
+  const rawAllowed: CallDisposition[] = (currentModule && IRM_MODULE_OUTCOMES[currentModule]) || ['Call Back', 'Other', 'No Response'];
+  const irmDispositions: CallDisposition[] = isFromOther
+    ? rawAllowed.filter(d => d !== 'Contacted')
+    : rawAllowed;
+
   const dispositions: CallDisposition[] = isIrm
-    ? (IRM_MODULE_OUTCOMES[currentModule] || ['Contacted', 'Other', 'No Response', 'Call Back'])
+    ? irmDispositions
     : (isFollowupCall
-        ? FOLLOWUP_CALL_OUTCOMES
-        : (isGhlSalesExec || tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1')
-          ? allDispositions.filter(d => d !== 'Converted')
-          : allDispositions);
+      ? FOLLOWUP_CALL_OUTCOMES
+      : SALES_EXEC_DISPOSITIONS);
 
   const handleSave = async () => {
     if (isSubmitting) return;
@@ -1456,30 +1467,30 @@ export const DispositionModal: React.FC = () => {
   return (
     <>
       <Modal
-      isOpen={showDispositionModal}
-      onClose={() => {
-        // Modal must not close until disposition is saved
-      }}
-      closeOnBackdrop={false}
-      closeOnEscape={false}
-      hideCloseButton={true}
-      title="Call Wrap-up & Disposition"
-      subtitle={`Call with ${lastCallRecord.contactName} (${lastCallRecord.contactPhone}) • Duration: ${isSimulated ? '0s (Not Connected)' : `${Math.floor(lastCallRecord.duration / 60)}m ${lastCallRecord.duration % 60}s`}`}
-      maxWidth={580}
-      footer={
-        <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%' }}>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={handleSave}
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? 'Saving...' : 'Save Disposition & Wrap Up'}
-          </button>
-        </div>
-      }
-    >
-      <div className="disposition-form-container">
+        isOpen={showDispositionModal}
+        onClose={() => {
+          // Modal must not close until disposition is saved
+        }}
+        closeOnBackdrop={false}
+        closeOnEscape={false}
+        hideCloseButton={true}
+        title="Call Wrap-up & Disposition"
+        subtitle={`Call with ${lastCallRecord.contactName} (${lastCallRecord.contactPhone}) • Duration: ${isSimulated ? '0s (Not Connected)' : `${Math.floor(lastCallRecord.duration / 60)}m ${lastCallRecord.duration % 60}s`}`}
+        maxWidth={580}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%' }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleSave}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Saving...' : 'Save Disposition & Wrap Up'}
+            </button>
+          </div>
+        }
+      >
+        <div className="disposition-form-container">
           {isSimulated && (
             <div
               style={{
@@ -1946,7 +1957,7 @@ export const DispositionModal: React.FC = () => {
               Scheduling Buffer Advice
             </div>
             <p style={{ margin: 0, fontSize: '0.83rem', color: 'var(--text-primary, #334155)', lineHeight: 1.5 }}>
-              To ensure sufficient time for each call and avoid overlapping appointments (e.g. 10:00 AM and 10:01 AM), <strong>please schedule your follow-up 15 to 20 minutes afterwards (or 20–30 minutes later)</strong>.
+              To avoid overlapping appointments and ensure sufficient time for each call, <strong>please schedule your follow-up at least 15–20 minutes after your existing appointment.</strong>
             </p>
           </div>
 

@@ -26,6 +26,7 @@ public class PlatformSecurityController : ControllerBase
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
     private readonly ITotpService _totpService;
+    private readonly IMfaService _mfaService;
     private readonly IHubContext<PlatformHub, IPlatformHubClient> _hubContext;
     private readonly ILogger<PlatformSecurityController> _logger;
 
@@ -33,12 +34,14 @@ public class PlatformSecurityController : ControllerBase
         ApplicationDbContext context,
         ICurrentUserService currentUser,
         ITotpService totpService,
+        IMfaService mfaService,
         IHubContext<PlatformHub, IPlatformHubClient> hubContext,
         ILogger<PlatformSecurityController> logger)
     {
         _context = context;
         _currentUser = currentUser;
         _totpService = totpService;
+        _mfaService = mfaService;
         _hubContext = hubContext;
         _logger = logger;
     }
@@ -252,101 +255,67 @@ public class PlatformSecurityController : ControllerBase
     [HttpGet("mfa/status")]
     public async Task<ActionResult<ApiResponse<object>>> GetMfaStatus(CancellationToken ct = default)
     {
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == _currentUser.UserId, ct);
-        if (user == null) return NotFound(ApiResponse<object>.FailureResult("User not found."));
+        var userId = _currentUser.UserId.GetValueOrDefault();
+        if (userId <= 0) return Unauthorized(ApiResponse<object>.FailureResult("User not authenticated."));
 
-        int recoveryCodesCount = 0;
-        if (!string.IsNullOrWhiteSpace(user.TwoFactorRecoveryCodesJson))
-        {
-            try
-            {
-                var codes = JsonSerializer.Deserialize<List<string>>(user.TwoFactorRecoveryCodesJson);
-                recoveryCodesCount = codes?.Count ?? 0;
-            }
-            catch { }
-        }
-
+        var status = await _mfaService.GetStatusAsync(userId, ct);
         return Ok(ApiResponse<object>.SuccessResult(new
         {
-            isEnabled = user.IsTwoFactorEnabled,
-            recoveryCodesRemaining = recoveryCodesCount,
-            userEmail = user.Email
+            isEnabled = status.IsTwoFactorEnabled,
+            isTwoFactorEnabled = status.IsTwoFactorEnabled,
+            recoveryCodesRemaining = status.RemainingRecoveryCodes,
+            remainingRecoveryCodes = status.RemainingRecoveryCodes,
+            userEmail = status.UserEmail
         }));
     }
 
     [HttpPost("mfa/setup")]
     public async Task<ActionResult<ApiResponse<MfaSetupResponseDto>>> SetupMfa(CancellationToken ct = default)
     {
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == _currentUser.UserId, ct);
+        var userId = _currentUser.UserId.GetValueOrDefault();
+        if (userId <= 0) return Unauthorized(ApiResponse<MfaSetupResponseDto>.FailureResult("User not authenticated."));
+
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
         if (user == null) return NotFound(ApiResponse<MfaSetupResponseDto>.FailureResult("User not found."));
 
-        var secret = _totpService.GenerateSecret();
-        var qrCodeUri = _totpService.GenerateQrCodeUri(user.Email, secret);
-        var recoveryCodes = _totpService.GenerateRecoveryCodes(8);
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
+        var ua = Request.Headers["User-Agent"].ToString();
 
-        // Stage secret and recovery codes temporarily on user record
-        user.TwoFactorSecret = secret;
-        user.TwoFactorRecoveryCodesJson = JsonSerializer.Serialize(recoveryCodes);
-        await _context.SaveChangesAsync(ct);
+        var res = await _mfaService.SetupAsync(userId, user.Email, ip, ua, ct);
+        if (!res.Success || res.Data == null)
+            return BadRequest(ApiResponse<MfaSetupResponseDto>.FailureResult(res.Message ?? "Failed to initiate MFA setup."));
 
         var response = new MfaSetupResponseDto
         {
-            Secret = secret,
-            QrCodeUri = qrCodeUri,
-            ManualEntryKey = secret,
-            RecoveryCodes = recoveryCodes
+            Secret = res.Data.Secret,
+            QrCodeUri = res.Data.QrCodeUri,
+            ManualEntryKey = res.Data.ManualEntryKey,
+            RecoveryCodes = res.Data.RecoveryCodes
         };
 
-        return Ok(ApiResponse<MfaSetupResponseDto>.SuccessResult(response, "MFA setup initiated. Please verify with a 6-digit code."));
+        return Ok(ApiResponse<MfaSetupResponseDto>.SuccessResult(response, res.Message));
     }
 
     [HttpPost("mfa/verify-and-enable")]
-    public async Task<ActionResult<ApiResponse<bool>>> VerifyAndEnableMfa(
+    public async Task<ActionResult<ApiResponse<object>>> VerifyAndEnableMfa(
         [FromBody] MfaVerifyRequestDto req,
         CancellationToken ct = default)
     {
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == _currentUser.UserId, ct);
-        if (user == null || string.IsNullOrWhiteSpace(user.TwoFactorSecret))
+        var userId = _currentUser.UserId.GetValueOrDefault();
+        if (userId <= 0) return Unauthorized(ApiResponse<object>.FailureResult("User not authenticated."));
+
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
+        var ua = Request.Headers["User-Agent"].ToString();
+
+        var res = await _mfaService.VerifySetupAsync(userId, req.Code, ip, ua, ct);
+        if (!res.Success)
+            return BadRequest(ApiResponse<object>.FailureResult(res.Message ?? "Invalid verification code."));
+
+        return Ok(ApiResponse<object>.SuccessResult(new
         {
-            return BadRequest(ApiResponse<bool>.FailureResult("MFA setup was not initiated. Please run setup first."));
-        }
-
-        var cleanCode = req.Code.Trim().Replace(" ", "").Replace("-", "");
-        var isValid = _totpService.ValidateTotp(user.TwoFactorSecret, cleanCode);
-
-        if (!isValid)
-        {
-            return BadRequest(ApiResponse<bool>.FailureResult("Invalid authentication code. Please check your authenticator app and try again."));
-        }
-
-        user.IsTwoFactorEnabled = true;
-        user.UpdatedAt = DateTime.UtcNow;
-
-        _context.SecurityEvents.Add(new SecurityEvent
-        {
-            EventType = "MFA_ENABLED",
-            Severity = "INFO",
-            Description = $"Super Admin {user.Email} successfully enabled Two-Factor Authentication (TOTP).",
-            UserEmail = user.Email,
-            UserId = user.Id,
-            Timestamp = DateTime.UtcNow
-        });
-
-        _context.AuditLogs.Add(new AuditLog
-        {
-            Action = "ENABLE_MFA",
-            EntityType = "User",
-            EntityId = user.Id.ToString(),
-            ActorName = user.Name,
-            ActorEmail = user.Email,
-            Details = "Super Admin enrolled in mandatory Two-Factor Authentication.",
-            Module = "Security",
-            Status = "success",
-            Timestamp = DateTime.UtcNow
-        });
-
-        await _context.SaveChangesAsync(ct);
-        return Ok(ApiResponse<bool>.SuccessResult(true, "Two-factor authentication enabled successfully."));
+            success = true,
+            recoveryCodes = res.Data?.RecoveryCodes ?? new List<string>()
+        }, "Two-factor authentication enabled successfully."));
     }
 
     [HttpPost("mfa/disable")]
@@ -354,74 +323,39 @@ public class PlatformSecurityController : ControllerBase
         [FromBody] MfaDisableRequestDto req,
         CancellationToken ct = default)
     {
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == _currentUser.UserId, ct);
-        if (user == null) return NotFound(ApiResponse<bool>.FailureResult("User not found."));
+        var userId = _currentUser.UserId.GetValueOrDefault();
+        if (userId <= 0) return Unauthorized(ApiResponse<bool>.FailureResult("User not authenticated."));
 
-        if (!PasswordHasher.VerifyPassword(req.Password, user.PasswordHash))
-        {
-            return BadRequest(ApiResponse<bool>.FailureResult("Password confirmation failed."));
-        }
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
+        var ua = Request.Headers["User-Agent"].ToString();
 
-        user.IsTwoFactorEnabled = false;
-        user.TwoFactorSecret = null;
-        user.TwoFactorRecoveryCodesJson = null;
-        user.UpdatedAt = DateTime.UtcNow;
+        var password = !string.IsNullOrWhiteSpace(req.Password) ? req.Password : (req.Code ?? string.Empty);
+        var res = await _mfaService.DisableMfaAsync(userId, password, req.Code, ip, ua, ct);
+        if (!res.Success)
+            return BadRequest(ApiResponse<bool>.FailureResult(res.Message ?? "Failed to disable MFA."));
 
-        _context.SecurityEvents.Add(new SecurityEvent
-        {
-            EventType = "MFA_DISABLED",
-            Severity = "WARNING",
-            Description = $"Two-factor authentication disabled for user {user.Email}.",
-            UserEmail = user.Email,
-            UserId = user.Id,
-            Timestamp = DateTime.UtcNow
-        });
-
-        _context.AuditLogs.Add(new AuditLog
-        {
-            Action = "DISABLE_MFA",
-            EntityType = "User",
-            EntityId = user.Id.ToString(),
-            ActorName = user.Name,
-            ActorEmail = user.Email,
-            Details = "User disabled Two-Factor Authentication.",
-            Module = "Security",
-            Status = "success",
-            Timestamp = DateTime.UtcNow
-        });
-
-        await _context.SaveChangesAsync(ct);
-        return Ok(ApiResponse<bool>.SuccessResult(true, "Two-factor authentication has been disabled."));
+        return Ok(res);
     }
 
     [HttpPost("mfa/regenerate-recovery-codes")]
-    public async Task<ActionResult<ApiResponse<List<string>>>> RegenerateRecoveryCodes(CancellationToken ct = default)
+    public async Task<ActionResult<ApiResponse<List<string>>>> RegenerateRecoveryCodes(
+        [FromBody] backend.DTOs.Auth.MfaRegenerateCodesRequestDto? req = null,
+        CancellationToken ct = default)
     {
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == _currentUser.UserId, ct);
-        if (user == null || !user.IsTwoFactorEnabled)
-        {
-            return BadRequest(ApiResponse<List<string>>.FailureResult("Two-factor authentication is not active."));
-        }
+        var userId = _currentUser.UserId.GetValueOrDefault();
+        if (userId <= 0) return Unauthorized(ApiResponse<List<string>>.FailureResult("User not authenticated."));
 
-        var newCodes = _totpService.GenerateRecoveryCodes(8);
-        user.TwoFactorRecoveryCodesJson = JsonSerializer.Serialize(newCodes);
-        user.UpdatedAt = DateTime.UtcNow;
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
+        var ua = Request.Headers["User-Agent"].ToString();
 
-        _context.AuditLogs.Add(new AuditLog
-        {
-            Action = "REGENERATE_MFA_RECOVERY_CODES",
-            EntityType = "User",
-            EntityId = user.Id.ToString(),
-            ActorName = user.Name,
-            ActorEmail = user.Email,
-            Details = "Generated fresh two-factor recovery codes.",
-            Module = "Security",
-            Status = "success",
-            Timestamp = DateTime.UtcNow
-        });
+        var password = req?.Password ?? string.Empty;
+        var code = req?.Code;
 
-        await _context.SaveChangesAsync(ct);
-        return Ok(ApiResponse<List<string>>.SuccessResult(newCodes, "Recovery codes regenerated successfully."));
+        var res = await _mfaService.RegenerateRecoveryCodesAsync(userId, password, code, ip, ua, ct);
+        if (!res.Success)
+            return BadRequest(ApiResponse<List<string>>.FailureResult(res.Message ?? "Failed to regenerate recovery codes."));
+
+        return Ok(res);
     }
 
     [HttpGet("events")]

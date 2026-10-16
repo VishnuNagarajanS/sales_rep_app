@@ -11,6 +11,11 @@ namespace backend.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.Sql("ALTER TABLE \"IrmPipelineCards\" DROP COLUMN IF EXISTS \"HandoverId\" CASCADE;");
+            migrationBuilder.Sql("ALTER TABLE \"IrmPipelineCards\" DROP COLUMN IF EXISTS \"OriginalOwnerId\" CASCADE;");
+            migrationBuilder.Sql("ALTER TABLE \"GhlInvestors\" DROP COLUMN IF EXISTS \"HandoverId\" CASCADE;");
+            migrationBuilder.Sql("ALTER TABLE \"GhlInvestors\" DROP COLUMN IF EXISTS \"OriginalOwnerId\" CASCADE;");
+
             // Add missing columns to IrmPipelineCards (were present in model but dropped from DB)
             migrationBuilder.Sql(@"
                 ALTER TABLE ""IrmPipelineCards"" ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;

@@ -151,12 +151,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
     ? allPendingLeads.filter(l => isUserMatch(l.assignedAgentId, l.assignedAgentName) && l.status === 'Interested')
     : allPendingLeads;
 
-  // IRM "My Leads" KPI — leads assigned to this IRM that the agent has marked Interested
+  // IRM "My Leads" KPI — leads assigned to this IRM that are Interested, No Response, Callback, etc.
   const myInterestedLeads = isIrm
-    ? leads.filter(l =>
-      l.status === 'Interested' &&
-      isUserMatch(l.assignedAgentId, l.assignedAgentName)
-    )
+    ? leads.filter(l => {
+      const s = (l.status || '').trim().toLowerCase();
+      return ['interested', 'no response', 'callback', 'new', 'contacted'].includes(s) &&
+        isUserMatch(l.assignedAgentId, l.assignedAgentName);
+    })
     : [];
 
   const scopedDeals = isExec

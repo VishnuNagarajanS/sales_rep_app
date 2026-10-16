@@ -47,6 +47,11 @@ public class ApplicationDbContext : DbContext
     public DbSet<PlatformSetting> PlatformSettings => Set<PlatformSetting>();
     public DbSet<UserSession> UserSessions => Set<UserSession>();
     public DbSet<SecurityEvent> SecurityEvents => Set<SecurityEvent>();
+    public DbSet<UserMfaSetting> UserMfaSettings => Set<UserMfaSetting>();
+    public DbSet<MfaRecoveryCode> MfaRecoveryCodes => Set<MfaRecoveryCode>();
+    public DbSet<MfaChallenge> MfaChallenges => Set<MfaChallenge>();
+    public DbSet<PlatformTicket> PlatformTickets => Set<PlatformTicket>();
+    public DbSet<PlatformTicketEvent> PlatformTicketEvents => Set<PlatformTicketEvent>();
 
     // IRM Entities
     public DbSet<Investor> Investors => Set<Investor>();
@@ -61,6 +66,12 @@ public class ApplicationDbContext : DbContext
     public DbSet<LeavePolicy> LeavePolicies => Set<LeavePolicy>();
     public DbSet<LeaveRequestEvent> LeaveRequestEvents => Set<LeaveRequestEvent>();
     public DbSet<AiChatLog> AiChatLogs => Set<AiChatLog>();
+
+    // Team Chat Entities
+    public DbSet<ChatConversation> ChatConversations => Set<ChatConversation>();
+    public DbSet<ChatParticipant> ChatParticipants => Set<ChatParticipant>();
+    public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
 
     public override int SaveChanges()
     {
@@ -486,75 +497,6 @@ public class ApplicationDbContext : DbContext
             }
         );
 
-        modelBuilder.Entity<CarrierSettings>().HasData(
-            new CarrierSettings
-            {
-                Id = 1,
-                PrimaryCarrier = "Twilio Elastic SIP Trunking (Mumbai AP-South)",
-                SecondaryCarrier = "Exotel Cloud Gateway (Failover Redundant)",
-                SipRealm = "sip.trunk.nexusplatform.io:5060",
-                WebrtcGatewayUrl = "wss://webrtc.nexusplatform.io/gateway",
-                RecordingRetentionDays = 180,
-                MaxConcurrentChannels = 100,
-                EmergencyRoutingEnabled = true,
-                WhisperAiModel = "OpenAI Whisper-Large-v3 (Self-Hosted on GPU cluster)",
-                PrimaryGatewayHost = "sip.trunk.nexusplatform.io",
-                FailoverGatewayHost = "gateway.exotel.com",
-                Status = "Active",
-                TestStatus = "Success",
-                LastTestedAt = new DateTime(2026, 9, 26, 10, 0, 0, DateTimeKind.Utc),
-                UpdatedAt = new DateTime(2026, 9, 26, 10, 0, 0, DateTimeKind.Utc)
-            }
-        );
-
-        modelBuilder.Entity<TenantDidMapping>().HasData(
-            new TenantDidMapping
-            {
-                Id = 1,
-                PhoneNumber = "+91 80 4700 8001",
-                TenantId = 1,
-                RoutingStrategy = "Skill/Priority",
-                QueueName = "HNW Wealth Advisory Queue",
-                EnableRecording = true,
-                EnableAiWhisper = true,
-                Status = "Online",
-                ChannelsCount = 8,
-                Notes = "Primary inbound trunk for HNW wealth consultations",
-                AllocatedAt = new DateTime(2026, 1, 10, 10, 0, 0, DateTimeKind.Utc),
-                CreatedAt = new DateTime(2026, 1, 10, 10, 0, 0, DateTimeKind.Utc)
-            },
-            new TenantDidMapping
-            {
-                Id = 2,
-                PhoneNumber = "+91 80 4700 8002",
-                TenantId = 2,
-                RoutingStrategy = "Round-Robin",
-                QueueName = "Plotted Enclaves Telecallers",
-                EnableRecording = true,
-                EnableAiWhisper = true,
-                Status = "Online",
-                ChannelsCount = 12,
-                Notes = "Buyer inquiry hotline for gated community layouts",
-                AllocatedAt = new DateTime(2026, 1, 15, 14, 30, 0, DateTimeKind.Utc),
-                CreatedAt = new DateTime(2026, 1, 15, 14, 30, 0, DateTimeKind.Utc)
-            },
-            new TenantDidMapping
-            {
-                Id = 3,
-                PhoneNumber = "+91 80 4700 8003",
-                TenantId = null,
-                RoutingStrategy = "Round-Robin",
-                QueueName = "Available DID Reserve",
-                EnableRecording = false,
-                EnableAiWhisper = false,
-                Status = "Reserved",
-                ChannelsCount = 4,
-                Notes = "Spare DID number for next enterprise onboarding",
-                AllocatedAt = new DateTime(2026, 2, 1, 9, 0, 0, DateTimeKind.Utc),
-                CreatedAt = new DateTime(2026, 2, 1, 9, 0, 0, DateTimeKind.Utc)
-            }
-        );
-
         modelBuilder.Entity<BroadcastAnnouncement>().HasData(
             new BroadcastAnnouncement
             {
@@ -582,5 +524,67 @@ public class ApplicationDbContext : DbContext
                 UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             }
         );
+
+        // ── Team Chat Relationships & Indices ──────────────────────────────────
+        modelBuilder.Entity<ChatConversation>(b =>
+        {
+            b.HasKey(c => c.Id);
+            b.HasIndex(c => new { c.CompanyId, c.Type });
+        });
+
+        modelBuilder.Entity<ChatParticipant>(b =>
+        {
+            b.HasKey(p => p.Id);
+            b.HasIndex(p => new { p.ConversationId, p.UserId }).IsUnique();
+            b.HasOne(p => p.Conversation)
+             .WithMany(c => c.Participants)
+             .HasForeignKey(p => p.ConversationId)
+             .OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(p => p.User)
+             .WithMany()
+             .HasForeignKey(p => p.UserId)
+             .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ChatMessage>(b =>
+        {
+            b.HasKey(m => m.Id);
+            b.HasIndex(m => new { m.ConversationId, m.CreatedAt });
+            b.HasOne(m => m.Conversation)
+             .WithMany(c => c.Messages)
+             .HasForeignKey(m => m.ConversationId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ChatAttachment>(b =>
+        {
+            b.HasKey(a => a.Id);
+            b.HasIndex(a => a.MessageId);
+            b.HasOne(a => a.Message)
+             .WithMany(m => m.Attachments)
+             .HasForeignKey(a => a.MessageId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PlatformTicket>(b =>
+        {
+            b.ToTable("platform_tickets");
+            b.HasKey(x => x.Id);
+            b.HasIndex(x => x.TicketNumber).IsUnique();
+            b.HasIndex(x => x.Status);
+            b.HasIndex(x => x.Priority);
+            b.HasIndex(x => x.TenantId);
+            b.HasIndex(x => x.CreatedAt);
+            b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.SetNull);
+            b.HasMany(x => x.Timeline).WithOne(x => x.Ticket).HasForeignKey(x => x.TicketId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PlatformTicketEvent>(b =>
+        {
+            b.ToTable("platform_ticket_events");
+            b.HasKey(x => x.Id);
+            b.HasIndex(x => x.TicketId);
+            b.HasIndex(x => x.CreatedAt);
+        });
     }
 }

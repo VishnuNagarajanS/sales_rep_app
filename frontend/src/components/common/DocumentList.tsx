@@ -180,6 +180,11 @@ export const DocumentList: React.FC<DocumentListProps> = ({
               <span className="document-item-category">
                 {doc.category}
               </span>
+              {doc.isPlatformShared && (
+                <span style={{ fontSize: '0.7rem', padding: '1px 6px', borderRadius: 4, background: 'rgba(16, 185, 129, 0.15)', color: '#059669', fontWeight: 700 }}>
+                  Platform Shared
+                </span>
+              )}
               <span>by {doc.uploadedBy}</span>
               <span>{doc.uploadedAt}</span>
             </div>

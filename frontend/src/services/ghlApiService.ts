@@ -1308,18 +1308,14 @@ export async function getIrmCallOutcomes(module?: string): Promise<Record<string
   try {
     const res: ApiResponse<Record<string, string[]>> = await apiClient.get('/irm/call-outcomes', module ? { module } : undefined);
     if (res.success && res.data) return res.data;
-  } catch {
-    try {
-      const fallbackRes: ApiResponse<Record<string, string[]>> = await apiClient.get('/sales-executive/calls/outcomes', module ? { module } : undefined);
-      if (fallbackRes.success && fallbackRes.data) return fallbackRes.data;
-    } catch {}
-  }
+  } catch {}
   return {
     my_leads: ['Follow-up Required', 'No Response', 'Call Back'],
     follow_up: ['Follow-up Required', 'Other', 'No Response', 'Call Back', 'Ready for KYC'],
     kyc: ['Contacted', 'Other', 'No Response', 'Call Back'],
     opportunities: ['Contacted', 'Other', 'No Response', 'Call Back'],
     investor_360: ['Contacted', 'Other', 'No Response', 'Call Back'],
+    other: ['Call Back', 'Other', 'No Response', 'Follow-up Required', 'Ready for KYC'],
   };
 }
 

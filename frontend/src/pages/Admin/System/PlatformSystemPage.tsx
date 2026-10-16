@@ -30,6 +30,7 @@ import {
   Tenant,
   SystemHealthReport,
   GlobalConfig,
+  BackupSnapshot,
 } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
 import { signalRService } from '../../../services/signalRService';
@@ -37,7 +38,7 @@ import { useUnsavedChanges } from '../../../context/NavigationGuardContext';
 import { Modal } from '../../../components/common/Modal';
 import './PlatformSystemPage.css';
 
-type SystemTab = 'diagnostics' | 'health' | 'config' | 'announcements';
+type SystemTab = 'diagnostics' | 'health' | 'config' | 'announcements' | 'backups';
 
 export const PlatformSystemPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<SystemTab>('diagnostics');
@@ -68,6 +69,12 @@ export const PlatformSystemPage: React.FC = () => {
   const [isExporting, setIsExporting] = useState(false);
   const [isTogglingMaint, setIsTogglingMaint] = useState(false);
   const [backupStatus, setBackupStatus] = useState<any>(null);
+
+  // Database Backup Vault State
+  const [backups, setBackups] = useState<BackupSnapshot[]>([]);
+  const [isGeneratingBackup, setIsGeneratingBackup] = useState(false);
+  const [backupDesc, setBackupDesc] = useState('');
+  const [includeAuditLogsInBackup, setIncludeAuditLogsInBackup] = useState(true);
 
   // Announcement Modal
   const [isAnnModalOpen, setIsAnnModalOpen] = useState(false);
@@ -110,7 +117,7 @@ export const PlatformSystemPage: React.FC = () => {
     setErrorMsg(null);
 
     try {
-      const [diag, health, config, anns, allTenants, maint, backup] = await Promise.all([
+      const [diag, health, config, anns, allTenants, maint, backup, backupList] = await Promise.all([
         superAdminService.fetchSystemDiagnosticsFromApi(),
         superAdminService.fetchSystemHealthChecksFromApi(),
         superAdminService.fetchGlobalConfigFromApi(),
@@ -118,6 +125,7 @@ export const PlatformSystemPage: React.FC = () => {
         superAdminService.fetchTenantsFromApi(),
         superAdminService.fetchMaintenanceModeFromApi(),
         superAdminService.getBackupStatus().catch(() => null),
+        superAdminService.fetchDatabaseBackupsApi().catch(() => []),
       ]);
 
       setDiagnostics(diag);
@@ -128,6 +136,7 @@ export const PlatformSystemPage: React.FC = () => {
       setTenants(allTenants || []);
       setMaintenance(maint);
       setBackupStatus(backup);
+      setBackups(backupList || []);
       if (isManualRefresh) {
         showSuccess('Live telemetry and system health refreshed.');
       }
@@ -391,6 +400,42 @@ export const PlatformSystemPage: React.FC = () => {
     }
   };
 
+  const handleGenerateBackup = async () => {
+    setIsGeneratingBackup(true);
+    try {
+      const newBackup = await superAdminService.generateDatabaseBackupApi({
+        description: backupDesc.trim() || undefined,
+        includeAuditLogs: includeAuditLogsInBackup,
+      });
+      setBackups(prev => [newBackup, ...prev]);
+      setBackupDesc('');
+      showSuccess(`Database snapshot '${newBackup.filename || newBackup.fileName}' created successfully (${newBackup.formattedSize || (newBackup.fileSizeBytes / (1024 * 1024)).toFixed(2) + ' MB'}).`);
+    } catch (err: any) {
+      alert(err.message || 'Failed to generate database snapshot');
+    } finally {
+      setIsGeneratingBackup(false);
+    }
+  };
+
+  const handleDownloadBackupFile = async (snapshot: BackupSnapshot) => {
+    try {
+      await superAdminService.downloadDatabaseBackupApi(snapshot.id, snapshot.filename || snapshot.fileName || 'backup.json');
+    } catch (err: any) {
+      alert(err.message || 'Failed to download snapshot file');
+    }
+  };
+
+  const handleDeleteBackupSnapshot = async (id: string, name: string) => {
+    if (!window.confirm(`Are you sure you want to delete backup snapshot '${name}'? This cannot be undone.`)) return;
+    try {
+      await superAdminService.deleteDatabaseBackupApi(id);
+      setBackups(prev => prev.filter(b => b.id !== id));
+      showSuccess('Backup snapshot removed from registry.');
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete snapshot');
+    }
+  };
+
   const memoryPercent =
     diagnostics && diagnostics.memoryLimitMb > 0
       ? Math.min(100, Math.round((diagnostics.memoryUsedMb / diagnostics.memoryLimitMb) * 100))
@@ -509,6 +554,16 @@ export const PlatformSystemPage: React.FC = () => {
           <Megaphone size={15} /> Fleet Broadcasts & Maintenance
           {announcements.length > 0 && (
             <span className="tab-badge blue">{announcements.length}</span>
+          )}
+        </button>
+
+        <button
+          className={`system-tab-btn ${activeTab === 'backups' ? 'active' : ''}`}
+          onClick={() => setActiveTab('backups')}
+        >
+          <Database size={15} /> Database Backup Vault
+          {backups.length > 0 && (
+            <span className="tab-badge green">{backups.length}</span>
           )}
         </button>
       </div>
@@ -1164,6 +1219,175 @@ export const PlatformSystemPage: React.FC = () => {
                               >
                                 <Trash2 size={14} />
                               </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 5: DATABASE BACKUP & SNAPSHOT VAULT */}
+          {activeTab === 'backups' && (
+            <div className="backup-vault-section">
+              {/* Snapshot Generator Card */}
+              <div className="backup-gen-box">
+                <div className="backup-gen-header">
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Database size={18} style={{ color: '#8b5cf6' }} />
+                      Platform Instant Database Backup & Snapshot Generator
+                    </h3>
+                    <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#94a3b8' }}>
+                      Captures full platform state across tenants, users, call sessions, pipelines, leads, and audit trails with SHA-256 cryptographic verification.
+                    </p>
+                  </div>
+                  <button
+                    className="btn btn-primary"
+                    disabled={isGeneratingBackup}
+                    onClick={handleGenerateBackup}
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 18px' }}
+                  >
+                    {isGeneratingBackup ? (
+                      <>
+                        <RefreshCw size={15} className="animate-spin" />
+                        Generating Snapshot...
+                      </>
+                    ) : (
+                      <>
+                        <Plus size={15} />
+                        Create Database Snapshot
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginTop: '4px' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontSize: '12px' }}>Snapshot Description / Label (Optional)</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="e.g. Pre-v2.4 Migration State, Monthly Compliance Snapshot"
+                      value={backupDesc}
+                      onChange={e => setBackupDesc(e.target.value)}
+                      disabled={isGeneratingBackup}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', paddingTop: '22px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: '#cbd5e1' }}>
+                      <input
+                        type="checkbox"
+                        checked={includeAuditLogsInBackup}
+                        onChange={e => setIncludeAuditLogsInBackup(e.target.checked)}
+                        disabled={isGeneratingBackup}
+                        style={{ width: '16px', height: '16px', accentColor: '#8b5cf6' }}
+                      />
+                      Include complete Audit Log event trails in snapshot
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Snapshot Vault Table */}
+              <div className="backup-table-card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <HardDrive size={16} style={{ color: '#38bdf8' }} />
+                    Snapshot Repository ({backups.length} archived)
+                  </h3>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => loadData(true)}
+                    disabled={isRefreshing}
+                    style={{ fontSize: '12px' }}
+                  >
+                    <RefreshCw size={13} className={isRefreshing ? 'animate-spin' : ''} />
+                    Refresh Vault
+                  </button>
+                </div>
+
+                <div className="table-responsive">
+                  <table className="backup-data-table">
+                    <thead>
+                      <tr>
+                        <th>Snapshot Name & Type</th>
+                        <th>Created At</th>
+                        <th>Created By</th>
+                        <th>Records Captured</th>
+                        <th>Size</th>
+                        <th>SHA-256 Checksum</th>
+                        <th>Status</th>
+                        <th style={{ textAlign: 'right' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {backups.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} style={{ textAlign: 'center', padding: '36px', color: '#64748b' }}>
+                            <Database size={28} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
+                            <div>No database snapshots stored yet. Click "Create Database Snapshot" above to generate your first backup.</div>
+                          </td>
+                        </tr>
+                      ) : (
+                        backups.map(b => (
+                          <tr key={b.id}>
+                            <td>
+                              <div>
+                                <span className="backup-filename">{b.filename || b.fileName}</span>
+                                {b.description && (
+                                  <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>{b.description}</div>
+                                )}
+                              </div>
+                            </td>
+                            <td>
+                              <div style={{ fontSize: '12px', color: '#cbd5e1' }}>
+                                {new Date(b.createdAt).toLocaleString()}
+                              </div>
+                            </td>
+                            <td>
+                              <span style={{ fontSize: '12px', color: '#94a3b8' }}>{b.createdBy}</span>
+                            </td>
+                            <td>
+                              <span style={{ fontWeight: 600, color: '#38bdf8' }}>{(b.totalRecordsCount ?? b.recordCount ?? 0).toLocaleString()}</span>
+                            </td>
+                            <td>
+                              <span style={{ fontSize: '12px', color: '#e2e8f0' }}>
+                                {b.formattedSize || `${(b.fileSizeBytes / (1024 * 1024)).toFixed(2)} MB`}
+                              </span>
+                            </td>
+                            <td>
+                              <span className="checksum-pill" title={b.checksumSha256 || b.sha256Checksum || ''}>
+                                {b.checksumSha256 || b.sha256Checksum || 'SHA256 verified'}
+                              </span>
+                            </td>
+                            <td>
+                              <span className={`status-pill ${b.status === 'Completed' ? 'active' : 'warning'}`}>
+                                {b.status}
+                              </span>
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                                <button
+                                  className="btn btn-ghost btn-sm"
+                                  onClick={() => handleDownloadBackupFile(b)}
+                                  title="Download Snapshot File"
+                                  style={{ padding: '4px 8px', color: '#38bdf8' }}
+                                >
+                                  <Download size={14} />
+                                </button>
+                                <button
+                                  className="btn-delete-ann"
+                                  onClick={() => handleDeleteBackupSnapshot(b.id, b.filename || b.fileName || 'Snapshot')}
+                                  title="Delete Snapshot"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))

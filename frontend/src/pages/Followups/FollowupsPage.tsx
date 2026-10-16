@@ -291,7 +291,7 @@ export const FollowupsPage: React.FC = () => {
           return;
         }
       }
-    } catch {}
+    } catch { }
     const d = new Date();
     d.setDate(d.getDate() + 1);
     d.setHours(10, 0, 0, 0);
@@ -460,6 +460,8 @@ export const FollowupsPage: React.FC = () => {
               notes: l.notes || 'Lead marked Follow-up Required',
               assignedAgentId: String(l.assignedAgentId || ''),
               assignedAgentName: l.assignedAgentName || '',
+              assignedRole: (l as any).assignedRole || (l.assignedIrmId ? 'irm' : (isIrm ? 'irm' : undefined)),
+              assignedByName: l.assignedByName || (isIrm ? 'Created by IRM' : undefined),
               handoverId: l.handoverId,
               handedOverFromName: l.handedOverFromName,
               handoverPlannedEnd: l.handoverPlannedEnd,
@@ -489,8 +491,12 @@ export const FollowupsPage: React.FC = () => {
           if (existing) {
             leadMap.set(key, {
               ...existing,
+              status: (il.status as any) || existing.status,
+              nextFollowupDate: il.nextFollowupDate || existing.nextFollowupDate,
               assignedById: il.assignedById != null ? String(il.assignedById) : existing.assignedById,
-              assignedByName: (il.assignedByName && il.assignedByName !== 'Created by IRM') ? il.assignedByName : existing.assignedByName,
+              assignedByName: il.assignedByName || existing.assignedByName,
+              assignedIrmId: String(user?.id || existing.assignedIrmId || ''),
+              assignedIrmName: user?.name || existing.assignedIrmName || '',
             });
           } else {
             leadMap.set(key, {
@@ -507,7 +513,10 @@ export const FollowupsPage: React.FC = () => {
               assignedAgentName: il.assignedAgentName || user?.name || '',
               assignedById: il.assignedById != null ? String(il.assignedById) : undefined,
               assignedByName: il.assignedByName || '',
+              assignedIrmId: String(user?.id || ''),
+              assignedIrmName: user?.name || '',
               createdAt: il.createdAt,
+              nextFollowupDate: il.nextFollowupDate,
               notes: il.notes || '',
               customFields: {
                 investmentCapacity: il.investmentCapacity,
@@ -587,16 +596,16 @@ export const FollowupsPage: React.FC = () => {
 
     const savedAssetClass = isConfirmed
       ? (l?.customFields?.irmPreferencesConfirmed && l?.customFields?.preferredAssetClass) ||
-        (c?.customFields?.irmPreferencesConfirmed && c?.customFields?.preferredAssetClass) ||
-        savedLocal?.preferredAssetClass ||
-        ''
+      (c?.customFields?.irmPreferencesConfirmed && c?.customFields?.preferredAssetClass) ||
+      savedLocal?.preferredAssetClass ||
+      ''
       : '';
 
     const savedHorizon = isConfirmed
       ? (l?.customFields?.irmPreferencesConfirmed && (l?.customFields?.horizon || l?.customFields?.investmentHorizon)) ||
-        (c?.customFields?.irmPreferencesConfirmed && (c?.customFields?.horizon || c?.customFields?.investmentHorizon)) ||
-        savedLocal?.horizon ||
-        ''
+      (c?.customFields?.irmPreferencesConfirmed && (c?.customFields?.horizon || c?.customFields?.investmentHorizon)) ||
+      savedLocal?.horizon ||
+      ''
       : '';
 
     setPrefAssetClass(savedAssetClass);
@@ -1044,10 +1053,12 @@ export const FollowupsPage: React.FC = () => {
   // Helper to determine the display agent and role for a followup card or drawer
   const getFollowupDisplayAgent = (f: Followup): { label: string; name: string; role: string; badgeClass: string } => {
     const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+    const cleanContactId = (f.contactId || '').replace(/\D/g, '');
     const matchingLead = allLeads.find(l => {
-      const idMatch = f.contactId && String(f.contactId) === String(l.id);
+      const cleanLeadId = String(l.id).replace(/\D/g, '');
+      const idMatch = (cleanContactId && cleanLeadId && cleanContactId === cleanLeadId) || (f.contactId && String(f.contactId) === String(l.id));
       const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
-      return idMatch || Boolean(fPhone && lPhone && fPhone === lPhone);
+      return Boolean(idMatch) || Boolean(fPhone && lPhone && fPhone === lPhone);
     });
 
     if (isIrm) {
@@ -1248,13 +1259,18 @@ export const FollowupsPage: React.FC = () => {
 
       const isDirectlyAssigned =
         (f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
-        (f.assignedAgentName && user?.name && f.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase());
+        (f.assignedAgentName && user?.name && f.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase()) ||
+        (f.assignedRole === 'irm');
       if (isDirectlyAssigned) return true;
 
       if (matchingLead) {
         return (
           (matchingLead.assignedAgentId && String(matchingLead.assignedAgentId) === String(user?.id)) ||
-          (matchingLead.assignedAgentName && user?.name && matchingLead.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase())
+          (matchingLead.assignedAgentName && user?.name && matchingLead.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase()) ||
+          (matchingLead.assignedIrmId && String(matchingLead.assignedIrmId) === String(user?.id)) ||
+          (matchingLead.assignedIrmName && user?.name && matchingLead.assignedIrmName.trim().toLowerCase() === user.name.trim().toLowerCase()) ||
+          ((matchingLead.customFields as any)?.assignedIrmId && String((matchingLead.customFields as any).assignedIrmId) === String(user?.id)) ||
+          ((matchingLead.customFields as any)?.assignedIrmName && user?.name && String((matchingLead.customFields as any).assignedIrmName).trim().toLowerCase() === user.name.trim().toLowerCase())
         );
       }
 
@@ -1272,7 +1288,11 @@ export const FollowupsPage: React.FC = () => {
     const missingFollowupLeads = allLeads.filter(l => {
       const isAssignedToMe =
         (l.assignedAgentId && String(l.assignedAgentId) === String(user?.id)) ||
-        (l.assignedAgentName && user?.name && l.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase());
+        (l.assignedAgentName && user?.name && l.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase()) ||
+        (l.assignedIrmId && String(l.assignedIrmId) === String(user?.id)) ||
+        (l.assignedIrmName && user?.name && l.assignedIrmName.trim().toLowerCase() === user.name.trim().toLowerCase()) ||
+        ((l.customFields as any)?.assignedIrmId && String((l.customFields as any).assignedIrmId) === String(user?.id)) ||
+        ((l.customFields as any)?.assignedIrmName && user?.name && String((l.customFields as any).assignedIrmName).trim().toLowerCase() === user.name.trim().toLowerCase());
       if (!isAssignedToMe) return false;
       if (l.companyId && tenant?.id && !isTenantMatch(l.companyId, tenant.id)) return false;
 
@@ -1322,8 +1342,8 @@ export const FollowupsPage: React.FC = () => {
         status: 'Pending',
         notes: ml.notes || 'Scheduled follow-up callback',
         assignedAgentId: String(user?.id || ''),
-        assignedAgentName: salesAgentName || user?.name || ml.assignedAgentName || '',
-        assignedRole: salesAgentName ? 'Sales Executive' : 'IRM',
+        assignedAgentName: user?.name || ml.assignedAgentName || '',
+        assignedRole: 'IRM',
       });
     }
   } else {
@@ -1882,34 +1902,34 @@ export const FollowupsPage: React.FC = () => {
         <div className="followups-tabs-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', gap: 8 }}>
             {[
-            { id: 'all', label: `All Tasks (${activePendingFollowups.length})` },
-            {
-              id: 'due',
-              label: `Due Today (${activePendingFollowups.filter(isFollowupToday).length})`,
-            },
-            {
-              id: 'overdue',
-              label: `Overdue (${activePendingFollowups.filter(f => isFollowupOverdue(f) && !isFollowupToday(f)).length})`,
-              danger: true,
-            },
-          ].map(tab => (
-            <button
-              key={tab.id}
-              className={`btn btn-sm ${activeTab === tab.id ? 'btn-primary' : 'btn-secondary'
-                } ${tab.danger && activeTab === tab.id
-                  ? 'followups-tab-danger-active'
-                  : tab.danger
-                    ? 'followups-tab-danger-inactive'
-                    : ''
-                }`}
-              onClick={() => setActiveTab(tab.id as any)}
-            >
-              {tab.danger && (
-                <AlertTriangle size={13} color={activeTab === tab.id ? '#ffffff' : '#dc2626'} />
-              )}
-              {tab.label}
-            </button>
-          ))}
+              { id: 'all', label: `All Tasks (${activePendingFollowups.length})` },
+              {
+                id: 'due',
+                label: `Due Today (${activePendingFollowups.filter(isFollowupToday).length})`,
+              },
+              {
+                id: 'overdue',
+                label: `Overdue (${activePendingFollowups.filter(f => isFollowupOverdue(f) && !isFollowupToday(f)).length})`,
+                danger: true,
+              },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                className={`btn btn-sm ${activeTab === tab.id ? 'btn-primary' : 'btn-secondary'
+                  } ${tab.danger && activeTab === tab.id
+                    ? 'followups-tab-danger-active'
+                    : tab.danger
+                      ? 'followups-tab-danger-inactive'
+                      : ''
+                  }`}
+                onClick={() => setActiveTab(tab.id as any)}
+              >
+                {tab.danger && (
+                  <AlertTriangle size={13} color={activeTab === tab.id ? '#ffffff' : '#dc2626'} />
+                )}
+                {tab.label}
+              </button>
+            ))}
           </div>
 
           {handoverOptions.length > 0 && (
@@ -2251,7 +2271,7 @@ export const FollowupsPage: React.FC = () => {
               Scheduling Buffer Advice
             </div>
             <p style={{ margin: 0, fontSize: '0.83rem', color: 'var(--text-primary, #334155)', lineHeight: 1.5 }}>
-              To ensure sufficient time for each call and avoid overlapping appointments (e.g. 10:00 AM and 10:01 AM), <strong>please schedule your follow-up 15 to 20 minutes afterwards (or 20–30 minutes later)</strong>.
+              To avoid overlapping appointments and ensure sufficient time for each call, <strong>please schedule your follow-up at least 15–20 minutes after your existing appointment.</strong>
             </p>
           </div>
 

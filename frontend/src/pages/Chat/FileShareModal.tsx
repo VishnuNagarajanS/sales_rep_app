@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Modal } from '../../components/common/Modal';
 import { FileCategory, FilePermission, ChatAttachment } from '../../types';
-import { FileText, Image as ImageIcon, FileSpreadsheet, File, Shield, Eye, Download, Edit3, UploadCloud, RefreshCw } from 'lucide-react';
+import { FileText, Image as ImageIcon, FileSpreadsheet, File, Shield, Eye, Download, Edit3, UploadCloud, RefreshCw, Loader2 } from 'lucide-react';
+import { chatApiService } from '../../services/chatApiService';
 
 interface Props {
   isOpen: boolean;
@@ -38,14 +39,17 @@ export const FileShareModal: React.FC<Props> = ({
   const [selectedFile, setSelectedFile] = useState<{ file: globalThis.File; dataUrl: string } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [permission, setPermission] = useState<FilePermission>('view_download');
+  const [isUploading, setIsUploading] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setSelectedFile(initialFile || null);
       setPermission('view_download');
       setIsDragging(false);
+      setIsUploading(false);
     } else {
       setSelectedFile(null);
+      setIsUploading(false);
     }
   }, [isOpen, initialFile]);
 
@@ -90,19 +94,38 @@ export const FileShareModal: React.FC<Props> = ({
     }
   };
 
-  const handleConfirm = () => {
-    if (!selectedFile) return;
-    const attachment: ChatAttachment = {
-      id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      name: selectedFile.file.name,
-      size: selectedFile.file.size,
-      type: selectedFile.file.type || 'application/octet-stream',
-      category: detectCategory(selectedFile.file.name, selectedFile.file.type),
-      permission,
-      dataUrl: selectedFile.dataUrl,
-    };
-    onConfirm(attachment);
-    onClose();
+  const handleConfirm = async () => {
+    if (!selectedFile || isUploading) return;
+    setIsUploading(true);
+    try {
+      const uploaded = await chatApiService.uploadFile(selectedFile.file);
+      const attachment: ChatAttachment = {
+        id: uploaded.id || `att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        name: uploaded.name || selectedFile.file.name,
+        size: uploaded.size || selectedFile.file.size,
+        type: uploaded.type || selectedFile.file.type || 'application/octet-stream',
+        category: (uploaded.category as FileCategory) || detectCategory(selectedFile.file.name, selectedFile.file.type),
+        permission,
+        dataUrl: uploaded.dataUrl || selectedFile.dataUrl,
+      };
+      onConfirm(attachment);
+      onClose();
+    } catch (err) {
+      console.warn('[FileShareModal] Server upload failed, using local inline dataUrl fallback:', err);
+      const fallbackAttachment: ChatAttachment = {
+        id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        name: selectedFile.file.name,
+        size: selectedFile.file.size,
+        type: selectedFile.file.type || 'application/octet-stream',
+        category: detectCategory(selectedFile.file.name, selectedFile.file.type),
+        permission,
+        dataUrl: selectedFile.dataUrl,
+      };
+      onConfirm(fallbackAttachment);
+      onClose();
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const permissions: { id: FilePermission; label: string; desc: string; badge: string; icon: React.ReactNode }[] = [
@@ -157,16 +180,23 @@ export const FileShareModal: React.FC<Props> = ({
             )}
           </span>
           <div className="file-share-actions">
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+            <button type="button" className="btn btn-ghost btn-sm" disabled={isUploading} onClick={onClose}>
               Cancel
             </button>
             <button
               type="button"
               className="btn btn-primary btn-sm"
-              disabled={!selectedFile}
+              disabled={!selectedFile || isUploading}
               onClick={handleConfirm}
             >
-              Attach to Message
+              {isUploading ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" />
+                  <span>Uploading...</span>
+                </>
+              ) : (
+                'Attach to Message'
+              )}
             </button>
           </div>
         </div>

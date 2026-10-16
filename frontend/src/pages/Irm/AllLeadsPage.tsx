@@ -14,6 +14,7 @@ import {
   UserCheck,
   Briefcase,
   CheckCircle2,
+  FolderOpen,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
@@ -37,6 +38,7 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
     inKyc: 0,
     inOpportunities: 0,
     converted: 0,
+    inOther: 0,
     leads: [],
   });
   const [loading, setLoading] = useState(true);
@@ -122,6 +124,7 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
       'KYC': 0,
       'Opportunities': 0,
       'Converted': 0,
+      'Other': 0,
     };
     agentFilteredLeads.forEach(l => {
       const st = l.currentStage;
@@ -154,6 +157,9 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
     if (norm === 'converted' || norm === 'investor' || norm === 'investors' || norm === 'investor 360' || norm === 'investor_360') {
       return 'investor_360';
     }
+    if (norm === 'other') {
+      return 'other';
+    }
     return 'my_leads';
   };
 
@@ -174,6 +180,9 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
         break;
       case 'converted':
         onNavigate('investors');
+        break;
+      case 'other':
+        onNavigate('irm-other');
         break;
       default:
         break;
@@ -215,6 +224,13 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
           <span className="all-leads-badge converted">
             <CheckCircle2 size={11} />
             Converted
+          </span>
+        );
+      case 'Other':
+        return (
+          <span className="all-leads-badge other">
+            <FolderOpen size={11} />
+            Other
           </span>
         );
       case 'Archived':
@@ -463,6 +479,21 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
           <div className="all-leads-metric-value">{summary.converted}</div>
           <div className="all-leads-metric-subtext">Closed Won / Funded</div>
         </div>
+
+        {/* Card 7: Other */}
+        <div
+          onClick={() => setSelectedStageTab('Other')}
+          className={`all-leads-metric-card ${selectedStageTab === 'Other' ? 'is-active' : ''}`}
+        >
+          <div className="all-leads-metric-header">
+            <span className="all-leads-metric-label" style={{ color: '#ef4444' }}>In Other</span>
+            <div className="all-leads-metric-icon other">
+              <FolderOpen size={14} />
+            </div>
+          </div>
+          <div className="all-leads-metric-value">{summary.inOther ?? stageCounts['Other'] ?? 0}</div>
+          <div className="all-leads-metric-subtext">Moved to Other</div>
+        </div>
       </div>
 
       {/* Shared DataTable Component with Theme and Search Support */}
@@ -495,6 +526,7 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
                 { id: 'KYC', label: 'KYC', count: stageCounts['KYC'] },
                 { id: 'Opportunities', label: 'Opportunities', count: stageCounts['Opportunities'] },
                 { id: 'Converted', label: 'Converted', count: stageCounts['Converted'] },
+                { id: 'Other', label: 'Other', count: stageCounts['Other'] },
               ].map(tab => (
                 <button
                   key={tab.id}

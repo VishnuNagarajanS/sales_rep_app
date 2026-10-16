@@ -40,5 +40,6 @@ public class IrmAllLeadsSummaryDto
     public int InKyc { get; set; }
     public int InOpportunities { get; set; }
     public int Converted { get; set; }
+    public int InOther { get; set; }
     public List<IrmAllLeadItemDto> Leads { get; set; } = new();
 }

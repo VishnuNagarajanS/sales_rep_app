@@ -75,7 +75,7 @@ namespace backend.Migrations
 
                     b.HasIndex("CompanyId", "AskedAt");
 
-                    b.ToTable("AiChatLogs");
+                    b.ToTable("AiChatLogs", (string)null);
                 });
 
             modelBuilder.Entity("backend.Models.Entities.AuditLog", b =>
@@ -133,7 +133,7 @@ namespace backend.Migrations
 
                     b.HasIndex("CompanyId");
 
-                    b.ToTable("AuditLogs");
+                    b.ToTable("audit_logs", (string)null);
                 });
 
             modelBuilder.Entity("backend.Models.Entities.BroadcastAnnouncement", b =>
@@ -280,10 +280,6 @@ namespace backend.Migrations
                     b.Property<string>("Reason")
                         .HasColumnType("text");
 
-                    b.Property<string>("CallModule")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
                     b.Property<string>("RecordingUrl")
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
@@ -413,6 +409,166 @@ namespace backend.Migrations
                         });
                 });
 
+            modelBuilder.Entity("backend.Models.Entities.ChatAttachment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Category")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<long>("FileSize")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("FileUrl")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("MessageId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("MimeType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MessageId");
+
+                    b.ToTable("ChatAttachments", (string)null);
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.ChatConversation", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text");
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "Type");
+
+                    b.ToTable("ChatConversations", (string)null);
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.ChatMessage", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ConversationId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsEdited")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("MessageType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ReactionsJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ReplyToMessageId")
+                        .HasColumnType("text");
+
+                    b.Property<int>("SenderId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SenderName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationId", "CreatedAt");
+
+                    b.ToTable("ChatMessages", (string)null);
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.ChatParticipant", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ConversationId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsMuted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsPinned")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("JoinedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastReadMessageId")
+                        .HasColumnType("text");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("ConversationId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("ChatParticipants", (string)null);
+                });
+
             modelBuilder.Entity("backend.Models.Entities.Consultation", b =>
                 {
                     b.Property<int>("Id")
@@ -443,7 +599,7 @@ namespace backend.Migrations
                     b.Property<int?>("HandoverId")
                         .HasColumnType("integer");
 
-                    b.Property<int>("InvestorId")
+                    b.Property<int?>("InvestorId")
                         .HasColumnType("integer");
 
                     b.Property<string>("InvestorName")
@@ -469,9 +625,7 @@ namespace backend.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("Status")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0);
+                        .HasColumnType("integer");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -521,9 +675,6 @@ namespace backend.Migrations
                     b.Property<int?>("HandoverId")
                         .HasColumnType("integer");
 
-                    b.Property<DateTime?>("InterestedLeadSince")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<bool>("IsDuplicate")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
@@ -561,13 +712,6 @@ namespace backend.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
-
-                    b.Property<string>("Source")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int?>("SourceLeadId")
-                        .HasColumnType("integer");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -699,7 +843,7 @@ namespace backend.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ExecutiveProfiles");
+                    b.ToTable("ExecutiveProfiles", (string)null);
                 });
 
             modelBuilder.Entity("backend.Models.Entities.Followup", b =>
@@ -731,7 +875,6 @@ namespace backend.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("ContactEmail")
-                        .IsRequired()
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
@@ -919,7 +1062,7 @@ namespace backend.Migrations
 
                     b.HasIndex("OriginalOwnerId");
 
-                    b.ToTable("GhlDeals");
+                    b.ToTable("GhlDeals", (string)null);
                 });
 
             modelBuilder.Entity("backend.Models.Entities.GhlDealActivity", b =>
@@ -970,7 +1113,7 @@ namespace backend.Migrations
 
                     b.HasIndex("DealId");
 
-                    b.ToTable("GhlDealActivities");
+                    b.ToTable("GhlDealActivities", (string)null);
                 });
 
             modelBuilder.Entity("backend.Models.Entities.GhlInvestmentOpportunity", b =>
@@ -1036,86 +1179,7 @@ namespace backend.Migrations
 
                     b.HasIndex("OriginalOwnerId");
 
-                    b.ToTable("GhlInvestmentOpportunities");
-                });
-
-            modelBuilder.Entity("backend.Models.Entities.GhlInvestor", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("AssignedAgentId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("CommittedAUM")
-                        .HasColumnType("text");
-
-                    b.Property<int>("CompanyId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Email")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int?>("HandoverId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("InvestmentCapacity")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("InvestmentMandate")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Notes")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int?>("OriginalOwnerId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Phone")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("PreferredAssetClass")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("ReferralSource")
-                        .HasColumnType("text");
-
-                    b.Property<string>("RiskTolerance")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AssignedAgentId");
-
-                    b.HasIndex("CompanyId");
-
-                    b.HasIndex("HandoverId");
-
-                    b.HasIndex("OriginalOwnerId");
-
-                    b.ToTable("GhlInvestors");
+                    b.ToTable("GhlInvestmentOpportunities", (string)null);
                 });
 
             modelBuilder.Entity("backend.Models.Entities.InvestmentOpportunity", b =>
@@ -1188,26 +1252,7 @@ namespace backend.Migrations
 
                     b.HasIndex("CreatedByIrmId");
 
-                    b.ToTable("InvestmentOpportunities");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            AssetClass = "Commercial AIF",
-                            CommittedAmount = 50000000m,
-                            CompanyId = 1,
-                            CreatedAt = new DateTime(2026, 1, 10, 0, 0, 0, 0, DateTimeKind.Utc),
-                            CreatedByIrmId = 5,
-                            Description = "Grade-A office park pre-leased to Fortune 500 GCCs with 8.5% entry cap rate",
-                            IsActive = true,
-                            MinTicketSize = 10000000m,
-                            RiskLevel = "Moderate",
-                            TargetIrr = 16.5m,
-                            Tenure = "5 Years",
-                            Title = "Prime Bengaluru Commercial Yield Fund II",
-                            TotalTargetCorpus = 1000000000m
-                        });
+                    b.ToTable("InvestmentOpportunities", (string)null);
                 });
 
             modelBuilder.Entity("backend.Models.Entities.Investor", b =>
@@ -1289,103 +1334,7 @@ namespace backend.Migrations
 
                     b.HasIndex("OriginalOwnerId");
 
-                    b.ToTable("Investors");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            AssignedIrmId = 5,
-                            AssignedIrmName = "Dhinakaran",
-                            CommittedAum = "₹5.0 Cr",
-                            CompanyId = 1,
-                            CreatedAt = new DateTime(2026, 1, 15, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Email = "rajesh.singhania@apexcapital.in",
-                            InvestmentCapacity = "₹5 Cr – ₹10 Cr",
-                            InvestmentMandate = "Growth focused Category II AIF with commercial allocation",
-                            Name = "Rajesh Singhania",
-                            Notes = "Senior HNI investor with portfolio in Bangalore",
-                            Phone = "+91 98200 44556",
-                            PreferredAssetClass = "AIF",
-                            ReferralSource = "Wealth Partner Direct",
-                            RiskTolerance = "Moderate",
-                            Status = 1
-                        },
-                        new
-                        {
-                            Id = 2,
-                            AssignedIrmId = 5,
-                            AssignedIrmName = "Dhinakaran",
-                            CompanyId = 1,
-                            CreatedAt = new DateTime(2026, 2, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Email = "meera.nambiar@nambiarholdings.com",
-                            InvestmentCapacity = "₹10 Cr – ₹25 Cr",
-                            InvestmentMandate = "High-yield commercial development tranches",
-                            Name = "Meera Nambiar",
-                            Notes = "Family office lead referred via CFO network",
-                            Phone = "+91 98450 99881",
-                            PreferredAssetClass = "Commercial AIF",
-                            RiskTolerance = "Aggressive",
-                            Status = 0
-                        });
-                });
-
-            modelBuilder.Entity("backend.Models.Entities.InvestorCall", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CalledAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("CompanyId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("DurationSeconds")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("InvestorId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("InvestorName")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("InvestorPhone")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int>("IrmId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("IrmName")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Notes")
-                        .HasColumnType("text");
-
-                    b.Property<int>("Outcome")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("RecordingUrl")
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CompanyId");
-
-                    b.HasIndex("InvestorId");
-
-                    b.HasIndex("IrmId");
-
-                    b.ToTable("InvestorCalls");
+                    b.ToTable("Investors", (string)null);
                 });
 
             modelBuilder.Entity("backend.Models.Entities.InvestorKyc", b =>
@@ -1594,7 +1543,7 @@ namespace backend.Migrations
 
                     b.HasIndex("OriginalOwnerId");
 
-                    b.ToTable("InvestorKycs");
+                    b.ToTable("InvestorKycs", (string)null);
                 });
 
             modelBuilder.Entity("backend.Models.Entities.IrmCoverageAssignment", b =>
@@ -1650,134 +1599,7 @@ namespace backend.Migrations
 
                     b.HasIndex("OriginalIrmId");
 
-                    b.ToTable("IrmCoverageAssignments");
-                });
-
-            modelBuilder.Entity("backend.Models.Entities.IrmPipelineCard", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("ActivityLogsJson")
-                        .HasColumnType("text");
-
-                    b.Property<int>("AssignedIrmId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("AssignedIrmName")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int>("CompanyId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int?>("HandoverId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("InvestmentAmount")
-                        .HasColumnType("text");
-
-                    b.Property<string>("InvestorEmail")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int>("InvestorId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("InvestorName")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("InvestorPhone")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("LastActionSnippet")
-                        .HasColumnType("text");
-
-                    b.Property<DateTime?>("LastActivityDate")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int?>("OriginalOwnerId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("PreferredAssetClass")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Priority")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("StageEnteredAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("StageId")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<decimal?>("Value")
-                        .HasColumnType("numeric");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AssignedIrmId");
-
-                    b.HasIndex("CompanyId");
-
-                    b.HasIndex("HandoverId");
-
-                    b.HasIndex("InvestorId");
-
-                    b.HasIndex("OriginalOwnerId");
-
-                    b.ToTable("IrmPipelineCards");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            AssignedIrmId = 5,
-                            AssignedIrmName = "Dhinakaran",
-                            CompanyId = 1,
-                            CreatedAt = new DateTime(2026, 1, 15, 0, 0, 0, 0, DateTimeKind.Utc),
-                            InvestmentAmount = "₹5 Cr",
-                            InvestorEmail = "rajesh.singhania@apexcapital.in",
-                            InvestorId = 1,
-                            InvestorName = "Rajesh Singhania",
-                            InvestorPhone = "+91 98200 44556",
-                            PreferredAssetClass = "AIF",
-                            Priority = "High",
-                            StageEnteredAt = new DateTime(2026, 2, 10, 0, 0, 0, 0, DateTimeKind.Utc),
-                            StageId = "qualified_investor",
-                            Value = 50000000m
-                        },
-                        new
-                        {
-                            Id = 2,
-                            AssignedIrmId = 5,
-                            AssignedIrmName = "Dhinakaran",
-                            CompanyId = 1,
-                            CreatedAt = new DateTime(2026, 2, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            InvestmentAmount = "₹10 Cr",
-                            InvestorEmail = "meera.nambiar@nambiarholdings.com",
-                            InvestorId = 2,
-                            InvestorName = "Meera Nambiar",
-                            InvestorPhone = "+91 98450 99881",
-                            PreferredAssetClass = "Commercial AIF",
-                            Priority = "High",
-                            StageEnteredAt = new DateTime(2026, 2, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            StageId = "leads",
-                            Value = 100000000m
-                        });
+                    b.ToTable("IrmCoverageAssignments", (string)null);
                 });
 
             modelBuilder.Entity("backend.Models.Entities.KycOtpVerification", b =>
@@ -2039,7 +1861,7 @@ namespace backend.Migrations
 
                     b.HasIndex("CompanyId");
 
-                    b.ToTable("LeavePolicies");
+                    b.ToTable("LeavePolicies", (string)null);
                 });
 
             modelBuilder.Entity("backend.Models.Entities.LeaveRequest", b =>
@@ -2138,7 +1960,7 @@ namespace backend.Migrations
 
                     b.HasIndex("WorkHandoverId");
 
-                    b.ToTable("LeaveRequests");
+                    b.ToTable("LeaveRequests", (string)null);
                 });
 
             modelBuilder.Entity("backend.Models.Entities.LeaveRequestEvent", b =>
@@ -2173,7 +1995,7 @@ namespace backend.Migrations
 
                     b.HasIndex("LeaveRequestId");
 
-                    b.ToTable("LeaveRequestEvents");
+                    b.ToTable("LeaveRequestEvents", (string)null);
                 });
 
             modelBuilder.Entity("backend.Models.Entities.Notification", b =>
@@ -2210,53 +2032,7 @@ namespace backend.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Notifications");
-                });
-
-            modelBuilder.Entity("backend.Models.Entities.OpportunityPitch", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("CommitmentNotes")
-                        .HasColumnType("text");
-
-                    b.Property<decimal?>("CommittedAmount")
-                        .HasColumnType("numeric");
-
-                    b.Property<DateTime?>("CommittedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("InvestorId")
-                        .HasColumnType("integer");
-
-                    b.Property<bool>("IsCommitted")
-                        .HasColumnType("boolean");
-
-                    b.Property<int>("OpportunityId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("PitchNotes")
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("PitchedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("PitchedByIrmId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("InvestorId");
-
-                    b.HasIndex("OpportunityId");
-
-                    b.HasIndex("PitchedByIrmId");
-
-                    b.ToTable("OpportunityPitches");
+                    b.ToTable("notifications", (string)null);
                 });
 
             modelBuilder.Entity("backend.Models.Entities.PasswordResetToken", b =>
@@ -2285,7 +2061,7 @@ namespace backend.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("PasswordResetTokens");
+                    b.ToTable("PasswordResetTokens", (string)null);
                 });
 
             modelBuilder.Entity("backend.Models.Entities.PlatformSetting", b =>
@@ -2495,6 +2271,144 @@ namespace backend.Migrations
                     b.HasIndex("CreatedAt", "Severity");
 
                     b.ToTable("security_events", (string)null);
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.MfaChallenge", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AttemptCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("ChallengeTokenHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChallengeTokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "ExpiresAt");
+
+                    b.ToTable("mfa_challenges", (string)null);
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.MfaRecoveryCode", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<DateTime?>("UsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("UserId", "CodeHash");
+
+                    b.ToTable("mfa_recovery_codes", (string)null);
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.UserMfaSetting", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<DateTime?>("EnabledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("FailedAttempts")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<bool>("IsEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LockedUntil")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PendingSecretEncrypted")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("SecretEncrypted")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("user_mfa_settings", (string)null);
                 });
 
             modelBuilder.Entity("backend.Models.Entities.SubscriptionPackage", b =>
@@ -3089,6 +3003,71 @@ namespace backend.Migrations
                         });
                 });
 
+            modelBuilder.Entity("backend.Models.Entities.UserSession", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<string>("Device")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("IpAddress")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<DateTime>("LastActivityAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Location")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RevokedReason")
+                        .HasColumnType("text");
+
+                    b.Property<string>("TokenId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("UserAgent")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenId")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "IsActive");
+
+                    b.ToTable("user_sessions", (string)null);
+                });
+
             modelBuilder.Entity("backend.Models.Entities.WorkHandover", b =>
                 {
                     b.Property<int>("Id")
@@ -3215,71 +3194,6 @@ namespace backend.Migrations
                     b.ToTable("work_handover_items", (string)null);
                 });
 
-            modelBuilder.Entity("backend.Models.Entities.UserSession", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("NOW()");
-
-                    b.Property<string>("Device")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<string>("IpAddress")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<bool>("IsActive")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(true);
-
-                    b.Property<DateTime>("LastActivityAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Location")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<DateTime?>("RevokedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("RevokedReason")
-                        .HasColumnType("text");
-
-                    b.Property<string>("TokenId")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<string>("UserAgent")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("character varying(512)");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TokenId")
-                        .IsUnique();
-
-                    b.HasIndex("UserId", "IsActive");
-
-                    b.ToTable("user_sessions", (string)null);
-                });
-
             modelBuilder.Entity("backend.Models.Entities.AiChatLog", b =>
                 {
                     b.HasOne("backend.Models.Entities.Tenant", "Company")
@@ -3347,6 +3261,47 @@ namespace backend.Migrations
                     b.Navigation("Company");
                 });
 
+            modelBuilder.Entity("backend.Models.Entities.ChatAttachment", b =>
+                {
+                    b.HasOne("backend.Models.Entities.ChatMessage", "Message")
+                        .WithMany("Attachments")
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Message");
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.ChatMessage", b =>
+                {
+                    b.HasOne("backend.Models.Entities.ChatConversation", "Conversation")
+                        .WithMany("Messages")
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Conversation");
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.ChatParticipant", b =>
+                {
+                    b.HasOne("backend.Models.Entities.ChatConversation", "Conversation")
+                        .WithMany("Participants")
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("backend.Models.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Conversation");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("backend.Models.Entities.Consultation", b =>
                 {
                     b.HasOne("backend.Models.Entities.Tenant", "Company")
@@ -3369,8 +3324,7 @@ namespace backend.Migrations
                     b.HasOne("backend.Models.Entities.Investor", "Investor")
                         .WithMany("Consultations")
                         .HasForeignKey("InvestorId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("backend.Models.Entities.User", "OriginalOwner")
                         .WithMany()
@@ -3533,6 +3487,11 @@ namespace backend.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("backend.Models.Entities.WorkHandover", "Handover")
+                        .WithMany()
+                        .HasForeignKey("HandoverId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("backend.Models.Entities.Investor", "Investor")
                         .WithMany()
                         .HasForeignKey("InvestorId")
@@ -3548,40 +3507,9 @@ namespace backend.Migrations
 
                     b.Navigation("Company");
 
-                    b.Navigation("Investor");
-
-                    b.Navigation("OriginalOwner");
-                });
-
-            modelBuilder.Entity("backend.Models.Entities.GhlInvestor", b =>
-                {
-                    b.HasOne("backend.Models.Entities.User", "AssignedAgent")
-                        .WithMany()
-                        .HasForeignKey("AssignedAgentId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.Tenant", "Company")
-                        .WithMany()
-                        .HasForeignKey("CompanyId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.WorkHandover", "Handover")
-                        .WithMany()
-                        .HasForeignKey("HandoverId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("backend.Models.Entities.User", "OriginalOwner")
-                        .WithMany()
-                        .HasForeignKey("OriginalOwnerId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("AssignedAgent");
-
-                    b.Navigation("Company");
-
                     b.Navigation("Handover");
+
+                    b.Navigation("Investor");
 
                     b.Navigation("OriginalOwner");
                 });
@@ -3700,47 +3628,6 @@ namespace backend.Migrations
                     b.Navigation("CoveringIrm");
 
                     b.Navigation("OriginalIrm");
-                });
-
-            modelBuilder.Entity("backend.Models.Entities.IrmPipelineCard", b =>
-                {
-                    b.HasOne("backend.Models.Entities.User", "AssignedIrm")
-                        .WithMany()
-                        .HasForeignKey("AssignedIrmId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.Tenant", "Company")
-                        .WithMany()
-                        .HasForeignKey("CompanyId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.WorkHandover", "Handover")
-                        .WithMany()
-                        .HasForeignKey("HandoverId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("backend.Models.Entities.Investor", "Investor")
-                        .WithMany()
-                        .HasForeignKey("InvestorId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("backend.Models.Entities.User", "OriginalOwner")
-                        .WithMany()
-                        .HasForeignKey("OriginalOwnerId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("AssignedIrm");
-
-                    b.Navigation("Company");
-
-                    b.Navigation("Handover");
-
-                    b.Navigation("Investor");
-
-                    b.Navigation("OriginalOwner");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.KycOtpVerification", b =>
@@ -3911,6 +3798,39 @@ namespace backend.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("backend.Models.Entities.MfaChallenge", b =>
+                {
+                    b.HasOne("backend.Models.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.MfaRecoveryCode", b =>
+                {
+                    b.HasOne("backend.Models.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.UserMfaSetting", b =>
+                {
+                    b.HasOne("backend.Models.Entities.User", "User")
+                        .WithOne()
+                        .HasForeignKey("backend.Models.Entities.UserMfaSetting", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("backend.Models.Entities.TenantDidMapping", b =>
                 {
                     b.HasOne("backend.Models.Entities.Tenant", "Tenant")
@@ -3937,6 +3857,17 @@ namespace backend.Migrations
                     b.Navigation("Company");
 
                     b.Navigation("Role");
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.UserSession", b =>
+                {
+                    b.HasOne("backend.Models.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.WorkHandover", b =>
@@ -3999,15 +3930,16 @@ namespace backend.Migrations
                     b.Navigation("Handover");
                 });
 
-            modelBuilder.Entity("backend.Models.Entities.UserSession", b =>
+            modelBuilder.Entity("backend.Models.Entities.ChatConversation", b =>
                 {
-                    b.HasOne("backend.Models.Entities.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                    b.Navigation("Messages");
 
-                    b.Navigation("User");
+                    b.Navigation("Participants");
+                });
+
+            modelBuilder.Entity("backend.Models.Entities.ChatMessage", b =>
+                {
+                    b.Navigation("Attachments");
                 });
 
             modelBuilder.Entity("backend.Models.Entities.Investor", b =>

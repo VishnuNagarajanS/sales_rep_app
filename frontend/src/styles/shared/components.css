@@ -214,10 +214,10 @@ h6 {
   box-shadow: 0 0 0 3px var(--primary-glow);
 }
 
-.form-input:-webkit-autofill,
-.form-input:-webkit-autofill:hover, 
-.form-input:-webkit-autofill:focus, 
-.form-input:-webkit-autofill:active,
+.form-input:not(.auth-input-field):-webkit-autofill,
+.form-input:not(.auth-input-field):-webkit-autofill:hover, 
+.form-input:not(.auth-input-field):-webkit-autofill:focus, 
+.form-input:not(.auth-input-field):-webkit-autofill:active,
 .form-select:-webkit-autofill,
 .form-select:-webkit-autofill:hover,
 .form-select:-webkit-autofill:focus,
@@ -227,6 +227,137 @@ h6 {
   -webkit-box-shadow: 0 0 0 1000px var(--bg-surface) inset !important;
   -webkit-text-fill-color: var(--text-primary) !important;
   transition: background-color 5000s ease-in-out 0s;
+}
+
+/* Glass Auth Inputs Autofill Overrides (NexusSales Login) */
+.auth-input-field:-webkit-autofill,
+.form-input.auth-input-field:-webkit-autofill {
+  -webkit-text-fill-color: #ffffff !important;
+  color: #ffffff !important;
+  caret-color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.20) !important;
+  border-radius: 12px !important;
+  transition: background-color 600000s 0s, color 600000s 0s !important;
+  -webkit-box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.2),
+    inset 0 0 10px rgba(255, 255, 255, 0.02) !important;
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.2),
+    inset 0 0 10px rgba(255, 255, 255, 0.02) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+}
+
+.auth-input-field:-webkit-autofill:hover,
+.form-input.auth-input-field:-webkit-autofill:hover {
+  -webkit-text-fill-color: #ffffff !important;
+  color: #ffffff !important;
+  caret-color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(255, 255, 255, 0.30) !important;
+  transition: background-color 600000s 0s, color 600000s 0s !important;
+  -webkit-box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.2),
+    inset 0 0 10px rgba(255, 255, 255, 0.02) !important;
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.2),
+    inset 0 0 10px rgba(255, 255, 255, 0.02) !important;
+}
+
+.auth-input-field:-webkit-autofill:focus,
+.auth-input-field:-webkit-autofill:active,
+.form-input.auth-input-field:-webkit-autofill:focus,
+.form-input.auth-input-field:-webkit-autofill:active {
+  -webkit-text-fill-color: #ffffff !important;
+  color: #ffffff !important;
+  caret-color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.14) !important;
+  border-color: rgba(239, 68, 68, 0.75) !important;
+  border-radius: 12px !important;
+  transition: background-color 600000s 0s, color 600000s 0s !important;
+  -webkit-box-shadow:
+    0 0 0 3px rgba(239, 68, 68, 0.25),
+    0 0 16px rgba(239, 68, 68, 0.2),
+    inset 0 1px 2px rgba(0, 0, 0, 0.2) !important;
+  box-shadow:
+    0 0 0 3px rgba(239, 68, 68, 0.25),
+    0 0 16px rgba(239, 68, 68, 0.2),
+    inset 0 1px 2px rgba(0, 0, 0, 0.2) !important;
+  outline: none !important;
+}
+
+/* Standard :autofill selector (Firefox / Modern Standards) */
+.auth-input-field:autofill,
+.form-input.auth-input-field:autofill {
+  -webkit-text-fill-color: #ffffff !important;
+  color: #ffffff !important;
+  caret-color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.20) !important;
+  border-radius: 12px !important;
+  transition: background-color 600000s 0s, color 600000s 0s !important;
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.2),
+    inset 0 0 10px rgba(255, 255, 255, 0.02) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+}
+
+.auth-input-field:autofill:hover,
+.form-input.auth-input-field:autofill:hover {
+  -webkit-text-fill-color: #ffffff !important;
+  color: #ffffff !important;
+  caret-color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(255, 255, 255, 0.30) !important;
+  transition: background-color 600000s 0s, color 600000s 0s !important;
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.2),
+    inset 0 0 10px rgba(255, 255, 255, 0.02) !important;
+}
+
+.auth-input-field:autofill:focus,
+.auth-input-field:autofill:active,
+.form-input.auth-input-field:autofill:focus,
+.form-input.auth-input-field:autofill:active {
+  -webkit-text-fill-color: #ffffff !important;
+  color: #ffffff !important;
+  caret-color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.14) !important;
+  border-color: rgba(239, 68, 68, 0.75) !important;
+  border-radius: 12px !important;
+  transition: background-color 600000s 0s, color 600000s 0s !important;
+  box-shadow:
+    0 0 0 3px rgba(239, 68, 68, 0.25),
+    0 0 16px rgba(239, 68, 68, 0.2),
+    inset 0 1px 2px rgba(0, 0, 0, 0.2) !important;
+  outline: none !important;
+}
+
+/* Firefox :-moz-autofill */
+.auth-input-field:-moz-autofill,
+.form-input.auth-input-field:-moz-autofill {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.20) !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2), inset 0 0 10px rgba(255, 255, 255, 0.02) !important;
+}
+
+.auth-input-field:-moz-autofill:hover,
+.form-input.auth-input-field:-moz-autofill:hover {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(255, 255, 255, 0.30) !important;
+}
+
+.auth-input-field:-moz-autofill:focus,
+.form-input.auth-input-field:-moz-autofill:focus {
+  background-color: rgba(255, 255, 255, 0.14) !important;
+  border-color: rgba(239, 68, 68, 0.75) !important;
+  box-shadow:
+    0 0 0 3px rgba(239, 68, 68, 0.25),
+    0 0 16px rgba(239, 68, 68, 0.2),
+    inset 0 1px 2px rgba(0, 0, 0, 0.2) !important;
 }
 
 /* Badges */

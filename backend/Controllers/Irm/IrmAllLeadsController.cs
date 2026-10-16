@@ -6,6 +6,8 @@ using backend.DTOs.Irm;
 using backend.Extensions;
 using backend.Models.Entities;
 using backend.Models.Enums;
+using backend.Services.Implementations;
+using backend.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -19,11 +21,13 @@ public class IrmAllLeadsController : ControllerBase
 {
     private readonly ApplicationDbContext _db;
     private readonly ILogger<IrmAllLeadsController> _logger;
+    private readonly IIrmOtherService _otherService;
 
-    public IrmAllLeadsController(ApplicationDbContext db, ILogger<IrmAllLeadsController> logger)
+    public IrmAllLeadsController(ApplicationDbContext db, ILogger<IrmAllLeadsController> logger, IIrmOtherService? otherService = null)
     {
         _db = db;
         _logger = logger;
+        _otherService = otherService ?? new IrmOtherService(db);
     }
 
     private static string GetLast10(string? phone)
@@ -141,6 +145,11 @@ public class IrmAllLeadsController : ControllerBase
             })
             .ToListAsync(ct);
 
+        // Fetch Other records & matcher to ensure contacts moved to "Other" are accurately classified
+        var otherMatcher = await _otherService.GetOtherMatcherAsync(companyId, null, targetIrmId, ct);
+        var otherRecordsRes = await _otherService.GetOtherRecordsAsync(companyId, targetIrmId, null, null, ct);
+        var otherRecords = (otherRecordsRes.Success && otherRecordsRes.Data != null) ? otherRecordsRes.Data : new List<IrmOtherRecordDto>();
+
         var items = new List<IrmAllLeadItemDto>();
 
         foreach (var l in rawLeads)
@@ -179,6 +188,16 @@ public class IrmAllLeadsController : ControllerBase
                 (f.ContactId != null && f.ContactId == l.Id.ToString()) ||
                 (!string.IsNullOrWhiteSpace(phoneLast10) && GetLast10(f.ContactPhone) == phoneLast10));
 
+            // Check if contact is currently in "Other" (moved to Other via call disposition in KYC/Leads/Follow-up/etc.)
+            var matchedOther = otherRecords.FirstOrDefault(r =>
+                (r.LeadId.HasValue && r.LeadId.Value == l.Id) ||
+                (matchedCustomer != null && r.CustomerId.HasValue && r.CustomerId.Value == matchedCustomer.Id) ||
+                (matchedDeal != null && matchedDeal.CustomerId.HasValue && r.CustomerId.HasValue && r.CustomerId.Value == matchedDeal.CustomerId.Value) ||
+                (!string.IsNullOrWhiteSpace(phoneLast10) && GetLast10(r.ContactPhone) == phoneLast10) ||
+                (!string.IsNullOrWhiteSpace(leadNameLower) && !string.IsNullOrWhiteSpace(r.ContactName) && r.ContactName.Trim().ToLower() == leadNameLower));
+
+            var isOther = matchedOther != null || otherMatcher.IsInOther(l.Phone, matchedCustomer?.Id ?? matchedDeal?.CustomerId, l.Id, l.Name);
+
             string currentStage = "My Leads";
             string stageDetails = "Active assigned lead";
             string? kycStatus = null;
@@ -186,7 +205,14 @@ public class IrmAllLeadsController : ControllerBase
             decimal? dealValue = null;
             string? dealStage = null;
 
-            if (matchedDeal != null)
+            if (isOther)
+            {
+                currentStage = "Other";
+                var modName = matchedOther?.ModuleDisplayName ?? "KYC";
+                var rsn = !string.IsNullOrWhiteSpace(matchedOther?.Reason) ? matchedOther.Reason : "Contact in Other section";
+                stageDetails = $"Moved to Other ({modName}): {rsn}";
+            }
+            else if (matchedDeal != null)
             {
                 var dStage = (matchedDeal.Stage ?? string.Empty).Trim().ToLowerInvariant();
                 dealValue = matchedDeal.Value;
@@ -325,6 +351,7 @@ public class IrmAllLeadsController : ControllerBase
         var inKyc = items.Count(i => i.CurrentStage == "KYC");
         var inOpps = items.Count(i => i.CurrentStage == "Opportunities");
         var converted = items.Count(i => i.CurrentStage == "Converted" || i.Status.Equals("Converted", StringComparison.OrdinalIgnoreCase));
+        var inOther = items.Count(i => i.CurrentStage == "Other");
 
         // Filter by stage if requested
         if (!string.IsNullOrWhiteSpace(stage) && !stage.Equals("all", StringComparison.OrdinalIgnoreCase))
@@ -348,6 +375,7 @@ public class IrmAllLeadsController : ControllerBase
             InKyc = inKyc,
             InOpportunities = inOpps,
             Converted = converted,
+            InOther = inOther,
             Leads = items,
         };
 

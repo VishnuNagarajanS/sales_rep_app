@@ -13,6 +13,7 @@ import {
   HardDrive,
   IndianRupee,
   Search,
+  RefreshCw,
 } from 'lucide-react';
 import { SubscriptionPackage, Tenant } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
@@ -233,14 +234,32 @@ export const PlatformFeaturesPage: React.FC = () => {
         </div>
       )}
 
+      {loadError && (
+        <div className="alert-banner error" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', marginBottom: '16px', borderRadius: '8px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#ef4444' }}>
+          <span><strong>Failed to load packages:</strong> {loadError}</span>
+          <button className="btn btn-secondary btn-xs" onClick={loadData}>Retry</button>
+        </div>
+      )}
+
+      {isLoading && (
+        <div className="platform-loading-state" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 20px', gap: '12px' }}>
+          <RefreshCw size={28} className="animate-spin text-primary" />
+          <span style={{ color: 'var(--text-muted, #94a3b8)', fontSize: '13px' }}>Loading subscription packages & entitlement tiers...</span>
+        </div>
+      )}
+
       {/* ========================================================================= */}
       {/* TAB 1: SUBSCRIPTION PACKAGES */}
       {/* ========================================================================= */}
-      {activeTab === 'packages' && (
+      {!isLoading && activeTab === 'packages' && (
         <div className="packages-tab-container animate-fade-in">
           <div className="packages-grid">
             {packages.map(pkg => {
-              const enrolledTenants = tenants.filter(t => t.subscriptionPlan === pkg.name);
+              const enrolledTenants = tenants.filter(
+                t =>
+                  t.subscriptionPlan?.trim().toLowerCase() === pkg.name.trim().toLowerCase() ||
+                  t.subscriptionPlan?.trim().toLowerCase() === pkg.code.trim().toLowerCase()
+              );
               return (
                 <div key={pkg.id} className={`card package-card ${pkg.isPopular ? 'popular-glow' : ''}`}>
                   {pkg.isPopular && <div className="popular-badge">MOST POPULAR</div>}

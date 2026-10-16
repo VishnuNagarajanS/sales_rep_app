@@ -51,6 +51,7 @@ public class FollowupService : IFollowupService
             var cid = companyId ?? 1;
             query = query.Where(f =>
                 f.AssignedAgentId == agentId.Value ||
+                (role == "irm" && (f.AssignedToRole == "irm" || f.AssignedAgentId == agentId.Value)) ||
                 _context.Leads.Any(l => l.CompanyId == cid && l.AssignedAgentId == agentId.Value &&
                     ((f.ContactId != null && f.ContactId != "" && f.ContactId == l.Id.ToString()) ||
                      (f.ContactPhone != null && f.ContactPhone != "" && (f.ContactPhone == l.Phone || f.ContactPhone.Contains(l.Phone) || l.Phone.Contains(f.ContactPhone)))))
@@ -111,6 +112,7 @@ public class FollowupService : IFollowupService
             var cid = companyId ?? 1;
             query = query.Where(f =>
                 f.AssignedAgentId == agentId.Value ||
+                (role == "irm" && (f.AssignedToRole == "irm" || f.AssignedAgentId == agentId.Value)) ||
                 _context.Leads.Any(l => l.CompanyId == cid && l.AssignedAgentId == agentId.Value &&
                     ((f.ContactId != null && f.ContactId != "" && f.ContactId == l.Id.ToString()) ||
                      (f.ContactPhone != null && f.ContactPhone != "" && (f.ContactPhone == l.Phone || f.ContactPhone.Contains(l.Phone) || l.Phone.Contains(f.ContactPhone)))))
@@ -277,12 +279,22 @@ public class FollowupService : IFollowupService
 
         var contactPhones = paged.Where(f => !string.IsNullOrEmpty(f.ContactPhone)).Select(f => f.ContactPhone).Distinct().ToList();
         var contactIds = paged.Where(f => !string.IsNullOrEmpty(f.ContactId)).Select(f => f.ContactId).Distinct().ToList();
+        var parsedLeadIds = paged
+            .Where(f => !string.IsNullOrEmpty(f.ContactId))
+            .Select(f => {
+                var clean = f.ContactId.Replace("lead-", "").Trim();
+                return int.TryParse(clean, out var id) ? (int?)id : null;
+            })
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToList();
 
         var matchedLeads = await _context.Leads
             .AsNoTracking()
             .Include(l => l.AssignedBy)
             .Include(l => l.AssignedAgent)
-            .Where(l => l.CompanyId == companyId && (contactIds.Contains(l.Id.ToString()) || contactPhones.Contains(l.Phone)))
+            .Where(l => l.CompanyId == companyId && (parsedLeadIds.Contains(l.Id) || contactIds.Contains(l.Id.ToString()) || contactPhones.Contains(l.Phone)))
             .ToListAsync(ct);
 
         var fIds = paged.Select(f => f.Id).ToList();
@@ -298,7 +310,10 @@ public class FollowupService : IFollowupService
         {
             Lead? lead = null;
             if (!string.IsNullOrWhiteSpace(f.ContactId))
-                lead = matchedLeads.FirstOrDefault(l => l.Id.ToString() == f.ContactId);
+            {
+                var clean = f.ContactId.Replace("lead-", "").Trim();
+                lead = matchedLeads.FirstOrDefault(l => l.Id.ToString() == f.ContactId || l.Id.ToString() == clean);
+            }
             if (lead == null && !string.IsNullOrWhiteSpace(f.ContactPhone))
             {
                 var p10 = f.ContactPhone.Length >= 10 ? f.ContactPhone[^10..] : f.ContactPhone;
@@ -395,10 +410,15 @@ public class FollowupService : IFollowupService
             }
         }
 
+        var currentRole = (_currentUser.Role ?? string.Empty).ToLowerInvariant();
         int targetAgentId = agentId.Value;
         if (dto.AssignedAgentId.HasValue && dto.AssignedAgentId.Value > 0)
         {
             targetAgentId = dto.AssignedAgentId.Value;
+        }
+        else if (currentRole == "irm" || string.Equals(dto.AssignedToRole, "irm", StringComparison.OrdinalIgnoreCase))
+        {
+            targetAgentId = agentId.Value;
         }
         else if (targetLead?.AssignedAgentId != null && targetLead.AssignedAgentId.Value > 0)
         {
@@ -406,7 +426,7 @@ public class FollowupService : IFollowupService
         }
 
         var assignedUser = await _context.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == targetAgentId, ct);
-        var targetRole = dto.AssignedToRole ?? assignedUser?.Role?.Code ?? "sales_executive";
+        var targetRole = dto.AssignedToRole ?? assignedUser?.Role?.Code ?? (currentRole == "irm" ? "irm" : "sales_executive");
         var targetName = assignedUser?.Name ?? string.Empty;
 
         if (existingPending != null)
@@ -429,6 +449,10 @@ public class FollowupService : IFollowupService
             if (targetLead != null)
             {
                 targetLead.NextFollowupDate = existingPending.ScheduledAt;
+                if (currentRole == "irm" || string.Equals(targetRole, "irm", StringComparison.OrdinalIgnoreCase))
+                {
+                    targetLead.AssignedAgentId = targetAgentId;
+                }
                 if (targetLead.Status == "New" || targetLead.Status == "Contacted" || targetLead.Status == "Callback" || targetLead.Status == "Interested")
                 {
                     targetLead.Status = "Follow-up Required";
@@ -545,6 +569,10 @@ public class FollowupService : IFollowupService
         if (targetLead != null)
         {
             targetLead.NextFollowupDate = followup.ScheduledAt;
+            if (currentRole == "irm" || string.Equals(targetRole, "irm", StringComparison.OrdinalIgnoreCase))
+            {
+                targetLead.AssignedAgentId = targetAgentId;
+            }
             if (targetLead.Status == "New" || targetLead.Status == "Contacted" || targetLead.Status == "Callback" || targetLead.Status == "Interested")
             {
                 targetLead.Status = "Follow-up Required";
@@ -648,11 +676,15 @@ public class FollowupService : IFollowupService
         await _context.SaveChangesAsync(ct);
 
         Lead? lead = null;
-        if (!string.IsNullOrWhiteSpace(followup.ContactId) && int.TryParse(followup.ContactId, out var ucid))
+        if (!string.IsNullOrWhiteSpace(followup.ContactId))
         {
-            lead = await _context.Leads.AsNoTracking().Include(l => l.AssignedBy).Include(l => l.AssignedAgent).FirstOrDefaultAsync(l => l.Id == ucid, ct);
+            var clean = followup.ContactId.Replace("lead-", "").Trim();
+            if (int.TryParse(clean, out var ucid))
+            {
+                lead = await _context.Leads.AsNoTracking().Include(l => l.AssignedBy).Include(l => l.AssignedAgent).FirstOrDefaultAsync(l => l.Id == ucid, ct);
+            }
         }
-        else if (!string.IsNullOrWhiteSpace(followup.ContactPhone))
+        if (lead == null && !string.IsNullOrWhiteSpace(followup.ContactPhone))
         {
             var p10 = followup.ContactPhone.Length >= 10 ? followup.ContactPhone[^10..] : followup.ContactPhone;
             lead = await _context.Leads.AsNoTracking().Include(l => l.AssignedBy).Include(l => l.AssignedAgent).FirstOrDefaultAsync(l => l.CompanyId == followup.CompanyId && l.Phone.Contains(p10), ct);
@@ -792,8 +824,25 @@ public class FollowupService : IFollowupService
                 if (lead.AssignedById == lead.AssignedAgentId || lead.AssignedBy == null)
                 {
                     assignedById = lead.AssignedAgentId;
-                    assignedByName = lead.AssignedAgent?.Name ?? "Created by IRM";
+                    var agentRole = lead.AssignedAgent?.Role?.Code?.ToLowerInvariant();
+                    if (agentRole == "irm" || lead.AssignedAgentId == 5)
+                    {
+                        assignedByName = "Created by IRM";
+                    }
+                    else
+                    {
+                        assignedByName = lead.AssignedAgent?.Name ?? "Created by IRM";
+                    }
                 }
+            }
+        }
+        else
+        {
+            var fRole = (f.AssignedToRole ?? f.AssignedAgent?.Role?.Code ?? "").ToLowerInvariant();
+            if (fRole == "irm" || f.AssignedAgentId == 5)
+            {
+                assignedByName = "Created by IRM";
+                assignedById = f.AssignedAgentId;
             }
         }
 

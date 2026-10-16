@@ -255,7 +255,8 @@ export interface Deal {
   location?: string;
   preferredAssetClass?: string;
   investmentRange?: string; // e.g. "₹15 Cr – ₹25 Cr", display string shown in green
-  investorType?: 'AIF' | 'Co-AIF';
+  investorType?: string;
+  investmentRoute?: 'direct_aif' | 'debenture' | string;
   investmentAmountConfirmed?: boolean;
   kycStatus?: string;
   kycId?: number;
@@ -321,6 +322,7 @@ export interface CallRecord {
   reason?: string;
   callModule?: string;
   module?: string;
+  isFromOther?: boolean;
   providerCallId?: string;
   twilioCallSid?: string;
   contactId?: string;
@@ -573,9 +575,13 @@ export interface DocumentItem {
   uploadedBy: string;
   uploadedAt: string;
   category: string;
-  entityType?: 'lead' | 'customer' | 'investor' | 'booking' | 'consultation' | 'company';
+  entityType?: 'lead' | 'customer' | 'investor' | 'booking' | 'consultation' | 'company' | 'platform';
   entityId?: string;
   fileUrl?: string;
+  targetAudience?: 'all_users' | 'admin_only' | string;
+  isPlatformShared?: boolean;
+  description?: string;
+  targetTenantName?: string;
 }
 
 export interface Department {
@@ -777,19 +783,19 @@ export interface ChatConversation {
 export interface ChatSettings {
   general?: {
     theme: 'default' | 'dark' | 'high_contrast';
-    autoStartApp: boolean;
-    openInBackground: boolean;
-    onCloseKeepRunning: boolean;
-    gpuHardwareAcceleration: boolean;
-    registerAsDefaultChatApp: boolean;
     language: string;
-    keyboardLanguage: string;
     turnOffAnimations: boolean;
     outOfOfficeReply: boolean;
     outOfOfficeMessage: string;
+    autoStartApp?: boolean;
+    openInBackground?: boolean;
+    onCloseKeepRunning?: boolean;
+    gpuHardwareAcceleration?: boolean;
+    registerAsDefaultChatApp?: boolean;
+    keyboardLanguage?: string;
   };
   accounts?: {
-    activeTenant: string;
+    activeTenant?: string;
   };
   privacy: {
     readReceipts: boolean;
@@ -803,50 +809,50 @@ export interface ChatSettings {
     desktopPush: boolean;
     sound: boolean;
     mentionOnly: boolean;
-    notificationStyle?: 'teams' | 'windows';
     showPreview?: boolean;
+    notificationStyle?: 'teams' | 'windows';
     missedActivityEmails?: 'hourly' | 'daily' | 'asap' | 'off';
     chatsAndChannels?: 'banner_feed' | 'feed_only' | 'off';
     meetingsAndCalls?: 'banner' | 'off';
   };
   captions?: {
-    autoIdentifyMe: boolean;
-    spokenLanguage: string;
-    autoStartTranscription: boolean;
+    autoIdentifyMe?: boolean;
+    spokenLanguage?: string;
+    autoStartTranscription?: boolean;
   };
   files?: {
-    fileOpenPreference: 'teams' | 'desktop' | 'browser';
-    downloadLocation: string;
-    alwaysAskWhereToSave: boolean;
+    fileOpenPreference?: 'teams' | 'desktop' | 'browser';
+    downloadLocation?: string;
+    alwaysAskWhereToSave?: boolean;
   };
-  calls: {
-    defaultMic: string;
-    defaultCamera: string;
+  calls?: {
+    defaultMic?: string;
+    defaultCamera?: string;
     defaultSpeaker?: string;
     noiseSuppression?: 'auto' | 'high' | 'low' | 'off';
     secondaryRinger?: string;
-    cameraOffOnJoin: boolean;
-    autoAnswer: boolean;
+    cameraOffOnJoin?: boolean;
+    autoAnswer?: boolean;
     callAnsweringRules?: 'ring_me' | 'forward';
     forwardTo?: 'voicemail' | 'delegates';
     ringDurationBeforeRedirect?: number;
     ringtone?: string;
   };
   appPermissions?: {
-    media: boolean;
-    location: boolean;
-    notifications: boolean;
-    externalLinks: boolean;
-    midiDevices: boolean;
+    media?: boolean;
+    location?: boolean;
+    notifications?: boolean;
+    externalLinks?: boolean;
+    midiDevices?: boolean;
   };
   accessibility?: {
-    signLanguageView: boolean;
-    alwaysShowMeetingControls: boolean;
-    highContrast: boolean;
+    signLanguageView?: boolean;
+    alwaysShowMeetingControls?: boolean;
+    highContrast?: boolean;
   };
   adminGovernance?: {
     retentionDays: number; // 0 for forever
-    fileRetentionDays: number;
+    fileRetentionDays?: number;
     whoCanCreateGroups: 'everyone' | 'managers_admins';
   };
 }
@@ -1023,3 +1029,92 @@ export interface PlatformMetrics {
 }
 
 export * from './kanban';
+
+// ── Speech AI Vocabulary Tuning ─────────────────────────────────────────────
+export interface SpeechKeywordBoost {
+  term: string;
+  category: 'Land Metric' | 'Documentation' | 'Financial' | 'Location' | 'Legal' | string;
+  boostWeight: number; // 1.0 - 5.0
+}
+
+export interface PhoneticSubstitution {
+  spokenPattern: string;
+  normalizedTarget: string;
+}
+
+export interface SpeechVocabulary {
+  id: string;
+  key: string;
+  name: string;
+  language: string;
+  languageCode: string;
+  engine: string;
+  description: string;
+  isActive: boolean;
+  keywords: SpeechKeywordBoost[];
+  phoneticSubstitutions: PhoneticSubstitution[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SimulateSpeechResult {
+  rawTranscript: string;
+  normalizedTranscript: string;
+  boostedTermsMatched: string[];
+  substitutionsApplied: string[];
+  acousticConfidenceGainPercent: number;
+  processingLatencyMs: number;
+  engineUsed: string;
+}
+
+// ── Platform Instant Database Backups ───────────────────────────────────────
+export interface BackupSnapshot {
+  id: string;
+  filename: string;
+  fileName?: string;
+  description: string;
+  createdBy: string;
+  createdAt: string;
+  fileSizeBytes: number;
+  formattedSize: string;
+  totalTables: number;
+  totalRecordsCount: number;
+  recordCount?: number;
+  checksumSha256: string;
+  sha256Checksum?: string;
+  status: string;
+  tableCounts: Record<string, number>;
+}
+
+// ── Platform Support & Technical Incident Helpdesk ──────────────────────────
+export interface TicketTimelineEvent {
+  id: string;
+  authorName: string;
+  authorEmail: string;
+  message: string;
+  type: 'note' | 'status_change' | 'priority_change' | 'system_alert' | string;
+  createdAt: string;
+}
+
+export interface PlatformTicket {
+  id: string;
+  ticketNumber: string;
+  title: string;
+  description: string;
+  category: string;
+  priority: 'low' | 'medium' | 'high' | 'critical';
+  status: 'open' | 'in_progress' | 'escalated' | 'resolved' | 'closed';
+  tenantId?: number;
+  tenantName?: string;
+  tenantSlug?: string;
+  reportedByName: string;
+  reportedByEmail: string;
+  assignedToName?: string;
+  assignedToEmail?: string;
+  resolutionNotes?: string;
+  resolvedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  timeline: TicketTimelineEvent[];
+}
+

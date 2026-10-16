@@ -28,6 +28,9 @@ import {
   Save,
   AlertTriangle,
   Info,
+  Copy,
+  Sparkles,
+  Check,
 } from 'lucide-react';
 import { SendKycLinkModal } from './components/SendKycLinkModal';
 import { KycStatusBadge } from './components/KycStatusBadge';
@@ -346,6 +349,8 @@ const GhlIrmKycView: React.FC = () => {
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
   const [selectedCustomerDeal, setSelectedCustomerDeal] = useState<Deal | null>(null);
   const [profileKycData, setProfileKycData] = useState<Partial<KYCFormData> | null>(null);
+  const [profileDossierTab, setProfileDossierTab] = useState<'all' | 'personal' | 'identity' | 'bank' | 'demat' | 'nominees'>('all');
+  const [copiedField, setCopiedField] = useState<string | null>(null);
   const [verifyModalDeal, setVerifyModalDeal] = useState<Deal | null>(null);
 
   // Quick Section Edit State (Personal Details / Address & Identity)
@@ -2622,71 +2627,157 @@ const GhlIrmKycView: React.FC = () => {
         const isContinue = status === 'continue';
         const initial = (deal.customerName || 'U').trim().charAt(0).toUpperCase();
 
-        const renderField = (label: string, value?: string | number | null) => {
+        const handleCopy = (text?: string | number | null, fieldKey?: string) => {
+          if (!text || text === '—') return;
+          try {
+            navigator.clipboard.writeText(String(text));
+            setCopiedField(fieldKey || String(text));
+            showToast(`✓ Copied ${fieldKey || 'text'} to clipboard`);
+            setTimeout(() => setCopiedField(null), 2200);
+          } catch {}
+        };
+
+        const renderField = (
+          label: string,
+          value?: string | number | null,
+          options?: { copyable?: boolean; isDoc?: boolean; isMono?: boolean }
+        ) => {
           const valStr = value ? String(value).trim() : '';
           const hasVal = valStr && valStr !== '—' && valStr.toLowerCase() !== 'not provided' && valStr.toLowerCase() !== 'not specified';
+          const isCopied = copiedField === label || (valStr && copiedField === valStr);
+
           return (
-            <div className="kyc-profile-field">
-              <span className="kyc-profile-label">{label}</span>
+            <div className="kyc-glass-field">
+              <span className="kyc-glass-label">{label}</span>
               {hasVal ? (
-                <span className="kyc-profile-value">{valStr}</span>
+                <div className="kyc-glass-val-container">
+                  {options?.isDoc ? (
+                    <span className="kyc-glass-doc-chip" title={valStr}>
+                      <FileText size={13} className="kyc-glass-doc-icon" />
+                      <span className="kyc-glass-doc-name">{valStr}</span>
+                      <span className="kyc-glass-doc-status-pill">Uploaded</span>
+                    </span>
+                  ) : (
+                    <span className={`kyc-glass-value ${options?.isMono ? 'font-mono' : ''}`}>
+                      {valStr}
+                    </span>
+                  )}
+                  {options?.copyable && (
+                    <button
+                      type="button"
+                      className={`kyc-glass-copy-btn ${isCopied ? 'copied' : ''}`}
+                      onClick={() => handleCopy(valStr, label)}
+                      title={`Copy ${label}`}
+                    >
+                      {isCopied ? <Check size={11} color="#10b981" /> : <Copy size={11} />}
+                    </button>
+                  )}
+                </div>
               ) : (
-                <span className="kyc-profile-value not-provided">Not specified</span>
+                <div className="kyc-glass-empty-container">
+                  <span className="kyc-glass-empty-pill">Not Specified</span>
+                </div>
               )}
             </div>
           );
         };
 
         return (
-          <div className="kyc-profile-container">
-            {/* Header: Back Button + Your Profile + Edit Profile button */}
-            <div>
-              <button
-                type="button"
-                className="kyc-flow-back-btn"
-                style={{ marginBottom: 12, display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}
-                onClick={() => setViewMode('table')}
-              >
-                <ArrowLeft size={16} /> Back to Qualified Investors
-              </button>
-              <div className="kyc-profile-header-row">
-                <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
-                  Your Profile
-                </h1>
-              </div>
+          <div className="kyc-glass-canvas">
+            {/* Spatial Ambient Glow Atmosphere */}
+            <div className="kyc-glass-ambient-orbs" aria-hidden="true">
+              <div className="kyc-glass-orb kyc-glass-orb-1" />
+              <div className="kyc-glass-orb kyc-glass-orb-2" />
+              <div className="kyc-glass-orb kyc-glass-orb-3" />
             </div>
 
-            {/* Profile Completion Progress Card */}
-            <div className="kyc-completion-card">
-              <div className="kyc-completion-header">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#dc2626', display: 'inline-block' }}></span>
-                  <span>Profile Completion</span>
+            {/* Floating macOS Top Glass Capsule Bar */}
+            <div className="kyc-glass-top-bar">
+              <div className="kyc-glass-top-left">
+                <button
+                  type="button"
+                  className="kyc-glass-back-btn"
+                  onClick={() => setViewMode('table')}
+                  title="Return to Qualified Investors list"
+                >
+                  <ArrowLeft size={15} /> <span>Qualified Investors</span>
+                </button>
+                <div className="kyc-glass-breadcrumb">
+                  <span className="kyc-glass-crumb-node">Dossier</span>
+                  <span className="kyc-glass-crumb-sep">/</span>
+                  <span className="kyc-glass-crumb-active">{deal.customerName}</span>
                 </div>
-                <span style={{ fontSize: 13, fontWeight: 700, color: '#dc2626' }}>
-                  {completionPct}%
-                </span>
               </div>
-              <div className="kyc-progress-track">
-                <div className="kyc-progress-fill" style={{ width: `${completionPct}%` }}></div>
-              </div>
-              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8 }}>
-                Complete your profile to unlock all platform features and faster KYC approval.
+
+              <div className="kyc-glass-top-right">
+                <button
+                  type="button"
+                  className="kyc-glass-action-pill kyc-btn-call"
+                  onClick={() => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.customerId || deal.id, undefined, 'kyc')}
+                  title={`Initiate direct phone consultation with ${deal.customerName}`}
+                >
+                  <Phone size={13} /> <span>Call Investor</span>
+                </button>
+                <button
+                  type="button"
+                  className="kyc-glass-action-pill kyc-btn-edit"
+                  onClick={() => startAssistedKycFlow(deal)}
+                  title="Update or submit Assisted KYC details"
+                >
+                  <Edit2 size={13} /> <span>Update Dossier</span>
+                </button>
               </div>
             </div>
 
-            {/* Main Layout: Executive Profile Header + Balanced Details Grid */}
-            <div className="kyc-profile-layout">
-              {/* Executive Top Profile Header Card */}
-              <div className="kyc-profile-hero-card">
-                <div className="kyc-profile-hero-left">
-                  <div className="kyc-profile-avatar">
-                    {initial}
+            {/* Holographic Identity Shield (Floating Spatial Hero Card) */}
+            <div className="kyc-glass-hero-shield">
+              <div className="kyc-glass-specular-light" />
+              
+              <div className="kyc-glass-hero-content">
+                {/* Left: Prismatic Avatar, Customer Name & Status */}
+                <div className="kyc-glass-hero-left">
+                  <div className="kyc-glass-avatar-box">
+                    <div className="kyc-glass-avatar">
+                      {initial}
+                      <span className="kyc-glass-avatar-ring" />
+                    </div>
                   </div>
-                  <div className="kyc-profile-hero-user">
-                    <div className="kyc-profile-hero-name">{deal.customerName}</div>
-                    <div className="kyc-profile-hero-email">{data.email || deal.email || '—'}</div>
-                    <div className="kyc-profile-hero-status-row">
+                  <div className="kyc-glass-hero-user">
+                    <div className="kyc-glass-name-row">
+                      <h2 className="kyc-glass-hero-name">{deal.customerName}</h2>
+                      <span className="kyc-glass-vip-pill">
+                        <Sparkles size={11} /> Qualified HNW
+                      </span>
+                    </div>
+                    <div className="kyc-glass-contact-row">
+                      <span className="kyc-glass-contact-chip">
+                        <Mail size={12} /> {data.email || deal.email || '—'}
+                        {deal.email && (
+                          <button
+                            type="button"
+                            className="kyc-glass-mini-copy"
+                            onClick={() => handleCopy(deal.email, 'Email')}
+                            title="Copy Email"
+                          >
+                            <Copy size={10} />
+                          </button>
+                        )}
+                      </span>
+                      <span className="kyc-glass-contact-chip">
+                        <Phone size={12} /> {data.phone || deal.phone || '—'}
+                        {deal.phone && (
+                          <button
+                            type="button"
+                            className="kyc-glass-mini-copy"
+                            onClick={() => handleCopy(deal.phone, 'Phone')}
+                            title="Copy Phone"
+                          >
+                            <Copy size={10} />
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                    <div className="kyc-glass-status-row">
                       <KycStatusDropdown
                         deal={deal}
                         customerKycStatus={resolveCustomerKycStatus(deal)}
@@ -2697,136 +2788,253 @@ const GhlIrmKycView: React.FC = () => {
                         onShowToast={showToast}
                       />
                       {deal.kycStatus === 'Verified' && (deal.verifiedBy || deal.verifiedAt) && (
-                        <span className="kyc-profile-verified-by">
-                          Verified by {deal.verifiedBy ? deal.verifiedBy.split('@')[0] : 'IRM'}
-                          {deal.verifiedAt ? ' on ' + new Date(deal.verifiedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+                        <span className="kyc-glass-verified-stamp">
+                          <CheckCircle size={12} /> Verified by {deal.verifiedBy ? deal.verifiedBy.split('@')[0] : 'IRM'}
+                          {deal.verifiedAt ? ' · ' + new Date(deal.verifiedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
                         </span>
                       )}
                     </div>
                   </div>
                 </div>
 
-                <div className="kyc-profile-hero-meta-divider"></div>
-
-                <div className="kyc-profile-hero-metrics">
-                  <div className="kyc-profile-hero-metric-item">
-                    <span className="kyc-profile-hero-metric-label">GHL ID</span>
-                    <span className="kyc-profile-hero-metric-val">{getGhlId(deal)}</span>
+                {/* Right: Floating Glass Metrics + Spatial Action Button */}
+                <div className="kyc-glass-hero-right">
+                  <div className="kyc-glass-metrics-grid">
+                    <div className="kyc-glass-metric-cell">
+                      <span className="kyc-glass-metric-label">GHL ID</span>
+                      <span className="kyc-glass-metric-val font-mono">{getGhlId(deal)}</span>
+                    </div>
+                    <div className="kyc-glass-metric-cell">
+                      <span className="kyc-glass-metric-label">PAN Number</span>
+                      <div className="kyc-glass-metric-with-copy">
+                        <span className="kyc-glass-metric-val font-mono">{data.panNumber || '—'}</span>
+                        {data.panNumber && (
+                          <button
+                            type="button"
+                            className="kyc-glass-mini-copy"
+                            onClick={() => handleCopy(data.panNumber, 'PAN Number')}
+                            title="Copy PAN"
+                          >
+                            <Copy size={10} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="kyc-glass-metric-cell">
+                      <span className="kyc-glass-metric-label">Registered Mobile</span>
+                      <span className="kyc-glass-metric-val font-mono">{data.phone || deal.phone || '—'}</span>
+                    </div>
+                    <div className="kyc-glass-metric-cell">
+                      <span className="kyc-glass-metric-label">Pipeline Joined</span>
+                      <span className="kyc-glass-metric-val">{getJoinedDate(deal)}</span>
+                    </div>
                   </div>
-                  <div className="kyc-profile-hero-metric-item">
-                    <span className="kyc-profile-hero-metric-label">PAN</span>
-                    <span className="kyc-profile-hero-metric-val">{data.panNumber || 'Not provided'}</span>
-                  </div>
-                  <div className="kyc-profile-hero-metric-item">
-                    <span className="kyc-profile-hero-metric-label">Mobile</span>
-                    <span className="kyc-profile-hero-metric-val font-mono">{data.phone || deal.phone || 'Not provided'}</span>
-                  </div>
-                  <div className="kyc-profile-hero-metric-item">
-                    <span className="kyc-profile-hero-metric-label">Joined</span>
-                    <span className="kyc-profile-hero-metric-val">{getJoinedDate(deal)}</span>
-                  </div>
-                </div>
 
-                <div className="kyc-profile-hero-action">
-                  {(() => {
-                    const normalizedStatus = normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy);
-                    const custStatus = resolveCustomerKycStatus(deal);
-                    const backendKyc = findBackendKyc(deal, dbKycs, tenant?.id);
+                  <div className="kyc-glass-hero-cta">
+                    {(() => {
+                      const normalizedStatus = normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy);
+                      const custStatus = resolveCustomerKycStatus(deal);
+                      const backendKyc = findBackendKyc(deal, dbKycs, tenant?.id);
 
-                    // Backend confirmed submission: record has submittedAt and is awaiting review or approved
-                    const backendSubmitted = Boolean(
-                      backendKyc && (
-                        (backendKyc.submittedAt && (backendKyc.status || '').toLowerCase() === 'pendingreview') ||
-                        (backendKyc.submittedAt && (backendKyc.status || '').toLowerCase() === 'approved') ||
-                        (backendKyc.isAssisted && backendKyc.customerConsentObtained && backendKyc.submittedAt)
-                      )
-                    );
-
-                    // Distinguish draft-only records from submitted records
-                    const isBackendDraft = Boolean(
-                      backendKyc &&
-                      (backendKyc.status || '').toLowerCase() === 'draft' &&
-                      !backendKyc.submittedAt
-                    );
-
-                    const isAssistedSubmitted =
-                      custStatus === 'Assisted KYC – Submitted for Verification' ||
-                      (deal as any).customerKycStatus === 'Assisted KYC – Submitted for Verification' ||
-                      Boolean(backendKyc?.isAssisted && backendSubmitted);
-
-                    const isDraftOnly =
-                      custStatus === 'Assisted Draft' ||
-                      (deal as any).customerKycStatus === 'Assisted Draft' ||
-                      isBackendDraft;
-
-                    const customerSubmitted =
-                      !isDraftOnly && (
-                        backendSubmitted ||
-                        isAssistedSubmitted ||
-                        custStatus === 'Completed' ||
-                        custStatus === 'Submitted' ||
-                        custStatus === 'Under Verification' ||
-                        custStatus === 'Verified'
+                      const backendSubmitted = Boolean(
+                        backendKyc && (
+                          (backendKyc.submittedAt && (backendKyc.status || '').toLowerCase() === 'pendingreview') ||
+                          (backendKyc.submittedAt && (backendKyc.status || '').toLowerCase() === 'approved') ||
+                          (backendKyc.isAssisted && backendKyc.customerConsentObtained && backendKyc.submittedAt)
+                        )
                       );
 
-                    const canVerify =
-                      permissions.includes(PERMISSIONS.KYC_VERIFY) ||
-                      user?.role?.code === 'irm' ||
-                      user?.role?.code === 'company_admin' ||
-                      user?.role?.code === 'super_admin' ||
-                      user?.role?.code === 'sales_executive' ||
-                      !permissions ||
-                      permissions.length === 0;
+                      const isBackendDraft = Boolean(
+                        backendKyc &&
+                        (backendKyc.status || '').toLowerCase() === 'draft' &&
+                        !backendKyc.submittedAt
+                      );
 
-                    const isBtnDisabled = !canVerify || !customerSubmitted;
-                    const tooltipText = !canVerify
-                      ? 'You do not have permission to verify KYC'
-                      : isDraftOnly
-                        ? 'Assisted KYC is currently an incomplete draft and has not been submitted yet'
-                        : !customerSubmitted
-                          ? 'Customer has not submitted KYC yet'
-                          : undefined;
+                      const isAssistedSubmitted =
+                        custStatus === 'Assisted KYC – Submitted for Verification' ||
+                        (deal as any).customerKycStatus === 'Assisted KYC – Submitted for Verification' ||
+                        Boolean(backendKyc?.isAssisted && backendSubmitted);
 
-                    return (
-                      <button
-                        type="button"
-                        className="btn-complete-kyc"
-                        disabled={isBtnDisabled}
-                        title={tooltipText}
-                        style={{
-                          backgroundColor: normalizedStatus === 'Verified' ? '#059669' : '#2563eb',
-                          borderColor: normalizedStatus === 'Verified' ? '#059669' : '#2563eb',
-                          cursor: isBtnDisabled ? 'not-allowed' : 'pointer',
-                          opacity: isBtnDisabled ? 0.6 : 1,
-                        }}
-                        onClick={() => {
-                          if (!profileKycData) {
-                            const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
-                            const matchLead = leads.find(l => (deal.customerId && l.id === deal.customerId) || (l.phone && l.phone.replace(/\D/g, '').slice(-10) === fDigits));
-                            const matchCust = customers.find(c => (deal.customerId && c.id === deal.customerId) || (c.phone && c.phone.replace(/\D/g, '').slice(-10) === fDigits));
-                            setProfileKycData(buildMergedProfileData(deal, backendKyc, matchLead, matchCust));
-                          }
-                          setVerifyModalDeal(deal);
-                        }}
-                      >
-                        <ShieldCheck size={14} />
-                        {normalizedStatus === 'Verified' ? 'Re-verify KYC' : 'Verify KYC'}
-                      </button>
-                    );
-                  })()}
+                      const isDraftOnly =
+                        custStatus === 'Assisted Draft' ||
+                        (deal as any).customerKycStatus === 'Assisted Draft' ||
+                        isBackendDraft;
+
+                      const customerSubmitted =
+                        !isDraftOnly && (
+                          backendSubmitted ||
+                          isAssistedSubmitted ||
+                          custStatus === 'Completed' ||
+                          custStatus === 'Submitted' ||
+                          custStatus === 'Under Verification' ||
+                          custStatus === 'Verified'
+                        );
+
+                      const canVerify =
+                        permissions.includes(PERMISSIONS.KYC_VERIFY) ||
+                        user?.role?.code === 'irm' ||
+                        user?.role?.code === 'company_admin' ||
+                        user?.role?.code === 'super_admin' ||
+                        user?.role?.code === 'sales_executive' ||
+                        !permissions ||
+                        permissions.length === 0;
+
+                      const isBtnDisabled = !canVerify || !customerSubmitted;
+                      const tooltipText = !canVerify
+                        ? 'You do not have permission to verify KYC'
+                        : isDraftOnly
+                          ? 'Assisted KYC is currently an incomplete draft and has not been submitted yet'
+                          : !customerSubmitted
+                            ? 'Customer has not submitted KYC yet'
+                            : undefined;
+
+                      return (
+                        <button
+                          type="button"
+                          className="kyc-glass-cta-btn"
+                          disabled={isBtnDisabled}
+                          title={tooltipText}
+                          style={{
+                            background: normalizedStatus === 'Verified'
+                              ? 'linear-gradient(135deg, #059669 0%, #10b981 100%)'
+                              : 'linear-gradient(135deg, #dc2626 0%, #991b1b 100%)',
+                            cursor: isBtnDisabled ? 'not-allowed' : 'pointer',
+                            opacity: isBtnDisabled ? 0.6 : 1,
+                          }}
+                          onClick={() => {
+                            if (!profileKycData) {
+                              const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+                              const matchLead = leads.find(l => (deal.customerId && l.id === deal.customerId) || (l.phone && l.phone.replace(/\D/g, '').slice(-10) === fDigits));
+                              const matchCust = customers.find(c => (deal.customerId && c.id === deal.customerId) || (c.phone && c.phone.replace(/\D/g, '').slice(-10) === fDigits));
+                              setProfileKycData(buildMergedProfileData(deal, backendKyc, matchLead, matchCust));
+                            }
+                            setVerifyModalDeal(deal);
+                          }}
+                        >
+                          <ShieldCheck size={16} />
+                          <span>{normalizedStatus === 'Verified' ? 'Re-verify KYC' : 'Verify Dossier'}</span>
+                        </button>
+                      );
+                    })()}
+                  </div>
                 </div>
               </div>
+            </div>
 
-              {/* Balanced Multi-Column Detail Cards Grid */}
-              <div className="kyc-profile-main-cards">
-                {/* 1. Personal Details */}
-                <div className="kyc-profile-card">
-                  <h3 className="kyc-profile-card-title">Personal Details</h3>
-                  <div className="kyc-profile-fields-grid">
+            {/* Holographic Compliance Tracker Card */}
+            <div className="kyc-glass-compliance-card">
+              <div className="kyc-glass-compliance-header">
+                <div className="kyc-glass-compliance-left">
+                  <div className="kyc-glass-pulse-dot" style={{ background: completionPct === 100 ? '#10b981' : '#ef4444' }} />
+                  <span className="kyc-glass-compliance-title">KYC Compliance Dossier Status</span>
+                  <span className={`kyc-glass-compliance-pct-badge ${completionPct === 100 ? 'done' : ''}`}>
+                    {completionPct}% Complete
+                  </span>
+                </div>
+                <div className="kyc-glass-milestones">
+                  <span className={`kyc-glass-milestone-chip ${data.panNumber ? 'done' : ''}`}>
+                    PAN {data.panNumber ? '✓' : '—'}
+                  </span>
+                  <span className={`kyc-glass-milestone-chip ${data.aadhaarNumber ? 'done' : ''}`}>
+                    Aadhaar {data.aadhaarNumber ? '✓' : '—'}
+                  </span>
+                  <span className={`kyc-glass-milestone-chip ${data.bankName ? 'done' : ''}`}>
+                    Bank {data.bankName ? '✓' : '—'}
+                  </span>
+                  <span className={`kyc-glass-milestone-chip ${data.dematAccountNumber || data.hasNoDemat ? 'done' : ''}`}>
+                    Demat {data.dematAccountNumber || data.hasNoDemat ? '✓' : '—'}
+                  </span>
+                </div>
+              </div>
+              <div className="kyc-glass-progress-track">
+                <div
+                  className="kyc-glass-progress-fill"
+                  style={{
+                    width: `${completionPct}%`,
+                    background: completionPct === 100
+                      ? 'linear-gradient(90deg, #059669 0%, #10b981 100%)'
+                      : 'linear-gradient(90deg, #991b1b 0%, #dc2626 50%, #ef4444 100%)'
+                  }}
+                />
+              </div>
+              <div className="kyc-glass-compliance-footer">
+                <span>SEBI &amp; PMLA institutional verification tracker</span>
+                <span className="kyc-glass-compliance-counter">
+                  {completionPct === 100 ? '✓ Ready for institutional tranche allocations' : `${100 - completionPct}% remaining to complete onboarding`}
+                </span>
+              </div>
+            </div>
+
+            {/* Floating macOS Segmented Island Dock */}
+            <div className="kyc-glass-dock-wrapper">
+              <div className="kyc-glass-dock">
+                <button
+                  type="button"
+                  className={`kyc-glass-dock-item ${profileDossierTab === 'all' ? 'active' : ''}`}
+                  onClick={() => setProfileDossierTab('all')}
+                >
+                  <span>All Sections (5)</span>
+                </button>
+                <button
+                  type="button"
+                  className={`kyc-glass-dock-item ${profileDossierTab === 'personal' ? 'active' : ''}`}
+                  onClick={() => setProfileDossierTab('personal')}
+                >
+                  <User size={13} /> <span>Personal Details</span>
+                </button>
+                <button
+                  type="button"
+                  className={`kyc-glass-dock-item ${profileDossierTab === 'identity' ? 'active' : ''}`}
+                  onClick={() => setProfileDossierTab('identity')}
+                >
+                  <ShieldCheck size={13} /> <span>Address &amp; Identity</span>
+                </button>
+                <button
+                  type="button"
+                  className={`kyc-glass-dock-item ${profileDossierTab === 'bank' ? 'active' : ''}`}
+                  onClick={() => setProfileDossierTab('bank')}
+                >
+                  <Building size={13} /> <span>Bank Details</span>
+                </button>
+                <button
+                  type="button"
+                  className={`kyc-glass-dock-item ${profileDossierTab === 'demat' ? 'active' : ''}`}
+                  onClick={() => setProfileDossierTab('demat')}
+                >
+                  <Layers size={13} /> <span>Demat Account</span>
+                </button>
+                <button
+                  type="button"
+                  className={`kyc-glass-dock-item ${profileDossierTab === 'nominees' ? 'active' : ''}`}
+                  onClick={() => setProfileDossierTab('nominees')}
+                >
+                  <Users size={13} /> <span>Nominees</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Floating Acrylic Bento Panels Grid (Zero Empty Space 2+3 Bento Architecture) */}
+            <div className="kyc-glass-bento-grid">
+              {/* 1. Personal Details */}
+              {(profileDossierTab === 'all' || profileDossierTab === 'personal') && (
+                <div className="kyc-glass-panel kyc-panel-personal">
+                  <div className="kyc-glass-panel-header">
+                    <div className="kyc-glass-panel-title-box">
+                      <div className="kyc-glass-icon-chip kyc-icon-personal">
+                        <User size={16} />
+                      </div>
+                      <div>
+                        <h3 className="kyc-glass-panel-title">Personal Details</h3>
+                        <p className="kyc-glass-panel-desc">Investor demographics, capacity &amp; asset preferences</p>
+                      </div>
+                    </div>
+                    <span className="kyc-glass-badge">12 Fields</span>
+                  </div>
+                  <div className="kyc-glass-fields-matrix">
                     {renderField('Full Name', data.investorName || deal.customerName)}
-                    {renderField('Email', data.email || deal.email)}
-                    {renderField('Phone', data.phone || deal.phone)}
-                    {renderField('Pan Number', data.panNumber)}
+                    {renderField('Email', data.email || deal.email, { copyable: true })}
+                    {renderField('Phone', data.phone || deal.phone, { copyable: true, isMono: true })}
+                    {renderField('PAN Number', data.panNumber, { copyable: true, isMono: true })}
                     {renderField('City', data.city || getResolvedLocation(deal))}
                     {renderField('Date of Birth', data.dob)}
                     {renderField('Occupation', data.occupation)}
@@ -2837,63 +3045,115 @@ const GhlIrmKycView: React.FC = () => {
                     {renderField('Preferred Asset Class', getIrmPreferredAssetClass(deal))}
                   </div>
                 </div>
+              )}
 
-                {/* 2. Address & Identity */}
-                <div className="kyc-profile-card">
-                  <h3 className="kyc-profile-card-title">Address &amp; Identity</h3>
-                  <div className="kyc-profile-fields-grid">
+              {/* 2. Address & Identity */}
+              {(profileDossierTab === 'all' || profileDossierTab === 'identity') && (
+                <div className="kyc-glass-panel kyc-panel-identity">
+                  <div className="kyc-glass-panel-header">
+                    <div className="kyc-glass-panel-title-box">
+                      <div className="kyc-glass-icon-chip kyc-icon-identity">
+                        <ShieldCheck size={16} />
+                      </div>
+                      <div>
+                        <h3 className="kyc-glass-panel-title">Address &amp; Identity</h3>
+                        <p className="kyc-glass-panel-desc">Statutory Aadhaar, PAN documents &amp; residence</p>
+                      </div>
+                    </div>
+                    <span className="kyc-glass-badge">11 Fields</span>
+                  </div>
+                  <div className="kyc-glass-fields-matrix">
                     {renderField('Name on Document', data.nameAsPerPan || data.investorName || deal.customerName)}
                     {renderField("Father's Name", data.fatherName)}
-                    {renderField('Aadhaar Number', data.aadhaarNumber)}
+                    {renderField('Aadhaar Number', data.aadhaarNumber, { copyable: true, isMono: true })}
                     {renderField('Permanent Address', data.address)}
                     {renderField('Courier Address', data.courierAddress || data.address)}
                     {renderField('City', data.city || getResolvedLocation(deal))}
                     {renderField('State', data.state)}
-                    {renderField('Pincode', data.pincode)}
+                    {renderField('Pincode', data.pincode, { isMono: true })}
                     {renderField('Country', data.country || 'India')}
-                    {renderField('Aadhaar Document', data.aadhaarDoc?.name)}
-                    {renderField('PAN Document', data.panDoc?.name)}
+                    {renderField('Aadhaar Document', data.aadhaarDoc?.name, { isDoc: true })}
+                    {renderField('PAN Document', data.panDoc?.name, { isDoc: true })}
                   </div>
                 </div>
+              )}
 
-                {/* 3. Nominee Details */}
-                <div className="kyc-profile-card">
-                  <h3 className="kyc-profile-card-title">Nominee Details</h3>
-                  <div className="kyc-profile-fields-grid">
+              {/* 3. Bank Details */}
+              {(profileDossierTab === 'all' || profileDossierTab === 'bank') && (
+                <div className="kyc-glass-panel kyc-panel-bank">
+                  <div className="kyc-glass-panel-header">
+                    <div className="kyc-glass-panel-title-box">
+                      <div className="kyc-glass-icon-chip kyc-icon-bank">
+                        <Building size={16} />
+                      </div>
+                      <div>
+                        <h3 className="kyc-glass-panel-title">Bank Details</h3>
+                        <p className="kyc-glass-panel-desc">Verified payout &amp; subscription settlement account</p>
+                      </div>
+                    </div>
+                    <span className="kyc-glass-badge">5 Fields</span>
+                  </div>
+                  <div className="kyc-glass-fields-matrix">
+                    {renderField('Bank Name', data.bankName)}
+                    {renderField('Account No', data.accountNumber, { copyable: true, isMono: true })}
+                    {renderField('IFSC Code', data.ifscCode, { copyable: true, isMono: true })}
+                    {renderField('Account Type', data.accountType)}
+                    {renderField('Bank Proof Document', data.bankProofDoc?.name, { isDoc: true })}
+                  </div>
+                </div>
+              )}
+
+              {/* 4. Demat Details */}
+              {(profileDossierTab === 'all' || profileDossierTab === 'demat') && (
+                <div className="kyc-glass-panel kyc-panel-demat">
+                  <div className="kyc-glass-panel-header">
+                    <div className="kyc-glass-panel-title-box">
+                      <div className="kyc-glass-icon-chip kyc-icon-demat">
+                        <Layers size={16} />
+                      </div>
+                      <div>
+                        <h3 className="kyc-glass-panel-title">Demat Details</h3>
+                        <p className="kyc-glass-panel-desc">Depository participant details for securities allotment</p>
+                      </div>
+                    </div>
+                    <span className="kyc-glass-badge">6 Fields</span>
+                  </div>
+                  <div className="kyc-glass-fields-matrix">
+                    {renderField('Demat Account Status', data.hasNoDemat ? 'No Demat Account' : (data.dematAccountNumber || data.dematDepository || data.dematDpId ? 'Active Demat' : null))}
+                    {renderField('Demat Account Number', data.dematAccountNumber, { copyable: true, isMono: true })}
+                    {renderField('Depository', data.dematDepository)}
+                    {renderField('DP ID', data.dematDpId, { copyable: true, isMono: true })}
+                    {renderField('Client ID', data.dematClientId, { copyable: true, isMono: true })}
+                    {renderField('Demat Statement Proof', data.dematDoc?.name, { isDoc: true })}
+                  </div>
+                </div>
+              )}
+
+              {/* 5. Nominee Details */}
+              {(profileDossierTab === 'all' || profileDossierTab === 'nominees') && (
+                <div className="kyc-glass-panel kyc-panel-nominees">
+                  <div className="kyc-glass-panel-header">
+                    <div className="kyc-glass-panel-title-box">
+                      <div className="kyc-glass-icon-chip kyc-icon-nominee">
+                        <Users size={16} />
+                      </div>
+                      <div>
+                        <h3 className="kyc-glass-panel-title">Nominee Details</h3>
+                        <p className="kyc-glass-panel-desc">Primary succession &amp; legal beneficiaries</p>
+                      </div>
+                    </div>
+                    <span className="kyc-glass-badge">6 Fields</span>
+                  </div>
+                  <div className="kyc-glass-fields-matrix">
                     {renderField('Nominee Name', data.nominees?.[0]?.name)}
                     {renderField('Relationship', data.nominees?.[0]?.relationship)}
-                    {renderField('ID Proof', data.nominees?.[0]?.guardianName ? `Guardian: ${data.nominees[0].guardianName}` : (data.nominees?.[0] ? 'Provided' : null))}
-                    {renderField('Share', data.nominees?.[0]?.allocationPercentage ? `${data.nominees[0].allocationPercentage}%` : null)}
+                    {renderField('ID Proof / Guardian', data.nominees?.[0]?.guardianName ? `Guardian: ${data.nominees[0].guardianName}` : (data.nominees?.[0] ? 'Provided' : null))}
+                    {renderField('Share Allocation', data.nominees?.[0]?.allocationPercentage ? `${data.nominees[0].allocationPercentage}%` : null)}
                     {renderField('Date of Birth / Age', data.nominees?.[0]?.dob)}
                     {renderField('Nominee Address', data.nominees?.[0]?.address)}
                   </div>
                 </div>
-
-                {/* 4. Bank Details */}
-                <div className="kyc-profile-card">
-                  <h3 className="kyc-profile-card-title">Bank Details</h3>
-                  <div className="kyc-profile-fields-grid">
-                    {renderField('Bank Name', data.bankName)}
-                    {renderField('Account No', data.accountNumber)}
-                    {renderField('IFSC', data.ifscCode)}
-                    {renderField('Account Type', data.accountType)}
-                    {renderField('Bank Proof Document', data.bankProofDoc?.name)}
-                  </div>
-                </div>
-
-                {/* 5. Demat Details */}
-                <div className="kyc-profile-card">
-                  <h3 className="kyc-profile-card-title">Demat Details</h3>
-                  <div className="kyc-profile-fields-grid">
-                    {renderField('Demat Account', data.hasNoDemat ? 'No Demat Account' : (data.dematAccountNumber || data.dematDepository || data.dematDpId ? 'Active Demat' : null))}
-                    {renderField('Demat Account Number', data.dematAccountNumber)}
-                    {renderField('Depository', data.dematDepository)}
-                    {renderField('DP ID', data.dematDpId)}
-                    {renderField('Client ID', data.dematClientId)}
-                    {renderField('Demat Statement Proof', data.dematDoc?.name)}
-                  </div>
-                </div>
-              </div>
+              )}
             </div>
           </div>
         );

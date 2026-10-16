@@ -23,7 +23,8 @@ public class IrmOtherService : IIrmOtherService
         ["kyc"] = new() { "Contacted", "Other", "No Response", "Call Back" },
         ["opportunities"] = new() { "Contacted", "Other", "No Response", "Call Back" },
         ["investor_360"] = new() { "Contacted", "Other", "No Response", "Call Back" },
-        ["all_leads"] = new() { "Follow-up Required", "Call Back", "Ready for KYC", "Other", "No Response", "Contacted" }
+        ["all_leads"] = new() { "Follow-up Required", "Call Back", "Ready for KYC", "Other", "No Response" },
+        ["other"] = new() { "Call Back", "Other", "No Response", "Follow-up Required", "Ready for KYC" }
     };
 
     public ApiResponse<Dictionary<string, List<string>>> GetCallOutcomes()
@@ -40,6 +41,7 @@ public class IrmOtherService : IIrmOtherService
         if (clean == "followup" || clean == "followups") return "follow_up";
         if (clean == "investor360" || clean == "investors" || clean == "investor") return "investor_360";
         if (clean == "opportunity" || clean == "opps") return "opportunities";
+        if (clean == "other" || clean == "others" || clean == "other_follow_up" || clean == "other_followup") return "other";
         return clean;
     }
 

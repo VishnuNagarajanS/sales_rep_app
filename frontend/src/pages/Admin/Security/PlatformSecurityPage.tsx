@@ -48,7 +48,11 @@ export const PlatformSecurityPage: React.FC = () => {
   const [mfaRecoveryCodes, setMfaRecoveryCodes] = useState<string[]>([]);
   const [isEnrollingMfa, setIsEnrollingMfa] = useState(false);
   const [isDisablingMfa, setIsDisablingMfa] = useState(false);
+  const [disablePassword, setDisablePassword] = useState('');
   const [disableCode, setDisableCode] = useState('');
+  const [isRegeneratingCodes, setIsRegeneratingCodes] = useState(false);
+  const [regenPassword, setRegenPassword] = useState('');
+  const [regenCode, setRegenCode] = useState('');
 
   // Security Events Pagination & Filter State
   const [events, setEvents] = useState<SecurityEventDto[]>([]);
@@ -179,9 +183,9 @@ export const PlatformSecurityPage: React.FC = () => {
     }
 
     try {
-      await superAdminService.verifyAndEnableMfa(mfaVerifyCode.trim());
+      const res = await superAdminService.verifyAndEnableMfa(mfaVerifyCode.trim());
       showSuccess('Multi-Factor Authentication enabled and enforced successfully!');
-      const codes = mfaSetupData?.recoveryCodes || [];
+      const codes = res?.recoveryCodes || mfaSetupData?.recoveryCodes || [];
       setMfaRecoveryCodes(codes);
       setMfaStatus({
         isTwoFactorEnabled: true,
@@ -196,19 +200,45 @@ export const PlatformSecurityPage: React.FC = () => {
 
   const handleDisableMfa = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!disablePassword.trim()) {
+      alert('Please enter your account password to confirm disabling MFA.');
+      return;
+    }
     if (!disableCode.trim()) {
       alert('Please enter your current TOTP or recovery code to confirm disabling MFA.');
       return;
     }
 
     try {
-      await superAdminService.disableMfa(disableCode.trim());
+      await superAdminService.disableMfa(disablePassword.trim(), disableCode.trim());
       showSuccess('Multi-Factor Authentication disabled.');
       setMfaStatus({ isTwoFactorEnabled: false, remainingRecoveryCodes: 0 });
       setIsDisablingMfa(false);
       setDisableCode('');
+      setDisablePassword('');
+      setMfaRecoveryCodes([]);
     } catch (err: any) {
-      alert(err.message || 'Failed to disable MFA. Invalid code.');
+      alert(err.message || 'Failed to disable MFA. Please check password and authentication code.');
+    }
+  };
+
+  const handleRegenerateRecoveryCodes = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!regenPassword.trim()) {
+      alert('Please enter your account password to regenerate recovery codes.');
+      return;
+    }
+
+    try {
+      const codes = await superAdminService.regenerateRecoveryCodes(regenPassword.trim(), regenCode.trim());
+      setMfaRecoveryCodes(codes);
+      setMfaStatus((prev) => (prev ? { ...prev, remainingRecoveryCodes: codes.length } : null));
+      showSuccess('Emergency recovery codes regenerated! Store them safely.');
+      setIsRegeneratingCodes(false);
+      setRegenPassword('');
+      setRegenCode('');
+    } catch (err: any) {
+      alert(err.message || 'Failed to regenerate recovery codes.');
     }
   };
 
@@ -496,17 +526,73 @@ export const PlatformSecurityPage: React.FC = () => {
                   </div>
                 )}
 
-                <div style={{ marginTop: 8 }}>
-                  {!isDisablingMfa ? (
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      style={{ borderColor: 'rgba(239, 68, 68, 0.4)', color: '#f87171' }}
-                      onClick={() => setIsDisablingMfa(true)}
-                    >
-                      Disable Two-Factor Authentication
-                    </button>
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {!isDisablingMfa && !isRegeneratingCodes ? (
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
+                        onClick={() => setIsRegeneratingCodes(true)}
+                      >
+                        <RefreshCw size={13} /> Regenerate Backup Recovery Codes
+                      </button>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ borderColor: 'rgba(239, 68, 68, 0.4)', color: '#f87171' }}
+                        onClick={() => setIsDisablingMfa(true)}
+                      >
+                        Disable Two-Factor Authentication
+                      </button>
+                    </div>
+                  ) : isRegeneratingCodes ? (
+                    <form onSubmit={handleRegenerateRecoveryCodes} style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 450, padding: 14, background: 'rgba(15, 23, 42, 0.6)', border: '1px solid #334155', borderRadius: 8 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#f8fafc' }}>Regenerate Backup Recovery Codes</div>
+                      <p style={{ fontSize: 12, color: '#94a3b8', margin: 0 }}>This will invalidate all current recovery codes. Enter your password to proceed.</p>
+                      <input
+                        id="mfa-regen-password"
+                        name="regenPassword"
+                        type="password"
+                        placeholder="Current Account Password"
+                        className="form-control"
+                        value={regenPassword}
+                        onChange={(e) => setRegenPassword(e.target.value)}
+                        required
+                        style={{ background: '#090d16', border: '1px solid #334155', color: '#fff', padding: '8px 12px', borderRadius: 6 }}
+                      />
+                      <input
+                        id="mfa-regen-code"
+                        name="regenCode"
+                        type="text"
+                        placeholder="Current 6-Digit TOTP Code (optional)"
+                        className="form-control"
+                        value={regenCode}
+                        onChange={(e) => setRegenCode(e.target.value)}
+                        style={{ background: '#090d16', border: '1px solid #334155', color: '#fff', padding: '8px 12px', borderRadius: 6 }}
+                      />
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        <button type="submit" className="btn btn-primary btn-sm" style={{ padding: '8px 14px' }}>
+                          Generate New Codes
+                        </button>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setIsRegeneratingCodes(false)}>
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
                   ) : (
-                    <form onSubmit={handleDisableMfa} style={{ display: 'flex', gap: 10, alignItems: 'center', maxWidth: 420 }}>
+                    <form onSubmit={handleDisableMfa} style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 450, padding: 14, background: 'rgba(15, 23, 42, 0.6)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: 8 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#f87171' }}>Disable Multi-Factor Authentication</div>
+                      <p style={{ fontSize: 12, color: '#94a3b8', margin: 0 }}>Requires both your account password and current authentication code to confirm.</p>
+                      <input
+                        id="mfa-disable-password"
+                        name="disablePassword"
+                        type="password"
+                        placeholder="Current Account Password"
+                        className="form-control"
+                        value={disablePassword}
+                        onChange={(e) => setDisablePassword(e.target.value)}
+                        required
+                        style={{ background: '#090d16', border: '1px solid #334155', color: '#fff', padding: '8px 12px', borderRadius: 6 }}
+                      />
                       <input
                         id="mfa-disable-code"
                         name="disableCode"
@@ -520,12 +606,14 @@ export const PlatformSecurityPage: React.FC = () => {
                         autoComplete="one-time-code"
                         style={{ background: '#090d16', border: '1px solid #334155', color: '#fff', padding: '8px 12px', borderRadius: 6 }}
                       />
-                      <button type="submit" className="btn btn-danger btn-sm" style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: 6 }}>
-                        Confirm Disable
-                      </button>
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setIsDisablingMfa(false)}>
-                        Cancel
-                      </button>
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        <button type="submit" className="btn btn-danger btn-sm" style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: 6 }}>
+                          Confirm Disable
+                        </button>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setIsDisablingMfa(false)}>
+                          Cancel
+                        </button>
+                      </div>
                     </form>
                   )}
                 </div>

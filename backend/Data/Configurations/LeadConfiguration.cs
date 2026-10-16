@@ -78,6 +78,6 @@ public class LeadConfiguration : IEntityTypeConfiguration<Lead>
 
         builder.HasIndex(l => new { l.CompanyId, l.AssignedAgentId });
         
-        builder.UseXminAsConcurrencyToken();
+        builder.Property<uint>("xmin").IsRowVersion();
     }
 }

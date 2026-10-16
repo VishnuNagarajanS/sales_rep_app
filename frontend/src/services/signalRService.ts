@@ -139,6 +139,20 @@ class SignalRService {
         this.emit('PlatformDataUpdated', { entityType, action });
       });
 
+      // Real-Time Chat handlers
+      this.connection.on('ReceiveChatMessage', (message: any) => {
+        this.emit('ReceiveChatMessage', message);
+      });
+      this.connection.on('ChatUserTyping', (convId: string, userId: number, userName: string, isTyping: boolean) => {
+        this.emit('ChatUserTyping', { convId, userId, userName, isTyping });
+      });
+      this.connection.on('ChatConversationUpdated', (conversationId: string) => {
+        this.emit('ChatConversationUpdated', { conversationId });
+      });
+      this.connection.on('ChatMessageRead', (conversationId: string, userId: number, messageId: string) => {
+        this.emit('ChatMessageRead', { conversationId, userId, messageId });
+      });
+
       this.connection.onreconnecting((error?: Error) => {
         console.warn('SignalR reconnecting...', error);
         this.emit('reconnecting', error);

@@ -111,8 +111,11 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
         );
         const raw = leads
           .filter(l => !l.companyId || isTenantMatch(l.companyId, tenant?.id))
-          // Same rule as IRM "My Leads": only 'Interested' leads assigned to THIS IRM
-          .filter(l => l.status === 'Interested')
+          // Same rule as IRM "My Leads": 'Interested', 'No Response', 'Callback', etc. assigned to THIS IRM
+          .filter(l => {
+            const s = (l.status || '').trim().toLowerCase();
+            return ['interested', 'no response', 'callback', 'new', 'contacted'].includes(s);
+          })
           .filter(l =>
             l.assignedAgentId
               ? String(l.assignedAgentId) === String(user?.id)

@@ -137,7 +137,19 @@ export const PlatformRolesPage: React.FC = () => {
 
   // Compute dynamic roles list with live user counts
   const roleList: Role[] = useMemo(() => {
-    return superAdminService.getRolesList();
+    const users = superAdminService.getUsers();
+    return Object.values(roles).map(r => {
+      const userCount = r.usersCount !== undefined
+        ? r.usersCount
+        : users.filter(u => u.role?.code === r.code || u.role?.id === r.id).length;
+      return {
+        ...r,
+        usersCount: userCount,
+        permissionsCount: r.permissions?.length || 0,
+        isSystemRole: r.isSystemRole ?? ['super_admin', 'company_admin', 'sales_executive', 'irm'].includes(r.code),
+        isActive: r.isActive ?? true,
+      };
+    });
   }, [roles]);
 
   // Filtered Roles for Table
@@ -440,7 +452,6 @@ export const PlatformRolesPage: React.FC = () => {
   // PERMISSION MATRIX TOGGLES
   // --------------------------------------------------------------------------
   const handleMatrixToggle = (roleCode: string, permKey: string) => {
-    if (roleCode === 'super_admin') return;
     const current = roles[roleCode];
     if (!current) return;
 
@@ -466,7 +477,6 @@ export const PlatformRolesPage: React.FC = () => {
     setIsSavingMatrix(true);
     try {
       const updates = Object.values(roles)
-        .filter(r => r.code !== 'super_admin')
         .map(r => superAdminService.updateRoleApi(r.id, { permissions: r.permissions }));
       await Promise.all(updates);
       setHasUnsavedMatrixChanges(false);
@@ -876,22 +886,20 @@ export const PlatformRolesPage: React.FC = () => {
 
                           {roleList.map(r => {
                             const isGranted = (r.permissions || []).includes(item.key);
-                            const isSuperAdmin = r.code === 'super_admin';
 
                             return (
                               <td key={r.code} className="matrix-checkbox-cell">
-                                <label htmlFor={`perm-matrix-${r.code}-${item.key}`} className={`matrix-toggle-label ${isSuperAdmin ? 'locked' : ''}`}>
+                                <label htmlFor={`perm-matrix-${r.code}-${item.key}`} className="matrix-toggle-label">
                                   <input
                                     id={`perm-matrix-${r.code}-${item.key}`}
                                     name={`perm_${r.code}_${item.key}`}
                                     aria-label={`Permission ${item.label} for role ${r.name}`}
                                     type="checkbox"
-                                    checked={isGranted || isSuperAdmin}
-                                    disabled={isSuperAdmin}
+                                    checked={isGranted}
                                     onChange={() => handleMatrixToggle(r.code, item.key)}
                                   />
-                                  <span className={`toggle-check-box ${isGranted || isSuperAdmin ? 'checked' : ''}`}>
-                                    {(isGranted || isSuperAdmin) && <Check size={12} />}
+                                  <span className={`toggle-check-box ${isGranted ? 'checked' : ''}`}>
+                                    {isGranted && <Check size={12} />}
                                   </span>
                                 </label>
                               </td>

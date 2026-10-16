@@ -63,6 +63,8 @@ public static class ServiceExtensions
         services.AddScoped<ICurrentUserService, CurrentUserService>();
         services.AddScoped<ITotpService, TotpService>();
         services.AddScoped<IReportService, ReportService>();
+        services.AddSingleton<IMfaEncryptionService, MfaEncryptionService>();
+        services.AddScoped<IMfaService, MfaService>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IAdminUserService, AdminUserService>();
         services.AddScoped<ILeadService, LeadService>();

@@ -32,6 +32,7 @@ import {
   FolderArchive,
   Layers,
   CalendarOff,
+  Ticket,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
@@ -141,11 +142,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
         { id: 'admin-dashboard', label: 'Platform Console', icon: <LayoutDashboard size={18} /> },
         { id: 'admin-companies', label: 'Companies (Tenants)', icon: <Building2 size={18} /> },
         { id: 'admin-users', label: 'Cross-Tenant Users', icon: <Users size={18} /> },
+        { id: 'admin-converted-customers', label: 'Converted Customers', icon: <UserCheck size={18} /> },
         { id: 'admin-roles', label: 'Role Management', icon: <Shield size={18} /> },
         { id: 'admin-features', label: 'Feature Packages', icon: <Sparkles size={18} /> },
         { id: 'admin-call-config', label: 'Call Configuration', icon: <PhoneCall size={18} /> },
+        { id: 'admin-documents', label: 'Platform Documents', icon: <FolderArchive size={18} /> },
         { id: 'admin-audit', label: 'Platform Audit Logs', icon: <FileCheck size={18} /> },
         { id: 'admin-security', label: 'Security & Access', icon: <KeyRound size={18} /> },
+        { id: 'admin-tickets', label: 'Incident Helpdesk', icon: <Ticket size={18} /> },
         { id: 'admin-system', label: 'System & Health', icon: <Server size={18} /> },
       ],
     },
@@ -168,6 +172,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
         ] : []),
         { id: 'followups', label: 'Follow-ups', icon: <CalendarCheck size={18} />, feature: FEATURES.FOLLOWUPS, permission: PERMISSIONS.FOLLOWUPS_VIEW },
         { id: 'customers', label: 'Customers 360', icon: <Building2 size={18} />, feature: FEATURES.CUSTOMERS, permission: PERMISSIONS.CUSTOMERS_VIEW },
+        { id: 'converted-customers', label: 'Converted Customers', icon: <UserCheck size={18} />, feature: FEATURES.CUSTOMERS, permission: PERMISSIONS.CUSTOMERS_VIEW },
         { id: 'pipeline', label: 'Pipeline', icon: <Kanban size={18} />, feature: FEATURES.DEALS, permission: PERMISSIONS.DEALS_VIEW },
         ...(isGhlAdmin ? [
           { id: 'archived-leads', label: 'Archived Leads', icon: <Trash2 size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW }
@@ -209,6 +214,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
     {
       header: 'Administration',
       items: [
+        { id: 'company-documents', label: 'Company Documents', icon: <FolderArchive size={18} /> },
         { id: 'company-users', label: 'Users', icon: <Users size={18} />, feature: FEATURES.USERS, permission: PERMISSIONS.USERS_VIEW },
         ...(isGhlAdmin ? [
           { id: 'work-handover', label: 'Work Handover', icon: <UserCheck size={18} />, feature: FEATURES.USERS, permission: PERMISSIONS.USERS_VIEW }
@@ -227,6 +233,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
     {
       header: 'Help and Support',
       items: [
+        { id: 'support', label: 'Helpdesk & Support', icon: <Ticket size={18} /> },
         { id: 'chat', label: 'Chat', icon: <MessageSquare size={18} />, badge: unreadChatCount > 0 ? unreadChatCount : undefined },
         { id: 'smarty-ai', label: 'Smarty AI', icon: <Sparkles size={18} /> },
       ],
@@ -246,6 +253,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
         { id: 'followups', label: 'Follow-ups', icon: <CalendarCheck size={18} />, feature: FEATURES.FOLLOWUPS, permission: PERMISSIONS.FOLLOWUPS_VIEW, badge: pendingFollowupsCount > 0 ? pendingFollowupsCount : undefined },
         { id: 'consultations', label: 'Consultations', icon: <Calendar size={18} />, feature: FEATURES.CONSULTATIONS, permission: PERMISSIONS.CONSULTATIONS_VIEW },
         { id: 'customers', label: 'Customers 360', icon: <Building2 size={18} />, feature: FEATURES.CUSTOMERS, permission: PERMISSIONS.CUSTOMERS_VIEW },
+        { id: 'company-documents', label: 'Collaterals & Docs', icon: <FolderArchive size={18} /> },
         { id: 'not-interested', label: 'Not - Interested', icon: <XCircle size={18} /> },
         { id: 'junk', label: 'Junk', icon: <Trash2 size={18} /> },
       ],
@@ -267,6 +275,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
     {
       header: 'Help and Support',
       items: [
+        { id: 'support', label: 'Helpdesk & Support', icon: <Ticket size={18} /> },
         { id: 'chat', label: 'Chat', icon: <MessageSquare size={18} />, badge: unreadChatCount > 0 ? unreadChatCount : undefined },
         { id: 'smarty-ai', label: 'Smarty AI', icon: <Sparkles size={18} /> },
       ],
@@ -297,6 +306,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
         { id: 'kyc', label: 'KYC', icon: <FileCheck size={18} />, feature: FEATURES.INVESTORS, permission: PERMISSIONS.INVESTORS_VIEW },
         { id: 'opportunities', label: 'Opportunities', icon: <Briefcase size={18} />, feature: FEATURES.INVESTMENT_OPPORTUNITIES, permission: PERMISSIONS.OPPORTUNITIES_VIEW },
         { id: 'investors', label: 'Investor 360', icon: <TrendingUp size={18} />, feature: FEATURES.INVESTORS, permission: PERMISSIONS.INVESTORS_VIEW },
+        { id: 'company-documents', label: 'Collaterals & Docs', icon: <FolderArchive size={18} /> },
         { id: 'irm-other', label: 'Other', icon: <FolderArchive size={18} /> },
         ...(isGhlIrm ? [{ id: 'pipeline', label: 'Pipeline', icon: <Kanban size={18} />, feature: FEATURES.DEALS, permission: PERMISSIONS.DEALS_VIEW }] : []),
       ],
@@ -318,6 +328,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
     {
       header: 'Help and Support',
       items: [
+        { id: 'support', label: 'Helpdesk & Support', icon: <Ticket size={18} /> },
         { id: 'chat', label: 'Chat', icon: <MessageSquare size={18} />, badge: unreadChatCount > 0 ? unreadChatCount : undefined },
         { id: 'smarty-ai', label: 'Smarty AI', icon: <Sparkles size={18} /> },
       ],

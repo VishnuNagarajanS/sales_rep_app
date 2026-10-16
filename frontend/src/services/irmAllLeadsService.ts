@@ -1,9 +1,7 @@
 import { apiClient, ApiResponse } from './apiClient';
-import { getLeads, getFollowups, getCustomers } from './ghlApiService';
+import { getLeads, getFollowups, getCustomers, getDeals, getIrmOtherRecords } from './ghlApiService';
 import { Lead } from '../types';
-
 import { storageService } from './storageService';
-import { getDeals } from './ghlApiService';
 
 export interface IrmAllLeadItem {
   id: number | string;
@@ -23,7 +21,7 @@ export interface IrmAllLeadItem {
   assignedAt?: string;
   createdAt: string;
   updatedAt?: string;
-  currentStage: 'My Leads' | 'Follow-up' | 'KYC' | 'Opportunities' | 'Archived' | string;
+  currentStage: 'My Leads' | 'Follow-up' | 'KYC' | 'Opportunities' | 'Converted' | 'Archived' | 'Other' | string;
   stageDetails?: string;
   kycStatus?: string;
   nextFollowupDate?: string;
@@ -40,6 +38,7 @@ export interface IrmAllLeadsSummary {
   inKyc: number;
   inOpportunities: number;
   converted: number;
+  inOther?: number;
   leads: IrmAllLeadItem[];
 }
 
@@ -67,11 +66,12 @@ export async function fetchIrmAllLeads(
   }
 
   // 2. Comprehensive local + API computation fallback
-  const [apiLeads, apiFollowups, apiCustomers, apiDeals] = await Promise.all([
+  const [apiLeads, apiFollowups, apiCustomers, apiDeals, apiOtherRecords] = await Promise.all([
     getLeads(tenantId).catch(() => [] as Lead[]),
     getFollowups(tenantId).catch(() => []),
     getCustomers(tenantId).catch(() => []),
     getDeals(tenantId).catch(() => []),
+    getIrmOtherRecords().catch(() => []),
   ]);
 
   const localLeads = storageService.getLeads(tenantId) || [];
@@ -113,6 +113,15 @@ export async function fetchIrmAllLeads(
 
   const items: IrmAllLeadItem[] = irmLeads.map(l => {
     const cleanPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+    const leadNameLower = (l.name || '').trim().toLowerCase();
+
+    const matchedOther = (apiOtherRecords || []).find((r: any) => {
+      const rPhone = (r.contactPhone || '').replace(/\D/g, '').slice(-10);
+      return (cleanPhone && rPhone === cleanPhone) ||
+        (leadNameLower && r.contactName && r.contactName.trim().toLowerCase() === leadNameLower) ||
+        (r.leadId && String(r.leadId) === String(l.id));
+    });
+    const isOther = Boolean(matchedOther);
 
     const matchedCustomer = allCustomers.find(c => {
       const cPhone = (c.phone || '').replace(/\D/g, '').slice(-10);
@@ -131,11 +140,16 @@ export async function fetchIrmAllLeads(
       return (cleanPhone && fPhone === cleanPhone) || (f.contactId && String(f.contactId) === String(l.id));
     });
 
-    let currentStage: 'My Leads' | 'Follow-up' | 'KYC' | 'Opportunities' | 'Converted' | 'Archived' = 'My Leads';
+    let currentStage: 'My Leads' | 'Follow-up' | 'KYC' | 'Opportunities' | 'Converted' | 'Archived' | 'Other' = 'My Leads';
     let stageDetails = 'Active assigned lead';
     let kycStatus: string | undefined = undefined;
 
-    if (matchedDeal) {
+    if (isOther) {
+      currentStage = 'Other';
+      const modName = matchedOther?.moduleDisplayName || 'KYC';
+      const rsn = matchedOther?.reason || 'Contact in Other section';
+      stageDetails = `Moved to Other (${modName}): ${rsn}`;
+    } else if (matchedDeal) {
       const dStage = (matchedDeal.stage || '').trim().toLowerCase();
       const dealVal = matchedDeal.value;
 
@@ -217,6 +231,7 @@ export async function fetchIrmAllLeads(
   const inKyc = items.filter(i => i.currentStage === 'KYC').length;
   const inOpportunities = items.filter(i => i.currentStage === 'Opportunities').length;
   const converted = items.filter(i => i.currentStage === 'Converted' || i.status === 'Converted').length;
+  const inOther = items.filter(i => i.currentStage === 'Other').length;
 
   let filtered = items;
   if (options?.stage && options.stage !== 'all') {
@@ -240,6 +255,7 @@ export async function fetchIrmAllLeads(
     inKyc,
     inOpportunities,
     converted,
+    inOther,
     leads: filtered,
   };
 }

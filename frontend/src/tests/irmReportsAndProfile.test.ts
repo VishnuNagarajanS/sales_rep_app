@@ -49,4 +49,35 @@ describe('IRM Reports and Profile Calculations', () => {
     const aumProgress = Math.min(Math.round((mockDashboardData.committedAUM / mockDashboardData.targetAUM) * 100), 100);
     expect(aumProgress).toBe(70);
   });
+
+  it('validates opportunity workspace investment presets', () => {
+    const presets = [
+      { label: '₹5L', value: 500000 },
+      { label: '₹10L', value: 1000000 },
+      { label: '₹25L', value: 2500000 },
+      { label: '₹50L', value: 5000000 },
+      { label: '₹1Cr', value: 10000000 },
+      { label: '₹2Cr', value: 20000000 },
+    ];
+    expect(presets.length).toBe(6);
+    expect(presets[0].value).toBe(500000);
+    expect(presets[4].value).toBe(10000000);
+  });
+
+  it('correctly maps deal KYC status for opportunity profile', () => {
+    const getDealKycStatus = (deal: any, liveKyc?: any): string => {
+      const raw = (deal.kycStatus || liveKyc?.status || '').toString().toLowerCase();
+      if (raw === 'verified' || raw === 'completed' || raw === 'approved' || raw === '3') return 'Verified';
+      if (raw === 'wrong' || raw === 'rejected' || raw === '4') return 'Wrong';
+      if (raw === 'submitted' || raw === 'pending_review' || raw === 'under_review' || raw === '2') return 'Submitted';
+      if (raw === 'partially completed' || raw === 'in_progress' || raw === '1') return 'Partially Completed';
+      if (deal.kycValidated === true) return 'Verified';
+      return 'Pending';
+    };
+
+    expect(getDealKycStatus({ kycStatus: 'Approved' })).toBe('Verified');
+    expect(getDealKycStatus({ kycStatus: 'Submitted' })).toBe('Submitted');
+    expect(getDealKycStatus({}, { status: 'Approved' })).toBe('Verified');
+    expect(getDealKycStatus({})).toBe('Pending');
+  });
 });

@@ -19,6 +19,12 @@ public interface IPlatformHubClient
     Task SessionRevoked(string tokenId, int userId);
     Task SecurityAlert(string title, string severity, string message);
     Task PlatformDataUpdated(string entityType, string action);
+
+    // Real-Time Chat Broadcasts
+    Task ReceiveChatMessage(object message);
+    Task ChatUserTyping(string conversationId, int userId, string userName, bool isTyping);
+    Task ChatConversationUpdated(string conversationId);
+    Task ChatMessageRead(string conversationId, int userId, string messageId);
 }
 
 [Authorize]

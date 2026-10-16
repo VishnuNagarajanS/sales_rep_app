@@ -251,7 +251,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       );
 
       const raw = tenantLeads.filter(l => {
-        if (l.status !== 'Interested') return false;
+        const sNorm = (l.status || '').trim().toLowerCase();
+        const allowedIrmStatuses = ['interested', 'no response', 'callback', 'new', 'contacted'];
+        if (!allowedIrmStatuses.includes(sNorm)) return false;
 
         const isAssignedToThisIrm =
           (l.assignedIrmId && String(l.assignedIrmId) === uId) ||
@@ -532,14 +534,14 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     const handleUpdate = () => loadData();
     window.addEventListener('nexus_storage_updated', handleUpdate);
     window.addEventListener('nexus_handover_updated', handleUpdate);
-    
+
     // Polling every 15 seconds while visible
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible' && !apiClient.isMockMode()) {
         loadData();
       }
     }, 15000);
-    
+
     const handleFocus = () => {
       if (!apiClient.isMockMode()) loadData();
     };
@@ -732,7 +734,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       setSelectedLead(updatedLead);
     }
     await loadData();
-    
+
     const toast = document.createElement('div');
     toast.className = 'nexus-toast success';
     toast.textContent = `✓ Lead "${updatedLead.name}" successfully assigned to IRM ${chosenIrm.name}!`;
@@ -810,7 +812,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
   const handleAiConfirm = async () => {
     let okCount = 0;
-    
+
     if (apiClient.isMockMode()) {
       const pairs: Array<{ lead: Lead; agent: AssignableAgent }> = [];
       Object.entries(aiDistribution).forEach(([agentId, agentLeads]) => {
@@ -991,13 +993,13 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     const resolvedAgentId = (isLeadScopedUser && user?.id)
       ? user.id
       : (formData.assignedAgentId && formData.assignedAgentId !== 'usr-exec' && formData.assignedAgentId !== 'unassigned'
-          ? formData.assignedAgentId
-          : undefined);
+        ? formData.assignedAgentId
+        : undefined);
     const resolvedAgentName = (isLeadScopedUser && user?.name)
       ? user.name
       : (formData.assignedAgentName && formData.assignedAgentName !== 'Agent' && formData.assignedAgentName !== 'Unassigned'
-          ? formData.assignedAgentName
-          : undefined);
+        ? formData.assignedAgentName
+        : undefined);
 
     const isExistingById = leads.some(l => l.id === formData.id);
     const targetCompanyId = formData.companyId || tenant?.id || 't-ghl-01';
@@ -1280,7 +1282,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
           const dbId = lead.id.toString().replace('db-', '');
           await apiClient.delete(`/sales-executive/leads/${dbId}`);
         } else {
-          await apiSaveLead({ ...lead, status: 'Junk' }).catch(() => {});
+          await apiSaveLead({ ...lead, status: 'Junk' }).catch(() => { });
         }
       } catch (err: any) {
         console.error('Failed to delete lead from DB', err);
@@ -1690,7 +1692,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
             aria-label={`Call ${l.name}`}
             onClick={e => {
               e.stopPropagation();
-              initiateCall(l.name, l.phone, 'lead', l.id, undefined, 'my_leads');
+              initiateCall(l.name, l.phone, 'lead', l.id, undefined, isIrm ? 'my_leads' : undefined);
             }}
           >
             <Phone size={12} color="#ffffff" />
@@ -1901,7 +1903,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
             <button
               className="btn btn-call"
               onClick={() => {
-                if (selectedLead) initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, 'my_leads');
+                if (selectedLead) initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, isIrm ? 'my_leads' : undefined);
               }}
             >
               <Phone size={14} /> Call Lead
@@ -1910,192 +1912,192 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         }
       >
         {selectedLead && (() => {
-            const isGhlIrm = isIrm && (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01');
+          const isGhlIrm = isIrm && (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01');
 
-            /** ── Investment Capacity value ── */
-            const investmentCapacity =
-              selectedLead.customFields?.investmentCapacity ||
-              selectedLead.customFields?.capacityRange ||
-              selectedLead.customFields?.investmentRange ||
-              (selectedLead as any).investmentRange ||
-              null;
+          /** ── Investment Capacity value ── */
+          const investmentCapacity =
+            selectedLead.customFields?.investmentCapacity ||
+            selectedLead.customFields?.capacityRange ||
+            selectedLead.customFields?.investmentRange ||
+            (selectedLead as any).investmentRange ||
+            null;
 
-            /** ── User-facing message ── */
-            const userMessage =
-              (selectedLead as any).message ||
-              (selectedLead as any).userMessage ||
-              selectedLead.customFields?.message ||
-              selectedLead.customFields?.userMessage ||
-              selectedLead.notes ||
-              null;
-
-
+          /** ── User-facing message ── */
+          const userMessage =
+            (selectedLead as any).message ||
+            (selectedLead as any).userMessage ||
+            selectedLead.customFields?.message ||
+            selectedLead.customFields?.userMessage ||
+            selectedLead.notes ||
+            null;
 
 
-            return (
-              <>
-                {/* ── Quick Info Banner (Assigned Agent) ── */}
-                <div className="lead-quick-banner">
-                  <div className="lead-assigned-note" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {isIrm ? 'Assigned Sales Agent' : 'Assigned'} : <strong>{getLeadDisplayAgent(selectedLead).name}</strong>
-                    <span className={`badge-role-inline ${getLeadDisplayAgent(selectedLead).badgeClass}`}>
-                      {getLeadDisplayAgent(selectedLead).role}
-                    </span>
-                  </div>
+
+
+          return (
+            <>
+              {/* ── Quick Info Banner (Assigned Agent) ── */}
+              <div className="lead-quick-banner">
+                <div className="lead-assigned-note" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {isIrm ? 'Assigned Sales Agent' : 'Assigned'} : <strong>{getLeadDisplayAgent(selectedLead).name}</strong>
+                  <span className={`badge-role-inline ${getLeadDisplayAgent(selectedLead).badgeClass}`}>
+                    {getLeadDisplayAgent(selectedLead).role}
+                  </span>
                 </div>
+              </div>
 
-                {isLeadReturned(selectedLead) && (
-                  <div style={{
-                    margin: '10px 0',
-                    padding: '10px 14px',
-                    borderRadius: 8,
-                    background: 'rgba(16, 185, 129, 0.12)',
-                    border: '1px solid rgba(16, 185, 129, 0.35)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                  }}>
-                    <span style={{ fontSize: 16 }}>↩️</span>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: '#34d399' }}>
-                        Returned from Coverage by {getReturnedCoveringName(selectedLead)}
-                      </div>
-                      <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
-                        This lead was covered while you were away and handed back to you{getReturnedDate(selectedLead) ? ` on ${new Date(getReturnedDate(selectedLead)!).toLocaleDateString()}` : ''}. Review recent call logs and updated notes below.
-                      </div>
+              {isLeadReturned(selectedLead) && (
+                <div style={{
+                  margin: '10px 0',
+                  padding: '10px 14px',
+                  borderRadius: 8,
+                  background: 'rgba(16, 185, 129, 0.12)',
+                  border: '1px solid rgba(16, 185, 129, 0.35)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                }}>
+                  <span style={{ fontSize: 16 }}>↩️</span>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#34d399' }}>
+                      Returned from Coverage by {getReturnedCoveringName(selectedLead)}
                     </div>
-                  </div>
-                )}
-
-                {/* ── Contact & Profile Details ── */}
-                <div className="card lead-detail-card">
-                  <h4 className="lead-detail-title">Contact &amp; Profile Details</h4>
-                  <div className="lead-detail-grid">
-                    <div>
-                      <span className="lead-detail-label">Email:</span>
-                      <div className="lead-detail-value">{selectedLead.email || '—'}</div>
-                    </div>
-                    <div>
-                      <span className="lead-detail-label">Location:</span>
-                      <div className="lead-detail-value">{selectedLead.location || '—'}</div>
-                    </div>
-                    <div>
-                      <span className="lead-detail-label">Lead Source:</span>
-                      <div className="lead-detail-value">{selectedLead.source}</div>
-                    </div>
-                    <div>
-                      <span className="lead-detail-label">Follow-up:</span>
-                      <div className="lead-detail-value lead-followup-text has-date">
-                        {selectedLead.nextFollowupDate || 'Not scheduled'}
-                      </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
+                      This lead was covered while you were away and handed back to you{getReturnedDate(selectedLead) ? ` on ${new Date(getReturnedDate(selectedLead)!).toLocaleDateString()}` : ''}. Review recent call logs and updated notes below.
                     </div>
                   </div>
                 </div>
+              )}
 
-                {/* ── GHL IRM: Investment Capacity (replaces Preferred Asset Class + Investment Horizon unless confirmed by IRM) ── */}
-                {isGhlIrm ? (
-                  <div className="card lead-custom-card">
-                    <h4 className="lead-custom-title">Investment Details</h4>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                      <div>
-                        <span className="lead-detail-label">Investment Capacity:</span>
-                        <div
-                          className="lead-detail-value"
-                          style={{
-                            marginTop: 4,
-                            fontSize: 16,
-                            fontWeight: 700,
-                            color: '#10b981',
-                            letterSpacing: '0.01em',
-                          }}
-                        >
-                          {investmentCapacity || '—'}
-                        </div>
-                      </div>
-
-                      {/* Only show Preferred Asset Class & Horizon if set & confirmed by IRM */}
-                      {Boolean(
-                        selectedLead.customFields?.irmPreferencesConfirmed &&
-                        selectedLead.customFields?.preferredAssetClass
-                      ) ? (
-                        <div className="lead-detail-grid" style={{ marginTop: 4, paddingTop: 10, borderTop: '1px solid var(--border-base)' }}>
-                          <div>
-                            <span className="lead-detail-label">Preferred Asset Class:</span>
-                            <div className="lead-detail-value">{selectedLead.customFields?.preferredAssetClass}</div>
-                          </div>
-                          <div>
-                            <span className="lead-detail-label">Investment Horizon:</span>
-                            <div className="lead-detail-value">{selectedLead.customFields?.horizon || selectedLead.customFields?.investmentHorizon || '—'}</div>
-                          </div>
-                        </div>
-                      ) : (() => {
-                        try {
-                          localStorage.removeItem(`nexus_irm_pref_${selectedLead.id}`);
-                          const fDigits = (selectedLead.phone || '').replace(/\D/g, '').slice(-10);
-                          if (fDigits) localStorage.removeItem(`nexus_irm_pref_${fDigits}`);
-                        } catch { }
-                        return null;
-                      })()}
+              {/* ── Contact & Profile Details ── */}
+              <div className="card lead-detail-card">
+                <h4 className="lead-detail-title">Contact &amp; Profile Details</h4>
+                <div className="lead-detail-grid">
+                  <div>
+                    <span className="lead-detail-label">Email:</span>
+                    <div className="lead-detail-value">{selectedLead.email || '—'}</div>
+                  </div>
+                  <div>
+                    <span className="lead-detail-label">Location:</span>
+                    <div className="lead-detail-value">{selectedLead.location || '—'}</div>
+                  </div>
+                  <div>
+                    <span className="lead-detail-label">Lead Source:</span>
+                    <div className="lead-detail-value">{selectedLead.source}</div>
+                  </div>
+                  <div>
+                    <span className="lead-detail-label">Follow-up:</span>
+                    <div className="lead-detail-value lead-followup-text has-date">
+                      {selectedLead.nextFollowupDate || 'Not scheduled'}
                     </div>
                   </div>
-                ) : (
-                  /* Non-IRM tenants: show the generic custom attributes exactly as before */
-                  (() => {
-                    const activeDefs = storageService
-                      .getCustomFieldDefinitions(tenant?.id)
-                      .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
-                      .filter(d => !(isExec && (d.fieldKey === 'assetClass' || d.fieldKey === 'preferredAssetClass')))
-                      .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
-                    const rows = activeDefs
-                      .map(def => {
-                        const key = def.fieldKey || def.id;
-                        const val = selectedLead.customFields?.[key];
-                        if (val === undefined || val === null || val === '') return null;
-                        return { id: def.id, label: def.label || key.replace(/([A-Z])/g, ' $1'), value: String(val) };
-                      })
-                      .filter(Boolean);
-                    if (rows.length === 0) return null;
-                    return (
-                      <div className="card lead-custom-card">
-                        <h4 className="lead-custom-title">{tenant?.name} Custom Attributes</h4>
-                        <div className="lead-detail-grid">
-                          {rows.map(item => (
-                            <div key={item!.id}>
-                              <span className="lead-custom-label">{item!.label}:</span>
-                              <div className="lead-custom-value">{item!.value}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })()
-                )}
+                </div>
+              </div>
 
-                {/* ── Message from User ── */}
+              {/* ── GHL IRM: Investment Capacity (replaces Preferred Asset Class + Investment Horizon unless confirmed by IRM) ── */}
+              {isGhlIrm ? (
                 <div className="card lead-custom-card">
-                  <h4 className="lead-custom-title">Message from User</h4>
-                  <div className="lead-user-message-box">
-                    {userMessage ? (
-                      <div className="lead-user-message-text">{userMessage}</div>
-                    ) : (
-                      <div className="lead-user-message-empty">No message available</div>
-                    )}
+                  <h4 className="lead-custom-title">Investment Details</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div>
+                      <span className="lead-detail-label">Investment Capacity:</span>
+                      <div
+                        className="lead-detail-value"
+                        style={{
+                          marginTop: 4,
+                          fontSize: 16,
+                          fontWeight: 700,
+                          color: '#10b981',
+                          letterSpacing: '0.01em',
+                        }}
+                      >
+                        {investmentCapacity || '—'}
+                      </div>
+                    </div>
+
+                    {/* Only show Preferred Asset Class & Horizon if set & confirmed by IRM */}
+                    {Boolean(
+                      selectedLead.customFields?.irmPreferencesConfirmed &&
+                      selectedLead.customFields?.preferredAssetClass
+                    ) ? (
+                      <div className="lead-detail-grid" style={{ marginTop: 4, paddingTop: 10, borderTop: '1px solid var(--border-base)' }}>
+                        <div>
+                          <span className="lead-detail-label">Preferred Asset Class:</span>
+                          <div className="lead-detail-value">{selectedLead.customFields?.preferredAssetClass}</div>
+                        </div>
+                        <div>
+                          <span className="lead-detail-label">Investment Horizon:</span>
+                          <div className="lead-detail-value">{selectedLead.customFields?.horizon || selectedLead.customFields?.investmentHorizon || '—'}</div>
+                        </div>
+                      </div>
+                    ) : (() => {
+                      try {
+                        localStorage.removeItem(`nexus_irm_pref_${selectedLead.id}`);
+                        const fDigits = (selectedLead.phone || '').replace(/\D/g, '').slice(-10);
+                        if (fDigits) localStorage.removeItem(`nexus_irm_pref_${fDigits}`);
+                      } catch { }
+                      return null;
+                    })()}
                   </div>
                 </div>
+              ) : (
+                /* Non-IRM tenants: show the generic custom attributes exactly as before */
+                (() => {
+                  const activeDefs = storageService
+                    .getCustomFieldDefinitions(tenant?.id)
+                    .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
+                    .filter(d => !(isExec && (d.fieldKey === 'assetClass' || d.fieldKey === 'preferredAssetClass')))
+                    .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+                  const rows = activeDefs
+                    .map(def => {
+                      const key = def.fieldKey || def.id;
+                      const val = selectedLead.customFields?.[key];
+                      if (val === undefined || val === null || val === '') return null;
+                      return { id: def.id, label: def.label || key.replace(/([A-Z])/g, ' $1'), value: String(val) };
+                    })
+                    .filter(Boolean);
+                  if (rows.length === 0) return null;
+                  return (
+                    <div className="card lead-custom-card">
+                      <h4 className="lead-custom-title">{tenant?.name} Custom Attributes</h4>
+                      <div className="lead-detail-grid">
+                        {rows.map(item => (
+                          <div key={item!.id}>
+                            <span className="lead-custom-label">{item!.label}:</span>
+                            <div className="lead-custom-value">{item!.value}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()
+              )}
 
-                <LeadDetailDrawerContent
-                  contactName={selectedLead.name}
-                  contactPhone={selectedLead.phone}
-                  contactId={selectedLead.id}
-                  contactType="lead"
-                  tenantId={tenant?.id}
-                  tenantName={tenant?.name}
-                  onCall={() => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, 'my_leads')}
-                  sectionsOnly={['callRecordings']}
-                />
-              </>
-            );
-          })()}
+              {/* ── Message from User ── */}
+              <div className="card lead-custom-card">
+                <h4 className="lead-custom-title">Message from User</h4>
+                <div className="lead-user-message-box">
+                  {userMessage ? (
+                    <div className="lead-user-message-text">{userMessage}</div>
+                  ) : (
+                    <div className="lead-user-message-empty">No message available</div>
+                  )}
+                </div>
+              </div>
+
+              <LeadDetailDrawerContent
+                contactName={selectedLead.name}
+                contactPhone={selectedLead.phone}
+                contactId={selectedLead.id}
+                contactType="lead"
+                tenantId={tenant?.id}
+                tenantName={tenant?.name}
+                onCall={() => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, isIrm ? 'my_leads' : undefined)}
+                sectionsOnly={['callRecordings']}
+              />
+            </>
+          );
+        })()}
       </Drawer>
 
       {/* Create / Edit Drawer */}
@@ -3164,7 +3166,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
               Scheduling Buffer Advice
             </div>
             <p style={{ margin: 0, fontSize: '0.83rem', color: 'var(--text-primary, #334155)', lineHeight: 1.5 }}>
-              To ensure sufficient time for each call and avoid overlapping appointments (e.g. 10:00 AM and 10:01 AM), <strong>please schedule your follow-up 15 to 20 minutes afterwards (or 20–30 minutes later)</strong>.
+              To avoid overlapping appointments and ensure sufficient time for each call, <strong>please schedule your follow-up at least 15–20 minutes after your existing appointment.</strong>
             </p>
           </div>
 

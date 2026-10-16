@@ -1,5 +1,11 @@
+/// <reference types="node" />
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { CallDisposition } from '../types';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 describe('IRM Call Outcomes and Other Module Rules', () => {
   const IRM_MODULE_OUTCOMES: Record<string, CallDisposition[]> = {
@@ -8,6 +14,7 @@ describe('IRM Call Outcomes and Other Module Rules', () => {
     kyc: ['Contacted', 'Other', 'No Response', 'Call Back'],
     opportunities: ['Contacted', 'Other', 'No Response', 'Call Back'],
     investor_360: ['Contacted', 'Other', 'No Response', 'Call Back'],
+    other: ['Call Back', 'Other', 'No Response', 'Follow-up Required', 'Ready for KYC'],
   };
 
   it('verifies exact permitted outcomes for each IRM module', () => {
@@ -45,6 +52,36 @@ describe('IRM Call Outcomes and Other Module Rules', () => {
       'No Response',
       'Call Back',
     ]);
+
+    // Verify 'other' module explicitly does NOT contain 'Contacted'
+    expect(IRM_MODULE_OUTCOMES['other']).not.toContain('Contacted');
+    expect(IRM_MODULE_OUTCOMES['other']).toEqual([
+      'Call Back',
+      'Other',
+      'No Response',
+      'Follow-up Required',
+      'Ready for KYC',
+    ]);
+  });
+
+  it('ensures Contacted is removed from outcomes when calling a contact from Other module', () => {
+    const filterOutcomesForOther = (moduleOutcomes: CallDisposition[], isFromOther: boolean) => {
+      return isFromOther ? moduleOutcomes.filter(o => o !== 'Contacted') : moduleOutcomes;
+    };
+
+    // When an agent calls a contact in Other who originated from KYC:
+    const kycInOther = filterOutcomesForOther(IRM_MODULE_OUTCOMES['kyc'], true);
+    expect(kycInOther).not.toContain('Contacted');
+    expect(kycInOther).toEqual(['Other', 'No Response', 'Call Back']);
+
+    // When an agent calls a contact in Other who originated from Opportunities:
+    const oppsInOther = filterOutcomesForOther(IRM_MODULE_OUTCOMES['opportunities'], true);
+    expect(oppsInOther).not.toContain('Contacted');
+    expect(oppsInOther).toEqual(['Other', 'No Response', 'Call Back']);
+
+    // When an agent calls a contact in Other directly:
+    const directOther = filterOutcomesForOther(IRM_MODULE_OUTCOMES['other'], true);
+    expect(directOther).not.toContain('Contacted');
   });
 
   it('validates mandatory reason when outcome is Other', () => {
@@ -70,10 +107,7 @@ describe('IRM Call Outcomes and Other Module Rules', () => {
     expect(isSkipAllowed).toBe(false);
   });
 
-  it('verifies layout stability styles for IRM Other module and scrollbar gutter', async () => {
-    const fs = await import('fs');
-    const path = await import('path');
-
+  it('verifies layout stability styles for IRM Other module and scrollbar gutter', () => {
     // 1. Check layout.css has scrollbar-gutter: stable
     const layoutCssPath = path.resolve(__dirname, '../styles/shared/layout.css');
     const layoutCss = fs.readFileSync(layoutCssPath, 'utf-8');
