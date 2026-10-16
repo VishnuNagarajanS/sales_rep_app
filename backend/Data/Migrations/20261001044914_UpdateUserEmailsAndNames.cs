@@ -25,10 +25,10 @@ namespace backend.Data.Migrations
                     ""Code"" = EXCLUDED.""Code"",
                     ""Name"" = EXCLUDED.""Name"";
 
-                INSERT INTO tenants (""Id"", ""Name"", ""Slug"", ""BrandColor"", ""BusinessHours"", ""CreatedAt"", ""Currency"", ""EnabledFeatures"", ""IsActive"")
+                INSERT INTO tenants (""Id"", ""Name"", ""Slug"", ""BrandColor"", ""BusinessHours"", ""CreatedAt"", ""Currency"", ""EnabledFeatures"", ""IsActive"", ""Tagline"")
                 VALUES
-                    (1, 'GHL India Ventures', 'ghl',   '#0284c7', '09:30 AM - 07:00 PM IST', '2026-01-01 00:00:00+00', '₹ INR', '{}', true),
-                    (2, 'Jamin Bazaar',       'jamin', '#059669', '09:00 AM - 06:30 PM IST', '2026-01-01 00:00:00+00', '₹ INR', '{}', true)
+                    (1, 'GHL India Ventures', 'ghl',   '#0284c7', '09:30 AM - 07:00 PM IST', '2026-01-01 00:00:00+00', '₹ INR', '{}', true, 'Institutional Wealth & Real Estate Investment Advisory'),
+                    (2, 'Jamin Bazaar',       'jamin', '#059669', '09:00 AM - 06:30 PM IST', '2026-01-01 00:00:00+00', '₹ INR', '{}', true, 'Premium Plotted Enclaves & Farmland Communities')
                 ON CONFLICT (""Id"") DO NOTHING;
 
                 DELETE FROM users WHERE ""Email"" IN (
