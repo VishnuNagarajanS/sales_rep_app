@@ -89,6 +89,7 @@ builder.Services.AddSwaggerGen(c =>
     });
 
     c.CustomSchemaIds(type => type.FullName?.Replace("+", ".") ?? type.Name);
+    c.ResolveConflictingActions(apiDescriptions => apiDescriptions.First());
 
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
@@ -1009,8 +1010,7 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHub<backend.Hubs.PlatformHub>("/hubs/platform");
 
-// Redirect root to Swagger UI and add health probe
+// Redirect root to Swagger UI
 app.MapGet("/", () => Results.Redirect("/swagger"));
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "NexusSales Platform API", timestamp = DateTime.UtcNow }));
 
 app.Run();
