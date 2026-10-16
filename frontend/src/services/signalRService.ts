@@ -35,8 +35,12 @@ class SignalRService {
     this.isConnecting = true;
 
     try {
+      const rawApiUrl = (import.meta.env.VITE_API_URL as string | undefined) || '';
+      const hubOrigin = rawApiUrl.replace(/\/api\/?$/, '');
+      const hubUrl = hubOrigin ? `${hubOrigin}/hubs/platform` : '/hubs/platform';
+
       this.connection = new HubConnectionBuilder()
-        .withUrl('/hubs/platform', {
+        .withUrl(hubUrl, {
           accessTokenFactory: () =>
             sessionStorage.getItem('nexus_auth_token') ||
             localStorage.getItem('nexus_auth_token') ||
