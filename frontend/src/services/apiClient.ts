@@ -15,7 +15,10 @@ export interface PagedResult<T = any> {
 
 import { isMockMode as envIsMockMode } from '../config/environment';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+const rawBase = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+const API_BASE_URL = rawBase
+  ? (rawBase.endsWith('/api') ? rawBase : `${rawBase}/api`)
+  : '/api';
 
 class ApiClient {
   isMockMode(): boolean {
