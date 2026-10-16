@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -32,6 +32,8 @@ namespace backend.Data.Migrations
                 {
                     table.PrimaryKey("PK_Documents", x => x.Id);
                 });
+
+            migrationBuilder.Sql(@"UPDATE roles SET ""Code"" = 'temp_' || ""Id"" WHERE ""Id"" IN (3, 4, 5);");
 
             migrationBuilder.UpdateData(
                 table: "roles",

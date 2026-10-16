@@ -126,6 +126,19 @@ using (var scope = app.Services.CreateScope())
             if (pendingMigrations.Any())
             {
                 Console.WriteLine($"[Database] Applying {pendingMigrations.Count} pending EF Core migration(s)...");
+                try
+                {
+                    db.Database.ExecuteSqlRaw(@"
+                        DO $$
+                        BEGIN
+                            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'roles') THEN
+                                UPDATE roles SET ""Code"" = 'temp_' || ""Id"" WHERE ""Id"" IN (3, 4, 5);
+                            END IF;
+                        END $$;
+                    ");
+                }
+                catch { }
+
                 db.Database.Migrate();
                 Console.WriteLine("[Database] All EF Core migrations applied successfully.");
             }
