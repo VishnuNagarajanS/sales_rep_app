@@ -160,7 +160,7 @@ Open your terminal in the workspace root (`c:\Users\ADMIN\Desktop\sales_rep_app`
 
 * **For DigitalOcean:**
   ```powershell
-  dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=db-postgresql-blr1-xxxxx.b.db.ondigitalocean.com;Port=25060;Database=defaultdb;Username=doadmin;Password=YOUR_PASSWORD;SSL Mode=Require;Trust Server Certificate=true;" --project backend
+  dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=db-postgresql-blr1-xxxxx.b.db.ondigitalocean.com;Port=25060;Database=defaultdb;Username=doadmin;Password=YOUR_PASSWORD;SSL Mode=Require;Trust Server Certificate=true;Maximum Pool Size=5;Minimum Pool Size=0;Connection Idle Lifetime=15;Connection Pruning Interval=5;" --project backend
   ```
 
 * **For Supabase:**
